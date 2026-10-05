@@ -47,6 +47,7 @@ interface SkillRunsPanelProps {
   onStopMission: (id: string) => void;
   onMissionStarted: (id: string) => void;
   onConfirmApproval: (input: {
+    proposalContext?: import("../../lib/skills").ProposalApprovalContext | null;
     kind: string;
     summary: string;
     target?: string | null;
@@ -136,6 +137,7 @@ export function SkillRunsPanel({
     const cwd = workspacePathFromMission(mission) ?? workPath;
     if (!cwd || !reviewProposal || activeRunId !== mission.id || appliedIds.has(mission.id) || applyBusy) return;
     const approvalId = await onConfirmApproval({
+      proposalContext: { cwd, proposal: reviewProposal, runId: mission.id },
       kind: SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
       summary: t("skillRuns.applySummary", {
         files: reviewProposal.files.length,

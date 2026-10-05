@@ -215,6 +215,23 @@ export function JobsTab({ workPath }: JobsTabProps) {
                     <span>{t("system.jobs.logs")}</span>
                   </button>
                 </div>
+                <details className="jobs-logs">
+                  <summary>{t("system.jobs.history")}</summary>
+                  {(job.receipts ?? []).length === 0 ? <p className="muted">{t("system.jobs.history.empty")}</p> : (
+                    <ol>
+                      {(job.receipts ?? []).map((receipt) => (
+                        <li key={receipt.runId}>
+                          <strong>{receipt.source}: {receipt.processOutcome}</strong>
+                          <p>{new Date(receipt.admittedAt * 1000).toLocaleString()}</p>
+                          <p>{t("system.jobs.history.process", { code: receipt.exitCode ?? "-" })}</p>
+                          <p>{t("system.jobs.history.verification")}: {receipt.verificationOutcome === "notRequested" ? t("system.jobs.history.notRequested") : receipt.verificationOutcome}</p>
+                          <p className="muted">{receipt.runId}</p>
+                          {receipt.coalescedInto ? <p>{t("system.jobs.history.coalesced")}: {receipt.coalescedInto}</p> : null}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </details>
                 {openLogs.has(job.id) ? (
                   <div className="jobs-logs">
                     <strong className="muted">{t("system.jobs.logs.stdout")}</strong>

@@ -386,6 +386,7 @@ export function AgentChatTab({
       try {
         const approvalId = await onConfirmApproval({
           kind: SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
+          proposalContext: { cwd: workPath, proposal },
           summary: t("skillRuns.applySummary", {
             files: proposal.files.length,
             commands: proposal.commands.length,

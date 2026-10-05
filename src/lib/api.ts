@@ -990,11 +990,15 @@ export async function saveInboxRuntimeConfig(
 }
 
 export async function prepareApproval(input: {
+  proposalContext?: import("./skills").ProposalApprovalContext | null;
   kind: string;
   summary: string;
   target?: string | null;
   payloadPreview?: string | null;
 }): Promise<ApprovalRequest> {
+  if (input.kind === "agent.proposal.apply" && !input.proposalContext) {
+    throw new Error("approval_binding_required");
+  }
   if (!isTauri()) {
     return {
       id: `mock-approval-${Date.now()}`,
@@ -1010,6 +1014,7 @@ export async function prepareApproval(input: {
     summary: input.summary,
     target: input.target ?? null,
     payloadPreview: input.payloadPreview ?? null,
+    proposalContext: input.proposalContext ?? null,
   });
 }
 
@@ -2900,6 +2905,24 @@ export interface JobSchedule {
   runAtLoad: boolean;
 }
 
+export interface JobRunReceipt {
+  requestId: string;
+  runId: string;
+  source: string;
+  jobRevision: string;
+  scheduledFireAt: number | null;
+  admittedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  processOutcome: string;
+  exitCode: number | null;
+  verificationOutcome: string;
+  ledgerRecorded: boolean;
+  coalescedInto: string | null;
+  owner: { pid: number; start: string } | null;
+  child: { pid: number; start: string } | null;
+}
+
 export interface JobStatus {
   id: string;
   title: string;
@@ -2912,6 +2935,7 @@ export interface JobStatus {
   schedule: JobSchedule;
   lastExitCode: number | null;
   lastRunAt: string | null;
+  receipts?: JobRunReceipt[];
 }
 
 export interface JobLogsTail {
@@ -2942,7 +2966,11 @@ function mockJobStatus(workPath: string): JobStatus {
 }
 
 export async function jobsList(workPath: string): Promise<JobStatus[]> {
-  if (!isTauri()) return [mockJobStatus(workPath)];
+  if (!isTauri()) {
+    const override = await invokeE2EOverride<JobStatus[]>("jobs_list", { workPath });
+    if (override !== null) return override;
+    return [mockJobStatus(workPath)];
+  }
   return invoke<JobStatus[]>("jobs_list", { workPath });
 }
 

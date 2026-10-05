@@ -742,6 +742,12 @@ export async function agentParseSkillProposal(raw: string): Promise<SkillProposa
   return invoke<SkillProposal>("agent_parse_skill_proposal", { raw });
 }
 
+export interface ProposalApprovalContext {
+  cwd: string;
+  proposal: SkillProposal;
+  runId?: string | null;
+}
+
 export async function agentApplySkillProposal(params: {
   cwd: string;
   proposal: SkillProposal;

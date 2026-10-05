@@ -9,8 +9,9 @@ use crate::agent_host::event_store::{append_run_event_payload_in_transaction, ru
 use crate::agent_host::protected_write::{
     apply_protected_write_claim, ProtectedWriteClaim, ProtectedWriteOutcome,
 };
-use crate::approval::{require_approval, ApprovalState};
+use crate::approval::{ApprovalBinding, ApprovalRequest, ApprovalState};
 use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
+use sha2::{Digest, Sha256};
 
 pub const MEETING_SOURCE_REVIEW_SCHEMA_VERSION: &str = "maru_meeting_source_review_v1";
 
@@ -182,6 +183,91 @@ pub fn agent_parse_skill_proposal(raw: String) -> Result<SkillProposal, String> 
     parse_skill_proposal(&raw)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalApprovalContext {
+    pub cwd: String,
+    pub proposal: SkillProposal,
+    pub run_id: Option<String>,
+}
+
+fn hash_json(value: &impl Serialize) -> Result<String, String> {
+    serde_json::to_vec(value)
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+        .map_err(|e| e.to_string())
+}
+
+fn proposal_binding(context: &ProposalApprovalContext) -> Result<ApprovalBinding, String> {
+    context.proposal.validate()?;
+    let root = crate::vault::normalize_existing_dir(&context.cwd)?;
+    let mut targets = Vec::new();
+    let mut revisions = Vec::new();
+    for file in &context.proposal.files {
+        let path = crate::vault::resolve_inside_vault(&context.cwd, &file.path)?;
+        targets.push(path.to_string_lossy().to_string());
+        revisions.push(if path.exists() {
+            Some(crate::agent_host::protected_write::file_sha256_hex(&path)?)
+        } else {
+            None
+        });
+    }
+    let source = if let Some(run_id) = context.run_id.as_deref() {
+        validate_reviewed_source_provenance(&context.cwd, run_id)?;
+        let events = crate::agent_host::event_store::read_run_events(&context.cwd, run_id)?;
+        let started = events.iter().find(|e| e.event_type == "run.started");
+        let reviewed = reviewed_source_state_path(&context.cwd, run_id)?;
+        let reviewed_hash = reviewed
+            .as_ref()
+            .map(|path| crate::agent_host::protected_write::file_sha256_hex(path))
+            .transpose()?;
+        hash_json(&(started, reviewed_hash))?
+    } else {
+        hash_json(&Option::<String>::None)?
+    };
+    let policy_path = crate::vault_list::workspace_registry_path()?;
+    let legacy_path = crate::vault_list::legacy_vault_list_path()?;
+    let policy_bytes = |path: &std::path::Path| -> Result<Option<Vec<u8>>, String> {
+        match std::fs::read(path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("approval_policy_read_failed: {error}")),
+        }
+    };
+    let policy = (policy_bytes(&policy_path)?, policy_bytes(&legacy_path)?);
+    Ok(ApprovalBinding {
+        logical_target: hash_json(&(root.to_string_lossy(), targets))?,
+        payload_hash: hash_json(&context.proposal)?,
+        source_run_id: context.run_id.clone(),
+        source_revision: source,
+        base_revision: hash_json(&revisions)?,
+        policy_revision: hash_json(&("proposal-approval-v1", policy))?,
+    })
+}
+
+pub(crate) fn prepare_proposal_approval(
+    state: &ApprovalState,
+    context: &ProposalApprovalContext,
+    summary: String,
+    target: Option<String>,
+    preview: Option<String>,
+) -> Result<ApprovalRequest, String> {
+    // Materialize the existing legacy registry before its bytes become an
+    // approval revision. Metadata publication must never invalidate that pin.
+    with_path_transactions(
+        PathTransactionRequest::new([
+            crate::vault_list::workspace_registry_path()?,
+            crate::vault_list::legacy_vault_list_path()?,
+        ])?,
+        |lease| {
+            lease.before_effect()?;
+            crate::vault_list::load_registry()?;
+            Ok(())
+        },
+    )?;
+    let binding = proposal_binding(context)?;
+    state.prepare_bound(&context.cwd, summary, target, preview, binding)
+}
+
 pub fn agent_apply_skill_proposal<R: tauri::Runtime>(
     app: AppHandle<R>,
     cwd: String,
@@ -190,11 +276,37 @@ pub fn agent_apply_skill_proposal<R: tauri::Runtime>(
     run_id: Option<String>,
 ) -> Result<ProposalApplyReport, String> {
     let approvals = app.state::<ApprovalState>();
-    require_approval(&approvals, approval_id, "agent.proposal.apply")?;
-    if let Some(run_id) = run_id.as_deref() {
-        validate_reviewed_source_provenance(&cwd, run_id)?;
-    }
-    apply_skill_proposal(&cwd, &proposal, run_id.as_deref())
+    let id = approval_id
+        .as_deref()
+        .ok_or("approval_required: agent.proposal.apply")?;
+    let mut paths = apply_write_set(&cwd, &proposal, run_id.as_deref())?;
+    paths.push(crate::approval::audit_path(&cwd, id)?);
+    paths.push(crate::vault_list::workspace_registry_path()?);
+    paths.push(crate::vault_list::legacy_vault_list_path()?);
+    with_path_transactions(
+        PathTransactionRequest::new(paths)?.with_workspace_registry()?,
+        |lease| {
+            lease.before_effect()?;
+            let binding = proposal_binding(&ProposalApprovalContext {
+                cwd: cwd.clone(),
+                proposal: proposal.clone(),
+                run_id: run_id.clone(),
+            })?;
+            let id = approvals.consume_bound(Some(id), &binding, lease)?;
+            let outcome =
+                apply_skill_proposal_in_transaction(&cwd, &proposal, run_id.as_deref(), lease);
+            let detail = match &outcome {
+                Ok(report) => serde_json::to_string(report).map_err(|e| e.to_string())?,
+                Err(error) => format!("failed_or_partial: {error}"),
+            };
+            if let Err(error) = approvals.record_effect(&id, detail, lease) {
+                return Err(format!(
+                    "approval_effect_outcome_uncertain: effect attempted; do not retry; {error}"
+                ));
+            }
+            outcome
+        },
+    )
 }
 
 /// A meeting generation proposal may only be applied while its source-review
@@ -652,10 +764,19 @@ mod phase08_16 {
         app
     }
 
-    fn grant(app: &tauri::App<tauri::test::MockRuntime>) -> String {
-        let request = crate::approval::prepare_approval(
-            app.state(),
-            "agent.proposal.apply".into(),
+    fn grant(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        cwd: &str,
+        proposal: &SkillProposal,
+        run_id: Option<&str>,
+    ) -> String {
+        let request = prepare_proposal_approval(
+            &app.state::<ApprovalState>(),
+            &ProposalApprovalContext {
+                cwd: cwd.into(),
+                proposal: proposal.clone(),
+                run_id: run_id.map(str::to_string),
+            },
             "synthetic fixture".into(),
             None,
             None,
@@ -749,7 +870,7 @@ mod phase08_16 {
                 file("existing.md", "replace", Some("replaced body\n")),
             ],
         );
-        let approval = grant(&app);
+        let approval = grant(&app, &cwd, &create, Some("ai-proposal-run"));
         let report = run(ipc::agent_apply_skill_proposal(
             handle.clone(),
             cwd.clone(),
@@ -817,8 +938,8 @@ mod phase08_16 {
         ))
         .unwrap_err()
         .starts_with("approval_kind_mismatch"));
-        let consumed = grant(&app);
         let first = proposal("x", vec![file("consumed.md", "create", Some("1\n"))]);
+        let consumed = grant(&app, &cwd, &first, None);
         run(ipc::agent_apply_skill_proposal(
             handle.clone(),
             cwd.clone(),
@@ -849,15 +970,579 @@ mod phase08_16 {
                 diff: None,
             }],
         );
+        let stale_approval = grant(&app, &cwd, &stale_hash, None);
         assert!(run(ipc::agent_apply_skill_proposal(
             handle,
-            cwd,
+            cwd.clone(),
             stale_hash,
-            Some(grant(&app)),
+            Some(stale_approval),
             None,
         ))
         .unwrap_err()
         .starts_with("write_conflict"));
+    }
+
+    #[test]
+    fn bound_proposal_rejects_payload_target_workspace_run_and_base_drift() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        let other = home.root.path().join("other");
+        fs::create_dir_all(&work).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let cwd = text(&work);
+        let original = proposal(
+            "approved",
+            vec![file("note.md", "replace", Some("approved body"))],
+        );
+        let id = grant(&app, &cwd, &original, Some("source-run"));
+        for (root, candidate, run_id) in [
+            (
+                cwd.clone(),
+                proposal(
+                    "approved",
+                    vec![file("note.md", "replace", Some("other body"))],
+                ),
+                Some("source-run".into()),
+            ),
+            (
+                cwd.clone(),
+                proposal(
+                    "approved",
+                    vec![file("other.md", "replace", Some("approved body"))],
+                ),
+                Some("source-run".into()),
+            ),
+            (text(&other), original.clone(), Some("source-run".into())),
+            (cwd.clone(), original.clone(), Some("other-run".into())),
+        ] {
+            assert_eq!(
+                agent_apply_skill_proposal(
+                    app.handle().clone(),
+                    root,
+                    candidate,
+                    Some(id.clone()),
+                    run_id
+                )
+                .unwrap_err(),
+                "approval_binding_mismatch"
+            );
+        }
+        fs::write(work.join("note.md"), "new source revision").unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                original,
+                Some(id),
+                Some("source-run".into())
+            )
+            .unwrap_err(),
+            "approval_binding_mismatch"
+        );
+        assert_eq!(
+            fs::read_to_string(work.join("note.md")).unwrap(),
+            "new source revision"
+        );
+        assert!(!other.join("note.md").exists());
+    }
+
+    #[test]
+    fn bound_proposal_rejects_changed_source_and_policy_revision() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let id = grant(&app, &cwd, &candidate, Some("source-run"));
+        crate::agent_host::event_store::append_run_event_payload(
+            &cwd,
+            "source-run",
+            "run.started",
+            "fixture",
+            serde_json::json!({"metadata": {"revision": "changed"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                candidate.clone(),
+                Some(id),
+                Some("source-run".into())
+            )
+            .unwrap_err(),
+            "approval_binding_mismatch"
+        );
+        let id = grant(&app, &cwd, &candidate, None);
+        let registry = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(
+            registry,
+            serde_json::to_vec(&serde_json::json!({"workspaces": [], "activeByVisibility": {}, "hiddenDefaults": ["policy-revision-changed"]})).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
+                .unwrap_err(),
+            "approval_binding_mismatch"
+        );
+        assert!(!work.join("note.md").exists());
+    }
+
+    #[test]
+    fn bound_proposal_concurrent_consumes_and_restart_keep_history_without_authority() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal(
+            "approved",
+            vec![file("note.md", "append", Some("one attempt"))],
+        );
+        let id = grant(&app, &cwd, &candidate, None);
+        let make = || {
+            let handle = app.handle().clone();
+            let cwd = cwd.clone();
+            let candidate = candidate.clone();
+            let id = id.clone();
+            start(async move {
+                ipc::agent_apply_skill_proposal(handle, cwd, candidate, Some(id), None).await
+            })
+        };
+        let a = make();
+        let b = make();
+        let outcomes = [done(a), done(b)];
+        assert_eq!(outcomes.iter().filter(|r| r.is_ok()).count(), 1);
+        assert_eq!(
+            outcomes.iter().find_map(|r| r.as_ref().err()).unwrap(),
+            "approval_consumed"
+        );
+        assert_eq!(
+            fs::read_to_string(work.join("note.md")).unwrap(),
+            "one attempt"
+        );
+        let events = crate::approval::read_approval_audit(&cwd, &id).unwrap();
+        assert_eq!(
+            events.iter().map(|e| e.event.as_str()).collect::<Vec<_>>(),
+            ["requested", "decided", "consumed", "effect.outcome"]
+        );
+        let unused = proposal(
+            "unused grant",
+            vec![file("unused.md", "create", Some("body"))],
+        );
+        let unused_id = grant(&app, &cwd, &unused, None);
+        let restarted = super::phase08_16::app();
+        assert_eq!(
+            agent_apply_skill_proposal(
+                restarted.handle().clone(),
+                cwd.clone(),
+                unused,
+                Some(unused_id.clone()),
+                None
+            )
+            .unwrap_err(),
+            "approval_not_found"
+        );
+        assert_eq!(
+            crate::approval::read_approval_audit(&cwd, &unused_id)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            agent_apply_skill_proposal(
+                restarted.handle().clone(),
+                cwd.clone(),
+                candidate,
+                Some(id.clone()),
+                None
+            )
+            .unwrap_err(),
+            "approval_not_found"
+        );
+        assert_eq!(
+            crate::approval::read_approval_audit(&cwd, &id)
+                .unwrap()
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn bound_remembered_grants_are_exactly_scoped_and_terminal_decisions_immutable() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let context = ProposalApprovalContext {
+            cwd: text(&work),
+            proposal: proposal("approved", vec![file("note.md", "replace", Some("body"))]),
+            run_id: None,
+        };
+        let prepare = |context: &ProposalApprovalContext| {
+            prepare_proposal_approval(
+                &app.state::<ApprovalState>(),
+                context,
+                "Review".into(),
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        let request = prepare(&context);
+        crate::approval::record_approval(
+            app.state(),
+            request.id.clone(),
+            crate::approval::ApprovalDecision::Approved,
+            Some(true),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::approval::record_approval(
+                app.state(),
+                request.id.clone(),
+                crate::approval::ApprovalDecision::Rejected,
+                None
+            )
+            .unwrap_err(),
+            "approval_decision_terminal"
+        );
+        assert!(prepare(&context).auto_approved);
+        let mut changed = context.clone();
+        changed.proposal.files[0].path = "other.md".into();
+        assert!(!prepare(&changed).auto_approved);
+        changed = context.clone();
+        changed.run_id = Some("other-run".into());
+        assert!(!prepare(&changed).auto_approved);
+        changed = context.clone();
+        changed.proposal.files[0].content = Some("changed".into());
+        assert!(!prepare(&changed).auto_approved);
+        assert_eq!(
+            crate::approval::require_approval(
+                &app.state::<ApprovalState>(),
+                Some(request.id),
+                "agent.proposal.apply"
+            )
+            .unwrap_err(),
+            "approval_bound_required"
+        );
+    }
+
+    #[test]
+    fn bound_proposal_pre_effect_audit_failure_blocks_and_poisoned_grant_cannot_retry() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let id = grant(&app, &cwd, &candidate, None);
+        let audit = crate::approval::audit_path(&cwd, &id).unwrap();
+        fs::write(&audit, "corrupt history").unwrap();
+        assert!(agent_apply_skill_proposal(
+            app.handle().clone(),
+            cwd.clone(),
+            candidate.clone(),
+            Some(id.clone()),
+            None
+        )
+        .unwrap_err()
+        .starts_with("approval_audit_invalid"));
+        assert!(!work.join("note.md").exists());
+        fs::write(audit, "[]").unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
+                .unwrap_err(),
+            "approval_consumed"
+        );
+    }
+
+    #[test]
+    fn bound_proposal_consume_cannot_publish_audit_blocks_effect() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let id = grant(&app, &cwd, &candidate, None);
+        let audit = crate::approval::audit_path(&cwd, &id).unwrap();
+        fs::remove_file(&audit).unwrap();
+        fs::create_dir(&audit).unwrap();
+        assert!(agent_apply_skill_proposal(
+            app.handle().clone(),
+            cwd.clone(),
+            candidate.clone(),
+            Some(id.clone()),
+            None
+        )
+        .unwrap_err()
+        .starts_with("approval_audit_read_failed"));
+        assert!(!work.join("note.md").exists());
+        fs::remove_dir(&audit).unwrap();
+        fs::write(&audit, "[]").unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
+                .unwrap_err(),
+            "approval_consumed"
+        );
+    }
+
+    #[test]
+    fn bound_first_approval_survives_legacy_only_registry_migration() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let legacy = crate::vault_list::legacy_vault_list_path().unwrap();
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, serde_json::to_vec(&serde_json::json!({"vaults": [{"label": "Legacy", "path": cwd}], "activeVault": cwd, "hiddenDefaults": []})).unwrap()).unwrap();
+        assert!(!crate::vault_list::workspace_registry_path()
+            .unwrap()
+            .exists());
+        let candidate = proposal(
+            "first approval",
+            vec![file("note.md", "create", Some("body"))],
+        );
+        let id = grant(&app, &cwd, &candidate, None);
+        assert!(crate::vault_list::workspace_registry_path()
+            .unwrap()
+            .exists());
+        agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None).unwrap();
+        assert_eq!(fs::read_to_string(work.join("note.md")).unwrap(), "body");
+    }
+
+    #[test]
+    fn bound_audit_is_application_owned_but_document_effects_keep_granular_capabilities() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let registry = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        for (role, operation, opposite) in [("5", "create", "replace"), ("3", "replace", "create")]
+        {
+            fs::write(&registry, serde_json::to_vec(&serde_json::json!({"workspaces": [{"label": "Nextcloud", "path": cwd, "visibility": "public", "provider": "nextcloud", "writePolicy": "direct", "permissionSummary": {"role": role, "source": "manual", "checkedAt": "2026-10-05T00:00:00Z"}}], "activeByVisibility": {}, "hiddenDefaults": []})).unwrap()).unwrap();
+            let accepted_path = format!("accepted-{role}.md");
+            if operation == "replace" {
+                fs::write(work.join(&accepted_path), "before").unwrap();
+            }
+            let accepted = proposal(
+                "allowed action",
+                vec![file(&accepted_path, operation, Some("accepted"))],
+            );
+            let id = grant(&app, &cwd, &accepted, None);
+            agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                accepted,
+                Some(id.clone()),
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read_to_string(work.join(&accepted_path)).unwrap(),
+                "accepted"
+            );
+            assert_eq!(
+                crate::approval::read_approval_audit(&cwd, &id)
+                    .unwrap()
+                    .len(),
+                4
+            );
+            let denied_path = format!("denied-{role}.md");
+            if opposite == "replace" {
+                fs::write(work.join(&denied_path), "unchanged").unwrap();
+            }
+            let denied = proposal(
+                "denied action",
+                vec![file(&denied_path, opposite, Some("must not appear"))],
+            );
+            let denied_id = grant(&app, &cwd, &denied, None);
+            assert!(agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                denied,
+                Some(denied_id),
+                None
+            )
+            .unwrap_err()
+            .contains("Workspace writes are blocked"));
+            if opposite == "replace" {
+                assert_eq!(
+                    fs::read_to_string(work.join(denied_path)).unwrap(),
+                    "unchanged"
+                );
+            } else {
+                assert!(!work.join(denied_path).exists());
+            }
+        }
+        assert!(!work.join(".maru/approvals").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bound_owned_audit_rejects_directory_and_leaf_symlink_escapes() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        let outside = home.root.path().join("outside");
+        fs::create_dir_all(&work).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let id = grant(&app, &cwd, &candidate, None);
+        let audit = crate::approval::audit_path(&cwd, &id).unwrap();
+        let bytes = fs::read(&audit).unwrap();
+        let foreign = outside.join("foreign.json");
+        fs::write(&foreign, &bytes).unwrap();
+        fs::remove_file(&audit).unwrap();
+        std::os::unix::fs::symlink(&foreign, &audit).unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                candidate.clone(),
+                Some(id.clone()),
+                None
+            )
+            .unwrap_err(),
+            "approval_audit_symlink_rejected"
+        );
+        fs::remove_file(&audit).unwrap();
+        fs::write(&audit, &bytes).unwrap();
+        let parent = audit.parent().unwrap();
+        let relocated = outside.join("saved-audit-dir");
+        fs::rename(parent, &relocated).unwrap();
+        std::os::unix::fs::symlink(&relocated, parent).unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
+                .unwrap_err(),
+            "approval_audit_symlink_rejected"
+        );
+        assert_eq!(fs::read(&foreign).unwrap(), bytes);
+        assert!(!work.join("note.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bound_audit_syncs_first_application_home_publication_through_workspace_alias() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        let alias = home.root.path().join("work-alias");
+        fs::create_dir_all(&work).unwrap();
+        std::os::unix::fs::symlink(&work, &alias).unwrap();
+        let home_syncs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = home_syncs.clone();
+        let _hook = PathTransactionTestHook::new(
+            home.root.path().to_path_buf(),
+            "approval-audit-before-directory-sync",
+            move || {
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            },
+        );
+        assert!(!crate::skill_host::fs::maru_home().unwrap().exists());
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let context = ProposalApprovalContext {
+            cwd: text(&alias),
+            proposal: candidate,
+            run_id: None,
+        };
+        let request = prepare_proposal_approval(
+            &app.state::<ApprovalState>(),
+            &context,
+            "Review".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(home_syncs.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            crate::approval::read_approval_audit(&text(&work), &request.id)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bound_consume_application_home_sync_failure_blocks_effect_and_retry() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        let moved = home.root.path().join("moved-maru-home");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let id = grant(&app, &cwd, &candidate, None);
+        let original = crate::skill_host::fs::maru_home().unwrap();
+        let relocated = moved.clone();
+        let hook = PathTransactionTestHook::new(
+            original.clone(),
+            "approval-audit-before-directory-sync",
+            move || {
+                fs::rename(&original, &relocated).unwrap();
+            },
+        );
+        assert!(agent_apply_skill_proposal(
+            app.handle().clone(),
+            cwd.clone(),
+            candidate.clone(),
+            Some(id.clone()),
+            None
+        )
+        .unwrap_err()
+        .starts_with("approval_audit_sync_failed"));
+        drop(hook);
+        assert!(!work.join("note.md").exists());
+        fs::rename(&moved, crate::skill_host::fs::maru_home().unwrap()).unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
+                .unwrap_err(),
+            "approval_consumed"
+        );
+        assert!(!work.join("note.md").exists());
+    }
+
+    #[test]
+    fn bound_proposal_outcome_failure_is_uncertain_without_rollback_or_retry() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let id = grant(&app, &cwd, &candidate, None);
+        let audit = crate::approval::audit_path(&cwd, &id).unwrap();
+        let effect = work.join("note.md");
+        let hook = PathTransactionTestHook::new(audit.clone(), "pre-effect", move || {
+            if effect.exists() {
+                fs::write(&audit, "corrupt after effect").unwrap();
+            }
+        });
+        assert!(agent_apply_skill_proposal(
+            app.handle().clone(),
+            cwd.clone(),
+            candidate.clone(),
+            Some(id.clone()),
+            None
+        )
+        .unwrap_err()
+        .starts_with("approval_effect_outcome_uncertain"));
+        drop(hook);
+        assert_eq!(fs::read_to_string(work.join("note.md")).unwrap(), "body");
+        assert_eq!(
+            agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
+                .unwrap_err(),
+            "approval_consumed"
+        );
     }
 
     #[test]
@@ -929,7 +1614,12 @@ mod phase08_16 {
                 handle,
                 text(&work),
                 proposal("x", vec![file("a.md", "create", Some("b\n"))]),
-                Some(grant(&app)),
+                Some(grant(
+                    &app,
+                    &(text(&work)),
+                    &(proposal("x", vec![file("a.md", "create", Some("b\n"))])),
+                    None
+                )),
                 None,
             ))
             .unwrap_err()
@@ -973,7 +1663,15 @@ mod phase08_16 {
                     )
                 };
                 fs::write(docs.join("note.md"), "original note\n").unwrap();
-                let approval = grant(&app);
+                let approval = grant(
+                    &app,
+                    &apply_cwd,
+                    &proposal(
+                        "contended apply",
+                        vec![file("docs/note.md", "replace", Some("changed note\n"))],
+                    ),
+                    None,
+                );
                 let moved_dir = if alias {
                     fixture_root.join("moved")
                 } else {
@@ -1070,11 +1768,12 @@ mod phase08_16 {
                 diff: None,
             }],
         );
+        let conflict_approval = grant(&app, &cwd, &conflict, None);
         assert!(run(ipc::agent_apply_skill_proposal(
             handle.clone(),
             cwd.clone(),
             conflict,
-            Some(grant(&app)),
+            Some(conflict_approval),
             None,
         ))
         .unwrap_err()
@@ -1100,7 +1799,12 @@ mod phase08_16 {
                 handle.clone(),
                 cwd.clone(),
                 proposal("x", vec![file("note.md", "replace", Some("unwind\n"))]),
-                Some(grant(&app)),
+                Some(grant(
+                    &app,
+                    &(cwd.clone()),
+                    &(proposal("x", vec![file("note.md", "replace", Some("unwind\n"))])),
+                    None
+                )),
                 None,
             ))
             .unwrap_err()
@@ -1108,9 +1812,14 @@ mod phase08_16 {
         }
         let report = run(ipc::agent_apply_skill_proposal(
             handle,
-            cwd,
+            cwd.clone(),
             proposal("x", vec![file("note.md", "replace", Some("recovered\n"))]),
-            Some(grant(&app)),
+            Some(grant(
+                &app,
+                &(cwd),
+                &(proposal("x", vec![file("note.md", "replace", Some("recovered\n"))])),
+                None,
+            )),
             None,
         ))
         .unwrap();

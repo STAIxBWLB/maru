@@ -80,6 +80,7 @@ interface TasksRunsPanelProps {
   onStopMission: (id: string) => void;
   onRefreshMissions: () => void;
   onConfirmApproval: (input: {
+    proposalContext?: import("../../lib/skills").ProposalApprovalContext | null;
     kind: string;
     summary: string;
     target?: string | null;
@@ -169,7 +170,8 @@ export function TasksRunsPanel({
     const proposal = bundle.proposal && selectedFiles > 0 ? rebuildSkillProposal(bundle.proposal, bundle.files) : null;
     const selectedFollowupItems = bundle.followups.filter((item) => item.selected);
     const approvalId = await onConfirmApproval({
-      kind: SKILL_PROPOSAL_APPLY_APPROVAL_KIND,
+      proposalContext: proposal ? { cwd: workPath, proposal, runId: bundle.runId } : null,
+      kind: proposal ? SKILL_PROPOSAL_APPLY_APPROVAL_KIND : "agent.followups.dispatch",
       summary: t("tasks.review.applySummaryDetailed", {
         files: proposal?.files.length ?? 0,
         followups: selectedFollowupItems.length,

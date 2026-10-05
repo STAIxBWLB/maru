@@ -226,7 +226,7 @@ fn install_maru_menus<R: Runtime>(app: &AppHandle<R>, menu: &Menu<R>) -> tauri::
     let workspace_refresh = command_item(
         app,
         "workspace.refresh",
-        "Refresh Workspace",
+        "Reload Workspace",
         Some("CmdOrCtrl+R"),
     )?;
     let workspace_reveal = command_item(app, "workspace.reveal", "Reveal Workspace", None)?;

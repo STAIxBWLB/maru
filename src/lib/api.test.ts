@@ -24,6 +24,7 @@ import {
   duplicateWorkspaceEntries,
   pasteWorkspaceEntries,
   prepareShareOutboxFiles,
+  prepareApproval,
   rejectInboxItem,
   rejectInboxItems,
   renameWorkspaceEntry,
@@ -532,5 +533,29 @@ describe("processing completion ownership (phase 08-25)", () => {
     ]);
     expect(result).toBe(payload);
     expect(mocks.notice).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("bound proposal approvals", () => {
+  afterEach(() => { delete (globalThis as { window?: unknown }).window; });
+
+  it("forwards the exact selected proposal and source run to Rust preparation", async () => {
+    (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
+    const proposalContext = { cwd: "/work", runId: "run-1", proposal: { summary: "selected files", schemaVersion: "maru_skill_proposal_v1", requiresApproval: true, risks: [], commands: [], files: [{ path: "note.md", operation: "replace", content: "reviewed" }] } };
+    await prepareApproval({ kind: "agent.proposal.apply", summary: "Review", proposalContext });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("prepare_approval", { kind: "agent.proposal.apply", summary: "Review", target: null, payloadPreview: null, proposalContext });
+  });
+
+  it("rejects a proposal approval with display text alone before IPC", async () => {
+    (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
+    await expect(prepareApproval({ kind: "agent.proposal.apply", summary: "Apply", target: "note.md", payloadPreview: "approved body" })).rejects.toThrow("approval_binding_required");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("retains generic preparation for a non-migrated low-risk caller", async () => {
+    (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
+    await prepareApproval({ kind: "inbox.bulk", summary: "Bulk" });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("prepare_approval", { kind: "inbox.bulk", summary: "Bulk", target: null, payloadPreview: null, proposalContext: null });
   });
 });

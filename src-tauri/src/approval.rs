@@ -1,5 +1,8 @@
+use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -12,6 +15,134 @@ pub struct ApprovalRequest {
     pub target: Option<String>,
     pub payload_preview: Option<String>,
     pub auto_approved: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ApprovalBinding>,
+}
+
+/// Authority is scoped to this exact workspace operation, never display text.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalBinding {
+    pub logical_target: String,
+    pub payload_hash: String,
+    pub source_run_id: Option<String>,
+    pub source_revision: String,
+    pub base_revision: String,
+    pub policy_revision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalAuditEvent {
+    pub event: String,
+    pub request: ApprovalRequest,
+    pub decision: ApprovalDecision,
+    pub detail: Option<String>,
+}
+
+fn validate_audit_store_path(path: &std::path::Path) -> Result<(), String> {
+    let home = crate::skill_host::fs::maru_home()?;
+    let relative = path
+        .strip_prefix(&home)
+        .map_err(|_| "approval_audit_path_outside_home")?;
+    let mut current = home;
+    for component in std::iter::once(None).chain(relative.components().map(Some)) {
+        if let Some(component) = component {
+            current.push(component);
+        }
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err("approval_audit_symlink_rejected".into())
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("approval_audit_path_invalid: {error}")),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn audit_path(cwd: &str, id: &str) -> Result<PathBuf, String> {
+    let suffix = id.strip_prefix("approval-").ok_or("approval_id_invalid")?;
+    Uuid::parse_str(suffix).map_err(|_| "approval_id_invalid".to_string())?;
+    let workspace = crate::vault::normalize_existing_dir(cwd)?;
+    let workspace_key = format!(
+        "{:x}",
+        Sha256::digest(workspace.to_string_lossy().as_bytes())
+    );
+    let path = crate::skill_host::fs::maru_home()?
+        .join("approvals")
+        .join(workspace_key)
+        .join(format!("{id}.json"));
+    validate_audit_store_path(&path)?;
+    Ok(path)
+}
+
+fn audit_transaction(path: PathBuf) -> Result<PathTransactionRequest, String> {
+    PathTransactionRequest::new([
+        path,
+        crate::vault_list::workspace_registry_path()?,
+        crate::vault_list::legacy_vault_list_path()?,
+    ])
+}
+
+/// History is deliberately readable without restoring any in-memory authority.
+pub fn read_approval_audit(cwd: &str, id: &str) -> Result<Vec<ApprovalAuditEvent>, String> {
+    let path = audit_path(cwd, id)?;
+    let bytes = std::fs::read(path).map_err(|e| format!("approval_audit_read_failed: {e}"))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("approval_audit_invalid: {e}"))
+}
+
+fn persist_audit(
+    stored: &StoredApproval,
+    event: &str,
+    detail: Option<String>,
+    lease: &PathTransactionLease,
+) -> Result<(), String> {
+    let Some(cwd) = stored.audit_workspace.as_deref() else {
+        return Ok(());
+    };
+    let path = audit_path(cwd, &stored.request.id)?;
+    lease.ensure_covered([path.clone()])?;
+    lease.before_effect()?;
+    validate_audit_store_path(&path)?;
+    // This is application metadata, not a provider document operation. Its
+    // scope is constructed from the configured Maru home, workspace hash and UUID.
+    let mut events = if path.exists() {
+        read_approval_audit(cwd, &stored.request.id)?
+    } else {
+        Vec::new()
+    };
+    events.push(ApprovalAuditEvent {
+        event: event.into(),
+        request: stored.request.clone(),
+        decision: stored.decision,
+        detail,
+    });
+    let content = serde_json::to_string_pretty(&events).map_err(|e| e.to_string())?;
+    crate::atomic_file::write_atomic_private(&path, content.as_bytes())
+        .map_err(|e| format!("approval_audit_persist_failed: {e}"))?;
+    // Publish the audit tree and the application home in its owning parent.
+    // Neither source workspace aliases nor provider document permissions alter it.
+    #[cfg(unix)]
+    {
+        let home = crate::skill_host::fs::maru_home()?;
+        let home_parent = home.parent().ok_or("approval_audit_home_parent_missing")?;
+        for parent in path.ancestors().skip(1) {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[parent.to_path_buf()],
+                "approval-audit-before-directory-sync",
+            );
+            std::fs::File::open(parent)
+                .and_then(|file| file.sync_all())
+                .map_err(|e| format!("approval_audit_sync_failed: {e}"))?;
+            if parent == home_parent {
+                break;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,12 +158,14 @@ struct StoredApproval {
     request: ApprovalRequest,
     decision: ApprovalDecision,
     consumed: bool,
+    audit_workspace: Option<String>,
 }
 
 #[derive(Debug, Default)]
 struct ApprovalStore {
     approvals: HashMap<String, StoredApproval>,
     session_allowed_kinds: HashSet<String>,
+    session_allowed_bindings: HashSet<ApprovalBinding>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -102,6 +235,7 @@ impl ApprovalState {
             target,
             payload_preview,
             auto_approved,
+            binding: None,
         };
         store.approvals.insert(
             id,
@@ -113,9 +247,48 @@ impl ApprovalState {
                     ApprovalDecision::Pending
                 },
                 consumed: false,
+                audit_workspace: None,
             },
         );
         Ok(request)
+    }
+
+    pub(crate) fn prepare_bound(
+        &self,
+        cwd: &str,
+        summary: String,
+        target: Option<String>,
+        preview: Option<String>,
+        binding: ApprovalBinding,
+    ) -> Result<ApprovalRequest, String> {
+        let id = format!("approval-{}", Uuid::new_v4());
+        let path = audit_path(cwd, &id)?;
+        with_path_transactions(audit_transaction(path)?, |lease| {
+            let mut store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+            let auto_approved = store.session_allowed_bindings.contains(&binding);
+            let request = ApprovalRequest {
+                id: id.clone(),
+                kind: "agent.proposal.apply".into(),
+                summary,
+                target,
+                payload_preview: preview,
+                auto_approved,
+                binding: Some(binding),
+            };
+            let stored = StoredApproval {
+                request: request.clone(),
+                decision: if auto_approved {
+                    ApprovalDecision::Approved
+                } else {
+                    ApprovalDecision::Pending
+                },
+                consumed: false,
+                audit_workspace: Some(cwd.into()),
+            };
+            persist_audit(&stored, "requested", None, lease)?;
+            store.approvals.insert(id, stored);
+            Ok(request)
+        })
     }
 
     fn record(
@@ -124,26 +297,104 @@ impl ApprovalState {
         decision: ApprovalDecision,
         remember_kind: bool,
     ) -> Result<ApprovalRequest, String> {
-        let mut store = self
-            .store
-            .lock()
-            .map_err(|_| "approval_state_poisoned".to_string())?;
-        let kind = {
-            let Some(stored) = store.approvals.get_mut(id) else {
-                return Err("approval_not_found".to_string());
-            };
-            stored.decision = decision;
-            stored.request.auto_approved = false;
-            stored.request.kind.clone()
+        let path = {
+            let store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+            let stored = store.approvals.get(id).ok_or("approval_not_found")?;
+            stored
+                .audit_workspace
+                .as_deref()
+                .map(|cwd| audit_path(cwd, id))
+                .transpose()?
         };
-        if decision == ApprovalDecision::Approved && remember_kind {
-            store.session_allowed_kinds.insert(kind);
+        if let Some(path) = path {
+            with_path_transactions(audit_transaction(path)?, |lease| {
+                self.record_locked(id, decision, remember_kind, Some(lease))
+            })
+        } else {
+            self.record_locked(id, decision, remember_kind, None)
         }
-        store
-            .approvals
-            .get(id)
-            .map(|stored| stored.request.clone())
-            .ok_or_else(|| "approval_not_found".to_string())
+    }
+
+    fn record_locked(
+        &self,
+        id: &str,
+        decision: ApprovalDecision,
+        remember_kind: bool,
+        lease: Option<&PathTransactionLease>,
+    ) -> Result<ApprovalRequest, String> {
+        let mut store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+        let current = store.approvals.get(id).ok_or("approval_not_found")?;
+        if current.consumed {
+            return Err("approval_consumed".into());
+        }
+        if current.decision != ApprovalDecision::Pending {
+            if current.decision == decision {
+                return Ok(current.request.clone());
+            }
+            return Err("approval_decision_terminal".into());
+        }
+        if decision == ApprovalDecision::Pending {
+            return Err("approval_decision_required".into());
+        }
+        let mut next = current.clone();
+        next.decision = decision;
+        next.request.auto_approved = false;
+        if let Some(lease) = lease {
+            persist_audit(&next, "decided", None, lease)?;
+        }
+        if decision == ApprovalDecision::Approved && remember_kind {
+            if let Some(binding) = &next.request.binding {
+                store.session_allowed_bindings.insert(binding.clone());
+            } else {
+                store
+                    .session_allowed_kinds
+                    .insert(next.request.kind.clone());
+            }
+        }
+        let request = next.request.clone();
+        store.approvals.insert(id.into(), next);
+        Ok(request)
+    }
+
+    pub(crate) fn consume_bound(
+        &self,
+        id: Option<&str>,
+        binding: &ApprovalBinding,
+        lease: &PathTransactionLease,
+    ) -> Result<String, String> {
+        let id = id.ok_or("approval_required: agent.proposal.apply")?;
+        let mut store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+        let stored = store.approvals.get_mut(id).ok_or("approval_not_found")?;
+        if stored.consumed {
+            return Err("approval_consumed".into());
+        }
+        if stored.request.kind != "agent.proposal.apply" {
+            return Err("approval_kind_mismatch".into());
+        }
+        if stored.request.binding.as_ref() != Some(binding) {
+            return Err("approval_binding_mismatch".into());
+        }
+        if stored.decision != ApprovalDecision::Approved {
+            return Err("approval_not_granted".into());
+        }
+        // Poison authority even when publication has an uncertain result.
+        stored.consumed = true;
+        persist_audit(stored, "consumed", None, lease)?;
+        Ok(id.into())
+    }
+
+    pub(crate) fn record_effect(
+        &self,
+        id: &str,
+        detail: String,
+        lease: &PathTransactionLease,
+    ) -> Result<(), String> {
+        let store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+        let stored = store.approvals.get(id).ok_or("approval_not_found")?;
+        if !stored.consumed {
+            return Err("approval_not_consumed".into());
+        }
+        persist_audit(stored, "effect.outcome", Some(detail), lease)
     }
 
     fn consume_any(&self, approval_id: Option<&str>, kinds: &[&str]) -> Result<(), String> {
@@ -173,6 +424,9 @@ impl ApprovalState {
         if stored.decision != ApprovalDecision::Approved {
             return Err("approval_not_granted".to_string());
         }
+        if stored.request.binding.is_some() {
+            return Err("approval_bound_required".into());
+        }
         stored.consumed = true;
         Ok(())
     }
@@ -193,6 +447,7 @@ pub mod ipc {
         summary: String,
         target: Option<String>,
         payload_preview: Option<String>,
+        proposal_context: Option<crate::agent_host::proposal::ProposalApprovalContext>,
     ) -> Result<ApprovalRequest, String> {
         let state = state.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -201,7 +456,23 @@ pub mod ipc {
                 &[std::path::PathBuf::from(WORKER_HOOK_KEY)],
                 "worker:prepare_approval",
             );
-            state.prepare(kind, summary, target, payload_preview)
+            if let Some(context) = proposal_context {
+                if kind != "agent.proposal.apply" {
+                    return Err("approval_kind_mismatch".into());
+                }
+                crate::agent_host::proposal::prepare_proposal_approval(
+                    &state,
+                    &context,
+                    summary,
+                    target,
+                    payload_preview,
+                )
+            } else {
+                if kind == "agent.proposal.apply" {
+                    return Err("approval_binding_required".into());
+                }
+                state.prepare(kind, summary, target, payload_preview)
+            }
         })
         .await
         .map_err(|err| format!("prepare_approval_task_failed: {err}"))?
@@ -350,6 +621,7 @@ mod tests {
                     "Move file".into(),
                     None,
                     None,
+                    None,
                 )
                 .await
             });
@@ -375,6 +647,7 @@ mod tests {
                     app.state(),
                     "inbox.file.accept".into(),
                     "Move file".into(),
+                    None,
                     None,
                     None,
                 )
@@ -410,6 +683,7 @@ mod tests {
                     "Empty kind".into(),
                     None,
                     None,
+                    None,
                 )
                 .await
                 .unwrap_err();
@@ -419,6 +693,7 @@ mod tests {
                     app.state(),
                     "vault.trash".into(),
                     "Trash entry".into(),
+                    None,
                     None,
                     None,
                 )
@@ -436,6 +711,7 @@ mod tests {
                     app.state(),
                     "vault.trash".into(),
                     "Trash again".into(),
+                    None,
                     None,
                     None,
                 )
@@ -477,6 +753,7 @@ mod tests {
                             "Bulk".into(),
                             None,
                             None,
+                            None,
                         )
                         .await
                         .unwrap()
@@ -501,44 +778,22 @@ mod tests {
                 drop(blocked_guard);
                 done(blocked).unwrap();
 
-                // Two concurrent writers on the same id: the store mutex
-                // serializes the mutations, so the final state is exactly one
-                // decision with no mixed state. Async completion order cannot
-                // identify the last writer — each worker's blocking record can
-                // finish (and its mutation be overwritten) before the runtime
-                // reschedules the awaiting task — so read the decision the
-                // store actually settled on.
+                // A terminal decision is immutable, including a concurrent
+                // opposing writer. Idempotent repeats retain the same verdict.
                 let first_app = app.clone();
                 let first_id = id.clone();
                 let first = start(async move {
-                    ipc::record_approval(first_app.state(), first_id, decision_a, None)
-                        .await
-                        .unwrap()
+                    ipc::record_approval(first_app.state(), first_id, decision_a, None).await
                 });
                 let second_app = app.clone();
                 let second_id = id.clone();
                 let second = start(async move {
-                    ipc::record_approval(second_app.state(), second_id, decision_b, None)
-                        .await
-                        .unwrap()
+                    ipc::record_approval(second_app.state(), second_id, decision_b, None).await
                 });
-                let first_outcome = done(first);
-                let second_outcome = done(second);
-                assert_eq!(first_outcome.kind, "inbox.bulk");
-                assert_eq!(second_outcome.kind, "inbox.bulk");
-                assert!(!first_outcome.auto_approved);
-                assert!(!second_outcome.auto_approved);
-                let final_decision = store
-                    .lock()
-                    .unwrap()
-                    .approvals
-                    .get(&id)
-                    .map(|stored| stored.decision)
-                    .expect("approval stays recorded");
-                assert!(
-                    final_decision == decision_a || final_decision == decision_b,
-                    "store holds one of the two recorded decisions"
-                );
+                assert_eq!(done(first).unwrap().kind, "inbox.bulk");
+                assert_eq!(done(second).unwrap_err(), "approval_decision_terminal");
+                let final_decision = store.lock().unwrap().approvals.get(&id).unwrap().decision;
+                assert_eq!(final_decision, decision_a);
 
                 let verdict = require_approval(
                     &app.state::<ApprovalState>(),

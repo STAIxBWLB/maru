@@ -12,6 +12,7 @@ interface PendingApproval {
 }
 
 export interface ApprovalInput {
+  proposalContext?: import("../lib/skills").ProposalApprovalContext | null;
   kind: string;
   summary: string;
   target?: string | null;
@@ -121,7 +122,7 @@ function ApprovalDialog({
                   checked={rememberKind}
                   onChange={(event) => onRememberKind(event.currentTarget.checked)}
                 />
-                <span>{t("approval.dialog.rememberKind")}</span>
+                <span>{t(request.binding ? "approval.dialog.rememberBinding" : "approval.dialog.rememberKind")}</span>
               </label>
             </div>
           ) : null}
