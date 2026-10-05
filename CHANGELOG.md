@@ -9,6 +9,12 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.18 - Bound Intent (2026-10-05)
+
+- Bind one-time proposal approvals to the exact workspace, provider, operations, file bytes and policy; record private audit receipts and reject stale or replayed grants (#426).
+- Retain durable, bounded job run receipts across app and CLI restarts, including process ownership, termination and launcher recovery evidence (#427).
+- Route Cmd+R to Reload Workspace through the native menu and preserve the current application window (#438).
+
 ## v1.1.17 - Structured Canvas (2026-10-05)
 
 - Add pinned Archify 3.0.0 interchange and architecture/workflow generation with strict validation, preview, scoped apply, stale-result rejection and one-step undo.
