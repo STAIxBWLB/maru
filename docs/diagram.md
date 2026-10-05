@@ -42,7 +42,12 @@ Backend commands (`src-tauri/src/diagram/mod.rs`): `diagram_save_document`,
 `diagram_backup_document` (one-time legacy backup), pattern presets
 `diagram_pattern_save` / `diagram_pattern_list` / `diagram_pattern_delete`,
 and `diagram_write_report_asset` (report assets; extension-whitelisted to
-svg/png/json, traversal-safe, atomic, write-guard checked).
+svg/png/json, traversal-safe, atomic, write-guard checked). Generation adds
+`archify_validate_candidate` (`src-tauri/src/archify.rs`, pinned-engine
+validation) and the architecture gallery adds
+`architecture_read_sibling_spec` (`src-tauri/src/architecture.rs`, guarded
+sibling read). The command-isolation gate now expects **387** registered
+commands with recorded evidence (`Makefile` `--expected-count 387`).
 
 ## Canvas & nodes
 
@@ -90,6 +95,98 @@ commits and moves down, Tab / Shift+Tab move right/left, Escape closes,
 arrows move the cell focus, Delete clears the range, and the Table ribbon tab
 merges/splits cells and adds/removes rows/columns. Pasting from the OS
 clipboard understands HTML tables, TSV, and Markdown tables.
+
+## Typed semantic datasets (schema v9)
+
+v9 adds the `semanticSpec` dataset kind (`src/lib/diagram/reportTypes.ts`):
+the canonical, editable meaning of a generated diagram. `spec` is the Archify
+typed JSON (interchange/renderer input); canvas members are a projection of
+the dataset, never a second semantic source. `idMap` is the reversible
+Archify-safe-id → Maru-id mapping (Archify ids forbid `:` and leading digits;
+Maru member ids like `ds:m0` do not), `engine` pins the `archify` engine
+version the spec round-trips through, and `provenance` records the origin
+(`generated` / `imported` / `gallery-copy`) with a source path when one
+exists. Fields the pinned engine cannot represent are kept verbatim in
+`preservedExtensions` and reported as fidelity diagnostics — never silently
+stripped, never re-emitted as if the engine supported them.
+
+Because canvas members are projections, freeform edits to a managed member
+require detaching it first (the same detach contract as report pattern
+views); the semantic spec stays the source of truth. v8→v9 is a version bump
+only — v8 documents migrate in memory on load with no content rewrites.
+
+## Generation and safe editing (issue #433)
+
+The File ribbon's 다이어그램 생성 action (`GenerateDiagramDialog`; pipeline
+in `src/lib/diagram/generation.ts` + `proposal.ts`) runs: requirements →
+agent produces a bounded candidate (`semanticSpec` dataset) → strict
+validation through the pinned engine (`archify_validate_candidate`) → preview
+with candidate summary, categorized diff, engine receipt and diagnostics →
+explicit apply → conditional save. Nothing mutates the document before the
+apply click; blocking diagnostics (a locked-node target, a silently removed
+boundary edge) disable apply, and the offending ops are dropped from the
+proposal so the op list alone can never mutate out-of-scope or locked
+members.
+
+Scoped edits (an active selection at open time) may modify or remove only
+scoped node ids; additions of brand-new ids are allowed. Boundary edges
+(exactly one endpoint in scope) may be updated but never removed silently —
+a kept one is reported, a removed one blocks. Edges fully outside the scope
+and locked nodes are never touched. `prepareProposalApply` re-checks the
+base memory revision (stale → re-preview), validates the would-be result,
+and returns a single transformer wrapped in exactly one `withSnapshot` undo
+entry.
+
+Saves are conditional on `expected_revision` (the `diagramRevision` of the
+loaded/last-saved body): a file that changed on disk since the load rejects
+with a `document_conflict` IpcError and is left untouched. UI apply success
+is therefore not a durable save — canvas state and the on-disk document are
+separate commitments, and a conflict surfaces as a notice, never an
+automatic retry.
+
+Unavailability degrades honestly: a missing engine surfaces the typed
+`ENGINE_UNAVAILABLE` diagnostic, an unreachable agent host surfaces the
+failed-run state, and the Mermaid paste import path (`mermaidToDocDetailed`,
+agent- and engine-free) keeps working, reporting skipped constructs as
+localized diagnostics.
+
+## Archify engine pin
+
+The validation/render engine is the vendored, hash-pinned copy at
+`sidecars/archify/` — never the user-installed skill at
+`~/.agents/skills/archify`, which is user-mutable. `sidecars/archify/PIN.json`
+carries `version`, `repository`, a 40-hex `revision` (plus `revisionRef`),
+`pinnedAt`, `license: MIT` with `licenseHolders`, the vendoring `excludes`,
+and a `fileHashes` SHA-256 manifest of every vendored file. `make verify`
+runs `check-archify-pin` (`scripts/check-archify-pin.mjs`), which fails the
+build when the tree drifts from the manifest, when LICENSE or
+THIRD_PARTY_NOTICES.md go missing, or when the pin metadata is incomplete.
+
+Refresh after a deliberate engine update: re-vendor the files, regenerate
+the manifest from the repo root —
+
+```bash
+node -e 'const{createHash}=require("node:crypto"),{readdirSync,readFileSync,statSync}=require("node:fs"),{join,relative,sep}=require("node:path");const root="sidecars/archify";const walk=(d)=>readdirSync(d).sort().flatMap((e)=>{const p=join(d,e);return statSync(p).isDirectory()?walk(p):[p]});const out={};for(const f of walk(root)){const rel=relative(root,f).split(sep).join("/");if(rel!=="PIN.json")out[rel]=createHash("sha256").update(readFileSync(f)).digest("hex")}console.log(JSON.stringify(out,null,2))'
+```
+
+— write the result into `PIN.json.fileHashes`, bump `version` / `revision` /
+`pinnedAt`, review the diff, and keep the MIT notices (LICENSE,
+THIRD_PARTY_NOTICES.md) intact.
+
+## Architecture gallery handoff
+
+The Architecture gallery's "Diagram으로 복사해 편집" action copies a
+blueprint's `<slug>.architecture.json` spec into Diagram mode as a NEW
+workspace diagram. The read goes through `architecture_read_sibling_spec`,
+a guarded sibling read: the spec must live in the same submodule as the
+viewer (own containment check with `..`/symlink resolution, symlinks
+escaping the submodule root refused), under a 1 MiB size cap, and it must
+parse against the Archify schema — a missing or unsupported spec simply
+leaves the action unavailable. The copy lands as a `semanticSpec` dataset
+with `provenance.origin = "gallery-copy"` and the workspace-relative source
+path, gets projected and laid out, and is saved under a never-overwriting
+name; the source repo's files and the gallery's per-file asset-protocol
+grants are untouched.
 
 ## Export / import
 
@@ -176,4 +273,6 @@ Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache
 - `src-tauri/src/diagram/mod.rs` — persistence, export, snapshots, legacy backup,
   pattern presets, report assets.
 - e2e: `e2e/diagram.spec.ts` (flag visibility, ko/en labels, save/reload,
-  templates, Mermaid, export dialog, no `localhost:5500` / Google Fonts requests).
+  templates, Mermaid, export dialog, generation dialog + Mermaid paste
+  diagnostics + agent-host-unavailable degradation, no `localhost:5500` /
+  Google Fonts requests).
