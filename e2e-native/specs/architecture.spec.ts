@@ -127,7 +127,7 @@ describe("native 설계도 mode", () => {
     const copy = await browser.$('[data-testid="architecture-copy-to-diagram"]');
     await copy.waitForDisplayed({ timeout: 30_000 });
     await copy.click();
-    await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node")).length === 1, {
+    await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node").length) === 1, {
       timeout: 30_000, timeoutMsg: "cold gallery handoff must open the saved copy",
     });
     assert.match(await (await browser.$(".maru-diagram-node")).getText(), /한글 서버/);
@@ -152,7 +152,7 @@ describe("native 설계도 mode", () => {
     await (await browser.$('[data-testid="gen-from-mermaid"]')).click();
     await (await browser.$('[data-testid="gen-mermaid-preview"]')).waitForDisplayed({ timeout: 30_000 });
     await (await browser.$('[data-testid="gen-mermaid-apply"]')).click();
-    await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node")).length === 2, {
+    await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node").length) === 2, {
       timeout: 30_000, timeoutMsg: "native Mermaid generation must apply two nodes",
     });
 

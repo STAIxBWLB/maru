@@ -282,7 +282,7 @@ function DiagramShell({
   const coalescer = useDiagramCoalescer();
   const gestureCoalescers = useDiagramGestureCoalescers();
   const sessionKey = workPath ?? "__no-workspace__";
-  const handoffOpening = useRef(false);
+  const handoffOpening = useRef<string | null>(null);
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
   const edges = doc.edges;
@@ -456,12 +456,12 @@ function DiagramShell({
       try {
         const settings = await readMaruSettings(workPath);
         const lastDocument = settings.diagram.lastDocument ?? readLastDocumentFallback(workPath);
-        if (!lastDocument || cancelled || handoffOpening.current) return;
+        if (!lastDocument || cancelled || handoffOpening.current === workPath) return;
         if (getDiagramSession(sessionKey).activeName) return;
         const current = store.getState().doc;
         if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
         const { doc: restored, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, lastDocument);
-        if (cancelled || handoffOpening.current) return;
+        if (cancelled || handoffOpening.current === workPath) return;
         store.setState(replaceDoc(restored));
         setActiveName(lastDocument);
         setLastSavedBody(serializeDoc(restored));
@@ -1135,7 +1135,7 @@ function DiagramShell({
     const openPending = () => {
       const name = takeDiagramHandoff(workPath);
       if (name) {
-        handoffOpening.current = true;
+        handoffOpening.current = workPath;
         void handleOpen(name);
       }
     };
