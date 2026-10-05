@@ -63,7 +63,12 @@ describe("native 설계도 mode", () => {
     await fs.writeFile(path.join(source, "docs", "architecture", "probe-rendered.html"), PROBE_HTML);
     await fs.writeFile(
       path.join(source, "docs", "architecture", "probe.architecture.json"),
-      JSON.stringify({ meta: { title: "Probe Blueprint" } }),
+      JSON.stringify({
+        schema_version: 1,
+        diagram_type: "architecture",
+        meta: { title: "Probe Blueprint", output: "probe.html" },
+        components: [{ id: "app", type: "backend", label: "한글 서버" }],
+      }),
     );
     git(source, ["init", "-q"]);
     git(source, ["add", "."]);
@@ -114,5 +119,42 @@ describe("native 설계도 mode", () => {
     }, theme);
 
     assert.equal(await browser.getUrl(), appUrl, "the app webview must stay on the app");
+
+    // The Diagram surface has never mounted in this session: this exercises
+    // the lazy handoff, real guarded schema validation and create-only save.
+    const sourceSpec = path.join(workspace(), "dev/probe/docs/architecture/probe.architecture.json");
+    const sourceBefore = await fs.readFile(sourceSpec, "utf8");
+    const copy = await browser.$('[data-testid="architecture-copy-to-diagram"]');
+    await copy.waitForDisplayed({ timeout: 30_000 });
+    await copy.click();
+    await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node")).length === 1, {
+      timeout: 30_000, timeoutMsg: "cold gallery handoff must open the saved copy",
+    });
+    assert.match(await (await browser.$(".maru-diagram-node")).getText(), /한글 서버/);
+    const saved = JSON.parse(await fs.readFile(path.join(workspace(), "diagrams/Probe Blueprint.cmd.json"), "utf8"));
+    assert.equal(saved.datasets[0].provenance.origin, "gallery-copy");
+    assert.equal(saved.datasets[0].provenance.repository, "dev/probe");
+    assert.equal(await fs.readFile(sourceSpec, "utf8"), sourceBefore);
+    assert.equal(await fs.readFile(path.join(workspace(), "dev/probe/docs/architecture/probe-rendered.html"), "utf8"), PROBE_HTML);
+
+    const fileTab = await browser.$('[role="tab"][aria-label="파일"]');
+    // Existing ribbon tabs expose their visible label instead of aria-label.
+    if (await fileTab.isExisting()) await fileTab.click();
+    else {
+      const tab = await browser.$('[role="tab"]*=파일');
+      await tab.click();
+    }
+    const generate = await browser.$('button=다이어그램 생성');
+    await generate.click();
+    await (await browser.$('[data-testid="gen-type-select"]')).waitForDisplayed({ timeout: 30_000 });
+    const mermaid = await browser.$('[data-testid="gen-mermaid"]');
+    await mermaid.setValue("flowchart TD\n A[시작] --> B[종료]");
+    await (await browser.$('[data-testid="gen-from-mermaid"]')).click();
+    await (await browser.$('[data-testid="gen-mermaid-preview"]')).waitForDisplayed({ timeout: 30_000 });
+    await (await browser.$('[data-testid="gen-mermaid-apply"]')).click();
+    await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node")).length === 2, {
+      timeout: 30_000, timeoutMsg: "native Mermaid generation must apply two nodes",
+    });
+
   });
 });
