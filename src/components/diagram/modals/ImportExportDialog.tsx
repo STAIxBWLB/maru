@@ -33,7 +33,7 @@ import {
   type CodecSerializeOutcome,
 } from "../../../lib/diagram/codecs";
 import { exportPdf, suggestedFileName } from "../../../lib/diagram/export";
-import type { MatrixDataset, ReportDataset } from "../../../lib/diagram/reportTypes";
+import type { MatrixDataset, ReportDataset, SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
 import type { DiagramDoc } from "../../../lib/diagram/types";
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { useTranslation } from "../../../lib/i18n";
@@ -134,12 +134,17 @@ export function ImportExportDialog({
     [doc.datasets],
   );
 
+  const semanticDataset = (doc.datasets ?? []).find(
+    (ds): ds is SemanticSpecDataset => ds.kind === "semanticSpec",
+  );
+
   const exportCodecs = useMemo(
     () =>
       CODEC_LIST.filter(
-        (codec) => codec.canExport && (codec.dataKind !== "matrix" || matrices.length > 0),
+        (codec) => codec.canExport && (codec.dataKind !== "matrix" || matrices.length > 0)
+          && (codec.id !== "archify-json" || semanticDataset !== undefined),
       ),
-    [matrices.length],
+    [matrices.length, semanticDataset],
   );
 
   // Reset transient state whenever the dialog opens.
@@ -225,7 +230,9 @@ export function ImportExportDialog({
         doc,
         ...(needsDataset ? { datasetId: effectiveDatasetId } : {}),
       });
-      const ext = codec.extensions[0]!.replace(/^\./, "");
+      const ext = codec.id === "archify-json" && semanticDataset
+        ? `${semanticDataset.diagramType}.json`
+        : codec.extensions[0]!.replace(/^\./, "");
       const fileName = suggestedFileName(doc, ext);
       const blob =
         typeof outcome.bytes === "string"

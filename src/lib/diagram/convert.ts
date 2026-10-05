@@ -47,6 +47,7 @@ import {
   type NetworkDataset,
   type PatternView,
   type PatternViewBounds,
+  type PatternDatasetKind,
   type ReportDataset,
   type ScorecardDataset,
   type SemanticTag,
@@ -174,6 +175,10 @@ function matrixToRecords(matrix: MatrixDataset, warnings: ConversionWarning[]): 
 export function datasetToRecords(dataset: ReportDataset): ExtractedRecords {
   const warnings: ConversionWarning[] = [];
   switch (dataset.kind) {
+    case "semanticSpec":
+      // Semantic specs are managed by the generation/apply flow (issue #433);
+      // report-pattern cross conversion does not apply to them.
+      throw new Error("datasetToRecords: semanticSpec datasets are not report-convertible");
     case "matrix": {
       const matrix = dataset as MatrixDataset;
       return {
@@ -284,7 +289,7 @@ interface MappingSpec {
   optional: SemanticTag[];
 }
 
-const MAPPING_SPECS: Record<ReportDataset["kind"], MappingSpec> = {
+const MAPPING_SPECS: Record<PatternDatasetKind, MappingSpec> = {
   hierarchy: { positional: ["label", "parent"], optional: [] },
   timeline: { positional: ["label", "start", "end"], optional: ["owner", "status"] },
   scorecard: {
@@ -622,7 +627,7 @@ export interface ExtractionResult<T extends ReportDataset> {
 function extractFromMatrix<T extends ReportDataset>(
   matrix: MatrixDataset,
   userMapping: FieldMapping,
-  targetKind: ReportDataset["kind"],
+  targetKind: PatternDatasetKind,
   build: (
     records: DatasetRecord[],
     mapping: FieldMapping,

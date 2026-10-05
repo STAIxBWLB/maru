@@ -19,7 +19,8 @@
  */
 
 import { rasterise } from "./export";
-import { docToMermaid, mermaidToDoc } from "./mermaid";
+import { docToMermaid, mermaidToDocDetailed } from "./mermaid";
+import { datasetToArchifySpec, parseArchifySpec } from "./archifyCodec";
 import { mkNode } from "./nodeKinds";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import { renderDocToSvg } from "./renderSvg";
@@ -828,10 +829,11 @@ const mermaidCodec: DiagramCodec = {
   dataKind: "doc",
   exportKind: "mmd",
   parse(bytes) {
+    const { doc, diagnostics } = mermaidToDocDetailed(toText(bytes));
     return {
-      result: { kind: "doc", doc: mermaidToDoc(toText(bytes)) },
+      result: { kind: "doc", doc },
       fidelity: "structural",
-      warnings: [{ key: "diagram.codec.warn.mermaidImport" }],
+      warnings: [{ key: "diagram.codec.warn.mermaidImport" }, ...diagnostics],
       ignoredFields: ["positions", "styles"],
     };
   },
@@ -841,6 +843,57 @@ const mermaidCodec: DiagramCodec = {
       fidelity: "structural",
       warnings: [{ key: "diagram.codec.warn.mermaidExport" }],
       ignoredFields: ["positions", "styles", "datasets"],
+    };
+  },
+};
+
+/**
+ * Archify typed JSON interchange (issue #433). Import wraps the spec in a v9
+ * semantic dataset inside a fresh doc — the canvas projection is produced by
+ * the generation/apply flow, not by file ingest. Export emits the semantic
+ * spec exactly as the pinned engine consumes it; canvas geometry and styles
+ * are view state and never part of the interchange.
+ */
+const archifyJsonCodec: DiagramCodec = {
+  id: "archify-json",
+  labelKey: "diagram.codec.label.archifyJson",
+  extensions: [".architecture.json", ".workflow.json"],
+  canImport: true,
+  canExport: true,
+  exportFidelity: "structural",
+  dataKind: "doc",
+  exportKind: "json",
+  parse(bytes, filename) {
+    const outcome = parseArchifySpec(toText(bytes), {
+      provenance: { origin: "imported", sourcePath: filename, capturedAt: Date.now() },
+    });
+    if (!outcome.ok) {
+      const first = outcome.diagnostics[0];
+      throw new Error(
+        first ? `${first.key}: ${JSON.stringify(first.params ?? {})}` : "diagram.archify.invalid",
+      );
+    }
+    const { dataset, diagnostics } = outcome.result;
+    const doc = createEmptyDoc(createDiagramId());
+    doc.docTitle = dataset.name;
+    doc.datasets = [dataset];
+    return {
+      result: { kind: "doc", doc },
+      fidelity: "structural",
+      warnings: [...diagnostics],
+      ignoredFields: ["positions", "styles"],
+    };
+  },
+  serialize({ doc }) {
+    const dataset = (doc.datasets ?? []).find(
+      (entry): entry is import("./reportTypes").SemanticSpecDataset => entry.kind === "semanticSpec",
+    );
+    if (!dataset) throw new Error("diagram.archify.noSemanticDataset");
+    return {
+      bytes: `${JSON.stringify(datasetToArchifySpec(dataset), null, 2)}\n`,
+      fidelity: "structural",
+      warnings: [{ key: "diagram.archify.semanticOnly" }],
+      ignoredFields: ["positions", "styles"],
     };
   },
 };
@@ -919,16 +972,20 @@ export const CODEC_LIST: readonly DiagramCodec[] = [
   markdownTableCodec,
   htmlTableCodec,
   mermaidCodec,
+  archifyJsonCodec,
 ];
 
 export function getCodec(id: string): DiagramCodec | undefined {
   return CODEC_LIST.find((codec) => codec.id === id);
 }
 
-/** Resolve an import-capable codec for a file name (`.cmd.json` before `.json`). */
+/** Resolve an import-capable codec for a file name (compound extensions first). */
 export function codecForFilename(name: string): DiagramCodec | undefined {
   const lower = name.toLowerCase();
   if (lower.endsWith(".cmd.json")) return getCodec("maru-json");
+  if (lower.endsWith(".architecture.json") || lower.endsWith(".workflow.json")) {
+    return getCodec("archify-json");
+  }
   const dot = lower.lastIndexOf(".");
   if (dot < 0) return undefined;
   const ext = lower.slice(dot);

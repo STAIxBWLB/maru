@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { IpcError, normalizeIpcError } from "./ipcError";
+import { sha256Hex } from "./today";
 
 declare global {
   interface Window {
@@ -50,21 +52,58 @@ function extractDocTitle(body: string): string {
   }
 }
 
+/** Trailing-newline normalization the Rust `diagram_save_document` applies
+ *  before writing; the file revision hashes the normalized payload. */
+function storedPayload(body: string): string {
+  return body.endsWith("\n") ? body : `${body}\n`;
+}
+
+/** Revision of the exact loaded file bytes. Set `afterWrite` only for a
+ * payload just saved, since Rust appends a trailing newline before writing. */
+export async function diagramRevision(body: string, afterWrite = false): Promise<string> {
+  return sha256Hex(afterWrite ? storedPayload(body) : body);
+}
+
 export async function diagramSaveDocument(
   workspace: string,
   name: string,
   body: string,
+  expectedRevision?: string,
 ): Promise<void> {
   if (!isTauri()) {
     const storage = mockStorage();
     if (!storage) throw new Error("diagram_save_document_requires_tauri");
-    storage.setItem(
-      mockDocumentKey(workspace, name),
-      JSON.stringify({ body, modifiedAt: Date.now() }),
-    );
+    const key = mockDocumentKey(workspace, name);
+    if (expectedRevision) {
+      const raw = storage.getItem(key);
+      const parsed = raw ? (JSON.parse(raw) as { body?: unknown }) : null;
+      const current = typeof parsed?.body === "string" ? parsed.body : null;
+      const actual = current === null ? null : await sha256Hex(current);
+      if (actual !== expectedRevision) {
+        throw new IpcError({
+          code: "document_conflict",
+          message:
+            actual === null
+              ? `expected revision ${expectedRevision}, file is missing`
+              : `expected revision ${expectedRevision}, found ${actual}`,
+        });
+      }
+    }
+    storage.setItem(key, JSON.stringify({ body: storedPayload(body), modifiedAt: Date.now() }));
     return;
   }
-  return invoke<void>("diagram_save_document", { workspace, name, body });
+  try {
+    return await invoke<void>("diagram_save_document", {
+      workspace,
+      name,
+      body,
+      expectedRevision: expectedRevision ?? null,
+    });
+  } catch (err) {
+    // The command returns IpcError, so a conflict rejection is a
+    // { code, message } object; normalize so callers can branch on `.code`.
+    throw normalizeIpcError(err);
+  }
 }
 
 export async function diagramLoadDocument(
@@ -209,27 +248,35 @@ export async function diagramRestoreSnapshot(
 }
 
 /**
- * One-time v7 backup before the first v8 save overwrites a legacy document.
- * Returns the backup file path. In the localStorage mock the copy is kept
- * under a `backups:` key so tests can verify it happened.
+ * One-time backup before the first save at the current schema overwrites a
+ * legacy document. `sourceVersion` labels the backup file (`<name>-v<N>-<ts>`)
+ * and defaults to 7, the first legacy schema this path protected. Returns the
+ * backup file path. In the localStorage mock the copy is kept under a
+ * `backups:` key so tests can verify it happened.
  */
 export async function diagramBackupDocument(
   workspace: string,
   name: string,
+  sourceVersion?: number,
 ): Promise<string> {
+  const label = sourceVersion ?? 7;
   if (!isTauri()) {
     const storage = mockStorage();
     if (!storage) throw new Error("diagram_backup_document_requires_tauri");
     const raw = storage.getItem(mockDocumentKey(workspace, name));
     if (!raw) throw new Error(`Diagram not found: ${name}`);
-    const backupName = `${name}-v7-${Date.now()}`;
+    const backupName = `${name}-v${label}-${Date.now()}`;
     storage.setItem(
       `${mockDocumentPrefix(workspace)}backups:${encodeURIComponent(backupName)}`,
       raw,
     );
     return backupName;
   }
-  return invoke<string>("diagram_backup_document", { workspace, name });
+  return invoke<string>("diagram_backup_document", {
+    workspace,
+    name,
+    sourceVersion: sourceVersion ?? null,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,8 @@ function getWorkspaceContext(key?: string | null): WorkspaceDiagramContext {
         activeName: null,
         lastSavedBody: null,
         migratedFromLegacy: false,
+        legacySourceVersion: null,
+        fileRevision: null,
         legacyBackupAttempted: false,
       },
     };
@@ -147,11 +149,21 @@ export interface DiagramSession {
   activeName: string | null;
   lastSavedBody: string | null;
   /**
-   * Set when the active document was loaded from a pre-v8 body. The first
-   * save after that triggers a one-time v7 backup (see DiagramMode persistSave).
+   * Set when the active document was loaded from a legacy-schema body. The
+   * first save after that triggers a one-time backup of the legacy body (see
+   * DiagramMode persistSave).
    */
   migratedFromLegacy: boolean;
-  /** True once the v7 backup has been attempted for the active document. */
+  /** Schema version found on disk, used to label the one-time backup. */
+  legacySourceVersion: number | null;
+  /**
+   * Revision (sha256 of the stored bytes) of the file this session loaded or
+   * last wrote. Revision-conditional saves use this — NOT a hash of
+   * lastSavedBody, which is the normalized form and diverges from the disk
+   * bytes whenever a legacy/migrated body is reserialized.
+   */
+  fileRevision: string | null;
+  /** True once the legacy backup has been attempted for the active document. */
   legacyBackupAttempted: boolean;
 }
 
@@ -167,6 +179,8 @@ export function setDiagramSession(
   if (patch.activeName !== undefined) session.activeName = patch.activeName;
   if (patch.lastSavedBody !== undefined) session.lastSavedBody = patch.lastSavedBody;
   if (patch.migratedFromLegacy !== undefined) session.migratedFromLegacy = patch.migratedFromLegacy;
+  if (patch.legacySourceVersion !== undefined) session.legacySourceVersion = patch.legacySourceVersion;
+  if (patch.fileRevision !== undefined) session.fileRevision = patch.fileRevision;
   if (patch.legacyBackupAttempted !== undefined) session.legacyBackupAttempted = patch.legacyBackupAttempted;
 }
 
@@ -175,6 +189,8 @@ export function _resetDiagramSessionForTests(): void {
     ctx.session.activeName = null;
     ctx.session.lastSavedBody = null;
     ctx.session.migratedFromLegacy = false;
+    ctx.session.legacySourceVersion = null;
+    ctx.session.fileRevision = null;
     ctx.session.legacyBackupAttempted = false;
   }
 }

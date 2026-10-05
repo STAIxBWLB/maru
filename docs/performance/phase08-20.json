@@ -323,12 +323,12 @@
    "originalDisposition": "AUDIT",
    "disposition": "ISOLATED",
    "helperChain": [
-    "src-tauri/src/diagram/mod.rs::ipc::diagram_save_document owns the workspace, name and body Strings and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_save_document inside the worker; a JoinError becomes the display-only diagram_save_document_task_failed String.",
+    "src-tauri/src/diagram/mod.rs::ipc::diagram_save_document owns the workspace, name and body Strings plus the optional expected_revision String and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/diagram/mod.rs::diagram_save_document inside the worker; a JoinError becomes the display-only diagram_save_document_task_failed IpcError with an empty code.",
     "src-tauri/src/diagram/mod.rs::diagram_save_document resolves the target through src-tauri/src/diagram/mod.rs::diagram_file_path (src-tauri/src/diagram/mod.rs::validate_name traversal rejection plus src-tauri/src/diagram/mod.rs::ensure_within containment) and enters shared admission over the complete write set.",
     "src-tauri/src/diagram/mod.rs::diagram_save_document builds the src-tauri/src/atomic_file.rs::PathTransactionRequest (the diagrams/<name>.cmd.json target file, workspace-root parent snapshot via PathTransactionRequest::require_parent, workspace-registry precondition) and enters src-tauri/src/atomic_file.rs::with_path_transactions inside the blocking worker; src-tauri/src/diagram/mod.rs::diagram_save_document_in_transaction revalidates coverage with PathTransactionLease::ensure_covered plus PathTransactionLease::ensure_workspace_registry and calls PathTransactionLease::before_effect before the first filesystem effect.",
-    "src-tauri/src/diagram/mod.rs::diagram_save_document_in_transaction re-resolves the target, re-runs the create/modify policy check and publishes the payload (trailing-newline normalization preserved) through src-tauri/src/atomic_file.rs::write_atomic."
+    "src-tauri/src/diagram/mod.rs::diagram_save_document_in_transaction re-resolves the target, re-runs the create/modify policy check and, when expected_revision is Some, hashes the current file content with src-tauri/src/document.rs::revision_for and asserts it through src-tauri/src/diagram/mod.rs::assert_expected_revision once before PathTransactionLease::before_effect and again immediately before the write (a missing file conflicts via src-tauri/src/diagram/mod.rs::revision_conflict_missing), then publishes the payload (trailing-newline normalization preserved) through src-tauri/src/atomic_file.rs::write_atomic."
    ],
-   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_save_document awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_save_document_task_failed String while the unit payload and every domain error string pass through unchanged; owned Strings and Vec<u8> cross the await, never a borrowed State or guard.",
+   "workerBoundary": "src-tauri/src/diagram/mod.rs::ipc::diagram_save_document awaits tauri::async_runtime::spawn_blocking before any filesystem access runs (the #[cfg(test)] worker-stage hook keyed to the fixture workspace root fires at worker entry); only a JoinError maps to the display-only diagram_save_document_task_failed IpcError with an empty code, while an optimistic-concurrency rejection crosses as the structured document_conflict IpcError and every legacy domain error keeps its exact message with an empty code; owned Strings cross the await, never a borrowed State or guard.",
    "syncCallers": [
     "No Rust or CLI caller invokes diagram_save_document synchronously today; src-tauri/src/lib.rs registers only diagram::ipc::diagram_save_document, and the original synchronous src-tauri/src/diagram/mod.rs::diagram_save_document keeps its name and signature for Rust callers (the inline legacy tests exercise it directly)."
    ],
@@ -344,14 +344,22 @@
      "src-tauri/src/diagram/mod.rs::validate_name rejects traversal, control-character, leading-dot and over-long names before admission",
      "PathTransactionLease::ensure_covered revalidates the resolved target after the wait",
      "src-tauri/src/vault_list.rs::assert_maru_can_write with the Create or Modify action runs inside the transaction before any effect",
+     "When expected_revision is Some, src-tauri/src/diagram/mod.rs::assert_expected_revision hashes the current file content with src-tauri/src/document.rs::revision_for and rejects a mismatch (or a missing file, via src-tauri/src/diagram/mod.rs::revision_conflict_missing) with the structured document_conflict IpcError, once before PathTransactionLease::before_effect and again immediately before the write",
      "PathTransactionLease::before_effect confirms the pinned parents and workspace registry before src-tauri/src/atomic_file.rs::write_atomic"
     ],
     "domainLockOrder": "Shared path admission is acquired inside the blocking worker before the workspace write-policy check and the effects; Diagram mode has no domain mutex of its own, and no guard is held across an await."
    },
    "tests": [
     {
-     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20",
-     "passed": 9,
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib diagram -- --test-threads=2",
+     "passed": 40,
+     "failed": 0,
+     "ignored": 0,
+     "exitCode": 0
+    },
+    {
+     "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_20_diagram -- --test-threads=2",
+     "passed": 5,
      "failed": 0,
      "ignored": 0,
      "exitCode": 0
@@ -360,9 +368,11 @@
    "processingCaller": {
     "path": [
      "src/lib/diagram.ts",
+     "src/lib/diagram/persistence.ts",
+     "src/components/diagram/DiagramMode.tsx",
      "src/lib/diagram.test.ts"
     ],
-    "payload": "saveDiagram (src/lib/diagram.ts:67) invokes diagram_save_document with workspace, name and body on Diagram save/autosave; the Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
+    "payload": "diagramSaveDocument (src/lib/diagram.ts) invokes diagram_save_document with workspace, name, body and expectedRevision (null when unconditional) on Diagram save/autosave; writeDiagram (src/lib/diagram/persistence.ts) forwards the revision that DiagramMode.tsx computed from its last-saved body via diagramRevision, and a document_conflict rejection surfaces as the diagram.error.saveConflict notice while the dirty in-memory doc is kept. The Diagram surface keeps owning that save promise and its error display regardless of screen changes.",
     "terminalNoticeOwner": "The Diagram surface (src/components/diagram) owns current diagram list, snapshot and export display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
    ,
      "classifier": "n/a: bounded synchronous write, not a file-processing batch",
@@ -376,12 +386,18 @@
      "phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure",
      "phase08_20_diagram_real_fixture_results_and_legacy_rejections",
      "phase08_20_diagram_save_contends_with_document_save_both_orders",
-     "phase08_20_diagram_delete_then_save_serializes_and_error_releases"
+     "phase08_20_diagram_delete_then_save_serializes_and_error_releases",
+     "phase08_20_diagram_save_conflict_surfaces_structured_code",
+     "save_with_matching_revision_succeeds",
+     "save_with_stale_revision_conflicts_and_preserves_file",
+     "save_with_expected_revision_over_missing_file_conflicts",
+     "save_without_revision_keeps_legacy_overwrite",
+     "save_revision_chains_across_sequential_saves"
     ],
-    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_save_document future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_save_document_task_failed String.",
+    "workerProof": "diagram::phase08_20::phase08_20_diagram_each_wrapper_yields_same_poll_and_maps_join_failure holds the diagram_save_document future at spawn_blocking worker entry via the workspace-root-keyed (or export-target-keyed for diagram_export_blob_to_path) #[cfg(test)] worker-stage hook, manually polls it on the same async task and proves progress while a distinct worker thread stays blocked; the panicked worker maps to the display-only diagram_save_document_task_failed IpcError with an empty code.",
     "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces with a seeded .maru directory and the test-only worker-stage hook; no live workspace, credential or network endpoint is touched.",
-    "limits": "Shared admission serializes cooperating in-process writers only; the both-orders fixture proves diagram_save_document and src-tauri/src/document.rs::save_document contend on the same admitted path in either launch order, and the delete-then-save fixture proves a rejected writer releases admission. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
-    "contract": "The unit/String payloads, the validation and not-found error strings, exported byte identity and snapshot identity are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
+    "limits": "Shared admission serializes cooperating in-process writers only; the both-orders fixture proves diagram_save_document and src-tauri/src/document.rs::save_document contend on the same admitted path in either launch order, and the delete-then-save fixture proves a rejected writer releases admission. The revision re-check shrinks the TOCTOU window to the temp-file rename; an external deleter racing the write cannot be fully closed without OS locks it does not honor. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
+    "contract": "With expected_revision None the unit payload, the validation and not-found error strings and the trailing-newline normalization are byte-identical to before (legacy errors now cross as IpcError with an empty code and the exact legacy message). The new optional expected_revision adds the document.rs-mirrored optimistic-concurrency guard: the current file is hashed with src-tauri/src/document.rs::revision_for and asserted once before PathTransactionLease::before_effect and again immediately before write_atomic, a mismatch or missing file rejects with the structured document_conflict IpcError and the on-disk bytes are preserved (phase08_20_diagram_save_conflict_surfaces_structured_code and save_with_stale_revision_conflicts_and_preserves_file), and save_revision_chains_across_sequential_saves proves a save can chain on the revision of the previous save's stored payload."
    }
   },
   {

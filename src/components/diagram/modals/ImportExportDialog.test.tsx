@@ -111,6 +111,7 @@ describe("ImportExportDialog (export)", () => {
     }
     // No matrix dataset in the doc — tabular codecs are filtered out.
     expect(values).not.toContain("csv");
+    expect(values).not.toContain("archify-json");
     const badge = query('[data-testid="ie-fidelity-badge"]')!;
     expect(badge.textContent).toBe(translate("ko", "diagram.codec.fidelity.lossless"));
   });

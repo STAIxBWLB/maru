@@ -3,15 +3,17 @@
  *
  * The on-disk format continues the source standalone editor's `v:` numbering
  * (last shipped: `v:6`). `v:7` marked the post-`localhost:5500` boundary;
- * `v:8` adds report datasets + pattern views (Report Pattern Studio). Older
- * bodies are migrated forward on read; bodies newer than
- * {@link DIAGRAM_SCHEMA_VERSION} throw {@link UnsupportedDiagramVersionError}
- * and are never down-converted. The Tauri side is a dumb byte store — all
- * schema knowledge lives here.
+ * `v:8` adds report datasets + pattern views (Report Pattern Studio); `v:9`
+ * adds typed semantic datasets (issue #433) and is otherwise field-identical
+ * to v8, so v8→v9 is a version bump only. Older bodies are migrated forward
+ * on read; bodies newer than {@link DIAGRAM_SCHEMA_VERSION} throw
+ * {@link UnsupportedDiagramVersionError} and are never down-converted. The
+ * Tauri side is a dumb byte store — all schema knowledge lives here.
  */
 
 import {
   diagramLoadDocument,
+  diagramRevision,
   diagramSaveDocument,
   type DiagramFile,
 } from "../diagram";
@@ -249,7 +251,9 @@ function upgradeV7ToV8(nodes: DiagramNode[]): V8Upgrade {
  * Bring any-shape JSON into the current {@link DiagramDoc} envelope.
  *
  * Cases handled:
- * - `v:8` doc → identity check + field defaults (datasets/views default to []).
+ * - `v:9` doc → identity check + field defaults (datasets/views default to []).
+ * - `v:8` doc → version bump only (v9 adds no required fields; typed semantic
+ *   datasets ride the existing `datasets` array).
  * - `v:7` doc → field defaults, then the v7→v8 upgrade (table `meta.rows/cols`
  *   become datasets + views, legacy meta keys map onto `TypedNodeMeta`).
  * - `v:6` doc (source editor's last format) → same path as v7.
@@ -295,7 +299,10 @@ export function migrate(raw: unknown, now: () => number = Date.now): DiagramDoc 
 
   let datasets = ensureDatasets(obj.datasets);
   let views = ensureViews(obj.views);
-  if (typeof obj.v === "number" && obj.v < DIAGRAM_SCHEMA_VERSION) {
+  // v7 (and v6) upgrade. v8 bodies are already field-identical to v9, so the
+  // upgrade must NOT re-run on them — a v8 table node is already dataset-
+  // backed, and re-running would mint duplicate datasets.
+  if (typeof obj.v === "number" && obj.v < 8) {
     const upgrade = upgradeV7ToV8(nodes);
     nodes = upgrade.nodes;
     datasets = [...datasets, ...upgrade.datasets];
@@ -332,8 +339,16 @@ export interface ReadDiagramResult {
   doc: DiagramDoc;
   /** Schema version found on disk, or null for bare/unversioned JSON. */
   sourceVersion: number | null;
-  /** True when the on-disk body predates v8 (first v8 save triggers a backup). */
+  /**
+   * True when the on-disk body predates the current schema (the first save at
+   * the new schema triggers a one-time backup of the legacy body).
+   */
   migratedFromLegacy: boolean;
+  /**
+   * Revision of the raw on-disk bytes (NOT the normalized doc), for
+   * revision-conditional saves.
+   */
+  fileRevision: string;
 }
 
 export async function readDiagramDetailed(
@@ -353,6 +368,7 @@ export async function readDiagramDetailed(
     doc,
     sourceVersion,
     migratedFromLegacy: sourceVersion !== null && sourceVersion < DIAGRAM_SCHEMA_VERSION,
+    fileRevision: await diagramRevision(body),
   };
 }
 
@@ -361,13 +377,18 @@ export async function readDiagram(workspace: string, name: string): Promise<Diag
   return doc;
 }
 
+/** Stamp `updatedAt` and save. `expectedRevision` (from `diagramRevision` of
+ *  the loaded/last-saved body) makes the write conditional: a file that
+ *  changed on disk since the load rejects with a `document_conflict` IpcError
+ *  and is left untouched. Omit it for a first save or Save-As to a new name. */
 export async function writeDiagram(
   workspace: string,
   name: string,
   doc: DiagramDoc,
+  expectedRevision?: string,
 ): Promise<DiagramDoc> {
   const stamped: DiagramDoc = { ...doc, updatedAt: Date.now() };
-  await diagramSaveDocument(workspace, name, serializeDoc(stamped));
+  await diagramSaveDocument(workspace, name, serializeDoc(stamped), expectedRevision);
   return stamped;
 }
 

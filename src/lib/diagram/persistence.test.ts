@@ -5,6 +5,7 @@ import {
   computeProjectionHash,
   matrixFromRowsCols,
   validateMatrix,
+  validateSemanticSpec,
 } from "./reportTypes";
 import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc } from "./types";
 
@@ -104,7 +105,7 @@ describe("diagram persistence v8 (report pattern studio)", () => {
       edges: [],
     };
     const doc = migrate(legacy);
-    expect(doc.v).toBe(8);
+    expect(doc.v).toBe(9);
 
     expect(doc.datasets).toHaveLength(1);
     const dataset = doc.datasets?.[0];
@@ -182,7 +183,7 @@ describe("diagram persistence v8 (report pattern studio)", () => {
     expect(doc.nodes[0]?.meta?.rows).toBe(2);
   });
 
-  it("passes v:8 docs through with defaults and round-trips losslessly", () => {
+  it("passes v:8 docs through to v9 with defaults and round-trips losslessly", () => {
     const matrix = matrixFromRowsCols(2, 2, { name: "m" });
     const view = {
       id: "view-1",
@@ -206,9 +207,9 @@ describe("diagram persistence v8 (report pattern studio)", () => {
       views: [view],
     };
     const doc = migrate(raw);
-    expect(doc.v).toBe(8);
+    // v8 → v9 is a version bump only: no fields change, no datasets synthesized.
+    expect(doc.v).toBe(9);
     expect(doc.datasets).toHaveLength(1);
-    // no extra datasets/views synthesized for v8 input
     expect(doc.views).toEqual([view]);
 
     const roundTripped = deserializeDoc(serializeDoc(doc));
@@ -218,38 +219,103 @@ describe("diagram persistence v8 (report pattern studio)", () => {
     expect(validateMatrix(dataset).ok).toBe(true);
   });
 
+  it("does not re-run the v7 upgrade on v8 table nodes", () => {
+    // A v8 table node is already dataset-backed; meta.rows/cols left over in
+    // `meta` (unknown keys are preserved) must not mint a second dataset.
+    const raw = {
+      v: 8,
+      nodes: [{ id: "t1", kind: "table", x: 0, y: 0, w: 100, h: 100, meta: { rows: 2, cols: 2 } }],
+      edges: [],
+    };
+    const doc = migrate(raw);
+    expect(doc.v).toBe(9);
+    expect(doc.datasets).toEqual([]);
+    expect(doc.views).toEqual([]);
+    expect(doc.nodes[0]?.meta?.rows).toBe(2);
+  });
+
   it("normalizes missing datasets/views to empty arrays", () => {
     const doc = migrate({ v: 8, nodes: [], edges: [] });
     expect(doc.datasets).toEqual([]);
     expect(doc.views).toEqual([]);
   });
 
-  it("throws UnsupportedDiagramVersionError for v:9 and never down-converts", () => {
-    expect(() => migrate({ v: 9, nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
+  it("throws UnsupportedDiagramVersionError for v:10 and never down-converts", () => {
+    expect(() => migrate({ v: 10, nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
     try {
-      migrate({ v: 9, nodes: [], edges: [] });
+      migrate({ v: 10, nodes: [], edges: [] });
       expect.unreachable();
     } catch (err) {
       const typed = err as UnsupportedDiagramVersionError;
-      expect(typed.version).toBe(9);
+      expect(typed.version).toBe(10);
       expect(typed.supported).toBe(DIAGRAM_SCHEMA_VERSION);
-      expect(typed.message).toMatch(/v9/);
+      expect(typed.message).toMatch(/v10/);
     }
     expect(() => deserializeDoc(JSON.stringify({ v: 42 }))).toThrow(UnsupportedDiagramVersionError);
   });
 
   it("still wraps bare {nodes,edges} exports without synthesizing datasets", () => {
     const doc = migrate({ nodes: [{ id: "t", kind: "table", x: 0, y: 0, meta: { rows: 2, cols: 2 } }], edges: [] });
-    expect(doc.v).toBe(8);
+    expect(doc.v).toBe(9);
     expect(doc.datasets).toEqual([]);
     expect(doc.views).toEqual([]);
   });
 
   it("rejects a present-but-non-numeric v instead of silently rewriting", () => {
     // `{"v":"9"}` is a format this build does not know — treating it as
-    // unversioned would discard unknown fields and overwrite it as v8 on save.
+    // unversioned would discard unknown fields and overwrite it as v9 on save.
     expect(() => migrate({ v: "9", nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
     expect(() => migrate({ v: null, nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
     expect(() => migrate({ v: NaN, nodes: [], edges: [] })).toThrow(UnsupportedDiagramVersionError);
+  });
+});
+
+describe("diagram persistence v9 (typed semantic datasets, issue #433)", () => {
+  it("round-trips a semanticSpec dataset untouched through the lenient migrator", () => {
+    const dataset = {
+      id: "ds-1",
+      kind: "semanticSpec",
+      name: "Shop architecture",
+      diagramType: "architecture",
+      spec: {
+        schema_version: 1,
+        diagram_type: "architecture",
+        meta: { title: "Shop", output: "shop.html" },
+        components: [{ id: "web", type: "frontend", label: "Web" }],
+      },
+      idMap: { web: "web" },
+      engine: { name: "archify", version: "3.0.0" },
+      provenance: { origin: "generated", capturedAt: 1 },
+    };
+    const doc = migrate({ v: 9, nodes: [], edges: [], datasets: [dataset] });
+    expect(doc.v).toBe(9);
+    expect(doc.datasets?.[0]).toEqual(dataset);
+    const roundTripped = deserializeDoc(serializeDoc(doc));
+    expect(roundTripped.datasets?.[0]).toEqual(dataset);
+  });
+
+  it("validateSemanticSpec enforces structure, budgets and reversible id maps", () => {
+    const base = {
+      id: "ds-1",
+      kind: "semanticSpec" as const,
+      name: "s",
+      diagramType: "architecture" as const,
+      spec: { meta: { title: "t" } },
+      idMap: { a: "n1" },
+      engine: { name: "archify" as const, version: "3.0.0" },
+    };
+    expect(validateSemanticSpec(base).ok).toBe(true);
+    expect(
+      validateSemanticSpec({ ...base, diagramType: "sequence" as never }).errors[0],
+    ).toMatch(/unknown diagramType/);
+    expect(validateSemanticSpec({ ...base, spec: [] as never }).errors[0]).toMatch(
+      /spec must be an object/,
+    );
+    expect(
+      validateSemanticSpec({ ...base, idMap: { a: "n1", b: "n1" } }).errors[0],
+    ).toMatch(/duplicate Maru id/);
+    expect(
+      validateSemanticSpec({ ...base, engine: { name: "archify", version: "" } }).errors[0],
+    ).toMatch(/engine\.version/);
   });
 });

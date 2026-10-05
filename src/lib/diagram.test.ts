@@ -44,6 +44,25 @@ describe("diagram api wrappers", () => {
       workspace: "/w",
       name: "demo",
       body: "{\"v\":7}",
+      expectedRevision: null,
+    });
+  });
+
+  it("diagramSaveDocument forwards expectedRevision and normalizes a conflict rejection", async () => {
+    invokeMock.mockRejectedValueOnce({
+      code: "document_conflict",
+      message: "expected revision a, found b",
+    });
+    const { diagramSaveDocument } = await import("./diagram");
+    const { IpcError } = await import("./ipcError");
+    const err = await diagramSaveDocument("/w", "demo", "{}", "rev-a").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(IpcError);
+    expect((err as InstanceType<typeof IpcError>).code).toBe("document_conflict");
+    expect(invokeMock).toHaveBeenCalledWith("diagram_save_document", {
+      workspace: "/w",
+      name: "demo",
+      body: "{}",
+      expectedRevision: "rev-a",
     });
   });
 
@@ -113,5 +132,26 @@ describe("diagram api wrappers", () => {
     delete (globalThis as unknown as { window?: unknown }).window;
     const { diagramSaveDocument } = await import("./diagram");
     await expect(diagramSaveDocument("/w", "n", "")).rejects.toThrow(/requires_tauri/);
+  });
+
+  it("mock save enforces expectedRevision against the stored body", async () => {
+    (globalThis as unknown as { window?: unknown }).window = {
+      localStorage: memoryStorage(),
+    };
+    const { diagramSaveDocument, diagramLoadDocument, diagramRevision } = await import("./diagram");
+    const body = "{\"docTitle\":\"Demo\"}";
+    await diagramSaveDocument("/w", "demo", body);
+    // A matching revision saves.
+    await diagramSaveDocument("/w", "demo", "{\"docTitle\":\"Next\"}", await diagramRevision(body, true));
+    expect(await diagramLoadDocument("/w", "demo")).toContain("Next");
+    // A stale revision conflicts and preserves the stored body.
+    await expect(
+      diagramSaveDocument("/w", "demo", "{\"docTitle\":\"Bad\"}", await diagramRevision(body)),
+    ).rejects.toMatchObject({ code: "document_conflict" });
+    expect(await diagramLoadDocument("/w", "demo")).toContain("Next");
+    // An expected revision over a missing file conflicts.
+    await expect(
+      diagramSaveDocument("/w", "ghost", "{}", await diagramRevision(body)),
+    ).rejects.toMatchObject({ code: "document_conflict" });
   });
 });

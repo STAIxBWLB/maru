@@ -105,7 +105,8 @@ import {
   type DiagramFile,
   writeDiagram,
 } from "../../lib/diagram/persistence";
-import { diagramBackupDocument } from "../../lib/diagram";
+import { diagramBackupDocument, diagramRevision } from "../../lib/diagram";
+import { IpcError } from "../../lib/ipcError";
 import {
   createAutoSnapshotScheduler,
   saveSnapshotForDoc,
@@ -455,12 +456,12 @@ function DiagramShell({
         if (getDiagramSession(sessionKey).activeName) return;
         const current = store.getState().doc;
         if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
-        const { doc: restored, migratedFromLegacy } = await readDiagramDetailed(workPath, lastDocument);
+        const { doc: restored, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, lastDocument);
         if (cancelled) return;
         store.setState(replaceDoc(restored));
         setActiveName(lastDocument);
         setLastSavedBody(serializeDoc(restored));
-        setDiagramSession({ migratedFromLegacy, legacyBackupAttempted: false }, sessionKey);
+        setDiagramSession({ migratedFromLegacy, legacySourceVersion: sourceVersion, fileRevision, legacyBackupAttempted: false }, sessionKey);
       } catch {
         /* Best-effort restore only: a missing/deleted last diagram should not block Diagram mode. */
       }
@@ -923,11 +924,12 @@ function DiagramShell({
       store.setState(replaceDoc(next));
       setActiveName(null);
       setLastSavedBody(null);
+      setDiagramSession({ fileRevision: null }, sessionKey);
       void persistLastDocument(null);
       setIoDialog(null);
       reportError(null);
     },
-    [persistLastDocument, reportError, setActiveName, setLastSavedBody, store],
+    [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store],
   );
 
   const refreshList = useCallback(async () => {
@@ -1009,9 +1011,10 @@ function DiagramShell({
       setSaving(true);
       reportError(null);
       try {
-        // One-time v7 backup: the active document was loaded from a pre-v8
-        // body and this is the first v8 save over it. A backup failure ABORTS
-        // the save — overwriting the only v7 copy without a backup would be
+        // One-time legacy backup: the active document was loaded from a body
+        // written at an older schema and this is the first save at the
+        // current schema over it. A backup failure ABORTS the save —
+        // overwriting the only legacy copy without a backup would be
         // unrecoverable — and leaves the attempt flag unset so the next save
         // retries. Save-As to a different name leaves the legacy file
         // untouched, so no backup runs (backing up `name` would read the
@@ -1019,10 +1022,10 @@ function DiagramShell({
         const session = getDiagramSession(sessionKey);
         if (session.migratedFromLegacy && !session.legacyBackupAttempted && name === activeName) {
           try {
-            await diagramBackupDocument(workPath, name);
+            await diagramBackupDocument(workPath, name, session.legacySourceVersion ?? undefined);
             setDiagramSession({ legacyBackupAttempted: true }, sessionKey);
           } catch (backupErr) {
-            console.warn("diagram v7 backup failed", backupErr);
+            console.warn("diagram legacy backup failed", backupErr);
             reportError(
               t("diagram.error.backup", { message: (backupErr as Error).message ?? "unknown" }),
             );
@@ -1030,16 +1033,33 @@ function DiagramShell({
           }
         }
         const current = store.getState().doc;
-        const written = await writeDiagram(workPath, name, current);
+        // Optimistic concurrency: overwriting the file this session loaded is
+        // conditional on the disk bytes still matching the revision captured
+        // at load/last save. A first save or Save-As to a different name sends
+        // no revision.
+        const expectedRevision =
+          name === activeName ? (session.fileRevision ?? undefined) : undefined;
+        const written = await writeDiagram(workPath, name, current, expectedRevision);
         store.setState((s) => ({ ...s, doc: written }));
         setActiveName(name);
-        setLastSavedBody(serializeDoc(written));
-        setDiagramSession({ migratedFromLegacy: false }, sessionKey);
+        const writtenBody = serializeDoc(written);
+        setLastSavedBody(writtenBody);
+        setDiagramSession({
+          migratedFromLegacy: false,
+          legacySourceVersion: null,
+          fileRevision: await diagramRevision(writtenBody, true),
+        }, sessionKey);
         // A successful manual save satisfies the pending auto-snapshot.
         snapshotSchedRef.current?.markClean();
         await persistLastDocument(name);
       } catch (err) {
-        reportError(t("diagram.error.save", { message: (err as Error).message ?? "unknown" }));
+        if (err instanceof IpcError && err.code === "document_conflict") {
+          // The file changed on disk since load. Keep the dirty in-memory doc
+          // and lastSavedBody untouched so the user can Save As or reload.
+          reportError(t("diagram.error.saveConflict"));
+        } else {
+          reportError(t("diagram.error.save", { message: (err as Error).message ?? "unknown" }));
+        }
       } finally {
         setSaving(false);
       }
@@ -1072,7 +1092,7 @@ function DiagramShell({
     store.setState(replaceDoc(fresh));
     setActiveName(null);
     setLastSavedBody(null);
-    setDiagramSession({ migratedFromLegacy: false, legacyBackupAttempted: false }, sessionKey);
+    setDiagramSession({ migratedFromLegacy: false, legacySourceVersion: null, fileRevision: null, legacyBackupAttempted: false }, sessionKey);
     void persistLastDocument(null);
     reportError(null);
   }, [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store]);
@@ -1081,11 +1101,11 @@ function DiagramShell({
     async (name: string) => {
       if (!workPath) return;
       try {
-        const { doc, migratedFromLegacy } = await readDiagramDetailed(workPath, name);
+        const { doc, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, name);
         store.setState(replaceDoc(doc));
         setActiveName(name);
         setLastSavedBody(serializeDoc(doc));
-        setDiagramSession({ migratedFromLegacy, legacyBackupAttempted: false }, sessionKey);
+        setDiagramSession({ migratedFromLegacy, legacySourceVersion: sourceVersion, fileRevision, legacyBackupAttempted: false }, sessionKey);
         setListOpen(false);
         await persistLastDocument(name);
         reportError(null);
