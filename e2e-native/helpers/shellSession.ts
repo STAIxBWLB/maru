@@ -192,7 +192,8 @@ async function probe(request: NativeShellProbeRequest, message: string): Promise
 }
 
 /** Requires the original left PTY and one distinct right PTY, both physically
- * visible and painted. A command is never replayed by this readiness wait. */
+ * visible with nonempty text mirrors. Pixel paint is checked separately by pty.spec.
+ * A command is never replayed by this readiness wait. */
 export async function waitForShellSplitReady(firstId: string): Promise<boolean> {
   const result = await probe({ phase: "split", sessionId: firstId }, "both real split PTYs must be ready before restart");
   return result.ready;
