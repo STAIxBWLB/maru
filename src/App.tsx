@@ -1875,8 +1875,10 @@ export function MainApp() {
   });
 
   useEffect(() => {
+    let disposed = false;
     let dispose: (() => void) | null = null;
     void listenMaruSettingsUpdated((payload) => {
+      if (disposed) return;
       // Unrelated settings saves (layout, outline, …) echo back here with the
       // stored activeAppMode; they must not clobber a boot Today auto-open.
       const keepAutoOpenMode = () => todayAutoOpenPathRef.current === settingsWorkPath;
@@ -1896,6 +1898,7 @@ export function MainApp() {
       } else if (payload.globalChanged && settingsWorkPath) {
         void readMaruSettings(settingsWorkPath)
           .then((next) => {
+            if (disposed) return;
             setMaruSettings(next);
             if (!keepAutoOpenMode()) {
               setAppMode(
@@ -1908,12 +1911,18 @@ export function MainApp() {
             setEditorPaneViewModes(next.ui.editorPaneViewModes);
             setRightPaneTab(next.ui.rightPaneTab);
           })
-          .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+          .catch((err) => {
+            if (!disposed) setError(err instanceof Error ? err.message : String(err));
+          });
       }
     }).then((off) => {
-      dispose = off;
+      if (disposed) off();
+      else dispose = off;
     });
-    return () => dispose?.();
+    return () => {
+      disposed = true;
+      dispose?.();
+    };
   }, [booting, settingsWorkPath, setMaruSettings]);
 
   useEffect(() => {
