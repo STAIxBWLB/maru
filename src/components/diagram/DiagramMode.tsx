@@ -105,7 +105,8 @@ import {
   type DiagramFile,
   writeDiagram,
 } from "../../lib/diagram/persistence";
-import { diagramBackupDocument } from "../../lib/diagram";
+import { diagramBackupDocument, diagramRevision } from "../../lib/diagram";
+import { IpcError } from "../../lib/ipcError";
 import {
   createAutoSnapshotScheduler,
   saveSnapshotForDoc,
@@ -1031,7 +1032,14 @@ function DiagramShell({
           }
         }
         const current = store.getState().doc;
-        const written = await writeDiagram(workPath, name, current);
+        // Optimistic concurrency: overwriting the file this session loaded is
+        // conditional on the disk bytes still matching lastSavedBody. A first
+        // save or Save-As to a different name sends no revision.
+        const expectedRevision =
+          name === activeName && lastSavedBody !== null
+            ? await diagramRevision(lastSavedBody)
+            : undefined;
+        const written = await writeDiagram(workPath, name, current, expectedRevision);
         store.setState((s) => ({ ...s, doc: written }));
         setActiveName(name);
         setLastSavedBody(serializeDoc(written));
@@ -1040,12 +1048,18 @@ function DiagramShell({
         snapshotSchedRef.current?.markClean();
         await persistLastDocument(name);
       } catch (err) {
-        reportError(t("diagram.error.save", { message: (err as Error).message ?? "unknown" }));
+        if (err instanceof IpcError && err.code === "document_conflict") {
+          // The file changed on disk since load. Keep the dirty in-memory doc
+          // and lastSavedBody untouched so the user can Save As or reload.
+          reportError(t("diagram.error.saveConflict"));
+        } else {
+          reportError(t("diagram.error.save", { message: (err as Error).message ?? "unknown" }));
+        }
       } finally {
         setSaving(false);
       }
     },
-    [activeName, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
+    [activeName, lastSavedBody, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
   const handleSave = useCallback(() => {

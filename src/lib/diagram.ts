@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { IpcError, normalizeIpcError } from "./ipcError";
+import { sha256Hex } from "./today";
 
 declare global {
   interface Window {
@@ -50,21 +52,60 @@ function extractDocTitle(body: string): string {
   }
 }
 
+/** Trailing-newline normalization the Rust `diagram_save_document` applies
+ *  before writing; the file revision hashes the normalized payload. */
+function storedPayload(body: string): string {
+  return body.endsWith("\n") ? body : `${body}\n`;
+}
+
+/** Revision of a diagram body as the backend computes it: sha256 hex of the
+ *  stored payload (the Rust save appends a trailing newline before writing),
+ *  matching `document::revision_for` over the file bytes. Pass the loaded or
+ *  last-saved body, not the normalized form. */
+export async function diagramRevision(body: string): Promise<string> {
+  return sha256Hex(storedPayload(body));
+}
+
 export async function diagramSaveDocument(
   workspace: string,
   name: string,
   body: string,
+  expectedRevision?: string,
 ): Promise<void> {
   if (!isTauri()) {
     const storage = mockStorage();
     if (!storage) throw new Error("diagram_save_document_requires_tauri");
-    storage.setItem(
-      mockDocumentKey(workspace, name),
-      JSON.stringify({ body, modifiedAt: Date.now() }),
-    );
+    const key = mockDocumentKey(workspace, name);
+    if (expectedRevision) {
+      const raw = storage.getItem(key);
+      const parsed = raw ? (JSON.parse(raw) as { body?: unknown }) : null;
+      const current = typeof parsed?.body === "string" ? parsed.body : null;
+      const actual = current === null ? null : await sha256Hex(storedPayload(current));
+      if (actual !== expectedRevision) {
+        throw new IpcError({
+          code: "document_conflict",
+          message:
+            actual === null
+              ? `expected revision ${expectedRevision}, file is missing`
+              : `expected revision ${expectedRevision}, found ${actual}`,
+        });
+      }
+    }
+    storage.setItem(key, JSON.stringify({ body, modifiedAt: Date.now() }));
     return;
   }
-  return invoke<void>("diagram_save_document", { workspace, name, body });
+  try {
+    return await invoke<void>("diagram_save_document", {
+      workspace,
+      name,
+      body,
+      expectedRevision: expectedRevision ?? null,
+    });
+  } catch (err) {
+    // The command returns IpcError, so a conflict rejection is a
+    // { code, message } object; normalize so callers can branch on `.code`.
+    throw normalizeIpcError(err);
+  }
 }
 
 export async function diagramLoadDocument(

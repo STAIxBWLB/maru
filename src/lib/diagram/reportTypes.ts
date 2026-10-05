@@ -266,6 +266,13 @@ export type ReportDataset =
 
 export type ReportDatasetKind = ReportDataset["kind"];
 
+/**
+ * Dataset kinds the report pattern machinery can project onto the canvas.
+ * `semanticSpec` datasets (v9) are projected by the generation/apply flow,
+ * not by report patterns, so pattern families exclude them.
+ */
+export type PatternDatasetKind = Exclude<ReportDatasetKind, "semanticSpec">;
+
 // ---------------------------------------------------------------------------
 // Pattern views
 // ---------------------------------------------------------------------------

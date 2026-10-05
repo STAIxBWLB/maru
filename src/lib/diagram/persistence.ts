@@ -370,13 +370,18 @@ export async function readDiagram(workspace: string, name: string): Promise<Diag
   return doc;
 }
 
+/** Stamp `updatedAt` and save. `expectedRevision` (from `diagramRevision` of
+ *  the loaded/last-saved body) makes the write conditional: a file that
+ *  changed on disk since the load rejects with a `document_conflict` IpcError
+ *  and is left untouched. Omit it for a first save or Save-As to a new name. */
 export async function writeDiagram(
   workspace: string,
   name: string,
   doc: DiagramDoc,
+  expectedRevision?: string,
 ): Promise<DiagramDoc> {
   const stamped: DiagramDoc = { ...doc, updatedAt: Date.now() };
-  await diagramSaveDocument(workspace, name, serializeDoc(stamped));
+  await diagramSaveDocument(workspace, name, serializeDoc(stamped), expectedRevision);
   return stamped;
 }
 

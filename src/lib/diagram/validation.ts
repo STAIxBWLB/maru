@@ -177,7 +177,13 @@ export function validateCandidateDoc(
     }
     if (isRecord(node.meta)) {
       const memberId = node.meta.memberId;
-      if (memberId !== undefined && !(typeof memberId === "string" && datasetIds.has(memberId))) {
+      // A member pointer is either the dataset id itself (v7 upgrade legacy)
+      // or a pattern member address `<datasetId>:m<index>` (patterns.ts).
+      const memberOk =
+        typeof memberId === "string" &&
+        (datasetIds.has(memberId) ||
+          (memberId.includes(":") && datasetIds.has(memberId.slice(0, memberId.indexOf(":")))));
+      if (memberId !== undefined && !memberOk) {
         diagnostics.push({
           key: "diagram.validation.memberReference",
           params: { nodeId: id, kind: "member", refId: String(memberId) },
@@ -315,7 +321,7 @@ export function validateArchifySpecPreCheck(
   } catch {
     diagnostics.push({
       key: "diagram.validation.specBudget",
-      params: { reason: "unserializable", maxBytes: SEMANTIC_SPEC_MAX_BYTES },
+      params: { bytes: "n/a", maxBytes: SEMANTIC_SPEC_MAX_BYTES },
     });
     return { ok: false, diagnostics };
   }

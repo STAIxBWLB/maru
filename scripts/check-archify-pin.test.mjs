@@ -12,6 +12,7 @@ afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()();
 });
 
+/** @param {{ pin?: Record<string, unknown>, files?: Record<string, string>, license?: string | null, notices?: boolean }} [opts] */
 function fixture({ pin = {}, files = { "bin/archify.mjs": "x" }, license = "MIT License", notices = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "maru-archify-pin-"));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));

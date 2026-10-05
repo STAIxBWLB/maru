@@ -124,6 +124,16 @@ describe("validateCandidateDoc", () => {
     expect(refs.map((d) => d.params?.kind)).toEqual(["member", "view"]);
   });
 
+  it("accepts pattern member addresses (<datasetId>:m<index>) for known datasets", () => {
+    const doc = makeValidDoc();
+    doc.nodes[0]!.meta = { memberId: "ds1:m0", viewId: "view1" };
+    const result = validateCandidateDoc(doc);
+    expect(result.diagnostics.filter((d) => d.key === "diagram.validation.memberReference")).toEqual([]);
+    doc.nodes[0]!.meta = { memberId: "ghost-ds:m0", viewId: "view1" };
+    const bad = validateCandidateDoc(doc);
+    expect(bad.diagnostics.filter((d) => d.key === "diagram.validation.memberReference")).toHaveLength(1);
+  });
+
   it("flags non-finite and non-positive geometry", () => {
     const doc = createEmptyDoc("doc-geom");
     doc.nodes.push(

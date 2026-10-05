@@ -31,7 +31,7 @@ import {
   type NetworkDataset,
   type PatternViewBounds,
   type ReportDataset,
-  type ReportDatasetKind,
+  type PatternDatasetKind,
   type ScorecardDataset,
   type SemanticTag,
   type TimelineDataset,
@@ -70,9 +70,9 @@ export interface BuildViewArgs {
 export interface PatternDefinition {
   id: string;
   /** Dataset kind this pattern natively projects. */
-  family: ReportDatasetKind;
+  family: PatternDatasetKind;
   /** Same-family switch targets (always includes `family`). */
-  compatibleFamilies: ReportDatasetKind[];
+  compatibleFamilies: PatternDatasetKind[];
   /** Freeform entries (legacy templates) are not dataset-backed/convertible. */
   freeform?: boolean;
   labelKey: string;
@@ -384,7 +384,7 @@ function buildScorecardProjection(
   return { nodes: outNodes, edges: [] };
 }
 
-function buildProjection(args: BuildViewArgs, family: ReportDatasetKind): PatternViewOutput {
+function buildProjection(args: BuildViewArgs, family: PatternDatasetKind): PatternViewOutput {
   const { dataset, bounds, t } = args;
   if (dataset.kind !== family) return { nodes: [], edges: [] };
   switch (family) {
@@ -430,7 +430,7 @@ function suggestMatrixMapping(dataset: ReportDataset): FieldMappingSuggestion[] 
   }));
 }
 
-const RECORD_FIELDS: Partial<Record<ReportDatasetKind, SemanticTag[]>> = {
+const RECORD_FIELDS: Partial<Record<PatternDatasetKind, SemanticTag[]>> = {
   hierarchy: ["label", "parent"],
   timeline: ["label", "start", "end", "owner", "status"],
   flow: ["label", "from", "to"],
@@ -439,8 +439,9 @@ const RECORD_FIELDS: Partial<Record<ReportDatasetKind, SemanticTag[]>> = {
 };
 
 function suggestRecordMapping(dataset: ReportDataset): FieldMappingSuggestion[] {
+  if (dataset.kind === "semanticSpec") return [];
   const tags = RECORD_FIELDS[dataset.kind] ?? [];
-  return tags.map((tag) => ({
+  return tags.map((tag: SemanticTag) => ({
     source: tag,
     sourceLabel: tag,
     sourceTag: tag,
@@ -510,8 +511,8 @@ function starterHierarchy(name: string, rootLabel: string, childLabels: string[]
 
 function defineReportPattern(def: {
   id: string;
-  family: ReportDatasetKind;
-  compatibleFamilies?: ReportDatasetKind[];
+  family: PatternDatasetKind;
+  compatibleFamilies?: PatternDatasetKind[];
   createDataset?(args: { t: TFn }): ReportDataset;
 }): PatternDefinition {
   return {
@@ -819,6 +820,6 @@ export const REPORT_PATTERN_LIST: PatternDefinition[] = REPORT_PATTERNS.filter(
   (pattern) => !pattern.freeform,
 );
 
-export function patternsForFamily(kind: ReportDatasetKind): PatternDefinition[] {
+export function patternsForFamily(kind: PatternDatasetKind): PatternDefinition[] {
   return REPORT_PATTERN_LIST.filter((pattern) => pattern.family === kind);
 }

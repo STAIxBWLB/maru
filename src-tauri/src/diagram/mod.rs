@@ -7,6 +7,8 @@
 use crate::atomic_file::{
     with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
 };
+use crate::document::revision_for;
+use crate::ipc_error::{IpcError, DOCUMENT_CONFLICT};
 use crate::vault::{lexical_normalize, resolve_inside_vault};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
@@ -117,23 +119,63 @@ fn extract_doc_title(file_path: &Path) -> String {
     rest[..end].to_string()
 }
 
-pub fn diagram_save_document(workspace: String, name: String, body: String) -> Result<(), String> {
+/// Optimistic-concurrency guard mirroring `document::assert_expected_revision`:
+/// when the caller supplies the revision it loaded, a file whose current
+/// content hashes differently (or is missing) conflicts instead of being
+/// silently overwritten.
+fn assert_expected_revision(current: &str, expected: Option<&str>) -> Result<(), IpcError> {
+    if let Some(expected) = expected {
+        let actual = revision_for(current);
+        if actual != expected {
+            return Err(IpcError {
+                code: DOCUMENT_CONFLICT.to_string(),
+                message: format!("expected revision {expected}, found {actual}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn revision_conflict_missing(expected: Option<&str>) -> IpcError {
+    IpcError {
+        code: DOCUMENT_CONFLICT.to_string(),
+        message: format!(
+            "expected revision {}, file is missing",
+            expected.unwrap_or_default()
+        ),
+    }
+}
+
+pub fn diagram_save_document(
+    workspace: String,
+    name: String,
+    body: String,
+    expected_revision: Option<String>,
+) -> Result<(), IpcError> {
     let path = diagram_file_path(&workspace, &name)?;
     let root = resolve_inside_vault(&workspace, ".")?;
     let request = PathTransactionRequest::new(vec![path])?
         .require_parent(&root)?
         .with_workspace_registry()?;
+    // Keep structured inner conflicts; admission failures remain display-only.
     with_path_transactions(request, |lease| {
-        diagram_save_document_in_transaction(workspace, name, body, lease)
-    })
+        Ok(diagram_save_document_in_transaction(
+            workspace,
+            name,
+            body,
+            expected_revision,
+            lease,
+        ))
+    })?
 }
 
 fn diagram_save_document_in_transaction(
     workspace: String,
     name: String,
     body: String,
+    expected_revision: Option<String>,
     lease: &PathTransactionLease,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     lease.ensure_workspace_registry()?;
     let path = diagram_file_path(&workspace, &name)?;
     lease.ensure_covered(vec![path.clone()])?;
@@ -143,7 +185,30 @@ fn diagram_save_document_in_transaction(
         WorkspaceWriteAction::Create
     };
     assert_maru_can_write(&workspace, action)?;
+    if path.is_file() {
+        if expected_revision.is_some() {
+            let current = fs::read_to_string(&path)
+                .map_err(|err| format!("Cannot read diagram: {err}"))?;
+            assert_expected_revision(&current, expected_revision.as_deref())?;
+        }
+    } else if expected_revision.is_some() {
+        return Err(revision_conflict_missing(expected_revision.as_deref()));
+    }
     lease.before_effect()?;
+    // Re-assert the revision right before the write: a revision-conditional
+    // caller was promised the file it loaded, so a file that vanished or
+    // changed between the first check and the write must conflict rather than
+    // be silently recreated/overwritten — the same TOCTOU window
+    // `document::save_document_in_transaction` closes.
+    if expected_revision.is_some() {
+        if path.is_file() {
+            let current = fs::read_to_string(&path)
+                .map_err(|err| format!("Cannot read diagram: {err}"))?;
+            assert_expected_revision(&current, expected_revision.as_deref())?;
+        } else {
+            return Err(revision_conflict_missing(expected_revision.as_deref()));
+        }
+    }
     let payload = if body.ends_with('\n') {
         body
     } else {
@@ -813,17 +878,18 @@ pub mod ipc {
         workspace: String,
         name: String,
         body: String,
-    ) -> Result<(), String> {
+        expected_revision: Option<String>,
+    ) -> Result<(), IpcError> {
         tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
             PathTransactionLease::test_stage(
                 &[PathBuf::from(&workspace)],
                 "worker:diagram_save_document",
             );
-            super::diagram_save_document(workspace, name, body)
+            super::diagram_save_document(workspace, name, body, expected_revision)
         })
         .await
-        .map_err(|err| format!("diagram_save_document_task_failed: {err}"))?
+        .map_err(|err| IpcError::from(format!("diagram_save_document_task_failed: {err}")))?
     }
     #[tauri::command]
     pub async fn diagram_load_document(workspace: String, name: String) -> Result<String, String> {
@@ -1086,20 +1152,92 @@ mod tests {
     fn save_load_round_trips() {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":7,"docTitle":"hello","nodes":[],"edges":[],"layers":[]}"#;
-        diagram_save_document(work.clone(), "demo".into(), body.into()).unwrap();
+        diagram_save_document(work.clone(), "demo".into(), body.into(), None).unwrap();
         let loaded = diagram_load_document(work, "demo".into()).unwrap();
         assert!(loaded.contains("\"v\":7"));
         assert!(loaded.contains("hello"));
     }
 
     #[test]
+    fn save_with_matching_revision_succeeds() {
+        let (_tmp, work) = setup_workspace();
+        let body = r#"{"v":8,"docTitle":"rev","nodes":[],"edges":[],"layers":[]}"#;
+        diagram_save_document(work.clone(), "rev".into(), body.into(), None).unwrap();
+        // The stored payload carries the trailing-newline normalization, so
+        // the file revision hashes `body + "\n"`.
+        let revision = revision_for(&format!("{body}\n"));
+        let next = r#"{"v":8,"docTitle":"rev2","nodes":[],"edges":[],"layers":[]}"#;
+        diagram_save_document(work.clone(), "rev".into(), next.into(), Some(revision)).unwrap();
+        let loaded = diagram_load_document(work, "rev".into()).unwrap();
+        assert!(loaded.contains("rev2"));
+    }
+
+    #[test]
+    fn save_with_stale_revision_conflicts_and_preserves_file() {
+        let (_tmp, work) = setup_workspace();
+        let body = r#"{"v":8,"docTitle":"keep","nodes":[],"edges":[],"layers":[]}"#;
+        diagram_save_document(work.clone(), "keep".into(), body.into(), None).unwrap();
+        let err = diagram_save_document(
+            work.clone(),
+            "keep".into(),
+            r#"{"v":8,"docTitle":"overwrite"}"#.into(),
+            Some(revision_for("something else")),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, DOCUMENT_CONFLICT);
+        let loaded = diagram_load_document(work, "keep".into()).unwrap();
+        assert_eq!(loaded, format!("{body}\n"));
+    }
+
+    #[test]
+    fn save_with_expected_revision_over_missing_file_conflicts() {
+        let (_tmp, work) = setup_workspace();
+        let err = diagram_save_document(
+            work.clone(),
+            "ghost".into(),
+            "{}".into(),
+            Some(revision_for("anything")),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, DOCUMENT_CONFLICT);
+        assert!(err.message.contains("file is missing"));
+        assert!(diagram_load_document(work, "ghost".into()).is_err());
+    }
+
+    #[test]
+    fn save_without_revision_keeps_legacy_overwrite() {
+        let (_tmp, work) = setup_workspace();
+        let body = r#"{"v":8,"docTitle":"one"}"#;
+        diagram_save_document(work.clone(), "demo".into(), body.into(), None).unwrap();
+        let next = r#"{"v":8,"docTitle":"two"}"#;
+        diagram_save_document(work.clone(), "demo".into(), next.into(), None).unwrap();
+        let loaded = diagram_load_document(work, "demo".into()).unwrap();
+        assert!(loaded.contains("two"));
+    }
+
+    #[test]
+    fn save_revision_chains_across_sequential_saves() {
+        let (_tmp, work) = setup_workspace();
+        let first = r#"{"v":8,"docTitle":"one"}"#;
+        diagram_save_document(work.clone(), "chain".into(), first.into(), None).unwrap();
+        let rev1 = revision_for(&format!("{first}\n"));
+        let second = r#"{"v":8,"docTitle":"two"}"#;
+        diagram_save_document(work.clone(), "chain".into(), second.into(), Some(rev1)).unwrap();
+        let rev2 = revision_for(&format!("{second}\n"));
+        let third = r#"{"v":8,"docTitle":"three"}"#;
+        diagram_save_document(work.clone(), "chain".into(), third.into(), Some(rev2)).unwrap();
+        let loaded = diagram_load_document(work, "chain".into()).unwrap();
+        assert!(loaded.contains("three"));
+    }
+
+    #[test]
     fn list_sorts_by_mtime_descending() {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":7,"docTitle":"a","nodes":[],"edges":[],"layers":[]}"#;
-        diagram_save_document(work.clone(), "first".into(), body.into()).unwrap();
+        diagram_save_document(work.clone(), "first".into(), body.into(), None).unwrap();
         sleep(Duration::from_millis(15));
         let body2 = r#"{"v":7,"docTitle":"b","nodes":[],"edges":[],"layers":[]}"#;
-        diagram_save_document(work.clone(), "second".into(), body2.into()).unwrap();
+        diagram_save_document(work.clone(), "second".into(), body2.into(), None).unwrap();
         let listed = diagram_list_documents(work).unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].name, "second");
@@ -1121,7 +1259,7 @@ mod tests {
     fn delete_removes_existing() {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":7,"docTitle":"x","nodes":[],"edges":[],"layers":[]}"#;
-        diagram_save_document(work.clone(), "x".into(), body.into()).unwrap();
+        diagram_save_document(work.clone(), "x".into(), body.into(), None).unwrap();
         assert!(diagram_delete_document(work.clone(), "x".into()).unwrap());
         let listed = diagram_list_documents(work).unwrap();
         assert!(listed.is_empty());
@@ -1130,14 +1268,14 @@ mod tests {
     #[test]
     fn save_rejects_bad_name() {
         let (_tmp, work) = setup_workspace();
-        assert!(diagram_save_document(work, "../escape".into(), "{}".into()).is_err());
+        assert!(diagram_save_document(work, "../escape".into(), "{}".into(), None).is_err());
     }
 
     #[test]
     fn list_skips_non_cmd_files() {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":7,"docTitle":"keep","nodes":[],"edges":[],"layers":[]}"#;
-        diagram_save_document(work.clone(), "keep".into(), body.into()).unwrap();
+        diagram_save_document(work.clone(), "keep".into(), body.into(), None).unwrap();
         // stray file in diagrams/
         let path = PathBuf::from(&work).join(DIAGRAMS_DIR).join("stray.txt");
         fs::write(&path, "noise").unwrap();
@@ -1250,7 +1388,7 @@ mod tests {
     fn backup_creates_v7_copy() {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":7,"docTitle":"legacy","nodes":[],"edges":[],"layers":[]}"#;
-        diagram_save_document(work.clone(), "legacy".into(), body.into()).unwrap();
+        diagram_save_document(work.clone(), "legacy".into(), body.into(), None).unwrap();
         let backup = diagram_backup_document(work.clone(), "legacy".into(), None).unwrap();
         assert!(
             backup.contains(".maru/diagrams/backups/")
@@ -1269,7 +1407,7 @@ mod tests {
     fn backup_labels_source_version() {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":8,"docTitle":"legacy8","nodes":[],"edges":[],"layers":[]}"#;
-        diagram_save_document(work.clone(), "legacy8".into(), body.into()).unwrap();
+        diagram_save_document(work.clone(), "legacy8".into(), body.into(), None).unwrap();
         let backup = diagram_backup_document(work.clone(), "legacy8".into(), Some(8)).unwrap();
         assert!(backup.contains("legacy8-v8-"));
         assert!(fs::read_to_string(&backup).unwrap().contains("\"v\":8"));
@@ -1503,7 +1641,11 @@ mod phase08_20 {
         let (_root, work) = workspace(&home, "boundary");
         boundary(work.clone().into(), "diagram_save_document", {
             let work = work.clone();
-            ipc::diagram_save_document(work, "demo".into(), "{}".into())
+            async move {
+                ipc::diagram_save_document(work, "demo".into(), "{}".into(), None)
+                    .await
+                    .map_err(|err| format!("{err}"))
+            }
         });
         boundary(work.clone().into(), "diagram_load_document", {
             let work = work.clone();
@@ -1582,6 +1724,7 @@ mod phase08_20 {
             work.clone(),
             "demo".into(),
             body.into(),
+            None,
         ))
         .unwrap();
         let loaded = run(ipc::diagram_load_document(work.clone(), "demo".into())).unwrap();
@@ -1668,9 +1811,11 @@ mod phase08_20 {
         assert!(run(ipc::diagram_save_document(
             work.clone(),
             "../escape".into(),
-            "{}".into()
+            "{}".into(),
+            None,
         ))
         .unwrap_err()
+        .message
         .starts_with("Invalid diagram name:"));
         assert!(run(ipc::diagram_export_blob(
             work.clone(),
@@ -1727,6 +1872,7 @@ mod phase08_20 {
                     work.clone(),
                     "demo".into(),
                     diagram_body.into(),
+                    None,
                 ));
                 waiting.wait();
                 waiting.release();
@@ -1740,6 +1886,7 @@ mod phase08_20 {
                     work.clone(),
                     "demo".into(),
                     diagram_body.into(),
+                    None,
                 ));
                 held.wait();
                 let waiting = Held::new(target.clone(), "before-admission");
@@ -1774,6 +1921,7 @@ mod phase08_20 {
             work.clone(),
             "demo".into(),
             body.into(),
+            None,
         ))
         .unwrap();
 
@@ -1785,6 +1933,7 @@ mod phase08_20 {
             work.clone(),
             "demo".into(),
             body.into(),
+            None,
         ));
         waiting.wait();
         waiting.release();
@@ -1803,16 +1952,70 @@ mod phase08_20 {
             work.clone(),
             "demo".into(),
             body.into(),
+            None,
         ))
         .unwrap_err()
+        .message
         .starts_with("Cannot atomically replace"));
         fs::remove_dir(&target).unwrap();
         run(ipc::diagram_save_document(
             work.clone(),
             "demo".into(),
             body.into(),
+            None,
         ))
         .unwrap();
         assert!(target.is_file());
+    }
+
+    #[test]
+    fn phase08_20_diagram_save_conflict_surfaces_structured_code() {
+        let home = Home::new();
+        let (root, work) = workspace(&home, "conflict");
+        let target = root.join("diagrams/demo.cmd.json");
+        let body = r#"{"v":8,"docTitle":"on disk"}"#;
+        run(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            body.into(),
+            None,
+        ))
+        .unwrap();
+
+        // A stale expected revision conflicts with the structured code and
+        // leaves the on-disk bytes untouched.
+        let err = run(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            r#"{"v":8,"docTitle":"stale write"}"#.into(),
+            Some("deadbeef".into()),
+        ))
+        .unwrap_err();
+        assert_eq!(err.code, crate::ipc_error::DOCUMENT_CONFLICT);
+        assert_eq!(fs::read_to_string(&target).unwrap(), format!("{body}\n"));
+
+        // An expected revision over a missing file conflicts too: the caller
+        // believed it was overwriting an existing file.
+        let err = run(ipc::diagram_save_document(
+            work.clone(),
+            "ghost".into(),
+            "{}".into(),
+            Some("deadbeef".into()),
+        ))
+        .unwrap_err();
+        assert_eq!(err.code, crate::ipc_error::DOCUMENT_CONFLICT);
+        assert!(err.message.contains("file is missing"));
+
+        // The matching revision (hashing the stored, newline-normalized
+        // payload) crosses the ipc boundary and saves.
+        let revision = crate::document::revision_for(&format!("{body}\n"));
+        run(ipc::diagram_save_document(
+            work.clone(),
+            "demo".into(),
+            r#"{"v":8,"docTitle":"fresh write"}"#.into(),
+            Some(revision),
+        ))
+        .unwrap();
+        assert!(fs::read_to_string(&target).unwrap().contains("fresh write"));
     }
 }
