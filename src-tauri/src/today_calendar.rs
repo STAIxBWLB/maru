@@ -835,12 +835,7 @@ mod tests {
 
     pub(super) fn write_fake_gws(dir: &Path, name: &str, body: &str) -> PathBuf {
         let bin = dir.join(name);
-        fs::write(&bin, body).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        crate::test_support::write_executable_fixture(&bin, body, 0o755).unwrap();
         assert_eq!(resolve_gws(Some(bin.to_str().unwrap())).unwrap(), bin);
         bin
     }

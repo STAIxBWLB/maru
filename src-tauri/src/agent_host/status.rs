@@ -1438,14 +1438,7 @@ mod phase08_17 {
 
     fn write_fake_cli(dir: &Path, name: &str, script: &str) -> PathBuf {
         let path = dir.join(name);
-        std::fs::write(&path, script).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&path).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&path, perms).unwrap();
-        }
+        crate::test_support::write_executable_fixture(&path, script, 0o755).unwrap();
         path
     }
 

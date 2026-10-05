@@ -687,12 +687,7 @@ exit 2
 
     #[cfg(unix)]
     fn write_script(path: &Path, script: &str) {
-        use std::os::unix::fs::PermissionsExt;
-
-        std::fs::write(path, script).unwrap();
-        let mut permissions = std::fs::metadata(path).unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(path, permissions).unwrap();
+        crate::test_support::write_executable_fixture(path, script, 0o755).unwrap();
     }
 
     fn plan(root: &Path, formats: &[&str]) {

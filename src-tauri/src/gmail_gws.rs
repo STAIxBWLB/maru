@@ -857,12 +857,7 @@ mod tests {
     fn resolve_gws_path_respects_override_when_file_exists() {
         let tmp = tempfile::TempDir::new().unwrap();
         let bin = tmp.path().join("gws");
-        std::fs::write(&bin, b"#!/bin/sh\necho gws").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        crate::test_support::write_executable_fixture(&bin, b"#!/bin/sh\necho gws", 0o755).unwrap();
         let resolved = resolve_gws_path(Some(bin.to_string_lossy().as_ref()));
         assert_eq!(resolved.as_deref(), Some(bin.as_path()));
     }
@@ -995,7 +990,6 @@ mod phase08_14 {
     use crate::atomic_file::PathTransactionTestHook;
     use crate::scratchpad::phase08_08::registry;
     use std::future::Future;
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
     type TestApp = AppHandle<tauri::test::MockRuntime>;
 
@@ -1028,7 +1022,7 @@ mod phase08_14 {
     fn fixture(home: &Home) -> tempfile::TempDir {
         let tmp = tempfile::tempdir_in(home.root.path()).unwrap();
         let bin = tmp.path().join("fake-gws");
-        fs::write(&bin, r#"#!/bin/sh
+        crate::test_support::write_executable_fixture(&bin, r#"#!/bin/sh
 printf '%s\n' "$*" >> "$0.calls"
 case "$*" in
   *+triage*) printf '%s\n' '{"messages":[{"id":"fixture-1","from":"synthetic@example.invalid","subject":"Synthetic envelope","date":"2026-01-01"}]}' ;;
@@ -1036,8 +1030,7 @@ case "$*" in
   *'messages modify'*) printf '%s\n' '{"id":"fixture-1"}' ;;
   *) printf '%s\n' 'unexpected synthetic arguments' >&2; exit 7 ;;
 esac
-"#).unwrap();
-        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+"#, 0o755).unwrap();
         fs::write(tmp.path().join("workspace.config.yaml"), format!("io:\n  providers:\n    gws:\n      gws_binary: {}\ninbox:\n  root: inbox\n  channels:\n    gws:\n      provider: gws\n      kind: bundle\n      dedupe: provider-id\n      drop_paths: [drop/gws]\n", text(&bin))).unwrap();
         fs::create_dir_all(tmp.path().join("inbox/drop/gws")).unwrap();
         assert_eq!(resolve_gws_for_vault(Some(&text(tmp.path()))).unwrap(), bin);

@@ -557,11 +557,7 @@ mod tests {
 
     #[cfg(unix)]
     fn write_fake_cli(path: std::path::PathBuf) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
+        crate::test_support::write_executable_fixture(&path, "#!/bin/sh\nexit 0\n", 0o755).unwrap();
         path
     }
 
@@ -812,7 +808,6 @@ mod phase08_16 {
     use super::*;
     use crate::atomic_file::phase08_06::{boundary, run, Home};
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
     use tauri::Manager;
@@ -842,10 +837,12 @@ mod phase08_16 {
         )
         .unwrap();
         let cli = home.root.path().join("fake-claude");
-        fs::write(&cli, "#!/bin/sh\necho 'fixture cli output'\nexit 0\n").unwrap();
-        let mut perms = fs::metadata(&cli).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&cli, perms).unwrap();
+        crate::test_support::write_executable_fixture(
+            &cli,
+            "#!/bin/sh\necho 'fixture cli output'\nexit 0\n",
+            0o755,
+        )
+        .unwrap();
         (work, cli)
     }
 
@@ -887,14 +884,12 @@ mod phase08_16 {
         assert!(id.starts_with("ai-"), "{id}");
 
         let codex_cli = home.root.path().join("fake-codex");
-        fs::write(
+        crate::test_support::write_executable_fixture(
             &codex_cli,
             "#!/bin/sh\ncat >/dev/null\necho 'fixture cli output'\nexit 0\n",
+            0o755,
         )
         .unwrap();
-        let mut perms = fs::metadata(&codex_cli).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&codex_cli, perms).unwrap();
         let codex_id = run(ipc::start_agent_cli_invocation(
             handle.clone(),
             "codex".into(),
