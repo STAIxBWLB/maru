@@ -1,3 +1,4 @@
+import { requestDiagramHandoff } from "./lib/diagram/handoff";
 import { hasDirtyMeetingSourceDrafts } from "./lib/meetingSourceEditorStore";
 import {
   lazy,
@@ -8548,12 +8549,10 @@ export function MainApp() {
               },
               openDiagramDocument: (documentName) => {
                 if (!diagramEnabled) return;
+                const workspace = inboxWorkspacePath ?? settingsWorkPath;
+                if (!workspace) return;
+                requestDiagramHandoff(workspace, documentName);
                 setPersistedAppMode("diagram");
-                window.setTimeout(() => {
-                  window.dispatchEvent(
-                    new CustomEvent("maru:diagram:open-document", { detail: { name: documentName } }),
-                  );
-                }, 0);
               },
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,

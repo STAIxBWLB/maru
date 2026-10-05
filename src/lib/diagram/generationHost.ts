@@ -55,86 +55,83 @@ export function createGenerationHost(options: GenerationHostOptions): DiagramGen
       throw new Error("Diagram generation is only available inside the Tauri shell.");
     }
     const { listen } = await import("@tauri-apps/api/event");
-    const invocationId = await startAgentCliInvocation(
-      runtime,
-      promptText,
-      options.workPath,
-      null,
-      null,
-      options.commandOverride ?? null,
-      options.permissionMode ?? null,
-      {
-        origin: "diagram-generation",
-        ...(options.adaptivePolicy ? { adaptivePolicy: options.adaptivePolicy } : {}),
-      },
-    );
-
     return await new Promise<string>((resolve, reject) => {
+      let invocationId: string | null = null;
       let stdoutBuffer = "";
       let settled = false;
       const unlisteners: Array<() => void> = [];
-
+      const early: Array<() => void> = [];
       const cleanup = () => {
         settled = true;
         cancelCurrent = null;
-        for (const off of unlisteners) {
-          try {
-            off();
-          } catch {
-            // best-effort
-          }
-        }
+        early.length = 0;
+        for (const off of unlisteners) off();
       };
-
-      const safeResolve = (value: string) => {
-        if (settled) return;
-        cleanup();
-        resolve(value);
-      };
-
       const safeReject = (err: Error) => {
         if (settled) return;
         cleanup();
         reject(err);
       };
-
+      const stop = () => {
+        if (invocationId) void stopAiMission(invocationId).catch(() => {});
+      };
+      cancelCurrent = () => {
+        stop();
+        safeReject(new Error("cancelled"));
+      };
       const timeout = window.setTimeout(() => {
-        void stopAiMission(invocationId).catch(() => {
-          // best-effort: the local rejection below settles the promise either way
-        });
+        stop();
         safeReject(new Error(`Diagram generation timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       unlisteners.push(() => window.clearTimeout(timeout));
-
-      cancelCurrent = () => {
-        void stopAiMission(invocationId).catch(() => {
-          // best-effort
-        });
-        safeReject(new Error("cancelled"));
+      const correlate = (id: string, handle: () => void) => {
+        if (settled) return;
+        if (invocationId === null) {
+          early.push(() => { if (id === invocationId) handle(); });
+        } else if (id === invocationId) handle();
       };
-
-      void listen<AiOutputEvent>("ai://output", (evt) => {
-        if (evt.payload.invocationId !== invocationId) return;
-        if (evt.payload.stream === "stdout") {
-          stdoutBuffer += `${evt.payload.line}\n`;
-        }
-      }).then((off) => unlisteners.push(off));
-
-      void listen<AiDoneEvent>("ai://done", (evt) => {
-        if (evt.payload.invocationId !== invocationId) return;
-        if (!evt.payload.success) {
-          safeReject(
-            new Error(`${runtime} CLI exited with code ${evt.payload.exitCode ?? "unknown"}`),
+      const register = async <T,>(event: string, handle: (payload: T) => void) => {
+        const off = await listen<T>(event, (evt) => handle(evt.payload));
+        if (settled) off();
+        else unlisteners.push(off);
+      };
+      void (async () => {
+        try {
+          // All listeners are ready before Rust can emit the first output.
+          await register<AiOutputEvent>("ai://output", (payload) => {
+            correlate(payload.invocationId, () => {
+              if (payload.stream === "stdout") stdoutBuffer += `${payload.line}\n`;
+            });
+          });
+          await register<AiDoneEvent>("ai://done", (payload) => {
+            correlate(payload.invocationId, () => {
+              if (!payload.success) {
+                safeReject(new Error(`${runtime} CLI exited with code ${payload.exitCode ?? "unknown"}`));
+              } else if (!settled) {
+                cleanup();
+                resolve(stdoutBuffer);
+              }
+            });
+          });
+          await register<AiErrorEvent>("ai://error", (payload) => {
+            correlate(payload.invocationId, () => safeReject(new Error(`${payload.kind}: ${payload.message}`)));
+          });
+          if (settled) return;
+          invocationId = await startAgentCliInvocation(
+            runtime, promptText, options.workPath, null, null,
+            options.commandOverride ?? null, options.permissionMode ?? null,
+            { origin: "diagram-generation", ...(options.adaptivePolicy ? { adaptivePolicy: options.adaptivePolicy } : {}) },
           );
-          return;
+          if (settled) { stop(); return; }
+          // Events emitted before the invoke response retain their order.
+          for (const replay of early.splice(0)) {
+            if (settled) break;
+            replay();
+          }
+        } catch (err) {
+          safeReject(err instanceof Error ? err : new Error(String(err)));
         }
-        safeResolve(stdoutBuffer);
-      }).then((off) => unlisteners.push(off));
-
-      void listen<AiErrorEvent>("ai://error", (evt) => {
-        if (evt.payload.invocationId !== invocationId) return;
-        safeReject(new Error(`${evt.payload.kind}: ${evt.payload.message}`));
-      }).then((off) => unlisteners.push(off));
+      })();
     });
   };
 

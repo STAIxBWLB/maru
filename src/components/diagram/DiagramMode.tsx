@@ -1,3 +1,4 @@
+import { subscribeDiagramHandoff, takeDiagramHandoff } from "../../lib/diagram/handoff";
 import { setError } from "../../lib/errorStore";
 import { Eye, Network } from "lucide-react";
 import {
@@ -281,6 +282,7 @@ function DiagramShell({
   const coalescer = useDiagramCoalescer();
   const gestureCoalescers = useDiagramGestureCoalescers();
   const sessionKey = workPath ?? "__no-workspace__";
+  const handoffOpening = useRef(false);
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
   const edges = doc.edges;
@@ -454,12 +456,12 @@ function DiagramShell({
       try {
         const settings = await readMaruSettings(workPath);
         const lastDocument = settings.diagram.lastDocument ?? readLastDocumentFallback(workPath);
-        if (!lastDocument || cancelled) return;
+        if (!lastDocument || cancelled || handoffOpening.current) return;
         if (getDiagramSession(sessionKey).activeName) return;
         const current = store.getState().doc;
         if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
         const { doc: restored, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, lastDocument);
-        if (cancelled) return;
+        if (cancelled || handoffOpening.current) return;
         store.setState(replaceDoc(restored));
         setActiveName(lastDocument);
         setLastSavedBody(serializeDoc(restored));
@@ -1127,16 +1129,20 @@ function DiagramShell({
     [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
-  // Cross-mode handoff (issue #433): another surface (e.g. the architecture
-  // gallery's "copy to Diagram") asks us to open a saved workspace diagram.
+  // Subscribe first, then drain any request queued before this lazy mount.
   useEffect(() => {
-    const onOpenDocument = (event: Event) => {
-      const name = (event as CustomEvent<{ name?: unknown }>).detail?.name;
-      if (typeof name === "string" && name.length > 0) void handleOpen(name);
+    if (!workPath) return;
+    const openPending = () => {
+      const name = takeDiagramHandoff(workPath);
+      if (name) {
+        handoffOpening.current = true;
+        void handleOpen(name);
+      }
     };
-    window.addEventListener("maru:diagram:open-document", onOpenDocument);
-    return () => window.removeEventListener("maru:diagram:open-document", onOpenDocument);
-  }, [handleOpen]);
+    const unsubscribe = subscribeDiagramHandoff(openPending);
+    openPending();
+    return unsubscribe;
+  }, [handleOpen, workPath]);
 
   const handleDeleteFile = useCallback(
     async (name: string) => {

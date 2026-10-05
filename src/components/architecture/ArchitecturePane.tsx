@@ -17,6 +17,7 @@ import { layoutDoc } from "../../lib/diagram/layout";
 import { listDiagrams, writeDiagram } from "../../lib/diagram/persistence";
 import { projectSemanticCandidate } from "../../lib/diagram/proposal";
 import { createDiagramId, createEmptyDoc } from "../../lib/diagram/types";
+import { IpcError } from "../../lib/ipcError";
 import { useTranslation } from "../../lib/i18n";
 import { IconButton } from "../ui/Button";
 import { EmptyState, StatusBanner } from "../ui/ModeChrome";
@@ -181,11 +182,19 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles, onOpenDiagram
       const base = sanitizeDiagramName(dataset.name);
       let name = base;
       let suffix = 2;
-      while (existing.has(name)) {
+      for (;;) {
+        if (!existing.has(name)) {
+          try {
+            await writeDiagram(workspacePath, name, doc, "");
+            break;
+          } catch (err) {
+            if (!(err instanceof IpcError) || err.code !== "document_conflict") throw err;
+            // A concurrent creator won; retry a fresh candidate, never modify it.
+          }
+        }
         name = `${base}-${suffix}`;
         suffix += 1;
       }
-      await writeDiagram(workspacePath, name, doc);
       setCopyState(null);
       onOpenDiagram(name);
     } catch (err) {

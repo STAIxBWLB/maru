@@ -380,7 +380,8 @@ export async function readDiagram(workspace: string, name: string): Promise<Diag
 /** Stamp `updatedAt` and save. `expectedRevision` (from `diagramRevision` of
  *  the loaded/last-saved body) makes the write conditional: a file that
  *  changed on disk since the load rejects with a `document_conflict` IpcError
- *  and is left untouched. Omit it for a first save or Save-As to a new name. */
+ *  and is left untouched. Empty string means atomically create-if-absent;
+ *  omission retains the legacy unconditional save behavior. */
 export async function writeDiagram(
   workspace: string,
   name: string,

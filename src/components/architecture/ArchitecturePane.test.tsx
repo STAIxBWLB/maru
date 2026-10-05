@@ -19,6 +19,7 @@ vi.mock("../../lib/diagram/persistence", () => ({
   writeDiagram: mocks.writeDiagram,
 }));
 
+import { IpcError } from "../../lib/ipcError";
 import { ArchitecturePane } from "./ArchitecturePane";
 import { LocaleContext } from "../../lib/i18n";
 
@@ -158,7 +159,8 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
       commit: "abc123",
     });
     mocks.listDiagrams.mockResolvedValue([{ name: "Alpha Service" }]);
-    mocks.writeDiagram.mockClear();
+    mocks.writeDiagram.mockReset();
+    mocks.writeDiagram.mockImplementation(async (_root: string, _name: string, doc: unknown) => doc);
   });
 
   afterEach(async () => {
@@ -205,6 +207,16 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
     expect(doc.nodes.length).toBe(2);
     expect(doc.edges.length).toBe(1);
     expect(opened).toEqual(["Alpha Service-2"]);
+  });
+
+  it("retries a name raced by another creator using create-only writes", async () => {
+    mocks.writeDiagram.mockRejectedValueOnce(new IpcError({ code: "document_conflict", message: "exists" }));
+    const opened: string[] = [];
+    await render((name) => opened.push(name));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="architecture-copy-to-diagram"]')!.click());
+    expect(mocks.writeDiagram.mock.calls.map((call) => call[1])).toEqual(["Alpha Service-2", "Alpha Service-3"]);
+    expect(mocks.writeDiagram.mock.calls.every((call) => (call as unknown[])[3] === "")).toBe(true);
+    expect(opened).toEqual(["Alpha Service-3"]);
   });
 
   it("hides the action when the sibling spec is missing or unsupported", async () => {

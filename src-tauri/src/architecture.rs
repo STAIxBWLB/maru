@@ -224,10 +224,18 @@ fn submodule_head_sha(repo_root: &Path) -> Option<String> {
 /// (#433). A safe listed HTML proves nothing about the JSON, so the sibling
 /// gets its own checks: canonicalize, stay inside the same submodule (a
 /// symlink escaping the submodule root is refused), size cap, and a parse
-/// requiring `diagram_type == "architecture"` and a numeric `schema_version`.
+/// requiring the complete pinned architecture schema.
 pub fn architecture_read_sibling_spec(
     workspace_path: String,
     html_path: String,
+) -> Result<SiblingSpec, String> {
+    read_sibling_spec_with_engine(workspace_path, html_path, None)
+}
+
+fn read_sibling_spec_with_engine(
+    workspace_path: String,
+    html_path: String,
+    engine: Option<PathBuf>,
 ) -> Result<SiblingSpec, String> {
     let root = normalize_existing_dir(&workspace_path)?;
     // Fresh listing scan: never trust the caller's path.
@@ -263,6 +271,7 @@ pub fn architecture_read_sibling_spec(
     if !value.get("schema_version").is_some_and(|v| v.is_number()) {
         return Err("Sibling spec has no numeric schema_version".to_string());
     }
+    crate::archify::validate_sibling_schema(&body, engine).map_err(|err| err.message)?;
     let title = value
         .pointer("/meta/title")
         .and_then(|v| v.as_str())
@@ -306,11 +315,13 @@ pub mod ipc {
 
     #[tauri::command]
     pub async fn architecture_read_sibling_spec(
+        app: tauri::AppHandle,
         workspace_path: String,
         html_path: String,
     ) -> Result<SiblingSpec, String> {
         tauri::async_runtime::spawn_blocking(move || {
-            super::architecture_read_sibling_spec(workspace_path, html_path)
+            let engine = crate::archify::bundled_engine_path(&app).map_err(|err| err.message)?;
+            super::read_sibling_spec_with_engine(workspace_path, html_path, Some(engine))
         })
         .await
         .map_err(|err| format!("architecture_read_sibling_spec_task_failed: {err}"))?
@@ -362,7 +373,7 @@ mod tests {
                 ),
                 (
                     "docs/architecture/alpha.architecture.json",
-                    r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Alpha Service"}}"#,
+                    r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Alpha Service","output":"alpha.html"},"components":[{"id":"app","type":"backend","label":"App"}]}"#,
                 ),
                 ("docs/architecture/notes.html", "not a viewer"),
             ],
@@ -684,6 +695,27 @@ mod tests {
             architecture_read_sibling_spec(root_arg(&root), viewer).unwrap_err(),
             "Sibling spec has no numeric schema_version"
         );
+    }
+
+    #[test]
+    fn sibling_spec_rejects_future_schema_missing_components_and_bad_component_shapes() {
+        let (_tmp, root) = workspace();
+        let path = root.join("dev/alpha/docs/architecture/alpha.architecture.json");
+        for body in [
+            r#"{"schema_version":99,"diagram_type":"architecture","meta":{"title":"Future","output":"future.html"},"components":[{"id":"app","type":"backend","label":"App"}]}"#,
+            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Missing","output":"x.html"}}"#,
+            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Invalid","output":"x.html"},"components":[{"id":"app","type":"bogus","label":"App"}]}"#,
+        ] {
+            fs::write(&path, body).unwrap();
+            let err = architecture_read_sibling_spec(
+                root_arg(&root),
+                "dev/alpha/docs/architecture/alpha-rendered.html".into(),
+            )
+            .unwrap_err();
+            assert!(err.contains("pinned architecture schema"), "{err}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), body);
+            assert!(!root.join(".maru/diagram-gen").exists());
+        }
     }
 
     #[test]

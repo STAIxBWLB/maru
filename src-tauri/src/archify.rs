@@ -13,9 +13,11 @@ use crate::vault::resolve_inside_vault;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
+use tauri::Manager;
 
 pub const ARCHIFY_INVALID_DIAGRAM_TYPE: &str = "archify_invalid_diagram_type";
 pub const ARCHIFY_CANDIDATE_TOO_LARGE: &str = "archify_candidate_too_large";
@@ -72,6 +74,21 @@ fn validate_diagram_type(diagram_type: &str) -> Result<&'static str, IpcError> {
 /// `<repo>/sidecars/archify/bin/archify.mjs`: walk up from the current exe and
 /// from the compile-time manifest dir until it appears. An explicit
 /// `MARU_ARCHIFY_ENGINE` override wins and must exist.
+pub(crate) fn bundled_engine_path(app: &tauri::AppHandle) -> Result<PathBuf, IpcError> {
+    if cfg!(debug_assertions) || std::env::var_os(ENGINE_ENV).is_some() {
+        return resolve_engine_path();
+    }
+    let engine = app
+        .path()
+        .resource_dir()
+        .map_err(|err| engine_unavailable(format!("Cannot resolve resources: {err}")))?
+        .join("archify/bin/archify.mjs");
+    if !engine.is_file() {
+        return Err(engine_unavailable("Bundled Archify engine is missing"));
+    }
+    Ok(engine)
+}
+
 fn resolve_engine_path() -> Result<PathBuf, IpcError> {
     if let Some(override_path) = std::env::var_os(ENGINE_ENV) {
         let candidate = PathBuf::from(override_path);
@@ -207,7 +224,7 @@ fn run_engine(
     candidate: &Path,
     timeout: Duration,
 ) -> Result<ArchifyValidationReceipt, IpcError> {
-    let mut child = Command::new(node)
+    let child = Command::new(node)
         .arg(engine)
         .arg("validate")
         .arg(diagram_type)
@@ -217,6 +234,14 @@ fn run_engine(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| engine_unavailable(format!("Cannot start the Archify engine: {err}")))?;
+    wait_engine(child, diagram_type, timeout)
+}
+
+fn wait_engine(
+    mut child: std::process::Child,
+    diagram_type: &str,
+    timeout: Duration,
+) -> Result<ArchifyValidationReceipt, IpcError> {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -279,10 +304,67 @@ fn stage_candidate(
     Ok(())
 }
 
+/// Validate the exact bytes already read through gallery containment guards.
+/// The pinned schema validator runs without rendering or source-file writes.
+pub(crate) fn validate_sibling_schema(body: &str, engine: Option<PathBuf>) -> Result<(), IpcError> {
+    let engine = engine.map_or_else(resolve_engine_path, Ok)?;
+    let validator = engine
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| engine_unavailable("Invalid engine location"))?
+        .join("renderers/shared/validator.mjs");
+    let script = r#"import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
+const { validateSchema } = await import(pathToFileURL(process.argv[1]).href);
+try {
+  validateSchema('architecture', JSON.parse(readFileSync(0, 'utf8')));
+  console.log(JSON.stringify({ok:true}));
+} catch (error) {
+  console.log(JSON.stringify({ok:false,error:error.message}));
+  process.exitCode = 1;
+}"#;
+    let mut child = Command::new(resolve_node()?)
+        .args(["--input-type=module", "--eval", script])
+        .arg(validator)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| engine_unavailable(format!("Cannot start schema validator: {err}")))?;
+    if let Err(err) = child.stdin.take().unwrap().write_all(body.as_bytes()) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(typed(
+            ARCHIFY_ENGINE_FAILED,
+            format!("Cannot send sibling spec: {err}"),
+        ));
+    }
+    let receipt = wait_engine(child, "architecture", validate_timeout())?;
+    if !receipt.ok {
+        return Err(typed(
+            ARCHIFY_ENGINE_FAILED,
+            format!(
+                "Sibling spec fails pinned architecture schema: {}",
+                receipt.errors.join("; ")
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub fn archify_validate_candidate(
     workspace: String,
     diagram_type: String,
     candidate_json: String,
+) -> Result<ArchifyValidationReceipt, IpcError> {
+    validate_candidate_with_engine(workspace, diagram_type, candidate_json, None)
+}
+
+fn validate_candidate_with_engine(
+    workspace: String,
+    diagram_type: String,
+    candidate_json: String,
+    engine: Option<PathBuf>,
 ) -> Result<ArchifyValidationReceipt, IpcError> {
     // Type and size gates run before any filesystem or process work.
     let diagram_type = validate_diagram_type(&diagram_type)?;
@@ -292,7 +374,7 @@ pub fn archify_validate_candidate(
             format!("Candidate exceeds {MAX_CANDIDATE_BYTES} bytes"),
         ));
     }
-    let engine = resolve_engine_path()?;
+    let engine = engine.map_or_else(resolve_engine_path, Ok)?;
     let node = resolve_node()?;
     let job_id = uuid::Uuid::new_v4().simple().to_string();
     let job_dir = resolve_inside_vault(&workspace, STAGING_DIR)?.join(&job_id);
@@ -311,6 +393,7 @@ pub mod ipc {
 
     #[tauri::command]
     pub async fn archify_validate_candidate(
+        app: tauri::AppHandle,
         workspace: String,
         diagram_type: String,
         candidate_json: String,
@@ -321,7 +404,13 @@ pub mod ipc {
                 &[std::path::PathBuf::from(&workspace)],
                 "worker:archify_validate_candidate",
             );
-            super::archify_validate_candidate(workspace, diagram_type, candidate_json)
+            let engine = super::bundled_engine_path(&app)?;
+            super::validate_candidate_with_engine(
+                workspace,
+                diagram_type,
+                candidate_json,
+                Some(engine),
+            )
         })
         .await
         .map_err(|err| IpcError::from(format!("archify_validate_candidate_task_failed: {err}")))?

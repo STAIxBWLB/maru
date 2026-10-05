@@ -37,7 +37,8 @@ function emitDone(payload: { invocationId: string; success: boolean; exitCode: n
 
 describe("createGenerationHost", () => {
   beforeEach(() => {
-    startAgentCliInvocation.mockClear();
+    startAgentCliInvocation.mockReset();
+    startAgentCliInvocation.mockResolvedValue("inv-1");
     stopAiMission.mockClear();
     archifyValidateCandidate.mockClear();
     handlers.clear();
@@ -82,6 +83,27 @@ describe("createGenerationHost", () => {
     });
     emitDone({ invocationId: "inv-1", success: true, exitCode: 0 });
     await expect(pending).resolves.toBe('{"a":\n1}\n');
+  });
+
+  it("captures output and done emitted before the invocation ID resolves", async () => {
+    startAgentCliInvocation.mockImplementationOnce(async () => {
+      expect(handlers.has("ai://output")).toBe(true);
+      expect(handlers.has("ai://done")).toBe(true);
+      expect(handlers.has("ai://error")).toBe(true);
+      handlers.get("ai://output")?.({ payload: { invocationId: "other", stream: "stdout", line: "noise" } });
+      handlers.get("ai://output")?.({ payload: { invocationId: "inv-1", stream: "stdout", line: '{"fast":true}' } });
+      emitDone({ invocationId: "other", success: false, exitCode: 1 });
+      emitDone({ invocationId: "inv-1", success: true, exitCode: 0 });
+      return "inv-1";
+    });
+    await expect(createGenerationHost({ workPath: "/tmp/work" }).runAgent("PROMPT")).resolves.toBe('{"fast":true}\n');
+    expect(handlers.size).toBe(0);
+  });
+
+  it("cleans listeners when invocation startup fails", async () => {
+    startAgentCliInvocation.mockRejectedValueOnce(new Error("startup failed"));
+    await expect(createGenerationHost({ workPath: "/tmp/work" }).runAgent("PROMPT")).rejects.toThrow("startup failed");
+    expect(handlers.size).toBe(0);
   });
 
   it("rejects on ai://error and on a non-success exit", async () => {
