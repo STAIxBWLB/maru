@@ -638,7 +638,7 @@ export function validateSemanticSpec(dataset: SemanticSpecDataset): MatrixValida
     }
   }
   try {
-    const bytes = JSON.stringify(dataset.spec).length;
+    const bytes = new TextEncoder().encode(JSON.stringify(dataset.spec)).length;
     if (bytes > SEMANTIC_SPEC_MAX_BYTES) {
       errors.push(`spec too large: ${bytes} > ${SEMANTIC_SPEC_MAX_BYTES} bytes`);
     }

@@ -264,6 +264,16 @@ describe("validateArchifySpecPreCheck", () => {
     expect(result.diagnostics).toEqual([]);
   });
 
+  it("accepts portable subdirectories and counts Korean payload bytes", () => {
+    expect(validateArchifySpecPreCheck("architecture", {
+      ...validSpec, meta: { title: "T", output: "docs/out.html" },
+    }).ok).toBe(true);
+    const spec = { ...validSpec, blob: "가".repeat(SEMANTIC_SPEC_MAX_BYTES / 2) };
+    const result = validateArchifySpecPreCheck("architecture", spec);
+    expect(result.diagnostics.find((d) => d.key === "diagram.validation.specBudget")?.params?.bytes)
+      .toBe(new TextEncoder().encode(JSON.stringify(spec)).length);
+  });
+
   it("rejects an unknown diagram type", () => {
     const result = validateArchifySpecPreCheck("sequence", validSpec);
     expect(result.ok).toBe(false);
@@ -316,7 +326,7 @@ describe("validateArchifySpecPreCheck", () => {
   });
 
   it("rejects a meta.output that is not a portable .html filename", () => {
-    for (const output of ["out.svg", "dir/out.html", "../out.html", "a\\b.html", 42]) {
+    for (const output of ["out.svg", "/out.html", "../out.html", "a\\b.html", 42]) {
       const result = validateArchifySpecPreCheck("architecture", {
         schema_version: 1,
         meta: { title: "T", output },

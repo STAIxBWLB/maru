@@ -3365,7 +3365,7 @@ export const ko: Record<string, string> = {
   "diagram.error.save": "저장 실패: {message}",
   "diagram.error.saveConflict": "파일이 디스크에서 변경되어 저장하지 않았습니다. 편집 중인 내용은 그대로 유지됩니다. 다른 이름으로 저장하거나 다시 열어 주세요.",
   "diagram.error.load": "불러오기 실패: {message}",
-  "diagram.error.backup": "v7 백업 생성 실패 — 원본 보호를 위해 저장을 중단했습니다. 다시 시도해 주세요: {message}",
+  "diagram.error.backup": "이전 버전 다이어그램 백업 생성 실패 — 원본 보호를 위해 저장을 중단했습니다. 다시 시도해 주세요: {message}",
   "diagram.error.unsupportedVersion": "지원하지 않는 다이어그램 버전입니다 (v{version}; 이 빌드는 v{supported}까지 지원)",
 
   "diagram.ribbon.tab.file": "파일",

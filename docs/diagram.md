@@ -276,3 +276,14 @@ Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache
   templates, Mermaid, export dialog, generation dialog + Mermaid paste
   diagnostics + agent-host-unavailable degradation, no `localhost:5500` /
   Google Fonts requests).
+
+## Archify engine pin
+
+The renderer is vendored under `sidecars/archify/`; `PIN.json` records the
+upstream revision and SHA-256 manifest. Run `make check-archify-pin` to verify
+integrity. To refresh, fetch an explicitly reviewed upstream tag, replace only
+the vendored paths listed by the manifest, retain the MIT license and third-party
+notices, and regenerate the manifest from those exact upstream bytes. Update
+`ARCHIFY_ENGINE` in `src/lib/diagram/archifyCodec.ts` to the same version and
+review the upstream diff before running the full verification gate. Never
+refresh from a mutable installed skill directory.

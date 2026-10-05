@@ -1201,6 +1201,23 @@ mod tests {
     }
 
     #[test]
+    fn save_with_revision_over_foreign_file_without_trailing_newline() {
+        // A legacy/foreign file written without the trailing newline must not
+        // produce a revision false-positive: the loaded bytes are hashed exactly,
+        // so the first in-place save proceeds and normalizes the file.
+        let (_tmp, work) = setup_workspace();
+        let diagrams = work.join("diagrams");
+        fs::create_dir_all(&diagrams).unwrap();
+        let body = r#"{"v":8,"docTitle":"foreign","nodes":[],"edges":[],"layers":[]}"#;
+        fs::write(diagrams.join("foreign.cmd.json"), body).unwrap();
+        let revision = revision_for(body);
+        let next = r#"{"v":8,"docTitle":"foreign2","nodes":[],"edges":[],"layers":[]}"#;
+        diagram_save_document(work.clone(), "foreign".into(), next.into(), Some(revision)).unwrap();
+        let loaded = diagram_load_document(work, "foreign".into()).unwrap();
+        assert_eq!(loaded, format!("{next}\n"));
+    }
+
+    #[test]
     fn save_with_stale_revision_conflicts_and_preserves_file() {
         let (_tmp, work) = setup_workspace();
         let body = r#"{"v":8,"docTitle":"keep","nodes":[],"edges":[],"layers":[]}"#;

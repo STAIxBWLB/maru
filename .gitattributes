@@ -1,0 +1,5 @@
+# Vendored third-party trees are hash-pinned verbatim copies of upstream
+# (see sidecars/archify/PIN.json and scripts/check-archify-pin.mjs). Their
+# whitespace is upstream's own; `git diff --check` must not flag it, because
+# "fixing" it would break the pin hashes. Drift is owned by the pin guard.
+sidecars/archify/** -whitespace
