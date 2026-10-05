@@ -246,7 +246,10 @@ brew upgrade maru-cli
   binding inside the write transaction; drift needs a new approval. Bound grants
   are single-use, terminal decisions are immutable, and remembered grants match
   the complete binding. Request, decision, consume, and effect outcome records
-  live under `.maru/approvals/`; restarting restores readable history without
+  live under `~/.maru/approvals/<canonical-workspace-sha256>/` as application-owned
+  private metadata, independently of provider document capabilities. Legacy
+  registry migration completes before the approval policy pin. Restarting
+  restores readable history without
   restoring authority. Failed durable consume blocks writes. An outcome audit
   failure after an effect reports uncertainty and must not cause automatic retry.
 

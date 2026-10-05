@@ -251,6 +251,19 @@ pub(crate) fn prepare_proposal_approval(
     target: Option<String>,
     preview: Option<String>,
 ) -> Result<ApprovalRequest, String> {
+    // Materialize the existing legacy registry before its bytes become an
+    // approval revision. Metadata publication must never invalidate that pin.
+    with_path_transactions(
+        PathTransactionRequest::new([
+            crate::vault_list::workspace_registry_path()?,
+            crate::vault_list::legacy_vault_list_path()?,
+        ])?,
+        |lease| {
+            lease.before_effect()?;
+            crate::vault_list::load_registry()?;
+            Ok(())
+        },
+    )?;
     let binding = proposal_binding(context)?;
     state.prepare_bound(&context.cwd, summary, target, preview, binding)
 }
@@ -1278,25 +1291,163 @@ mod phase08_16 {
         );
     }
 
+    #[test]
+    fn bound_first_approval_survives_legacy_only_registry_migration() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let legacy = crate::vault_list::legacy_vault_list_path().unwrap();
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, serde_json::to_vec(&serde_json::json!({"vaults": [{"label": "Legacy", "path": cwd}], "activeVault": cwd, "hiddenDefaults": []})).unwrap()).unwrap();
+        assert!(!crate::vault_list::workspace_registry_path()
+            .unwrap()
+            .exists());
+        let candidate = proposal(
+            "first approval",
+            vec![file("note.md", "create", Some("body"))],
+        );
+        let id = grant(&app, &cwd, &candidate, None);
+        assert!(crate::vault_list::workspace_registry_path()
+            .unwrap()
+            .exists());
+        agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None).unwrap();
+        assert_eq!(fs::read_to_string(work.join("note.md")).unwrap(), "body");
+    }
+
+    #[test]
+    fn bound_audit_is_application_owned_but_document_effects_keep_granular_capabilities() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        fs::create_dir_all(&work).unwrap();
+        let cwd = text(&work);
+        let registry = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        for (role, operation, opposite) in [("5", "create", "replace"), ("3", "replace", "create")]
+        {
+            fs::write(&registry, serde_json::to_vec(&serde_json::json!({"workspaces": [{"label": "Nextcloud", "path": cwd, "visibility": "public", "provider": "nextcloud", "writePolicy": "direct", "permissionSummary": {"role": role, "source": "manual", "checkedAt": "2026-10-05T00:00:00Z"}}], "activeByVisibility": {}, "hiddenDefaults": []})).unwrap()).unwrap();
+            let accepted_path = format!("accepted-{role}.md");
+            if operation == "replace" {
+                fs::write(work.join(&accepted_path), "before").unwrap();
+            }
+            let accepted = proposal(
+                "allowed action",
+                vec![file(&accepted_path, operation, Some("accepted"))],
+            );
+            let id = grant(&app, &cwd, &accepted, None);
+            agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                accepted,
+                Some(id.clone()),
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read_to_string(work.join(&accepted_path)).unwrap(),
+                "accepted"
+            );
+            assert_eq!(
+                crate::approval::read_approval_audit(&cwd, &id)
+                    .unwrap()
+                    .len(),
+                4
+            );
+            let denied_path = format!("denied-{role}.md");
+            if opposite == "replace" {
+                fs::write(work.join(&denied_path), "unchanged").unwrap();
+            }
+            let denied = proposal(
+                "denied action",
+                vec![file(&denied_path, opposite, Some("must not appear"))],
+            );
+            let denied_id = grant(&app, &cwd, &denied, None);
+            assert!(agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                denied,
+                Some(denied_id),
+                None
+            )
+            .unwrap_err()
+            .contains("Workspace writes are blocked"));
+            if opposite == "replace" {
+                assert_eq!(
+                    fs::read_to_string(work.join(denied_path)).unwrap(),
+                    "unchanged"
+                );
+            } else {
+                assert!(!work.join(denied_path).exists());
+            }
+        }
+        assert!(!work.join(".maru/approvals").exists());
+    }
+
     #[cfg(unix)]
     #[test]
-    fn bound_audit_syncs_first_workspace_publication_through_root_alias() {
+    fn bound_owned_audit_rejects_directory_and_leaf_symlink_escapes() {
+        let home = Home::new();
+        let app = app();
+        let work = home.root.path().join("work");
+        let outside = home.root.path().join("outside");
+        fs::create_dir_all(&work).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let cwd = text(&work);
+        let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
+        let id = grant(&app, &cwd, &candidate, None);
+        let audit = crate::approval::audit_path(&cwd, &id).unwrap();
+        let bytes = fs::read(&audit).unwrap();
+        let foreign = outside.join("foreign.json");
+        fs::write(&foreign, &bytes).unwrap();
+        fs::remove_file(&audit).unwrap();
+        std::os::unix::fs::symlink(&foreign, &audit).unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(
+                app.handle().clone(),
+                cwd.clone(),
+                candidate.clone(),
+                Some(id.clone()),
+                None
+            )
+            .unwrap_err(),
+            "approval_audit_symlink_rejected"
+        );
+        fs::remove_file(&audit).unwrap();
+        fs::write(&audit, &bytes).unwrap();
+        let parent = audit.parent().unwrap();
+        let relocated = outside.join("saved-audit-dir");
+        fs::rename(parent, &relocated).unwrap();
+        std::os::unix::fs::symlink(&relocated, parent).unwrap();
+        assert_eq!(
+            agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
+                .unwrap_err(),
+            "approval_audit_symlink_rejected"
+        );
+        assert_eq!(fs::read(&foreign).unwrap(), bytes);
+        assert!(!work.join("note.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bound_audit_syncs_first_application_home_publication_through_workspace_alias() {
         let home = Home::new();
         let app = app();
         let work = home.root.path().join("work");
         let alias = home.root.path().join("work-alias");
         fs::create_dir_all(&work).unwrap();
         std::os::unix::fs::symlink(&work, &alias).unwrap();
-        let workspace_syncs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let observed = workspace_syncs.clone();
+        let home_syncs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = home_syncs.clone();
         let _hook = PathTransactionTestHook::new(
-            work.clone(),
+            home.root.path().to_path_buf(),
             "approval-audit-before-directory-sync",
             move || {
                 observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             },
         );
-        assert!(!work.join(".maru").exists());
+        assert!(!crate::skill_host::fs::maru_home().unwrap().exists());
         let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
         let context = ProposalApprovalContext {
             cwd: text(&alias),
@@ -1311,7 +1462,7 @@ mod phase08_16 {
             None,
         )
         .unwrap();
-        assert_eq!(workspace_syncs.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(home_syncs.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(
             crate::approval::read_approval_audit(&text(&work), &request.id)
                 .unwrap()
@@ -1322,19 +1473,19 @@ mod phase08_16 {
 
     #[cfg(unix)]
     #[test]
-    fn bound_consume_workspace_sync_failure_blocks_effect_and_retry() {
+    fn bound_consume_application_home_sync_failure_blocks_effect_and_retry() {
         let home = Home::new();
         let app = app();
         let work = home.root.path().join("work");
-        let moved = home.root.path().join("moved-work");
+        let moved = home.root.path().join("moved-maru-home");
         fs::create_dir_all(&work).unwrap();
         let cwd = text(&work);
         let candidate = proposal("approved", vec![file("note.md", "create", Some("body"))]);
         let id = grant(&app, &cwd, &candidate, None);
-        let original = work.clone();
+        let original = crate::skill_host::fs::maru_home().unwrap();
         let relocated = moved.clone();
         let hook = PathTransactionTestHook::new(
-            work.clone(),
+            original.clone(),
             "approval-audit-before-directory-sync",
             move || {
                 fs::rename(&original, &relocated).unwrap();
@@ -1350,8 +1501,8 @@ mod phase08_16 {
         .unwrap_err()
         .starts_with("approval_audit_sync_failed"));
         drop(hook);
-        assert!(!moved.join("note.md").exists());
-        fs::rename(&moved, &work).unwrap();
+        assert!(!work.join("note.md").exists());
+        fs::rename(&moved, crate::skill_host::fs::maru_home().unwrap()).unwrap();
         assert_eq!(
             agent_apply_skill_proposal(app.handle().clone(), cwd, candidate, Some(id), None)
                 .unwrap_err(),

@@ -1,5 +1,6 @@
 use crate::atomic_file::{with_path_transactions, PathTransactionLease, PathTransactionRequest};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -39,10 +40,42 @@ pub struct ApprovalAuditEvent {
     pub detail: Option<String>,
 }
 
+fn validate_audit_store_path(path: &std::path::Path) -> Result<(), String> {
+    let home = crate::skill_host::fs::maru_home()?;
+    let relative = path
+        .strip_prefix(&home)
+        .map_err(|_| "approval_audit_path_outside_home")?;
+    let mut current = home;
+    for component in std::iter::once(None).chain(relative.components().map(Some)) {
+        if let Some(component) = component {
+            current.push(component);
+        }
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err("approval_audit_symlink_rejected".into())
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("approval_audit_path_invalid: {error}")),
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn audit_path(cwd: &str, id: &str) -> Result<PathBuf, String> {
     let suffix = id.strip_prefix("approval-").ok_or("approval_id_invalid")?;
     Uuid::parse_str(suffix).map_err(|_| "approval_id_invalid".to_string())?;
-    crate::vault::resolve_inside_vault(cwd, &format!(".maru/approvals/{id}.json"))
+    let workspace = crate::vault::normalize_existing_dir(cwd)?;
+    let workspace_key = format!(
+        "{:x}",
+        Sha256::digest(workspace.to_string_lossy().as_bytes())
+    );
+    let path = crate::skill_host::fs::maru_home()?
+        .join("approvals")
+        .join(workspace_key)
+        .join(format!("{id}.json"));
+    validate_audit_store_path(&path)?;
+    Ok(path)
 }
 
 fn audit_transaction(path: PathBuf) -> Result<PathTransactionRequest, String> {
@@ -72,14 +105,9 @@ fn persist_audit(
     let path = audit_path(cwd, &stored.request.id)?;
     lease.ensure_covered([path.clone()])?;
     lease.before_effect()?;
-    crate::vault_list::assert_maru_can_write(
-        cwd,
-        if path.exists() {
-            crate::vault_list::WorkspaceWriteAction::Modify
-        } else {
-            crate::vault_list::WorkspaceWriteAction::Create
-        },
-    )?;
+    validate_audit_store_path(&path)?;
+    // This is application metadata, not a provider document operation. Its
+    // scope is constructed from the configured Maru home, workspace hash and UUID.
     let mut events = if path.exists() {
         read_approval_audit(cwd, &stored.request.id)?
     } else {
@@ -92,14 +120,14 @@ fn persist_audit(
         detail,
     });
     let content = serde_json::to_string_pretty(&events).map_err(|e| e.to_string())?;
-    crate::vault_guard::validate_managed_write(cwd, &path.to_string_lossy(), &content)?;
     crate::atomic_file::write_atomic_private(&path, content.as_bytes())
         .map_err(|e| format!("approval_audit_persist_failed: {e}"))?;
-    // Publish every created directory entry, including .maru in its workspace.
-    // Compare canonical workspace identity so root aliases retain the same stop.
+    // Publish the audit tree and the application home in its owning parent.
+    // Neither source workspace aliases nor provider document permissions alter it.
     #[cfg(unix)]
     {
-        let workspace = crate::vault::normalize_existing_dir(cwd)?;
+        let home = crate::skill_host::fs::maru_home()?;
+        let home_parent = home.parent().ok_or("approval_audit_home_parent_missing")?;
         for parent in path.ancestors().skip(1) {
             #[cfg(test)]
             PathTransactionLease::test_stage(
@@ -109,7 +137,7 @@ fn persist_audit(
             std::fs::File::open(parent)
                 .and_then(|file| file.sync_all())
                 .map_err(|e| format!("approval_audit_sync_failed: {e}"))?;
-            if parent == workspace {
+            if parent == home_parent {
                 break;
             }
         }
