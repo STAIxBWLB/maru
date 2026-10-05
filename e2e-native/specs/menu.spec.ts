@@ -96,43 +96,23 @@ describe("native macOS menu command path", () => {
     async () => {
       await dispatchMenuCommand("terminal.shell");
 
-      // The menu command opens the tool panel's terminal surface and launches
-      // a shell — and the panel's auto-launch (settings.terminal.autoLaunch
-      // defaults to "shell") launches one too, so two sessions mount back to
-      // back and the active view flips as they land. Latching the first
-      // active view and dispatching the split while the second launch is
-      // still in flight is the menu-side half of the #388 race, so wait for
-      // the session set to stop changing before reading the active session.
+      // Bind the ready focused pane, not a guessed session count or a quiet
+      // period. Automatic and explicit launches may create hidden sessions in
+      // separate tasks; their unpainted mirrors do not own this menu action.
       const firstSession = await browser.executeAsync(
         (timeout: number, done: (id: string | null) => void) => {
           const deadline = Date.now() + timeout;
-          let lastKey = "";
-          let stableSince = 0;
           const tick = () => {
-            const now = Date.now();
-            const ids = Array.from(
-              document.querySelectorAll(".native-terminal-view[data-session-id]"),
-            )
-              .map((el) => el.getAttribute("data-session-id") ?? "")
-              .sort();
-            const key = ids.join("|");
-            if (ids.length === 0 || key !== lastKey) {
-              lastKey = key;
-              stableSince = now;
-            } else if (now - stableSince >= 750) {
-              const active = document.querySelector(
-                ".terminal-instance.active .native-terminal-view[data-session-id]",
-              );
-              const id = active?.getAttribute("data-session-id") ?? null;
-              if (id) {
-                done(id);
-                return;
-              }
-            }
-            if (now > deadline) {
-              done(null);
+            const views = Array.from(document.querySelectorAll<HTMLElement>(".native-terminal-view[data-session-id]"));
+            const focused = document.querySelector<HTMLElement>(".terminal-instance.active.focused .native-terminal-view[data-session-id]");
+            const launcher = document.querySelector<HTMLButtonElement>('.terminal-launchers button[aria-label="Shell"]');
+            const visibleViews = views.filter((view) => view.closest(".terminal-instance.active") && view.getClientRects().length > 0);
+            if (focused && focused.getClientRects().length > 0 && launcher && !launcher.disabled
+              && visibleViews.length > 0 && visibleViews.every((view) => window.__MARU_NATIVE_E2E__?.terminalText(view.dataset.sessionId!)?.trim())) {
+              done(focused.dataset.sessionId ?? null);
               return;
             }
+            if (Date.now() > deadline) { done(null); return; }
             setTimeout(tick, 250);
           };
           tick();

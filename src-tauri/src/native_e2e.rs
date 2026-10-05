@@ -23,6 +23,79 @@ use crate::paths::{native_e2e_dir_override, NATIVE_E2E_HOME_VAR};
 
 pub const MARU_NATIVE_RESPONSIVENESS_HOOK: &str = "MARU_NATIVE_RESPONSIVENESS_HOOK";
 pub const EXPECTED_WORKER_THREADS: usize = 2;
+
+/// A fixture root owns a persistent WKWebView store for restart tests, while
+/// another spec/root must never inherit its terminal tabs or the installed app's
+/// default store. dataDirectory does not isolate WKWebView on macOS.
+#[cfg(target_os = "macos")]
+pub fn isolate_webview_profile(
+    mut context: tauri::Context<tauri::Wry>,
+) -> tauri::Context<tauri::Wry> {
+    let directory = native_e2e_dir_override(crate::paths::NATIVE_E2E_CONFIG_DIR_VAR)
+        .expect("native-e2e config isolation is required")
+        .expect("native-e2e config isolation is enabled")
+        .canonicalize()
+        .expect("native-e2e config directory must be seeded before app launch");
+    configure_webview_profile(context.config_mut(), &directory);
+    context
+}
+
+#[cfg(target_os = "macos")]
+fn configure_webview_profile(config: &mut tauri::Config, directory: &Path) {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(directory.as_os_str().as_encoded_bytes());
+    let mut identifier = [0; 16];
+    identifier.copy_from_slice(&digest[..16]);
+    for window in &mut config.app.windows {
+        if window.create {
+            window.data_store_identifier = Some(identifier);
+            // Locked tauri-runtime 2.10.1 does not forward this config field.
+            // Defer these windows to the explicit builder setter in setup.
+            window.create = false;
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn create_fixture_webviews(app: &tauri::App) -> tauri::Result<()> {
+    for config in &app.config().app.windows {
+        if let Some(identifier) = config.data_store_identifier {
+            tauri::WebviewWindowBuilder::from_config(app, config)?
+                .data_store_identifier(identifier)
+                .build()?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod profile_tests {
+    use super::configure_webview_profile;
+    use std::path::Path;
+
+    #[test]
+    fn fixture_profiles_are_stable_for_restart_and_separate_between_specs() {
+        fn profile(root: &str) -> tauri::Config {
+            let mut config = tauri::Config::default();
+            config.app.windows.push(Default::default());
+            config.app.windows.push(Default::default());
+            configure_webview_profile(&mut config, Path::new(root));
+            config
+        }
+        let first = profile("/fixture/spec-a/config");
+        let restarted = profile("/fixture/spec-a/config");
+        let other = profile("/fixture/spec-b/config");
+        let id = first.app.windows[0].data_store_identifier;
+        assert!(id.is_some());
+        assert!(!first.app.windows[0].create);
+        assert_eq!(id, first.app.windows[1].data_store_identifier);
+        assert_eq!(id, restarted.app.windows[0].data_store_identifier);
+        assert_ne!(id, other.app.windows[0].data_store_identifier);
+        assert!(tauri::utils::config::WindowConfig::default()
+            .data_store_identifier
+            .is_none());
+    }
+}
 const LOAD_INTERVAL: Duration = Duration::from_millis(2500);
 const LOAD_CONTROL_OPS: &[&str] = &["git_status", "scan_vault", "skills_sync_source"];
 

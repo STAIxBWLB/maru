@@ -509,6 +509,11 @@ CI E2E runs Chromium against Vite with mocked IPC. It does not prove WKWebView,
 the native PTY, Korean IME behavior, macOS menus, signing, or notarization.
 macOS-affecting changes require a real-app or release-artifact check.
 
+Native fixture lifecycle and terminal readiness are documented in
+[`docs/native-e2e.md`](docs/native-e2e.md#fixture-lifecycle-and-terminal-readiness).
+Spec-owned roots/profiles are isolated at the launcher boundary; actual Mocha
+setup hooks and final completion gates propagate fixture failures.
+
 Coverage is measured by `make coverage` locally and by the `coverage` workflow
 on every push to `main`. It never runs for pull requests and is not a required
 check. Both HTML reports upload as the `coverage-report` artifact with 30-day

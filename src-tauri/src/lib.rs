@@ -219,6 +219,8 @@ pub fn run() {
         );
         return;
     }
+    #[cfg(all(feature = "native-e2e", target_os = "macos"))]
+    let context = native_e2e::isolate_webview_profile(context);
     // Phase 08-27 saturation harness: install the two-worker test runtime
     // before any Tauri runtime initialization (default builds never call
     // this and keep Tauri's lazily initialized runtime).
@@ -256,6 +258,8 @@ pub fn run() {
         .manage(BrowserPasskeyState::default())
         .manage(SiteOpenedUrlState::default())
         .setup(|app| {
+            #[cfg(all(feature = "native-e2e", target_os = "macos"))]
+            native_e2e::create_fixture_webviews(app)?;
             // M0 Anchor→Maru one-time on-disk migration (~/.anchor → ~/.maru,
             // com.anchor.app → com.maru.app) — idempotent, before anything
             // touches the home runtime (DR-024).
