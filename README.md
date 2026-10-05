@@ -17,7 +17,7 @@ identifier and on-disk migration to Maru.
 | Application shell | Complete | 19 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 385 production commands classified: 376 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Main-thread isolation | PERF-01/02 closed | All 387 production commands classified: 378 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
 | Active milestone | None, v1.2 being defined | v1.1 closed 2026-09-27; opening v1.2 moves releases to 1.2.0 |
 
 The milestone archive, audit, retrospective, and summary live under
@@ -141,11 +141,11 @@ brew upgrade maru-cli
   boundaries. Nothing imports `src/App.tsx`.
 - Shared UI state follows keyed module-store plus `useSyncExternalStore`
   patterns. No additional global state library or provider tree is used.
-- Production commands never block the UI/shared async worker thread: 376
+- Production commands never block the UI/shared async worker thread: 378
   ISOLATED commands run on awaited `spawn_blocking` workers and 9
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  385-command inventory, worker-boundary, and admission evidence are gated by
+  387-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -377,8 +377,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (385 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 385
+# Phase 08 evidence closure gate alone (387 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 387
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -473,8 +473,8 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 385-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 385`)
+  mutation-admission and processing-caller evidence against the 387-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 387`)
 
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
