@@ -75,7 +75,7 @@ fn validate_diagram_type(diagram_type: &str) -> Result<&'static str, IpcError> {
 /// from the compile-time manifest dir until it appears. An explicit
 /// `MARU_ARCHIFY_ENGINE` override wins and must exist.
 pub(crate) fn bundled_engine_path(app: &tauri::AppHandle) -> Result<PathBuf, IpcError> {
-    if cfg!(debug_assertions) || std::env::var_os(ENGINE_ENV).is_some() {
+    if cfg!(debug_assertions) {
         return resolve_engine_path();
     }
     let engine = app

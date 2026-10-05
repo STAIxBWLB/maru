@@ -49,6 +49,8 @@ function useAppTheme(): "light" | "dark" {
 
 export interface ArchitecturePaneProps {
   workspacePath: string | null;
+  /** Destination workspace used by Diagram; gallery sources remain in workspacePath. */
+  copyWorkspacePath?: string | null;
   onRevealInFiles?(targetPath: string): void;
   /** Issue #433 handoff: open a saved workspace diagram in Diagram mode. */
   onOpenDiagram?(documentName: string): void;
@@ -67,7 +69,7 @@ function sanitizeDiagramName(raw: string): string {
   return cleaned.length > 0 ? cleaned : "architecture-copy";
 }
 
-export function ArchitecturePane({ workspacePath, onRevealInFiles, onOpenDiagram }: ArchitecturePaneProps) {
+export function ArchitecturePane({ workspacePath, copyWorkspacePath, onRevealInFiles, onOpenDiagram }: ArchitecturePaneProps) {
   const { t } = useTranslation();
   const theme = useAppTheme();
   const [blueprints, setBlueprints] = useState<ArchitectureBlueprint[]>([]);
@@ -151,8 +153,9 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles, onOpenDiagram
     };
   }, [selectedPath, workspacePath, onOpenDiagram]);
 
+  const destinationWorkspace = copyWorkspacePath === undefined ? workspacePath : copyWorkspacePath;
   const handleCopyToDiagram = useCallback(async () => {
-    if (!workspacePath || !selectedPath || !onOpenDiagram || !siblingSpec) return;
+    if (!destinationWorkspace || !workspacePath || !selectedPath || !onOpenDiagram || !siblingSpec) return;
     setCopyState({ kind: "busy" });
     try {
       const outcome = parseArchifySpec(siblingSpec.specJson, {
@@ -178,14 +181,14 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles, onOpenDiagram
       doc.edges = laidOut.doc.edges;
 
       // Never overwrite: pick a name no existing diagram uses.
-      const existing = new Set((await listDiagrams(workspacePath)).map((file) => file.name));
+      const existing = new Set((await listDiagrams(destinationWorkspace)).map((file) => file.name));
       const base = sanitizeDiagramName(dataset.name);
       let name = base;
       let suffix = 2;
       for (;;) {
         if (!existing.has(name)) {
           try {
-            await writeDiagram(workspacePath, name, doc, "");
+            await writeDiagram(destinationWorkspace, name, doc, "");
             break;
           } catch (err) {
             if (!(err instanceof IpcError) || err.code !== "document_conflict") throw err;
@@ -200,7 +203,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles, onOpenDiagram
     } catch (err) {
       setCopyState({ kind: "error", message: (err as Error).message ?? String(err) });
     }
-  }, [workspacePath, selectedPath, onOpenDiagram, siblingSpec, selected?.repoPath, t]);
+  }, [destinationWorkspace, workspacePath, selectedPath, onOpenDiagram, siblingSpec, selected?.repoPath, t]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -283,7 +286,7 @@ export function ArchitecturePane({ workspacePath, onRevealInFiles, onOpenDiagram
                 <strong>{selected.title}</strong>
                 <code>{selected.repoPath}</code>
               </span>
-              {onOpenDiagram && siblingSpec ? (
+              {onOpenDiagram && destinationWorkspace && siblingSpec ? (
                 <IconButton
                   label={t("architecture.copyToDiagram")}
                   size="sm"

@@ -169,12 +169,12 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
     container.remove();
   });
 
-  async function render(onOpenDiagram?: (name: string) => void): Promise<void> {
+  async function render(onOpenDiagram?: (name: string) => void, copyWorkspacePath?: string): Promise<void> {
     root = createRoot(container);
     await act(async () => {
       root!.render(
         <LocaleContext.Provider value={{ locale: "en", setLocale: () => {}, t }}>
-          <ArchitecturePane workspacePath="/work" onOpenDiagram={onOpenDiagram} />
+          <ArchitecturePane workspacePath="/work" copyWorkspacePath={copyWorkspacePath} onOpenDiagram={onOpenDiagram} />
         </LocaleContext.Provider>,
       );
     });
@@ -207,6 +207,14 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
     expect(doc.nodes.length).toBe(2);
     expect(doc.edges.length).toBe(1);
     expect(opened).toEqual(["Alpha Service-2"]);
+  });
+
+  it("creates the copy in the Diagram workspace while retaining gallery source provenance", async () => {
+    await render(() => {}, "/diagram-workspace");
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="architecture-copy-to-diagram"]')!.click());
+    expect(mocks.listDiagrams).toHaveBeenCalledWith("/diagram-workspace");
+    expect(mocks.writeDiagram.mock.calls[0][0]).toBe("/diagram-workspace");
+    expect(mocks.architectureReadSiblingSpec).toHaveBeenCalledWith("/work", "/work/dev/alpha/docs/alpha-rendered.html");
   });
 
   it("retries a name raced by another creator using create-only writes", async () => {
