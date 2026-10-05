@@ -29,18 +29,13 @@
 //      no source declaration shows. `--dist <dir>` overrides the
 //      directory (behavioral tests).
 //
-// - Binary half (`--binary <path>` only, D-04 proof (b)): reads the
-//   compiled Tauri binary and asserts the CSP tauri-codegen compiled in
-//   carries no script-src blob:. Codegen stores each directive as its
-//   name directly followed by its source list (`script-src'self'`), and
-//   that form reflects the effective config, overlays included. The
-//   pretty-printed tauri.conf.json that bundle_update.rs pulls in with
-//   include_str! is NOT the shipped CSP, so the codegen form must be
-//   present or the scan fails closed. Wired into the Makefile's
-//   `release-checks` recipe between the debug no-bundle Tauri build and
-//   the artifact prune; `release-preflight` inherits it. Tauri's nonce
-//   placeholder (`script-src__TAURI_SCRIPT_NONCE__`) is not a source
-//   list and is ignored.
+// - Binary half (`--binary <path>` only, D-04 proof (b)): executes the host-native
+//   compiled app with fixed argv `--print-compiled-csp`. This headless diagnostic
+//   reads the same generated Context used by desktop startup, including the
+//   runtime devCsp fallback. No window, plugin or service is initialized. The
+//   guard requires its versioned report and validates all script directive
+//   fallbacks; missing/invalid output, execution errors and timeout fail closed.
+//   Linker string-pool adjacency and include_str! source copies prove nothing.
 //
 // Needle scope, deliberately narrow (D-05): `new Worker(blobUrl)` fetches
 // the worker script under worker-src, which keeps `'self' blob:`, so a
@@ -50,18 +45,11 @@
 // (SEC-02) and the runtime CSP itself. Missing dist or binary is a usage
 // error (exit 1), not an environmental skip.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-// Binary half, matched at each `script-src` occurrence. Codegen form: the
-// directive name immediately followed by its source list (quoted keywords,
-// scheme or scheme://host sources).
-const CODEGEN_SCRIPT_SRC =
-  /^script-src(?:-elem)?((?:\s*(?:'[^'\x00-\x1f]*'|[a-z][a-z0-9+.-]*:(?:\/\/[^\s'"\x00-\x1f]*)?))+)/;
-// JSON form (the include_str! copy of tauri.conf.json), after its opening quote.
-const JSON_SCRIPT_SRC = /^script-src(?:-elem)?"\s*:\s*"([^"]*)"/;
 
 const violations = [];
 let summary = "";
@@ -240,34 +228,54 @@ function checkBinary(binaryPath) {
     console.error(`csp-blob: --binary path does not exist: ${binaryPath}`);
     process.exit(1);
   }
-  // A Linux debug binary exceeds V8's ~512 MiB string limit, so search the
-  // raw bytes and decode only a window at each hit (latin1 maps bytes 1:1).
-  const bytes = readFileSync(binaryPath);
-  const codegen = [];
-  const json = [];
-  for (let at = bytes.indexOf("script-src"); at !== -1; at = bytes.indexOf("script-src", at + 1)) {
-    const text = bytes.subarray(at, at + 1024).toString("latin1");
-    const codegenMatch = text.match(CODEGEN_SCRIPT_SRC);
-    const jsonMatch = bytes[at - 1] === 0x22 ? text.match(JSON_SCRIPT_SRC) : null;
-    if (codegenMatch) codegen.push(codegenMatch[1].trim());
-    if (jsonMatch) json.push(jsonMatch[1]);
-  }
-  if (codegen.length === 0) {
-    violations.push(
-      `${binaryPath} carries no codegen CSP script-src serialization — ` +
-        "wrong artifact or the tauri-codegen format changed; D-04 proof (b) cannot be asserted, failing closed",
-    );
+  let report;
+  try {
+    const output = execFileSync(resolve(binaryPath), ["--print-compiled-csp"], {
+      encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    report = JSON.parse(output);
+  } catch (error) {
+    violations.push(`${binaryPath} compiled CSP diagnostic failed; D-04 proof (b) fails closed (${error instanceof Error ? error.message : error})`);
     return;
   }
-  for (const value of [...codegen, ...json]) {
-    if (value.includes("blob:")) {
-      violations.push(
-        `${binaryPath} embedded CSP script-src carries blob: ("${value}") — ` +
-          "drop script-src blob: from src-tauri/tauri.conf.json (SEC-01, D-04 proof (b))",
-      );
-    }
+  if (!report || report.kind !== "maru.compiled-csp.v1" || report.csp == null) {
+    violations.push(`${binaryPath} has no valid compiled CSP diagnostic; D-04 proof (b) fails closed`);
+    return;
   }
-  summary = `csp-blob: ${binaryPath} embedded CSP script-src carries no blob: (compiled source list: "${codegen[0]}")`;
+  const directives = {};
+  try {
+    const entries = typeof report.csp === "string"
+      ? report.csp.split(";").filter((item) => item.trim()).map((item) => {
+          const [name, ...sources] = item.trim().split(/\s+/);
+          return [name, sources.join(" ")];
+        })
+      : typeof report.csp === "object" && !Array.isArray(report.csp)
+        ? Object.entries(report.csp)
+        : (() => { throw new Error("CSP must be a policy string or directive map"); })();
+    for (const [name, sources] of entries) {
+      if (typeof name !== "string" || !/^[a-z][a-z0-9-]*$/.test(name) || Object.hasOwn(directives, name)) throw new Error("Invalid or duplicate CSP directive");
+      if (typeof sources === "string") directives[name] = sources;
+      else if (Array.isArray(sources) && sources.every((source) => typeof source === "string")) directives[name] = sources.join(" ");
+      else throw new Error("Invalid CSP source list");
+    }
+    // Element and attribute policies each fall back through script-src, then
+    // default-src. An elem-only directive must not hide an unsafe fallback.
+    for (const name of ["script-src", "script-src-elem", "script-src-attr"]) {
+      const governing = Object.hasOwn(directives, name) ? name
+        : Object.hasOwn(directives, "script-src") ? "script-src" : "default-src";
+      if (!Object.hasOwn(directives, governing)) throw new Error(`${name} has no governing restriction`);
+      if (directives[governing].toLowerCase().includes("blob:")) {
+        violations.push(`${binaryPath} compiled CSP ${governing} carries blob: ("${directives[governing]}") — SEC-01, D-04 proof (b)`);
+      }
+    }
+  } catch (error) {
+    violations.push(`${binaryPath} malformed compiled CSP; D-04 proof (b) fails closed (${error instanceof Error ? error.message : error})`);
+    return;
+  }
+  const governing = directives["script-src"] ?? directives["default-src"];
+  summary = `csp-blob: ${binaryPath} compiled context CSP carries no blob: (compiled source list: "${governing}")`;
+
 }
 
 const args = parseArgs(process.argv.slice(2));

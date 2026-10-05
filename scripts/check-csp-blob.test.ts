@@ -3,10 +3,11 @@
 // needle or a desynced scanner fails here instead of passing silently.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { pathToFileURL } from "node:url";
 
 const guardScript = resolve(process.cwd(), "scripts/check-csp-blob.mjs");
 let fixtureDir: string | null = null;
@@ -19,6 +20,26 @@ function fixture(files: Record<string, string>): string {
 
 function runGuard(...args: string[]) {
   return spawnSync(process.execPath, [guardScript, ...args], { encoding: "utf8" });
+}
+
+// Portable subprocess seam: intercept only the fixed compiled-app diagnostic,
+// not filesystem reads or the guard process. No generated executable fixture.
+function compiledReport(output: string, failure = false) {
+  const dir = fixture({ "response.txt": output });
+  const hook = join(dir, "diagnostic-hook.mjs");
+  const called = join(dir, "diagnostic-call.json");
+  writeFileSync(hook, [
+    'import childProcess from "node:child_process";',
+    'import { syncBuiltinESMExports } from "node:module";',
+    'import { readFileSync, writeFileSync } from "node:fs";',
+    `childProcess.execFileSync = (file, args, options) => {`,
+    `  writeFileSync(${JSON.stringify(called)}, JSON.stringify({ file, args, options }));`,
+    failure ? '  throw new Error("diagnostic failed or timed out");' : `  return readFileSync(${JSON.stringify(join(dir, "response.txt"))}, "utf8");`,
+    '};',
+    'syncBuiltinESMExports();',
+  ].join("\n"));
+  const result = spawnSync(process.execPath, ["--import", pathToFileURL(hook).href, guardScript, "--binary", process.execPath], { encoding: "utf8" });
+  return { ...result, invocation: JSON.parse(readFileSync(called, "utf8")) as { file: string; args: string[]; options: Record<string, unknown> } };
 }
 
 const probeConf = resolve(process.cwd(), "src-tauri/tauri.__csp_probe__.conf.json");
@@ -101,28 +122,57 @@ describe("check-csp-blob.mjs dist half", () => {
   });
 });
 
-describe("check-csp-blob.mjs binary half", () => {
-  it("fails on blob: in the codegen form the binary actually ships", () => {
-    const bin = join(fixture({ maru: "\u0000script-src'self' blob:style-src'self'\u0000" }), "maru");
-    const result = runGuard("--binary", bin);
+describe("check-csp-blob.mjs compiled context half", () => {
+  const report = (csp: unknown) => JSON.stringify({ kind: "maru.compiled-csp.v1", csp });
+
+  it("reads the actual binary with fixed argv and bounded headless execution", () => {
+    const result = compiledReport(report({ "script-src": "'self'", "worker-src": "'self' blob:" }));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`compiled source list: "'self'"`);
+    expect(result.invocation).toEqual({ file: resolve(process.execPath), args: ["--print-compiled-csp"], options: { encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] } });
+  });
+
+  it.each([
+    { "script-src": "'self' blob:" },
+    { "script-src": "'self'", "script-src-elem": ["'self'", "blob:"] },
+    { "script-src": "'self'", "script-src-attr": "BLOB:" },
+    { "default-src": "'self' blob:" },
+    { "script-src-elem": "'self'", "default-src": "blob:" },
+    "script-src 'self' blob:; worker-src 'self' blob:",
+  ])("rejects blob in explicit and fallback script policies: %j", (csp) => {
+    const result = compiledReport(report(csp));
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("carries blob:");
   });
 
-  it("passes a clean codegen form and ignores the nonce placeholder", () => {
-    const bin = join(
-      fixture({ maru: "script-src'self'style-src'self'\u0000script-src__TAURI_SCRIPT_NONCE__" }),
-      "maru",
-    );
-    const result = runGuard("--binary", bin);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain(`compiled source list: "'self'"`);
+  it.each([null, [], 5, {}, { "script-src-elem": "'self'" }, { "script-src": 42 }, { "script-src": ["'self'", 42] }, "script-src blob:; script-src 'self'"])("fails closed on missing, malformed or duplicate policy: %j", (csp) => {
+    const result = compiledReport(report(csp));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("fails closed");
   });
 
-  it("fails closed when only the include_str! JSON copy is present", () => {
-    const bin = join(fixture({ maru: '"script-src": "\'self\'",' }), "maru");
+  it.each(["", "not json", JSON.stringify({ "script-src": "'self'" }), JSON.stringify({ kind: "source-copy", csp: { "script-src": "'self'" } })])("rejects source copies and invalid diagnostic output", (output) => {
+    const result = compiledReport(output);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("fails closed");
+  });
+
+  it("fails closed on diagnostic execution failure", () => {
+    const result = compiledReport(report({ "script-src": "'self'" }), true);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("diagnostic failed or timed out");
+  });
+
+  it("accepts a policy string and a restrictive default fallback", () => {
+    const result = compiledReport(report("default-src 'none'; worker-src 'self' blob:"));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`compiled source list: "'none'"`);
+  });
+
+  it("rejects a non-executable source JSON file instead of scanning its strings", () => {
+    const bin = join(fixture({ maru: JSON.stringify({ "script-src": "'self'" }) }), "maru");
     const result = runGuard("--binary", bin);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("failing closed");
+    expect(result.stderr).toContain("fails closed");
   });
 });

@@ -516,6 +516,14 @@ retention, and the per-language and per-crate totals table appears in the
 run's Job Summary. There is no threshold, so a lower number never fails
 anything.
 
+The compiled CSP gate invokes the built host-native desktop binary with
+`--print-compiled-csp`. This headless diagnostic reports the runtime-effective
+CSP from the same generated Tauri Context used by startup (including `devCsp`
+fallback when applicable), before plugins, services, or windows initialize.
+The guard rejects absent or malformed policies, unsafe script directive
+fallbacks, execution failures, and timeouts. Binary string layout and embedded
+source JSON are not evidence of the effective policy.
+
 Generated Rust executable test fixtures use
 `src-tauri/src/test_support.rs::write_executable_fixture`, including rewrites,
 with the existing script bytes and permission mode. On Unix the helper waits
