@@ -38,6 +38,9 @@ const NODE_ENV: &str = "MARU_NODE_PATH";
 /// Millisecond timeout override, so tests can exercise the kill path quickly.
 const TIMEOUT_ENV: &str = "MARU_ARCHIFY_TIMEOUT_MS";
 
+#[cfg(test)]
+static ENGINE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchifyValidationReceipt {
@@ -307,6 +310,8 @@ fn stage_candidate(
 /// Validate the exact bytes already read through gallery containment guards.
 /// The pinned schema validator runs without rendering or source-file writes.
 pub(crate) fn validate_sibling_schema(body: &str, engine: Option<PathBuf>) -> Result<(), IpcError> {
+    #[cfg(test)]
+    let _environment = ENGINE_ENV_LOCK.lock().unwrap();
     let engine = engine.map_or_else(resolve_engine_path, Ok)?;
     let validator = engine
         .parent()
@@ -420,12 +425,11 @@ pub mod ipc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use tempfile::TempDir;
 
     /// Env-var overrides are process-global, so every test that resolves the
     /// engine or node serializes here.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     const VALID_SPEC: &str = r#"{
   "schema_version": 1,
@@ -448,7 +452,7 @@ mod tests {
 }"#;
 
     fn lock_env() -> MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap()
+        ENGINE_ENV_LOCK.lock().unwrap()
     }
 
     struct EnvRestore {
