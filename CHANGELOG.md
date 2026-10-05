@@ -8,6 +8,17 @@ because releases cut frequently during active development. Versions before
 Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
+
+## v1.1.17 - Structured Canvas (2026-10-05)
+
+- Add pinned Archify 3.0.0 interchange and architecture/workflow generation with strict validation, preview, scoped apply, stale-result rejection and one-step undo.
+- Copy validated Architecture gallery specs into new Diagram documents without modifying source submodules or overwriting existing files.
+- Preserve legacy v7/v8 documents through schema v9 migration and guarded backups; conditional saves compare the exact loaded file bytes.
+- Bundle the pinned engine in desktop artifacts, resolve installed Node through the existing runtime paths, and preserve dirty documents when cancelling new-generation replacement.
+- Validate imports against pinned schemas, enforce UTF-8 payload budgets and portable output paths, and choose semantic export types correctly.
+
+This release delivers the architecture/workflow MVP for #433. Sequence/dataflow/lifecycle editing, verified HTML publication and exploration remain open in P2-P4.
+
 ## v1.1.16 - 2026-10-04 - Recovered Rhythm
 
 - **Calendar jobs can recover missed daily fires (#420).** An opt-in
