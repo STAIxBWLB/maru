@@ -5,7 +5,8 @@
 //! the safety rules in `studio/mod.rs` and the workspace write-allow guard.
 //!
 use crate::atomic_file::{
-    with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
+    with_path_transactions, write_atomic, write_atomic_create, PathTransactionLease,
+    PathTransactionRequest,
 };
 use crate::document::revision_for;
 use crate::ipc_error::{IpcError, DOCUMENT_CONFLICT};
@@ -179,6 +180,33 @@ fn diagram_save_document_in_transaction(
     lease.ensure_workspace_registry()?;
     let path = diagram_file_path(&workspace, &name)?;
     lease.ensure_covered(vec![path.clone()])?;
+    // An empty expected revision means create-only. Admission and the
+    // no-clobber publish both enforce absence, including external creators.
+    if expected_revision.as_deref() == Some("") {
+        assert_maru_can_write(&workspace, WorkspaceWriteAction::Create)?;
+        if path.exists() {
+            return Err(IpcError {
+                code: DOCUMENT_CONFLICT.to_string(),
+                message: "Diagram name already exists".to_string(),
+            });
+        }
+        lease.before_effect()?;
+        let payload = if body.ends_with('\n') {
+            body
+        } else {
+            format!("{body}\n")
+        };
+        return write_atomic_create(&path, payload.as_bytes()).map_err(|message| {
+            if path.exists() {
+                IpcError {
+                    code: DOCUMENT_CONFLICT.to_string(),
+                    message,
+                }
+            } else {
+                IpcError::from(message)
+            }
+        });
+    }
     let action = if path.is_file() {
         WorkspaceWriteAction::Modify
     } else {
@@ -1204,6 +1232,30 @@ mod tests {
         assert_eq!(err.code, DOCUMENT_CONFLICT);
         let loaded = diagram_load_document(work, "keep".into()).unwrap();
         assert_eq!(loaded, format!("{body}\n"));
+    }
+
+    #[test]
+    fn create_only_save_never_overwrites_an_existing_document() {
+        let (_tmp, work) = setup_workspace();
+        diagram_save_document(
+            work.clone(),
+            "copy".into(),
+            "original".into(),
+            Some("".into()),
+        )
+        .unwrap();
+        let err = diagram_save_document(
+            work.clone(),
+            "copy".into(),
+            "replacement".into(),
+            Some("".into()),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, DOCUMENT_CONFLICT);
+        assert_eq!(
+            diagram_load_document(work, "copy".into()).unwrap(),
+            "original\n"
+        );
     }
 
     #[test]

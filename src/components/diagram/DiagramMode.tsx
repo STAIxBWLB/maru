@@ -1,3 +1,4 @@
+import { subscribeDiagramHandoff, takeDiagramHandoff } from "../../lib/diagram/handoff";
 import { setError } from "../../lib/errorStore";
 import { Eye, Network } from "lucide-react";
 import {
@@ -137,6 +138,7 @@ import { LeftPanel } from "./panels/LeftPanel";
 import { RightPanel } from "./panels/RightPanel";
 import { Ribbon } from "./ribbon/Ribbon";
 import { ImportExportDialog } from "./modals/ImportExportDialog";
+import { GenerateDiagramDialog } from "./modals/GenerateDiagramDialog";
 import { MappingPreviewDialog } from "./modals/MappingPreviewDialog";
 import { MemoDialog } from "./modals/MemoDialog";
 import {
@@ -280,6 +282,10 @@ function DiagramShell({
   const coalescer = useDiagramCoalescer();
   const gestureCoalescers = useDiagramGestureCoalescers();
   const sessionKey = workPath ?? "__no-workspace__";
+  const handoffOpening = useRef<string | null>(null);
+  useEffect(() => {
+    handoffOpening.current = null;
+  }, [workPath]);
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
   const edges = doc.edges;
@@ -313,6 +319,7 @@ function DiagramShell({
     targetPatternId: string;
   } | null>(null);
   const [ioDialog, setIoDialog] = useState<"import" | "export" | null>(null);
+  const [generateOpen, setGenerateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [memoOpen, setMemoOpen] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -452,12 +459,12 @@ function DiagramShell({
       try {
         const settings = await readMaruSettings(workPath);
         const lastDocument = settings.diagram.lastDocument ?? readLastDocumentFallback(workPath);
-        if (!lastDocument || cancelled) return;
+        if (!lastDocument || cancelled || handoffOpening.current === workPath) return;
         if (getDiagramSession(sessionKey).activeName) return;
         const current = store.getState().doc;
         if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
         const { doc: restored, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, lastDocument);
-        if (cancelled) return;
+        if (cancelled || handoffOpening.current === workPath) return;
         store.setState(replaceDoc(restored));
         setActiveName(lastDocument);
         setLastSavedBody(serializeDoc(restored));
@@ -1125,6 +1132,21 @@ function DiagramShell({
     [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
 
+  // Subscribe first, then drain any request queued before this lazy mount.
+  useEffect(() => {
+    if (!workPath) return;
+    const openPending = () => {
+      const name = takeDiagramHandoff(workPath);
+      if (name) {
+        handoffOpening.current = workPath;
+        void handleOpen(name);
+      }
+    };
+    const unsubscribe = subscribeDiagramHandoff(openPending);
+    openPending();
+    return unsubscribe;
+  }, [handleOpen, workPath]);
+
   const handleDeleteFile = useCallback(
     async (name: string) => {
       if (!workPath) return;
@@ -1618,6 +1640,7 @@ function DiagramShell({
           onSave: handleSave,
           onExport: () => setIoDialog("export"),
           onTemplates: () => openGallery("apply"),
+          onGenerate: () => setGenerateOpen(true),
           onHistory: () => setHistoryOpen(true),
           onImport: () => setIoDialog("import"),
           onCopyPng: () => void handleCopyPng(),
@@ -1819,6 +1842,14 @@ function DiagramShell({
         onImportDoc={handleImportDoc}
         onImportDataset={handleImportDataset}
         onClose={() => setIoDialog(null)}
+      />
+      <GenerateDiagramDialog
+        open={generateOpen}
+        dirty={dirty}
+        selectionNodeIds={[...selection.nodes]}
+        workPath={workPath}
+        onImportDoc={handleImportDoc}
+        onClose={() => setGenerateOpen(false)}
       />
       <VersionHistoryDialog
         open={historyOpen}

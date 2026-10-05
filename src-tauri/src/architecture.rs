@@ -4,7 +4,7 @@
 //! committed, and it grants the asset protocol one listed file at a time.
 
 use crate::git::list_workspace_submodules;
-use crate::vault::normalize_existing_dir;
+use crate::vault::{lexical_normalize, normalize_existing_dir};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +31,19 @@ pub struct ArchitectureBlueprint {
     pub modified_at: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiblingSpec {
+    /// Raw `<slug>.architecture.json` body.
+    pub spec_json: String,
+    pub title: Option<String>,
+    /// Workspace-relative submodule path the spec was proven to live in.
+    pub submodule: String,
+    /// Submodule HEAD sha, best effort (read from the gitdir, no subprocess).
+    pub commit: Option<String>,
+}
+
+#[derive(Clone)]
 struct Found {
     slug: String,
     group: &'static str,
@@ -131,20 +144,20 @@ pub fn list_architecture_blueprints(
 /// `..` and symlinks before the comparison.
 // ponytail: rescans (git submodule foreach, ~0.6 s on the real workspace) per
 // selection; cache the listing per workspace if that latency starts to show.
-fn resolve_listed_blueprint(workspace_path: &str, html_path: &str) -> Result<PathBuf, String> {
+fn resolve_listed_found(workspace_path: &str, html_path: &str) -> Result<Found, String> {
     let root = normalize_existing_dir(workspace_path)?;
     let target = root
         .join(html_path)
         .canonicalize()
         .map_err(|err| format!("Cannot open blueprint: {err}"))?;
-    if scan_blueprints(&root)?
-        .iter()
-        .any(|found| found.path == target)
-    {
-        Ok(target)
-    } else {
-        Err("Not a listed architecture blueprint".to_string())
-    }
+    scan_blueprints(&root)?
+        .into_iter()
+        .find(|found| found.path == target)
+        .ok_or_else(|| "Not a listed architecture blueprint".to_string())
+}
+
+fn resolve_listed_blueprint(workspace_path: &str, html_path: &str) -> Result<PathBuf, String> {
+    Ok(resolve_listed_found(workspace_path, html_path)?.path)
 }
 
 /// Grants that single file (never its directory) to the asset protocol.
@@ -160,8 +173,122 @@ pub fn prepare_architecture_blueprint<R: tauri::Runtime>(
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// Sibling specs larger than this are rejected before parsing.
+const MAX_SPEC_BYTES: u64 = 1024 * 1024;
+
+/// Best-effort HEAD sha of a submodule, read from its gitdir without spawning
+/// git: `<submodule>/.git` is a `gitdir:` pointer file (or a real directory),
+/// and HEAD names a ref resolved from loose refs or packed-refs.
+fn submodule_head_sha(repo_root: &Path) -> Option<String> {
+    let is_sha = |value: &str| value.len() >= 40 && value.chars().all(|c| c.is_ascii_hexdigit());
+    let dotgit = repo_root.join(".git");
+    let gitdir = if dotgit.is_dir() {
+        dotgit
+    } else {
+        let pointer = fs::read_to_string(&dotgit).ok()?;
+        let target = pointer.trim().strip_prefix("gitdir:")?.trim();
+        if Path::new(target).is_absolute() {
+            PathBuf::from(target)
+        } else {
+            lexical_normalize(&repo_root.join(target))
+        }
+    };
+    let head = fs::read_to_string(gitdir.join("HEAD")).ok()?;
+    let head = head.trim();
+    if is_sha(head) {
+        return Some(head.to_string());
+    }
+    let reference = head.strip_prefix("ref:")?.trim();
+    if let Ok(loose) = fs::read_to_string(gitdir.join(reference)) {
+        let sha = loose.trim();
+        if is_sha(sha) {
+            return Some(sha.to_string());
+        }
+    }
+    let packed = fs::read_to_string(gitdir.join("packed-refs")).ok()?;
+    for line in packed.lines() {
+        let line = line.trim();
+        if line.starts_with('#') || line.starts_with('^') {
+            continue;
+        }
+        if let Some((sha, name)) = line.split_once(' ') {
+            if name.trim() == reference && is_sha(sha) {
+                return Some(sha.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Reads the `<slug>.architecture.json` sibling of a listed gallery blueprint
+/// (#433). A safe listed HTML proves nothing about the JSON, so the sibling
+/// gets its own checks: canonicalize, stay inside the same submodule (a
+/// symlink escaping the submodule root is refused), size cap, and a parse
+/// requiring the complete pinned architecture schema.
+#[cfg(test)]
+fn architecture_read_sibling_spec(
+    workspace_path: String,
+    html_path: String,
+) -> Result<SiblingSpec, String> {
+    read_sibling_spec_with_engine(workspace_path, html_path, None)
+}
+
+fn read_sibling_spec_with_engine(
+    workspace_path: String,
+    html_path: String,
+    engine: Option<PathBuf>,
+) -> Result<SiblingSpec, String> {
+    let root = normalize_existing_dir(&workspace_path)?;
+    // Fresh listing scan: never trust the caller's path.
+    let found = resolve_listed_found(&workspace_path, &html_path)?;
+    let repo_root = root
+        .join(&found.repo_path)
+        .canonicalize()
+        .map_err(|err| format!("Cannot open submodule: {err}"))?;
+    let spec = found
+        .path
+        .with_file_name(format!("{}{SPEC_SUFFIX}", found.slug));
+    let canonical = spec
+        .canonicalize()
+        .map_err(|_| format!("Sibling spec not found: {}{SPEC_SUFFIX}", found.slug))?;
+    if !canonical.starts_with(&repo_root) {
+        return Err("Sibling spec escapes its submodule".to_string());
+    }
+    let size = fs::metadata(&canonical)
+        .map_err(|err| format!("Cannot stat sibling spec: {err}"))?
+        .len();
+    if size > MAX_SPEC_BYTES {
+        return Err(format!(
+            "Sibling spec too large ({size} bytes, max {MAX_SPEC_BYTES})"
+        ));
+    }
+    let body =
+        fs::read_to_string(&canonical).map_err(|err| format!("Cannot read sibling spec: {err}"))?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|err| format!("Sibling spec is not valid JSON: {err}"))?;
+    if value.get("diagram_type").and_then(|v| v.as_str()) != Some("architecture") {
+        return Err("Sibling spec is not an architecture spec".to_string());
+    }
+    if !value.get("schema_version").is_some_and(|v| v.is_number()) {
+        return Err("Sibling spec has no numeric schema_version".to_string());
+    }
+    crate::archify::validate_sibling_schema(&body, engine).map_err(|err| err.message)?;
+    let title = value
+        .pointer("/meta/title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(str::to_string);
+    Ok(SiblingSpec {
+        spec_json: body,
+        title,
+        commit: submodule_head_sha(&repo_root),
+        submodule: found.repo_path,
+    })
+}
+
 pub mod ipc {
-    use super::ArchitectureBlueprint;
+    use super::{ArchitectureBlueprint, SiblingSpec};
 
     #[tauri::command]
     pub async fn list_architecture_blueprints(
@@ -185,6 +312,20 @@ pub mod ipc {
         })
         .await
         .map_err(|err| format!("prepare_architecture_blueprint_task_failed: {err}"))?
+    }
+
+    #[tauri::command]
+    pub async fn architecture_read_sibling_spec(
+        app: tauri::AppHandle,
+        workspace_path: String,
+        html_path: String,
+    ) -> Result<SiblingSpec, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let engine = crate::archify::bundled_engine_path(&app).map_err(|err| err.message)?;
+            super::read_sibling_spec_with_engine(workspace_path, html_path, Some(engine))
+        })
+        .await
+        .map_err(|err| format!("architecture_read_sibling_spec_task_failed: {err}"))?
     }
 }
 
@@ -233,7 +374,7 @@ mod tests {
                 ),
                 (
                     "docs/architecture/alpha.architecture.json",
-                    r#"{"meta":{"title":"Alpha Service"}}"#,
+                    r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Alpha Service","output":"alpha.html"},"components":[{"id":"app","type":"backend","label":"App"}]}"#,
                 ),
                 ("docs/architecture/notes.html", "not a viewer"),
             ],
@@ -278,6 +419,18 @@ mod tests {
 
     fn root_arg(root: &Path) -> String {
         root.to_string_lossy().into_owned()
+    }
+
+    fn git_out(dir: &Path, args: &[&str]) -> String {
+        let mut command = Command::new("git");
+        crate::git::configure_git(&mut command);
+        let output = command.args(args).current_dir(dir).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
     #[test]
@@ -439,5 +592,150 @@ mod tests {
             .await
             .is_err());
         });
+    }
+
+    #[test]
+    fn sibling_spec_returns_spec_and_provenance() {
+        let (_tmp, root) = workspace();
+
+        let spec = architecture_read_sibling_spec(
+            root_arg(&root),
+            "dev/alpha/docs/architecture/alpha-rendered.html".to_string(),
+        )
+        .unwrap();
+
+        assert!(spec.spec_json.contains("Alpha Service"));
+        assert_eq!(spec.title.as_deref(), Some("Alpha Service"));
+        assert_eq!(spec.submodule, "dev/alpha");
+        let head = git_out(&root.join("dev/alpha"), &["rev-parse", "HEAD"]);
+        assert_eq!(spec.commit.as_deref(), Some(head.as_str()));
+    }
+
+    #[test]
+    fn sibling_spec_missing_is_a_typed_diagnostic() {
+        let (_tmp, root) = workspace();
+
+        let err = architecture_read_sibling_spec(
+            root_arg(&root),
+            "sites/beta/docs/beta-rendered.html".to_string(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "Sibling spec not found: beta.architecture.json");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sibling_spec_symlink_escaping_the_submodule_is_refused() {
+        let (tmp, root) = workspace();
+        let outside = tmp.path().join("escaped.architecture.json");
+        fs::write(
+            &outside,
+            r#"{"schema_version":1,"diagram_type":"architecture"}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            &outside,
+            root.join("sites/gamma/architecture/gamma.architecture.json"),
+        )
+        .unwrap();
+
+        let err = architecture_read_sibling_spec(
+            root_arg(&root),
+            "sites/gamma/architecture/gamma-rendered.html".to_string(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, "Sibling spec escapes its submodule");
+    }
+
+    #[test]
+    fn sibling_spec_oversize_is_refused() {
+        let (_tmp, root) = workspace();
+        let padded = format!(
+            r#"{{"schema_version":1,"diagram_type":"architecture","pad":"{}"}}"#,
+            "x".repeat(MAX_SPEC_BYTES as usize)
+        );
+        fs::write(
+            root.join("sites/gamma/architecture/gamma.architecture.json"),
+            padded,
+        )
+        .unwrap();
+
+        let err = architecture_read_sibling_spec(
+            root_arg(&root),
+            "sites/gamma/architecture/gamma-rendered.html".to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err.starts_with("Sibling spec too large"), "{err}");
+    }
+
+    #[test]
+    fn sibling_spec_wrong_type_or_version_is_refused() {
+        let (_tmp, root) = workspace();
+        let spec_path = root.join("sites/gamma/architecture/gamma.architecture.json");
+        let viewer = "sites/gamma/architecture/gamma-rendered.html".to_string();
+
+        fs::write(
+            &spec_path,
+            r#"{"schema_version":1,"diagram_type":"workflow"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            architecture_read_sibling_spec(root_arg(&root), viewer.clone()).unwrap_err(),
+            "Sibling spec is not an architecture spec"
+        );
+
+        fs::write(
+            &spec_path,
+            r#"{"schema_version":"1","diagram_type":"architecture"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            architecture_read_sibling_spec(root_arg(&root), viewer).unwrap_err(),
+            "Sibling spec has no numeric schema_version"
+        );
+    }
+
+    #[test]
+    fn sibling_spec_rejects_future_schema_missing_components_and_bad_component_shapes() {
+        let (_tmp, root) = workspace();
+        let path = root.join("dev/alpha/docs/architecture/alpha.architecture.json");
+        for body in [
+            r#"{"schema_version":99,"diagram_type":"architecture","meta":{"title":"Future","output":"future.html"},"components":[{"id":"app","type":"backend","label":"App"}]}"#,
+            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Missing","output":"x.html"}}"#,
+            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Invalid","output":"x.html"},"components":[{"id":"app","type":"bogus","label":"App"}]}"#,
+        ] {
+            fs::write(&path, body).unwrap();
+            let err = architecture_read_sibling_spec(
+                root_arg(&root),
+                "dev/alpha/docs/architecture/alpha-rendered.html".into(),
+            )
+            .unwrap_err();
+            assert!(err.contains("pinned architecture schema"), "{err}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), body);
+            assert!(!root.join(".maru/diagram-gen").exists());
+        }
+    }
+
+    #[test]
+    fn sibling_spec_requires_a_listed_html_path() {
+        let (_tmp, root) = workspace();
+
+        for path in [
+            "dev/stray/docs/architecture/stray-rendered.html".to_string(),
+            "dev/alpha/docs/architecture/alpha.architecture.json".to_string(),
+        ] {
+            let err = architecture_read_sibling_spec(root_arg(&root), path.clone()).unwrap_err();
+            assert_eq!(err, "Not a listed architecture blueprint", "{path}");
+        }
+        // A viewer that does not exist fails even earlier, at canonicalization.
+        assert!(architecture_read_sibling_spec(
+            root_arg(&root),
+            "dev/alpha/docs/architecture/missing-rendered.html".to_string(),
+        )
+        .unwrap_err()
+        .starts_with("Cannot open blueprint:"));
     }
 }

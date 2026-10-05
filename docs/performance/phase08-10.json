@@ -2289,6 +2289,126 @@
         "workerProof": "The registered wrapper futures are awaited on the async runtime and return the listing and the grant through the blocking worker; a stray-clone path is rejected through the same wrapper.",
         "platformScope": "Executed on macOS against disposable git repositories with real dev/ and sites/ submodules, a stray clone and symlinks escaping the workspace. No Windows run claimed."
       }
+    },
+    {
+      "name": "architecture_read_sibling_spec",
+      "module": "src-tauri/src/architecture.rs",
+      "registrationPath": "src-tauri/src/lib.rs::architecture::ipc::architecture_read_sibling_spec",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/architecture.rs::ipc::architecture_read_sibling_spec awaits spawn_blocking before the rescan and the spec read.",
+        "src-tauri/src/architecture.rs::architecture_read_sibling_spec proves listing membership through resolve_listed_found, then canonicalizes the sibling spec, enforces submodule containment and the 1 MiB cap, and parses the JSON schema fields.",
+        "src-tauri/src/architecture.rs::resolve_listed_found canonicalizes the requested html path and accepts it only when a fresh scan_blueprints run lists the same canonical file.",
+        "src-tauri/src/architecture.rs::submodule_head_sha reads the submodule gitdir HEAD, the loose ref and packed-refs without spawning git, for the commit provenance."
+      ],
+      "workerBoundary": "src-tauri/src/architecture.rs::ipc::architecture_read_sibling_spec owns its wire Strings, awaits tauri::async_runtime::spawn_blocking around the whole body, and adds architecture_read_sibling_spec_task_failed context to a JoinError. The git submodule listing, directory scans, spec reads and gitdir reads never run on the caller thread.",
+      "syncCallers": [
+        "src-tauri/src/architecture.rs::architecture_read_sibling_spec remains the synchronous domain API used by the wrapper and its tests."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib architecture",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/architecture/ArchitecturePane.tsx",
+          "src/lib/modeAdapters/ArchitectureModeAdapter.tsx"
+        ],
+        "payload": "ArchitecturePane owns the selected blueprint; the sibling spec read feeds the architecture spec inspection and the #433 regeneration flow for the selected viewer.",
+        "terminalNoticeOwner": "ArchitecturePane owns loading, the inline error banner and the selected blueprint; it is the only gallery caller.",
+        "classifier": "n/a: read-only single-spec read, not a file-processing batch",
+        "successRetention": "spec body, title, submodule path and commit provenance returned to the caller",
+        "failureReasons": "typed diagnostic string (not listed, spec missing, escaping symlink, oversize, wrong schema) surfaced through the call-site catch",
+        "singleTerminalNoticeOwner": true
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation: read-only listing rescan, canonicalization, size-capped spec read and .git HEAD ref reads."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "sibling_spec_returns_spec_and_provenance",
+          "sibling_spec_missing_is_a_typed_diagnostic",
+          "sibling_spec_symlink_escaping_the_submodule_is_refused",
+          "sibling_spec_oversize_is_refused",
+          "sibling_spec_wrong_type_or_version_is_refused",
+          "sibling_spec_requires_a_listed_html_path"
+        ],
+        "workerProof": "The registered wrapper awaits spawn_blocking around the whole body; the domain function is exercised through the same module tests that drive the listing and grant wrappers.",
+        "platformScope": "Executed on macOS against disposable git repositories with real dev/ and sites/ submodules, a stray clone and a symlinked spec escaping its submodule. No Windows run claimed."
+      }
+    },
+    {
+      "name": "archify_validate_candidate",
+      "module": "src-tauri/src/archify.rs",
+      "registrationPath": "src-tauri/src/lib.rs::archify::ipc::archify_validate_candidate",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/archify.rs::ipc::archify_validate_candidate awaits spawn_blocking before any filesystem or process work.",
+        "src-tauri/src/archify.rs::archify_validate_candidate gates the diagram type and the 512 KiB size cap before staging, then resolves the engine and node and runs the validation.",
+        "src-tauri/src/archify.rs::stage_candidate admits the job-private staging directory and candidate.json through src-tauri/src/atomic_file.rs::with_path_transactions and publishes with write_atomic.",
+        "src-tauri/src/archify.rs::resolve_engine_path honors the MARU_ARCHIFY_ENGINE override then walks up from the current exe and the compile-time manifest dir to sidecars/archify/bin/archify.mjs; src-tauri/src/archify.rs::resolve_node honors MARU_NODE_PATH and probes node --version.",
+        "src-tauri/src/archify.rs::run_engine spawns node with piped stdout/stderr, polls try_wait on the 30s budget and kills on timeout; src-tauri/src/archify.rs::parse_receipt flattens engine diagnostics into errors and warnings."
+      ],
+      "workerBoundary": "src-tauri/src/archify.rs::ipc::archify_validate_candidate owns its wire Strings, awaits tauri::async_runtime::spawn_blocking around the whole body, and adds archify_validate_candidate_task_failed context to a JoinError. The staging writes, the node spawn and the try_wait poll loop never run on the caller thread.",
+      "syncCallers": [
+        "src-tauri/src/archify.rs::archify_validate_candidate remains the synchronous domain API used by the wrapper and its tests."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib archify",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src-tauri/src/archify.rs",
+          "src-tauri/src/lib.rs"
+        ],
+        "payload": "Issue #433 P1 ships the engine adapter first: no frontend caller exists on this branch yet; the Diagram generation flow will invoke it with the workspace path, the diagram type and the candidate JSON it assembled.",
+        "terminalNoticeOwner": "No UI caller exists yet; the typed IpcError codes (archify_invalid_diagram_type, archify_candidate_too_large, archify_engine_unavailable, archify_validate_timeout, archify_engine_failed) are the terminal diagnostic the Diagram generation surface will render.",
+        "classifier": "n/a: single-candidate validation against the pinned engine, not a file-processing batch",
+        "successRetention": "typed ArchifyValidationReceipt (ok, diagramType, errors, warnings, candidateSha256) returned to the caller; the job-private staging directory is removed after every run",
+        "failureReasons": "typed IpcError code plus message returned to the caller; a missing engine or node is archify_engine_unavailable, never a faked success",
+        "singleTerminalNoticeOwner": true
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "<workspace>/.maru/diagram-gen/<jobId>/",
+          "<workspace>/.maru/diagram-gen/<jobId>/candidate.json"
+        ],
+        "aliasPaths": [
+          "physical identity keys captured by PathTransactionRequest in src-tauri/src/atomic_file.rs for the workspace root and existing ancestors of the job directory"
+        ],
+        "postAdmissionPreconditions": "lease.ensure_workspace_registry and lease.ensure_covered re-verify the declared set after admission; assert_maru_can_write(Create) re-runs inside the transaction; write_atomic publishes candidate.json; the job directory is removed best-effort after the engine run ends.",
+        "domainLockOrder": "Shared path-set admission before the workspace write-allow guard and before the staging write; no lock or admission is held across the engine run itself.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions admits the job-private staging directory and candidate.json before any effect."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "rejects_unknown_diagram_type_before_filesystem_work",
+          "rejects_oversize_candidate",
+          "valid_candidate_validates_with_real_engine",
+          "invalid_candidate_returns_errors",
+          "sleeping_node_is_killed_at_timeout",
+          "missing_engine_is_engine_unavailable"
+        ],
+        "workerProof": "The registered wrapper awaits spawn_blocking around the whole body; the domain function stages, spawns the engine and cleans up inside the blocking worker.",
+        "platformScope": "Executed on macOS against temporary workspaces and the real vendored engine; the timeout path uses a fake node script via MARU_NODE_PATH and the missing-engine path uses the MARU_ARCHIFY_ENGINE override seam. No Windows run claimed."
+      }
     }
   ]
 }

@@ -54,6 +54,33 @@ async function waitForProbe(count: number): Promise<Probe> {
   return (await probes())[count - 1];
 }
 
+async function logHandoffDiagnostics(stage: string): Promise<void> {
+  const dom = await browser.execute(() => {
+    const copy = document.querySelector<HTMLButtonElement>('[data-testid="architecture-copy-to-diagram"]');
+    return {
+      diagramFlag: window.localStorage.getItem("maru:diagram:enabled"),
+      mode: {
+        diagram: Boolean(document.querySelector(".diagram-mode")),
+        architecture: Boolean(document.querySelector(".architecture-pane")),
+        mainClass: document.querySelector("main")?.className ?? null,
+      },
+      rail: Array.from(document.querySelectorAll(".activity-rail .activity-button"))
+        .map((button) => ({ label: button.getAttribute("aria-label"), selected: button.classList.contains("active") })),
+      copyButton: copy ? { disabled: copy.disabled, outerHTML: copy.outerHTML.slice(0, 1000) } : null,
+      iframeSrc: document.querySelector<HTMLIFrameElement>(".architecture-frame")?.src ?? null,
+      documentPathLabels: Array.from(document.querySelectorAll('[data-tree-target-path], .doc-tab[title], [role="tab"][title]'))
+        .slice(0, 5).map((item) => item.getAttribute("data-tree-target-path") ?? item.getAttribute("title")),
+      nodeCount: document.querySelectorAll(".maru-diagram-node").length,
+      alerts: Array.from(document.querySelectorAll('[role="alert"]'))
+        .slice(0, 5).map((alert) => (alert.textContent ?? "").slice(0, 400)),
+      bodyText: (document.body.textContent ?? "").slice(0, 1600),
+    };
+  }).catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
+  const files = await fs.readdir(path.join(workspace(), "diagrams"))
+    .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
+  console.error("native_architecture_handoff_diagnostics", JSON.stringify({ stage, dom, files }));
+}
+
 describe("native 설계도 mode", () => {
   // Seeded once for this file's single test: wdio's beforeTest reset wipes
   // the workspace from the second test on, so a new test must seed again.
@@ -63,7 +90,12 @@ describe("native 설계도 mode", () => {
     await fs.writeFile(path.join(source, "docs", "architecture", "probe-rendered.html"), PROBE_HTML);
     await fs.writeFile(
       path.join(source, "docs", "architecture", "probe.architecture.json"),
-      JSON.stringify({ meta: { title: "Probe Blueprint" } }),
+      JSON.stringify({
+        schema_version: 1,
+        diagram_type: "architecture",
+        meta: { title: "Probe Blueprint", output: "probe.html" },
+        components: [{ id: "app", type: "backend", label: "한글 서버" }],
+      }),
     );
     git(source, ["init", "-q"]);
     git(source, ["add", "."]);
@@ -79,6 +111,9 @@ describe("native 설계도 mode", () => {
   });
 
   it("runs the viewer sandboxed, themed, and cut off from the app", async () => {
+    // Explicit standard WebDriver selection tells the service which window
+    // to keep, without its unsupported global-Tauri focus-state probes.
+    await browser.switchToWindow(await browser.getWindowHandle());
     await browser.execute(() => {
       const w = window as unknown as { __architectureProbes?: unknown[] };
       w.__architectureProbes = [];
@@ -114,5 +149,48 @@ describe("native 설계도 mode", () => {
     }, theme);
 
     assert.equal(await browser.getUrl(), appUrl, "the app webview must stay on the app");
+
+    // The Diagram surface has never mounted in this session: this exercises
+    // the lazy handoff, real guarded schema validation and create-only save.
+    const sourceSpec = path.join(workspace(), "dev/probe/docs/architecture/probe.architecture.json");
+    const sourceBefore = await fs.readFile(sourceSpec, "utf8");
+    const copy = await browser.$('[data-testid="architecture-copy-to-diagram"]');
+    await copy.waitForDisplayed({ timeout: 30_000 });
+    await copy.click();
+    await logHandoffDiagnostics("immediate");
+    try {
+      await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node").length) === 1, {
+        timeout: 30_000, timeoutMsg: "cold gallery handoff must open the saved copy",
+      });
+    } catch (error) {
+      await logHandoffDiagnostics("wait-failed");
+      throw error;
+    }
+    assert.match(await (await browser.$(".maru-diagram-node")).getText(), /한글 서버/);
+    const saved = JSON.parse(await fs.readFile(path.join(workspace(), "diagrams/Probe Blueprint.cmd.json"), "utf8"));
+    assert.equal(saved.datasets[0].provenance.origin, "gallery-copy");
+    assert.equal(saved.datasets[0].provenance.repository, "dev/probe");
+    assert.equal(await fs.readFile(sourceSpec, "utf8"), sourceBefore);
+    assert.equal(await fs.readFile(path.join(workspace(), "dev/probe/docs/architecture/probe-rendered.html"), "utf8"), PROBE_HTML);
+
+    const fileTab = await browser.$('[role="tab"][aria-label="파일"]');
+    // Existing ribbon tabs expose their visible label instead of aria-label.
+    if (await fileTab.isExisting()) await fileTab.click();
+    else {
+      const tab = await browser.$('[role="tab"]*=파일');
+      await tab.click();
+    }
+    const generate = await browser.$('button=다이어그램 생성');
+    await generate.click();
+    await (await browser.$('[data-testid="gen-type-select"]')).waitForDisplayed({ timeout: 30_000 });
+    const mermaid = await browser.$('[data-testid="gen-mermaid"]');
+    await mermaid.setValue("flowchart TD\n A[시작] --> B[종료]");
+    await (await browser.$('[data-testid="gen-from-mermaid"]')).click();
+    await (await browser.$('[data-testid="gen-mermaid-preview"]')).waitForDisplayed({ timeout: 30_000 });
+    await (await browser.$('[data-testid="gen-mermaid-apply"]')).click();
+    await browser.waitUntil(async () => (await browser.$$(".maru-diagram-node").length) === 2, {
+      timeout: 30_000, timeoutMsg: "native Mermaid generation must apply two nodes",
+    });
+
   });
 });

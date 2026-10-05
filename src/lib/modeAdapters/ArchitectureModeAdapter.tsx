@@ -3,7 +3,7 @@ import type { ModeAdapterProps } from "../modeRegistry";
 import { useWorkspaceRegistry } from "../workspaceStore";
 
 /** Dedicated lazy 설계도 surface: blueprints live in the private work root's dev/ and sites/ submodules. */
-export function ArchitectureModeAdapter({ commands }: ModeAdapterProps) {
+export function ArchitectureModeAdapter({ scope, commands }: ModeAdapterProps) {
   const registry = useWorkspaceRegistry();
   const workPath =
     registry.activeByVisibility.private ??
@@ -13,9 +13,11 @@ export function ArchitectureModeAdapter({ commands }: ModeAdapterProps) {
   return (
     <ArchitecturePane
       workspacePath={workPath}
+      copyWorkspacePath={scope.workspacePath}
       onRevealInFiles={
         workPath && revealInFiles ? (target) => revealInFiles(workPath, "private", target) : undefined
       }
+      onOpenDiagram={commands.openDiagramDocument}
     />
   );
 }

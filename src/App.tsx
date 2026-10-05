@@ -1,3 +1,4 @@
+import { requestDiagramHandoff } from "./lib/diagram/handoff";
 import { hasDirtyMeetingSourceDrafts } from "./lib/meetingSourceEditorStore";
 import {
   lazy,
@@ -8545,6 +8546,13 @@ export function MainApp() {
               openGraphEntry: (entry) => {
                 setPersistedAppMode("pkm");
                 void selectEntry(entry as VaultEntry, "left");
+              },
+              openDiagramDocument: (documentName) => {
+                if (!diagramEnabled) return;
+                const workspace = inboxWorkspacePath ?? settingsWorkPath;
+                if (!workspace) return;
+                requestDiagramHandoff(workspace, documentName);
+                setPersistedAppMode("diagram");
               },
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,
