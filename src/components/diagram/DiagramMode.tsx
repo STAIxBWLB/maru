@@ -1842,6 +1842,7 @@ function DiagramShell({
       />
       <GenerateDiagramDialog
         open={generateOpen}
+        dirty={dirty}
         selectionNodeIds={[...selection.nodes]}
         workPath={workPath}
         onImportDoc={handleImportDoc}

@@ -22,6 +22,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { isEngineUnavailable } from "../../../lib/archify";
 import { diagramRevision } from "../../../lib/diagram";
 import { withSnapshot } from "../../../lib/diagram/actions";
@@ -54,6 +55,7 @@ export interface GenerateDiagramDialogProps {
   /** Selected node ids at open time; a non-empty list scopes the generation. */
   selectionNodeIds: string[];
   workPath: string | null;
+  dirty?: boolean;
   onImportDoc: (doc: DiagramDoc) => void;
   onClose: () => void;
   /** Test seam: a stubbed host replaces the real agent/engine host. */
@@ -83,6 +85,7 @@ export function GenerateDiagramDialog({
   open,
   selectionNodeIds,
   workPath,
+  dirty = false,
   onImportDoc,
   onClose,
   hostOverride = null,
@@ -204,8 +207,9 @@ export function GenerateDiagramDialog({
 
   const applyDisabled = !candidate || !proposal || blockingDiagnostics.length > 0 || applying;
 
-  const handleApplyNew = () => {
-    if (!candidate) return;
+  const handleApplyNew = async () => {
+    if (!candidate || applying) return;
+    if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
     const projected = projectSemanticCandidate(candidate);
     const base = createEmptyDoc(createDiagramId("doc"));
     const draft: DiagramDoc = {
@@ -249,8 +253,9 @@ export function GenerateDiagramDialog({
     setMermaidPreview({ doc: parsed, diagnostics });
   };
 
-  const handleMermaidApply = () => {
+  const handleMermaidApply = async () => {
     if (!mermaidPreview) return;
+    if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
     onImportDoc(mermaidPreview.doc);
     onClose();
   };

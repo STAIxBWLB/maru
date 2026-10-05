@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { confirmDialog } from "../../../lib/confirmDialog";
 import { withSnapshot } from "../../../lib/diagram/actions";
 import type { GenerationHost } from "../../../lib/diagram/generation";
 import { isSemanticSpecDataset, type SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
@@ -22,6 +23,8 @@ import {
   useDiagramStore,
 } from "../DiagramStoreContext";
 import { GenerateDiagramDialog } from "./GenerateDiagramDialog";
+
+vi.mock("../../../lib/confirmDialog", () => ({ confirmDialog: vi.fn(async () => true) }));
 
 vi.mock("../../../lib/diagram/actions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../lib/diagram/actions")>();
@@ -72,6 +75,7 @@ interface Harness {
 
 interface RenderOpts {
   doc?: DiagramDoc;
+  dirty?: boolean;
   selection?: string[];
   host?: StubHost;
 }
@@ -103,6 +107,7 @@ function renderDialog(opts: RenderOpts = {}): Harness {
           <StoreProbe />
           <GenerateDiagramDialog
             open
+            dirty={opts.dirty ?? false}
             selectionNodeIds={opts.selection ?? []}
             workPath={null}
             hostOverride={opts.host ?? null}
@@ -150,6 +155,8 @@ describe("GenerateDiagramDialog", () => {
 
   beforeEach(() => {
     document.body.innerHTML = "";
+    vi.mocked(confirmDialog).mockReset();
+    vi.mocked(confirmDialog).mockResolvedValue(true);
     probe = null;
     _resetDiagramSharedStoreForTests();
     withSnapshotSpy.mockClear();
@@ -162,6 +169,8 @@ describe("GenerateDiagramDialog", () => {
       harness = null;
     }
     document.body.innerHTML = "";
+    vi.mocked(confirmDialog).mockReset();
+    vi.mocked(confirmDialog).mockResolvedValue(true);
     _resetDiagramSharedStoreForTests();
   });
 
@@ -253,6 +262,32 @@ describe("GenerateDiagramDialog", () => {
     expect(dataset).toBeDefined();
     expect((dataset as SemanticSpecDataset).diagramType).toBe("architecture");
     expect(harness.onClose).toHaveBeenCalled();
+  });
+
+  it("preserves the dirty document and preview when new-generation replacement is cancelled", async () => {
+    const original = { ...createEmptyDoc("dirty-generation", 1), nodes: [node("existing", "Unsaved")] };
+    harness = renderDialog({ doc: original, dirty: true, host: stubHost() });
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await runGeneration();
+    await vi.waitFor(() => expect(query('[data-testid="gen-apply-new"]')).not.toBeNull());
+    await click(query('[data-testid="gen-apply-new"]')!);
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    expect(harness.onImportDoc).not.toHaveBeenCalled();
+    expect(harness.onClose).not.toHaveBeenCalled();
+    expect(probe!.getState().doc).toBe(original);
+    expect(query('[data-testid="gen-preview"]')).not.toBeNull();
+  });
+
+  it("preserves the dirty document when Mermaid replacement is cancelled", async () => {
+    const original = { ...createEmptyDoc("dirty-mermaid", 1), nodes: [node("existing", "Unsaved")] };
+    harness = renderDialog({ doc: original, dirty: true });
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await setTextarea(query<HTMLTextAreaElement>('[data-testid="gen-mermaid"]')!, "flowchart TD\n A[Start] --> B[End]");
+    await click(query('[data-testid="gen-from-mermaid"]')!);
+    await click(query('[data-testid="gen-mermaid-apply"]')!);
+    expect(harness.onImportDoc).not.toHaveBeenCalled();
+    expect(harness.onClose).not.toHaveBeenCalled();
+    expect(probe!.getState().doc).toBe(original);
   });
 
   it("apply-scoped commits the transformer via withSnapshot exactly once", async () => {
