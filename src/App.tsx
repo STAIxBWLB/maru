@@ -295,6 +295,7 @@ import {
   nativeE2eEnabled,
   installNativeE2eHarness,
   registerMenuCommandDispatcher,
+  registerNativeAppStateReader,
 } from "./lib/nativeE2eBridge";
 import { currentPlatform, isMacPlatform } from "./lib/platform";
 import {
@@ -464,6 +465,12 @@ import {
   type WorkspaceFileFilter,
 } from "./lib/settings";
 import {
+  applyIncomingShellSettings,
+  getPendingShellSettingsRevision,
+  getShellSettings,
+  hasPendingShellSettingsIntent,
+  shellSettingsSaveBase,
+  type GuardedShellSettingsPath,
   updateShellSettings,
   useShellSettings,
 } from "./lib/shellSettingsStore";
@@ -1215,7 +1222,6 @@ export function MainApp() {
     useUpdaterToasts(t);
   const composeSeed = useComposeSeed();
   const maruSettings = useShellSettings();
-  const setMaruSettings = updateShellSettings;
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [, startExplorerTransition] = useTransition();
   const scanOptions = useMemo(
@@ -1854,7 +1860,7 @@ export function MainApp() {
       bootAppMode({
         storedMode: preserveAutoOpen
           ? (todayAutoOpenModeRef.current ?? "today")
-          : applyStoredAppMode(userPickedAppModeRef, settings.ui.activeAppMode, booting),
+          : applyStoredAppMode(userPickedAppModeRef, settings.ui.activeAppMode, booting || hasPendingShellSettingsIntent("ui.activeAppMode")),
         browserPasskeyBuild: browserPasskeyBuildRef.current,
       }),
     [booting],
@@ -1866,7 +1872,7 @@ export function MainApp() {
     requestRef: loadWorkspaceRequestRef,
     autoOpenPathRef: todayAutoOpenPathRef,
     autoOpenModeRef: todayAutoOpenModeRef,
-    setSettings: setMaruSettings,
+    setSettings: applyIncomingShellSettings,
     setAppMode,
     resolveMode: resolveHydratedAppMode,
     setEditorPaneViewModes,
@@ -1883,12 +1889,11 @@ export function MainApp() {
       // stored activeAppMode; they must not clobber a boot Today auto-open.
       const keepAutoOpenMode = () => todayAutoOpenPathRef.current === settingsWorkPath;
       if (payload.workPath === settingsWorkPath) {
-        const next = normalizeMaruSettings(payload.settings);
-        setMaruSettings(next);
+        const next = applyIncomingShellSettings(payload.settings, payload.saveOrigin);
         if (!keepAutoOpenMode()) {
           setAppMode(
             bootAppMode({
-              storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode, booting),
+              storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode, booting || hasPendingShellSettingsIntent("ui.activeAppMode")),
               browserPasskeyBuild: browserPasskeyBuildRef.current,
             }),
           );
@@ -1897,13 +1902,13 @@ export function MainApp() {
         setRightPaneTab(next.ui.rightPaneTab);
       } else if (payload.globalChanged && settingsWorkPath) {
         void readMaruSettings(settingsWorkPath)
-          .then((next) => {
+          .then((incoming) => {
             if (disposed) return;
-            setMaruSettings(next);
+            const next = applyIncomingShellSettings(incoming, payload.saveOrigin);
             if (!keepAutoOpenMode()) {
               setAppMode(
                 bootAppMode({
-                  storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode, booting),
+                  storedMode: applyStoredAppMode(userPickedAppModeRef, next.ui.activeAppMode, booting || hasPendingShellSettingsIntent("ui.activeAppMode")),
                   browserPasskeyBuild: browserPasskeyBuildRef.current,
                 }),
               );
@@ -1923,7 +1928,7 @@ export function MainApp() {
       disposed = true;
       dispose?.();
     };
-  }, [booting, settingsWorkPath, setMaruSettings]);
+  }, [booting, settingsWorkPath]);
 
   useEffect(() => {
     const apply = () => {
@@ -2003,25 +2008,23 @@ export function MainApp() {
   const updateSettings = useCallback(
     (
       updater: MaruSettings | ((current: MaruSettings) => MaruSettings),
-      options?: { flush?: boolean },
+      options?: { flush?: boolean; guardedIntent?: readonly GuardedShellSettingsPath[] },
     ) => {
-      setMaruSettings((current) => {
-        const next = normalizeMaruSettings(
-          typeof updater === "function" ? updater(current) : updater,
-        );
+      const current = getShellSettings();
+      const next = updateShellSettings(updater, options?.guardedIntent);
+      const base = shellSettingsSaveBase(current, next);
         if (settingsWritable && settingsWorkPath) {
           const saver = settingsContextualSaverRef.current;
           if (saver) {
             saver.schedule(next, {
               workPath: settingsWorkPath,
-              base: current,
+              base,
             });
             if (options?.flush) {
               void saver.flush();
             }
           } else {
             const workPath = settingsWorkPath;
-            const base = current;
             void settingsSaveQueueRef.current
               .enqueue(() => saveMaruSettings(workPath, next, base))
               .catch((err) => {
@@ -2029,10 +2032,8 @@ export function MainApp() {
               });
           }
         }
-        return next;
-      });
     },
-    [settingsWorkPath, settingsWritable, setMaruSettings],
+    [settingsWorkPath, settingsWritable],
   );
 
   // Boot-time app-mode pick lifecycle (#387): persist a pick made before the
@@ -2043,6 +2044,7 @@ export function MainApp() {
     settingsWorkPath,
     settingsWritable,
     storedAppMode: maruSettings.ui.activeAppMode,
+    pendingSettingsRevision: getPendingShellSettingsRevision(),
     userPickRef: userPickedAppModeRef,
     updateSettings,
   });
@@ -2100,7 +2102,7 @@ export function MainApp() {
             layout,
           },
         };
-      }, options);
+      }, { ...options, guardedIntent: Object.keys(patch).map((key) => `ui.layout.${key}` as GuardedShellSettingsPath) });
     },
     [updateSettings],
   );
@@ -2253,7 +2255,7 @@ export function MainApp() {
       todayAutoOpenModeRef.current = null;
       userPickedAppModeRef.current = activeAppMode;
       setAppMode(activeAppMode);
-      updateSettings((current) => withActiveAppMode(current, activeAppMode));
+      updateSettings((current) => withActiveAppMode(current, activeAppMode), { guardedIntent: ["ui.activeAppMode"] });
     },
     [updateSettings],
   );
@@ -7063,10 +7065,27 @@ export function MainApp() {
   useEffect(() => {
     if (!nativeE2eEnabled()) return;
     installNativeE2eHarness();
-    return registerMenuCommandDispatcher((id) => {
+    const disposeMenu = registerMenuCommandDispatcher((id) => {
       runMenuCommand(id);
     });
-  }, [runMenuCommand]);
+    const disposeState = registerNativeAppStateReader(() => {
+      const store = getWorkspaceStoreState();
+      const workspacePath = store.registry.activeByVisibility[store.explorerVisibility] ?? null;
+      const catalog = workspacePath ? store.states[workspacePath] : undefined;
+      const layout = getShellSettings().ui.layout;
+      return {
+        booting, settingsLoaded, settingsWritable,
+        workspacePath, settingsWorkPath, terminalWorkspacePath: activeDocumentWorkspacePath,
+        catalogReady: catalog?.startupIoReady === true,
+        catalogLoading: catalog?.loading !== false,
+        catalogHasFixtureDocument: catalog?.entries.some((entry) => entry.relPath === "Welcome.md") === true,
+        appMode: visibleAppMode,
+        terminalOpen: layout.terminalOpen,
+        terminalSplitOpen: layout.terminalSplitOpen,
+      };
+    });
+    return () => { disposeMenu(); disposeState(); };
+  }, [runMenuCommand, booting, settingsLoaded, settingsWritable, settingsWorkPath, activeDocumentWorkspacePath, visibleAppMode]);
 
   const modeClassByAppMode: Partial<Record<AppMode, string>> = {
     inbox: " inbox-mode",

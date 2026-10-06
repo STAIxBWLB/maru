@@ -4,7 +4,7 @@ import { addWorkspaceRoot, getSampleWorkspacePath, listWorkspaceRoots } from "./
 import { readMaruSettings } from "./maruDir";
 import { planningModeController } from "./planningModeStore";
 import { MaruAppMode, MaruSettings } from "./settings";
-import { updateShellSettings } from "./shellSettingsStore";
+import { applyIncomingShellSettings } from "./shellSettingsStore";
 import { markStartup, measureStartup } from "./startupProfile";
 import { bootAppMode } from "./startupAppMode";
 import { todayLogicalDay, todayOpen, todayRollover } from "./today";
@@ -111,8 +111,8 @@ export function useWorkspaceBootLifecycle({
         const settingsPath = startupSettingsPath(registry);
         if (settingsPath) {
           try {
-            bootSettings = await measureStartup("settings:startup-read", () => readMaruSettings(settingsPath));
-            updateShellSettings(bootSettings);
+            const incoming = await measureStartup("settings:startup-read", () => readMaruSettings(settingsPath));
+            bootSettings = applyIncomingShellSettings(incoming);
             // A mode the user picked while boot was still reading the
             // registry wins over the stored mode (#387).
             if (todayAutoOpenPathRef.current === null && userPickedAppModeRef.current === null) {

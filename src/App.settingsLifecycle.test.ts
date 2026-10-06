@@ -34,6 +34,7 @@ function fixture() {
   const subscription = deferred<() => void>();
   const read = deferred<typeof DEFAULT_MARU_SETTINGS>();
   let receive!: (payload: { workPath: string; settings: typeof DEFAULT_MARU_SETTINGS; globalChanged?: boolean }) => void;
+  const applyIncoming = vi.fn((settings: typeof DEFAULT_MARU_SETTINGS) => settings);
   const ports = {
     listenMaruSettingsUpdated: vi.fn((callback: typeof receive) => { receive = callback; return subscription.promise; }),
     readMaruSettings: vi.fn(() => read.promise),
@@ -41,7 +42,8 @@ function fixture() {
     userPickedAppModeRef: { current: null }, browserPasskeyBuildRef: { current: false }, booting: false,
     normalizeMaruSettings: (settings: typeof DEFAULT_MARU_SETTINGS) => settings,
     applyStoredAppMode, bootAppMode,
-    setMaruSettings: vi.fn(), setAppMode: vi.fn(), setEditorPaneViewModes: vi.fn(), setRightPaneTab: vi.fn(), setError: vi.fn(),
+    applyIncomingShellSettings: applyIncoming, hasPendingShellSettingsIntent: () => false,
+    setMaruSettings: applyIncoming, setAppMode: vi.fn(), setEditorPaneViewModes: vi.fn(), setRightPaneTab: vi.fn(), setError: vi.fn(),
   };
   const exported: { effect?: () => () => void } = {};
   new Function("exports", "ports", `const {${Object.keys(ports).join(",")}} = ports; ${code}`)(exported, ports);
@@ -88,7 +90,7 @@ describe("App settings listener disposal", () => {
     state.subscription.resolve(state.off);
     await settle();
     state.receive();
-    expect(state.ports.setMaruSettings).toHaveBeenCalledWith(DEFAULT_MARU_SETTINGS);
+    expect(state.ports.setMaruSettings).toHaveBeenCalledWith(DEFAULT_MARU_SETTINGS, undefined);
     expect(state.ports.setAppMode).toHaveBeenCalledWith("pkm");
     state.dispose();
     expect(state.off).toHaveBeenCalledOnce();

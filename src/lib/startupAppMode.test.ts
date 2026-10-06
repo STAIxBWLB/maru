@@ -14,7 +14,6 @@ vi.mock("./api", () => ({ listWorkspaceRoots: boot.registry, addWorkspaceRoot: v
 vi.mock("./maruDir", () => ({ readMaruSettings: boot.settings }));
 vi.mock("./today", () => ({ todayLogicalDay: boot.day, todayRollover: boot.rollover, todayOpen: boot.open }));
 vi.mock("./planningModeStore", () => ({ planningModeController: { setLogicalDay: vi.fn(), setTodayRoute: vi.fn() } }));
-vi.mock("./shellSettingsStore", () => ({ updateShellSettings: vi.fn() }));
 vi.mock("./workspaceStore", () => ({ activateWorkspace: vi.fn(), setWorkspaceRegistry: vi.fn() }));
 
 describe("bootAppMode", () => {

@@ -41,6 +41,7 @@ interface AppModePickLifecycleOptions {
   settingsWorkPath: string | null;
   settingsWritable: boolean;
   storedAppMode: MaruAppMode;
+  pendingSettingsRevision?: number;
   userPickRef: MutableRefObject<MaruAppMode | null>;
   updateSettings(updater: (current: MaruSettings) => MaruSettings): void;
 }
@@ -60,15 +61,23 @@ export function useAppModePickLifecycle({
   settingsWorkPath,
   settingsWritable,
   storedAppMode,
+  pendingSettingsRevision = 0,
   userPickRef,
   updateSettings,
 }: AppModePickLifecycleOptions): void {
   useEffect(() => {
     const picked = userPickRef.current;
+    // Layout and mode are global. A choice made before writes were possible
+    // must reach the saver once a workspace becomes writable, even if its
+    // effective UI value was retained and therefore no longer differs.
+    if (pendingSettingsRevision && settingsWritable && settingsWorkPath) {
+      updateSettings((current) => picked === null ? current : withActiveAppMode(current, picked));
+      return;
+    }
     if (picked === null) return;
     if (!shouldReapplyAppModePick({ picked, settingsWorkPath, settingsWritable, storedAppMode })) {
       return;
     }
     updateSettings((current) => withActiveAppMode(current, picked));
-  }, [settingsWorkPath, settingsWritable, storedAppMode, updateSettings, userPickRef]);
+  }, [settingsWorkPath, settingsWritable, storedAppMode, pendingSettingsRevision, updateSettings, userPickRef]);
 }

@@ -43,6 +43,12 @@ Mocha root hook checks a fixture-owned storage marker at startup; the restored
 terminal native spec checks that the same marker survives its app restart.
 Home/config isolation alone does not isolate WKWebView localStorage.
 
+Fresh startup uses the same 20s profile deadline to require the actual menu
+dispatcher, completed boot/settings hydration, writable settings, the exact
+owned workspace paths and the seeded Welcome catalog entry. The build-gated
+reader returns fixed status fields only. A retained-profile check inside a
+restart still checks its marker without waiting for boot or rewriting metadata.
+
 Actual Mocha hooks propagate setup errors. WDIO config `beforeTest` catches and
 logs rejected hooks, so it cannot enforce fixture readiness. Between tests only
 the authored Welcome leaf is restored atomically, and identical bytes cause no
@@ -68,6 +74,12 @@ failed document-mode assertion reports active rail modes and list state, while
 keeping its original deadline. The startup pick guard stays pending throughout
 boot, even when the picked mode matches stored settings, so an in-flight Today
 launch cannot override that explicit choice.
+
+The settings owner also retains local mode/layout intent against older whole
+snapshots. Save origins and baselines bind to the scheduled value, including
+coalesced saves; acknowledgement uses actual merged readback. Read-start
+revisions preserve newer choices even after acknowledgement. Choices made
+before writes become possible are persisted through the existing lifecycle.
 
 The `dist/` the run leaves behind is deliberately **not shippable** — it
 carries the debug bridge. Re-run `pnpm build:frontend` before inspecting a

@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type MaruNativeE2eBridge,
+  type NativeAppState,
   nativeE2eEnabled,
   installNativeE2eHarness,
   registerMenuCommandDispatcher,
+  registerNativeAppStateReader,
   registerTerminalTextReader,
 } from "./nativeE2eBridge";
 
@@ -163,4 +165,45 @@ describe("registerMenuCommandDispatcher", () => {
     expect(bridge()?.menuCommandReady()).toBe(false);
   });
 
+});
+
+
+function appState(): NativeAppState {
+  return { booting: false, settingsLoaded: true, settingsWritable: true,
+    workspacePath: "/fixture/workspace", settingsWorkPath: "/fixture/workspace", terminalWorkspacePath: "/fixture/workspace",
+    catalogReady: true, catalogLoading: false, catalogHasFixtureDocument: true,
+    appMode: "pkm", terminalOpen: false, terminalSplitOpen: false };
+}
+describe("native app-state reader", () => {
+  it("is null for a harness or terminal-created namespace until MainApp registers its reader", () => {
+    vi.stubEnv("VITE_NATIVE_E2E", "1"); installNativeE2eHarness();
+    expect(bridge()?.readAppState()).toBeNull();
+    track(registerTerminalTextReader("reader", () => "terminal"));
+    expect(bridge()?.readAppState()).toBeNull();
+    const state = appState(); const read = vi.fn(() => state);
+    const dispose = track(registerNativeAppStateReader(read));
+    expect(read).not.toHaveBeenCalled();
+    expect(bridge()?.readAppState()).toEqual(state); expect(read).toHaveBeenCalledOnce();
+    dispose(); expect(bridge()?.readAppState()).toBeNull();
+  });
+
+  it("keeps replacements alive through old disposal, including the same callback", () => {
+    vi.stubEnv("VITE_NATIVE_E2E", "1");
+    const first = vi.fn(() => ({ ...appState(), booting: true })); const replacement = vi.fn(appState);
+    const disposeFirst = track(registerNativeAppStateReader(first));
+    const disposeReplacement = track(registerNativeAppStateReader(replacement));
+    disposeFirst(); expect(bridge()?.readAppState()).toEqual(appState()); expect(first).not.toHaveBeenCalled();
+    const disposeSame = track(registerNativeAppStateReader(replacement));
+    disposeReplacement(); expect(bridge()?.readAppState()).toEqual(appState());
+    disposeSame(); expect(bridge()?.readAppState()).toBeNull();
+  });
+
+  it("does not expose arbitrary reader fields or install anything in a production build", () => {
+    vi.stubEnv("VITE_NATIVE_E2E", "");
+    track(registerNativeAppStateReader(appState)); expect(bridge()).toBeUndefined();
+    vi.stubEnv("VITE_NATIVE_E2E", "1");
+    track(registerNativeAppStateReader(() => ({ ...appState(), privateData: { input: "must not expose" } })));
+    expect(bridge()?.readAppState()).toEqual(appState());
+    expect(bridge()?.readAppState()).not.toHaveProperty("privateData");
+  });
 });

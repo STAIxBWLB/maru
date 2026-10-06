@@ -20,6 +20,22 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+/** Fixed read-only native fixture startup/diagnostic projection, no settings blobs. */
+export interface NativeAppState {
+  booting: boolean;
+  settingsLoaded: boolean;
+  settingsWritable: boolean;
+  workspacePath: string | null;
+  settingsWorkPath: string | null;
+  terminalWorkspacePath: string | null;
+  catalogReady: boolean;
+  catalogLoading: boolean;
+  catalogHasFixtureDocument: boolean;
+  appMode: string;
+  terminalOpen: boolean;
+  terminalSplitOpen: boolean;
+}
+
 export interface MaruNativeE2eBridge {
   /** Whole-screen text mirror for one terminal session, or null when the
    *  session id was never registered (a spec racing a session teardown gets
@@ -28,6 +44,8 @@ export interface MaruNativeE2eBridge {
   /** Read-only MainApp dispatcher readiness; namespace installation alone
    *  does not mean menu commands can be dispatched. */
   menuCommandReady(): boolean;
+  /** Null until MainApp registers its fixed startup-state reader. */
+  readAppState(): NativeAppState | null;
   /** Dispatch one menu command by id. False when no dispatcher is registered,
    *  true after invoking the current callback exactly once; never queued. */
   menuCommand(id: string): boolean;
@@ -124,6 +142,7 @@ export function nativeE2eEnabled(): boolean {
 
 const terminalTextReaders = new Map<string, () => string>();
 let menuCommandRegistration: { dispatch: (id: string) => void } | null = null;
+let appStateRegistration: { read: () => NativeAppState } | null = null;
 
 /** Installs the single namespace on the first reader, dispatcher or harness
  *  registration. Menu readiness follows the dispatcher alone. The plan 08-27 responsiveness
@@ -134,6 +153,17 @@ function bridgeNamespace(): MaruNativeE2eBridge {
     window.__MARU_NATIVE_E2E__ = {
       terminalText: (sessionId) => terminalTextReaders.get(sessionId)?.() ?? null,
       menuCommandReady: () => menuCommandRegistration !== null,
+      readAppState: () => {
+        const state = appStateRegistration?.read();
+        if (!state) return null;
+        // Project only the allowlisted shape, even when a reader's object has extras.
+        return {
+          booting: state.booting, settingsLoaded: state.settingsLoaded, settingsWritable: state.settingsWritable,
+          workspacePath: state.workspacePath, settingsWorkPath: state.settingsWorkPath, terminalWorkspacePath: state.terminalWorkspacePath,
+          catalogReady: state.catalogReady, catalogLoading: state.catalogLoading, catalogHasFixtureDocument: state.catalogHasFixtureDocument,
+          appMode: state.appMode, terminalOpen: state.terminalOpen, terminalSplitOpen: state.terminalSplitOpen,
+        };
+      },
       menuCommand: (id) => {
         const registration = menuCommandRegistration;
         if (!registration) return false;
@@ -192,6 +222,18 @@ export function registerMenuCommandDispatcher(dispatch: (id: string) => void): (
   menuCommandRegistration = registration;
   return () => {
     if (menuCommandRegistration === registration) menuCommandRegistration = null;
+  };
+}
+
+/** Registers a fixed read-only app-state projection; registration identity
+ * keeps an older disposer from clearing a replacement reader. */
+export function registerNativeAppStateReader(read: () => NativeAppState): () => void {
+  if (import.meta.env.VITE_NATIVE_E2E !== "1") return () => {};
+  bridgeNamespace();
+  const registration = { read };
+  appStateRegistration = registration;
+  return () => {
+    if (appStateRegistration === registration) appStateRegistration = null;
   };
 }
 

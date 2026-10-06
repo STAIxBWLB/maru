@@ -9,6 +9,74 @@ import {
 type SettingsUpdater = MaruSettings | ((current: MaruSettings) => MaruSettings);
 type Subscriber = () => void;
 
+export interface ShellSettingsOrigin { readonly actorId: string; readonly revision: number }
+export type GuardedShellSettingsPath = "ui.activeAppMode" | `ui.layout.${string}`;
+interface PendingIntent { revision: number; value: unknown; base: unknown }
+let actorId = globalThis.crypto?.randomUUID?.() ?? `shell-${Date.now()}-${Math.random()}`;
+let localRevision = 0;
+const pendingIntents = new Map<string, PendingIntent>();
+const lastLocalChanges = new Map<string, number>();
+let saveOrigins = new WeakMap<MaruSettings, ShellSettingsOrigin>();
+let saveBases = new WeakMap<MaruSettings, ReadonlyMap<string, unknown>>();
+let readOrigins = new WeakMap<MaruSettings, ShellSettingsOrigin>();
+
+export function captureShellSettingsRevision(): ShellSettingsOrigin {
+  return Object.freeze({ actorId, revision: localRevision });
+}
+export function bindShellSettingsRead(value: MaruSettings, origin: ShellSettingsOrigin): MaruSettings {
+  readOrigins.set(value, origin);
+  return value;
+}
+export function getShellSettingsSaveOrigin(value: MaruSettings): ShellSettingsOrigin | undefined {
+  return saveOrigins.get(value);
+}
+export function getPendingShellSettingsRevision(): number {
+  return Math.max(0, ...Array.from(pendingIntents.values(), (intent) => intent.revision));
+}
+export function hasPendingShellSettingsIntent(path: GuardedShellSettingsPath): boolean {
+  return pendingIntents.has(path);
+}
+
+function guardedLeaves(value: MaruSettings): Map<string, unknown> {
+  const leaves = new Map<string, unknown>([["ui.activeAppMode", value.ui.activeAppMode]]);
+  const walk = (entry: unknown, prefix: string) => {
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      for (const [key, child] of Object.entries(entry)) walk(child, `${prefix}.${key}`);
+    } else leaves.set(prefix, entry);
+  };
+  walk(value.ui.layout, "ui.layout");
+  return leaves;
+}
+function readPath(value: MaruSettings, path: string): unknown {
+  let entry: unknown = value;
+  for (const key of path.split(".")) {
+    if (!entry || typeof entry !== "object") return undefined;
+    entry = (entry as Record<string, unknown>)[key];
+  }
+  return entry;
+}
+function writePath(value: MaruSettings, path: string, replacement: unknown): void {
+  const keys = path.split(".");
+  let entry = value as unknown as Record<string, unknown>;
+  for (const key of keys.slice(0, -1)) {
+    const child = entry[key];
+    entry[key] = child && typeof child === "object" && !Array.isArray(child) ? { ...child } : {};
+    entry = entry[key] as Record<string, unknown>;
+  }
+  if (replacement === undefined) delete entry[keys[keys.length - 1]];
+  else entry[keys[keys.length - 1]] = replacement;
+}
+
+/** Retrying/coalescing an unrelated change must still include unsaved intent
+ * in the backend's changed-leaf patch rather than using its UI value as base. */
+export function shellSettingsSaveBase(base: MaruSettings, snapshot?: MaruSettings): MaruSettings {
+  const result = { ...base };
+  const captured = snapshot ? saveBases.get(snapshot) : undefined;
+  if (captured) for (const [path, value] of captured) writePath(result, path, value);
+  else if (!snapshot) for (const [path, intent] of pendingIntents) writePath(result, path, intent.base);
+  return result;
+}
+
 export interface ShellLayoutSlice {
   layout: MaruSettings["ui"]["layout"];
   themeMode: MaruSettings["ui"]["themeMode"];
@@ -115,8 +183,61 @@ export function getShellSettings(): MaruSettings {
 }
 
 /** Applies an existing-key settings update without introducing a second owner in MainApp. */
-export function updateShellSettings(updater: SettingsUpdater): MaruSettings {
-  return publish(normalizeMaruSettings(typeof updater === "function" ? updater(settings) : updater));
+export function updateShellSettings(updater: SettingsUpdater, explicitIntent: readonly GuardedShellSettingsPath[] = []): MaruSettings {
+  const before = guardedLeaves(settings);
+  const next = normalizeMaruSettings(typeof updater === "function" ? updater(settings) : updater);
+  const after = guardedLeaves(next);
+  localRevision += 1;
+  for (const [path, value] of after) {
+    if (Object.is(before.get(path), value) && !explicitIntent.some((prefix) => path === prefix || path.startsWith(`${prefix}.`))) continue;
+    // A null/object transition supersedes older parent/child leaf intents.
+    for (const key of lastLocalChanges.keys()) {
+      if (key !== path && (key.startsWith(`${path}.`) || path.startsWith(`${key}.`))) {
+        lastLocalChanges.delete(key); pendingIntents.delete(key);
+      }
+    }
+    lastLocalChanges.set(path, localRevision);
+    const previousPending = pendingIntents.get(path);
+    const priorValue = before.has(path) ? before.get(path) : readPath(settings, path);
+    const base = Object.is(priorValue, value) && previousPending ? previousPending.base : priorValue;
+    pendingIntents.set(path, { revision: localRevision, value, base });
+  }
+  saveOrigins.set(next, captureShellSettingsRevision());
+  saveBases.set(next, new Map<string, unknown>(Array.from(pendingIntents, ([path, intent]) => [path, intent.base] as const)));
+  return publish(next);
+}
+
+/** Whole-blob incoming state cannot acknowledge a local choice merely by
+ * matching its value. Only this actor's revision-bound, read-back save can. */
+export function applyIncomingShellSettings(incoming: MaruSettings, saveOrigin?: ShellSettingsOrigin, readStartedAt?: ShellSettingsOrigin): MaruSettings {
+  const readOrigin = readStartedAt ?? readOrigins.get(incoming);
+  const cuts = [saveOrigin, readOrigin].filter((origin): origin is ShellSettingsOrigin => origin?.actorId === actorId).map((origin) => origin.revision);
+  const cutoff = cuts.length ? Math.min(...cuts) : undefined;
+  const next = normalizeMaruSettings(incoming);
+  for (const [path, revision] of lastLocalChanges) {
+    let pending = pendingIntents.get(path);
+    let effectiveRevision = revision;
+    const persistedValue = readPath(next, path);
+    // Explicitly selecting an unchanged UI default before hydration can
+    // leave a guessed base equal to the desired value. Learn a different
+    // actual disk baseline once, so the next authorized snapshot writes a
+    // changed leaf. Old queued snapshots keep their immutable stamp/base.
+    if (pending && (readOrigin || saveOrigin) && Object.is(pending.base, pending.value) && !Object.is(persistedValue, pending.value)) {
+      localRevision += 1;
+      effectiveRevision = localRevision;
+      pending = { ...pending, revision: effectiveRevision, base: persistedValue };
+      pendingIntents.set(path, pending);
+      lastLocalChanges.set(path, effectiveRevision);
+    }
+    if (pending && saveOrigin?.actorId === actorId && saveOrigin.revision >= pending.revision && Object.is(readPath(next, path), pending.value)) {
+      pendingIntents.delete(path);
+    }
+    if (pendingIntents.has(path) || (cutoff !== undefined && effectiveRevision > cutoff)) {
+      const remaining = pendingIntents.get(path);
+      writePath(next, path, remaining ? remaining.value : readPath(settings, path));
+    }
+  }
+  return publish(normalizeMaruSettings(next));
 }
 
 /** Applies hydration only when the caller's workspace-load generation remains current. */
@@ -124,9 +245,10 @@ export function hydrateShellSettings(
   incoming: MaruSettings,
   requestId: number,
   currentRequestId: number,
+  readStartedAt?: ShellSettingsOrigin,
 ): boolean {
   if (requestId !== currentRequestId) return false;
-  publish(normalizeMaruSettings(incoming));
+  applyIncomingShellSettings(incoming, undefined, readStartedAt);
   return true;
 }
 
@@ -176,6 +298,10 @@ export function useShellTasksSlice(): MaruSettings["tasks"] {
 
 /** Test-only reset. Production hydration always uses the request-generation guard. */
 export function resetShellSettingsStoreForTests(): void {
+  actorId = globalThis.crypto?.randomUUID?.() ?? `shell-${Date.now()}-${Math.random()}`;
+  localRevision = 0;
+  pendingIntents.clear(); lastLocalChanges.clear();
+  saveOrigins = new WeakMap(); saveBases = new WeakMap(); readOrigins = new WeakMap();
   settings = normalizeMaruSettings(DEFAULT_MARU_SETTINGS);
   slices = createSlices(settings);
   notify(subscribers);

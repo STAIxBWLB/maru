@@ -71,6 +71,25 @@ async function logHandoffDiagnostics(stage: string): Promise<void> {
       documentPathLabels: Array.from(document.querySelectorAll('[data-tree-target-path], .doc-tab[title], [role="tab"][title]'))
         .slice(0, 5).map((item) => item.getAttribute("data-tree-target-path") ?? item.getAttribute("title")),
       nodeCount: document.querySelectorAll(".maru-diagram-node").length,
+      ribbon: Array.from(document.querySelectorAll<HTMLElement>(".maru-diagram-ribbon-tabs")).map((root) => {
+        const rect = root.getBoundingClientRect(); const style = getComputedStyle(root);
+        return { rect: [rect.x, rect.y, rect.width, rect.height], display: style.display, visibility: style.visibility,
+          tabs: Array.from(root.querySelectorAll<HTMLButtonElement>("button[role=tab]")).map((tab) => ({
+            label: tab.textContent?.trim(), role: tab.getAttribute("role"), selected: tab.getAttribute("aria-selected"),
+          })) };
+      }),
+      fileTabXPathCount: (() => {
+        try {
+          const found = document.evaluate('.//*[contains(@role, "tab") and contains(., "파일") and not(.//*[contains(@role, "tab")])]', document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          return found.snapshotLength;
+        } catch { return "xpath-evaluation-failed"; }
+      })(),
+      appState: (() => {
+        const state = window.__MARU_NATIVE_E2E__?.readAppState();
+        return state ? { booting: state.booting, settingsLoaded: state.settingsLoaded, settingsWritable: state.settingsWritable,
+          catalogReady: state.catalogReady, catalogLoading: state.catalogLoading, appMode: state.appMode,
+          terminalOpen: state.terminalOpen, terminalSplitOpen: state.terminalSplitOpen } : null;
+      })(),
       alerts: Array.from(document.querySelectorAll('[role="alert"]'))
         .slice(0, 5).map((alert) => (alert.textContent ?? "").slice(0, 400)),
       bodyText: (document.body.textContent ?? "").slice(0, 1600),
@@ -173,12 +192,17 @@ describe("native 설계도 mode", () => {
     assert.equal(await fs.readFile(sourceSpec, "utf8"), sourceBefore);
     assert.equal(await fs.readFile(path.join(workspace(), "dev/probe/docs/architecture/probe-rendered.html"), "utf8"), PROBE_HTML);
 
-    const fileTab = await browser.$('[role="tab"][aria-label="파일"]');
-    // Existing ribbon tabs expose their visible label instead of aria-label.
-    if (await fileTab.isExisting()) await fileTab.click();
-    else {
-      const tab = await browser.$('[role="tab"]*=파일');
-      await tab.click();
+    try {
+      const fileTab = await browser.$('[role="tab"][aria-label="파일"]');
+      // Existing ribbon tabs expose their visible label instead of aria-label.
+      if (await fileTab.isExisting()) await fileTab.click();
+      else {
+        const tab = await browser.$('[role="tab"]*=파일');
+        await tab.click();
+      }
+    } catch (error) {
+      await logHandoffDiagnostics("file-tab-failed");
+      throw error;
     }
     const generate = await browser.$('button=다이어그램 생성');
     await generate.click();

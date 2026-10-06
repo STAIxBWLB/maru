@@ -5,7 +5,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { JSDOM } from "jsdom";
 
 // Dynamic paths keep the scripts typecheck project separate from native-e2e.
 const fixtureModule = path.resolve("e2e-native/helpers/fixtureWorkspace.ts");
@@ -212,5 +213,112 @@ describe("native fixture lifecycle", () => {
     const record = result.stdout.split("\n").find((line) => line.startsWith("RESULT="));
     expect(record, result.stderr).toBeDefined();
     expect(JSON.parse(record!.slice("RESULT=".length))).toEqual({ failures: 1, bodyRan: phase === "same-spec-reload", swallowed: true });
+  });
+});
+
+
+describe("native fresh fixture startup/profile gate", () => {
+  const owner = "/owned-fixture/config";
+  const raw = "/var/owned-fixture/workspace";
+  const real = "/private/var/owned-fixture/workspace";
+  let dom: JSDOM;
+  let state: ReturnType<typeof readyState> | null;
+  let menuReady: boolean;
+  let readState: ReturnType<typeof vi.fn<() => ReturnType<typeof readyState> | null>>;
+  function readyState() {
+    return { booting: false, settingsLoaded: true, settingsWritable: true,
+      workspacePath: raw as string | null, settingsWorkPath: real as string | null, terminalWorkspacePath: raw as string | null,
+      catalogReady: true, catalogLoading: false, catalogHasFixtureDocument: true,
+      appMode: "pkm", terminalOpen: false, terminalSplitOpen: false };
+  }
+  beforeEach(() => {
+    vi.useFakeTimers();
+    dom = new JSDOM('<div class="activity-rail"></div>', { url: "https://native.test.invalid" });
+    vi.stubGlobal("window", dom.window); vi.stubGlobal("document", dom.window.document);
+    state = readyState(); menuReady = true;
+    readState = vi.fn(() => state);
+    Object.assign(dom.window, { __MARU_NATIVE_E2E__: { menuCommand: () => false,
+      menuCommandReady: () => menuReady, readAppState: readState } });
+  });
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); dom.window.close(); });
+  async function run(fresh = true) {
+    const { pollNativeFixtureProfile, NATIVE_PROFILE_MARKER_KEY } = await import(hooksModule);
+    const done = vi.fn();
+    pollNativeFixtureProfile({ key: NATIVE_PROFILE_MARKER_KEY, owner, fresh,
+      ownedPaths: [raw, real], deadline: Date.now() + 20_000 }, done);
+    return { done, key: NATIVE_PROFILE_MARKER_KEY };
+  }
+
+  it("does not confuse a ready command bridge with boot/settings/catalog ownership readiness", async () => {
+    state = null;
+    const { done, key } = await run();
+    expect(done).not.toHaveBeenCalled(); expect(dom.window.localStorage.getItem(key)).toBeNull();
+    vi.advanceTimersByTime(20_000);
+    expect(done.mock.calls[0][0]).toMatchObject({ ok: false, diagnostics: { menuReady: true, state: null } });
+  });
+
+  it.each(["booting", "settingsLoaded", "settingsWritable", "catalogReady", "catalogLoading", "catalogHasFixtureDocument"])
+    ("rejects incomplete %s while retaining the original deadline and unmodified marker", async (field) => {
+      state = { ...readyState(), [field]: field === "booting" || field === "catalogLoading" };
+      const { done, key } = await run(); vi.advanceTimersByTime(20_000);
+      expect(done.mock.calls[0][0].ok).toBe(false);
+      expect(dom.window.localStorage.getItem(key)).toBeNull();
+    });
+
+  it.each(["workspacePath", "settingsWorkPath", "terminalWorkspacePath"])("rejects unowned %s without logging the foreign path", async (field) => {
+    state = { ...readyState(), [field]: "/foreign-user-data/private-workspace" };
+    const { done } = await run(); vi.advanceTimersByTime(20_000);
+    const result = done.mock.calls[0][0];
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.state[field]).toBe("outside-fixture");
+    expect(JSON.stringify(result)).not.toContain("foreign-user-data");
+  });
+
+  it.each(["workspacePath", "settingsWorkPath", "terminalWorkspacePath"])("rejects missing %s", async (field) => {
+    state = { ...readyState(), [field]: null };
+    const { done } = await run(); vi.advanceTimersByTime(20_000);
+    expect(done.mock.calls[0][0].ok).toBe(false);
+  });
+
+  it("cannot acknowledge readiness after the shared startup/profile deadline has already elapsed", async () => {
+    const { pollNativeFixtureProfile, NATIVE_PROFILE_MARKER_KEY } = await import(hooksModule);
+    const done = vi.fn();
+    pollNativeFixtureProfile({ key: NATIVE_PROFILE_MARKER_KEY, owner, fresh: true,
+      ownedPaths: [raw, real], deadline: Date.now() - 1 }, done);
+    expect(done.mock.calls[0][0].ok).toBe(false);
+    expect(dom.window.localStorage.getItem(NATIVE_PROFILE_MARKER_KEY)).toBeNull();
+  });
+
+  it("requires actual dispatcher readiness even though menuCommand is a function", async () => {
+    menuReady = false;
+    const { done, key } = await run(); vi.advanceTimersByTime(20_000);
+    expect(done.mock.calls[0][0]).toMatchObject({ ok: false, diagnostics: { menuReady: false } });
+    expect(dom.window.localStorage.getItem(key)).toBeNull();
+  });
+
+  it("accepts only the raw/real owned path pair and commits the fresh marker after all state catches up", async () => {
+    state = { ...readyState(), catalogHasFixtureDocument: false };
+    const { done, key } = await run(); vi.advanceTimersByTime(19_900);
+    expect(done).not.toHaveBeenCalled(); expect(dom.window.localStorage.getItem(key)).toBeNull();
+    state = readyState(); vi.advanceTimersByTime(100);
+    expect(done).toHaveBeenCalledOnce(); expect(done.mock.calls[0][0].ok).toBe(true);
+    expect(dom.window.localStorage.getItem(key)).toBe(owner);
+  });
+
+  it("strictly rejects an existing fresh marker without clearing it", async () => {
+    const { NATIVE_PROFILE_MARKER_KEY } = await import(hooksModule);
+    dom.window.localStorage.setItem(NATIVE_PROFILE_MARKER_KEY, "/another-fixture/config");
+    const { done, key } = await run();
+    expect(done.mock.calls[0][0]).toMatchObject({ ok: false, reason: "profile marker leaked from another spec" });
+    expect(dom.window.localStorage.getItem(key)).toBe("/another-fixture/config");
+  });
+
+  it("keeps retained marker verification independent of boot/catalog state or reader availability", async () => {
+    const { NATIVE_PROFILE_MARKER_KEY } = await import(hooksModule);
+    dom.window.localStorage.setItem(NATIVE_PROFILE_MARKER_KEY, owner);
+    state = { ...readyState(), booting: true, settingsLoaded: false, catalogReady: false, catalogHasFixtureDocument: false };
+    readState.mockImplementation(() => { throw new Error("retained verification must not read startup state"); });
+    const { done } = await run(false);
+    expect(done.mock.calls[0][0].ok).toBe(true); expect(readState).not.toHaveBeenCalled();
   });
 });

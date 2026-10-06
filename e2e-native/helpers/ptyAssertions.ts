@@ -24,9 +24,25 @@ export const INK_MIN_RATIO = 0.002;
 /** The bridge global's shape, re-declared locally: tsconfig.e2e-native.json
  *  does not include src/, so the Window augmentation in
  *  src/lib/nativeE2eBridge.ts is not visible here. */
+export interface NativeAppState {
+  booting: boolean;
+  settingsLoaded: boolean;
+  settingsWritable: boolean;
+  workspacePath: string | null;
+  settingsWorkPath: string | null;
+  terminalWorkspacePath: string | null;
+  catalogReady: boolean;
+  catalogLoading: boolean;
+  catalogHasFixtureDocument: boolean;
+  appMode: string;
+  terminalOpen: boolean;
+  terminalSplitOpen: boolean;
+}
+
 interface MaruNativeE2eBridge {
   terminalText(sessionId: string): string | null;
   menuCommandReady(): boolean;
+  readAppState(): NativeAppState | null;
   menuCommand(id: string): boolean;
 }
 
