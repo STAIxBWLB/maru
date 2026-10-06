@@ -23,12 +23,20 @@ let readOrigins = new WeakMap<MaruSettings, ShellSettingsOrigin>();
 export function captureShellSettingsRevision(): ShellSettingsOrigin {
   return Object.freeze({ actorId, revision: localRevision });
 }
+export function isOwnShellSettingsOrigin(origin: ShellSettingsOrigin | undefined): boolean {
+  return origin?.actorId === actorId;
+}
 export function bindShellSettingsRead(value: MaruSettings, origin: ShellSettingsOrigin): MaruSettings {
   readOrigins.set(value, origin);
   return value;
 }
 export function getShellSettingsSaveOrigin(value: MaruSettings): ShellSettingsOrigin | undefined {
   return saveOrigins.get(value);
+}
+/** Keep the invocation-time read fence when an event crosses IPC/JSON and
+ * therefore cannot retain the snapshot's private WeakMap identity. */
+export function getShellSettingsReadOrigin(value: MaruSettings): ShellSettingsOrigin | undefined {
+  return readOrigins.get(value);
 }
 export function getPendingShellSettingsRevision(): number {
   return Math.max(0, ...Array.from(pendingIntents.values(), (intent) => intent.revision));

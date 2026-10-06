@@ -6,6 +6,7 @@ import {
   captureShellSettingsRevision,
   getPendingShellSettingsRevision,
   getShellSettingsSaveOrigin,
+  getShellSettingsReadOrigin,
   getShellSettings,
   hydrateShellSettings,
   resetShellSettingsStoreForTests,
@@ -89,6 +90,18 @@ describe("shellSettingsStore", () => {
     expect(getPendingShellSettingsRevision()).toBe(0);
     applyIncomingShellSettings(late);
     expect(getShellSettings().ui.layout.terminalSplitOpen).toBe(true);
+  });
+
+  it("uses serialized read origins only as fences, never as save acknowledgements", () => {
+    const chosen = layout({ terminalSplitOpen: true });
+    const read = bindShellSettingsRead(copied(chosen), captureShellSettingsRevision());
+    const serialized = JSON.parse(JSON.stringify(read)) as MaruSettings;
+    applyIncomingShellSettings(serialized, undefined, getShellSettingsReadOrigin(read));
+    expect(getPendingShellSettingsRevision()).toBeGreaterThan(0);
+    applyIncomingShellSettings(serialized, { actorId: "another-window", revision: 1000 });
+    expect(getPendingShellSettingsRevision()).toBeGreaterThan(0);
+    applyIncomingShellSettings(serialized, getShellSettingsSaveOrigin(chosen));
+    expect(getPendingShellSettingsRevision()).toBe(0);
   });
 
   it("learns the actual Today baseline for an explicit unchanged Documents pick before hydration", () => {

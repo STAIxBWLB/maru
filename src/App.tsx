@@ -468,6 +468,7 @@ import {
   getPendingShellSettingsRevision,
   getShellSettings,
   hasPendingShellSettingsIntent,
+  isOwnShellSettingsOrigin,
   shellSettingsSaveBase,
   type GuardedShellSettingsPath,
   updateShellSettings,
@@ -1887,8 +1888,8 @@ export function MainApp() {
       // Unrelated settings saves (layout, outline, …) echo back here with the
       // stored activeAppMode; they must not clobber a boot Today auto-open.
       const keepAutoOpenMode = () => todayAutoOpenPathRef.current === settingsWorkPath;
-      if (payload.workPath === settingsWorkPath) {
-        const next = applyIncomingShellSettings(payload.settings, payload.saveOrigin);
+      if (payload.workPath === settingsWorkPath && isOwnShellSettingsOrigin(payload.readOrigin)) {
+        const next = applyIncomingShellSettings(payload.settings, payload.saveOrigin, payload.readOrigin);
         if (!keepAutoOpenMode()) {
           setAppMode(
             bootAppMode({
@@ -1899,7 +1900,7 @@ export function MainApp() {
         }
         setEditorPaneViewModes(next.ui.editorPaneViewModes);
         setRightPaneTab(next.ui.rightPaneTab);
-      } else if (payload.globalChanged && settingsWorkPath) {
+      } else if ((payload.workPath === settingsWorkPath || payload.globalChanged) && settingsWorkPath) {
         void readMaruSettings(settingsWorkPath)
           .then((incoming) => {
             if (disposed) return;

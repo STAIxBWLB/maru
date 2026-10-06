@@ -33,7 +33,7 @@ async function settle() { await Promise.resolve(); await Promise.resolve(); awai
 function fixture() {
   const subscription = deferred<() => void>();
   const read = deferred<typeof DEFAULT_MARU_SETTINGS>();
-  let receive!: (payload: { workPath: string; settings: typeof DEFAULT_MARU_SETTINGS; globalChanged?: boolean }) => void;
+  let receive!: (payload: { workPath: string; settings: typeof DEFAULT_MARU_SETTINGS; globalChanged?: boolean; readOrigin?: { actorId: string; revision: number } }) => void;
   const applyIncoming = vi.fn((settings: typeof DEFAULT_MARU_SETTINGS) => settings);
   const ports = {
     listenMaruSettingsUpdated: vi.fn((callback: typeof receive) => { receive = callback; return subscription.promise; }),
@@ -43,6 +43,7 @@ function fixture() {
     normalizeMaruSettings: (settings: typeof DEFAULT_MARU_SETTINGS) => settings,
     applyStoredAppMode, bootAppMode,
     applyIncomingShellSettings: applyIncoming, hasPendingShellSettingsIntent: () => false,
+    isOwnShellSettingsOrigin: (origin?: { actorId: string }) => origin?.actorId === "fixture-owner",
     setMaruSettings: applyIncoming, setAppMode: vi.fn(), setEditorPaneViewModes: vi.fn(), setRightPaneTab: vi.fn(), setError: vi.fn(),
   };
   const exported: { effect?: () => () => void } = {};
@@ -50,7 +51,8 @@ function fixture() {
   const dispose = exported.effect!();
   const off = vi.fn();
   return { ports, subscription, read, dispose, off,
-    receive: (workPath = ports.settingsWorkPath, globalChanged = false) => receive({ workPath, globalChanged, settings: DEFAULT_MARU_SETTINGS }),
+    receive: (workPath = ports.settingsWorkPath, globalChanged = false) => receive({ workPath, globalChanged, settings: DEFAULT_MARU_SETTINGS, readOrigin: { actorId: "fixture-owner", revision: 0 } }),
+    receiveLegacy: () => receive({ workPath: ports.settingsWorkPath, settings: DEFAULT_MARU_SETTINGS }),
   };
 }
 
@@ -85,12 +87,26 @@ describe("App settings listener disposal", () => {
     expect(state.ports.setError).not.toHaveBeenCalled();
   });
 
+  it("re-reads a legacy same-workspace envelope instead of applying its snapshot", async () => {
+    const state = fixture();
+    state.subscription.resolve(state.off);
+    await settle();
+    state.receiveLegacy();
+    expect(state.ports.readMaruSettings).toHaveBeenCalledWith(state.ports.settingsWorkPath);
+    expect(state.ports.setMaruSettings).not.toHaveBeenCalled();
+    state.read.resolve(DEFAULT_MARU_SETTINGS);
+    await settle();
+    expect(state.ports.setMaruSettings).toHaveBeenCalledWith(DEFAULT_MARU_SETTINGS, undefined);
+    state.dispose();
+    expect(state.off).toHaveBeenCalledOnce();
+  });
+
   it("applies current settings while alive and disposes the active subscription", async () => {
     const state = fixture();
     state.subscription.resolve(state.off);
     await settle();
     state.receive();
-    expect(state.ports.setMaruSettings).toHaveBeenCalledWith(DEFAULT_MARU_SETTINGS, undefined);
+    expect(state.ports.setMaruSettings).toHaveBeenCalledWith(DEFAULT_MARU_SETTINGS, undefined, { actorId: "fixture-owner", revision: 0 });
     expect(state.ports.setAppMode).toHaveBeenCalledWith("pkm");
     state.dispose();
     expect(state.off).toHaveBeenCalledOnce();

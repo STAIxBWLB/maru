@@ -269,4 +269,50 @@ describe("settings save/read causality", () => {
     expect(getPendingShellSettingsRevision()).toBe(0);
     expect((await readMaruSettings("/fixture")).ui.activeAppMode).toBe("pkm");
   });
+
+  it("carries an untracked Diagram-style read fence across a serialized event delivered after a newer split acknowledgement", async () => {
+    const disk = normalizeMaruSettings(DEFAULT_MARU_SETTINGS);
+    let readCount = 0;
+    let releaseOldRead!: () => void;
+    let readBegan!: () => void;
+    const began = new Promise<void>((resolve) => { readBegan = resolve; });
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "save_maru_settings") {
+        const request = args as { value: MaruSettings; baseValue: MaruSettings };
+        if (request.value.diagram.lastDocument !== request.baseValue.diagram.lastDocument) disk.diagram.lastDocument = request.value.diagram.lastDocument;
+        if (request.value.ui.layout.terminalSplitOpen !== request.baseValue.ui.layout.terminalSplitOpen) disk.ui.layout.terminalSplitOpen = request.value.ui.layout.terminalSplitOpen;
+        return { globalChanged: true, workspaceChanged: true };
+      }
+      readCount += 1;
+      if (readCount === 2) {
+        const stale = normalizeMaruSettings(disk);
+        readBegan();
+        await new Promise<void>((resolve) => { releaseOldRead = resolve; });
+        return stale;
+      }
+      return normalizeMaruSettings(disk);
+    });
+    const base = await readMaruSettings("/fixture");
+    // DiagramMode's read/clone/persist path is not a local owner update,
+    // so its normalized snapshot has no WeakMap save origin.
+    const diagram = normalizeMaruSettings({ ...base, diagram: { ...base.diagram, lastDocument: "diagrams/fixture.json" } });
+    expect(getShellSettingsSaveOrigin(diagram)).toBeUndefined();
+    const diagramSave = saveMaruSettings("/fixture", diagram, base);
+    await began;
+    const beforeSplit = getShellSettings();
+    const split = updateShellSettings((current) => ({ ...current, ui: { ...current.ui, layout: { ...current.ui.layout, terminalSplitOpen: true } } }));
+    await saveMaruSettings("/fixture", split, beforeSplit);
+    const splitAck = JSON.parse(JSON.stringify(vi.mocked(emit).mock.calls[0][1])) as MaruSettingsUpdatedPayload;
+    applyIncomingShellSettings(splitAck.settings, splitAck.saveOrigin, splitAck.readOrigin);
+    expect(getPendingShellSettingsRevision()).toBe(0);
+    releaseOldRead();
+    await diagramSave;
+    const oldEvent = JSON.parse(JSON.stringify(vi.mocked(emit).mock.calls[1][1])) as MaruSettingsUpdatedPayload;
+    expect(oldEvent.saveOrigin).toBeUndefined();
+    expect(oldEvent.readOrigin?.revision).toBeLessThan(splitAck.saveOrigin!.revision);
+    expect(oldEvent.settings.ui.layout.terminalSplitOpen).toBe(false);
+    applyIncomingShellSettings(oldEvent.settings, oldEvent.saveOrigin, oldEvent.readOrigin);
+    expect(getShellSettings().ui.layout.terminalSplitOpen).toBe(true);
+    expect(getShellSettings().diagram.lastDocument).toBe("diagrams/fixture.json");
+  });
 });

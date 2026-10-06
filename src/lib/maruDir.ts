@@ -7,7 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { invokeE2EOverride } from "./e2eInvoke";
-import { bindShellSettingsRead, captureShellSettingsRevision, getShellSettingsSaveOrigin, shellSettingsSaveBase, type ShellSettingsOrigin } from "./shellSettingsStore";
+import { bindShellSettingsRead, captureShellSettingsRevision, getShellSettingsReadOrigin, getShellSettingsSaveOrigin, shellSettingsSaveBase, type ShellSettingsOrigin } from "./shellSettingsStore";
 import type {
   MaruWorkspaceMeta,
   MaruWorkspaceMetaPatch,
@@ -55,6 +55,7 @@ export const MARU_IGNORE_UPDATED_EVENT = "maru://ignore-updated";
 
 export interface MaruSettingsUpdatedPayload {
   saveOrigin?: ShellSettingsOrigin;
+  readOrigin?: ShellSettingsOrigin;
   workPath: string;
   settings: MaruSettings;
   globalChanged?: boolean;
@@ -717,6 +718,7 @@ export async function saveMaruSettings(
           workPath,
           settings: persisted,
           saveOrigin,
+          readOrigin: getShellSettingsReadOrigin(persisted),
           globalChanged: true,
           workspaceChanged: true,
         },
@@ -737,6 +739,7 @@ export async function saveMaruSettings(
     workPath,
     settings: persisted,
     saveOrigin,
+    readOrigin: getShellSettingsReadOrigin(persisted),
     globalChanged: outcome.globalChanged,
     workspaceChanged: outcome.workspaceChanged,
   });
