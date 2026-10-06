@@ -1,4 +1,4 @@
-// D-09: every native-e2e run seeds a fresh temp directory and points the
+// D-09: every native-e2e spec seeds a fresh temp directory and points the
 // launched app at it through the two isolation env vars paths.rs resolves
 // (`MARU_NATIVE_E2E_HOME`, `MARU_NATIVE_E2E_CONFIG_DIR`). Mirrors the
 // mkdtemp / spawn-with-one-added-env-key idiom in
@@ -218,8 +218,43 @@ const WORKSPACE_REGISTRY_FILE = "workspaces.json";
 let fixtureRoot: string | null = null;
 /** Per-worker latch: the first beforeTest sees the just-seeded state (the
  *  app launched after onPrepare), so only later tests need a real reset. */
-let fixtureDirty = false;
 const previousGitEnv = new Map<string, string | undefined>();
+
+/** Launcher-owned boundaries; a failed stop never permits deleting a live root. */
+export function createNativeFixtureLifecycle(actions: {
+  seed: () => Promise<unknown>;
+  stopOwnedApp: () => Promise<void>;
+  cleanup: () => Promise<void>;
+}) {
+  let prepared = false;
+  let worker: string | null = null;
+  return {
+    async prepare() {
+      if (prepared) throw new Error("native fixture already prepared");
+      prepared = true; // Keep partial seeds owned for failure-path teardown.
+      await actions.seed();
+    },
+    async start(id: string) {
+      if (worker !== null) throw new Error(`native fixture still owned by worker ${worker}`);
+      if (!prepared) { prepared = true; await actions.seed(); }
+      worker = id;
+    },
+    async end(id: string) {
+      if (worker !== id) throw new Error(`native fixture worker mismatch: ${id}`);
+      await actions.stopOwnedApp();
+      await actions.cleanup();
+      prepared = false;
+      worker = null;
+    },
+    async complete() {
+      if (!prepared) return;
+      await actions.stopOwnedApp();
+      await actions.cleanup();
+      prepared = false;
+      worker = null;
+    },
+  };
+}
 
 function fixturePaths(root: string) {
   return {
@@ -296,6 +331,7 @@ export async function seedFixtureWorkspace(): Promise<{
   configDir: string;
   workspaceDir: string;
 }> {
+  if (fixtureRoot) throw new Error("fixtureWorkspace: previous root must be disposed before seeding");
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "maru-native-e2e-"));
   fixtureRoot = root;
   await writeFixtureContent(root);
@@ -343,58 +379,27 @@ export async function seedFixtureWorkspace(): Promise<{
   return resolved;
 }
 
-/**
- * Restores the fixture workspace and registry to their seeded state
- * in-place, without touching the already-launched app's env (D-12: the
- * app is relaunched once per spec file, reset between the tests inside
- * it). Call from `beforeTest`.
- *
- * Two deliberate properties:
- *
- * - The FIRST call in a worker is a no-op. The app for this spec file was
- *   launched after onPrepare seeded the fixture, so its boot already read
- *   the fresh registry. Resetting at that moment races the boot read:
- *   deleting workspaces.json under a booting app makes
- *   listWorkspaceRoots() see zero workspaces, and the frontend then seeds
- *   its first-run Sample Workspace instead (observed: webview.spec's
- *   "Welcome" assertion failing with the sample workspace on screen
- *   whenever the reset landed mid-boot). Resets matter from the second
- *   test on.
- * - The reset removes the CONTENTS of each seeded directory, never the
- *   directories themselves: deleting a watched directory kills the running
- *   app's filesystem watcher on it, and the re-created directory is not
- *   re-watched, so the app never sees the re-seeded files.
- */
+/** Restore only the authored leaf. Never delete live app-owned state or the
+ * registry: a new spec receives its own complete seed before app launch. */
 export async function resetFixtureWorkspace(): Promise<void> {
   const root = requireFixtureRoot();
-  if (!fixtureDirty) {
-    fixtureDirty = true;
-    return;
-  }
-  const { workspaceDir, configDir } = fixturePaths(root);
-  // Contents only, never the directories themselves — for BOTH the workspace
-  // dir and the registry dir. Deleting configDir's com.maru.app entry
-  // wholesale would break the same watcher-survival invariant the docstring
-  // states for the workspace: the reset removes what is INSIDE
-  // config/com.maru.app/, never the registry directory itself.
-  const registryDir = path.join(configDir, APP_CONFIG_DIR);
-  for (const dir of [workspaceDir, registryDir]) {
-    const entries = await fs.readdir(dir).catch(() => [] as string[]);
-    for (const entry of entries) {
-      await fs.rm(path.join(dir, entry), { recursive: true, force: true });
-    }
-  }
-  await writeFixtureContent(root);
+  const { workspaceDir } = fixturePaths(root);
+  const welcome = path.join(workspaceDir, `${FIXTURE_DOC_NAME}.md`);
+  try { if (await fs.readFile(welcome, "utf8") === FIXTURE_DOC_CONTENT) return; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  const temporary = path.join(workspaceDir, `.welcome-restore-${process.pid}.tmp`);
+  await fs.writeFile(temporary, FIXTURE_DOC_CONTENT, "utf8");
+  await fs.rename(temporary, welcome);
 }
 
 /**
  * Removes the whole mkdtemp root and clears the isolation env vars. Call
- * from both the pass and the fail teardown path (`afterSession` and
- * `onComplete`) so a run never leaves a fixture root behind.
+ * from the launcher only after its app has exited, never from a worker.
  */
 export async function cleanupFixtureWorkspace(): Promise<void> {
   if (!fixtureRoot) return;
   const root = fixtureRoot;
+  await fs.rm(root, { recursive: true, force: true });
   fixtureRoot = null;
   delete process.env.MARU_NATIVE_E2E_HOME;
   delete process.env.MARU_NATIVE_E2E_CONFIG_DIR;
@@ -403,5 +408,4 @@ export async function cleanupFixtureWorkspace(): Promise<void> {
     else process.env[key] = value;
   }
   previousGitEnv.clear();
-  await fs.rm(root, { recursive: true, force: true });
 }

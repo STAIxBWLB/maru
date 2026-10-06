@@ -23,10 +23,63 @@ The target builds the frontend with `VITE_NATIVE_E2E=1`
 frontend (cargo does not track `dist/` as a build input, so the target touches
 `src-tauri/build.rs` between the two builds), builds the app with
 `--features native-e2e`, then runs WebdriverIO (`e2e-native/wdio.conf.ts`)
-against it. Each run seeds a fresh temporary fixture workspace and points the
+against it. Each spec receives a fresh temporary fixture workspace and points the
 app at it through `MARU_NATIVE_E2E_HOME` / `MARU_NATIVE_E2E_CONFIG_DIR`; the
 developer's real workspace is never opened (D-09), and the app's outbound
 providers stay unconfigured for the whole run (D-11).
+
+## Fixture lifecycle and terminal readiness
+
+The launcher seeds the initial root before the service launches its app. Each
+later spec is seeded before service restart, and the prior app must exit before
+its root is removed. Process selection checks exact argv, launcher parent,
+physical cwd and creation time; ambiguity preserves the fixture and fails the
+run. An intentional `reloadSession` inside a spec retains that spec's root.
+
+On macOS 14+, the default-off native-e2e build derives a WKWebView data-store
+identifier from the canonical fixture config directory. A spec cannot inherit
+another spec's terminal tabs or the installed app's default store. The actual
+Mocha root hook checks a fixture-owned storage marker at startup; the restored
+terminal native spec checks that the same marker survives its app restart.
+Home/config isolation alone does not isolate WKWebView localStorage.
+
+Fresh startup uses the same 20s profile deadline to require the actual menu
+dispatcher, completed boot/settings hydration, writable settings, the exact
+owned workspace paths and the seeded Welcome catalog entry. The build-gated
+reader returns fixed status fields only. A retained-profile check inside a
+restart still checks its marker without waiting for boot or rewriting metadata.
+
+Actual Mocha hooks propagate setup errors. WDIO config `beforeTest` catches and
+logs rejected hooks, so it cannot enforce fixture readiness. Between tests only
+the authored Welcome leaf is restored atomically, and identical bytes cause no
+write; live `.maru` and registry directories are never recursively reset.
+Launcher/cleanup failures also make the final runner exit nonzero.
+
+Terminal helpers wait for topology-created sessions and their real prompts
+before an explicit Shell launch, including restored split panes. They bind only
+one new physically visible, active and focused session and retain that identity
+through prompt/focus assertions. Failure diagnostics include pane/session IDs,
+rectangles, visibility and activeElement, without input or terminal contents.
+The restoration case requires one visible split body, one left/right pane with
+distinct IDs and nonempty real prompts, and the original left session identity.
+Split failures also report body visibility, prompt-readiness booleans and only
+the fixture's terminal layout flags; they do not replay the menu command.
+Readiness conditions replace session-set quiet-period guesses; existing timeout
+and text/paint assertions remain intact. Issue #388 requires five consecutive
+hosted native runs at the accepted fix, not retry-to-green closure.
+
+Menu tests wait for a registered dispatcher and require a receipt from their
+single command invocation; bridge-object presence alone is insufficient. A
+failed document-mode assertion reports active rail modes and list state, while
+keeping its original deadline. The startup pick guard stays pending throughout
+boot, even when the picked mode matches stored settings, so an in-flight Today
+launch cannot override that explicit choice.
+
+The settings owner also retains local mode/layout intent against older whole
+snapshots. Save origins and baselines bind to the scheduled value, including
+coalesced saves; acknowledgement uses actual merged readback. Read-start
+revisions preserve newer choices even after acknowledgement. Choices made
+before writes become possible are persisted through the existing lifecycle.
 
 The `dist/` the run leaves behind is deliberately **not shippable** — it
 carries the debug bridge. Re-run `pnpm build:frontend` before inspecting a
@@ -264,9 +317,11 @@ accessibility calls.
   test, Phase 9's SIGHUP test) attach their own specs to this runner (D-14).
 - IME coverage is the app's own composition handlers only; the OS input
   method itself is the human checklist above (D-08).
-- Cross-spec-file fixture state is not reset (resets are between tests inside
-  a spec file, D-12); a spec that needs a fresh per-file workspace must
-  re-seed at the launcher level.
+- Disk fixtures and WKWebView stores are isolated between spec files. Within
+  one spec, app-owned state is retained intentionally, including reloadSession
+  persistence tests. Cleanup removes the owned disk fixture after app exit;
+  isolated WebKit cache storage is managed by macOS rather than by recursive
+  deletion of any developer browser profile.
 
 ## Spike log
 

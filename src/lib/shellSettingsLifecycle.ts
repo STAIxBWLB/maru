@@ -2,7 +2,7 @@ import { useEffect, type MutableRefObject } from "react";
 
 import { readMaruSettings } from "./maruDir";
 import { DEFAULT_MARU_SETTINGS, normalizeMaruSettings, type MaruSettings } from "./settings";
-import { hydrateShellSettings } from "./shellSettingsStore";
+import { bindShellSettingsRead, captureShellSettingsRevision, getShellSettings, hydrateShellSettings } from "./shellSettingsStore";
 
 interface ShellSettingsHydrationOptions<TMode> {
   settingsWorkPath: string | null;
@@ -40,6 +40,7 @@ export function useShellSettingsHydration<TMode>({
   useEffect(() => {
     let cancelled = false;
     const requestId = requestRef.current;
+    const readStartedAt = captureShellSettingsRevision();
     setLoaded(false);
     if (!settingsWorkPath) {
       if (booting && workspaceCount === 0) return () => { cancelled = true; };
@@ -49,16 +50,17 @@ export function useShellSettingsHydration<TMode>({
     }
     void readMaruSettings(settingsWorkPath)
       .then((settings) => {
-        if (cancelled || !hydrateShellSettings(settings, requestId, requestRef.current)) return;
+        if (cancelled || !hydrateShellSettings(settings, requestId, requestRef.current, readStartedAt)) return;
+        const effective = getShellSettings();
         const preserveAutoOpen = autoOpenPathRef.current === settingsWorkPath;
-        setAppMode(resolveMode(settings, preserveAutoOpen));
-        setEditorPaneViewModes(settings.ui.editorPaneViewModes);
-        setRightPaneTab(settings.ui.rightPaneTab);
+        setAppMode(resolveMode(effective, preserveAutoOpen));
+        setEditorPaneViewModes(effective.ui.editorPaneViewModes);
+        setRightPaneTab(effective.ui.rightPaneTab);
         setLoaded(true);
       })
       .catch(() => {
         if (cancelled) return;
-        setSettings(normalizeMaruSettings(DEFAULT_MARU_SETTINGS));
+        setSettings(bindShellSettingsRead(normalizeMaruSettings(DEFAULT_MARU_SETTINGS), readStartedAt));
         setLoaded(true);
       });
     return () => { cancelled = true; };

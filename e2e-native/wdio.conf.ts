@@ -6,84 +6,125 @@
 // as literal values with reasons, not left at whatever the library defaults
 // to.
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-import { cleanupFixtureWorkspace, resetFixtureWorkspace, seedFixtureWorkspace } from "./helpers/fixtureWorkspace";
+import { cleanupFixtureWorkspace, createNativeFixtureLifecycle, seedFixtureWorkspace } from "./helpers/fixtureWorkspace";
+import { nativeWorkerBoundary } from "./rootHooks";
 
-// app.withGlobalTauri is false (src-tauri/tauri.conf.json), so no spec may
-// call invoke() via executeScript - everything a spec observes must come
-// from the DOM or a global the app itself exposes. Every spec in this tree
-// is bound by that constraint, not just this file.
 const APP_BINARY = "./src-tauri/target/debug/maru";
 
-/**
- * Backstop for the "no live app or PTY child left behind" truth: the
- * embedded provider owns the app process it spawns for the lifetime of a
- * session, but a session that never establishes (D-01's own stop
- * condition) never reaches a normal teardown. `onComplete` always runs,
- * on both the pass and the fail path, so a leftover process matching the
- * exact debug binary this run launched is force-killed here regardless of
- * how the session ended.
- */
-function killSurvivingAppProcesses(): void {
-  // pgrep -f treats the pattern as an unanchored ERE: the literal dots in
-  // APP_BINARY are regex wildcards, so the bare pattern matches ANY command
-  // line containing "<any char>/src-tauri/target/debug/maru" — including a
-  // developer's own `tauri dev` or debug instance launched by absolute path
-  // from this or any other checkout, which this backstop would then SIGKILL.
-  // Escape every metacharacter and anchor the match to the exact relative
-  // argv the tauri-service spawns, so teardown can only reach a process
-  // started the same way this run starts its app.
+export interface FixtureAppIdentity { pid: number; parent: number; cwd: string; started: string }
+
+/** A matching argv is insufficient: only this launcher's child in this
+ * checkout can be selected. Never choose the last of several candidates. */
+export function selectOwnedFixtureApp(candidates: FixtureAppIdentity[], launcher: number, cwd: string): FixtureAppIdentity | undefined {
+  const owned = candidates.filter((candidate) => candidate.parent === launcher && candidate.cwd === cwd);
+  if (owned.length > 1) throw new Error("ambiguous native fixture app ownership");
+  return owned[0];
+}
+
+function readAppIdentity(pid: number): FixtureAppIdentity {
+  const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
+  if (command !== APP_BINARY) throw new Error(`native fixture argv changed for PID ${pid}`);
+  const parent = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
+  const started = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
+  const cwdLines = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { encoding: "utf8" }).split("\n").filter((line) => line.startsWith("n"));
+  if (!Number.isInteger(parent) || parent <= 0 || !started || cwdLines.length !== 1) throw new Error(`missing native ownership telemetry for PID ${pid}`);
+  return { pid, parent, started, cwd: realpathSync(cwdLines[0].slice(1)) };
+}
+
+function findOwnedFixtureApp(launcher: number): FixtureAppIdentity | undefined {
   const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let pids: string[];
   try {
-    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    for (const pid of pids) {
-      try {
-        process.kill(Number(pid), "SIGKILL");
-      } catch {
-        // Already exited between pgrep and kill - nothing left to clean up.
-      }
+    pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) return undefined;
+    throw error;
+  }
+  const candidates = pids.flatMap((pid) => {
+    try { return [readAppIdentity(Number(pid))]; }
+    catch (error) {
+      if (!stillAlive(Number(pid))) return [];
+      throw error;
     }
-  } catch {
-    // pgrep exits non-zero when it finds nothing; that is the common case.
+  });
+  return selectOwnedFixtureApp(candidates, launcher, realpathSync(process.cwd()));
+}
+
+function stillAlive(pid: number): boolean {
+  try { process.kill(pid, 0); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+  // A zombie has exited and cannot write into the owned fixture anymore.
+  try {
+    return !execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).trim().startsWith("Z");
+  } catch (error) {
+    try { process.kill(pid, 0); }
+    catch (gone) { if ((gone as NodeJS.ErrnoException).code === "ESRCH") return false; }
+    throw error;
   }
 }
 
-/**
- * Local-run focus fix: the canvas ink check (pty.spec) reads painted pixels,
- * and WKWebView throttles painting on an occluded/backgrounded window
- * (`backgroundThrottling: "throttle"` in tauri.conf.json). The tauri-service's
- * own focus-recovery helper cannot run here (`withGlobalTauri: false`), so a
- * local run where the terminal keeps focus flakes on an unpainted canvas while
- * hosted CI - where the spawned window is the only thing on screen - stays
- * green. Bring the just-spawned app to the front once per session. Uses the
- * same escaped, anchored pgrep pattern as the teardown backstop so only a
- * process spawned exactly the way this runner spawns its app is touched, and
- * PID-targeted activation sidesteps the debug binary sharing the process name
- * with an installed Maru.app.
- */
+async function stopOwnedApp(): Promise<void> {
+  const owned = findOwnedFixtureApp(process.pid);
+  if (!owned) return;
+  const checkIdentity = () => {
+    const actual = readAppIdentity(owned.pid);
+    if (actual.parent !== owned.parent || actual.cwd !== owned.cwd || actual.started !== owned.started) throw new Error("native fixture process identity changed; refusing signal");
+  };
+  if (!stillAlive(owned.pid)) return;
+  checkIdentity();
+  try { process.kill(owned.pid, "SIGTERM"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+  const gracefulDeadline = Date.now() + 2_000;
+  while (stillAlive(owned.pid) && Date.now() < gracefulDeadline) await new Promise((resolve) => setTimeout(resolve, 50));
+  if (stillAlive(owned.pid)) { checkIdentity(); process.kill(owned.pid, "SIGKILL"); }
+  const deadline = Date.now() + 3_000;
+  while (stillAlive(owned.pid)) {
+    if (Date.now() > deadline) throw new Error("owned native app did not exit; preserving its fixture");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 function activateAppWindow(): boolean {
-  const escaped = APP_BINARY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const launcher = Number(process.env.MARU_NATIVE_E2E_LAUNCHER_PID);
+  if (!Number.isInteger(launcher) || launcher <= 0) throw new Error("native fixture launcher identity is missing");
+  const owned = findOwnedFixtureApp(launcher);
+  if (!owned) return false;
   try {
-    const pids = execFileSync("pgrep", ["-f", `^${escaped}$`], { encoding: "utf8" })
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const pid = pids[pids.length - 1];
-    if (!pid) return false;
-    execFileSync("osascript", [
-      "-e",
-      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`,
-    ]);
+    execFileSync("osascript", ["-e", `tell application "System Events" to set frontmost of (first process whose unix id is ${owned.pid}) to true`]);
     return true;
   } catch {
-    // Activation is best-effort: no accessibility grant, or the app not yet
-    // spawned, must never fail the run - the ink check only needs the common
-    // case covered.
+    // Accessibility activation is best-effort; ownership checks above are not.
     return false;
   }
+}
+
+const lifecycle = createNativeFixtureLifecycle({ seed: seedFixtureWorkspace, stopOwnedApp, cleanup: cleanupFixtureWorkspace });
+const launcherFailures: Error[] = [];
+async function launcherBoundary(action: () => Promise<void>): Promise<void> {
+  try {
+    if (launcherFailures.length) throw new Error("a prior native fixture lifecycle boundary failed");
+    await action();
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    launcherFailures.push(failure);
+    process.env.MARU_NATIVE_E2E_SETUP_ERROR = failure.message;
+    throw failure;
+  }
+}
+
+export function createNativeCompletionHook(complete: () => Promise<void>, failures: Error[]) {
+  return async () => {
+    await complete();
+    delete process.env.MARU_NATIVE_E2E_LAUNCHER_PID;
+    delete process.env.MARU_NATIVE_E2E_SETUP_ERROR;
+    if (failures.length) throw new AggregateError(failures, "native fixture lifecycle failed");
+  };
 }
 
 export const config = {
@@ -104,6 +145,7 @@ export const config = {
   framework: "mocha",
   mochaOpts: {
     ui: "bdd",
+    require: [fileURLToPath(new URL("./rootHooks.ts", import.meta.url))],
     // 120s, not a lean default: withGlobalTauri is false, so the service's
     // per-command window-state helper times out (~5s, twice) around every
     // wdio element command — each click/waitForDisplayed costs ~10-15s, and
@@ -124,51 +166,32 @@ export const config = {
   // config's).
   connectionRetryCount: 1,
 
-  // Seeding happens in onPrepare, not beforeSession: beforeSession runs in
-  // the worker process (@wdio/runner), but the tauri-service spawns the app
-  // in the launcher's service onPrepare. @wdio/cli runs the config's own
-  // onPrepare first, so env vars set here are in the launcher process.env
-  // before the app spawn - and startEmbeddedDriver spreads process.env into
-  // the app. Seeding in beforeSession left the app pointed at the real
-  // ~/.maru (the 06-01 fixture-isolation bug).
+  // Config launcher hooks run before tauri-service hooks. The first app is
+  // seeded before service onPrepare; later apps are reseeded before the
+  // service's onWorkerStart health check restarts its stopped embedded server.
   onPrepare: async () => {
-    // Plan 08-27 saturation harness: the debug binary installs its own Tokio
-    // runtime from TOKIO_WORKER_THREADS before Tauri initializes (see
-    // native_e2e::install_test_runtime), then asserts the observed worker
-    // count. Setting it here — before the tauri-service spawns the app, which
-    // inherits this process's env — is what makes the two-worker saturation
-    // proof meaningful: unrelated async commands have exactly 2 workers to
-    // schedule on while four real operations overlap.
     process.env.TOKIO_WORKER_THREADS = "2";
-    await seedFixtureWorkspace();
+    process.env.MARU_NATIVE_E2E_LAUNCHER_PID = String(process.pid);
+    delete process.env.MARU_NATIVE_E2E_SETUP_ERROR;
+    await launcherBoundary(() => lifecycle.prepare());
+  },
+  onWorkerStart: async (id: string) => {
+    await launcherBoundary(() => lifecycle.start(id));
   },
   beforeSession: async () => {
-    // The session's app instance may still be booting when this hook runs;
-    // retry briefly until the activation lands. Best-effort by design (see
-    // the helper's comment): a miss leaves the old flaky behavior, never a
-    // failure.
-    for (let attempt = 0; attempt < 15; attempt++) {
-      if (activateAppWindow()) break;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+    await nativeWorkerBoundary(async () => {
+      for (let attempt = 0; attempt < 15; attempt++) {
+        if (activateAppWindow()) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    });
   },
-  beforeTest: async () => {
-    await resetFixtureWorkspace();
+  // No worker teardown/reset deletes state while its app is still running.
+  // reloadSession within a spec intentionally retains the same disk fixture.
+  onWorkerEnd: async (id: string) => {
+    await launcherBoundary(() => lifecycle.end(id));
   },
-  afterSession: async () => {
-    // Kill only. Do NOT clean the fixture root here: afterSession runs per
-    // worker, i.e. per spec file, but the app for the NEXT spec file is
-    // spawned by the launcher pointed at the same fixture root — a cleanup
-    // here deletes that root from under it, and the next app boots into an
-    // empty registry and first-run-seeds its Sample Workspace instead
-    // (observed: webview.spec failing with the sample workspace on screen
-    // whenever it ran after another spec). The root is per-RUN state (D-09);
-    // onComplete, which runs once per run on both the pass and the fail
-    // path, owns its cleanup.
-    killSurvivingAppProcesses();
-  },
-  onComplete: async () => {
-    await cleanupFixtureWorkspace();
-    killSurvivingAppProcesses();
-  },
+  // Actual WDIO onComplete collects hook rejection as exit 1, unlike its
+  // beforeTest hook. Keep sticky launcher failures inside this final gate.
+  onComplete: createNativeCompletionHook(() => lifecycle.complete(), launcherFailures),
 };

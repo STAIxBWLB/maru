@@ -20,14 +20,35 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+/** Fixed read-only native fixture startup/diagnostic projection, no settings blobs. */
+export interface NativeAppState {
+  booting: boolean;
+  settingsLoaded: boolean;
+  settingsWritable: boolean;
+  workspacePath: string | null;
+  settingsWorkPath: string | null;
+  terminalWorkspacePath: string | null;
+  catalogReady: boolean;
+  catalogLoading: boolean;
+  catalogHasFixtureDocument: boolean;
+  appMode: string;
+  terminalOpen: boolean;
+  terminalSplitOpen: boolean;
+}
+
 export interface MaruNativeE2eBridge {
   /** Whole-screen text mirror for one terminal session, or null when the
    *  session id was never registered (a spec racing a session teardown gets
    *  a clean answer, not a throw). */
   terminalText(sessionId: string): string | null;
-  /** Dispatch a macOS menu command by id (consumed by plan 06-03's menu
-   *  surface). */
-  menuCommand(id: string): void;
+  /** Read-only MainApp dispatcher readiness; namespace installation alone
+   *  does not mean menu commands can be dispatched. */
+  menuCommandReady(): boolean;
+  /** Null until MainApp registers its fixed startup-state reader. */
+  readAppState(): NativeAppState | null;
+  /** Dispatch one menu command by id. False when no dispatcher is registered,
+   *  true after invoking the current callback exactly once; never queued. */
+  menuCommand(id: string): boolean;
   /** Plan 08-27: same-runtime one-yield async probe. */
   asyncProbe(): Promise<NativeE2eProbeResult>;
   /** Plan 08-27: feature-only saturation/source-race load control. The
@@ -120,18 +141,34 @@ export function nativeE2eEnabled(): boolean {
 }
 
 const terminalTextReaders = new Map<string, () => string>();
-let menuCommandDispatcher: ((id: string) => void) | null = null;
+let menuCommandRegistration: { dispatch: (id: string) => void } | null = null;
+let appStateRegistration: { read: () => NativeAppState } | null = null;
 
-/** Lazily installs the single namespace object on first registration, so an
- *  app with no terminal open installs nothing. The plan 08-27 responsiveness
+/** Installs the single namespace on the first reader, dispatcher or harness
+ *  registration. Menu readiness follows the dispatcher alone. The plan 08-27 responsiveness
  *  methods are fixed allowlisted production-command calls through imported
  *  invoke; there is deliberately no arbitrary command/path member. */
 function bridgeNamespace(): MaruNativeE2eBridge {
   if (!window.__MARU_NATIVE_E2E__) {
     window.__MARU_NATIVE_E2E__ = {
       terminalText: (sessionId) => terminalTextReaders.get(sessionId)?.() ?? null,
+      menuCommandReady: () => menuCommandRegistration !== null,
+      readAppState: () => {
+        const state = appStateRegistration?.read();
+        if (!state) return null;
+        // Project only the allowlisted shape, even when a reader's object has extras.
+        return {
+          booting: state.booting, settingsLoaded: state.settingsLoaded, settingsWritable: state.settingsWritable,
+          workspacePath: state.workspacePath, settingsWorkPath: state.settingsWorkPath, terminalWorkspacePath: state.terminalWorkspacePath,
+          catalogReady: state.catalogReady, catalogLoading: state.catalogLoading, catalogHasFixtureDocument: state.catalogHasFixtureDocument,
+          appMode: state.appMode, terminalOpen: state.terminalOpen, terminalSplitOpen: state.terminalSplitOpen,
+        };
+      },
       menuCommand: (id) => {
-        menuCommandDispatcher?.(id);
+        const registration = menuCommandRegistration;
+        if (!registration) return false;
+        registration.dispatch(id);
+        return true;
       },
       asyncProbe: () => invoke<NativeE2eProbeResult>("native_e2e_async_probe"),
       loadControl: (request) =>
@@ -181,9 +218,22 @@ export function registerMenuCommandDispatcher(dispatch: (id: string) => void): (
   // nativeE2eEnabled() call.
   if (import.meta.env.VITE_NATIVE_E2E !== "1") return () => {};
   bridgeNamespace();
-  menuCommandDispatcher = dispatch;
+  const registration = { dispatch };
+  menuCommandRegistration = registration;
   return () => {
-    if (menuCommandDispatcher === dispatch) menuCommandDispatcher = null;
+    if (menuCommandRegistration === registration) menuCommandRegistration = null;
+  };
+}
+
+/** Registers a fixed read-only app-state projection; registration identity
+ * keeps an older disposer from clearing a replacement reader. */
+export function registerNativeAppStateReader(read: () => NativeAppState): () => void {
+  if (import.meta.env.VITE_NATIVE_E2E !== "1") return () => {};
+  bridgeNamespace();
+  const registration = { read };
+  appStateRegistration = registration;
+  return () => {
+    if (appStateRegistration === registration) appStateRegistration = null;
   };
 }
 

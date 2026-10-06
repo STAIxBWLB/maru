@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { invokeE2EOverride } from "./e2eInvoke";
+import { bindShellSettingsRead, captureShellSettingsRevision, getShellSettingsReadOrigin, getShellSettingsSaveOrigin, shellSettingsSaveBase, type ShellSettingsOrigin } from "./shellSettingsStore";
 import type {
   MaruWorkspaceMeta,
   MaruWorkspaceMetaPatch,
@@ -53,6 +54,8 @@ export const MARU_SETTINGS_UPDATED_EVENT = "maru://settings-updated";
 export const MARU_IGNORE_UPDATED_EVENT = "maru://ignore-updated";
 
 export interface MaruSettingsUpdatedPayload {
+  saveOrigin?: ShellSettingsOrigin;
+  readOrigin?: ShellSettingsOrigin;
   workPath: string;
   settings: MaruSettings;
   globalChanged?: boolean;
@@ -682,16 +685,17 @@ export async function scanWorkSites(dir: string): Promise<unknown> {
 }
 
 export async function readMaruSettings(workPath: string): Promise<MaruSettings> {
+  const revision = captureShellSettingsRevision();
   if (!isTauri()) {
     try {
       const raw = window.localStorage.getItem(`${SETTINGS_FALLBACK_KEY}:${workPath}`);
-      return normalizeMaruSettings(raw ? JSON.parse(raw) : DEFAULT_MARU_SETTINGS);
+      return bindShellSettingsRead(normalizeMaruSettings(raw ? JSON.parse(raw) : DEFAULT_MARU_SETTINGS), revision);
     } catch {
-      return normalizeMaruSettings(DEFAULT_MARU_SETTINGS);
+      return bindShellSettingsRead(normalizeMaruSettings(DEFAULT_MARU_SETTINGS), revision);
     }
   }
   const value = await invoke<unknown>("read_maru_settings", { workPath });
-  return normalizeMaruSettings(value);
+  return bindShellSettingsRead(normalizeMaruSettings(value), revision);
 }
 
 export async function saveMaruSettings(
@@ -699,18 +703,22 @@ export async function saveMaruSettings(
   value: MaruSettings,
   baseValue?: MaruSettings,
 ): Promise<void> {
+  const saveOrigin = getShellSettingsSaveOrigin(value);
   const normalized = normalizeMaruSettings(value);
-  const normalizedBase = baseValue ? normalizeMaruSettings(baseValue) : undefined;
+  const normalizedBase = baseValue ? normalizeMaruSettings(shellSettingsSaveBase(baseValue, value)) : undefined;
   if (!isTauri()) {
     window.localStorage.setItem(
       `${SETTINGS_FALLBACK_KEY}:${workPath}`,
       JSON.stringify(normalized),
     );
+    const persisted = await readMaruSettings(workPath);
     window.dispatchEvent(
       new CustomEvent<MaruSettingsUpdatedPayload>(MARU_SETTINGS_UPDATED_EVENT, {
         detail: {
           workPath,
-          settings: normalized,
+          settings: persisted,
+          saveOrigin,
+          readOrigin: getShellSettingsReadOrigin(persisted),
           globalChanged: true,
           workspaceChanged: true,
         },
@@ -723,9 +731,15 @@ export async function saveMaruSettings(
     value: serializeMaruSettings(normalized),
     baseValue: normalizedBase ? serializeMaruSettings(normalizedBase) : null,
   });
+  // Submitted values are not the merged disk state: unchanged leaves may
+  // have been omitted by the backend's base-aware patch, or preserved from
+  // another writer. Only the authoritative readback can acknowledge intent.
+  const persisted = await readMaruSettings(workPath);
   await emitMaruSettingsUpdated({
     workPath,
-    settings: normalized,
+    settings: persisted,
+    saveOrigin,
+    readOrigin: getShellSettingsReadOrigin(persisted),
     globalChanged: outcome.globalChanged,
     workspaceChanged: outcome.workspaceChanged,
   });

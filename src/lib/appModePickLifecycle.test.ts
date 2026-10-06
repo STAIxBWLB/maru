@@ -9,6 +9,8 @@ import {
   withActiveAppMode,
 } from "./appModePickLifecycle";
 import { DEFAULT_MARU_SETTINGS, type MaruAppMode, type MaruSettings } from "./settings";
+import { getPendingShellSettingsRevision, getShellSettings, resetShellSettingsStoreForTests, updateShellSettings } from "./shellSettingsStore";
+import { unmountReactRoot } from "./testing/unmountReactRoot";
 
 describe("withActiveAppMode", () => {
   it("patches the active mode without touching other ui settings", () => {
@@ -88,6 +90,33 @@ function mountPickLifecycle(initialProps: PickLifecycleProps) {
 }
 
 describe("useAppModePickLifecycle", () => {
+  it("persists retained global layout intent when a workspace first becomes writable", async () => {
+    resetShellSettingsStoreForTests();
+    updateShellSettings((current) => ({ ...current, ui: { ...current.ui, layout: { ...current.ui.layout, terminalSplitOpen: true } } }));
+    const saved: MaruSettings[] = [];
+    const userPickRef: { current: MaruAppMode | null } = { current: null };
+    const updateSettings = (updater: (current: MaruSettings) => MaruSettings) => { saved.push(updateShellSettings(updater)); };
+    function Probe({ writable }: { writable: boolean }) {
+      useAppModePickLifecycle({ settingsWorkPath: "/fixture", settingsWritable: writable, storedAppMode: getShellSettings().ui.activeAppMode,
+        pendingSettingsRevision: getPendingShellSettingsRevision(), userPickRef, updateSettings });
+      return null;
+    }
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => { root.render(createElement(Probe, { writable: false })); });
+      expect(saved).toEqual([]);
+      await act(async () => { root.render(createElement(Probe, { writable: true })); });
+      expect(saved).toHaveLength(1);
+      expect(saved[0].ui.layout.terminalSplitOpen).toBe(true);
+    } finally {
+      await unmountReactRoot(root);
+      host.remove();
+      resetShellSettingsStoreForTests();
+    }
+  });
+
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
