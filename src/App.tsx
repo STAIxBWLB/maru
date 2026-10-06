@@ -439,7 +439,6 @@ import {
   applyWorkspaceCommsOverrides,
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
-  normalizeMaruSettings,
   readWorkspaceM365AuthConfig,
   resolveClassifierRuntime,
   validateWorkspaceM365ProviderConfig,
