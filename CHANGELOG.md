@@ -9,6 +9,12 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.19 - Steady Workspace (2026-10-07)
+
+- Preserve the latest application mode and terminal layout choices when settings load or save acknowledgements arrive late (#388).
+- Isolate native test workspaces and browser profiles, bind terminal assertions to the visible owned session, and propagate setup failures through the test runner (#388).
+- Verify native menu actions, terminal text and paint, and split restoration with five consecutive runs on the same reviewed commit (#388).
+
 ## v1.1.18 - Bound Intent (2026-10-05)
 
 - Bind one-time proposal approvals to the exact workspace, provider, operations, file bytes and policy; record private audit receipts and reject stale or replayed grants (#426).
