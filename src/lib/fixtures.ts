@@ -1,6 +1,8 @@
 import type {
   CreatedDocument,
-  DeletedDocument,
+  DocumentDeleteItem,
+  DocumentDeleteOutcome,
+  DocumentDeletePlan,
   DocumentPayload,
   InboxDropItem,
   MeetingGuides,
@@ -329,22 +331,52 @@ export function mockDuplicateDocument(documentPath: string): DocumentPayload {
   return next;
 }
 
-export function mockTrashDocument(documentPath: string): DeletedDocument {
+// Browser mock: every document has one export bundle and one Binder state,
+// so the delete dialog's toggles and lists have something to show.
+export function mockDocumentDeletePlan(documentPath: string): DocumentDeletePlan {
   const found = findMockDocument(documentPath);
   if (!found) throw new Error("Document file does not exist");
-  const rootPath = mockRootForPath(documentPath, found.relPath, found.path);
-  const index = mockDocuments.indexOf(found);
-  if (index >= 0) mockDocuments.splice(index, 1);
   const parts = found.relPath.split("/");
   const fileName = parts.pop() ?? "document.md";
   const folder = parts.length > 0 ? `${parts.join("/")}/` : "";
-  const stem = fileName.replace(/\.(md|markdown)$/i, "");
-  const trashRelPath = `.maru/trash/documents/${folder}${stem}-${Date.now()}.md`;
+  const stem = fileName.replace(/\.[^.]+$/, "");
+  const bundle = `${folder}${stem}.exports`;
+  const item = (
+    relPath: string,
+    kind: DocumentDeleteItem["kind"],
+    sizeBytes: number,
+    evidence: string,
+  ): DocumentDeleteItem => ({ relPath, kind, sizeBytes, isDir: false, evidence });
   return {
-    originalPath: found.path,
-    originalRelPath: found.relPath,
-    trashPath: `${rootPath}/${trashRelPath}`,
-    trashRelPath,
+    source: item(found.relPath, "source", found.content.length, "selected document"),
+    derived: [
+      item(`${bundle}/manifest.yaml`, "exportManifest", 412, "manifest.yaml source"),
+      item(`${bundle}/${stem}.docx`, "exportOutput", 18_432, "manifest.yaml outputs"),
+    ],
+    metadata: [
+      item(`.maru/binder/${stem}.json`, "binderState", 2_048, "Binder documentPath"),
+    ],
+    kept: [item(`${bundle}/notes.txt`, "exportUnlisted", 96, "not listed in manifest.yaml")],
+    fingerprint: `mock:${found.relPath}`,
+  };
+}
+
+export function mockTrashDocument(
+  documentPath: string,
+  fingerprint: string,
+  selectedRelPaths: string[],
+): DocumentDeleteOutcome {
+  const plan = mockDocumentDeletePlan(documentPath);
+  if (plan.fingerprint !== fingerprint) throw new Error("document_delete_stale: plan changed");
+  const listed = [...plan.derived, ...plan.metadata];
+  const found = findMockDocument(documentPath);
+  const index = found ? mockDocuments.indexOf(found) : -1;
+  if (index >= 0) mockDocuments.splice(index, 1);
+  return {
+    sourceRelPath: plan.source.relPath,
+    items: [plan.source, ...listed.filter((item) => selectedRelPaths.includes(item.relPath))].map(
+      (item) => ({ relPath: item.relPath, kind: item.kind, status: "trashed", error: null }),
+    ),
   };
 }
 

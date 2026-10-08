@@ -97,7 +97,7 @@ Early shards 01/02/03/04/05 record `integrationRequired: "08-29"` and final modu
 | 08-06 | `src-tauri/src/workspace_files.rs` | `scan_workspace_files`, `scan_workspace_entries`, `create_workspace_directory`, `rename_workspace_entry`, `duplicate_workspace_entries`, `paste_workspace_entries`, `trash_workspace_entries`, `describe_file_queue_sources`, `apply_file_queue` |
 | 08-06 | `src-tauri/src/content_search.rs` | `search_workspace_contents` |
 | 08-06 | `src-tauri/src/calendar_search.rs` | `search_calendar_notes` |
-| 08-07 | `src-tauri/src/document.rs` | `read_document`, `save_document`, `update_frontmatter_field`, `create_document`, `move_document`, `duplicate_document`, `trash_document`, `create_version` |
+| 08-07 | `src-tauri/src/document.rs` | `read_document`, `save_document`, `update_frontmatter_field`, `create_document`, `move_document`, `duplicate_document`, `trash_document`, `document_delete_plan`, `create_version` |
 | 08-07 | `src-tauri/src/file_manager.rs` | `reveal_in_file_manager`, `open_in_file_manager` |
 | 08-07 | `src-tauri/src/vault_guard.rs` | `vault_validate_note` |
 | 08-08 | `src-tauri/src/scratchpad.rs` | `scratchpad_list`, `scratchpad_read`, `scratchpad_save`, `scratchpad_rename`, `scratchpad_trash`, `scratchpad_create_idea`, `scratchpad_transition_idea`, `scratchpad_cleanup_plan`, `scratchpad_cleanup_apply`, `scratchpad_migrate_legacy_memos` |

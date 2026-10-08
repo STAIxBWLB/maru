@@ -1,6 +1,8 @@
 use crate::filename_rules::{validate_filename_stem, validate_folder_name};
 use crate::frontmatter::{build_frontmatter, update_frontmatter_content, FrontmatterValue};
-use crate::ipc_error::{IpcError, DOCUMENT_CONFLICT};
+use crate::ipc_error::{
+    IpcError, DOCUMENT_CONFLICT, DOCUMENT_DELETE_REFUSED, DOCUMENT_DELETE_STALE,
+};
 use crate::vault::{
     is_document_extension, parse_frontmatter, resolve_inside_vault, semantic_title_from_parts,
     slugify,
@@ -74,13 +76,65 @@ pub struct VersionSnapshot {
     pub created_at: String,
 }
 
+/// What qualified a file for a document delete plan (#441).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentDeleteKind {
+    Source,
+    ExportManifest,
+    ExportOutput,
+    Version,
+    StudioOutput,
+    BinderState,
+    StudioState,
+    KgCache,
+    ExportUnlisted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentDeleteItem {
+    pub rel_path: String,
+    pub kind: DocumentDeleteKind,
+    pub size_bytes: u64,
+    pub is_dir: bool,
+    /// The recorded link to the source that qualified this item.
+    pub evidence: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeletedDocument {
-    pub original_path: String,
-    pub original_rel_path: String,
-    pub trash_path: String,
-    pub trash_rel_path: String,
+pub struct DocumentDeletePlan {
+    pub source: DocumentDeleteItem,
+    pub derived: Vec<DocumentDeleteItem>,
+    pub metadata: Vec<DocumentDeleteItem>,
+    /// Found next to listed items but not linked to the source; never deleted.
+    pub kept: Vec<DocumentDeleteItem>,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentDeleteStatus {
+    Trashed,
+    Missing,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentDeleteItemOutcome {
+    pub rel_path: String,
+    pub kind: DocumentDeleteKind,
+    pub status: DocumentDeleteStatus,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentDeleteOutcome {
+    pub source_rel_path: String,
+    pub items: Vec<DocumentDeleteItemOutcome>,
 }
 
 pub fn read_document(vault_path: String, document_path: String) -> Result<DocumentPayload, String> {
@@ -632,53 +686,521 @@ pub(crate) fn duplicate_document_in_transaction(
     read_document(vault_path, target_path.to_string_lossy().to_string())
 }
 
+/// Plan a document delete (#441): the source plus every derived and metadata
+/// file that records a link to it. Read-only; the dialog shows the result.
+pub fn document_delete_plan(
+    vault_path: String,
+    document_path: String,
+) -> Result<DocumentDeletePlan, IpcError> {
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let source = resolve_inside_vault(&vault_path, &document_path)?;
+    assert_document_owner(&vault_path, &source)?;
+    assert_document_delete_allowed(&vault_path, &vault, std::slice::from_ref(&source))?;
+    ensure_existing_document(&source)?;
+    Ok(compute_delete_plan(&vault, &source)?)
+}
+
+/// Apply a reviewed delete plan (`trash_document`, #441): the source always, plus the checked derived and
+/// metadata paths, each moved to the system Trash. The plan is recomputed in
+/// the transaction; a changed fingerprint deletes nothing.
 pub fn trash_document(
     vault_path: String,
     document_path: String,
-) -> Result<DeletedDocument, String> {
+    fingerprint: String,
+    selected_rel_paths: Vec<String>,
+) -> Result<DocumentDeleteOutcome, IpcError> {
     let vault = resolve_inside_vault(&vault_path, ".")?;
     let source = resolve_inside_vault(&vault_path, &document_path)?;
-    let request = PathTransactionRequest::new(vec![source, vault.join(".maru/trash/documents")])?
+    let mut paths = vec![source];
+    for rel in &selected_rel_paths {
+        paths.push(resolve_inside_vault(&vault_path, rel)?);
+    }
+    paths.extend(export_bundle_dirs(&paths));
+    let request = PathTransactionRequest::new(paths)?
         .with_workspace_registry()?
         .require_parent(&vault)?;
+    // Keep structured inner conflicts; admission failures remain display-only.
     with_path_transactions(request, |lease| {
-        trash_document_in_transaction(lease, vault_path, document_path)
-    })
+        Ok(trash_document_in_transaction(
+            lease,
+            vault_path,
+            document_path,
+            fingerprint,
+            selected_rel_paths,
+        ))
+    })?
 }
 
 pub(crate) fn trash_document_in_transaction(
     lease: &PathTransactionLease,
     vault_path: String,
     document_path: String,
-) -> Result<DeletedDocument, String> {
+    fingerprint: String,
+    selected_rel_paths: Vec<String>,
+) -> Result<DocumentDeleteOutcome, IpcError> {
     lease.ensure_workspace_registry()?;
-    let source_path = resolve_inside_vault(&vault_path, &document_path)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
-    lease.ensure_covered(vec![
-        source_path.clone(),
-        vault.join(".maru/trash/documents"),
-    ])?;
-    assert_document_owner(&vault_path, &source_path)?;
-    assert_maru_can_write(&vault_path, WorkspaceWriteAction::Delete)?;
-    let vault = resolve_inside_vault(&vault_path, ".")?;
-    ensure_existing_document(&source_path)?;
-    let original_rel_path = relative(&source_path, &vault);
-    let trash_path = unique_trash_path(&source_path, &vault)?;
-    lease.ensure_covered(vec![trash_path.clone()])?;
-    lease.before_effect()?;
-    if let Some(parent) = trash_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("Cannot create trash directory: {err}"))?;
+    let source = resolve_inside_vault(&vault_path, &document_path)?;
+    let mut selected = Vec::new();
+    for rel in &selected_rel_paths {
+        selected.push(resolve_inside_vault(&vault_path, rel)?);
     }
-    move_file(&source_path, &trash_path)?;
-    let trash_rel_path = relative(&trash_path, &vault);
+    let mut covered = vec![source.clone()];
+    covered.extend(selected.iter().cloned());
+    covered.extend(export_bundle_dirs(&covered));
+    lease.ensure_covered(covered.clone())?;
+    assert_document_owner(&vault_path, &source)?;
+    assert_document_delete_allowed(&vault_path, &vault, &covered)?;
+    if fs::symlink_metadata(&source).is_err() {
+        return Err(stale_delete_plan("the document no longer exists"));
+    }
+    ensure_existing_document(&source)?;
+    let plan = compute_delete_plan(&vault, &source)?;
+    if plan.fingerprint != fingerprint {
+        return Err(stale_delete_plan(
+            "files changed since the plan was reviewed",
+        ));
+    }
+    let listed: Vec<&DocumentDeleteItem> = plan.derived.iter().chain(&plan.metadata).collect();
+    let selected_rels: Vec<String> = selected
+        .iter()
+        .map(|path| relative_slash(path, &vault))
+        .collect();
+    for rel in &selected_rels {
+        if *rel != plan.source.rel_path && !listed.iter().any(|item| item.rel_path == *rel) {
+            return Err(IpcError::from(format!(
+                "Not in the reviewed delete plan: {rel}"
+            )));
+        }
+    }
 
-    Ok(DeletedDocument {
-        original_path: source_path.to_string_lossy().to_string(),
-        original_rel_path,
-        trash_path: trash_path.to_string_lossy().to_string(),
-        trash_rel_path,
+    lease.before_effect()?;
+    crate::workspace_files::move_path_to_system_trash(&source)
+        .map_err(|err| IpcError::from(format!("Cannot move document to Trash: {err}")))?;
+    let mut items = vec![DocumentDeleteItemOutcome {
+        rel_path: plan.source.rel_path.clone(),
+        kind: DocumentDeleteKind::Source,
+        status: DocumentDeleteStatus::Trashed,
+        error: None,
+    }];
+    let mut bundle_touched = None;
+    for item in listed {
+        if !selected_rels.contains(&item.rel_path) {
+            continue;
+        }
+        let path = vault.join(&item.rel_path);
+        if matches!(
+            item.kind,
+            DocumentDeleteKind::ExportManifest | DocumentDeleteKind::ExportOutput
+        ) {
+            bundle_touched = path.parent().map(Path::to_path_buf);
+        }
+        let (status, error) = if fs::symlink_metadata(&path).is_err() {
+            (DocumentDeleteStatus::Missing, None)
+        } else {
+            match crate::workspace_files::move_path_to_system_trash(&path) {
+                Ok(()) => (DocumentDeleteStatus::Trashed, None),
+                Err(err) => (DocumentDeleteStatus::Failed, Some(err)),
+            }
+        };
+        items.push(DocumentDeleteItemOutcome {
+            rel_path: item.rel_path.clone(),
+            kind: item.kind,
+            status,
+            error,
+        });
+    }
+    // The .exports folder goes only when nothing else is left in it.
+    if let Some(bundle) = bundle_touched {
+        let empty = fs::read_dir(&bundle)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if empty {
+            let _ = fs::remove_dir(&bundle);
+        }
+    }
+    Ok(DocumentDeleteOutcome {
+        source_rel_path: plan.source.rel_path,
+        items,
     })
+}
+
+/// `.exports` folders holding selected paths: apply may remove them once empty.
+fn export_bundle_dirs(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = paths
+        .iter()
+        .filter_map(|path| path.parent())
+        .filter(|parent| {
+            parent
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".exports"))
+        })
+        .map(Path::to_path_buf)
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+fn stale_delete_plan(reason: &str) -> IpcError {
+    IpcError {
+        code: DOCUMENT_DELETE_STALE.to_string(),
+        message: reason.to_string(),
+    }
+}
+
+fn refused_delete(reason: String) -> IpcError {
+    IpcError {
+        code: DOCUMENT_DELETE_REFUSED.to_string(),
+        message: reason,
+    }
+}
+
+/// Delete capability, the managed-vault rule (note deletion stays MCP-only)
+/// and the promoted-draft guard, for the source and every selected path.
+fn assert_document_delete_allowed(
+    vault_path: &str,
+    vault: &Path,
+    paths: &[PathBuf],
+) -> Result<(), IpcError> {
+    if is_managed_root(vault_path) || is_managed_root(&vault.to_string_lossy()) {
+        return Err(refused_delete(
+            "managed vault: note deletion stays MCP-only".to_string(),
+        ));
+    }
+    assert_maru_can_write(vault_path, WorkspaceWriteAction::Delete)?;
+    // Fail closed: unreadable draft metadata may hide a promoted target.
+    let promoted = crate::drafts::promoted_doc_targets(vault)?;
+    for path in paths {
+        if promoted
+            .iter()
+            .any(|protected| protected == path || protected.starts_with(path))
+        {
+            return Err(refused_delete(format!(
+                "promoted draft target - relink or discard the draft first: {}",
+                relative_slash(path, vault)
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Largest version, Binder or manifest file the plan reads to find a link.
+const DELETE_PLAN_READ_CAP: u64 = 8 * 1024 * 1024;
+
+fn compute_delete_plan(vault: &Path, source: &Path) -> Result<DocumentDeletePlan, String> {
+    let source_rel = relative_slash(source, vault);
+    let source_item = delete_item(
+        vault,
+        source,
+        DocumentDeleteKind::Source,
+        "selected document",
+    )?;
+    let mut seen = vec![source_rel.clone()];
+    let mut derived = Vec::new();
+    let mut metadata = Vec::new();
+    let mut kept = Vec::new();
+    let mut push = |list: &mut Vec<DocumentDeleteItem>, path: &Path, kind, evidence: &str| {
+        let rel = relative_slash(path, vault);
+        if seen.contains(&rel) {
+            return Ok::<(), String>(());
+        }
+        seen.push(rel);
+        list.push(delete_item(vault, path, kind, evidence)?);
+        Ok(())
+    };
+
+    // Export bundle: only a manifest whose `source` is this document.
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("export");
+    let bundle = source
+        .parent()
+        .unwrap_or(vault)
+        .join(format!("{stem}.exports"));
+    let manifest_path = bundle.join("manifest.yaml");
+    if is_regular_file(&manifest_path) && within_read_cap(&manifest_path) {
+        if let Ok(manifest) = crate::export::manifest::load_manifest(&manifest_path) {
+            if stored_path_matches(&manifest.source, vault, source, &source_rel) {
+                push(
+                    &mut derived,
+                    &manifest_path,
+                    DocumentDeleteKind::ExportManifest,
+                    "manifest.yaml source",
+                )?;
+                let mut listed = vec![manifest_path.clone()];
+                for output in &manifest.outputs {
+                    let Some(path) = inside(vault, &output.path) else {
+                        continue;
+                    };
+                    if path.parent() != Some(bundle.as_path())
+                        || fs::symlink_metadata(&path).is_err()
+                    {
+                        continue;
+                    }
+                    listed.push(path.clone());
+                    push(
+                        &mut derived,
+                        &path,
+                        DocumentDeleteKind::ExportOutput,
+                        "manifest.yaml outputs",
+                    )?;
+                }
+                if let Ok(entries) = fs::read_dir(&bundle) {
+                    let mut others: Vec<PathBuf> = entries
+                        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                        .filter(|path| !listed.contains(path))
+                        .collect();
+                    others.sort();
+                    for path in others {
+                        push(
+                            &mut kept,
+                            &path,
+                            DocumentDeleteKind::ExportUnlisted,
+                            "not listed in manifest.yaml",
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+
+    // Version snapshots: frontmatter `version_of` equal to the relPath.
+    let versions = vault.join(".maru").join("versions");
+    if let Ok(entries) = fs::read_dir(&versions) {
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| is_regular_file(path) && within_read_cap(path))
+            .collect();
+        files.sort();
+        for path in files {
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let parts = parse_frontmatter(&content);
+            if parts.meta.get("version_of").and_then(Value::as_str) == Some(source_rel.as_str()) {
+                push(
+                    &mut derived,
+                    &path,
+                    DocumentDeleteKind::Version,
+                    "version_of",
+                )?;
+            }
+        }
+    }
+
+    // Studio: this document's state folder, and its recorded output files.
+    let vault_text = vault.to_string_lossy().to_string();
+    for (dir, state) in crate::studio::studio_state_dirs(&vault_text)? {
+        let Some(document_path) = state.source.document_path.as_deref() else {
+            continue;
+        };
+        if !stored_path_matches(document_path, vault, source, &source_rel) {
+            continue;
+        }
+        let outputs = [
+            (
+                state.hwp_fields.last_output_path.as_deref(),
+                "Studio hwpFields.lastOutputPath",
+            ),
+            (
+                state.package.snapshot_path.as_deref(),
+                "Studio package.snapshotPath",
+            ),
+        ];
+        for (stored, evidence) in outputs {
+            let Some(path) = stored.and_then(|stored| inside(vault, stored)) else {
+                continue;
+            };
+            // Files only, never the source, never inside a Studio state folder.
+            let is_file = fs::symlink_metadata(&path)
+                .map(|metadata| !metadata.is_dir())
+                .unwrap_or(false);
+            if is_file && path != source && !path.starts_with(&dir) {
+                push(
+                    &mut derived,
+                    &path,
+                    DocumentDeleteKind::StudioOutput,
+                    evidence,
+                )?;
+            }
+        }
+        push(
+            &mut metadata,
+            &dir,
+            DocumentDeleteKind::StudioState,
+            "Studio source.documentPath",
+        )?;
+    }
+
+    // Evidence Binder state recorded for this document.
+    for (path, document_path) in crate::evidence_binder::binder_state_document_paths(vault)? {
+        if stored_path_matches(&document_path, vault, source, &source_rel) {
+            push(
+                &mut metadata,
+                &path,
+                DocumentDeleteKind::BinderState,
+                "Binder documentPath",
+            )?;
+        }
+    }
+
+    // KG refs cache keyed by the relPath hash.
+    let kg_cache = crate::kg_refs::cache_file_for_document(vault, &source_rel);
+    if is_regular_file(&kg_cache) {
+        push(
+            &mut metadata,
+            &kg_cache,
+            DocumentDeleteKind::KgCache,
+            "kg-cache sha256(relPath)",
+        )?;
+    }
+
+    let fingerprint = delete_plan_fingerprint(vault, &source_item, &derived, &metadata, &kept);
+    Ok(DocumentDeletePlan {
+        source: source_item,
+        derived,
+        metadata,
+        kept,
+        fingerprint,
+    })
+}
+
+/// True when a stored link names exactly this document: a relative path equal
+/// to the relPath, or an absolute path whose canonical parent and file name
+/// match (so /var and /private/var agree, but a symlink is not followed).
+fn stored_path_matches(stored: &str, vault: &Path, source: &Path, source_rel: &str) -> bool {
+    let stored = stored.trim();
+    if stored.is_empty() {
+        return false;
+    }
+    let candidate = Path::new(stored);
+    if !candidate.is_absolute() {
+        let rel = stored.replace('\\', "/");
+        let rel = rel.trim_start_matches("./").trim_matches('/');
+        return rel == source_rel;
+    }
+    let candidate = crate::vault::lexical_normalize(candidate);
+    if candidate == source {
+        return true;
+    }
+    match (
+        candidate
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok()),
+        source
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok()),
+    ) {
+        (Some(left), Some(right)) => {
+            left == right && candidate.file_name() == source.file_name() && left.starts_with(vault)
+        }
+        _ => false,
+    }
+}
+
+/// A recorded path resolved inside the workspace, or None.
+fn inside(vault: &Path, stored: &str) -> Option<PathBuf> {
+    let stored = stored.trim();
+    if stored.is_empty() {
+        return None;
+    }
+    resolve_inside_vault(&vault.to_string_lossy(), stored)
+        .ok()
+        .filter(|path| path != vault)
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+}
+
+fn within_read_cap(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|metadata| metadata.len() <= DELETE_PLAN_READ_CAP)
+        .unwrap_or(false)
+}
+
+fn relative_slash(path: &Path, vault: &Path) -> String {
+    relative(path, vault).replace('\\', "/")
+}
+
+fn delete_item(
+    vault: &Path,
+    path: &Path,
+    kind: DocumentDeleteKind,
+    evidence: &str,
+) -> Result<DocumentDeleteItem, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| format!("Cannot inspect {}: {err}", path.display()))?;
+    let size_bytes = if metadata.is_dir() {
+        walkdir::WalkDir::new(path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.metadata().ok())
+            .filter(|metadata| metadata.is_file())
+            .map(|metadata| metadata.len())
+            .sum()
+    } else {
+        metadata.len()
+    };
+    Ok(DocumentDeleteItem {
+        rel_path: relative_slash(path, vault),
+        kind,
+        size_bytes,
+        is_dir: metadata.is_dir(),
+        evidence: evidence.to_string(),
+    })
+}
+
+/// Hash of (relPath, size, mtime) for every item the dialog shows. A folder
+/// contributes each nested entry, so a change anywhere inside it is stale.
+fn delete_plan_fingerprint(
+    vault: &Path,
+    source: &DocumentDeleteItem,
+    derived: &[DocumentDeleteItem],
+    metadata: &[DocumentDeleteItem],
+    kept: &[DocumentDeleteItem],
+) -> String {
+    let mut hasher = Sha256::new();
+    let groups = [
+        ("source", std::slice::from_ref(source)),
+        ("derived", derived),
+        ("metadata", metadata),
+        ("kept", kept),
+    ];
+    for (group, items) in groups {
+        for item in items {
+            for entry in walkdir::WalkDir::new(vault.join(&item.rel_path))
+                .follow_links(false)
+                .follow_root_links(false)
+                .sort_by_file_name()
+                .into_iter()
+                .filter_map(Result::ok)
+            {
+                let Ok(metadata) = entry.metadata() else {
+                    continue;
+                };
+                let mtime = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default();
+                hasher.update(format!(
+                    "{group}\t{}\t{}\t{mtime}\t{}\n",
+                    relative_slash(entry.path(), vault),
+                    metadata.len(),
+                    metadata.is_dir()
+                ));
+            }
+        }
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 fn ensure_existing_document(path: &Path) -> Result<(), String> {
@@ -731,42 +1253,6 @@ fn unique_duplicate_path(source_path: &Path) -> PathBuf {
         }
         counter += 1;
     }
-}
-
-fn unique_trash_path(source_path: &Path, vault: &Path) -> Result<PathBuf, String> {
-    let original_rel_parent = source_path
-        .strip_prefix(vault)
-        .unwrap_or(source_path)
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default();
-    let stem = source_path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("document");
-    let ext = source_path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("md");
-    let timestamp = Utc::now().format("%Y%m%d-%H%M%S");
-    let trash_dir = vault
-        .join(".maru")
-        .join("trash")
-        .join("documents")
-        .join(original_rel_parent);
-    let base = format!("{stem}-{timestamp}");
-    for counter in 1.. {
-        let file_name = if counter == 1 {
-            format!("{base}.{ext}")
-        } else {
-            format!("{base}-{counter}.{ext}")
-        };
-        let candidate = trash_dir.join(file_name);
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    Err("Cannot allocate trash path".to_string())
 }
 
 pub fn create_version(
@@ -1017,20 +1503,38 @@ pub mod ipc {
         .map_err(|err| format!("duplicate_document_task_failed: {err}"))?
     }
     #[tauri::command]
+    pub async fn document_delete_plan(
+        vault_path: String,
+        document_path: String,
+    ) -> Result<DocumentDeletePlan, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            PathTransactionLease::test_stage(
+                &[PathBuf::from(&vault_path)],
+                "worker:document_delete_plan",
+            );
+            super::document_delete_plan(vault_path, document_path)
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("document_delete_plan_task_failed: {err}")))?
+    }
+    #[tauri::command]
     pub async fn trash_document(
         vault_path: String,
         document_path: String,
-    ) -> Result<DeletedDocument, String> {
+        fingerprint: String,
+        selected_rel_paths: Vec<String>,
+    ) -> Result<DocumentDeleteOutcome, IpcError> {
         tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
             PathTransactionLease::test_stage(
                 &[PathBuf::from(&vault_path)],
                 "worker:trash_document",
             );
-            super::trash_document(vault_path, document_path)
+            super::trash_document(vault_path, document_path, fingerprint, selected_rel_paths)
         })
         .await
-        .map_err(|err| format!("trash_document_task_failed: {err}"))?
+        .map_err(|err| IpcError::from(format!("trash_document_task_failed: {err}")))?
     }
     #[tauri::command]
     pub async fn create_version(
@@ -1502,28 +2006,6 @@ mod tests {
     }
 
     #[test]
-    fn trash_document_moves_to_maru_trash_and_removes_source() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().to_string_lossy().to_string();
-        let source = tmp.path().join("meetings").join("weekly.md");
-        fs::create_dir_all(source.parent().unwrap()).unwrap();
-        fs::write(&source, "# Weekly\n").unwrap();
-
-        let deleted = trash_document(root, "meetings/weekly.md".to_string()).unwrap();
-
-        assert_eq!(deleted.original_rel_path, "meetings/weekly.md");
-        assert!(!source.exists());
-        assert!(deleted
-            .trash_rel_path
-            .starts_with(".maru/trash/documents/meetings/weekly-"));
-        assert!(Path::new(&deleted.trash_path).exists());
-        assert_eq!(
-            fs::read_to_string(deleted.trash_path).unwrap(),
-            "# Weekly\n"
-        );
-    }
-
-    #[test]
     fn move_document_preserves_html_extension_and_case() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().to_string_lossy().to_string();
@@ -1562,18 +2044,6 @@ mod tests {
 
         assert_eq!(payload.rel_path, "page-copy.HTML");
         assert!(tmp.path().join("page-copy.HTML").exists());
-    }
-
-    #[test]
-    fn trash_document_preserves_html_extension() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().to_string_lossy().to_string();
-        fs::write(tmp.path().join("page.htm"), "<html></html>").unwrap();
-
-        let deleted = trash_document(root, "page.htm".to_string()).unwrap();
-
-        assert!(deleted.trash_rel_path.ends_with(".htm"));
-        assert!(Path::new(&deleted.trash_path).exists());
     }
 
     #[test]
@@ -1735,11 +2205,24 @@ mod phase08_07 {
             "duplicate_document",
             ipc::duplicate_document(s.clone(), "note.md".into()),
         );
-        boundary(
-            root.into(),
-            "trash_document",
-            ipc::trash_document(s.clone(), "note.md".into()),
-        );
+        let t = s.clone();
+        boundary(root.into(), "document_delete_plan", async move {
+            ipc::document_delete_plan(t, "note.md".into())
+                .await
+                .map_err(|e| {
+                    assert!(e.code.is_empty(), "JoinError must remain display-only");
+                    e.message
+                })
+        });
+        let t = s.clone();
+        boundary(root.into(), "trash_document", async move {
+            ipc::trash_document(t, "note.md".into(), "fingerprint".into(), Vec::new())
+                .await
+                .map_err(|e| {
+                    assert!(e.code.is_empty(), "JoinError must remain display-only");
+                    e.message
+                })
+        });
         boundary(
             root.into(),
             "create_version",
@@ -1814,9 +2297,19 @@ mod phase08_07 {
         ))
         .unwrap();
         assert!(fs::read_to_string(snap.path).unwrap().contains("reason"));
-        let trash = run(ipc::trash_document(s.clone(), moved.rel_path)).unwrap();
-        assert_eq!(fs::read_to_string(trash.trash_path).unwrap(), saved.content);
-        assert!(!Path::new(&trash.original_path).exists());
+        let plan = run(ipc::document_delete_plan(s.clone(), moved.rel_path.clone())).unwrap();
+        let trashed = root.join("fixture-trash.md");
+        let _trash = TrashFixture::new(PathBuf::from(&moved.path), trashed.clone());
+        let deleted = run(ipc::trash_document(
+            s.clone(),
+            moved.rel_path.clone(),
+            plan.fingerprint,
+            Vec::new(),
+        ))
+        .unwrap();
+        assert_eq!(deleted.items.len(), 1);
+        assert_eq!(fs::read_to_string(trashed).unwrap(), saved.content);
+        assert!(!Path::new(&moved.path).exists());
         let missing = run(ipc::save_document(
             s,
             "missing.md".into(),
@@ -2025,6 +2518,7 @@ mod phase08_07 {
             let root = fixture.path();
             let s = text(root);
             fs::write(root.join("note.md"), "---\nstatus: draft\n---\n# body\n").unwrap();
+            let _trash = TrashFixture::new(root.join("note.md"), root.join("fixture-trash.md"));
             let target = root.join(if command == "create" {
                 "new.md"
             } else {
@@ -2065,10 +2559,15 @@ mod phase08_07 {
                         .await
                         .map(|_| ())
                         .map_err(IpcError::from),
-                    "trash" => ipc::trash_document(root, "note.md".into())
-                        .await
-                        .map(|_| ())
-                        .map_err(IpcError::from),
+                    "trash" => {
+                        let fingerprint =
+                            super::document_delete_plan(root.clone(), "note.md".into())
+                                .map(|plan| plan.fingerprint)
+                                .unwrap_or_default();
+                        ipc::trash_document(root, "note.md".into(), fingerprint, Vec::new())
+                            .await
+                            .map(|_| ())
+                    }
                     _ => ipc::create_version(
                         root,
                         "note.md".into(),
@@ -2734,5 +3233,375 @@ mod phase08_07_earlier_writer_document_races {
                 .any(|source| source.id == "fixture"));
             assert_clean_sidecars(&fixture.checkout);
         }
+    }
+}
+
+#[cfg(test)]
+mod document_delete_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::Home;
+    use crate::ipc_error::{DOCUMENT_DELETE_REFUSED, DOCUMENT_DELETE_STALE};
+    use crate::workspace_files::phase08_06::TrashFixture;
+
+    const SOURCE: &str = "notes/report.md";
+
+    struct Workspace {
+        home: Home,
+        root: PathBuf,
+    }
+
+    impl Workspace {
+        fn new() -> Self {
+            let home = Home::new();
+            let root = home.root.path().join("work");
+            fs::create_dir_all(&root).unwrap();
+            Self { home, root }
+        }
+        fn s(&self) -> String {
+            self.root.to_string_lossy().to_string()
+        }
+        fn write(&self, rel: &str, body: &str) -> PathBuf {
+            let path = self.root.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, body).unwrap();
+            path
+        }
+        fn plan(&self) -> DocumentDeletePlan {
+            document_delete_plan(self.s(), SOURCE.into()).unwrap()
+        }
+        /// Every listed path moves into a fixture folder instead of the real
+        /// system Trash; the returned guards keep the redirects alive.
+        fn trash_fixtures(&self, plan: &DocumentDeletePlan) -> Vec<TrashFixture> {
+            let trash = self.home.root.path().join("fixture-trash");
+            fs::create_dir_all(&trash).unwrap();
+            std::iter::once(&plan.source)
+                .chain(&plan.derived)
+                .chain(&plan.metadata)
+                .enumerate()
+                .map(|(index, item)| {
+                    TrashFixture::new(
+                        self.root.join(&item.rel_path),
+                        trash.join(index.to_string()),
+                    )
+                })
+                .collect()
+        }
+        fn apply(
+            &self,
+            plan: &DocumentDeletePlan,
+            selected: Vec<String>,
+        ) -> Result<DocumentDeleteOutcome, IpcError> {
+            trash_document(self.s(), SOURCE.into(), plan.fingerprint.clone(), selected)
+        }
+        fn exists(&self, rel: &str) -> bool {
+            fs::symlink_metadata(self.root.join(rel)).is_ok()
+        }
+    }
+
+    fn rels(items: &[DocumentDeleteItem]) -> Vec<String> {
+        items.iter().map(|item| item.rel_path.clone()).collect()
+    }
+
+    fn studio_state(doc_id: &str, document_path: &str, output: &str, snapshot: &str) -> String {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "docId": doc_id,
+            "currentStep": "export",
+            "source": {
+                "mode": "activeDocument",
+                "documentPath": document_path,
+                "title": "Report",
+                "docType": "report",
+                "targetRelPath": SOURCE
+            },
+            "template": null,
+            "bodyDraft": "",
+            "hwpFields": { "status": "filled", "lastOutputPath": output },
+            "export": { "formats": [], "manifestPath": null, "summary": null, "lastRunAt": null },
+            "package": { "frozen": true, "frozenAt": null, "snapshotPath": snapshot },
+            "updatedAt": "2026-10-09T00:00:00Z"
+        })
+        .to_string()
+    }
+
+    /// A document with every derived and metadata kind the plan recognizes,
+    /// plus look-alikes that must never be selected.
+    fn seeded() -> Workspace {
+        let ws = Workspace::new();
+        let source = ws.write(SOURCE, "# Report\n");
+        ws.write("notes/report-final.md", "# Final\n");
+        ws.write(
+            "notes/report.exports/manifest.yaml",
+            "schema_version: 1\nsource: notes/report.md\nsource_sha256: x\nsource_byte_size: 1\ngenerated_at: now\noutputs:\n- format: docx\n  path: notes/report.exports/report.docx\n  status: ready\n- format: pdf\n  path: notes/report.exports/report.pdf\n  status: failed\n",
+        );
+        ws.write("notes/report.exports/report.docx", "docx");
+        ws.write(
+            ".maru/versions/report-20261009-000000.000-a.md",
+            "---\ntype: Version\nversion_of: notes/report.md\n---\n# v1\n",
+        );
+        ws.write(
+            ".maru/versions/report-final-20261009-000000.000-b.md",
+            "---\ntype: Version\nversion_of: notes/report-final.md\n---\n# other\n",
+        );
+        ws.write(".maru/studio/filled/report.hwpx", "hwpx");
+        ws.write(
+            ".maru/studio/notes-report.md/state.json",
+            &studio_state(
+                "notes-report.md",
+                &source.to_string_lossy(),
+                ".maru/studio/filled/report.hwpx",
+                SOURCE,
+            ),
+        );
+        ws.write(
+            ".maru/binder/notes-report.md.json",
+            &serde_json::json!({ "docId": "notes-report.md", "documentPath": SOURCE }).to_string(),
+        );
+        ws.write(
+            ".maru/binder/notes-report-final.md.json",
+            &serde_json::json!({ "documentPath": "notes/report-final.md" }).to_string(),
+        );
+        let kg = crate::kg_refs::cache_file_for_document(&ws.root.canonicalize().unwrap(), SOURCE);
+        fs::create_dir_all(kg.parent().unwrap()).unwrap();
+        fs::write(kg, "{}").unwrap();
+        ws
+    }
+
+    fn kg_rel(ws: &Workspace) -> String {
+        let root = ws.root.canonicalize().unwrap();
+        relative_slash(
+            &crate::kg_refs::cache_file_for_document(&root, SOURCE),
+            &root,
+        )
+    }
+
+    #[test]
+    fn plan_lists_recorded_links_only() {
+        let ws = seeded();
+        let plan = ws.plan();
+        assert_eq!(plan.source.rel_path, SOURCE);
+        assert_eq!(
+            rels(&plan.derived),
+            vec![
+                "notes/report.exports/manifest.yaml",
+                "notes/report.exports/report.docx",
+                ".maru/versions/report-20261009-000000.000-a.md",
+                ".maru/studio/filled/report.hwpx",
+            ]
+        );
+        assert_eq!(
+            rels(&plan.metadata),
+            vec![
+                ".maru/studio/notes-report.md".to_string(),
+                ".maru/binder/notes-report.md.json".to_string(),
+                kg_rel(&ws),
+            ]
+        );
+        assert!(plan.metadata[0].is_dir);
+        assert!(plan.kept.is_empty());
+        // The Studio snapshot path names the source itself: never derived.
+        assert!(!rels(&plan.derived).contains(&SOURCE.to_string()));
+    }
+
+    #[test]
+    fn both_toggles_off_trashes_only_the_source_and_keeps_state() {
+        let ws = seeded();
+        let plan = ws.plan();
+        let _trash = ws.trash_fixtures(&plan);
+        let outcome = ws.apply(&plan, Vec::new()).unwrap();
+        assert_eq!(outcome.items.len(), 1);
+        assert_eq!(outcome.items[0].status, DocumentDeleteStatus::Trashed);
+        assert!(!ws.exists(SOURCE));
+        for item in plan.derived.iter().chain(&plan.metadata) {
+            assert!(ws.exists(&item.rel_path), "{} must stay", item.rel_path);
+        }
+    }
+
+    #[test]
+    fn derived_on_trashes_bundle_versions_and_outputs_then_the_empty_folder() {
+        let ws = seeded();
+        let plan = ws.plan();
+        let _trash = ws.trash_fixtures(&plan);
+        let outcome = ws.apply(&plan, rels(&plan.derived)).unwrap();
+        assert_eq!(outcome.items.len(), 5);
+        assert!(outcome
+            .items
+            .iter()
+            .all(|item| item.status == DocumentDeleteStatus::Trashed));
+        assert!(!ws.exists("notes/report.exports"));
+        assert!(ws.exists("notes/report-final.md"));
+        assert!(ws.exists(".maru/versions/report-final-20261009-000000.000-b.md"));
+        assert!(ws.exists(".maru/binder/notes-report.md.json"));
+    }
+
+    #[test]
+    fn metadata_on_trashes_binder_studio_and_kg_cache() {
+        let ws = seeded();
+        let plan = ws.plan();
+        let _trash = ws.trash_fixtures(&plan);
+        ws.apply(&plan, rels(&plan.metadata)).unwrap();
+        for item in &plan.metadata {
+            assert!(!ws.exists(&item.rel_path), "{} must go", item.rel_path);
+        }
+        assert!(ws.exists(".maru/binder/notes-report-final.md.json"));
+        assert!(ws.exists("notes/report.exports/manifest.yaml"));
+    }
+
+    #[test]
+    fn unchecked_items_stay() {
+        let ws = seeded();
+        let plan = ws.plan();
+        let _trash = ws.trash_fixtures(&plan);
+        let selected = vec![".maru/versions/report-20261009-000000.000-a.md".to_string()];
+        ws.apply(&plan, selected).unwrap();
+        assert!(!ws.exists(".maru/versions/report-20261009-000000.000-a.md"));
+        assert!(ws.exists("notes/report.exports/manifest.yaml"));
+        assert!(ws.exists(".maru/studio/filled/report.hwpx"));
+    }
+
+    #[test]
+    fn foreign_bundle_is_not_listed_and_unlisted_files_keep_the_folder() {
+        let ws = Workspace::new();
+        ws.write(SOURCE, "# Report\n");
+        ws.write(
+            "notes/report.exports/manifest.yaml",
+            "schema_version: 1\nsource: notes/other.md\nsource_sha256: x\nsource_byte_size: 1\ngenerated_at: now\noutputs: []\n",
+        );
+        assert!(ws.plan().derived.is_empty());
+
+        ws.write(
+            "notes/report.exports/manifest.yaml",
+            "schema_version: 1\nsource: notes/report.md\nsource_sha256: x\nsource_byte_size: 1\ngenerated_at: now\noutputs:\n- format: docx\n  path: notes/report.exports/report.docx\n  status: ready\n- format: pdf\n  path: notes/escape.pdf\n  status: ready\n",
+        );
+        ws.write("notes/report.exports/report.docx", "docx");
+        ws.write("notes/report.exports/handmade.txt", "keep me");
+        ws.write("notes/escape.pdf", "outside the bundle");
+        let plan = ws.plan();
+        assert_eq!(
+            rels(&plan.derived),
+            vec![
+                "notes/report.exports/manifest.yaml",
+                "notes/report.exports/report.docx"
+            ]
+        );
+        assert_eq!(rels(&plan.kept), vec!["notes/report.exports/handmade.txt"]);
+        let _trash = ws.trash_fixtures(&plan);
+        ws.apply(&plan, rels(&plan.derived)).unwrap();
+        assert!(ws.exists("notes/report.exports/handmade.txt"));
+        assert!(ws.exists("notes/escape.pdf"));
+    }
+
+    #[test]
+    fn changed_file_is_stale_and_nothing_is_deleted() {
+        let ws = seeded();
+        let plan = ws.plan();
+        let _trash = ws.trash_fixtures(&plan);
+        ws.write(
+            ".maru/versions/report-20261009-000000.000-a.md",
+            "---\nversion_of: notes/report.md\n---\n# edited\n",
+        );
+        let error = ws.apply(&plan, rels(&plan.derived)).unwrap_err();
+        assert_eq!(error.code, DOCUMENT_DELETE_STALE);
+        assert!(ws.exists(SOURCE));
+        assert!(ws.exists("notes/report.exports/manifest.yaml"));
+
+        // A newly linked file also changes the plan.
+        let plan = ws.plan();
+        ws.write(
+            ".maru/versions/report-new.md",
+            "---\nversion_of: notes/report.md\n---\n",
+        );
+        assert_eq!(
+            ws.apply(&plan, Vec::new()).unwrap_err().code,
+            DOCUMENT_DELETE_STALE
+        );
+        assert!(ws.exists(SOURCE));
+    }
+
+    #[test]
+    fn paths_outside_the_plan_or_workspace_are_rejected_before_any_effect() {
+        let ws = seeded();
+        let plan = ws.plan();
+        let _trash = ws.trash_fixtures(&plan);
+        let error = ws
+            .apply(&plan, vec!["notes/report-final.md".to_string()])
+            .unwrap_err();
+        assert!(error.message.contains("Not in the reviewed delete plan"));
+        let error = ws
+            .apply(&plan, vec!["../outside.md".to_string()])
+            .unwrap_err();
+        assert!(error.message.contains("escapes"));
+        assert!(ws.exists(SOURCE));
+        assert!(ws.exists("notes/report-final.md"));
+    }
+
+    #[test]
+    fn managed_root_and_promoted_target_are_refused() {
+        let ws = seeded();
+        let registry = crate::vault_list::workspace_registry_path().unwrap();
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(
+            &registry,
+            serde_json::json!({"workspaces":[{"label":"fixture","visibility":"private","path":ws.s(),"writePolicy":"managed"}]}).to_string(),
+        )
+        .unwrap();
+        let error = document_delete_plan(ws.s(), SOURCE.into()).unwrap_err();
+        assert_eq!(error.code, DOCUMENT_DELETE_REFUSED);
+        let error = trash_document(ws.s(), SOURCE.into(), "x".into(), Vec::new()).unwrap_err();
+        assert_eq!(error.code, DOCUMENT_DELETE_REFUSED);
+        fs::write(&registry, r#"{"workspaces":[]}"#).unwrap();
+
+        ws.write(
+            ".maru/drafts/index.json",
+            &serde_json::json!([{
+                "id": "draft-protected",
+                "kind": "task",
+                "title": "Protected",
+                "status": "accepted",
+                "source": "kimi",
+                "originRefs": [],
+                "bodyPath": "draft-protected.md",
+                "promotedTo": SOURCE,
+                "createdAt": "2026-08-08T00:00:00Z",
+                "updatedAt": "2026-08-08T00:00:00Z"
+            }])
+            .to_string(),
+        );
+        let error = document_delete_plan(ws.s(), SOURCE.into()).unwrap_err();
+        assert_eq!(error.code, DOCUMENT_DELETE_REFUSED);
+        assert!(error.message.contains("promoted draft target"));
+        assert!(ws.exists(SOURCE));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_output_is_trashed_as_a_link() {
+        let ws = Workspace::new();
+        ws.write(SOURCE, "# Report\n");
+        let outside = ws.home.root.path().join("outside.docx");
+        fs::write(&outside, "outside").unwrap();
+        ws.write(
+            "notes/report.exports/manifest.yaml",
+            "schema_version: 1\nsource: notes/report.md\nsource_sha256: x\nsource_byte_size: 1\ngenerated_at: now\noutputs:\n- format: docx\n  path: notes/report.exports/report.docx\n  status: ready\n",
+        );
+        std::os::unix::fs::symlink(&outside, ws.root.join("notes/report.exports/report.docx"))
+            .unwrap();
+        let plan = ws.plan();
+        assert!(!plan.derived[1].is_dir);
+        let _trash = ws.trash_fixtures(&plan);
+        ws.apply(&plan, rels(&plan.derived)).unwrap();
+        assert!(!ws.exists("notes/report.exports/report.docx"));
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+    }
+
+    #[test]
+    fn missing_source_is_stale() {
+        let ws = seeded();
+        let plan = ws.plan();
+        fs::remove_file(ws.root.join(SOURCE)).unwrap();
+        assert_eq!(
+            ws.apply(&plan, Vec::new()).unwrap_err().code,
+            DOCUMENT_DELETE_STALE
+        );
     }
 }

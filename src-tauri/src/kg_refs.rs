@@ -269,6 +269,11 @@ fn frontmatter_aliases(entry: &VaultEntry) -> Vec<String> {
     out
 }
 
+/// The kg-cache file for one workspace-relative document path (#441 delete plan).
+pub(crate) fn cache_file_for_document(work: &Path, doc_rel: &str) -> PathBuf {
+    cache_file_path(work, &normalize_rel(doc_rel))
+}
+
 fn cache_file_path(work: &Path, doc_rel: &str) -> PathBuf {
     let name = format!("{}.json", sha256_hex(doc_rel.as_bytes()));
     KG_CACHE_REL

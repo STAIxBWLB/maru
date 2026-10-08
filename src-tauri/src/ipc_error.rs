@@ -26,6 +26,12 @@ pub const EVIDENCE_BINDER_REVISION_CONFLICT: &str = "evidence_binder_revision_co
 /// the Today surface rendered. The frontend can refresh without guessing.
 pub const WEB_ACTION_REPAIR_CONFLICT: &str = "web_action_repair_conflict";
 pub const MEETING_SOURCE_REVISION_CONFLICT: &str = "meeting_source_revision_conflict";
+/// The reviewed document delete plan no longer matches the files on disk
+/// (`trash_document`). The dialog re-plans; nothing was deleted.
+pub const DOCUMENT_DELETE_STALE: &str = "document_delete_stale";
+/// The document cannot be deleted here: a managed vault root (note deletion
+/// stays MCP-only) or the target of a promoted draft.
+pub const DOCUMENT_DELETE_REFUSED: &str = "document_delete_refused";
 
 /// Error crossing the Tauri bridge. `code` is empty for legacy errors
 /// converted via `From<String>` (the whole original string lands in
@@ -156,6 +162,8 @@ mod tests {
             "assert_expected_revision(",
             "check_revision(",
             "load_context(",
+            "document_delete_plan(",
+            "trash_document(",
         ];
         // (file, line) pairs that flatten deliberately, each with its reason.
         const ALLOWED: &[(&str, &str)] = &[(
@@ -209,6 +217,8 @@ mod tests {
             EVIDENCE_BINDER_REVISION_CONFLICT,
             "evidence_binder_revision_conflict"
         );
+        assert_eq!(DOCUMENT_DELETE_STALE, "document_delete_stale");
+        assert_eq!(DOCUMENT_DELETE_REFUSED, "document_delete_refused");
     }
 
     #[test]

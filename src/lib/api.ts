@@ -15,6 +15,7 @@ import {
   mockMoveDocument,
   mockSetActiveWorkspaceRoot,
   mockTrashDocument,
+  mockDocumentDeletePlan,
   mockVaultGraphFile,
   mockWorkspaceFiles,
   mockWorkspaceRegistry,
@@ -39,7 +40,8 @@ import type {
 } from "./kakaoRelay";
 import type {
   CreatedDocument,
-  DeletedDocument,
+  DocumentDeleteOutcome,
+  DocumentDeletePlan,
   DocumentPayload,
   FileQueueApplyItem,
   FileQueueApplyOutcome,
@@ -1343,12 +1345,52 @@ export async function duplicateDocument(
   return invoke<DocumentPayload>("duplicate_document", { vaultPath, documentPath });
 }
 
+/** Everything a document delete would move to the system Trash (#441). */
+export async function documentDeletePlan(
+  vaultPath: string,
+  documentPath: string,
+): Promise<DocumentDeletePlan> {
+  try {
+    if (!isTauri()) {
+      const override = await invokeE2EOverride<DocumentDeletePlan>("document_delete_plan", {
+        vaultPath,
+        documentPath,
+      });
+      return override ?? mockDocumentDeletePlan(documentPath);
+    }
+    return await invoke<DocumentDeletePlan>("document_delete_plan", { vaultPath, documentPath });
+  } catch (err) {
+    throw normalizeIpcError(err);
+  }
+}
+
+/** Trash the source plus the reviewed paths still checked. A changed plan
+ *  rejects with `document_delete_stale` and deletes nothing. */
 export async function trashDocument(
   vaultPath: string,
   documentPath: string,
-): Promise<DeletedDocument> {
-  if (!isTauri()) return mockTrashDocument(documentPath);
-  return invoke<DeletedDocument>("trash_document", { vaultPath, documentPath });
+  fingerprint: string,
+  selectedRelPaths: string[],
+): Promise<DocumentDeleteOutcome> {
+  try {
+    if (!isTauri()) {
+      const override = await invokeE2EOverride<DocumentDeleteOutcome>("trash_document", {
+        vaultPath,
+        documentPath,
+        fingerprint,
+        selectedRelPaths,
+      });
+      return override ?? mockTrashDocument(documentPath, fingerprint, selectedRelPaths);
+    }
+    return await invoke<DocumentDeleteOutcome>("trash_document", {
+      vaultPath,
+      documentPath,
+      fingerprint,
+      selectedRelPaths,
+    });
+  } catch (err) {
+    throw normalizeIpcError(err);
+  }
 }
 
 // === Workspace registry ===

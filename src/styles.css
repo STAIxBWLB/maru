@@ -9766,6 +9766,94 @@ button.git-badge:hover {
   font-size: var(--type-label-size);
 }
 
+.document-delete-dialog {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.document-delete-body {
+  display: grid;
+  gap: 12px;
+}
+
+.document-delete-group {
+  display: grid;
+  gap: 6px;
+}
+
+.document-delete-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: var(--type-label-size);
+  font-weight: 600;
+}
+
+.document-delete-list {
+  display: grid;
+  gap: 2px;
+  max-height: 200px;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  list-style: none;
+}
+
+.document-delete-row {
+  display: grid;
+  gap: 2px;
+  padding: 4px 6px;
+}
+
+.document-delete-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.document-delete-path {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--type-meta-size);
+}
+
+.document-delete-meta,
+.document-delete-muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta-size);
+}
+
+.document-delete-total {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-body-size);
+  font-weight: 600;
+}
+
+.document-delete-notice,
+.document-delete-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--type-label-size);
+}
+
+.document-delete-notice {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.document-delete-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .skills-confirm-dialog {
   width: min(420px, calc(100vw - 32px));
 }

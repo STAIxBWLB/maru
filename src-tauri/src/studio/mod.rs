@@ -377,6 +377,33 @@ pub mod ipc {
     }
 }
 
+/// Every readable Studio state with its folder, for the #441 delete plan.
+/// Unreadable or foreign-schema states are skipped, as `studio_state_list` does.
+pub(crate) fn studio_state_dirs(work_path: &str) -> Result<Vec<(PathBuf, StudioState)>, String> {
+    let root = studio_root(work_path)?;
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut states = Vec::new();
+    for entry in fs::read_dir(&root).map_err(|err| format!("Cannot read Studio state: {err}"))? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let dir = entry.path();
+        let is_dir = fs::symlink_metadata(&dir)
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false);
+        if !is_dir {
+            continue;
+        }
+        if let Ok(state) = read_state_file(&dir.join("state.json")) {
+            states.push((dir, state));
+        }
+    }
+    states.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(states)
+}
+
 fn studio_root(work_path: &str) -> Result<PathBuf, String> {
     resolve_inside_vault(work_path, ".maru/studio")
 }

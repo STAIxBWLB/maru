@@ -3340,6 +3340,13 @@ mod phase08_08 {
                 let body = root.join("scratchpad/drafts").join(&draft.body_path);
                 let rel = text(body.strip_prefix(&root).unwrap());
                 let mutation_work = work.clone();
+                let fingerprint = crate::document::document_delete_plan(work.clone(), rel.clone())
+                    .unwrap()
+                    .fingerprint;
+                let _trash = crate::workspace_files::phase08_06::TrashFixture::new(
+                    body.clone(),
+                    root.join("fixture-trash.md"),
+                );
                 let mutation = async move {
                     if rename {
                         crate::workspace_files::ipc::rename_workspace_entry(
@@ -3350,9 +3357,15 @@ mod phase08_08 {
                         .await
                         .map(|_| ())
                     } else {
-                        crate::document::ipc::trash_document(mutation_work, rel)
-                            .await
-                            .map(|_| ())
+                        crate::document::ipc::trash_document(
+                            mutation_work,
+                            rel,
+                            fingerprint,
+                            Vec::new(),
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|err| err.message)
                     }
                 };
                 let reading = ipc::drafts_read(work.clone(), draft.id.clone());

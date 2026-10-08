@@ -298,6 +298,7 @@ pub fn run() {
             document::ipc::move_document,
             document::ipc::duplicate_document,
             document::ipc::trash_document,
+            document::ipc::document_delete_plan,
             document::ipc::create_version,
             document::ipc::update_frontmatter_field,
             list_workspace_roots,
