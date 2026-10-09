@@ -358,7 +358,7 @@ export function buildProposalFromCandidate(
       ops.push({ kind: "addEdge", edge: projected });
       continue;
     }
-    if (otherRelationIds.has(existing.id)) {
+    if (otherRelationIds.has(existing.id) && !previousRelationEdgeIds.has(existing.id)) {
       diagnostics.push({ key: "diagram.proposal.idCollision", params: { id: projected.id } });
       continue;
     }
@@ -392,8 +392,14 @@ export function buildProposalFromCandidate(
     // Fully out-of-scope edges are never touched.
   }
 
-  // The semantic candidate itself is stored with the patch.
-  ops.push({ kind: "upsertSemanticDataset", dataset: candidate });
+  // The semantic candidate itself is stored with the patch. Regenerating a
+  // dataset in place keeps the imported top-level fields the engine schema
+  // cannot carry, so they are never dropped silently.
+  const stored =
+    previous?.preservedExtensions !== undefined
+      ? { ...candidate, preservedExtensions: { ...previous.preservedExtensions, ...candidate.preservedExtensions } }
+      : candidate;
+  ops.push({ kind: "upsertSemanticDataset", dataset: stored });
 
   return { proposal: { meta, candidate, ops, diagnostics }, diagnostics };
 }

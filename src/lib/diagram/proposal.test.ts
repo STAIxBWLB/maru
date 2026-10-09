@@ -368,6 +368,16 @@ describe("buildProposalFromCandidate across datasets", () => {
     expect(proposal.ops.some((op) => op.kind === "updateEdge")).toBe(false);
   });
 
+  it("keeps the previous dataset's preserved extensions on an in-place regeneration", () => {
+    const previous = { ...candidateOf(SPEC, "dsA"), preservedExtensions: { "x-owner": "team-a" } };
+    const base = projectSemanticDocument(previous).doc;
+    const { proposal } = buildProposalFromCandidate(metaFor(), candidateOf(SPEC, "dsA"), base);
+    const upsert = proposal.ops.find((op) => op.kind === "upsertSemanticDataset");
+    expect(upsert && upsert.kind === "upsertSemanticDataset" ? upsert.dataset.preservedExtensions : null).toEqual({
+      "x-owner": "team-a",
+    });
+  });
+
   it("adopts a freeform node that shares a candidate id as the new member", () => {
     const base = doc([node("a", "A-old")], []);
     const { proposal } = buildProposalFromCandidate(metaFor(), candidateOf(SPEC, "dsB"), base);
