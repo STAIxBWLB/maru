@@ -16,6 +16,7 @@ import type {
 } from "../../../lib/diagram/types";
 import { useTranslation } from "../../../lib/i18n";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
+import { SemanticProps } from "./SemanticProps";
 
 function NumberField({
   labelKey,
@@ -360,6 +361,7 @@ export function RightPanel() {
     return (
       <aside className="maru-diagram-side-panel" aria-label={t("diagram.panel.properties")}>
         <h2>{t("diagram.panel.properties")}</h2>
+        <SemanticProps key={id} nodeId={id} />
         {node ? <NodeProps node={node} /> : null}
       </aside>
     );
@@ -371,6 +373,7 @@ export function RightPanel() {
     return (
       <aside className="maru-diagram-side-panel" aria-label={t("diagram.panel.properties")}>
         <h2>{t("diagram.panel.properties")}</h2>
+        <SemanticProps key={id} edgeId={id} />
         {edge ? <EdgeProps edge={edge} /> : null}
       </aside>
     );
