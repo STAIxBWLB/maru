@@ -3457,7 +3457,7 @@ mod phase09_04 {
         ensure_maru_dir(&work_path).unwrap();
         let real_target = work_path.join("elsewhere-recovery");
         fs::create_dir_all(&real_target).unwrap();
-        std::os::unix::fs::symlink(&real_target, recovery_dir(&work_path)).unwrap();
+        crate::test_support::symlink_dir(&real_target, recovery_dir(&work_path)).unwrap();
 
         let err = run(ipc::write_recovery_copy(
             work,
@@ -3478,7 +3478,7 @@ mod phase09_04 {
         let work = text(&work_path);
         let outside = home.root.path().join("outside-maru");
         fs::create_dir_all(&outside).unwrap();
-        std::os::unix::fs::symlink(&outside, work_path.join(MARU_DIR)).unwrap();
+        crate::test_support::symlink_dir(&outside, work_path.join(MARU_DIR)).unwrap();
 
         let err = run(ipc::write_recovery_copy(
             work,

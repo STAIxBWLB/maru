@@ -250,7 +250,7 @@ inbox:
             &json!({"id": "msg/1", "subject": "Hello"}),
         )
         .unwrap();
-        assert!(path.contains("/inbox/drop/gws/"));
+        assert!(path.replace('\\', "/").contains("/inbox/drop/gws/"));
         let raw = fs::read_to_string(path).unwrap();
         assert!(raw.contains("\"provider\": \"gws\""));
         assert!(raw.contains("\"kind\": \"message\""));

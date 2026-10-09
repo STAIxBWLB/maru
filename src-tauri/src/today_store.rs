@@ -3184,9 +3184,8 @@ mod phase08_11 {
                             "alias-{}",
                             root.file_name().unwrap().to_string_lossy()
                         ));
-                        #[cfg(unix)]
                         if alias {
-                            std::os::unix::fs::symlink(&root, &alias_path).unwrap();
+                            crate::test_support::symlink_dir(&root, &alias_path).unwrap();
                         }
                         let w = if alias {
                             text(&alias_path)
@@ -3368,8 +3367,7 @@ mod phase08_11 {
         let snapshot = load_snapshot(root, DAY).unwrap();
         let original = fs::read(state_path(root, DAY)).unwrap();
         let alias = home.root.path().join("store-alias");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(root, alias.as_path()).unwrap();
+        crate::test_support::symlink_dir(root, &alias).unwrap();
         for reverse in [false, true] {
             for policy in ["readOnly", "delegated"] {
                 let (registered, caller) = if reverse {

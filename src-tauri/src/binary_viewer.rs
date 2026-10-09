@@ -953,7 +953,6 @@ mod phase08_10_tests {
 
     /// Stub released hwp for the preview: `convert --to html -o -` prints a
     /// full document with a `<style>` head, `info --json` reports 1 section.
-    #[cfg(unix)]
     fn stub_hwp(dir: &Path) -> std::path::PathBuf {
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
@@ -1037,7 +1036,6 @@ esac
     fn phase08_10_actual_wrappers_return_nonempty_results_and_native_argv() {
         let _home = crate::atomic_file::phase08_06::Home::new();
         let temp = tempfile::tempdir_in(_home.root.path()).unwrap();
-        #[cfg(unix)]
         let _hwp = HwpBinGuard::set(&stub_hwp(temp.path()));
         let root = text(temp.path());
         let note = temp.path().join("note.txt");

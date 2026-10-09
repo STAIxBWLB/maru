@@ -1,3 +1,4 @@
+import { rightWorkbenchLabel } from "./helpers/platform";
 import { expect, test, type Page } from "@playwright/test";
 import { DEFAULT_MARU_SETTINGS } from "../src/lib/settings";
 
@@ -259,7 +260,7 @@ for (const width of [1024, 1280]) {
       ([modeLabel]) => modeLabel !== "스크래치패드",
     )) {
       await page.getByRole("button", {
-        name: `${label} 오른쪽에 열기 (Option-click)`,
+        name: await rightWorkbenchLabel(page, label),
       }).click();
 
       const workbench = page.locator(".app-workbench.workbench-secondary-open");
@@ -524,7 +525,7 @@ test("contains the opt-in E2E workbench in main and right placements", async ({ 
   await expect(page.locator(".e2e-pane")).toBeVisible();
 
   await page
-    .getByRole("button", { name: "E2E 플로우 오른쪽에 열기 (Option-click)" })
+    .getByRole("button", { name: await rightWorkbenchLabel(page, "E2E 플로우") })
     .click();
   const secondary = page.locator(
     ".workbench-secondary-surface > .e2e-pane",

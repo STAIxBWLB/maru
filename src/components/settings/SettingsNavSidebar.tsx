@@ -1,3 +1,4 @@
+import { formatShortcut } from "../../lib/platform";
 // Settings sidebar — "Back to app", search, then grouped tab items.
 // Items keep role="tab" inside a vertical tablist so existing e2e
 // getByRole("tab") assertions keep working.
@@ -51,7 +52,7 @@ export function SettingsNavSidebar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t("system.nav.searchPlaceholder")}
         />
-        <span className="kbd">⌘F</span>
+        <span className="kbd">{formatShortcut("⌘F")}</span>
       </label>
       <nav
         className="settings-nav"

@@ -140,10 +140,12 @@ pub fn plan_bundle(
         .iter()
         .map(|fmt| ExportOutputEntry {
             format: *fmt,
-            path: bundle_rel
-                .join(format!("{stem}.{}", fmt.extension()))
-                .to_string_lossy()
-                .to_string(),
+            path: crate::vault::slash_separators(
+                bundle_rel
+                    .join(format!("{stem}.{}", fmt.extension()))
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
             status: ExportOutputStatus::Planned,
             sha256: None,
             byte_size: None,
@@ -153,7 +155,7 @@ pub fn plan_bundle(
 
     let manifest = ExportManifest {
         schema_version: SCHEMA_VERSION,
-        source: source_rel.to_string_lossy().to_string(),
+        source: crate::vault::slash_separators(source_rel.to_string_lossy().into_owned()),
         source_sha256,
         source_byte_size,
         generated_at: Utc::now().to_rfc3339(),

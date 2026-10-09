@@ -411,11 +411,7 @@ pub(crate) fn prepare_capture_task_materialization(
         );
     }
     let content = serialize_task_note(&draft.frontmatter, &draft.body)?;
-    let rel_path = path
-        .strip_prefix(work)
-        .unwrap_or(&path)
-        .to_string_lossy()
-        .to_string();
+    let rel_path = crate::vault::relative_slash_path(&path, work);
     let content_hash = revision_for(&content);
     let will_create = !path.exists();
     Ok(PreparedCaptureTask {

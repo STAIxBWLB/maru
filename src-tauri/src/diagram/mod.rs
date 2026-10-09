@@ -2022,15 +2022,18 @@ mod phase08_20 {
 
         fs::remove_file(&target).unwrap();
         fs::create_dir(&target).unwrap();
-        assert!(run(ipc::diagram_save_document(
+        let replaced = run(ipc::diagram_save_document(
             work.clone(),
             "demo".into(),
             body.into(),
             None,
         ))
         .unwrap_err()
-        .message
-        .starts_with("Cannot atomically replace"));
+        .message;
+        assert!(
+            replaced.starts_with("Cannot atomically replace"),
+            "{replaced}"
+        );
         fs::remove_dir(&target).unwrap();
         run(ipc::diagram_save_document(
             work.clone(),

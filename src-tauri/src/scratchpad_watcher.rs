@@ -538,7 +538,11 @@ mod phase08_19 {
 
         let err = run(start_watcher(
             app.clone(),
-            "/phase08-19-scratchpad-missing-work".to_string(),
+            crate::test_support::absolute_hook_path(Path::new(
+                "/phase08-19-scratchpad-missing-work",
+            ))
+            .to_string_lossy()
+            .into_owned(),
         ))
         .unwrap_err();
         assert!(

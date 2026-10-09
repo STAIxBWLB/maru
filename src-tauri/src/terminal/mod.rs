@@ -48,8 +48,8 @@ struct TerminalSession {
     stream: Arc<TerminalStream>,
     closing: AtomicBool,
     // REL-01: the terminal child's spawn-time pid, which is also its pgid
-    // and sid because portable-pty calls `setsid()` before exec. `None` on
-    // non-unix, where the group-targeted kill ladder does not apply.
+    // and sid because portable-pty calls `setsid()` before exec.
+    #[cfg(unix)]
     process_group: Option<u32>,
 }
 
@@ -469,8 +469,6 @@ pub fn terminal_spawn(
     // group leader -- its pid equals its pgid for its whole lifetime.
     #[cfg(unix)]
     let process_group = child.process_id();
-    #[cfg(not(unix))]
-    let process_group: Option<u32> = None;
 
     let session = Arc::new(TerminalSession {
         kind: kind.clone(),
@@ -483,6 +481,7 @@ pub fn terminal_spawn(
         resize_lock: Mutex::new(()),
         stream: stream.clone(),
         closing: AtomicBool::new(false),
+        #[cfg(unix)]
         process_group,
     });
     // D-03: the sessions registry holds Arc<TerminalSession> handles whose
@@ -1424,6 +1423,8 @@ fn wait_for_all_groups_gone(targets: &[KillTarget], step: Duration) -> Vec<KillT
 /// polling. Sessions with no captured process group (or on non-unix) fall
 /// back to their stored `ChildKiller` instead of joining the batch ladder.
 pub(crate) fn sweep_sessions(state: &TerminalState, step: Duration) {
+    #[cfg(not(unix))]
+    let _ = step;
     let drained: Vec<Arc<TerminalSession>> = {
         let mut guard = crate::lock_recovery::recover_guard(
             state.sessions.lock(),

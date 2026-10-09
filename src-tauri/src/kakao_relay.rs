@@ -1600,7 +1600,7 @@ io:
             .path()
             .join(format!("outbox/pending/{}.json", result.id));
         assert!(pending.is_file());
-        assert_eq!(result.path, pending.to_string_lossy().to_string());
+        assert_eq!(Path::new(&result.path), pending);
         let payload = read_json_file(&pending).unwrap();
         assert_eq!(payload["schema"], "kakao-send/v1");
         assert_eq!(payload["id"], result.id);

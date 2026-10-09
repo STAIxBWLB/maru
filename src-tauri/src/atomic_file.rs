@@ -9,20 +9,94 @@ static PATH_TRANSACTIONS: (Mutex<ActivePathTransactions>, Condvar) =
 static NEXT_TRANSACTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Reusable explicit parent precondition for later background callbacks. The
-/// pinned handle belongs to the original directory, even after it is unlinked.
+/// pin belongs to the original directory, even after it is unlinked.
 #[derive(Clone)]
 pub(crate) struct PathTransactionParent {
     path: PathBuf,
-    handle: std::sync::Arc<fs::File>,
+    pin: ParentPin,
 }
 impl PathTransactionParent {
     pub(crate) fn capture(path: &Path) -> Result<Self, String> {
         let handle = PathTransactionRequest::open_parent(path).map_err(|err| err.to_string())?;
-        PathTransactionRequest::same_identity(&handle, &handle)?;
         Ok(Self {
             path: path.to_path_buf(),
-            handle: std::sync::Arc::new(handle),
+            pin: ParentPin::new(handle)?,
         })
+    }
+}
+
+/// Stable identity of a captured transaction parent. Unix keeps the directory
+/// open so inode reuse cannot disguise remove/recreate at the same pathname.
+/// On NTFS and ReFS, Windows records the volume and file reference instead:
+/// the reference carries a reuse sequence number, and an open directory handle
+/// would make Windows deny renaming any ancestor of a writer still waiting for
+/// admission. FAT-family indexes are positional and can repeat after a
+/// remove/recreate, so there the handle stays open as on Unix.
+#[derive(Clone)]
+struct ParentPin {
+    #[cfg(not(windows))]
+    handle: std::sync::Arc<fs::File>,
+    #[cfg(windows)]
+    identity: (u32, u64),
+    #[cfg(windows)]
+    _held: Option<std::sync::Arc<fs::File>>,
+}
+impl ParentPin {
+    fn new(handle: fs::File) -> Result<Self, String> {
+        #[cfg(not(windows))]
+        {
+            PathTransactionRequest::same_identity(&handle, &handle)?;
+            Ok(Self {
+                handle: std::sync::Arc::new(handle),
+            })
+        }
+        #[cfg(windows)]
+        {
+            let identity = PathTransactionRequest::windows_identity(&handle)?;
+            let _held = (!Self::reuse_safe_file_ids(&handle)).then(|| std::sync::Arc::new(handle));
+            Ok(Self { identity, _held })
+        }
+    }
+    /// NTFS and ReFS file references are not reused for a recreated entry.
+    #[cfg(windows)]
+    fn reuse_safe_file_ids(handle: &fs::File) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationByHandleW;
+        let mut name = [0u16; 32];
+        // SAFETY: the handle is live; only the filesystem-name buffer is requested.
+        let ok = unsafe {
+            GetVolumeInformationByHandleW(
+                handle.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                name.as_mut_ptr(),
+                name.len() as u32,
+            )
+        } != 0;
+        let len = name
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(name.len());
+        ok && matches!(
+            String::from_utf16_lossy(&name[..len]).as_str(),
+            "NTFS" | "ReFS"
+        )
+    }
+    fn matches(&self, current: &fs::File) -> Result<(), String> {
+        #[cfg(not(windows))]
+        {
+            PathTransactionRequest::same_identity(&self.handle, current)
+        }
+        #[cfg(windows)]
+        {
+            if self.identity == PathTransactionRequest::windows_identity(current)? {
+                return Ok(());
+            }
+            Err("Transaction parent changed; retry the operation".to_string())
+        }
     }
 }
 
@@ -111,10 +185,9 @@ impl PathTransactionRequest {
         mut self,
         parent: &PathTransactionParent,
     ) -> Result<Self, String> {
-        Self::same_identity(
-            &parent.handle,
-            &Self::open_parent(&parent.path).map_err(|err| err.to_string())?,
-        )?;
+        parent
+            .pin
+            .matches(&Self::open_parent(&parent.path).map_err(|err| err.to_string())?)?;
         self.parents.push(parent.clone());
         Ok(self)
     }
@@ -156,18 +229,12 @@ impl PathTransactionRequest {
                         .ok_or("Transaction parent does not exist")?
                         .to_path_buf();
                 }
-                // Keep an open directory handle: on Unix it also prevents inode
-                // reuse from disguising remove/recreate at the same pathname.
+                // See ParentPin for why the identity outlives the pathname.
                 let handle = Self::open_parent(&parent)
                     .map_err(|err| format!("Cannot capture transaction parent: {err}"))?;
-                Self::same_identity(
-                    &handle,
-                    &Self::open_parent(&parent).map_err(|err| err.to_string())?,
-                )?;
-                parents.push(PathTransactionParent {
-                    path: parent,
-                    handle: std::sync::Arc::new(handle),
-                });
+                let pin = ParentPin::new(handle)?;
+                pin.matches(&Self::open_parent(&parent).map_err(|err| err.to_string())?)?;
+                parents.push(PathTransactionParent { path: parent, pin });
             }
         }
         keys.sort();
@@ -220,6 +287,7 @@ impl PathTransactionRequest {
         }
     }
 
+    #[cfg(not(windows))]
     fn same_identity(left: &fs::File, right: &fs::File) -> Result<(), String> {
         #[cfg(unix)]
         {
@@ -235,14 +303,7 @@ impl PathTransactionRequest {
             }
             Err("Transaction parent changed; retry the operation".to_string())
         }
-        #[cfg(windows)]
-        {
-            if Self::windows_identity(left)? == Self::windows_identity(right)? {
-                return Ok(());
-            }
-            Err("Transaction parent changed; retry the operation".to_string())
-        }
-        #[cfg(not(any(unix, windows)))]
+        #[cfg(not(unix))]
         {
             let _ = (left, right);
             Err("Stable transaction parent identity is unavailable on this platform".to_string())
@@ -258,7 +319,7 @@ impl PathTransactionRequest {
         for parent in &self.parents {
             let current = Self::open_parent(&parent.path)
                 .map_err(|_| "Transaction parent disappeared; retry the operation".to_string())?;
-            Self::same_identity(&parent.handle, &current)?;
+            parent.pin.matches(&current)?;
         }
         for (path, alias) in self.paths.iter().zip(&self.aliases) {
             if *alias != Self::physical_path(path)? {
@@ -402,6 +463,7 @@ impl PathTransactionTestHook {
         stage: &str,
         callback: impl Fn() + Send + Sync + 'static,
     ) -> Self {
+        let path = crate::test_support::absolute_hook_path(&path);
         assert!(path.is_absolute());
         let id = NEXT_TRANSACTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         TRANSACTION_TEST_STAGES.lock().unwrap().push((
@@ -431,7 +493,12 @@ impl PathTransactionLease {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, path, label, _)| label == stage && paths.contains(path))
+            .filter(|(_, path, label, _)| {
+                label == stage
+                    && paths.iter().any(|candidate| {
+                        crate::test_support::absolute_hook_path(candidate) == *path
+                    })
+            })
             .map(|(_, _, _, callback)| callback.clone())
             .collect();
         for callback in callbacks {
@@ -783,7 +850,11 @@ fn write_atomic_with_create_mode(
         .map_err(|err| format!("Cannot create temporary file: {err}"))?;
     temp.write_all(content)
         .map_err(|err| format!("Cannot write temporary file: {err}"))?;
-    if let Ok(metadata) = fs::metadata(path) {
+    // Only a file's permissions carry over; a directory in the way fails at persist.
+    if let Some(metadata) = fs::metadata(path)
+        .ok()
+        .filter(|metadata| metadata.is_file())
+    {
         temp.as_file()
             .set_permissions(metadata.permissions())
             .map_err(|err| format!("Cannot preserve {} permissions: {err}", path.display()))?;

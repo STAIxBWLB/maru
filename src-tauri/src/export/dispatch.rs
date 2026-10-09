@@ -459,7 +459,7 @@ fn is_executable(path: &Path) -> bool {
     }
     #[cfg(not(unix))]
     {
-        true
+        crate::cli_path::is_executable(path)
     }
 }
 

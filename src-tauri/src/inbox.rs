@@ -1043,10 +1043,9 @@ fn scan_inbox_with_settings(
             continue;
         }
         let path = lexical_normalize(entry.path());
-        let rel_to_vault = path.strip_prefix(vault).unwrap_or(&path).to_path_buf();
         let metadata =
             fs::metadata(&path).map_err(|err| format!("Cannot read inbox item metadata: {err}"))?;
-        let rel_path = rel_to_vault.to_string_lossy().to_string();
+        let rel_path = crate::vault::relative_slash_path(&path, vault);
         let source = path
             .parent()
             .and_then(|parent| parent.strip_prefix(&inbox_root).ok())
@@ -1124,7 +1123,6 @@ fn scan_inbox_entries_with_config(
                     continue;
                 }
                 let path = inbox_settings::lexical_normalize_path(entry.path());
-                let rel_to_work = path.strip_prefix(work).unwrap_or(&path).to_path_buf();
                 if is_inbox_noise(&path) {
                     continue;
                 }
@@ -1136,7 +1134,7 @@ fn scan_inbox_entries_with_config(
                     .ok()
                     .map(DateTime::<Utc>::from)
                     .map(|dt| dt.to_rfc3339());
-                let rel_path = rel_to_work.to_string_lossy().to_string();
+                let rel_path = crate::vault::relative_slash_path(&path, work);
                 let title = path
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -1232,18 +1230,10 @@ fn scan_inbox_entries_with_config(
                 .map(str::to_string)
                 .unwrap_or_else(|| manifest.id.clone());
             entries.push(InboxEntry {
-                id: manifest_path
-                    .strip_prefix(work)
-                    .unwrap_or(&manifest_path)
-                    .to_string_lossy()
-                    .to_string(),
+                id: crate::vault::relative_slash_path(&manifest_path, work),
                 kind: "pendingItem".to_string(),
                 path: item_dir.to_string_lossy().to_string(),
-                rel_path: item_dir
-                    .strip_prefix(work)
-                    .unwrap_or(item_dir)
-                    .to_string_lossy()
-                    .to_string(),
+                rel_path: crate::vault::relative_slash_path(item_dir, work),
                 title,
                 channel: manifest.channel,
                 source_kind: manifest.metadata.source_kind.or(manifest.kind),
@@ -3341,6 +3331,7 @@ metadata:
             .summary_path
             .as_deref()
             .unwrap()
+            .replace('\\', "/")
             .ends_with("inbox/items/pending/260510-kakao-chat/digest.md"));
     }
 

@@ -1,3 +1,4 @@
+import { rightWorkbenchLabel } from "./helpers/platform";
 import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -264,7 +265,7 @@ test("opens Sites as a singleton beside the active document", async ({ page }) =
     navigator.platform.toLowerCase().includes("mac") ? "Meta+w" : "Control+w",
   );
 
-  await page.getByRole("button", { name: "회의록 오른쪽에 열기 (Option-click)" }).click();
+  await page.getByRole("button", { name: await rightWorkbenchLabel(page, "회의록") }).click();
   const meetings = workbench.locator(":scope > .workbench-secondary-surface > .meetings-pane");
   await expect(meetings).toBeVisible();
   const [meetingsSidebarBox, meetingsMainBox] = await Promise.all([
@@ -283,7 +284,7 @@ test("opens Sites as a singleton beside the active document", async ({ page }) =
   await page.keyboard.press(closeShortcut);
   await expect(workbench).toBeHidden();
 
-  await page.getByRole("button", { name: "사이트 오른쪽에 열기 (Option-click)" }).click();
+  await page.getByRole("button", { name: await rightWorkbenchLabel(page, "사이트") }).click();
   await expect(sites).toBeVisible();
   const leftDocumentTabs = editor.locator(".document-tab");
   const leftDocumentTabCount = await leftDocumentTabs.count();
@@ -298,7 +299,7 @@ test("opens Sites as a singleton beside the active document", async ({ page }) =
   await page.keyboard.press(closeShortcut);
   await expect(workbench).toBeHidden();
 
-  await page.getByRole("button", { name: "사이트 오른쪽에 열기 (Option-click)" }).click();
+  await page.getByRole("button", { name: await rightWorkbenchLabel(page, "사이트") }).click();
   await expect(sites).toBeVisible();
   await page.getByRole("button", { name: "메인 화면으로 이동" }).click();
   await expect(page.locator(".sites-pane")).toHaveCount(1);

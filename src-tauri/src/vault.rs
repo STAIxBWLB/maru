@@ -859,6 +859,25 @@ pub fn slugify(input: &str) -> String {
     }
 }
 
+/// Windows separators become `/`. Elsewhere `\` is a legal filename byte
+/// and must survive unchanged.
+pub(crate) fn slash_separators(text: String) -> String {
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    }
+}
+
+/// Workspace-relative paths cross IPC with `/` on every platform. A path
+/// outside `root` keeps its native absolute form.
+pub(crate) fn relative_slash_path(path: &Path, root: &Path) -> String {
+    match path.strip_prefix(root) {
+        Ok(relative) => slash_separators(relative.to_string_lossy().into_owned()),
+        Err(_) => path.to_string_lossy().into_owned(),
+    }
+}
+
 fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<VaultEntry, String> {
     let content = fs::read_to_string(path).map_err(|err| err.to_string())?;
     let parts = parse_frontmatter(&content);
@@ -867,11 +886,7 @@ fn read_entry(path: &Path, vault: &Path, version_names: &[String]) -> Result<Vau
         .and_then(|s| s.to_str())
         .unwrap_or("Untitled");
     let title = semantic_title_from_parts(&parts, fallback);
-    let rel_path = path
-        .strip_prefix(vault)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
+    let rel_path = relative_slash_path(path, vault);
     let file_kind = path
         .extension()
         .and_then(|e| e.to_str())

@@ -56,7 +56,45 @@ fn native_start(pid: u32) -> Option<String> {
     let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
     Some(format!("{}:{ticks}", boot.trim()))
 }
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// Creation time of a running process. An exited process whose handle another
+/// holder keeps open reports no start, like a reaped Unix PID.
+#[cfg(windows)]
+fn native_start(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE,
+    };
+    // SAFETY: OpenProcess returns an owned handle or null; it is closed below.
+    let process = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        )
+    };
+    if process.is_null() {
+        return None;
+    }
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let [mut created, mut exited, mut kernel, mut user] = [zero; 4];
+    // SAFETY: the handle is live and every output points to a local FILETIME.
+    let running = unsafe { WaitForSingleObject(process, 0) } == WAIT_TIMEOUT
+        && unsafe { GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) }
+            != 0;
+    // SAFETY: closes the handle opened above exactly once.
+    unsafe { CloseHandle(process) };
+    running.then(|| {
+        format!(
+            "{}",
+            (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime)
+        )
+    })
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn native_start(_pid: u32) -> Option<String> {
     None
 }
@@ -90,6 +128,25 @@ fn native_definitely_dead(pid: u32) -> bool {
     let errno = 0;
     errno == 3 // ESRCH only; EPERM or missing telemetry remains uncertain.
 }
+#[cfg(windows)]
+fn native_definitely_dead(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+    // SAFETY: OpenProcess returns an owned handle or null; it is closed below.
+    let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if process.is_null() {
+        // No such PID. Access denied or missing telemetry remains uncertain.
+        return unsafe { GetLastError() } == ERROR_INVALID_PARAMETER;
+    }
+    // SAFETY: the handle is live; it is closed exactly once below.
+    let exited = unsafe { WaitForSingleObject(process, 0) } == WAIT_OBJECT_0;
+    unsafe { CloseHandle(process) };
+    exited
+}
 fn alive(process: &NativeProcessIdentity) -> bool {
     native_start(process.pid)
         .map(|start| start == process.start)
@@ -98,7 +155,11 @@ fn alive(process: &NativeProcessIdentity) -> bool {
             {
                 !native_definitely_dead(process.pid)
             }
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            {
+                !native_definitely_dead(process.pid)
+            }
+            #[cfg(not(any(unix, windows)))]
             {
                 true
             }

@@ -500,6 +500,20 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   mutation-admission and processing-caller evidence against the 388-command
   inventory (`node scripts/check-command-isolation.mjs --all --expected-count 388`)
 
+On Windows, run Make with Git for Windows' Bash and Unix tools on `PATH`,
+alongside Node, pnpm, and Cargo. For a native Windows GNU Make installation,
+use `make verify "SHELL=C:/Program Files/Git/bin/bash.exe"` (and the same
+override for `make test-e2e`). Tracked text checks out with LF via
+`.gitattributes`; this preserves vendored pin hashes and Node shebang imports.
+The Windows unit and browser test runners default to two workers to reduce
+startup contention on hosts with many logical CPUs. Vitest's explicit
+`--maxWorkers` and Playwright's `--workers` options still override that default.
+
+Use workspace-relative paths such as `task_management.root: tasks` in shared
+`workspace.config.yaml` files. A home-relative or absolute path from another
+machine can resolve outside the selected workspace and is correctly rejected
+by the containment guard.
+
 Pull requests run a lightweight decision job first. Source changes fan out to
 `make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
 instead of the ordinary verify target, adding release-mode CLI and debug Tauri
@@ -540,7 +554,15 @@ for all inherited writable file descriptors to close before direct execution.
 Linux can otherwise return `ETXTBSY` even after `fs::write` closes its own file:
 a concurrent fork can retain a writable descriptor until exec. The test-only
 lock handoff addresses fixture publication without changing production spawn
-behavior or test assertions.
+behavior or test assertions. Windows cannot execute a `#!` script, so the
+helper also places a `<path>.exe` launcher beside it, which `Command::new(path)`
+and PATH lookup resolve first. The launcher runs the script under its shebang
+interpreter (Git for Windows `sh`/`bash`, or `node`), quotes every argument for
+MSYS, and passes `\\?\C:\` paths in their equivalent `C:\` form. It is built once
+per run with the toolchain's `rustc`. Fixtures that run a shell line directly
+use `test_support::posix_shell()`, and fixture Git remotes and paths given to
+Git use `test_support::git_local_path()`, because Git reads a verbatim path as
+an SSH remote.
 
 React dialog fixtures use `src/lib/testing/unmountReactRoot.ts` before removing
 their fixture containers. Radix FocusScope defers disposal to a timer; awaiting

@@ -1039,11 +1039,14 @@ fn validate_receipts_fragment(value: &str) -> Result<(), String> {
         return Err("receipts_required".to_string());
     }
     let path = Path::new(trimmed);
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
         return Err("receipts_outside_root".to_string());
     }
     Ok(())
@@ -1466,6 +1469,18 @@ not json
         assert!(validate_receipts_fragment("../escape.jsonl").is_err());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn receipts_fragment_rejects_windows_rooted_and_drive_relative_paths() {
+        for value in [r"\escape.jsonl", r"C:escape.jsonl", r"C:\escape.jsonl"] {
+            assert_eq!(
+                validate_receipts_fragment(value).unwrap_err(),
+                "receipts_outside_root"
+            );
+        }
+        assert!(validate_receipts_fragment(r"_state\index.jsonl").is_ok());
+    }
+
     #[test]
     fn scan_reads_receipts_and_flags_missing_output() {
         let (_dir, work) = workspace(FULL_CONFIG);
@@ -1475,9 +1490,9 @@ not json
         fs::create_dir_all(present.parent().unwrap()).unwrap();
         fs::write(&present, b"x").unwrap();
         let line = format!(
-            "{{\"output\":\"{}\",\"title\":\"존재\",\"author_key\":\"yjlee\",\"timestamp\":\"250601-1000\",\"timestamp_iso\":\"2025-06-01T10:00:00+09:00\",\"created_at\":\"2025-06-01T10:00:00+09:00\"}}\n{{\"output\":\"{}/missing.docx\",\"title\":\"없음\",\"author_key\":\"yjlee\",\"timestamp\":\"250602-1000\",\"timestamp_iso\":\"2025-06-02T10:00:00+09:00\",\"created_at\":\"2025-06-02T10:00:00+09:00\"}}\n",
-            present.to_string_lossy(),
-            root.to_string_lossy(),
+            "{{\"output\":{},\"title\":\"존재\",\"author_key\":\"yjlee\",\"timestamp\":\"250601-1000\",\"timestamp_iso\":\"2025-06-01T10:00:00+09:00\",\"created_at\":\"2025-06-01T10:00:00+09:00\"}}\n{{\"output\":{},\"title\":\"없음\",\"author_key\":\"yjlee\",\"timestamp\":\"250602-1000\",\"timestamp_iso\":\"2025-06-02T10:00:00+09:00\",\"created_at\":\"2025-06-02T10:00:00+09:00\"}}\n",
+            serde_json::to_string(&present.to_string_lossy()).unwrap(),
+            serde_json::to_string(&format!("{}/missing.docx", root.to_string_lossy())).unwrap(),
         );
         fs::write(root.join("_state").join("index.jsonl"), line).unwrap();
 

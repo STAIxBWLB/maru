@@ -20,7 +20,13 @@ if (hasBuiltinWebstorage) {
     .join(" ");
 }
 
-const result = spawnSync(process.execPath, [vitestBin, "run", ...process.argv.slice(2)], {
+const args = process.argv.slice(2);
+// Limit concurrent jsdom startup on Windows hosts with many logical CPUs.
+// Preserve explicit worker settings supplied by the caller.
+if (process.platform === "win32" && !args.some((arg) => arg.startsWith("--maxWorkers"))) {
+  args.push("--maxWorkers=2");
+}
+const result = spawnSync(process.execPath, [vitestBin, "run", ...args], {
   stdio: "inherit",
   env,
 });

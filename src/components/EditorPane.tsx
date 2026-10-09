@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/platform";
 import {
   Check,
   ChevronDown,
@@ -720,7 +721,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
             >
               <span className="document-tab-title">{tab.title}</span>
               {tab.dirty ? <span className="document-tab-dirty" aria-hidden="true" /> : null}
-              {index < 8 ? <span className="document-tab-kbd">⌘{index + 1}</span> : null}
+              {index < 8 ? <span className="document-tab-kbd">{formatShortcut(`⌘${index + 1}`)}</span> : null}
             </button>
             <button
               type="button"
@@ -779,7 +780,7 @@ export const EditorPane = memo(forwardRef<HTMLDivElement, EditorPaneProps>(funct
           <button type="button" role="menuitem" onClick={() => runTabAction(onCloseTab)}>
             <span>{t("editor.tabs.menu.close")}</span>
             <span className="context-menu-shortcut" aria-hidden="true">
-              ⌘W
+              {formatShortcut("⌘W")}
             </span>
           </button>
           <button type="button" role="menuitem" onClick={() => runTabAction(onCloseOtherTabs)}>

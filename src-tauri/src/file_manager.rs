@@ -282,7 +282,7 @@ mod tests {
         let resolved =
             resolve_file_manager_target(tmp.path().to_str().unwrap(), &target_path).unwrap();
 
-        assert_eq!(resolved, target);
+        assert_eq!(resolved, target.canonicalize().unwrap());
     }
 
     #[test]

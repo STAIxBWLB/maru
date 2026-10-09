@@ -2369,9 +2369,20 @@ mod phase08_29_git {
         fs::write(checkout.join("note.md"), "original note\n").unwrap();
         git(&checkout, &["add", "."]);
         git(&checkout, &["commit", "-m", "initial fixture"]);
-        git(&checkout, &["remote", "add", "origin", &text(&remote)]);
+        git(
+            &checkout,
+            &[
+                "remote",
+                "add",
+                "origin",
+                &crate::test_support::git_local_path(&remote),
+            ],
+        );
         git(&checkout, &["push", "-u", "origin", "main"]);
-        git(&peer, &["clone", &text(&remote), "."]);
+        git(
+            &peer,
+            &["clone", &crate::test_support::git_local_path(&remote), "."],
+        );
         fs::write(peer.join("remote.md"), "new remote content\n").unwrap();
         git(&peer, &["add", "remote.md"]);
         git(&peer, &["commit", "-m", "remote fixture update"]);
@@ -2569,7 +2580,13 @@ mod phase08_29_git {
         let linked = home.root.path().join("linked");
         git(
             &checkout,
-            &["worktree", "add", "-b", "linked", &text(&linked)],
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "linked",
+                &crate::test_support::git_local_path(&linked),
+            ],
         );
         let selected = linked.join("skills");
         let paths = git_mutation_paths(&selected).unwrap();
@@ -2595,7 +2612,10 @@ mod phase08_29_git {
         // must not be used merely because the selected worktree still exists.
         fs::write(
             linked.join(".git"),
-            format!("gitdir: {}\n", text(&checkout.join(".git"))),
+            format!(
+                "gitdir: {}\n",
+                crate::test_support::git_local_path(&checkout.join(".git"))
+            ),
         )
         .unwrap();
         drop(held);
@@ -2689,7 +2709,12 @@ pub(crate) mod phase08_29_maintenance {
         setup(
             builder,
             &seed,
-            &["remote", "add", "origin", remote.to_str().unwrap()],
+            &[
+                "remote",
+                "add",
+                "origin",
+                &crate::test_support::git_local_path(&remote),
+            ],
         );
         setup(builder, &seed, &["push", "-u", "origin", "main"]);
         setup(
@@ -2697,8 +2722,8 @@ pub(crate) mod phase08_29_maintenance {
             &root,
             &[
                 "clone",
-                remote.to_str().unwrap(),
-                checkout.to_str().unwrap(),
+                &crate::test_support::git_local_path(&remote),
+                &crate::test_support::git_local_path(&checkout),
             ],
         );
         setup(
@@ -2762,7 +2787,10 @@ pub(crate) mod phase08_29_maintenance {
             "-c",
             "gc.auto=0",
         ]);
-        control.env("GIT_TRACE2_EVENT", &control_trace);
+        control.env(
+            "GIT_TRACE2_EVENT",
+            crate::test_support::git_local_path(&control_trace),
+        );
         output(control, &checkout, pull_args);
         assert!(
             maintenance_child_count(&control_trace) > 0,
@@ -2774,7 +2802,10 @@ pub(crate) mod phase08_29_maintenance {
         setup(builder, &seed, &["push", "origin", "main"]);
         let protected_trace = root.join("protected-trace.jsonl");
         let mut protected = builder();
-        protected.env("GIT_TRACE2_EVENT", &protected_trace);
+        protected.env(
+            "GIT_TRACE2_EVENT",
+            crate::test_support::git_local_path(&protected_trace),
+        );
         output(protected, &checkout, pull_args);
         assert_eq!(
             maintenance_child_count(&protected_trace),

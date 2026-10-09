@@ -204,7 +204,9 @@ mod tests {
             env.get(CLAUDE_TMP_ENV),
             Some(
                 &expected_scratchpad
-                    .join("temp/runtime/claude")
+                    .join("temp")
+                    .join("runtime")
+                    .join("claude")
                     .to_string_lossy()
                     .into_owned()
             )

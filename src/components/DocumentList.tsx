@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/platform";
 import {
   ChevronsDownUp,
   ChevronsUpDown,
@@ -551,7 +552,7 @@ export const DocumentList = memo(function DocumentList({
           }}
           placeholder={t("list.searchPlaceholder")}
         />
-        <span className="kbd">⌘⇧F</span>
+        <span className="kbd">{formatShortcut("⌘⇧F")}</span>
       </label>
 
       <div

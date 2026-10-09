@@ -171,6 +171,22 @@ pub fn write_json_pretty<T: serde::Serialize>(path: &Path, value: &T) -> Result<
         .map_err(|err| format!("Cannot replace {}: {}", display_path(path), err.error))
 }
 
+/// Path text for comparing link targets. Windows stores a link created with a
+/// canonical `\\?\C:\...` target and reads it back as `C:\...`; both name
+/// the same location, so comparisons drop the verbatim drive prefix.
+pub fn simplified(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            if !rest.starts_with(r"UNC\") {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
 pub fn read_link_target(path: &Path) -> Option<PathBuf> {
     fs::symlink_metadata(path)
         .ok()
@@ -178,20 +194,34 @@ pub fn read_link_target(path: &Path) -> Option<PathBuf> {
         .and_then(|_| fs::read_link(path).ok())
 }
 
+/// Unlinks the link itself, never its target. Windows stores a directory
+/// symlink as a directory entry, which `remove_file` refuses.
+pub fn remove_symlink(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        if fs::symlink_metadata(path)?.file_type().is_symlink_dir() {
+            return fs::remove_dir(path);
+        }
+    }
+    fs::remove_file(path)
+}
+
 pub fn remove_if_matching_symlink(path: &Path, expected: &Path) -> Result<bool, String> {
     let Some(target) = read_link_target(path) else {
         return Ok(false);
     };
-    if target != expected {
+    if simplified(&target) != simplified(expected) {
         return Ok(false);
     }
-    fs::remove_file(path).map_err(|err| format!("Cannot remove {}: {err}", display_path(path)))?;
+    remove_symlink(path).map_err(|err| format!("Cannot remove {}: {err}", display_path(path)))?;
     Ok(true)
 }
 
 pub fn create_symlink_no_clobber(link: &Path, target: &Path) -> Result<(), String> {
     if link.exists() || fs::symlink_metadata(link).is_ok() {
-        if read_link_target(link).as_deref() == Some(target) {
+        if read_link_target(link).is_some_and(|current| simplified(&current) == simplified(target))
+        {
             return Ok(());
         }
         return Err(format!(
