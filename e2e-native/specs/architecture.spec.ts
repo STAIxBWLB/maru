@@ -192,6 +192,53 @@ describe("native 설계도 mode", () => {
     assert.equal(await fs.readFile(sourceSpec, "utf8"), sourceBefore);
     assert.equal(await fs.readFile(path.join(workspace(), "dev/probe/docs/architecture/probe-rendered.html"), "utf8"), PROBE_HTML);
 
+    // #444: the copied member is semantic. Its inspector renders, a property
+    // panel rename writes through and shows on the canvas, and undo restores it.
+    const memberId = await browser.execute(() =>
+      [...document.querySelectorAll<HTMLElement>("[data-node-id]")]
+        .find((node) => node.textContent?.includes("한글 서버"))
+        ?.getAttribute("data-node-id") ?? null,
+    );
+    assert.ok(memberId, "the copied member must be on the canvas");
+    const member = await browser.$(`[data-node-id="${memberId}"]`);
+    // SVG nodes have no element.click(); select with the canvas's own pointer events.
+    await browser.execute((id: string) => {
+      const node = document.querySelector(`[data-node-id="${id}"]`)!;
+      const box = node.getBoundingClientRect();
+      const at = { bubbles: true, button: 0, pointerId: 1, isPrimary: true, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 };
+      node.dispatchEvent(new PointerEvent("pointerdown", at));
+      node.dispatchEvent(new PointerEvent("pointerup", at));
+    }, memberId);
+    await (await browser.$('[data-testid="semantic-props"]')).waitForDisplayed({ timeout: 30_000 });
+    const renamed = await browser.execute(() => {
+      const input = [...document.querySelectorAll<HTMLInputElement>(".maru-diagram-prop input")]
+        .find((field) => field.value === "한글 서버");
+      if (!input) return false;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "한글 API 서버");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    });
+    assert.equal(renamed, true, "the member title field must be in the property panel");
+    await browser.waitUntil(async () => /한글 API 서버/.test(await member.getText()), {
+      timeout: 15_000, timeoutMsg: "the rename must reach the canvas",
+    });
+    const editTab = await browser.$('[role="tab"]*=편집');
+    await editTab.click();
+    await (await browser.$('button[aria-label="되돌리기"]')).click();
+    await browser.waitUntil(async () => /한글 서버/.test(await member.getText()) && !/API/.test(await member.getText()), {
+      timeout: 15_000, timeoutMsg: "undo must restore the member title",
+    });
+    // Clear the selection (pointer down on empty canvas) so the Mermaid step
+    // below runs unscoped, as before.
+    await browser.execute(() => {
+      const canvas = document.querySelector(".maru-diagram-canvas")!;
+      const box = canvas.getBoundingClientRect();
+      const at = { bubbles: true, button: 0, pointerId: 1, isPrimary: true, clientX: box.right - 8, clientY: box.bottom - 8 };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", at));
+      canvas.dispatchEvent(new PointerEvent("pointerup", at));
+    });
+    await (await browser.$('[data-testid="semantic-props"]')).waitForDisplayed({ reverse: true, timeout: 15_000 });
+
     try {
       const fileTab = await browser.$('[role="tab"][aria-label="파일"]');
       // Existing ribbon tabs expose their visible label instead of aria-label.
@@ -207,6 +254,8 @@ describe("native 설계도 mode", () => {
     const generate = await browser.$('button=다이어그램 생성');
     await generate.click();
     await (await browser.$('[data-testid="gen-type-select"]')).waitForDisplayed({ timeout: 30_000 });
+    // #444: all five Archify types are offered in the real WKWebView dialog.
+    assert.equal((await browser.$$('[data-testid="gen-type-select"] option')).length, 5);
     const mermaid = await browser.$('[data-testid="gen-mermaid"]');
     await mermaid.setValue("flowchart TD\n A[시작] --> B[종료]");
     await (await browser.$('[data-testid="gen-from-mermaid"]')).click();
