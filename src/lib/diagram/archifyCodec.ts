@@ -1,8 +1,7 @@
-import { architecture, workflow } from "../../../sidecars/archify/renderers/shared/generated-validators.mjs";
 /**
  * Archify interchange codec (issue #433).
  *
- * A typed Archify spec (architecture / workflow JSON) is the semantic source
+ * A typed Archify spec (any of the five engine types) is the semantic source
  * of truth for a generated diagram; canvas members are only a projection.
  * This module converts between the spec and the v9 `SemanticSpecDataset`,
  * owns the reversible Maru-id ↔ Archify-id mapping, and provides the
@@ -17,7 +16,8 @@ import { architecture, workflow } from "../../../sidecars/archify/renderers/shar
  * Fields the pinned engine's schemas do not cover (`additionalProperties:
  * false` at every level) are preserved verbatim in
  * `dataset.preservedExtensions` and reported as fidelity diagnostics — never
- * silently stripped, never re-emitted into the spec.
+ * silently stripped, never re-emitted into the spec. Id-less relations get
+ * minted ids at ingest (`mintRelationIds`), so canvas edges have stable ids.
  */
 
 import {
@@ -27,6 +27,7 @@ import {
   type SemanticProvenance,
   type SemanticSpecDataset,
 } from "./reportTypes";
+import { SEMANTIC_TYPES, collectSemanticIds, mintRelationIds, validateSemanticContent } from "./semantic";
 import { validateArchifySpecPreCheck, type ValidationDiagnostic } from "./validation";
 
 /** Pinned engine identity; the tree hash lives in `sidecars/archify/PIN.json`. */
@@ -81,35 +82,13 @@ export function archifyIdFor(maruId: string, idMap: Record<string, string>, take
 // Spec <-> dataset
 // ---------------------------------------------------------------------------
 
-/** Top-level spec fields the pinned schemas define per diagram type. */
-const KNOWN_SPEC_FIELDS: Record<SemanticDiagramType, readonly string[]> = {
-  architecture: ["schema_version", "diagram_type", "meta", "components", "layout", "boundaries", "connections", "cards"],
-  workflow: ["schema_version", "diagram_type", "meta", "lanes", "nodes", "edges", "phases", "groups", "mainPath", "semanticChecks", "cards"],
-};
-
-/** Arrays of objects whose `id` fields participate in the id map. */
-const ID_ARRAY_FIELDS: Record<SemanticDiagramType, readonly string[]> = {
-  architecture: ["components", "connections", "boundaries"],
-  workflow: ["lanes", "nodes", "edges", "phases", "groups"],
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Collect every declared id in a spec, in stable document order. */
 export function collectArchifyIds(diagramType: SemanticDiagramType, spec: Record<string, unknown>): string[] {
-  const ids: string[] = [];
-  for (const field of ID_ARRAY_FIELDS[diagramType]) {
-    const entries = spec[field];
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries) {
-      if (isRecord(entry) && typeof entry.id === "string" && entry.id.length > 0) {
-        ids.push(entry.id);
-      }
-    }
-  }
-  return ids;
+  return collectSemanticIds(diagramType, spec);
 }
 
 export interface SpecToDatasetOptions {
@@ -122,7 +101,8 @@ export interface SpecToDatasetOptions {
  * Wrap a validated Archify spec in a semantic dataset. The id map starts as
  * the identity over the spec's own ids (already Archify-safe); canvas
  * projection rewrites the values to Maru member ids. Top-level fields the
- * schema does not define are moved to `preservedExtensions` and reported.
+ * schema does not define are moved to `preservedExtensions` and reported, and
+ * id-less relations get minted ids (reported once per ingest).
  */
 export function archifySpecToDataset(
   diagramType: SemanticDiagramType,
@@ -130,10 +110,14 @@ export function archifySpecToDataset(
   opts: SpecToDatasetOptions = {},
 ): { dataset: SemanticSpecDataset; diagnostics: ValidationDiagnostic[] } {
   const diagnostics: ValidationDiagnostic[] = [];
-  const known = new Set(KNOWN_SPEC_FIELDS[diagramType]);
+  const known = new Set(SEMANTIC_TYPES[diagramType].knownFields);
   const clean: Record<string, unknown> = {};
   const preserved: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(spec)) {
+  const { spec: minted, minted: mintedCount } = mintRelationIds(diagramType, spec);
+  if (mintedCount > 0) {
+    diagnostics.push({ key: "diagram.archify.relationIdsAssigned", params: { count: mintedCount } });
+  }
+  for (const [key, value] of Object.entries(minted)) {
     if (known.has(key)) clean[key] = value;
     else preserved[key] = value;
   }
@@ -141,7 +125,7 @@ export function archifySpecToDataset(
     diagnostics.push({ key: "diagram.archify.unsupportedField", params: { field: key, diagramType } });
   }
 
-  const ids = collectArchifyIds(diagramType, spec);
+  const ids = collectArchifyIds(diagramType, minted);
   const idMap: Record<string, string> = {};
   const taken = new Set<string>();
   for (const id of ids) {
@@ -191,8 +175,9 @@ export type ArchifyParseOutcome =
 /**
  * Parse Archify typed JSON into a semantic dataset. Unlike the tolerant
  * document migrator, a structural failure (unknown diagram type, broken meta
- * contract, oversized payload) refuses the import with diagnostics — an AI
- * or file candidate is never coerced.
+ * contract, oversized payload) or a content failure (schema, dangling
+ * references, self-messages, duplicate ids) refuses the import with
+ * diagnostics — an AI or file candidate is never coerced.
  */
 export function parseArchifySpec(
   text: string,
@@ -224,16 +209,8 @@ export function parseArchifySpec(
     raw,
     opts,
   );
-  const validator = diagramType === "architecture" ? architecture : workflow;
-  if (!validator(dataset.spec)) {
-    return {
-      ok: false,
-      diagnostics: (validator.errors ?? []).map((error) => ({
-        key: "diagram.validation.specMeta",
-        params: { field: error.instancePath || "spec" },
-      })),
-    };
-  }
+  const content = validateSemanticContent(dataset.diagramType, dataset.spec);
+  if (content.length > 0) return { ok: false, diagnostics: content };
   return { ok: true, result: { dataset, diagnostics } };
 }
 

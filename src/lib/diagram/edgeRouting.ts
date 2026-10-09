@@ -24,7 +24,7 @@ export type ArrowKind = keyof typeof ARROW_MARKER_ID;
 export interface RoutedEdge {
   /** Full SVG path `d` attribute string. */
   path: string;
-  /** Visible label anchor (the path midpoint). */
+  /** Visible label anchor (the middle segment's midpoint for same-axis auto routes, else the endpoint midpoint). */
   label: { x: number; y: number };
   /** Midpoint handle position (offset by edge.midOff in the perpendicular axis). */
   mid: { x: number; y: number };
@@ -60,17 +60,19 @@ function autoPath(
   const endHorizontal = horizontal(endPort);
   let bend: { x: number; y: number };
   if (startHorizontal === endHorizontal) {
-    // Same axis — single turn at half the distance.
+    // Same axis — single turn at half the distance. The label sits on the
+    // middle segment, so a `midOff` bracket (sequence messages) carries its
+    // label; with `midOff = 0` that is exactly the endpoint midpoint.
     if (startHorizontal) {
       const cx = (start.x + end.x) / 2 + (midOff || 0);
       bend = { x: cx, y: start.y };
       const path = `M ${start.x} ${start.y} L ${cx} ${start.y} L ${cx} ${end.y} L ${end.x} ${end.y}`;
-      return finalize(path, start, end);
+      return finalize(path, start, end, { x: cx, y: (start.y + end.y) / 2 });
     }
     const cy = (start.y + end.y) / 2 + (midOff || 0);
     bend = { x: start.x, y: cy };
     const path = `M ${start.x} ${start.y} L ${start.x} ${cy} L ${end.x} ${cy} L ${end.x} ${end.y}`;
-    return finalize(path, start, end);
+    return finalize(path, start, end, { x: (start.x + end.x) / 2, y: cy });
   }
   // Different axes — single L bend.
   if (startHorizontal) {
@@ -86,8 +88,8 @@ function finalize(
   path: string,
   start: { x: number; y: number },
   end: { x: number; y: number },
+  label: { x: number; y: number } = midpoint(start, end),
 ): RoutedEdge {
-  const label = midpoint(start, end);
   return {
     path,
     label,

@@ -60,6 +60,33 @@ describe("edgeRouting", () => {
     expect(baseline.path).not.toEqual(shifted.path);
   });
 
+  it("keeps midOff = 0 routes byte-identical to the endpoint-midpoint anchor", () => {
+    const cases: Array<[DiagramNode, DiagramNode, "n" | "s" | "e" | "w", "n" | "s" | "e" | "w"]> = [
+      [node("a", 0, 0), node("b", 300, 40), "e", "w"],
+      [node("a", 0, 0), node("b", 300, 40), "s", "n"],
+      [node("a", 10, 0), node("b", 310, 0), "s", "s"],
+      [node("a", 0, 0), node("b", 300, 200), "s", "w"],
+    ];
+    cases.forEach(([a, b, fromPort, toPort], i) => {
+      const r = routeEdge(defaultEdge(`m${i}`, "a", fromPort, "b", toPort, { midOff: 0 }), a, b)!;
+      const start = r.path.match(/^M (\S+) (\S+)/)!.slice(1).map(Number);
+      const end = r.path.match(/L (\S+) (\S+)$/)!.slice(1).map(Number);
+      const midpoint = { x: (start[0]! + end[0]!) / 2, y: (start[1]! + end[1]!) / 2 };
+      expect(JSON.stringify(r.label)).toBe(JSON.stringify(midpoint));
+      expect(JSON.stringify(r.mid)).toBe(JSON.stringify(midpoint));
+    });
+  });
+
+  it("anchors the label on the middle segment of a midOff bracket", () => {
+    // Sequence-style bracket: both ports on the bottom side, pushed 72px down.
+    const a = node("a", 0, 0);
+    const b = node("b", 300, 0);
+    const r = routeEdge(defaultEdge("seq", "a", "s", "b", "s", { midOff: 72 }), a, b)!;
+    expect(r.path).toBe("M 50 50 L 50 122 L 350 122 L 350 50");
+    expect(r.label).toEqual({ x: 200, y: 122 });
+    expect(r.mid).toEqual({ x: 200, y: 122 });
+  });
+
   it("caches the same input, recomputes on node move", () => {
     const a = node("a", 0, 0);
     const b = node("b", 300, 0);
