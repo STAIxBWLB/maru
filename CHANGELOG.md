@@ -15,9 +15,11 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 - Generate, validate, preview and apply sequence, dataflow and lifecycle diagrams alongside architecture and workflow, with lanes, stages and boundaries drawn as containers and stable relation ids (#444).
 - Keep semantic diagrams canonical while editing: canvas text writes through to the spec, the inspector reorders sequence messages and sets lifecycle types, dataflow classifications, lanes and stages as one undo step, and deleting members asks to detach first (#444).
 - Regenerate a semantic dataset in place from a member selection, keeping one dataset, imported extension fields and freeform annotation edges; ids owned by another dataset block instead of being overwritten (#444).
-- Refuse Mermaid sequence and state diagrams for direct import with a hint to use generation, and warn when a Mermaid export drops semantics (#444).
+- Refuse Mermaid sequence and state diagrams for direct import with a hint to use generation, warn when a Mermaid export drops semantics, and project imported archify-json specs onto the canvas instead of an empty one (#444).
+- Ribbon Delete now also asks before detaching pattern-view members, like keyboard Delete (#444).
+- Compatibility: documents stay at schema v9. Opened in 1.1.17-1.1.19, a document with the new types shows containers as plain sections, refuses scoped apply for them and does not write canvas text through to the spec (#444).
 
-This release delivers P2 of #433. Verified HTML/static publication (P3) and exploration (P4) remain open there.
+This release delivers the P2 slice scoped in #444. Workflow groups and phases, boundary membership editing and semantic add/remove stay deferred; verified HTML/static publication (P3) and exploration (P4) remain open in #433.
 
 ## v1.1.19 - Steady Workspace (2026-10-07)
 
