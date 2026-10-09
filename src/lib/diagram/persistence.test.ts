@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { updateEdge } from "./actions";
+import { archifySpecToDataset } from "./archifyCodec";
 import { deserializeDoc, migrate, serializeDoc, UnsupportedDiagramVersionError } from "./persistence";
+import { buildProposalFromCandidate, projectSemanticCandidate, type ProposalMeta } from "./proposal";
 import {
   computeProjectionHash,
   matrixFromRowsCols,
   validateMatrix,
   validateSemanticSpec,
+  type SemanticSpecDataset,
 } from "./reportTypes";
-import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc } from "./types";
+import { createDiagramStore } from "./state";
+import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc, createInitialEphemeral } from "./types";
 
 describe("diagram persistence", () => {
   it("round-trips a v:7 doc", () => {
@@ -306,7 +312,7 @@ describe("diagram persistence v9 (typed semantic datasets, issue #433)", () => {
     };
     expect(validateSemanticSpec(base).ok).toBe(true);
     expect(
-      validateSemanticSpec({ ...base, diagramType: "sequence" as never }).errors[0],
+      validateSemanticSpec({ ...base, diagramType: "gantt" as never }).errors[0],
     ).toMatch(/unknown diagramType/);
     expect(validateSemanticSpec({ ...base, spec: [] as never }).errors[0]).toMatch(
       /spec must be an object/,
@@ -317,5 +323,60 @@ describe("diagram persistence v9 (typed semantic datasets, issue #433)", () => {
     expect(
       validateSemanticSpec({ ...base, engine: { name: "archify", version: "" } }).errors[0],
     ).toMatch(/engine\.version/);
+  });
+});
+
+describe("P1 (1.1.17-1.1.19) compatibility of P2 semantics (issue #433)", () => {
+  // A P1-era doc: container-less members, id-less relations projected to
+  // legacy `<datasetId>-e<index>` edges, spec stored without minted ids.
+  function p1Doc() {
+    const minted = archifySpecToDataset("workflow", SEMANTIC_FIXTURES.workflow, { id: "ds-p1" }).dataset;
+    const dataset = { ...minted, spec: structuredClone(SEMANTIC_FIXTURES.workflow), idMap: { author: "author", reviewer: "reviewer", draft: "draft", review: "review", merge: "merge" } };
+    const members = projectSemanticCandidate(dataset);
+    return { ...createEmptyDoc("p1", 1), nodes: members.nodes, edges: members.edges, datasets: [dataset] };
+  }
+
+  it("loads and saves losslessly, and write-through edits reach legacy edge ids", () => {
+    const doc = p1Doc();
+    expect(doc.edges.map((e) => e.id)).toEqual(["ds-p1-e0", "ds-p1-e1"]);
+    // Datasets pass through byte-for-byte; the doc re-saves identically.
+    const reloaded = deserializeDoc(serializeDoc(doc));
+    expect(JSON.stringify(reloaded.datasets)).toBe(JSON.stringify(doc.datasets));
+    expect(serializeDoc(deserializeDoc(serializeDoc(reloaded)))).toBe(serializeDoc(reloaded));
+
+    const store = createDiagramStore({ doc: reloaded, ephemeral: createInitialEphemeral() });
+    store.setState(updateEdge("ds-p1-e0", { label: "submit" }));
+    const spec = (store.getState().doc.datasets![0] as SemanticSpecDataset).spec as Record<string, Record<string, unknown>[]>;
+    expect(spec.edges![0]!.label).toBe("submit");
+    expect(spec.edges![0]).not.toHaveProperty("id");
+  });
+
+  it("regenerates without gaining containers", () => {
+    const doc = p1Doc();
+    const candidate = archifySpecToDataset("workflow", SEMANTIC_FIXTURES.workflow, { id: "ds-p1" }).dataset;
+    const meta: ProposalMeta = {
+      jobId: "j",
+      docId: doc.id,
+      schemaVersion: DIAGRAM_SCHEMA_VERSION,
+      baseMemoryRevision: "",
+      baseStorageRevision: null,
+      scope: new Set(doc.nodes.map((n) => n.id)),
+      lockedNodeIds: [],
+    };
+    const { proposal } = buildProposalFromCandidate(meta, candidate, doc);
+    expect(proposal.ops.some((op) => op.kind === "addNode")).toBe(false);
+    // Legacy index edges are replaced by the minted relation edges.
+    expect(proposal.ops.filter((op) => op.kind === "removeEdge").map((op) => (op as { id: string }).id)).toEqual([
+      "ds-p1-e0",
+      "ds-p1-e1",
+    ]);
+  });
+
+  it("passes a sequence-dataset doc through migrate unchanged", () => {
+    const { dataset } = archifySpecToDataset("sequence", SEMANTIC_FIXTURES.sequence, { id: "ds-seq" });
+    const doc = { ...createEmptyDoc("seq", 1), datasets: [dataset] };
+    const migrated = migrate(JSON.parse(JSON.stringify(doc)));
+    expect(migrated.datasets).toEqual([dataset]);
+    expect(validateSemanticSpec(dataset).ok).toBe(true);
   });
 });
