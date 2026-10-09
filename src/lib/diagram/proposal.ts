@@ -362,6 +362,17 @@ export function buildProposalFromCandidate(
       diagnostics.push({ key: "diagram.proposal.idCollision", params: { id: projected.id } });
       continue;
     }
+    // A freeform edge that shares a candidate id (for example one a detach
+    // left behind) is rewired only when the scope owns both of its current
+    // endpoints; edges outside the scope are never touched.
+    if (
+      scope !== null &&
+      !previousRelationEdgeIds.has(existing.id) &&
+      !(scope.has(existing.fromNode) && scope.has(existing.toNode))
+    ) {
+      diagnostics.push({ key: "diagram.proposal.outOfScopeEdge", params: { id: projected.id } });
+      continue;
+    }
     const patch = edgeSemanticPatch(existing, projected);
     if (patch) ops.push({ kind: "updateEdge", id: projected.id, patch });
   }

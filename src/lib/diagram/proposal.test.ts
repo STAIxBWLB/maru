@@ -368,6 +368,15 @@ describe("buildProposalFromCandidate across datasets", () => {
     expect(proposal.ops.some((op) => op.kind === "updateEdge")).toBe(false);
   });
 
+  it("never rewires a freeform edge whose current endpoints are outside the scope", () => {
+    // conn "e1" was left behind by a detach between nodes the user did not select.
+    const base = doc([node("p", "P"), node("q", "Q")], [edge("e1", "p", "q")]);
+    const spec = { ...SPEC, components: [{ id: "x", type: "frontend", label: "X" }, { id: "y", type: "backend", label: "Y" }], connections: [{ id: "e1", from: "x", to: "y" }] };
+    const { proposal } = buildProposalFromCandidate(metaFor({ scope: new Set(["x", "y"]) }), candidateOf(spec, "dsB"), base);
+    expect(proposal.ops.some((op) => op.kind === "updateEdge" && op.id === "e1")).toBe(false);
+    expect(proposal.diagnostics.some((d) => d.key === "diagram.proposal.outOfScopeEdge" && isBlockingDiagnostic(d))).toBe(true);
+  });
+
   it("keeps the previous dataset's preserved extensions on an in-place regeneration", () => {
     const previous = { ...candidateOf(SPEC, "dsA"), preservedExtensions: { "x-owner": "team-a" } };
     const base = projectSemanticDocument(previous).doc;

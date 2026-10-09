@@ -1864,20 +1864,8 @@ function DiagramShell({
           for (const id of sel) {
             const node = store.getState().doc.nodes.find((n) => n.id === id);
             if (!node) continue;
-            store.setState(
-              withSnapshot(
-                (state) => ({
-                  ...state,
-                  doc: {
-                    ...state.doc,
-                    nodes: state.doc.nodes.map((n) =>
-                      n.id === id && !n.locked ? { ...n, title: (n.title ?? "") + char } : n,
-                    ),
-                  },
-                }),
-                coalescer,
-              ),
-            );
+            // Through updateNode, so a semantic member's title writes through.
+            store.setState(withSnapshot(updateNode(id, { title: (node.title ?? "") + char }), coalescer));
           }
         }}
         onClose={() => setSpecialOpen(false)}
