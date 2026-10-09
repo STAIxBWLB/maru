@@ -105,7 +105,7 @@ describe("DocumentDeleteDialog", () => {
     expect(metadata!.disabled).toBe(true);
     expect(text()).toContain("None found.");
     expect(text()).toContain("handmade.txt");
-    expect(button(/^Delete 1 files$/)).toBeTruthy();
+    expect(button(/^Delete 1 file\(s\)$/)).toBeTruthy();
   });
 
   it("applies only the checked items of an enabled group", async () => {
@@ -123,8 +123,8 @@ describe("DocumentDeleteDialog", () => {
     expect(boxes.map((box) => box.checked)).toEqual([true, true, true]);
     expect(boxes[0]!.disabled).toBe(true);
     await click(boxes[1]!);
-    expect(text()).toContain("Delete 2 files (2.0 KB)");
-    await click(button(/^Delete 2 files$/));
+    expect(text()).toContain("Delete 2 file(s) (2.0 KB)");
+    await click(button(/^Delete 2 file\(s\)$/));
     expect(api.trashDocument).toHaveBeenCalledWith(
       "/work",
       "/work/notes/report.md",
@@ -143,7 +143,7 @@ describe("DocumentDeleteDialog", () => {
     api.documentDeletePlan.mockResolvedValue(plan("fp-2"));
     await click(switches()[0]!);
     await click(checkboxes()[1]!);
-    await click(button(/^Delete 2 files$/));
+    await click(button(/^Delete 2 file\(s\)$/));
     expect(checkboxes().map((box) => box.checked)).toEqual([true, false, true]);
     expect(api.documentDeletePlan).toHaveBeenCalledTimes(2);
     expect(text()).toContain("Files changed since this list was made");
@@ -161,7 +161,7 @@ describe("DocumentDeleteDialog", () => {
     });
     harness = await render();
     await click(switches()[0]!);
-    await click(button(/^Delete 3 files$/));
+    await click(button(/^Delete 3 file\(s\)$/));
     expect(harness.onDeleted).toHaveBeenCalledTimes(1);
     expect(harness.onClose).not.toHaveBeenCalled();
     expect(text()).toContain("Items not moved to the Trash");

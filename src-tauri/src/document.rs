@@ -888,7 +888,7 @@ fn assert_document_delete_allowed(
     Ok(())
 }
 
-/// Largest version, Binder or manifest file the plan reads to find a link.
+/// Largest version or manifest file the plan reads to find a link.
 const DELETE_PLAN_READ_CAP: u64 = 8 * 1024 * 1024;
 
 fn compute_delete_plan(vault: &Path, source: &Path) -> Result<DocumentDeletePlan, String> {
@@ -998,7 +998,7 @@ fn compute_delete_plan(vault: &Path, source: &Path) -> Result<DocumentDeletePlan
     // Filled outputs are named after the template, so one that another
     // Studio state also records is shared and kept.
     let vault_text = vault.to_string_lossy().to_string();
-    let states = crate::studio::studio_state_dirs(&vault_text)?;
+    let (states, unreadable) = crate::studio::studio_state_dirs(&vault_text)?;
     let filled_dir = vault.join(".maru").join("studio").join("filled");
     let output_of = |state: &crate::studio::StudioState| {
         state
@@ -1020,9 +1020,15 @@ fn compute_delete_plan(vault: &Path, source: &Path) -> Result<DocumentDeletePlan
             continue;
         }
         if let Some(path) = output_of(state) {
+            // A state that does not parse may still record this output; keep it.
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
             let shared = states
                 .iter()
-                .any(|(_, other)| !owns(other) && output_of(other).as_ref() == Some(&path));
+                .any(|(_, other)| !owns(other) && output_of(other).as_ref() == Some(&path))
+                || unreadable.iter().any(|raw| raw.contains(name));
             if shared {
                 push(
                     &mut kept,
@@ -3622,6 +3628,17 @@ mod document_delete_tests {
             );
             let plan = ws.plan();
             assert!(!rels(&plan.derived).contains(&".maru/studio/filled/report.hwpx".to_string()));
+            assert!(rels(&plan.kept).contains(&".maru/studio/filled/report.hwpx".to_string()));
+        }
+
+        // A state that does not parse may record the same output: kept too.
+        {
+            let ws = seeded();
+            ws.write(
+                ".maru/studio/future-doc/state.json",
+                r#"{"schemaVersion": 99, "hwpFields": {"lastOutputPath": ".maru/studio/filled/report.hwpx"}}"#,
+            );
+            let plan = ws.plan();
             assert!(rels(&plan.kept).contains(&".maru/studio/filled/report.hwpx".to_string()));
         }
 
