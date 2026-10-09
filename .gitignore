@@ -79,3 +79,7 @@ artifacts/
 .qwen/
 .playwright-cli/
 .planning/milestone.lock
+.context/
+
+# === Local design QA captures ===
+docs/design-qa/
