@@ -3,9 +3,9 @@
  *
  * A structural edit is a spec edit: {@link planSemanticEdit} transforms the
  * dataset's spec, runs `validateSemanticContent`, and routes the result
- * through P1's audited path — `buildProposalFromCandidate` (scope = the
- * dataset's members, current locks, touched filter) then
- * `prepareProposalApply` — so the caller commits exactly one `withSnapshot`
+ * through P1's audited path (`buildProposalFromCandidate` with scope = the
+ * dataset's members, current locks and a touched filter, then
+ * `prepareProposalApply`), so the caller commits exactly one `withSnapshot`
  * undo entry. Only canvas members whose projection changed are touched, so
  * canvas drift on other members survives. Manual edits never run the engine
  * (it is async and Tauri-only); the publication gate must.

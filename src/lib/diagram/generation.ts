@@ -23,7 +23,7 @@
  *   the engine ever sees the spec; a pre-check failure skips the engine call.
  *   Id-less relations are then minted (`mintRelationIds`) and the content is
  *   validated synchronously (`validateSemanticContent`, an early fail), so the
- *   engine validates — and its receipt hashes — the exact spec that is stored.
+ *   engine validates (and its receipt hashes) the exact spec that is stored.
  * - A job with a `target` regenerates an existing dataset: the prompt carries
  *   the current spec (capped, as untrusted data) and the result reuses the
  *   dataset id, so the upsert replaces it instead of appending a second one.

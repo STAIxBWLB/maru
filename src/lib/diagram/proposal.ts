@@ -42,7 +42,7 @@
  * candidate's id, "previous"; issue #433 P2):
  *
  * - A locked member blocks only when it would change (patch or slot move) or
- *   be removed — an unchanged locked member does not block.
+ *   be removed; an unchanged locked member does not block.
  * - On grid types a member whose projected slot moved between the previous
  *   and candidate projections moves by that delta (user offsets survive);
  *   containers resize the same way.

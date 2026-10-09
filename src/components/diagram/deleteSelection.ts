@@ -1,5 +1,5 @@
 /**
- * Delete the current selection — the one path behind keyboard Delete /
+ * Delete the current selection: the one path behind keyboard Delete /
  * Backspace and the ribbon's Delete button.
  *
  * Every prompt is answered before anything mutates, and cancelling any of
@@ -8,7 +8,7 @@
  * - a strict subset of a pattern view's members asks to detach them first
  *   (Phase 2b), then detaches one snapshot per subset;
  * - semantic members (issue #433 P2) ask `diagram.semantic.deleteRequiresDetach`
- *   with what detaching loses, then detach one snapshot per dataset — the
+ *   with what detaching loses, then detach one snapshot per dataset; the
  *   spec stays canonical, so members are never deleted out from under it.
  *
  * The selection is then removed (nodes, then edges), as before.
