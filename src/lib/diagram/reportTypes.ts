@@ -206,13 +206,20 @@ export interface ScorecardDataset {
 // ---------------------------------------------------------------------------
 
 /**
- * Diagram types whose semantics a semantic dataset can own. Sequence,
- * dataflow and lifecycle join when their editing phases land (issue #433
- * P2); only architecture and workflow are generatable/editable in P1.
+ * Diagram types whose semantics a semantic dataset can own: the five Archify
+ * engine types. Architecture and workflow shipped in issue #433 P1; sequence,
+ * dataflow and lifecycle joined in P2. Per-type collections live in the
+ * descriptor table in `semantic.ts`.
  */
-export type SemanticDiagramType = "architecture" | "workflow";
+export type SemanticDiagramType = "architecture" | "workflow" | "sequence" | "dataflow" | "lifecycle";
 
-export const SEMANTIC_DIAGRAM_TYPES: readonly SemanticDiagramType[] = ["architecture", "workflow"];
+export const SEMANTIC_DIAGRAM_TYPES: readonly SemanticDiagramType[] = [
+  "architecture",
+  "workflow",
+  "sequence",
+  "dataflow",
+  "lifecycle",
+];
 
 /** The pinned engine a semantic spec round-trips through. */
 export interface SemanticEngineRef {
