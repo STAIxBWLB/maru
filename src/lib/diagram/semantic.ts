@@ -145,6 +145,11 @@ export const LIFECYCLE_STATE_TYPES = [
   "external",
 ] as const;
 
+/** i18n key of a diagram type's display name (`diagram.generate.type<Type>`). */
+export function semanticTypeLabelKey(type: SemanticDiagramType): string {
+  return `diagram.generate.type${type[0]!.toUpperCase()}${type.slice(1)}`;
+}
+
 export function descriptorFor(dataset: SemanticSpecDataset): SemanticTypeDescriptor | null {
   return SEMANTIC_TYPES[dataset.diagramType] ?? null;
 }
