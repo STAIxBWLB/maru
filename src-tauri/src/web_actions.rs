@@ -52,7 +52,7 @@ use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub const WEB_ACTION_SCHEMA_VERSION: &str = "maru.web-task-action.v1";
 
@@ -598,8 +598,10 @@ fn ledger_append(work: &Path, receipt: &Receipt, now_iso: &str) -> Result<(), St
 
 /// Git blob sha of the working-tree file, computed by git itself so it always
 /// matches the id GitHub assigned the blob the web committed. `--no-filters`
-/// hashes the raw bytes, which is what the web hashed.
+/// hashes the raw bytes, which is what the web hashed. The bytes go through
+/// stdin: git cannot open the verbatim `\\?\` paths Windows canonicalizes to.
 fn blob_sha(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|err| format!("git hash-object failed: {err}"))?;
     let mut command = Command::new("git");
     // Tests hash only disposable notes; inherited user Git configuration,
     // repository overrides, credentials and hooks never enter the fixture.
@@ -622,12 +624,20 @@ fn blob_sha(path: &Path) -> Result<String, String> {
             "-c",
             "credential.helper=",
         ]);
-    let output = command
-        .args(["hash-object", "--no-filters", "--"])
-        .arg(path)
+    let mut child = command
+        .args(["hash-object", "--no-filters", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .no_window()
-        .output()
+        .spawn()
         .map_err(|err| format!("git hash-object failed: {err}"))?;
+    // git reads all of stdin before printing the 40-byte id, so this cannot block.
+    let written = child.stdin.take().expect("piped stdin").write_all(&bytes);
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("git hash-object failed: {err}"))?;
+    written.map_err(|err| format!("git hash-object failed: {err}"))?;
     if !output.status.success() {
         return Err(format!(
             "git hash-object failed: {}",
@@ -2407,7 +2417,7 @@ mod tests {
         );
         let outcome = apply(&tmp);
 
-        assert_eq!(outcome.applied, 1);
+        assert_eq!(outcome.applied, 1, "{outcome:?}");
         assert_eq!(outcome.stale, 0);
         assert_eq!(outcome.items[0].state, WebActionState::Applied);
 

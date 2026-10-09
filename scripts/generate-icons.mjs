@@ -14,9 +14,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { inflateSync } from "node:zlib";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
 const brandRoot = join(repoRoot, "src", "assets", "brand");
 const nativeOutput = join(repoRoot, "src-tauri", "icons");
 const publicRoot = join(repoRoot, "public");
@@ -99,10 +101,9 @@ function validateSources() {
 
 function runTauriIcon(input, output, pngSizes) {
   mkdirSync(output, { recursive: true });
-  const executable = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-  const args = ["exec", "tauri", "icon", input, "--output", output];
+  const args = [require.resolve("@tauri-apps/cli/tauri.js"), "icon", input, "--output", output];
   if (pngSizes) args.push("--png", pngSizes.join(","));
-  execFileSync(executable, args, { cwd: repoRoot, stdio: "inherit" });
+  execFileSync(process.execPath, args, { cwd: repoRoot, stdio: "inherit" });
 }
 
 function listFiles(root) {

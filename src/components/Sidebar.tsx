@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/platform";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   Archive,
@@ -196,15 +197,14 @@ export const Sidebar = memo(function Sidebar({
           type="button"
           className="shortcut-row"
           onClick={onOpenCommandPalette}
-          title={t("cmdk.openHint")}
+          title={t("cmdk.openHint", { shortcut: formatShortcut("⌘K") })}
         >
           <span className="shortcut-label">
             <FileText size={13} className="sidebar-inline-icon" />
             {t("sidebar.commandPalette")}
           </span>
           <span className="keys">
-            <span className="kbd">⌘</span>
-            <span className="kbd">K</span>
+            <span className="kbd">{formatShortcut("⌘K")}</span>
           </span>
         </button>
       </div>

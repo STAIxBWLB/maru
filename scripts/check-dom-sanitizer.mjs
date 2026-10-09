@@ -18,7 +18,7 @@
 // followed; there is intentionally no AST parser and no general alias
 // following. Everything else fails closed with exit 1.
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, normalize } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "../src");
@@ -67,7 +67,7 @@ function collectTsFiles(dir, relDir = "") {
 // return it when the target is one of the pinned allowlisted modules.
 function resolveAllowlistedModule(specifier, fileRel) {
   if (!specifier.startsWith(".")) return null;
-  const base = normalize(join(dirname(fileRel), specifier));
+  const base = posix.normalize(posix.join(posix.dirname(fileRel), specifier));
   for (const candidate of [
     base,
     `${base}.ts`,

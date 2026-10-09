@@ -1718,7 +1718,10 @@ mod phase08_10 {
         );
         assert_eq!(
             run(ipc::secrets_read_text(work, "services/demo.env".into())).unwrap_err(),
-            "Cannot inspect secret text file: No such file or directory (os error 2)"
+            format!(
+                "Cannot inspect secret text file: {}",
+                std::io::Error::from_raw_os_error(2)
+            )
         );
     }
 

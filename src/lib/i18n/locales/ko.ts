@@ -229,7 +229,7 @@ export const ko: Record<string, string> = {
   "mode.architecture": "설계도",
   "mode.sites": "사이트",
   "mode.graph": "그래프",
-  "workbench.openRight": "{name} 오른쪽에 열기 (Option-click)",
+  "workbench.openRight": "{name} 오른쪽에 열기 ({modifier}-click)",
   "workbench.moveToMain": "메인 화면으로 이동",
   "workbench.closeRight": "오른쪽 화면 닫기",
   "mode.drafts": "아이디어",
@@ -2271,7 +2271,7 @@ export const ko: Record<string, string> = {
 
   "cmdk.placeholder": "문서 또는 명령 검색...",
   "cmdk.empty": "결과가 없습니다.",
-  "cmdk.openHint": "⌘K 로 명령 팔레트를 엽니다",
+  "cmdk.openHint": "{shortcut} 로 명령 팔레트를 엽니다",
   "cmdk.section.documents": "문서",
   "cmdk.group.navigate": "이동",
   "cmdk.group.create": "만들기",

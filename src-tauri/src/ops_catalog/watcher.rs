@@ -251,7 +251,8 @@ fn should_dispatch_catalog_event(path: &Path, root: &Path) -> bool {
 
 fn is_catalog_relevant(path: &Path, root: &Path) -> bool {
     let rel = match path.strip_prefix(root) {
-        Ok(r) => r.to_string_lossy().to_string(),
+        // Relevance patterns use `/` on every platform.
+        Ok(r) => r.to_string_lossy().replace('\\', "/"),
         Err(_) => return false,
     };
 

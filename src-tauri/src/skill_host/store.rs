@@ -2534,7 +2534,7 @@ pub fn skills_sync_selected_tools(
                         let recorded = PathBuf::from(&existing.target_path);
                         if recorded != tool_target && stale_install_has_exact_owned_chain(existing)
                         {
-                            fs::remove_file(&recorded).map_err(|err| {
+                            host_fs::remove_symlink(&recorded).map_err(|err| {
                                 format!(
                                     "Cannot remove previous install link {}: {err}",
                                     host_fs::display_path(&recorded)
@@ -2855,7 +2855,7 @@ fn remove_exact_stale_install_links(
         .filter(|install| stale_install_has_exact_owned_chain(install))
         .collect();
     for install in &removable {
-        fs::remove_file(&install.target_path).map_err(|err| {
+        host_fs::remove_symlink(Path::new(&install.target_path)).map_err(|err| {
             format!(
                 "Cannot remove stale Maru install {}: {err}",
                 install.target_path
@@ -2879,7 +2879,7 @@ fn remove_exact_stale_install_links(
     }
     for entry in entries {
         if is_symlink_path(Path::new(&entry)) {
-            fs::remove_file(&entry)
+            host_fs::remove_symlink(Path::new(&entry))
                 .map_err(|err| format!("Cannot remove stale Maru entry {entry}: {err}"))?;
         }
     }
@@ -3062,11 +3062,13 @@ pub fn skills_reconcile_skill(
         outcome.git_repo_root = Some(host_fs::display_path(&repo_root));
         outcome.commands_shell = Some("posix".to_string());
         let skill_path = PathBuf::from(&skill_record.abs_path);
-        let rel = skill_path
-            .strip_prefix(&repo_root)
+        // Git prints `C:/...` on Windows; compare canonical forms. The
+        // relative path feeds POSIX commands, so it always uses `/`.
+        let rel = canonicalize_or_self(&skill_path)
+            .strip_prefix(canonicalize_or_self(&repo_root))
             .map_err(|_| "skill_not_inside_git_repo".to_string())?
             .to_string_lossy()
-            .to_string();
+            .replace('\\', "/");
         let repo_root_display = host_fs::display_path(&repo_root);
         let repo_root_quoted = shell_quote(&repo_root_display);
         let rel_quoted = shell_quote(&rel);
@@ -3360,7 +3362,7 @@ pub fn skills_import_unmanage(
         let meta = fs::symlink_metadata(&imported_skill)
             .map_err(|err| format!("Cannot stat imported skill {name}: {err}"))?;
         if meta.file_type().is_symlink() || meta.is_file() {
-            fs::remove_file(&imported_skill)
+            host_fs::remove_symlink(&imported_skill)
                 .map_err(|err| format!("Cannot remove imported skill {name}: {err}"))?;
         } else {
             fs::remove_dir_all(&imported_skill)
@@ -3693,7 +3695,9 @@ fn preserved_installs_from_registry(registry: SkillsRegistry) -> Vec<SkillInstal
 fn install_links_are_intact(install: &SkillInstall) -> bool {
     let target_path = PathBuf::from(&install.target_path);
     let entrypoint_path = PathBuf::from(&install.entrypoint_path);
-    host_fs::read_link_target(&target_path).as_deref() == Some(entrypoint_path.as_path())
+    host_fs::read_link_target(&target_path).is_some_and(|current| {
+        host_fs::simplified(&current) == host_fs::simplified(&entrypoint_path)
+    })
 }
 
 /// Mode-aware "this install is still present and ours" check.
@@ -3806,7 +3810,7 @@ fn create_maru_entry_symlink(
         return Ok(());
     }
     if symlink_target_is_skill_named(maru_entry, installed_as) {
-        fs::remove_file(maru_entry).map_err(|err| {
+        host_fs::remove_symlink(maru_entry).map_err(|err| {
             format!(
                 "Cannot replace existing Maru skill link {}: {err}",
                 host_fs::display_path(maru_entry)
@@ -3834,7 +3838,7 @@ fn create_install_target_symlink(
         return Ok(());
     }
     if symlink_target_resolves_to(tool_target, skill_path) {
-        fs::remove_file(tool_target).map_err(|err| {
+        host_fs::remove_symlink(tool_target).map_err(|err| {
             format!(
                 "Cannot replace existing install link {}: {err}",
                 host_fs::display_path(tool_target)
@@ -3843,7 +3847,7 @@ fn create_install_target_symlink(
         return host_fs::create_symlink_no_clobber(tool_target, maru_entry);
     }
     if symlink_target_is_skill_named(tool_target, installed_as) {
-        fs::remove_file(tool_target).map_err(|err| {
+        host_fs::remove_symlink(tool_target).map_err(|err| {
             format!(
                 "Cannot replace existing install link {}: {err}",
                 host_fs::display_path(tool_target)
@@ -3874,7 +3878,7 @@ fn symlink_target_path_equals(link: &Path, expected: &Path) -> bool {
     let Some(target) = host_fs::read_link_target(link) else {
         return false;
     };
-    resolve_link_target(link, target) == expected
+    host_fs::simplified(&resolve_link_target(link, target)) == host_fs::simplified(expected)
 }
 
 fn symlink_target_resolves_to(link: &Path, expected: &Path) -> bool {
@@ -5016,8 +5020,11 @@ fn cleanup_removed_builtin_installs(
             let maru_entry = PathBuf::from(&install.entrypoint_path);
             let _ = host_fs::remove_if_matching_symlink(&tool_target, &maru_entry);
             if let Some(link_target) = host_fs::read_link_target(&maru_entry) {
-                if link_target.starts_with(&builtin_prefix) && !link_target.exists() {
-                    let _ = fs::remove_file(&maru_entry);
+                if host_fs::simplified(&link_target)
+                    .starts_with(host_fs::simplified(&builtin_prefix))
+                    && !link_target.exists()
+                {
+                    let _ = host_fs::remove_symlink(&maru_entry);
                 }
             }
             registry.installs.retain(|other| {
@@ -6034,7 +6041,9 @@ fn doctor_foreign_root_issues(registry: &SkillsRegistry) -> Vec<SkillDoctorIssue
                 continue;
             }
             let points_into_maru = host_fs::read_link_target(&link_path)
-                .map(|target| target.starts_with(&skills_root))
+                .map(|target| {
+                    host_fs::simplified(&target).starts_with(host_fs::simplified(&skills_root))
+                })
                 .unwrap_or(false);
             if !points_into_maru {
                 continue;
@@ -7457,7 +7466,10 @@ mod tests {
                 // ensure_covered alone accepts it; exact mapping equality must reject.
                 fs::write(
                     checkout.join(".git"),
-                    format!("gitdir: {}\n", path_string(&replacement)),
+                    format!(
+                        "gitdir: {}\n",
+                        crate::test_support::git_local_path(&replacement)
+                    ),
                 )
                 .unwrap();
                 waiting.release();
@@ -7582,10 +7594,18 @@ mod tests {
             git(&checkout, &["commit", "-m", "initial fixture"]);
             git(
                 &checkout,
-                &["remote", "add", "origin", &path_string(&remote)],
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    &crate::test_support::git_local_path(&remote),
+                ],
             );
             git(&checkout, &["push", "-u", "origin", "main"]);
-            git(&peer, &["clone", &path_string(&remote), "."]);
+            git(
+                &peer,
+                &["clone", &crate::test_support::git_local_path(&remote), "."],
+            );
             fs::write(peer.join("skills/fixture/SKILL.md"), REMOTE).unwrap();
             git(&peer, &["commit", "-am", "remote fixture update"]);
             git(&peer, &["push", "origin", "HEAD"]);
@@ -8828,7 +8848,7 @@ mod tests {
             }
             let before = snapshots();
             let disk = fs::read(registry_path().unwrap()).unwrap();
-            fs::remove_file(&link).unwrap();
+            host_fs::remove_symlink(&link).unwrap();
             std::os::unix::fs::symlink(&second, &link).unwrap();
             let outcome =
                 skills_sync_all_sources_blocking(before, ProgressReporter::noop()).unwrap();
@@ -9270,7 +9290,7 @@ mod tests {
                 })
             });
             entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            fs::remove_file(&link).unwrap();
+            host_fs::remove_symlink(&link).unwrap();
             std::os::unix::fs::symlink(&second, &link).unwrap();
             release_tx.send(()).unwrap();
             assert!(worker
@@ -9872,7 +9892,7 @@ mod tests {
         manifest["skills"][0]["sourceOrigin"] =
             serde_json::Value::String(path_string(&canonical_source));
         host_fs::write_json_pretty(&imported_manifest_path().unwrap(), &manifest).unwrap();
-        fs::remove_file(&imported.imported_path).unwrap();
+        host_fs::remove_symlink(Path::new(&imported.imported_path)).unwrap();
         host_fs::create_symlink_no_clobber(Path::new(&imported.imported_path), &canonical_foreign)
             .unwrap();
         let error = rescan_source_in_registry(&mut registry, IMPORTED_SOURCE_ID).unwrap_err();
@@ -10889,7 +10909,7 @@ mod tests {
                 .iter()
                 .find(|profile| profile.target == target)
                 .unwrap();
-            assert_eq!(profile.root, path_string(&root));
+            assert_eq!(Path::new(&profile.root), root);
         }
         let registry = load_registry().unwrap();
         assert_eq!(
@@ -10990,10 +11010,10 @@ mod tests {
             .collect();
         names.sort();
         let first_target = install_target_path("claude", &names[0]).unwrap();
-        fs::remove_file(&first_target).unwrap();
+        host_fs::remove_symlink(&first_target).unwrap();
         let collision_name = names.last().unwrap();
         let collision_target = install_target_path("claude", collision_name).unwrap();
-        fs::remove_file(&collision_target).unwrap();
+        host_fs::remove_symlink(&collision_target).unwrap();
         let unrelated = TempDir::new().unwrap();
         let unrelated_skill = unrelated.path().join(collision_name);
         fs::create_dir_all(&unrelated_skill).unwrap();
@@ -11022,7 +11042,7 @@ mod tests {
         skills_sync_tools(None, tools.clone(), true, false).unwrap();
         let safe_target = install_target_path("claude", "stale-safe").unwrap();
         let unsafe_target = install_target_path("claude", "stale-unsafe").unwrap();
-        fs::remove_file(&unsafe_target).unwrap();
+        host_fs::remove_symlink(&unsafe_target).unwrap();
         let unrelated = TempDir::new().unwrap();
         let foreign = unrelated.path().join("stale-unsafe");
         fs::create_dir_all(&foreign).unwrap();
@@ -11070,7 +11090,7 @@ mod tests {
             host_fs::create_symlink_no_clobber(&foreign, &entry).unwrap();
             let ambient = install_target_path("codex", &install.installed_as).unwrap();
             if is_symlink_path(&ambient) {
-                fs::remove_file(&ambient).unwrap();
+                host_fs::remove_symlink(&ambient).unwrap();
             }
             install.target_path = path_string(&foreign);
         }
@@ -11226,7 +11246,7 @@ mod tests {
             .find(|install| install.target == "codex" && install.installed_as == "copy-rooted")
             .unwrap();
         let ambient = install_target_path("codex", "copy-rooted").unwrap();
-        fs::remove_file(&ambient).unwrap();
+        host_fs::remove_symlink(&ambient).unwrap();
         install_copy(&foreign_copy, &skill_path, &record.skill_id, "copy-rooted").unwrap();
         record.mode = "copy".to_string();
         record.target_path = path_string(&foreign_copy);

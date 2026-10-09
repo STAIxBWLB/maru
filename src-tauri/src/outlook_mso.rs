@@ -1227,14 +1227,16 @@ mod tests {
         crate::test_support::write_executable_fixture(path, contents, 0o755).unwrap();
     }
 
-    #[cfg(unix)]
     fn captured_output(
         stdout: &str,
         stderr: &str,
         success: bool,
         termination: CommandTermination,
     ) -> BoundedOutput {
+        #[cfg(unix)]
         use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
 
         BoundedOutput {
             status: std::process::ExitStatus::from_raw(if success { 0 } else { 1 << 8 }),

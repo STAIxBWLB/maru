@@ -418,9 +418,9 @@ impl ProcessTree {
     fn attach(child: &mut std::process::Child) -> io::Result<Self> {
         #[cfg(windows)]
         {
-            return windows_job::Job::assign(child)
+            windows_job::Job::assign(child)
                 .map(|job| Self { job })
-                .map_err(|job_error| cleanup_after_attach_failure(child, job_error));
+                .map_err(|job_error| cleanup_after_attach_failure(child, job_error))
         }
 
         #[cfg(unix)]
@@ -441,7 +441,7 @@ impl ProcessTree {
         #[cfg(windows)]
         {
             let _ = child;
-            return self.job.terminate();
+            self.job.terminate()
         }
 
         #[cfg(unix)]
@@ -829,14 +829,16 @@ mod tests {
             "$child = Start-Process powershell.exe -ArgumentList '-NoLogo','-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 60' -NoNewWindow -PassThru; [Console]::Out.Write($child.Id); Start-Sleep -Milliseconds 200",
         ]);
         let started = Instant::now();
+        // Cold PowerShell startup alone can exceed a sub-second budget. The
+        // timeout must outlast readiness (the PID is printed and the direct
+        // parent exits) so that only the descendant holds the output pipes.
+        let timeout = Duration::from_secs(5);
 
-        let output =
-            run_command_with_timeout(&mut command, Duration::from_millis(500), |_, _| false)
-                .unwrap();
+        let output = run_command_with_timeout(&mut command, timeout, |_, _| false).unwrap();
 
         assert_eq!(output.termination, CommandTermination::TimedOut);
         assert!(
-            started.elapsed() < Duration::from_secs(3),
+            started.elapsed() < timeout + Duration::from_millis(2500),
             "inherited output pipes kept readers blocked for {:?}",
             started.elapsed()
         );

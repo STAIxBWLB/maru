@@ -5,6 +5,7 @@ const port = Number(process.env.MARU_E2E_PORT ?? 5307);
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
+  workers: process.platform === "win32" ? 2 : undefined,
   expect: {
     timeout: 8_000,
   },

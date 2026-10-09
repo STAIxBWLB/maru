@@ -1,3 +1,4 @@
+import { formatShortcut } from "../lib/platform";
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Hash, Search } from "lucide-react";
 import { useTranslation } from "../lib/i18n";
@@ -377,7 +378,7 @@ export const CommandPalette = memo(function CommandPalette({
                         <strong>{item.action.label}</strong>
                       </span>
                       {item.action.shortcut ? (
-                        <span className="kbd">{item.action.shortcut}</span>
+                        <span className="kbd">{formatShortcut(item.action.shortcut)}</span>
                       ) : (
                         <span />
                       )}

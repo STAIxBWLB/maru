@@ -2096,11 +2096,12 @@ mod tests {
         assert!(!xml.contains("<string>~/"), "no literal ~ in values: {xml}");
         assert_eq!(
             resolve_job_path(&work, &job.program.command),
-            format!("{home}/.maru/env/.venv/bin/python3")
+            under_home(&home, ".maru/env/.venv/bin/python3")
         );
         assert!(xml.contains("--maru-cli"));
         assert!(xml.contains(&format!(
-            "<string>{home}/.local/share/fnm/aliases/default/bin:/usr/bin:/bin</string>"
+            "<string>{}:/usr/bin:/bin</string>",
+            under_home(&home, ".local/share/fnm/aliases/default/bin")
         )));
         assert_eq!(
             resolve_job_arg(&work, &job.program.args[0]),
@@ -2118,12 +2119,13 @@ mod tests {
             work.to_string_lossy()
         )));
         assert!(xml.contains(&format!(
-            "<string>{}/inbox/_state/mail-digest/.cache/logs/stdout.log</string>",
-            work.to_string_lossy()
+            "<string>{}/stdout.log</string>",
+            work.join("inbox/_state/mail-digest/.cache/logs")
+                .to_string_lossy()
         )));
         assert!(xml.contains(&format!(
-            "<string>{}/workspace.config.yaml</string>",
-            work.to_string_lossy()
+            "<string>{}</string>",
+            work.join("workspace.config.yaml").to_string_lossy()
         )));
         assert!(xml.contains(&format!("<key>HOME</key>\n      <string>{home}</string>")));
         assert!(xml.contains("<key>Hour</key>\n    <integer>3</integer>"));
@@ -2395,7 +2397,7 @@ mod tests {
             description: String::new(),
             enabled: true,
             program: JobProgram {
-                command: "/bin/sh".to_string(),
+                command: crate::test_support::posix_shell(),
                 args: vec!["-c".to_string(), shell_line.to_string()],
                 env: BTreeMap::new(),
             },
@@ -2609,6 +2611,11 @@ mod tests {
         assert!(!work.join("exec-marker.txt").exists());
     }
 
+    /// Expected tilde expansion: the home directory joined with native separators.
+    fn under_home(home: &str, rest: &str) -> String {
+        Path::new(home).join(rest).to_string_lossy().into_owned()
+    }
+
     #[test]
     fn env_value_expands_every_tilde_segment() {
         let _home = Home::new();
@@ -2620,7 +2627,11 @@ mod tests {
         // Regression: a two-tilde PATH must expand both segments.
         assert_eq!(
             expand_tilde_segments("~/a:~/b:/usr/bin"),
-            format!("{home}/a:{home}/b:/usr/bin")
+            format!(
+                "{}:{}:/usr/bin",
+                under_home(&home, "a"),
+                under_home(&home, "b")
+            )
         );
         // No tilde anywhere → byte-identical.
         assert_eq!(
@@ -2630,7 +2641,7 @@ mod tests {
         // Single path without ':' behaves as before.
         assert_eq!(
             expand_tilde_segments("~/bin/tools"),
-            format!("{home}/bin/tools")
+            under_home(&home, "bin/tools")
         );
         // URLs and times contain ':' but no tilde segments → byte-identical.
         assert_eq!(
@@ -2663,7 +2674,9 @@ mod tests {
             .to_string_lossy()
             .to_string();
         assert!(xml.contains(&format!(
-            "<string>{home}/.local/bin:{home}/.local/share/fnm/aliases/default/bin:/opt/homebrew/bin</string>"
+            "<string>{}:{}:/opt/homebrew/bin</string>",
+            under_home(&home, ".local/bin"),
+            under_home(&home, ".local/share/fnm/aliases/default/bin")
         )));
         assert!(!xml.contains("~/"), "no literal ~ in env values: {xml}");
     }
@@ -3661,6 +3674,7 @@ esac
         assert!(!work.path().join("marker").exists());
     }
     #[test]
+    #[cfg(unix)] // Exercises the launchctl shell emulator, like the other launchd fixtures.
     fn legacy_repeat_run_now_cannot_leave_a_nonce_for_later_replay() {
         let home = Home::new();
         let work = home.root.path().join("legacy-repeat");

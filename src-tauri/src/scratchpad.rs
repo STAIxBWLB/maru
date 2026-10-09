@@ -276,7 +276,9 @@ pub(crate) fn resolve_scratchpad_root(work_path: &Path) -> Result<PathBuf, Strin
         None => work.join("scratchpad"),
     };
     let resolved_for_containment = normalize_absolute_with_existing_ancestor(&root)?;
-    if !resolved_for_containment.starts_with(&work) {
+    // A missing workPath stays lexical; resolve it the same way as the root so
+    // both sides share one form (Windows canonicalizes to `\\?\` paths).
+    if !resolved_for_containment.starts_with(normalize_absolute_with_existing_ancestor(&work)?) {
         return Err("paths.scratchpad must stay inside workPath".to_string());
     }
     if fs::symlink_metadata(&root)

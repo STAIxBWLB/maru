@@ -846,6 +846,10 @@ fn kill_pid(pid: u32, force: bool) -> Result<(), String> {
             .map_err(|err| format!("mission_stop_failed: {err}"))?;
         if status.success() {
             Ok(())
+        } else if !force {
+            // Graceful taskkill posts WM_CLOSE, which a windowless console
+            // CLI never receives; escalate as Unix does after SIGTERM.
+            kill_pid(pid, true)
         } else {
             Err(format!("mission_stop_failed: pid {pid}"))
         }

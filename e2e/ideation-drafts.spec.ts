@@ -1,3 +1,4 @@
+import { rightWorkbenchLabel } from "./helpers/platform";
 import { expect, test } from "@playwright/test";
 
 // Ideation -> implementation-draft e2e. Seeds the backend through the browser
@@ -320,7 +321,7 @@ test("opens Scratchpad from the activity rail as a main-only workbench", async (
   const activityButton = page.getByRole("button", { name: "스크래치패드", exact: true });
   await expect(activityButton).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "스크래치패드 오른쪽에 열기 (Option-click)" }),
+    page.getByRole("button", { name: await rightWorkbenchLabel(page, "스크래치패드") }),
   ).toHaveCount(0);
 
   await activityButton.click();

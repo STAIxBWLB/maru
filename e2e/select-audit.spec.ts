@@ -25,30 +25,42 @@ async function auditSelects(page: Page): Promise<SelectAudit[]> {
   );
 }
 
-test("every select shares the base chrome", async ({ page }) => {
-  const rows: SelectAudit[] = [];
-  await page.goto("/");
-  await page.waitForTimeout(2500);
-  rows.push(...(await auditSelects(page)));
+// Audit every rail entry across independent pages: lazy-loading all modes in
+// one test couples the style guard to the total cold-start time of the app.
+for (let batch = 0; batch < 4; batch += 1) {
+  test(`every select shares the base chrome (batch ${batch + 1})`, async ({ page }) => {
+    const rows: SelectAudit[] = [];
+    await page.goto("/");
+    await expect(page.locator(".activity-rail")).toBeVisible();
+    await expect(page.locator(".mode-loading")).toHaveCount(0);
+    rows.push(...(await auditSelects(page)));
 
-  const buttons = await page
-    .locator(".activity-bar .activity-button, .activity-rail .activity-button")
-    .all();
-  for (let i = 0; i < buttons.length; i += 1) {
-    try {
-      await buttons[i].click({ timeout: 2000 });
-      await page.waitForTimeout(800);
-      rows.push(...(await auditSelects(page)));
-    } catch {
-      /* mode unavailable in browser mode */
+    const rail = page.locator(".activity-bar, .activity-rail");
+    // Contextual rail buttons change position across modes. Preserve identity
+    // rather than reusing nth locators against a changing button collection.
+    const labels = await rail.locator(".activity-button").evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute("aria-label")).filter(Boolean),
+    );
+    for (const label of labels.filter((_, index) => index % 4 === batch)) {
+      if (!label) continue;
+      try {
+        await rail.getByRole("button", { name: label, exact: true }).click({ timeout: 2000 });
+        await expect(page.locator(".mode-loading")).toHaveCount(0);
+        rows.push(...(await auditSelects(page)));
+      } catch {
+        /* mode unavailable in browser mode */
+      } finally {
+        // A command palette must not block the remaining style samples.
+        await page.keyboard.press("Escape");
+      }
     }
-  }
 
-  expect(rows.length).toBeGreaterThan(0);
-  for (const row of rows) {
-    expect(row.appearance, `${row.cls} must drop the native popup chrome`).toBe("none");
-    expect(row.hasImage, `${row.cls} lost its chevron to a background shorthand`).toBe(true);
-    // 12px glyph inset 9px from the right edge.
-    expect(row.paddingRight, `${row.cls} has no room for the chevron`).toBeGreaterThanOrEqual(21);
-  }
-});
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.appearance, `${row.cls} must drop the native popup chrome`).toBe("none");
+      expect(row.hasImage, `${row.cls} lost its chevron to a background shorthand`).toBe(true);
+      // 12px glyph inset 9px from the right edge.
+      expect(row.paddingRight, `${row.cls} has no room for the chevron`).toBeGreaterThanOrEqual(21);
+    }
+  });
+}

@@ -230,7 +230,7 @@ export const en: Record<string, string> = {
   "mode.architecture": "Architecture",
   "mode.sites": "Sites",
   "mode.graph": "Graph",
-  "workbench.openRight": "Open {name} on the right (Option-click)",
+  "workbench.openRight": "Open {name} on the right ({modifier}-click)",
   "workbench.moveToMain": "Move to main view",
   "workbench.closeRight": "Close right view",
   "mode.drafts": "Ideation",
@@ -2273,7 +2273,7 @@ export const en: Record<string, string> = {
 
   "cmdk.placeholder": "Search documents or commands…",
   "cmdk.empty": "No results.",
-  "cmdk.openHint": "⌘K opens the command palette",
+  "cmdk.openHint": "{shortcut} opens the command palette",
   "cmdk.section.documents": "Documents",
   "cmdk.group.navigate": "Navigate",
   "cmdk.group.create": "Create",

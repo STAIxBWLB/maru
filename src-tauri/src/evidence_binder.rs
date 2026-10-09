@@ -868,7 +868,7 @@ fn rekeyed_document_path(
     }
     if let Some(suffix) = path_suffix(&document, &old_absolute) {
         return Some((
-            format!("{new_absolute}{suffix}"),
+            native_separators(format!("{new_absolute}{suffix}")),
             format!("{old_rel}{suffix}"),
             format!("{new_rel}{suffix}"),
         ));
@@ -890,10 +890,20 @@ fn rekeyed_document_path(
     let root_prefix = &document[..marker_index];
     let suffix = &document[marker_end..];
     Some((
-        format!("{root_prefix}/{new_rel}{suffix}"),
+        native_separators(format!("{root_prefix}/{new_rel}{suffix}")),
         format!("{old_rel}{suffix}"),
         format!("{new_rel}{suffix}"),
     ))
+}
+
+/// Absolute paths are matched with `/`; a stored absolute path stays native,
+/// since a Windows verbatim `\\?\` path only accepts `\`.
+fn native_separators(path: String) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path
+    }
 }
 
 fn path_suffix<'a>(candidate: &'a str, prefix: &str) -> Option<&'a str> {

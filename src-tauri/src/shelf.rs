@@ -665,7 +665,11 @@ mod tests {
             "# Daily".to_string(),
         )
         .unwrap();
-        assert!(doc.entry.path.contains("scratchpad/memos/daily.md"));
+        assert!(doc
+            .entry
+            .path
+            .replace('\\', "/")
+            .contains("scratchpad/memos/daily.md"));
         let list = list_memos(tmp.path().to_string_lossy().to_string()).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "daily.md");
@@ -781,7 +785,11 @@ mod tests {
         )
         .unwrap();
         let memo_path = PathBuf::from(&doc.entry.path);
-        assert!(doc.entry.path.contains("scratchpad/memos/scratch.txt"));
+        assert!(doc
+            .entry
+            .path
+            .replace('\\', "/")
+            .contains("scratchpad/memos/scratch.txt"));
         assert!(memo_path.exists());
 
         let work = tmp.path().to_string_lossy().to_string();

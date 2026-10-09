@@ -27,6 +27,10 @@ fn migrate_dot_dir(base: &Path) -> Result<bool, String> {
     {
         let _ = std::os::unix::fs::symlink(".maru", &legacy);
     }
+    #[cfg(windows)]
+    {
+        let _ = std::os::windows::fs::symlink_dir(".maru", &legacy);
+    }
     Ok(true)
 }
 
@@ -101,7 +105,7 @@ mod tests {
     fn noop_when_legacy_is_already_a_symlink() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir(tmp.path().join(".maru")).unwrap();
-        std::os::unix::fs::symlink(".maru", tmp.path().join(".anchor")).unwrap();
+        crate::test_support::symlink_dir(".maru", tmp.path().join(".anchor")).unwrap();
         // Second run after a migration — must not rename the symlink itself.
         fs::remove_dir(tmp.path().join(".maru")).unwrap();
         assert!(!migrate_dot_dir(tmp.path()).unwrap());

@@ -758,9 +758,16 @@ mod quit_acl_tests {
             cmd: cmd.into(),
             callback: CallbackFn(0),
             error: CallbackFn(1),
-            // macOS/Linux desktop's local-origin scheme (manager::tauri_protocol_url):
-            // "http://tauri.localhost" is only correct on Windows/Android.
-            url: "tauri://localhost".parse().unwrap(),
+            // The desktop local-origin scheme (manager::tauri_protocol_url):
+            // "http://tauri.localhost" on Windows/Android, "tauri://localhost"
+            // on macOS/Linux.
+            url: if cfg!(windows) {
+                "http://tauri.localhost"
+            } else {
+                "tauri://localhost"
+            }
+            .parse()
+            .unwrap(),
             body: InvokeBody::default(),
             headers: Default::default(),
             invoke_key: INVOKE_KEY.to_string(),

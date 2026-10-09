@@ -1538,8 +1538,7 @@ mod phase08_12 {
         let (tmp, s) = fixture(&home);
         let (bin, log, release) = fake(&home, true);
         let alias = home.root.path().join("calendar-alias");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(tmp.path(), &alias).unwrap();
+        crate::test_support::symlink_dir(tmp.path(), &alias).unwrap();
         let first = start(publish(text(tmp.path()), s.clone(), text(&bin)));
         wait_file(&log);
         let second = start(publish(text(&alias), s, text(&bin)));
@@ -1669,9 +1668,8 @@ mod phase08_12 {
                             "alias-{}",
                             root.file_name().unwrap().to_string_lossy()
                         ));
-                        #[cfg(unix)]
                         if alias_op {
-                            std::os::unix::fs::symlink(&root, &alias).unwrap();
+                            crate::test_support::symlink_dir(&root, &alias).unwrap();
                         }
                         let w = text(if alias_op { &alias } else { &root });
                         let moved = owner.join(format!(
@@ -1769,8 +1767,7 @@ mod phase08_12 {
         }
         let (tmp, s) = fixture(&home);
         let alias = home.root.path().join("calendar-denied-alias");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(tmp.path(), &alias).unwrap();
+        crate::test_support::symlink_dir(tmp.path(), &alias).unwrap();
         let (bin, log, _) = fake(&home, false);
         for reverse in [false, true] {
             let registered = if reverse { &alias } else { tmp.path() };

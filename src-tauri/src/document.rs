@@ -94,11 +94,7 @@ pub fn read_document(vault_path: String, document_path: String) -> Result<Docume
         .and_then(|s| s.to_str())
         .unwrap_or("Untitled");
     let title = semantic_title_from_parts(&parts, fallback);
-    let rel_path = path
-        .strip_prefix(vault)
-        .unwrap_or(&path)
-        .to_string_lossy()
-        .to_string();
+    let rel_path = crate::vault::relative_slash_path(&path, &vault);
     let file_kind = path
         .extension()
         .and_then(|e| e.to_str())
@@ -904,10 +900,7 @@ pub(crate) fn write_version_snapshot_in_transaction(
 }
 
 fn relative(path: &Path, vault: &Path) -> String {
-    path.strip_prefix(vault)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string()
+    crate::vault::relative_slash_path(path, vault)
 }
 
 /// IPC scheduling boundary; synchronous domain/CLI APIs remain available.
@@ -1451,7 +1444,8 @@ mod tests {
         assert_eq!(
             binder["documentPath"],
             tmp.path()
-                .join("archive/weekly-renamed.md")
+                .join("archive")
+                .join("weekly-renamed.md")
                 .to_string_lossy()
                 .as_ref()
         );
@@ -2288,9 +2282,20 @@ mod phase08_07_earlier_writer_document_races {
             git(&checkout, &["config", "maintenance.auto", "false"]);
             git(&checkout, &["add", "."]);
             git(&checkout, &["commit", "-m", "initial fixture"]);
-            git(&checkout, &["remote", "add", "origin", &text(&remote)]);
+            git(
+                &checkout,
+                &[
+                    "remote",
+                    "add",
+                    "origin",
+                    &crate::test_support::git_local_path(&remote),
+                ],
+            );
             git(&checkout, &["push", "-u", "origin", "main"]);
-            git(&peer, &["clone", &text(&remote), "."]);
+            git(
+                &peer,
+                &["clone", &crate::test_support::git_local_path(&remote), "."],
+            );
             git(&peer, &["config", "gc.auto", "0"]);
             git(&peer, &["config", "maintenance.auto", "false"]);
             fs::write(peer.join("remote.md"), "complete remote content\n").unwrap();

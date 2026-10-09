@@ -173,7 +173,8 @@ mod tests {
 
     #[test]
     fn require_absolute_accepts_absolute_path() {
-        assert!(require_absolute(PathBuf::from("/work")).is_ok());
+        let absolute = crate::test_support::absolute_hook_path(Path::new("/work"));
+        assert!(require_absolute(absolute).is_ok());
     }
 
     #[test]
@@ -211,10 +212,10 @@ mod tests {
 
     #[test]
     fn resolve_native_e2e_dir_accepts_absolute_value() {
-        let value = OsStr::new("/tmp/native-e2e-home");
+        let absolute = crate::test_support::absolute_hook_path(Path::new("/tmp/native-e2e-home"));
         assert_eq!(
-            resolve_native_e2e_dir("MARU_NATIVE_E2E_HOME", Some(value)).unwrap(),
-            PathBuf::from("/tmp/native-e2e-home")
+            resolve_native_e2e_dir("MARU_NATIVE_E2E_HOME", Some(absolute.as_os_str())).unwrap(),
+            absolute
         );
     }
 

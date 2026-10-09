@@ -143,7 +143,7 @@ pub fn plan_bundle(
             path: bundle_rel
                 .join(format!("{stem}.{}", fmt.extension()))
                 .to_string_lossy()
-                .to_string(),
+                .replace('\\', "/"),
             status: ExportOutputStatus::Planned,
             sha256: None,
             byte_size: None,
@@ -153,7 +153,7 @@ pub fn plan_bundle(
 
     let manifest = ExportManifest {
         schema_version: SCHEMA_VERSION,
-        source: source_rel.to_string_lossy().to_string(),
+        source: source_rel.to_string_lossy().replace('\\', "/"),
         source_sha256,
         source_byte_size,
         generated_at: Utc::now().to_rfc3339(),

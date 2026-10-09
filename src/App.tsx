@@ -297,7 +297,7 @@ import {
   registerMenuCommandDispatcher,
   registerNativeAppStateReader,
 } from "./lib/nativeE2eBridge";
-import { currentPlatform, isMacPlatform } from "./lib/platform";
+import { alternateClickModifier, currentPlatform, formatShortcut, isMacPlatform } from "./lib/platform";
 import {
   buildInboxProcessPrompt,
   buildInboxItemStates,
@@ -771,7 +771,7 @@ const ActivityRail = memo(function ActivityRail({
         icon={<LayoutDashboard size={20} strokeWidth={1.9} />}
         onOpenPrimary={() => onOpenPrimary("dashboard")}
         onOpenRight={() => onOpenRight("dashboard")}
-        openRightLabel={t("workbench.openRight", { name: t("mode.dashboard") })}
+        openRightLabel={t("workbench.openRight", { name: t("mode.dashboard"), modifier: alternateClickModifier() })}
       />
       <ActivityModeButton
         label={t("mode.pkm")}
@@ -808,7 +808,7 @@ const ActivityRail = memo(function ActivityRail({
           icon={<Icon size={20} strokeWidth={1.9} />}
           onOpenPrimary={() => onOpenPrimary(mode)}
           onOpenRight={() => onOpenRight(mode)}
-          openRightLabel={t("workbench.openRight", { name: t(`mode.${mode}`) })}
+          openRightLabel={t("workbench.openRight", { name: t(`mode.${mode}`), modifier: alternateClickModifier() })}
         />
       ))}
       {e2eFlowEnabled ? (
@@ -819,7 +819,7 @@ const ActivityRail = memo(function ActivityRail({
           icon={<Route size={20} strokeWidth={1.9} />}
           onOpenPrimary={() => onOpenPrimary("e2e")}
           onOpenRight={() => onOpenRight("e2e")}
-          openRightLabel={t("workbench.openRight", { name: t("mode.e2e") })}
+          openRightLabel={t("workbench.openRight", { name: t("mode.e2e"), modifier: alternateClickModifier() })}
         />
       ) : null}
       {diagramEnabled ? (
@@ -830,7 +830,7 @@ const ActivityRail = memo(function ActivityRail({
           icon={<Network size={20} strokeWidth={1.9} />}
           onOpenPrimary={() => onOpenPrimary("diagram")}
           onOpenRight={() => onOpenRight("diagram")}
-          openRightLabel={t("workbench.openRight", { name: t("mode.diagram") })}
+          openRightLabel={t("workbench.openRight", { name: t("mode.diagram"), modifier: alternateClickModifier() })}
         />
       ) : null}
       <ActivityModeButton
@@ -840,7 +840,7 @@ const ActivityRail = memo(function ActivityRail({
         icon={<Waypoints size={20} strokeWidth={1.9} />}
         onOpenPrimary={() => onOpenPrimary("graph")}
         onOpenRight={() => onOpenRight("graph")}
-        openRightLabel={t("workbench.openRight", { name: t("mode.graph") })}
+        openRightLabel={t("workbench.openRight", { name: t("mode.graph"), modifier: alternateClickModifier() })}
       />
       <button type="button" className="activity-button" onClick={onOpenCommandPalette} title={t("sidebar.commandPalette")} aria-label={t("sidebar.commandPalette")}>
         <Command size={19} />
@@ -8413,18 +8413,17 @@ export function MainApp() {
           >
             <WandSparkles size={14} />
             <span>{t("topbar.skill")}</span>
-            <span className="kbd">⌘⇧K</span>
+            <span className="kbd">{formatShortcut("⌘⇧K")}</span>
           </button>
           <button
             type="button"
             className="topbar-pill topbar-command-action"
             onClick={openCommandPalette}
-            title={t("cmdk.openHint")}
+            title={t("cmdk.openHint", { shortcut: formatShortcut("⌘K") })}
           >
             <Command size={14} className="topbar-command-icon" />
             <span className="topbar-muted-label">{t("sidebar.commandPalette")}</span>
-            <span className="kbd">⌘</span>
-            <span className="kbd">K</span>
+            <span className="kbd">{formatShortcut("⌘K")}</span>
           </button>
           <button
             type="button"
