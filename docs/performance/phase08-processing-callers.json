@@ -3228,7 +3228,7 @@
    "inventoryForm": "sync",
    "inventoryDisposition": "CONVERT",
    "disposition": "component-owned-sync-write",
-   "frontendCaller": "wrapper src/lib/api.ts::trashDocument; used by src/App.tsx",
+   "frontendCaller": "wrapper src/lib/api.ts::trashDocument; used by src/components/DocumentDeleteDialog.tsx (#441 reviewed apply)",
    "owningWrapper": "call-site component owning the synchronous bounded write; error and success state render inline",
    "terminalNoticeDedupeKey": "component state key for the edited record",
    "fulfilledClassifier": "n/a: bounded synchronous write, not a file-processing batch",

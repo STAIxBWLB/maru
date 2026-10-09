@@ -42,11 +42,46 @@ export interface CreatedDocument {
   title: string;
 }
 
-export interface DeletedDocument {
-  originalPath: string;
-  originalRelPath: string;
-  trashPath: string;
-  trashRelPath: string;
+/** What qualified a file for a document delete plan (#441). */
+export type DocumentDeleteKind =
+  | "source"
+  | "exportManifest"
+  | "exportOutput"
+  | "version"
+  | "studioOutput"
+  | "binderState"
+  | "studioState"
+  | "kgCache"
+  | "exportUnlisted";
+
+export interface DocumentDeleteItem {
+  relPath: string;
+  kind: DocumentDeleteKind;
+  sizeBytes: number;
+  isDir: boolean;
+  /** The recorded link to the source that qualified this item. */
+  evidence: string;
+}
+
+export interface DocumentDeletePlan {
+  source: DocumentDeleteItem;
+  derived: DocumentDeleteItem[];
+  metadata: DocumentDeleteItem[];
+  /** Found next to listed items but not linked to the source; never deleted. */
+  kept: DocumentDeleteItem[];
+  fingerprint: string;
+}
+
+export interface DocumentDeleteItemOutcome {
+  relPath: string;
+  kind: DocumentDeleteKind;
+  status: "trashed" | "missing" | "failed";
+  error: string | null;
+}
+
+export interface DocumentDeleteOutcome {
+  sourceRelPath: string;
+  items: DocumentDeleteItemOutcome[];
 }
 
 export type WorkspaceVisibility = "private" | "public";
@@ -75,6 +110,8 @@ export const IPC_ERROR_CODES = [
   "evidence_binder_revision_conflict",
   "web_action_repair_conflict",
   "meeting_source_revision_conflict",
+  "document_delete_stale",
+  "document_delete_refused",
 ] as const;
 export type IpcErrorCode = (typeof IPC_ERROR_CODES)[number];
 

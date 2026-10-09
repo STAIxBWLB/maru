@@ -845,6 +845,46 @@ pub(crate) fn rekey_document_states(
     Ok(())
 }
 
+/// Every Binder state file with its recorded `documentPath`, for the #441
+/// delete plan. Same scan rules as `rekey_document_states`: regular `.json`
+/// files only, unreadable or unparsable states skipped.
+pub(crate) fn binder_state_document_paths(work: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+    let binder_dir = work.join(".maru").join("binder");
+    if !binder_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut states = Vec::new();
+    for entry in fs::read_dir(&binder_dir)
+        .map_err(|err| format!("Cannot scan evidence binder states: {err}"))?
+    {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+            || fs::symlink_metadata(&path)
+                .map(|metadata| !metadata.file_type().is_file())
+                .unwrap_or(true)
+        {
+            continue;
+        }
+        let Ok(raw) = fs::read(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if let Some(document_path) = value
+            .get("documentPath")
+            .and_then(serde_json::Value::as_str)
+        {
+            states.push((path, document_path.to_string()));
+        }
+    }
+    states.sort();
+    Ok(states)
+}
+
 fn rekeyed_document_path(
     document_path: &str,
     old_path: &Path,

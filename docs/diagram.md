@@ -46,8 +46,8 @@ svg/png/json, traversal-safe, atomic, write-guard checked). Generation adds
 `archify_validate_candidate` (`src-tauri/src/archify.rs`, pinned-engine
 validation) and the architecture gallery adds
 `architecture_read_sibling_spec` (`src-tauri/src/architecture.rs`, guarded
-sibling read). The command-isolation gate now expects **387** registered
-commands with recorded evidence (`Makefile` `--expected-count 387`).
+sibling read). The command-isolation gate expects the registered command
+count set in `Makefile` (`--expected-count`) with recorded evidence.
 
 ## Canvas & nodes
 

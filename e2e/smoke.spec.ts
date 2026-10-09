@@ -1088,17 +1088,18 @@ test("shows supported document tab menu items and performs file operations", asy
   await expect(movedTab).toBeVisible();
   await expect(page.locator("textarea.source-editor")).toHaveValue(/# Maru 용어집/);
 
-  page.once("dialog", async (dialog) => {
-    expect(dialog.type()).toBe("confirm");
-    await dialog.accept();
-  });
   await movedTab.click({ button: "right" });
   await page
     .locator(".document-tab-context-menu")
     .getByRole("menuitem", { name: "삭제" })
     .click();
+  // #441: the delete is reviewed in the app dialog, then goes to the system Trash.
+  const deleteDialog = page.getByRole("dialog", { name: "문서 삭제" });
+  await deleteDialog.getByRole("button", { name: "파일 1개 삭제" }).click();
   await expect(movedTab).toHaveCount(0);
-  await expect(page.locator(".toast", { hasText: ".maru/trash/documents/moved/" })).toBeVisible();
+  await expect(
+    page.locator(".toast", { hasText: "휴지통으로 옮겼습니다: moved/maru-glossary-renamed.md" }),
+  ).toBeVisible();
 });
 
 test("suppresses native context menus outside document surfaces", async ({ page }) => {

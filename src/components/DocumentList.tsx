@@ -839,7 +839,7 @@ export const DocumentList = memo(function DocumentList({
                     onClick={() => {
                       const entry = contextMenu.entry;
                       setContextMenu(null);
-                      if (entry) void onTrashEntry(entry);
+                      if (entry) onTrashEntry(entry);
                     }}
                   >
                     {t("context.moveToTrash")}

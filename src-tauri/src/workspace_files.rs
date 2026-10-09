@@ -1371,7 +1371,7 @@ fn cleanup_transaction_dir(dir: &Path) {
     }
 }
 
-fn move_path_to_system_trash(path: &Path) -> Result<(), String> {
+pub(crate) fn move_path_to_system_trash(path: &Path) -> Result<(), String> {
     #[cfg(test)]
     if let Some(result) = phase08_06::trash_fixture(path) {
         return result;

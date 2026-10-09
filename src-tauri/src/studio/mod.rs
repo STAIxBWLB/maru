@@ -377,6 +377,39 @@ pub mod ipc {
     }
 }
 
+/// Studio states for the #441 delete plan: every readable state with its
+/// folder, plus the raw text of states that do not parse (another schema or a
+/// hand edit), so the plan can treat their links conservatively.
+pub(crate) type StudioStateScan = (Vec<(PathBuf, StudioState)>, Vec<String>);
+
+pub(crate) fn studio_state_dirs(work_path: &str) -> Result<StudioStateScan, String> {
+    let root = studio_root(work_path)?;
+    if !root.is_dir() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let mut states = Vec::new();
+    let mut unreadable = Vec::new();
+    for entry in fs::read_dir(&root).map_err(|err| format!("Cannot read Studio state: {err}"))? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let dir = entry.path();
+        let is_dir = fs::symlink_metadata(&dir)
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false);
+        if !is_dir {
+            continue;
+        }
+        let path = dir.join("state.json");
+        match read_state_file(&path) {
+            Ok(state) => states.push((dir, state)),
+            Err(_) => unreadable.extend(fs::read_to_string(&path).ok()),
+        }
+    }
+    states.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok((states, unreadable))
+}
+
 fn studio_root(work_path: &str) -> Result<PathBuf, String> {
     resolve_inside_vault(work_path, ".maru/studio")
 }

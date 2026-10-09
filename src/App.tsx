@@ -121,6 +121,7 @@ import { WorkspaceSwitcher } from "./components/WorkspaceSwitcher";
 import type { FavoriteTarget } from "./components/FavoritesSection";
 import { useApprovalGate } from "./approval/ApprovalDialog";
 import { useTextPrompt } from "./components/ui/TextPromptDialog";
+import { useDocumentDelete, type DocumentDeleteRequest } from "./components/DocumentDeleteDialog";
 import { confirmDialog } from "./lib/confirmDialog";
 import { markStartup, measureStartup } from "./lib/startupProfile";
 import {
@@ -188,7 +189,6 @@ import {
   terminalHooksStatus,
   terminalHooksUninstall,
   writeAgentContextHint,
-  trashDocument,
   trashInboxItems,
   updateFrontmatterField,
   type LegacyLaunchdService,
@@ -364,6 +364,7 @@ import type {
   WorkspaceRootEntry,
   WorkspaceVisibility,
   WorkspaceWritePolicy,
+  DocumentDeleteOutcome,
 } from "./lib/types";
 import {
   agentRuntimeController,
@@ -5740,29 +5741,66 @@ export function MainApp() {
     ],
   );
 
+  // #441: a delete removes the trashed documents' tabs and the source's
+  // favorite, then rescans; the dialog itself lists per-item failures.
+  const handleDocumentDeleted = useCallback(
+    (request: DocumentDeleteRequest, outcome: DocumentDeleteOutcome) => {
+      const trashed = new Set(
+        outcome.items.filter((item) => item.status === "trashed").map((item) => item.relPath),
+      );
+      const { tabs: docTabs, binaryTabs: binTabs } = getEditorTabsState();
+      for (const tab of docTabs) {
+        if (tab.workspacePath === request.workspacePath && trashed.has(tab.document.relPath)) {
+          closeTab(tab.id);
+        }
+      }
+      for (const tab of binTabs) {
+        if (tab.workspacePath === request.workspacePath && trashed.has(tab.fileEntry.relPath)) {
+          closeTab(tab.id);
+        }
+      }
+      if ((settingsWorkPath ?? explorerWorkspacePath) === request.workspacePath) {
+        const favorite = maruSettings.ui.favorites.find(
+          (item) =>
+            item.kind === "file" &&
+            normalizeFavoriteTargetRelPath(item.relPath) === outcome.sourceRelPath,
+        );
+        if (favorite && trashed.has(outcome.sourceRelPath)) removeFavorite(favorite);
+      }
+      refreshAfterDocumentMutation(request.workspacePath).catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+      });
+      setError(
+        t(
+          trashed.size === outcome.items.length ? "documentDelete.success" : "documentDelete.partial",
+          { count: outcome.items.length, trashed: trashed.size, path: outcome.sourceRelPath },
+        ),
+      );
+    },
+    [
+      closeTab,
+      explorerWorkspacePath,
+      maruSettings.ui.favorites,
+      refreshAfterDocumentMutation,
+      removeFavorite,
+      settingsWorkPath,
+      t,
+    ],
+  );
+  const { requestDelete: requestDocumentDelete, dialog: documentDeleteDialog } =
+    useDocumentDelete(handleDocumentDeleted);
+
   const trashTabDocument = useCallback(
-    async (tabId: string) => {
+    (tabId: string) => {
       const tab = getEditorTabsState().tabs.find((item) => item.id === tabId);
       if (!tab || blockTabWrite(tab, "delete")) return;
-      if (
-        !(await confirmDialog(
-          t("editor.tabs.delete.confirm", {
-            path: tab.document.relPath,
-          }),
-        ))
-      ) {
+      if (tab.draftContent !== tab.document.content) {
+        setError(t("files.operations.dirtyBlocked", { count: 1 }));
         return;
       }
-      try {
-        const deleted = await trashDocument(tab.workspacePath, tab.document.path);
-        await refreshAfterDocumentMutation(tab.workspacePath);
-        closeTab(tab.id);
-        setError(t("editor.tabs.delete.success", { path: deleted.trashRelPath }));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      requestDocumentDelete({ workspacePath: tab.workspacePath, documentPath: tab.document.path });
     },
-    [blockTabWrite, closeTab, refreshAfterDocumentMutation, t],
+    [blockTabWrite, requestDocumentDelete, t],
   );
 
   const revealTabInFinder = useCallback(
@@ -7821,7 +7859,7 @@ export function MainApp() {
     [duplicateTabDocument],
   );
   const handleDeleteTab = useCallback(
-    (nextTabId: string) => void trashTabDocument(nextTabId),
+    (nextTabId: string) => trashTabDocument(nextTabId),
     [trashTabDocument],
   );
   const handleKgRefNodeClick = useCallback(
@@ -8052,7 +8090,7 @@ export function MainApp() {
   );
 
   const handleTrashExplorerEntry = useCallback(
-    async (entry: VaultEntry) => {
+    (entry: VaultEntry) => {
       if (!explorerWorkspacePath) return;
       if (!workspaceCan(explorerWorkspace ?? null, "delete")) {
         setError(
@@ -8064,30 +8102,19 @@ export function MainApp() {
         );
         return;
       }
-      if (!(await confirmDialog(t("context.moveToTrash.confirm", { path: entry.relPath })))) {
+      const dirty = getEditorTabsState().tabs.some(
+        (tab) =>
+          tab.workspacePath === explorerWorkspacePath &&
+          tab.document.path === entry.path &&
+          tab.draftContent !== tab.document.content,
+      );
+      if (dirty) {
+        setError(t("files.operations.dirtyBlocked", { count: 1 }));
         return;
       }
-      try {
-        const deleted = await trashDocument(explorerWorkspacePath, entry.path);
-        await refreshAfterDocumentMutation(explorerWorkspacePath);
-        const openTab = getEditorTabsState().tabs.find(
-          (tab) =>
-            tab.workspacePath === explorerWorkspacePath &&
-            tab.document.path === entry.path,
-        );
-        if (openTab) closeTab(openTab.id);
-        setError(t("editor.tabs.delete.success", { path: deleted.trashRelPath }));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      requestDocumentDelete({ workspacePath: explorerWorkspacePath, documentPath: entry.path });
     },
-    [
-      closeTab,
-      explorerWorkspace,
-      explorerWorkspacePath,
-      refreshAfterDocumentMutation,
-      t,
-    ],
+    [explorerWorkspace, explorerWorkspacePath, requestDocumentDelete, t],
   );
 
   const documentBrowserCommands = useMemo<DocumentListCommands>(
@@ -9002,6 +9029,7 @@ export function MainApp() {
         />
         {approvalGate.dialog}
         {textPromptDialog}
+        {documentDeleteDialog}
         <ComposeDialog
           open={composeSeed !== null}
           skills={skills}

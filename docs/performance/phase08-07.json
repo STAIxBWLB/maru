@@ -410,16 +410,102 @@
       "originalDisposition": "CONVERT",
       "disposition": "ISOLATED",
       "helperChain": [
-        "src-tauri/src/document.rs::ipc::trash_document awaits spawn_blocking before file reads, parsing, process creation or admission waits",
-        "src-tauri/src/document.rs::trash_document retains the public synchronous API",
-        "src-tauri/src/document.rs::trash_document_in_transaction owns the decisive finite filesystem, validation or platform-process work"
+        "src-tauri/src/document.rs::ipc::trash_document awaits spawn_blocking before file reads, plan recomputation, admission waits or Trash moves",
+        "src-tauri/src/document.rs::trash_document resolves the source and every reviewed path inside the workspace, adds .exports folders through export_bundle_dirs, and admits the full set through with_path_transactions",
+        "src-tauri/src/document.rs::trash_document_in_transaction re-checks coverage, ownership and assert_document_delete_allowed, recomputes compute_delete_plan, rejects a changed fingerprint or an unlisted path, then moves the source and the checked items with src-tauri/src/workspace_files.rs::move_path_to_system_trash",
+        "src-tauri/src/document.rs::compute_delete_plan reads the export manifest, .maru/versions frontmatter, src-tauri/src/studio/mod.rs::studio_state_dirs, src-tauri/src/evidence_binder.rs::binder_state_document_paths and src-tauri/src/kg_refs.rs::cache_file_for_document"
       ],
-      "workerBoundary": "src-tauri/src/document.rs::ipc::trash_document awaits tauri::async_runtime::spawn_blocking with owned String inputs and existing Option<FieldInput>/Option<CreateDocumentExtras>/Option<String> where applicable; no State or guard crosses await. Contextual JoinError preserves String versus IpcError outer type, inner domain errors pass through untouched.",
+      "workerBoundary": "src-tauri/src/document.rs::ipc::trash_document awaits tauri::async_runtime::spawn_blocking with owned String and Vec<String> inputs; no State or guard crosses await. A JoinError becomes a display-only IpcError with trash_document_task_failed context; inner document_delete_stale and document_delete_refused codes pass through untouched.",
       "syncCallers": [
-        "src-tauri/src/document.rs::trash_document remains available to synchronous Rust/CLI callers and original inline tests; cargo check -p maru-cli passes",
+        "src-tauri/src/document.rs::trash_document remains the synchronous domain API used by the wrapper and the document_delete_tests module",
         "src-tauri/src/graph_authoring.rs::snapshot_if_managed calls document::write_version_snapshot through its own short transaction; document managed saves instead pass the same lease to write_version_snapshot_in_transaction. Graph whole-proposal mutation integration belongs to its later owner; src-tauri/src/studio/mod.rs retains synchronous document reads."
       ],
       "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib document_delete",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/api.ts",
+          "src/components/DocumentDeleteDialog.tsx",
+          "src/App.tsx"
+        ],
+        "payload": "Issue #441: DocumentDeleteDialog sends the reviewed plan fingerprint and the checked derived/metadata relPaths; App.tsx handleDocumentDeleted closes trashed tabs, removes the source favorite, rescans the workspace and publishes documentDelete.success or documentDelete.partial.",
+        "terminalNoticeOwner": "DocumentDeleteDialog owns the stale re-plan notice, the inline error and the per-item failure list; App.tsx handleDocumentDeleted owns the single completion notice.",
+        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
+        "successRetention": "typed DocumentDeleteOutcome (sourceRelPath, per-item trashed/missing/failed) returned to the dialog and the App callback",
+        "failureReasons": "document_delete_stale re-plans in the dialog; document_delete_refused and display-only errors render inline; per-item Trash failures are listed without rollback",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=trash_document"
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "Exact source, every reviewed derived or metadata path (export manifest and outputs, version snapshots, Studio outputs, Binder state, Studio state folder, kg-cache file) and each containing .exports folder that may be removed once empty",
+          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
+        ],
+        "aliasPaths": [
+          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
+        ],
+        "postAdmissionPreconditions": [
+          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
+          "After admission: coverage of the full set, document ownership, the managed-root refusal, Delete capability and the promoted-draft guard, then the recomputed plan fingerprint and plan membership of every selected path, all before the first Trash move."
+        ],
+        "domainLockOrder": "Shared full-set admission before ownership, permission and plan recomputation; no domain lock is taken. Lease lasts through every Trash move and the empty-folder removal.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
+        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release; the trash kind recomputes the plan and fails stale after the first delete."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
+          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
+          "phase08_07_each_mutation_same_target_contention_and_error_release",
+          "both_toggles_off_trashes_only_the_source_and_keeps_state",
+          "derived_on_trashes_bundle_versions_and_outputs_then_the_empty_folder",
+          "changed_file_is_stale_and_nothing_is_deleted",
+          "paths_outside_the_plan_or_workspace_are_rejected_before_any_effect",
+          "managed_root_and_promoted_target_are_refused"
+        ],
+        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
+        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, live dot or package installer. System Trash moves are redirected through the workspace_files TrashFixture to a temp folder; the real macOS Trash put-back is a manual real-app check.",
+        "platformScope": "macOS execution only; Windows runtime and native saturation belong to later verification. Since #441 document deletion uses the system Trash through move_path_to_system_trash, matching the research inventory platform-trash disposition.",
+        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+      }
+    },
+    {
+      "name": "document_delete_plan",
+      "module": "src-tauri/src/document.rs",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::document_delete_plan",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/document.rs::ipc::document_delete_plan awaits spawn_blocking before any filesystem read.",
+        "src-tauri/src/document.rs::document_delete_plan resolves the source inside the workspace, checks ownership and assert_document_delete_allowed, then calls compute_delete_plan.",
+        "src-tauri/src/document.rs::compute_delete_plan lists only recorded links: the export manifest source, version_of frontmatter, src-tauri/src/studio/mod.rs::studio_state_dirs, src-tauri/src/evidence_binder.rs::binder_state_document_paths and src-tauri/src/kg_refs.rs::cache_file_for_document, and hashes them in delete_plan_fingerprint."
+      ],
+      "workerBoundary": "src-tauri/src/document.rs::ipc::document_delete_plan owns its wire Strings, awaits tauri::async_runtime::spawn_blocking around the whole body, and turns a JoinError into a display-only IpcError with document_delete_plan_task_failed context. Manifest, version, Studio and Binder reads and the size walk never run on the caller thread.",
+      "syncCallers": [
+        "src-tauri/src/document.rs::document_delete_plan remains the synchronous domain API used by the wrapper, the trash_document contention test and the document_delete_tests module."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib document_delete",
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_07",
           "passed": 23,
@@ -431,45 +517,31 @@
       "processingCaller": {
         "path": [
           "src/lib/api.ts",
-          "src/App.tsx",
-          "src/lib/documentOpsModeLifecycle.ts"
+          "src/components/DocumentDeleteDialog.tsx",
+          "src/App.tsx"
         ],
-        "payload": "App.tsx trashTabDocument refreshes initiating workspace, closes original tab and publishes editor.tabs.delete.success; backend keeps workspace-local recoverable trash.",
-        "terminalNoticeOwner": "Existing initiating App/editor callback owns completion/errors; query/validation results remain view-scoped. Plans25/26 own final cross-navigation lifetime and single-notice closure; this shard does not claim that UI work is implemented."
-      ,
-        "classifier": "n/a: bounded synchronous write, not a file-processing batch",
-        "successRetention": "updated record retained in component state",
-        "failureReasons": "call-site catch error message (single publisher)",
-        "singleTerminalNoticeOwner": true,
-        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=trash_document"
+        "payload": "Issue #441: DocumentDeleteDialog requests the plan when the Explorer context menu or the editor tab asks to delete a clean document, and lists the source, derived, metadata and kept items for review.",
+        "terminalNoticeOwner": "DocumentDeleteDialog owns loading, the refused or failed plan message and the review list; it is the only caller.",
+        "classifier": "n/a: read-only single-document plan, not a file-processing batch",
+        "successRetention": "typed DocumentDeletePlan (source, derived, metadata, kept, fingerprint) held in dialog state until apply or cancel",
+        "failureReasons": "document_delete_refused (managed vault root, promoted draft target) or a display-only error rendered inline in the dialog",
+        "singleTerminalNoticeOwner": true
       },
       "mutationKey": {
-        "lexicalPaths": [
-          "Exact source and complete .maru/trash/documents destination subtree, including timestamp/collision allocation and copy/remove fallback",
-          "Conditional workspace registry and legacy migration files are included with_workspace_registry when loader can write; admission detects newly appearing migration condition."
-        ],
-        "aliasPaths": [
-          "src-tauri/src/atomic_file.rs::PathTransactionRequest captures lexical and physical existing-target/nearest-parent-plus-suffix keys; pinned handles reject replaced parents and revalidated aliases reject retargeting."
-        ],
-        "postAdmissionPreconditions": [
-          "Required existing workspace plus nearest existing selected parents pinned before admission; changed/disappeared original parent fails without recreating it.",
-          "Nested adapter checks complete coverage and conditional registry effects before ownership/permissions; revision/current destination/managed policy validation occurs after admission before effects."
-        ],
-        "domainLockOrder": "Shared full-set admission before any existing BINDER_WRITE_LOCK or permission/domain work; nested snapshots use borrowed lease, no re-acquisition or extension. Lease lasts through rename, binder rekey, rollback and errors.",
-        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions",
-        "crossDomainProof": "Actual workspace parent wrappers vs document save/create, same-revision frontmatter/save and actual Skills-save/Skills-sync/Git-pull document consumers verify complete serial results or existing conflicts. All seven mutation kinds have held same-target contention and denied/error release."
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "No filesystem mutation: read-only manifest, version frontmatter, Studio state, Binder state and metadata reads for the plan and its fingerprint."
       },
       "evidence": {
         "behaviorCases": [
-          "phase08_07_all_document_wrappers_yield_on_same_polling_task",
-          "phase08_07_actual_wrappers_preserve_nonempty_payloads_and_typed_conflicts",
-          "phase08_07_each_mutation_same_target_contention_and_error_release",
-          "phase08_07_parent_child_races_all_pairs_both_orders_and_aliases"
+          "plan_lists_recorded_links_only",
+          "foreign_bundle_is_not_listed_and_unlisted_files_keep_the_folder",
+          "managed_root_and_promoted_target_are_refused",
+          "phase08_07_all_document_wrappers_yield_on_same_polling_task"
         ],
-        "workerProof": "All eleven actual wrapper futures are first polled and then yield on the same async task while a separate blocking worker is held; contextual panic JoinError is asserted. No spare-worker-only timing claim.",
-        "scope": "Disposable temp roots and local bare Git only; no credentials, installed runtime, native app launch, system Trash, live dot or package installer. File-manager fixture selects current test executable, runs exact harmless child, asserts marker and captured production argv; spawn-failure fixture is existing executable with absent fixture interpreter.",
-        "platformScope": "macOS execution only; platform argv builders remain covered by their existing unit cases, Windows runtime and native saturation belong to later verification. Document trash remains workspace-local .maru/trash/documents, correcting the research inventory platform-trash shorthand.",
-        "managedSnapshotProof": "phase08_07_managed_save_and_frontmatter_reuse_snapshot_lease proves nested auto-snapshots finish with two complete prior-body snapshots and no lease reacquisition."
+        "workerProof": "The registered wrapper is first polled and yields on the same async task while a separate blocking worker is held in phase08_07_all_document_wrappers_yield_on_same_polling_task; contextual panic JoinError is asserted.",
+        "platformScope": "Executed on macOS against disposable workspaces with export bundles, version snapshots, Studio and Binder state, kg-cache files, a symlinked output, a managed registry and a promoted draft index. No Windows run claimed."
       }
     },
     {
