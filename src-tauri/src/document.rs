@@ -749,7 +749,9 @@ pub(crate) fn trash_document_in_transaction(
     covered.extend(selected.iter().cloned());
     covered.extend(export_bundle_dirs(&covered));
     lease.ensure_covered(covered.clone())?;
-    assert_document_owner(&vault_path, &source)?;
+    for path in &covered {
+        assert_document_owner(&vault_path, path)?;
+    }
     assert_document_delete_allowed(&vault_path, &vault, &covered)?;
     if fs::symlink_metadata(&source).is_err() {
         return Err(stale_delete_plan("the document no longer exists"));
@@ -991,45 +993,55 @@ fn compute_delete_plan(vault: &Path, source: &Path) -> Result<DocumentDeletePlan
         }
     }
 
-    // Studio: this document's state folder, and its recorded output files.
+    // Studio: this document's state folder, and the filled HWPX it recorded.
+    // The package snapshot is a version snapshot, listed above by version_of.
+    // Filled outputs are named after the template, so one that another
+    // Studio state also records is shared and kept.
     let vault_text = vault.to_string_lossy().to_string();
-    for (dir, state) in crate::studio::studio_state_dirs(&vault_text)? {
-        let Some(document_path) = state.source.document_path.as_deref() else {
-            continue;
-        };
-        if !stored_path_matches(document_path, vault, source, &source_rel) {
+    let states = crate::studio::studio_state_dirs(&vault_text)?;
+    let filled_dir = vault.join(".maru").join("studio").join("filled");
+    let output_of = |state: &crate::studio::StudioState| {
+        state
+            .hwp_fields
+            .last_output_path
+            .as_deref()
+            .and_then(|stored| inside(vault, stored))
+            .filter(|path| path.parent() == Some(filled_dir.as_path()) && is_regular_file(path))
+    };
+    let owns = |state: &crate::studio::StudioState| {
+        state
+            .source
+            .document_path
+            .as_deref()
+            .is_some_and(|stored| stored_path_matches(stored, vault, source, &source_rel))
+    };
+    for (dir, state) in &states {
+        if !owns(state) {
             continue;
         }
-        let outputs = [
-            (
-                state.hwp_fields.last_output_path.as_deref(),
-                "Studio hwpFields.lastOutputPath",
-            ),
-            (
-                state.package.snapshot_path.as_deref(),
-                "Studio package.snapshotPath",
-            ),
-        ];
-        for (stored, evidence) in outputs {
-            let Some(path) = stored.and_then(|stored| inside(vault, stored)) else {
-                continue;
-            };
-            // Files only, never the source, never inside a Studio state folder.
-            let is_file = fs::symlink_metadata(&path)
-                .map(|metadata| !metadata.is_dir())
-                .unwrap_or(false);
-            if is_file && path != source && !path.starts_with(&dir) {
+        if let Some(path) = output_of(state) {
+            let shared = states
+                .iter()
+                .any(|(_, other)| !owns(other) && output_of(other).as_ref() == Some(&path));
+            if shared {
+                push(
+                    &mut kept,
+                    &path,
+                    DocumentDeleteKind::StudioOutput,
+                    "also recorded by another Studio state",
+                )?;
+            } else {
                 push(
                     &mut derived,
                     &path,
                     DocumentDeleteKind::StudioOutput,
-                    evidence,
+                    "Studio hwpFields.lastOutputPath",
                 )?;
             }
         }
         push(
             &mut metadata,
-            &dir,
+            dir,
             DocumentDeleteKind::StudioState,
             "Studio source.documentPath",
         )?;
@@ -3592,6 +3604,43 @@ mod document_delete_tests {
         ws.apply(&plan, rels(&plan.derived)).unwrap();
         assert!(!ws.exists("notes/report.exports/report.docx"));
         assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+    }
+
+    #[test]
+    fn shared_studio_output_is_kept_and_outside_outputs_are_ignored() {
+        // Each fixture holds the test-home lock, so the first must drop first.
+        {
+            let ws = seeded();
+            ws.write(
+                ".maru/studio/other-doc/state.json",
+                &studio_state(
+                    "other-doc",
+                    "notes/other.md",
+                    ".maru/studio/filled/report.hwpx",
+                    "notes/other.md",
+                ),
+            );
+            let plan = ws.plan();
+            assert!(!rels(&plan.derived).contains(&".maru/studio/filled/report.hwpx".to_string()));
+            assert!(rels(&plan.kept).contains(&".maru/studio/filled/report.hwpx".to_string()));
+        }
+
+        // A recorded output outside .maru/studio/filled never qualifies.
+        let ws = Workspace::new();
+        let source = ws.write(SOURCE, "# Report\n");
+        ws.write("notes/important.md", "keep");
+        ws.write(
+            ".maru/studio/notes-report.md/state.json",
+            &studio_state(
+                "notes-report.md",
+                &source.to_string_lossy(),
+                "notes/important.md",
+                "notes/important.md",
+            ),
+        );
+        let plan = ws.plan();
+        assert!(plan.derived.is_empty());
+        assert!(!rels(&plan.kept).contains(&"notes/important.md".to_string()));
     }
 
     #[test]

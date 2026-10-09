@@ -430,7 +430,7 @@
         },
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib document_delete",
-          "passed": 11,
+          "passed": 12,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -501,7 +501,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib document_delete",
-          "passed": 11,
+          "passed": 12,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0

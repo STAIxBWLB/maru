@@ -135,13 +135,16 @@ describe("DocumentDeleteDialog", () => {
     expect(harness.onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("re-plans on a stale plan and deletes nothing", async () => {
+  it("re-plans on a stale plan, keeps unchecked items and deletes nothing", async () => {
     api.trashDocument.mockRejectedValue(
       new IpcError({ code: "document_delete_stale", message: "files changed" }),
     );
     harness = await render();
     api.documentDeletePlan.mockResolvedValue(plan("fp-2"));
-    await click(button(/^Delete 1 files$/));
+    await click(switches()[0]!);
+    await click(checkboxes()[1]!);
+    await click(button(/^Delete 2 files$/));
+    expect(checkboxes().map((box) => box.checked)).toEqual([true, false, true]);
     expect(api.documentDeletePlan).toHaveBeenCalledTimes(2);
     expect(text()).toContain("Files changed since this list was made");
     expect(harness.onDeleted).not.toHaveBeenCalled();

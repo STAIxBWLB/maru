@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trashDocument, documentDeletePlan } from "../lib/api";
 import { formatBytes } from "../lib/binaryViewer";
 import { useTranslation } from "../lib/i18n";
@@ -58,17 +58,22 @@ export function DocumentDeleteDialog({
   const [unchecked, setUnchecked] = useState<Set<string>>(() => new Set());
   const [failures, setFailures] = useState<DocumentDeleteOutcome["items"]>([]);
 
+  // Only the latest request may fill the dialog; a slow earlier plan is dropped.
+  const latest = useRef<DocumentDeleteRequest | null>(null);
   const loadPlan = useCallback(async (target: DocumentDeleteRequest) => {
+    latest.current = target;
     setPlan(null);
     setError(null);
     try {
-      setPlan(await documentDeletePlan(target.workspacePath, target.documentPath));
+      const next = await documentDeletePlan(target.workspacePath, target.documentPath);
+      if (latest.current === target) setPlan(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (latest.current === target) setError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
   useEffect(() => {
+    latest.current = request;
     setGroups({ derived: false, metadata: false });
     setUnchecked(new Set());
     setNotice(null);
@@ -104,8 +109,8 @@ export function DocumentDeleteDialog({
       else onClose();
     } catch (err) {
       if (err instanceof IpcError && err.code === "document_delete_stale") {
+        // Keep what the user unchecked; the new plan is reviewed again.
         setNotice(t("documentDelete.stale"));
-        setUnchecked(new Set());
         await loadPlan(request);
       } else {
         setError(err instanceof Error ? err.message : String(err));

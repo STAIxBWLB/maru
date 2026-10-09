@@ -5748,8 +5748,14 @@ export function MainApp() {
       const trashed = new Set(
         outcome.items.filter((item) => item.status === "trashed").map((item) => item.relPath),
       );
-      for (const tab of getEditorTabsState().tabs) {
+      const { tabs: docTabs, binaryTabs: binTabs } = getEditorTabsState();
+      for (const tab of docTabs) {
         if (tab.workspacePath === request.workspacePath && trashed.has(tab.document.relPath)) {
+          closeTab(tab.id);
+        }
+      }
+      for (const tab of binTabs) {
+        if (tab.workspacePath === request.workspacePath && trashed.has(tab.fileEntry.relPath)) {
           closeTab(tab.id);
         }
       }
