@@ -9,6 +9,18 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.20 - Linked Canvas (2026-10-09)
+
+- Review every file before deleting a document from the Explorer menu or an editor tab: the source plus, on request, the derived files (export bundle, version snapshots, Studio outputs) and Maru metadata (Evidence Binder, Studio, KG cache) that record a link to it; reviewed items move to the system Trash, a changed plan deletes nothing, and managed vaults and promoted-draft targets are refused. Deletes no longer go to `.maru/trash/documents` (existing items there are left in place); Files mode keeps its own trash flow (#441).
+- Generate, validate, preview and apply sequence, dataflow and lifecycle diagrams alongside architecture and workflow, with lanes, stages and boundaries drawn as containers and stable relation ids (#444).
+- Keep semantic diagrams canonical while editing: canvas text writes through to the spec, the inspector reorders sequence messages and sets lifecycle types, dataflow classifications, lanes and stages as one undo step, and deleting members asks to detach first (#444).
+- Regenerate a semantic dataset in place from a member selection, keeping one dataset, imported extension fields and freeform annotation edges; ids owned by another dataset block instead of being overwritten (#444).
+- Direct Mermaid import accepts flowcharts only: other diagram headers import nothing instead of best-effort nodes, and sequence and state diagrams point to generation; warn when a Mermaid export drops semantics, and project imported archify-json specs onto the canvas instead of an empty one (#444).
+- Ribbon Delete now also asks before detaching pattern-view members, like keyboard Delete (#444).
+- Compatibility: documents stay at schema v9. Opened in 1.1.17-1.1.19, a document created or regenerated here shows containers as plain sections and does not write canvas text through; a document holding a sequence, dataflow or lifecycle dataset refuses scoped apply there (#444).
+
+This release delivers the P2 slice scoped in #444. Workflow groups and phases, sequence segments and activations, boundary membership editing and semantic add/remove stay deferred; verified HTML/static publication (P3) and exploration (P4) remain open in #433.
+
 ## v1.1.19 - Steady Workspace (2026-10-07)
 
 - Preserve the latest application mode and terminal layout choices when settings load or save acknowledgements arrive late (#388).
