@@ -9,6 +9,16 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.21 - Even Footing (2026-10-09)
+
+- Rename or trash a workspace folder on Windows while another write waits on a file inside it: a waiting transaction no longer holds a directory handle that made Windows deny the rename. NTFS/ReFS parents are pinned by file identity; other volumes keep the open handle (#455).
+- Apply web task actions on Windows: receipts were always reported stale because Git could not read the note path (#453, #455).
+- Replace and remove skill install links on Windows, and recognize Maru-owned links whose stored target Windows reads back in a different form (#452, #455).
+- Run scheduled and manual jobs on Windows with native process identity, stop AI missions whose console CLI ignores a graceful close, and resolve CLIs the way Windows actually launches them (an npm shell shim no longer wins over its `.cmd`) (#455).
+- Fix Windows path handling in the ops catalog scan and watcher, Evidence Binder rekeys on document move, inbox and document relative paths, scratchpad containment and atomic writes over a directory (#455).
+- Show Ctrl/Alt shortcut hints on Windows; macOS keeps ⌘/Option (#448).
+- `make verify` passes end to end on Windows (Git Bash tools on `PATH`); see README §Verification and CI (#449, #454).
+
 ## v1.1.20 - Linked Canvas (2026-10-09)
 
 - Review every file before deleting a document from the Explorer menu or an editor tab: the source plus, on request, the derived files (export bundle, version snapshots, Studio outputs) and Maru metadata (Evidence Binder, Studio, KG cache) that record a link to it; reviewed items move to the system Trash, a changed plan deletes nothing, and managed vaults and promoted-draft targets are refused. Deletes no longer go to `.maru/trash/documents` (existing items there are left in place); Files mode keeps its own trash flow (#441).
