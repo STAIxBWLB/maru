@@ -252,7 +252,7 @@ fn should_dispatch_catalog_event(path: &Path, root: &Path) -> bool {
 fn is_catalog_relevant(path: &Path, root: &Path) -> bool {
     let rel = match path.strip_prefix(root) {
         // Relevance patterns use `/` on every platform.
-        Ok(r) => r.to_string_lossy().replace('\\', "/"),
+        Ok(r) => crate::vault::slash_separators(r.to_string_lossy().into_owned()),
         Err(_) => return false,
     };
 

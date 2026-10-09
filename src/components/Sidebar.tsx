@@ -1,4 +1,4 @@
-import { formatShortcut } from "../lib/platform";
+import { currentPlatform, formatShortcut, isMacPlatform } from "../lib/platform";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   Archive,
@@ -204,7 +204,8 @@ export const Sidebar = memo(function Sidebar({
             {t("sidebar.commandPalette")}
           </span>
           <span className="keys">
-            <span className="kbd">{formatShortcut("⌘K")}</span>
+            <span className="kbd">{isMacPlatform(currentPlatform()) ? "⌘" : "Ctrl"}</span>
+            <span className="kbd">K</span>
           </span>
         </button>
       </div>

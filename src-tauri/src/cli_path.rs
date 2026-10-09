@@ -160,7 +160,8 @@ pub fn is_executable(path: &Path) -> bool {
 
 /// Mirrors how `std::process::Command` spawns a path on Windows: it first
 /// tries `<path>.exe`, then the path itself, which only runs with an
-/// executable extension. An extensionless npm shell shim is not executable.
+/// executable extension `Command` can spawn (PATHEXT may also list scripts
+/// such as `.js` that it cannot). An extensionless npm shell shim is not.
 #[cfg(windows)]
 pub fn is_executable(path: &Path) -> bool {
     let text = path.as_os_str().to_string_lossy();
@@ -172,9 +173,9 @@ pub fn is_executable(path: &Path) -> bool {
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| {
-                windows_path_extensions()
+                ["exe", "com", "bat", "cmd"]
                     .iter()
-                    .any(|candidate| candidate.trim_start_matches('.').eq_ignore_ascii_case(ext))
+                    .any(|spawnable| spawnable.eq_ignore_ascii_case(ext))
             })
 }
 

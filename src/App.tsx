@@ -8423,7 +8423,8 @@ export function MainApp() {
           >
             <Command size={14} className="topbar-command-icon" />
             <span className="topbar-muted-label">{t("sidebar.commandPalette")}</span>
-            <span className="kbd">{formatShortcut("⌘K")}</span>
+            <span className="kbd">{isMacPlatform(currentPlatform()) ? "⌘" : "Ctrl"}</span>
+            <span className="kbd">K</span>
           </button>
           <button
             type="button"

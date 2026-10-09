@@ -215,7 +215,8 @@ fn collect_bu_configs(
             }
             let p = entry.path();
             if p.file_name().is_some_and(|n| n == "bu-config.yaml")
-                && p.to_string_lossy().replace('\\', "/").contains("/.maru/")
+                && crate::vault::slash_separators(p.to_string_lossy().into_owned())
+                    .contains("/.maru/")
             {
                 match parse_bu_config(p) {
                     Ok(cfg) => {
@@ -568,7 +569,7 @@ fn analyze_binary(
     }
     // 03-evidence-cert/ 또는 04-evidence/ 또는 흔한 evidence 디렉토리 하위만
     // Zone patterns use `/` on every platform.
-    let path_str = p.to_string_lossy().replace('\\', "/");
+    let path_str = crate::vault::slash_separators(p.to_string_lossy().into_owned());
     let is_evidence_zone = path_str.contains("/03-evidence-cert/")
         || path_str.contains("/04-evidence/")
         || path_str.contains("/receipts/")

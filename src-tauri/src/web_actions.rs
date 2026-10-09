@@ -637,13 +637,14 @@ fn blob_sha(path: &Path) -> Result<String, String> {
     let output = child
         .wait_with_output()
         .map_err(|err| format!("git hash-object failed: {err}"))?;
-    written.map_err(|err| format!("git hash-object failed: {err}"))?;
+    // An early git failure breaks the pipe; its stderr is the useful diagnostic.
     if !output.status.success() {
         return Err(format!(
             "git hash-object failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+    written.map_err(|err| format!("git hash-object failed: {err}"))?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 

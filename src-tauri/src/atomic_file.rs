@@ -27,15 +27,19 @@ impl PathTransactionParent {
 
 /// Stable identity of a captured transaction parent. Unix keeps the directory
 /// open so inode reuse cannot disguise remove/recreate at the same pathname.
-/// Windows records the volume and file reference instead: the NTFS reference
-/// carries a reuse sequence number, and an open directory handle would make
-/// Windows deny renaming any ancestor of a writer still waiting for admission.
+/// On NTFS and ReFS, Windows records the volume and file reference instead:
+/// the reference carries a reuse sequence number, and an open directory handle
+/// would make Windows deny renaming any ancestor of a writer still waiting for
+/// admission. FAT-family indexes are positional and can repeat after a
+/// remove/recreate, so there the handle stays open as on Unix.
 #[derive(Clone)]
 struct ParentPin {
     #[cfg(not(windows))]
     handle: std::sync::Arc<fs::File>,
     #[cfg(windows)]
     identity: (u32, u64),
+    #[cfg(windows)]
+    _held: Option<std::sync::Arc<fs::File>>,
 }
 impl ParentPin {
     fn new(handle: fs::File) -> Result<Self, String> {
@@ -48,10 +52,38 @@ impl ParentPin {
         }
         #[cfg(windows)]
         {
-            Ok(Self {
-                identity: PathTransactionRequest::windows_identity(&handle)?,
-            })
+            let identity = PathTransactionRequest::windows_identity(&handle)?;
+            let _held = (!Self::reuse_safe_file_ids(&handle)).then(|| std::sync::Arc::new(handle));
+            Ok(Self { identity, _held })
         }
+    }
+    /// NTFS and ReFS file references are not reused for a recreated entry.
+    #[cfg(windows)]
+    fn reuse_safe_file_ids(handle: &fs::File) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationByHandleW;
+        let mut name = [0u16; 32];
+        // SAFETY: the handle is live; only the filesystem-name buffer is requested.
+        let ok = unsafe {
+            GetVolumeInformationByHandleW(
+                handle.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                name.as_mut_ptr(),
+                name.len() as u32,
+            )
+        } != 0;
+        let len = name
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(name.len());
+        ok && matches!(
+            String::from_utf16_lossy(&name[..len]).as_str(),
+            "NTFS" | "ReFS"
+        )
     }
     fn matches(&self, current: &fs::File) -> Result<(), String> {
         #[cfg(not(windows))]

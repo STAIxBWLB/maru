@@ -859,11 +859,21 @@ pub fn slugify(input: &str) -> String {
     }
 }
 
+/// Windows separators become `/`. Elsewhere `\` is a legal filename byte
+/// and must survive unchanged.
+pub(crate) fn slash_separators(text: String) -> String {
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    }
+}
+
 /// Workspace-relative paths cross IPC with `/` on every platform. A path
 /// outside `root` keeps its native absolute form.
 pub(crate) fn relative_slash_path(path: &Path, root: &Path) -> String {
     match path.strip_prefix(root) {
-        Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
+        Ok(relative) => slash_separators(relative.to_string_lossy().into_owned()),
         Err(_) => path.to_string_lossy().into_owned(),
     }
 }

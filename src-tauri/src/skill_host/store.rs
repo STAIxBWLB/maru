@@ -3062,13 +3062,16 @@ pub fn skills_reconcile_skill(
         outcome.git_repo_root = Some(host_fs::display_path(&repo_root));
         outcome.commands_shell = Some("posix".to_string());
         let skill_path = PathBuf::from(&skill_record.abs_path);
-        // Git prints `C:/...` on Windows; compare canonical forms. The
-        // relative path feeds POSIX commands, so it always uses `/`.
-        let rel = canonicalize_or_self(&skill_path)
-            .strip_prefix(canonicalize_or_self(&repo_root))
-            .map_err(|_| "skill_not_inside_git_repo".to_string())?
-            .to_string_lossy()
-            .replace('\\', "/");
+        // Git prints `C:/...` on Windows while the record may be `\\?\C:\...`;
+        // compare without the verbatim prefix (lexically, as on Unix). The
+        // relative path feeds POSIX commands, so it uses `/`.
+        let rel = crate::vault::slash_separators(
+            host_fs::simplified(&skill_path)
+                .strip_prefix(host_fs::simplified(&repo_root))
+                .map_err(|_| "skill_not_inside_git_repo".to_string())?
+                .to_string_lossy()
+                .into_owned(),
+        );
         let repo_root_display = host_fs::display_path(&repo_root);
         let repo_root_quoted = shell_quote(&repo_root_display);
         let rel_quoted = shell_quote(&rel);
