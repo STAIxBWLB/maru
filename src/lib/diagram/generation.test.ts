@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import {
+  CURRENT_SPEC_PROMPT_MAX_BYTES,
   buildGenerationPrompt,
   createGenerationJob,
   extractCandidateJson,
@@ -9,6 +11,7 @@ import {
   type GenerationHost,
   type GenerationJob,
 } from "./generation";
+import { mintRelationIds, projectSemanticDocument } from "./semantic";
 import { createEmptyDoc, type DiagramDoc } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -154,7 +157,11 @@ describe("runGenerationJob", () => {
     expect(job.state).toBe("ready");
     expect(updates).toEqual(["running", "validating", "ready"]);
     expect(host.runAgent).toHaveBeenCalledTimes(1);
-    expect(host.validateCandidate).toHaveBeenCalledWith("architecture", ARCH_SPEC);
+    // The engine sees the minted spec, the same bytes the dataset stores.
+    const minted = { ...ARCH_SPEC, connections: [{ id: "conn1", ...ARCH_SPEC.connections[0] }] };
+    expect(host.validateCandidate).toHaveBeenCalledWith("architecture", minted);
+    expect(job.candidate?.spec).toEqual(minted);
+    expect(job.diagnostics).toContainEqual({ key: "diagram.archify.relationIdsAssigned", params: { count: 1 } });
     expect(job.engineReceipt).toEqual({ ok: true, errors: [], warnings: [], candidateSha256: "sha-1" });
     expect(job.candidate?.kind).toBe("semanticSpec");
     expect(job.candidate?.provenance?.origin).toBe("generated");
@@ -248,6 +255,71 @@ describe("runGenerationJob", () => {
     const failedJob = await runGenerationJob(jobOf(), failHost);
     expect(failedJob.state).toBe("failed");
     expect(failedJob.error).toBe("timeout");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2 semantic types and regeneration targets (issue #433)
+// ---------------------------------------------------------------------------
+
+describe("P2 generation", () => {
+  const fixtureHost = (spec: Record<string, unknown>) => hostOf({ runAgent: vi.fn(async () => JSON.stringify(spec)) });
+
+  it("embeds per-type essentials and the relation-id rule", () => {
+    const sequence = buildGenerationPrompt(jobOf({ diagramType: "sequence" }));
+    expect(sequence).toContain('"participants"');
+    expect(sequence).toContain('"column_fit": "spread"');
+    expect(sequence).toContain("y starts at 180 and increases by 48");
+    expect(sequence).toContain('unique "id"');
+    expect(buildGenerationPrompt(jobOf({ diagramType: "dataflow" }))).toContain('"stages": required array of 2 to 5');
+    expect(buildGenerationPrompt(jobOf({ diagramType: "lifecycle" }))).toContain('"col" is an integer 0..4');
+  });
+
+  it("reaches ready for each new type and the engine sees the minted spec", async () => {
+    for (const type of ["sequence", "dataflow", "lifecycle"] as const) {
+      const host = fixtureHost(SEMANTIC_FIXTURES[type]);
+      const job = await runGenerationJob(jobOf({ diagramType: type }), host);
+      expect(job.state, type).toBe("ready");
+      const minted = mintRelationIds(type, SEMANTIC_FIXTURES[type]).spec;
+      expect(host.validateCandidate).toHaveBeenCalledWith(type, minted);
+      expect(job.candidate?.spec).toEqual(minted);
+      // New dataset: members, relations and containers are all additions.
+      const preview = projectSemanticDocument(job.candidate!).doc;
+      const added = job.proposal!.ops.filter((op) => op.kind === "addNode" || op.kind === "addEdge").length;
+      expect(added, type).toBe(preview.nodes.length + preview.edges.length);
+    }
+  });
+
+  it("fails semantic validation before the engine runs", async () => {
+    const spec = structuredClone(SEMANTIC_FIXTURES.sequence);
+    (spec.messages as Record<string, unknown>[])[0]!.to = "web";
+    const host = fixtureHost(spec);
+    const job = await runGenerationJob(jobOf({ diagramType: "sequence" }), host);
+    expect(job.state).toBe("failed");
+    expect(job.error).toBe("candidate failed semantic validation");
+    expect(job.diagnostics.map((d) => d.key)).toContain("diagram.semantic.selfMessage");
+    expect(host.validateCandidate).not.toHaveBeenCalled();
+  });
+
+  it("regenerates a target dataset: current spec in the prompt, dataset id reused", async () => {
+    const target = { datasetId: "ds-keep", spec: mintRelationIds("lifecycle", SEMANTIC_FIXTURES.lifecycle).spec };
+    const job = jobOf({ diagramType: "lifecycle", target });
+    expect(job.diagnostics).toEqual([]);
+    const prompt = buildGenerationPrompt(job);
+    expect(prompt).toContain("<untrusted_current_spec>");
+    expect(prompt).toContain('"id": "tr1"');
+    expect(prompt).toContain("keep the ids of entities you keep");
+    const ready = await runGenerationJob(job, fixtureHost(SEMANTIC_FIXTURES.lifecycle));
+    expect(ready.candidate?.id).toBe("ds-keep");
+  });
+
+  it("omits an oversized current spec with a diagnostic", () => {
+    const spec = { ...SEMANTIC_FIXTURES.lifecycle, meta: { title: "x".repeat(CURRENT_SPEC_PROMPT_MAX_BYTES), output: "o.html" } };
+    const job = jobOf({ diagramType: "lifecycle", target: { datasetId: "ds-big", spec } });
+    expect(job.diagnostics).toEqual([
+      { key: "diagram.generate.currentSpecOmitted", params: { maxBytes: CURRENT_SPEC_PROMPT_MAX_BYTES } },
+    ]);
+    expect(buildGenerationPrompt(job)).not.toContain("<untrusted_current_spec>");
   });
 });
 

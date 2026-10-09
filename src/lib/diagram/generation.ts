@@ -21,6 +21,12 @@
  *   Mermaid and source paths as untrusted data, never instructions.
  * - The structural pre-check ({@link validateArchifySpecPreCheck}) runs before
  *   the engine ever sees the spec; a pre-check failure skips the engine call.
+ *   Id-less relations are then minted (`mintRelationIds`) and the content is
+ *   validated synchronously (`validateSemanticContent`, an early fail), so the
+ *   engine validates — and its receipt hashes — the exact spec that is stored.
+ * - A job with a `target` regenerates an existing dataset: the prompt carries
+ *   the current spec (capped, as untrusted data) and the result reuses the
+ *   dataset id, so the upsert replaces it instead of appending a second one.
  * - Cancellation/timeout: the host promise is expected to reject on cancel,
  *   but a result arriving after `isCancelled()` is discarded either way. Once
  *   settled (ready/failed/cancelled) the job is never mutated again — every
@@ -32,6 +38,7 @@
 
 import { archifySpecToDataset } from "./archifyCodec";
 import { validateSemanticSpec, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
+import { mintRelationIds, validateSemanticContent } from "./semantic";
 import { DIAGRAM_SCHEMA_VERSION, createDiagramId, type DiagramDoc } from "./types";
 import { validateArchifySpecPreCheck, type ValidationDiagnostic } from "./validation";
 import {
@@ -60,11 +67,18 @@ export interface GenerationPromptInput {
   locale: "ko" | "en";
 }
 
+/** An existing semantic dataset the job regenerates (scoped generation on its members). */
+export interface GenerationTarget {
+  datasetId: string;
+  spec: Record<string, unknown>;
+}
+
 export interface GenerationJob {
   id: string;
   state: GenerationState;
   diagramType: SemanticDiagramType;
   prompt: GenerationPromptInput;
+  target?: GenerationTarget;
   meta: ProposalMeta;
   /** Base document snapshot captured at job creation; proposals diff against it. */
   doc: DiagramDoc;
@@ -100,6 +114,16 @@ export interface CreateGenerationJobInput {
   baseStorageRevision?: string | null;
   scope?: ReadonlySet<string> | null;
   lockedNodeIds?: string[];
+  target?: GenerationTarget;
+}
+
+/** UTF-8 cap for the current spec embedded in a regeneration prompt. */
+export const CURRENT_SPEC_PROMPT_MAX_BYTES = 48 * 1024;
+
+/** The target's spec as prompt text, or null when it exceeds the cap. */
+function currentSpecText(target: GenerationTarget): string | null {
+  const text = JSON.stringify(target.spec, null, 2);
+  return new TextEncoder().encode(text).length <= CURRENT_SPEC_PROMPT_MAX_BYTES ? text : null;
 }
 
 export function createGenerationJob(input: CreateGenerationJobInput): GenerationJob {
@@ -120,7 +144,11 @@ export function createGenerationJob(input: CreateGenerationJobInput): Generation
     prompt: input.prompt,
     meta,
     doc: input.doc,
-    diagnostics: [],
+    ...(input.target ? { target: input.target } : {}),
+    diagnostics:
+      input.target && currentSpecText(input.target) === null
+        ? [{ key: "diagram.generate.currentSpecOmitted", params: { maxBytes: CURRENT_SPEC_PROMPT_MAX_BYTES } }]
+        : [],
   };
 }
 
@@ -155,6 +183,47 @@ const SCHEMA_ESSENTIALS: Record<SemanticDiagramType, string> = {
     '  with optional "id", "label" and "role" (main | branch | async | return | error)',
     '- optional: "phases", "groups", "mainPath", "semanticChecks", "cards"',
   ].join("\n"),
+  sequence: [
+    '- "schema_version": 1 (constant)',
+    '- "diagram_type": "sequence" (constant)',
+    '- "meta": object with required "title" (non-empty string) and "output"',
+    '  (a bare portable file name ending in ".html", no path separators);',
+    '  set "column_fit": "spread" and "viewBox": [width, height] with height >= 300 + 48 * messages',
+    '- "participants": required array, min 2, of { "id", "type", "label" } where',
+    '  "type" is one of frontend | backend | database | cloud | security | messagebus | external;',
+    '  keep labels short; optional "sublabel"',
+    '- "messages": required array, min 1, of { "from", "to", "y", "label" } where',
+    '  "from"/"to" reference two different participant ids and "y" is a number >= 160;',
+    '  y starts at 180 and increases by 48 per message, strictly increasing in order;',
+    '  optional "variant" (default | emphasis | security | dashed | return) and "note"',
+    '- optional: "segments", "activations", "cards"',
+  ].join("\n"),
+  dataflow: [
+    '- "schema_version": 1 (constant)',
+    '- "diagram_type": "dataflow" (constant)',
+    '- "meta": object with required "title" (non-empty string) and "output"',
+    '  (a bare portable file name ending in ".html", no path separators)',
+    '- "stages": required array of 2 to 5 { "label" } (stages have no "id")',
+    '- "nodes": required array, min 2, of { "id", "type", "label", "stage", "row" } where',
+    '  "type" is one of frontend | backend | database | cloud | security | messagebus | external',
+    '  and "stage" / "row" are 0-based integers ("stage" < number of stages)',
+    '- "flows": required array of { "from", "to", "label" } referencing node ids,',
+    '  with optional "classification" (e.g. PII) and "variant"',
+    '- optional: "cards"',
+  ].join("\n"),
+  lifecycle: [
+    '- "schema_version": 2',
+    '- "diagram_type": "lifecycle" (constant)',
+    '- "meta": object with required "title" (non-empty string) and "output"',
+    '  (a bare portable file name ending in ".html", no path separators)',
+    '- "lanes": required array of 1 to 4 { "id", "label" }',
+    '- "states": required array, min 2, of { "id", "type", "label", "lane", "col" } where',
+    '  "type" is one of start | active | waiting | decision | success | failure | neutral | external,',
+    '  "lane" references a lane id and "col" is an integer 0..4',
+    '- "transitions": required array of { "from", "to" } referencing state ids,',
+    '  with optional "label", "note" and "variant"',
+    '- optional: "cards"',
+  ].join("\n"),
 };
 
 /**
@@ -175,6 +244,7 @@ export function buildGenerationPrompt(job: GenerationJob): string {
     ``,
     `SCHEMA ESSENTIALS (from the vendored pinned schema)`,
     `- Every "id" matches ${ARCHIFY_ID_RULE} and is unique within the document.`,
+    `- Give every relation (connection, edge, message, flow, transition) a unique "id".`,
     SCHEMA_ESSENTIALS[job.diagramType],
     `- Set "meta.locale" to "${job.prompt.locale}".`,
     `- additionalProperties is false at every level: emit only the fields named above.`,
@@ -197,6 +267,19 @@ export function buildGenerationPrompt(job: GenerationJob): string {
       `<untrusted_mermaid>`,
       job.prompt.mermaid,
       `</untrusted_mermaid>`,
+    );
+  }
+  const currentSpec = job.target ? currentSpecText(job.target) : null;
+  if (currentSpec !== null) {
+    sections.push(
+      ``,
+      `CURRENT SPEC`,
+      `The diagram already exists; its current spec is below. Return the complete`,
+      `updated spec, not a fragment, and keep the ids of entities you keep.`,
+      ``,
+      `<untrusted_current_spec>`,
+      currentSpec,
+      `</untrusted_current_spec>`,
     );
   }
   if (job.prompt.sourceFilePaths && job.prompt.sourceFilePaths.length > 0) {
@@ -336,9 +419,31 @@ export async function runGenerationJob(
   }
   if (cancelled()) return emit({ ...current, state: "cancelled" as const });
 
+  // Mint relation ids, then the synchronous content floor (early fail); the
+  // engine stays authoritative and sees exactly the spec that is stored.
+  const { spec: minted, minted: mintedCount } = mintRelationIds(
+    current.diagramType,
+    parsed as Record<string, unknown>,
+  );
+  if (mintedCount > 0) {
+    current = {
+      ...current,
+      diagnostics: [...current.diagnostics, { key: "diagram.archify.relationIdsAssigned", params: { count: mintedCount } }],
+    };
+  }
+  const content = validateSemanticContent(current.diagramType, minted);
+  if (content.length > 0) {
+    return emit({
+      ...current,
+      state: "failed" as const,
+      diagnostics: [...current.diagnostics, ...content],
+      error: "candidate failed semantic validation",
+    });
+  }
+
   let receipt: GenerationJob["engineReceipt"];
   try {
-    receipt = await host.validateCandidate(current.diagramType, parsed);
+    receipt = await host.validateCandidate(current.diagramType, minted);
   } catch (error) {
     return emit(
       cancelled()
@@ -356,11 +461,10 @@ export async function runGenerationJob(
     });
   }
 
-  const { dataset, diagnostics: codecDiagnostics } = archifySpecToDataset(
-    current.diagramType,
-    parsed as Record<string, unknown>,
-    { provenance: { origin: "generated", capturedAt: Date.now() } },
-  );
+  const { dataset, diagnostics: codecDiagnostics } = archifySpecToDataset(current.diagramType, minted, {
+    ...(current.target ? { id: current.target.datasetId } : {}),
+    provenance: { origin: "generated", capturedAt: Date.now() },
+  });
   const structural = validateSemanticSpec(dataset);
   if (!structural.ok) {
     return emit({
