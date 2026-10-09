@@ -49,7 +49,7 @@ import {
   semanticMemberNodeIds,
   semanticTypeLabelKey,
 } from "../../../lib/diagram/semantic";
-import type { DiagramDoc } from "../../../lib/diagram/types";
+import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { useTranslation, type Locale } from "../../../lib/i18n";
 import { useShellSettings } from "../../../lib/shellSettingsStore";
@@ -156,7 +156,11 @@ export function GenerateDiagramDialog({
     const doc = store.getState().doc;
     const scope = scoped ? new Set(scopeIds) : null;
     const baseMemoryRevision = scope ? await diagramRevision(serializeDoc(doc)) : "";
-    const lockedNodeIds = doc.nodes.filter((node) => node.locked === true).map((node) => node.id);
+    // An unscoped run is applied as a new diagram that replaces the canvas, so
+    // its proposal is built against an empty doc: nothing on the current
+    // canvas (locks, other datasets' ids) can block or shape it.
+    const proposalBase = scope ? doc : createEmptyDoc(doc.id);
+    const lockedNodeIds = proposalBase.nodes.filter((node) => node.locked === true).map((node) => node.id);
     const base = createGenerationJob({
       diagramType,
       prompt: {
@@ -164,7 +168,7 @@ export function GenerateDiagramDialog({
         ...(mermaid.trim().length > 0 ? { mermaid } : {}),
         locale: outputLocale,
       },
-      doc,
+      doc: proposalBase,
       baseMemoryRevision,
       scope,
       lockedNodeIds,

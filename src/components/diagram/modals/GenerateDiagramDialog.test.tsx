@@ -389,6 +389,23 @@ describe("GenerateDiagramDialog", () => {
       expect(doc.edges.map((e) => e.id)).toEqual(["tr1", "tr2"]);
     });
 
+    it("applies an unscoped rerun as new even when the canvas holds the same ids", async () => {
+      // Generate, apply as new, then run again with nothing selected: the
+      // candidate reuses the member and relation ids already on the canvas.
+      harness = renderDialog({
+        doc: lifecycleDoc("ds-first"),
+        host: stubHost({ runAgent: vi.fn(async () => JSON.stringify(SEMANTIC_FIXTURES.lifecycle)) }),
+      });
+      await setSelect(query<HTMLSelectElement>('[data-testid="gen-type-select"]')!, "lifecycle");
+      await runGeneration();
+      await vi.waitFor(() => expect(query('[data-testid="gen-preview"]')).not.toBeNull());
+      expect(query('[data-testid="gen-blocking"]')).toBeNull();
+      const apply = query<HTMLButtonElement>('[data-testid="gen-apply-new"]')!;
+      expect(apply.disabled).toBe(false);
+      await click(apply);
+      expect(harness.onImportDoc).toHaveBeenCalledTimes(1);
+    });
+
     it("expands a member selection to its dataset, locks the type and regenerates in place", async () => {
       const doc = lifecycleDoc();
       const updated = structuredClone(SEMANTIC_FIXTURES.lifecycle);
