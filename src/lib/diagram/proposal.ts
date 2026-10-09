@@ -59,8 +59,10 @@ import { isSemanticSpecDataset, type SemanticSpecDataset } from "./reportTypes";
 import {
   SEMANTIC_TYPES,
   datasetHasContainers,
+  descriptorFor,
   isSemanticContainerNode,
   projectSemanticDataset,
+  semanticDatasetsOf,
   sequenceOrder,
   specEntries,
   type ProjectedMembers,
@@ -112,6 +114,7 @@ export const BLOCKING_PROPOSAL_DIAGNOSTIC_KEYS: readonly string[] = [
   "diagram.proposal.lockedNode",
   "diagram.proposal.boundaryEdgeRemoved",
   "diagram.proposal.unresolvedEndpoint",
+  "diagram.proposal.idCollision",
 ];
 
 export function isBlockingDiagnostic(diagnostic: ValidationDiagnostic): boolean {
@@ -151,6 +154,12 @@ function nodeSemanticPatch(
   move: SlotMove | undefined,
 ): Partial<DiagramNode> | null {
   const patch: Partial<DiagramNode> = {};
+  // A freeform node that shares a candidate id becomes that member (for
+  // example after a detach): it adopts the member marker, so write-through,
+  // scope expansion and the delete guard apply to it again.
+  if (typeof existing.meta?.memberId !== "string" && projected.meta?.memberId !== undefined) {
+    patch.meta = { ...existing.meta, ...projected.meta };
+  }
   if (existing.kind !== projected.kind) patch.kind = projected.kind;
   if (existing.title !== projected.title) patch.title = projected.title;
   if (existing.body !== projected.body) patch.body = projected.body;
@@ -215,6 +224,24 @@ export function buildProposalFromCandidate(
   const locked = new Set(meta.lockedNodeIds);
   const docNodes = new Map((currentDoc.nodes ?? []).map((node) => [node.id, node]));
   const docEdges = new Map((currentDoc.edges ?? []).map((edge) => [edge.id, edge]));
+  // Canvas ids are spec ids, so another dataset can already own one. Patching
+  // that object would rewire or retitle the other dataset's member: block.
+  const ownedElsewhere = (node: DiagramNode): boolean => {
+    const memberId = node.meta?.memberId;
+    return typeof memberId === "string" && !memberId.startsWith(`${candidate.id}:`);
+  };
+  const otherRelationIds = new Set(
+    semanticDatasetsOf(currentDoc)
+      .filter((dataset) => dataset.id !== candidate.id)
+      .flatMap((dataset) => {
+        const descriptor = descriptorFor(dataset);
+        return descriptor
+          ? specEntries(dataset.spec, descriptor.relations).map((entry, index) =>
+              typeof entry.id === "string" ? (dataset.idMap[entry.id] ?? entry.id) : `${dataset.id}-e${index}`,
+            )
+          : [];
+      }),
+  );
   const candidateNodeIds = new Set(projection.nodes.map((node) => node.id));
   const candidateEdgeIds = new Set(projection.edges.map((edge) => edge.id));
 
@@ -252,6 +279,10 @@ export function buildProposalFromCandidate(
       continue;
     }
     if (skip(projected.id)) continue;
+    if (ownedElsewhere(existing)) {
+      diagnostics.push({ key: "diagram.proposal.idCollision", params: { id: projected.id } });
+      continue;
+    }
     const patch = nodeSemanticPatch(existing, projected, slotMoves.get(projected.id));
     // A locked node blocks only when the candidate would change it.
     if (locked.has(projected.id)) {
@@ -325,6 +356,10 @@ export function buildProposalFromCandidate(
     }
     if (!existing) {
       ops.push({ kind: "addEdge", edge: projected });
+      continue;
+    }
+    if (otherRelationIds.has(existing.id)) {
+      diagnostics.push({ key: "diagram.proposal.idCollision", params: { id: projected.id } });
       continue;
     }
     const patch = edgeSemanticPatch(existing, projected);

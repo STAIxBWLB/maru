@@ -122,7 +122,8 @@ export const CURRENT_SPEC_PROMPT_MAX_BYTES = 48 * 1024;
 
 /** The target's spec as prompt text, or null when it exceeds the cap. */
 function currentSpecText(target: GenerationTarget): string | null {
-  const text = JSON.stringify(target.spec, null, 2);
+  // "<" as \u003c is the same JSON, and no label can close the data block.
+  const text = JSON.stringify(target.spec, null, 2).replace(/</g, "\\u003c");
   return new TextEncoder().encode(text).length <= CURRENT_SPEC_PROMPT_MAX_BYTES ? text : null;
 }
 
@@ -421,9 +422,12 @@ export async function runGenerationJob(
 
   // Mint relation ids, then the synchronous content floor (early fail); the
   // engine stays authoritative and sees exactly the spec that is stored.
+  // Minted ids also avoid every id on the base canvas, so a new dataset's
+  // relations never collide with another dataset's edges.
   const { spec: minted, minted: mintedCount } = mintRelationIds(
     current.diagramType,
     parsed as Record<string, unknown>,
+    [...current.doc.nodes.map((node) => node.id), ...current.doc.edges.map((edge) => edge.id)],
   );
   if (mintedCount > 0) {
     current = {

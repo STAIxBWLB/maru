@@ -334,13 +334,15 @@ export function validateSemanticContent(
 export function mintRelationIds(
   diagramType: SemanticDiagramType,
   spec: Record<string, unknown>,
+  /** Ids already used elsewhere (other canvas objects) that minting avoids too. */
+  reserved: Iterable<string> = [],
 ): { spec: Record<string, unknown>; minted: number } {
   const descriptor = SEMANTIC_TYPES[diagramType];
   const relations = spec[descriptor.relations];
   if (!Array.isArray(relations) || !relations.some((entry) => isRecord(entry) && idOf(entry) === null)) {
     return { spec, minted: 0 };
   }
-  const taken = new Set(collectSemanticIds(diagramType, spec));
+  const taken = new Set([...collectSemanticIds(diagramType, spec), ...reserved]);
   let counter = 0;
   let minted = 0;
   const next = relations.map((entry: unknown) => {

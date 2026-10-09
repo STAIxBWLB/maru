@@ -3706,6 +3706,7 @@ export const ko: Record<string, string> = {
   "diagram.proposal.boundaryEdgeRemoved": "범위 경계의 연결을 제거하는 변경은 적용할 수 없습니다: {id}",
   "diagram.proposal.boundaryEdgeKept": "범위 경계의 연결은 유지됩니다: {id}",
   "diagram.proposal.unresolvedEndpoint": "후보의 연결 끝점을 해석할 수 없습니다: {id}",
+  "diagram.proposal.idCollision": "후보가 다른 데이터셋이 캔버스에서 쓰는 id를 다시 사용합니다: {id}",
   "diagram.generation.typeMismatch": "요청한 유형({expected})과 다른 유형({actual})의 결과가 생성되었습니다.",
   "diagram.generate.title": "다이어그램 생성",
   "diagram.generate.close": "닫기",

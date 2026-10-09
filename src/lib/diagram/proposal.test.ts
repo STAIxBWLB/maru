@@ -121,9 +121,15 @@ describe("buildProposalFromCandidate", () => {
     const meta = metaFor({ scope: new Set(["a", "b"]) });
     const { proposal, diagnostics } = buildProposalFromCandidate(meta, candidateOf(), base);
 
-    expect(proposal.ops).toContainEqual({ kind: "updateNode", id: "a", patch: { title: "A-new" } });
+    // The scoped freeform nodes become the new dataset's members (#444).
+    expect(proposal.ops).toContainEqual({
+      kind: "updateNode",
+      id: "a",
+      patch: { title: "A-new", meta: { memberId: "ds1:m0" } },
+    });
+    expect(proposal.ops).toContainEqual({ kind: "updateNode", id: "b", patch: { meta: { memberId: "ds1:m1" } } });
     expect(proposal.ops.some((op) => op.kind === "upsertSemanticDataset")).toBe(true);
-    // b is unchanged -> no op; nothing touches c, d or e4.
+    // Nothing touches c, d or e4.
     expect(
       proposal.ops.every(
         (op) =>
@@ -341,6 +347,35 @@ describe("diffProposal", () => {
 // ---------------------------------------------------------------------------
 // Regenerating an existing semantic dataset (issue #433 P2)
 // ---------------------------------------------------------------------------
+
+describe("buildProposalFromCandidate across datasets", () => {
+  // Canvas ids are spec ids, so a second dataset can propose an id another
+  // dataset already owns on the canvas.
+  const owned = () => projectSemanticDocument(candidateOf(SPEC, "dsA")).doc;
+
+  it("blocks a candidate node whose id another dataset's member owns", () => {
+    const base = owned();
+    const { proposal } = buildProposalFromCandidate(metaFor({ scope: new Set(["a", "b"]) }), candidateOf(SPEC, "dsB"), base);
+    expect(proposal.diagnostics.some((d) => d.key === "diagram.proposal.idCollision" && isBlockingDiagnostic(d))).toBe(true);
+    expect(proposal.ops.some((op) => op.kind === "updateNode")).toBe(false);
+  });
+
+  it("blocks a candidate edge whose id is another dataset's relation", () => {
+    const base = owned();
+    const spec = { ...SPEC, components: [{ id: "x", type: "frontend", label: "X" }, { id: "y", type: "backend", label: "Y" }], connections: [{ id: "e1", from: "x", to: "y" }] };
+    const { proposal } = buildProposalFromCandidate(metaFor(), candidateOf(spec, "dsB"), base);
+    expect(proposal.diagnostics.map((d) => d.key)).toContain("diagram.proposal.idCollision");
+    expect(proposal.ops.some((op) => op.kind === "updateEdge")).toBe(false);
+  });
+
+  it("adopts a freeform node that shares a candidate id as the new member", () => {
+    const base = doc([node("a", "A-old")], []);
+    const { proposal } = buildProposalFromCandidate(metaFor(), candidateOf(SPEC, "dsB"), base);
+    const update = proposal.ops.find((op) => op.kind === "updateNode" && op.id === "a");
+    expect(update && update.kind === "updateNode" ? update.patch.meta?.memberId : null).toMatch(/^dsB:/);
+    expect(proposal.diagnostics.some(isBlockingDiagnostic)).toBe(false);
+  });
+});
 
 describe("buildProposalFromCandidate with a previous dataset", () => {
   const datasetOf = (type: SemanticDiagramType, spec: Record<string, unknown>) =>

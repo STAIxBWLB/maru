@@ -32,7 +32,9 @@ export async function deleteSelection(store: DiagramStore, coalescer: Coalescer,
 
   const analysis = analyzeViewDrag(state.doc, nodeIds);
   if (analysis.subsets.length > 0 && !(await confirmDialog(t("diagram.detach.confirm")))) return;
-  const datasets = semanticDatasetsIn(state.doc, nodeIds, edgeIds);
+  // Locked nodes are never removed, so they never force a detach either.
+  const removable = nodeIds.filter((id) => !state.doc.nodes.find((node) => node.id === id)?.locked);
+  const datasets = semanticDatasetsIn(state.doc, removable, edgeIds);
   if (datasets.length > 0) {
     const lines = datasets.flatMap((dataset) => [
       dataset.name,

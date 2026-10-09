@@ -55,6 +55,15 @@ describe("deleteSelection", () => {
     expect(store.getState().doc).toBe(before);
   });
 
+  it("does not detach for a locked member that Delete keeps", async () => {
+    const base = lifecycleDoc();
+    const doc = { ...base, nodes: base.nodes.map((node) => (node.id === "running" ? { ...node, locked: true } : node)) };
+    const store = storeWith(doc, ["running"]);
+    await deleteSelection(store, defaultCoalescer(), ko);
+    expect(confirmDialog).not.toHaveBeenCalled();
+    expect(store.getState().doc.datasets).toEqual(doc.datasets);
+  });
+
   it("detaches, then deletes, as separate undo entries", async () => {
     const store = storeWith(lifecycleDoc(), ["running"]);
     await deleteSelection(store, defaultCoalescer(), ko);

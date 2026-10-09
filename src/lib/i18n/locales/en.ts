@@ -3711,6 +3711,7 @@ export const en: Record<string, string> = {
   "diagram.proposal.boundaryEdgeRemoved": "Cannot apply a change that removes a scope-boundary edge: {id}",
   "diagram.proposal.boundaryEdgeKept": "Scope-boundary edge is preserved: {id}",
   "diagram.proposal.unresolvedEndpoint": "Cannot resolve a candidate edge endpoint: {id}",
+  "diagram.proposal.idCollision": "The candidate reuses an id another dataset owns on the canvas: {id}",
   "diagram.generation.typeMismatch": "The generated result has a different type ({actual}) than requested ({expected}).",
   "diagram.generate.title": "Generate diagram",
   "diagram.generate.close": "Close",

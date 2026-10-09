@@ -110,6 +110,12 @@ describe("mintRelationIds", () => {
     expect(Object.keys((minted.messages as Record<string, unknown>[])[0]!)[0]).toBe("id");
   });
 
+  it("also avoids reserved canvas ids", () => {
+    const { spec: minted } = mintRelationIds("sequence", fixture("sequence"), ["msg1", "msg2"]);
+    const ids = (minted.messages as Record<string, unknown>[]).map((m) => m.id);
+    expect(ids).toEqual(["msg3", "msg4", "msg5", "msg6"]);
+  });
+
   it("is idempotent and leaves explicit ids alone", () => {
     for (const type of SEMANTIC_DIAGRAM_TYPES) {
       const once = mintRelationIds(type, fixture(type)).spec;
