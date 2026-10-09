@@ -8,7 +8,10 @@ import { unmountReactRoot } from "../../../lib/testing/unmountReactRoot";
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { withSnapshot } from "../../../lib/diagram/actions";
 import type { GenerationHost } from "../../../lib/diagram/generation";
+import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
+import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
 import { isSemanticSpecDataset, type SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
+import { projectSemanticDocument } from "../../../lib/diagram/semantic";
 import type { DiagramStore } from "../../../lib/diagram/state";
 import {
   createEmptyDoc,
@@ -182,7 +185,13 @@ describe("GenerateDiagramDialog", () => {
       translate("ko", "diagram.generate.scopeNew"),
     );
     const typeSelect = query<HTMLSelectElement>('[data-testid="gen-type-select"]')!;
-    expect([...typeSelect.options].map((o) => o.value)).toEqual(["architecture", "workflow"]);
+    expect([...typeSelect.options].map((o) => o.value)).toEqual([
+      "architecture",
+      "workflow",
+      "sequence",
+      "dataflow",
+      "lifecycle",
+    ]);
     expect(query('[data-testid="gen-requirements"]')).not.toBeNull();
     expect(query('[data-testid="gen-mermaid"]')).not.toBeNull();
     expect(query<HTMLSelectElement>('[data-testid="gen-locale-select"]')!.value).toBe("ko");
@@ -210,7 +219,13 @@ describe("GenerateDiagramDialog", () => {
     harness = renderDialog({ host: stubHost() });
     await runGeneration();
     await vi.waitFor(() => expect(query('[data-testid="gen-preview"]')).not.toBeNull());
-    expect(query('[data-testid="gen-summary"]')!.textContent).toContain("architecture");
+    expect(query('[data-testid="gen-summary"]')!.textContent).toBe(
+      translate("ko", "diagram.generate.summary", {
+        type: translate("ko", "diagram.generate.typeArchitecture"),
+        elements: 2,
+        relations: 1,
+      }),
+    );
     expect(query('[data-testid="gen-diff-added"]')!.textContent).toContain("Web");
     expect(query('[data-testid="gen-diff-added"]')!.textContent).toContain("Database");
     expect(query('[data-testid="gen-apply-new"]')).not.toBeNull();
@@ -324,5 +339,109 @@ describe("GenerateDiagramDialog", () => {
     );
     expect(withSnapshotSpy).not.toHaveBeenCalled();
     expect(harness.onClose).not.toHaveBeenCalled();
+  });
+
+  describe("P2 semantic types (issue #433)", () => {
+    const lifecycleDoc = (id = "ds-run") =>
+      projectSemanticDocument(archifySpecToDataset("lifecycle", SEMANTIC_FIXTURES.lifecycle, { id }).dataset).doc;
+
+    async function setSelect(el: HTMLSelectElement, value: string) {
+      await act(async () => {
+        el.value = value;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+
+    it("auto-selects the type from a pasted Mermaid header", async () => {
+      harness = renderDialog();
+      const mermaid = query<HTMLTextAreaElement>('[data-testid="gen-mermaid"]')!;
+      await setTextarea(mermaid, "sequenceDiagram\n  Alice->>Bob: hi");
+      expect(query<HTMLSelectElement>('[data-testid="gen-type-select"]')!.value).toBe("sequence");
+      await setTextarea(mermaid, "stateDiagram-v2\n  [*] --> A");
+      expect(query<HTMLSelectElement>('[data-testid="gen-type-select"]')!.value).toBe("lifecycle");
+    });
+
+    it("shows Mermaid diagnostics and disables apply for a refused diagram type", async () => {
+      harness = renderDialog();
+      await setTextarea(query<HTMLTextAreaElement>('[data-testid="gen-mermaid"]')!, "sequenceDiagram\n  A->>B: hi");
+      await click(query('[data-testid="gen-from-mermaid"]')!);
+      expect(query('[data-testid="gen-mermaid-diagnostics"]')!.textContent).toContain(
+        translate("ko", "diagram.mermaid.useGeneration", { type: "sequence" }),
+      );
+      expect(query<HTMLButtonElement>('[data-testid="gen-mermaid-apply"]')!.disabled).toBe(true);
+    });
+
+    it("previews counts and applies a new lifecycle diagram with its lane container", async () => {
+      harness = renderDialog({ host: stubHost({ runAgent: vi.fn(async () => JSON.stringify(SEMANTIC_FIXTURES.lifecycle)) }) });
+      await setSelect(query<HTMLSelectElement>('[data-testid="gen-type-select"]')!, "lifecycle");
+      await runGeneration();
+      await vi.waitFor(() => expect(query('[data-testid="gen-preview"]')).not.toBeNull());
+      expect(query('[data-testid="gen-summary"]')!.textContent).toBe(
+        translate("ko", "diagram.generate.summary", {
+          type: translate("ko", "diagram.generate.typeLifecycle"),
+          elements: 3,
+          relations: 2,
+        }),
+      );
+      await click(query('[data-testid="gen-apply-new"]')!);
+      const doc = harness.onImportDoc.mock.calls[0]![0] as DiagramDoc;
+      expect(doc.nodes.map((n) => n.id)).toEqual([`${doc.datasets![0]!.id}:lane:main`, "queued", "running", "done"]);
+      expect(doc.edges.map((e) => e.id)).toEqual(["tr1", "tr2"]);
+    });
+
+    it("applies an unscoped rerun as new even when the canvas holds the same ids", async () => {
+      // Generate, apply as new, then run again with nothing selected: the
+      // candidate reuses the member and relation ids already on the canvas.
+      harness = renderDialog({
+        doc: lifecycleDoc("ds-first"),
+        host: stubHost({ runAgent: vi.fn(async () => JSON.stringify(SEMANTIC_FIXTURES.lifecycle)) }),
+      });
+      await setSelect(query<HTMLSelectElement>('[data-testid="gen-type-select"]')!, "lifecycle");
+      await runGeneration();
+      await vi.waitFor(() => expect(query('[data-testid="gen-preview"]')).not.toBeNull());
+      expect(query('[data-testid="gen-blocking"]')).toBeNull();
+      const apply = query<HTMLButtonElement>('[data-testid="gen-apply-new"]')!;
+      expect(apply.disabled).toBe(false);
+      await click(apply);
+      expect(harness.onImportDoc).toHaveBeenCalledTimes(1);
+    });
+
+    it("expands a member selection to its dataset, locks the type and regenerates in place", async () => {
+      const doc = lifecycleDoc();
+      const updated = structuredClone(SEMANTIC_FIXTURES.lifecycle);
+      (updated.states as Record<string, unknown>[])[1]!.label = "Busy";
+      const host = stubHost({ runAgent: vi.fn(async () => JSON.stringify(updated)) });
+      harness = renderDialog({ doc, selection: ["running"], host });
+      expect(query('[data-testid="gen-scope"]')!.textContent).toBe(
+        translate("ko", "diagram.generate.scopeDataset", {
+          type: translate("ko", "diagram.generate.typeLifecycle"),
+          name: "Run",
+          count: 4,
+        }),
+      );
+      const typeSelect = query<HTMLSelectElement>('[data-testid="gen-type-select"]')!;
+      expect([typeSelect.value, typeSelect.disabled]).toEqual(["lifecycle", true]);
+
+      await runGeneration();
+      await vi.waitFor(() => expect(query('[data-testid="gen-apply-scoped"]')).not.toBeNull());
+      const prompt = vi.mocked(host.runAgent).mock.calls[0]![0];
+      expect(prompt).toContain("<untrusted_current_spec>");
+      withSnapshotSpy.mockClear();
+      await click(query('[data-testid="gen-apply-scoped"]')!);
+      expect(withSnapshotSpy).toHaveBeenCalledTimes(1);
+      const applied = probe!.getState().doc;
+      expect((applied.datasets ?? []).filter(isSemanticSpecDataset).map((d) => d.id)).toEqual(["ds-run"]);
+      expect(applied.nodes.find((n) => n.id === "running")?.title).toBe("Busy");
+    });
+
+    it("cannot run on members of more than one dataset", async () => {
+      const a = lifecycleDoc("ds-a");
+      const b = projectSemanticDocument(archifySpecToDataset("dataflow", SEMANTIC_FIXTURES.dataflow, { id: "ds-b" }).dataset).doc;
+      const doc = { ...a, nodes: [...a.nodes, ...b.nodes], edges: [...a.edges, ...b.edges], datasets: [...a.datasets!, ...b.datasets!] };
+      harness = renderDialog({ doc, selection: ["running", "app"] });
+      expect(query('[data-testid="gen-scope"]')!.textContent).toBe(translate("ko", "diagram.generate.multipleDatasets"));
+      await setTextarea(query<HTMLTextAreaElement>('[data-testid="gen-requirements"]')!, "x");
+      expect(query<HTMLButtonElement>('[data-testid="gen-run"]')!.disabled).toBe(true);
+    });
   });
 });

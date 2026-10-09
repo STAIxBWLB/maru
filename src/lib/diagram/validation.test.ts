@@ -275,7 +275,7 @@ describe("validateArchifySpecPreCheck", () => {
   });
 
   it("rejects an unknown diagram type", () => {
-    const result = validateArchifySpecPreCheck("sequence", validSpec);
+    const result = validateArchifySpecPreCheck("gantt", validSpec);
     expect(result.ok).toBe(false);
     expect(result.diagnostics.map((d) => d.key)).toContain("diagram.validation.specType");
   });

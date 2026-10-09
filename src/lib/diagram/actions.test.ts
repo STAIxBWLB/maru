@@ -12,9 +12,15 @@ import {
   setDocTitle,
   setSelection,
   undo,
+  updateEdge,
   updateNode,
   withSnapshot,
 } from "./actions";
+import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { archifySpecToDataset } from "./archifyCodec";
+import { replaceAllInDoc } from "./findReplace";
+import type { SemanticSpecDataset } from "./reportTypes";
+import { projectSemanticDocument } from "./semantic";
 import { createDiagramStore } from "./state";
 import { createEmptyDoc, createInitialEphemeral } from "./types";
 
@@ -164,5 +170,61 @@ describe("diagram actions", () => {
       hidden: true,
       locked: false,
     });
+  });
+});
+
+describe("semantic text write-through (issue #433 P2)", () => {
+  type Spec = Record<string, Record<string, unknown>[]>;
+  const semanticStore = (type: "lifecycle" | "dataflow") => {
+    const { dataset } = archifySpecToDataset(type, SEMANTIC_FIXTURES[type], { id: "ds" });
+    return createDiagramStore({ doc: projectSemanticDocument(dataset).doc, ephemeral: createInitialEphemeral() });
+  };
+  const specOf = (store: ReturnType<typeof semanticStore>) =>
+    (store.getState().doc.datasets![0] as SemanticSpecDataset).spec as Spec;
+
+  it("writes node title/body (inline, property panel, layer rename) to label/sublabel", () => {
+    const store = semanticStore("lifecycle");
+    store.setState(updateNode("running", { title: "Busy" }));
+    store.setState(updateNode("running", { body: "worker pool" }));
+    expect(specOf(store).states![1]).toMatchObject({ label: "Busy", sublabel: "worker pool" });
+    expect(store.getState().doc.nodes.find((n) => n.id === "running")).toMatchObject({ title: "Busy", body: "worker pool" });
+    store.setState(updateNode("running", { body: "" }));
+    expect(specOf(store).states![1]).not.toHaveProperty("sublabel");
+  });
+
+  it("refuses an empty required label and leaves the state untouched", () => {
+    const store = semanticStore("dataflow");
+    const before = store.getState();
+    store.setState(updateNode("app", { title: "" }));
+    store.setState(updateEdge("flow1", { label: "" }));
+    expect(store.getState()).toBe(before);
+  });
+
+  it("drops an optional relation label and writes edge labels through", () => {
+    const store = semanticStore("lifecycle");
+    store.setState(updateEdge("tr1", { label: "" }));
+    expect(specOf(store).transitions![0]).not.toHaveProperty("label");
+    store.setState(updateEdge("tr2", { label: "complete" }));
+    expect(specOf(store).transitions![1]!.label).toBe("complete");
+    expect(store.getState().doc.edges.find((e) => e.id === "tr2")?.label).toBe("complete");
+  });
+
+  it("writes replace-all through and refuses locked members", () => {
+    const store = semanticStore("lifecycle");
+    store.setState(setNodeLocked("done", true));
+    store.setState(replaceAllInDoc("n", "N"));
+    expect(specOf(store).states!.map((s) => s.label)).toEqual(["Queued", "RuNNiNg", "Done"]);
+    expect(specOf(store).transitions!.map((t) => t.label)).toEqual(["start", "fiNish"]);
+    expect(specOf(store).lanes![0]!.label).toBe("MaiN");
+    store.setState(updateNode("done", { title: "Over" }));
+    expect(specOf(store).states![2]!.label).toBe("Done");
+  });
+
+  it("keeps freeform edits off the spec", () => {
+    const store = semanticStore("lifecycle");
+    store.setState(addNode("simple", 0, 0, { id: "note", title: "Note" }));
+    const spec = specOf(store);
+    store.setState(updateNode("note", { title: "Annotated" }));
+    expect(specOf(store)).toBe(spec);
   });
 });

@@ -11,17 +11,18 @@ import {
   pasteStyleToSelection,
   pickStyle,
   redo as redoAction,
-  removeEdges,
-  removeNodes,
   sendBackward,
   sendToBack,
   undo as undoAction,
   withSnapshot,
 } from "../../../lib/diagram/actions";
+import { useTranslation } from "../../../lib/i18n";
+import { deleteSelection } from "../deleteSelection";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
 import { RibbonButton, RibbonGroup, RibbonSeparator } from "./ribbonPrimitives";
 
 export function RibbonEdit() {
+  const { t } = useTranslation();
   const store = useDiagramStore();
   const history = useDiagram((s) => s.ephemeral.history);
   const selection = useDiagram((s) => s.ephemeral.selection);
@@ -39,14 +40,8 @@ export function RibbonEdit() {
   const canDistribute = nodeCount >= 3;
   const canCopyStyle = nodeCount === 1;
 
-  const handleDelete = useCallback(() => {
-    if (selection.nodes.size > 0) {
-      store.setState(withSnapshot(removeNodes(selection.nodes), defaultCoalescer()));
-    }
-    if (selection.edges.size > 0) {
-      store.setState(withSnapshot(removeEdges(selection.edges), defaultCoalescer()));
-    }
-  }, [selection, store]);
+  // Same prompts as keyboard Delete (pattern-view detach, semantic detach).
+  const handleDelete = useCallback(() => void deleteSelection(store, defaultCoalescer(), t), [store, t]);
 
   const handleCopyStyle = useCallback(() => {
     const id = [...selection.nodes][0];

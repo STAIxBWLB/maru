@@ -34,20 +34,44 @@
  * - **Never throws.** Malformed candidates produce diagnostics, not
  *   exceptions.
  *
- * Canvas projection (P1 baseline): architecture `components` and workflow
- * `nodes` project to `simple` nodes (title = label, body = sublabel,
- * `meta.memberId = <datasetId>:m<index>`); `connections` / `edges` project to
- * edges. Lanes, boundaries, phases and groups stay semantic-only (they live
- * in the spec) until their editing phases land in P2. Node geometry comes
- * from the spec's `pos`/`size` when present, else a deterministic grid; the
- * dialog layer may reflow added nodes with `layoutDoc` afterwards.
+ * Canvas projection lives in `semantic.ts` (entities, relations, and the
+ * lane/stage/boundary containers); {@link projectSemanticCandidate} is the
+ * members-only delegate kept for P1 callers.
+ *
+ * Regenerating an existing dataset (the doc holds a dataset with the
+ * candidate's id, "previous"; issue #433 P2):
+ *
+ * - A locked member blocks only when it would change (patch or slot move) or
+ *   be removed; an unchanged locked member does not block.
+ * - On grid types a member whose projected slot moved between the previous
+ *   and candidate projections moves by that delta (user offsets survive);
+ *   containers resize the same way.
+ * - Only edges of the previous projection's relations are removed; freeform
+ *   annotation edges between members survive.
+ * - Containers are added only for a dataset new to the doc or one that
+ *   already has containers (P1 datasets stay container-less).
+ * - `opts.touched` (manual semantic edits) keeps only update/remove ops for
+ *   the touched ids plus the upsert, so canvas drift elsewhere is not
+ *   silently reverted.
  */
 
 import { isSemanticSpecDataset, type SemanticSpecDataset } from "./reportTypes";
+import {
+  SEMANTIC_TYPES,
+  datasetHasContainers,
+  descriptorFor,
+  isSemanticContainerNode,
+  projectSemanticDataset,
+  semanticDatasetsOf,
+  sequenceOrder,
+  specEntries,
+  type ProjectedMembers,
+} from "./semantic";
 import type { DiagramDoc, DiagramEdge, DiagramNode, DiagramStateRoot } from "./types";
 import { validateCandidateDoc, type ValidationDiagnostic } from "./validation";
 import type { StateTransformer } from "./actions";
-import { LAYOUT_DEFAULT_ORIGIN, LAYOUT_STEP_X, LAYOUT_STEP_Y } from "./layout";
+
+export type { ProjectedMembers } from "./semantic";
 
 // ---------------------------------------------------------------------------
 // Proposal model
@@ -90,6 +114,7 @@ export const BLOCKING_PROPOSAL_DIAGNOSTIC_KEYS: readonly string[] = [
   "diagram.proposal.lockedNode",
   "diagram.proposal.boundaryEdgeRemoved",
   "diagram.proposal.unresolvedEndpoint",
+  "diagram.proposal.idCollision",
 ];
 
 export function isBlockingDiagnostic(diagnostic: ValidationDiagnostic): boolean {
@@ -100,114 +125,50 @@ export function isBlockingDiagnostic(diagnostic: ValidationDiagnostic): boolean 
 // Candidate projection (spec -> canvas members)
 // ---------------------------------------------------------------------------
 
-export interface ProjectedMembers {
-  nodes: DiagramNode[];
-  edges: DiagramEdge[];
-  diagnostics: ValidationDiagnostic[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asRecordArray(value: unknown): Record<string, unknown>[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(isRecord);
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function isPoint(value: unknown): value is [number, number] {
-  return Array.isArray(value) && value.length === 2 && isFiniteNumber(value[0]) && isFiniteNumber(value[1]);
-}
-
-const PROJECTION_GRID_COLS = 4;
-const PROJECTION_NODE_W = 160;
-const PROJECTION_NODE_H = 64;
-
-/** Maru canvas id for a spec id, via the dataset's id map (identity fallback). */
-function maruIdFor(candidate: SemanticSpecDataset, specId: string): string {
-  return candidate.idMap[specId] ?? specId;
-}
-
-function projectNode(
-  candidate: SemanticSpecDataset,
-  entry: Record<string, unknown>,
-  index: number,
-): DiagramNode | null {
-  if (typeof entry.id !== "string" || entry.id.length === 0) return null;
-  const pos = isPoint(entry.pos) ? entry.pos : null;
-  const size = isPoint(entry.size) && entry.size[0] > 0 && entry.size[1] > 0 ? entry.size : null;
-  return {
-    id: maruIdFor(candidate, entry.id),
-    kind: "simple",
-    x: pos ? pos[0] : LAYOUT_DEFAULT_ORIGIN.x + (index % PROJECTION_GRID_COLS) * LAYOUT_STEP_X,
-    y: pos ? pos[1] : LAYOUT_DEFAULT_ORIGIN.y + Math.floor(index / PROJECTION_GRID_COLS) * LAYOUT_STEP_Y,
-    w: size ? size[0] : PROJECTION_NODE_W,
-    h: size ? size[1] : PROJECTION_NODE_H,
-    title: typeof entry.label === "string" ? entry.label : entry.id,
-    body: typeof entry.sublabel === "string" ? entry.sublabel : undefined,
-    meta: { memberId: `${candidate.id}:m${index}` },
-  };
-}
-
 /**
- * Project a semantic candidate to canvas members. Pure and deterministic;
- * unresolvable edge endpoints are skipped with a (blocking) diagnostic.
+ * Project a semantic candidate to canvas members (no containers). Pure and
+ * deterministic; delegates to `projectSemanticDataset`.
  */
 export function projectSemanticCandidate(candidate: SemanticSpecDataset): ProjectedMembers {
-  const diagnostics: ValidationDiagnostic[] = [];
-  const spec = candidate.spec;
-  const nodeEntries = asRecordArray(candidate.diagramType === "architecture" ? spec.components : spec.nodes);
-  const edgeEntries = asRecordArray(candidate.diagramType === "architecture" ? spec.connections : spec.edges);
-
-  const nodes: DiagramNode[] = [];
-  const nodeIds = new Set<string>();
-  nodeEntries.forEach((entry, index) => {
-    const node = projectNode(candidate, entry, index);
-    if (!node || nodeIds.has(node.id)) return;
-    nodeIds.add(node.id);
-    nodes.push(node);
-  });
-
-  const edges: DiagramEdge[] = [];
-  const edgeIds = new Set<string>();
-  edgeEntries.forEach((entry, index) => {
-    if (typeof entry.from !== "string" || typeof entry.to !== "string") return;
-    const fromNode = maruIdFor(candidate, entry.from);
-    const toNode = maruIdFor(candidate, entry.to);
-    let id =
-      typeof entry.id === "string" && entry.id.length > 0
-        ? maruIdFor(candidate, entry.id)
-        : `${candidate.id}-e${index}`;
-    while (edgeIds.has(id)) id = `${id}-2`;
-    edgeIds.add(id);
-    edges.push({
-      id,
-      fromNode,
-      fromPort: "e",
-      toNode,
-      toPort: "w",
-      arrowEnd: "filled",
-      label: typeof entry.label === "string" ? entry.label : undefined,
-    });
-  });
-
-  return { nodes, edges, diagnostics };
+  return projectSemanticDataset(candidate);
 }
 
 // ---------------------------------------------------------------------------
 // Proposal construction (diff candidate projection against the base doc)
 // ---------------------------------------------------------------------------
 
-/** Semantic fields whose drift turns a projection match into an update op. */
-function nodeSemanticPatch(existing: DiagramNode, projected: DiagramNode): Partial<DiagramNode> | null {
+interface SlotMove {
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+}
+
+/** Container geometry never collapses below this when a slot delta shrinks it. */
+const MIN_RESIZED_EXTENT = 20;
+
+/** Semantic fields (and slot moves) whose drift turns a projection match into an update op. */
+function nodeSemanticPatch(
+  existing: DiagramNode,
+  projected: DiagramNode,
+  move: SlotMove | undefined,
+): Partial<DiagramNode> | null {
   const patch: Partial<DiagramNode> = {};
+  // A freeform node that shares a candidate id becomes that member (for
+  // example after a detach): it adopts the member marker, so write-through,
+  // scope expansion and the delete guard apply to it again.
+  if (typeof existing.meta?.memberId !== "string" && projected.meta?.memberId !== undefined) {
+    patch.meta = { ...existing.meta, ...projected.meta };
+  }
   if (existing.kind !== projected.kind) patch.kind = projected.kind;
   if (existing.title !== projected.title) patch.title = projected.title;
   if (existing.body !== projected.body) patch.body = projected.body;
+  if (move) {
+    if (move.dx !== 0) patch.x = existing.x + move.dx;
+    if (move.dy !== 0) patch.y = existing.y + move.dy;
+    if (move.dw !== 0) patch.w = Math.max(MIN_RESIZED_EXTENT, existing.w + move.dw);
+    if (move.dh !== 0) patch.h = Math.max(MIN_RESIZED_EXTENT, existing.h + move.dh);
+  }
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
@@ -218,7 +179,25 @@ function edgeSemanticPatch(existing: DiagramEdge, projected: DiagramEdge): Parti
   if (existing.fromPort !== projected.fromPort) patch.fromPort = projected.fromPort;
   if (existing.toPort !== projected.toPort) patch.toPort = projected.toPort;
   if (existing.label !== projected.label) patch.label = projected.label;
+  if (projected.midOff !== undefined && existing.midOff !== projected.midOff) patch.midOff = projected.midOff;
+  if (projected.dash !== undefined && existing.dash !== projected.dash) patch.dash = projected.dash;
   return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function semanticDatasetById(doc: DiagramDoc, id: string): SemanticSpecDataset | null {
+  return (
+    (doc.datasets ?? []).find(
+      (dataset): dataset is SemanticSpecDataset => isSemanticSpecDataset(dataset) && dataset.id === id,
+    ) ?? null
+  );
+}
+
+export interface BuildProposalOptions {
+  /**
+   * Canvas ids a manual semantic edit touched: only update/remove ops for
+   * these ids (plus the dataset upsert) are kept, and nothing is added.
+   */
+  touched?: ReadonlySet<string>;
 }
 
 /**
@@ -231,16 +210,59 @@ export function buildProposalFromCandidate(
   meta: ProposalMeta,
   candidate: SemanticSpecDataset,
   currentDoc: DiagramDoc,
+  opts: BuildProposalOptions = {},
 ): { proposal: Proposal; diagnostics: ValidationDiagnostic[] } {
-  const projection = projectSemanticCandidate(candidate);
+  const previous = semanticDatasetById(currentDoc, candidate.id);
+  const containers = previous === null || datasetHasContainers(currentDoc, candidate.id);
+  const projection = projectSemanticDataset(candidate, { containers, doc: currentDoc });
+  const previousProjection = previous ? projectSemanticDataset(previous, { containers, doc: currentDoc }) : null;
   const diagnostics: ValidationDiagnostic[] = [...projection.diagnostics];
 
   const scope = meta.scope ?? null;
+  const touched = opts.touched ?? null;
+  const skip = (id: string): boolean => touched !== null && !touched.has(id);
   const locked = new Set(meta.lockedNodeIds);
   const docNodes = new Map((currentDoc.nodes ?? []).map((node) => [node.id, node]));
   const docEdges = new Map((currentDoc.edges ?? []).map((edge) => [edge.id, edge]));
+  // Canvas ids are spec ids, so another dataset can already own one. Patching
+  // that object would rewire or retitle the other dataset's member: block.
+  const ownedElsewhere = (node: DiagramNode): boolean => {
+    const memberId = node.meta?.memberId;
+    return typeof memberId === "string" && !memberId.startsWith(`${candidate.id}:`);
+  };
+  const otherRelationIds = new Set(
+    semanticDatasetsOf(currentDoc)
+      .filter((dataset) => dataset.id !== candidate.id)
+      .flatMap((dataset) => {
+        const descriptor = descriptorFor(dataset);
+        return descriptor
+          ? specEntries(dataset.spec, descriptor.relations).map((entry, index) =>
+              typeof entry.id === "string" ? (dataset.idMap[entry.id] ?? entry.id) : `${dataset.id}-e${index}`,
+            )
+          : [];
+      }),
+  );
   const candidateNodeIds = new Set(projection.nodes.map((node) => node.id));
   const candidateEdgeIds = new Set(projection.edges.map((edge) => edge.id));
+
+  // Slot moves: previous → candidate projection delta, for grid members and
+  // for containers of every type.
+  const slotMoves = new Map<string, SlotMove>();
+  if (previousProjection) {
+    const grid = SEMANTIC_TYPES[candidate.diagramType]?.grid === true;
+    const before = new Map(previousProjection.nodes.map((node) => [node.id, node]));
+    for (const next of projection.nodes) {
+      const prev = before.get(next.id);
+      if (!prev || !(grid || isSemanticContainerNode(next))) continue;
+      const move = { dx: next.x - prev.x, dy: next.y - prev.y, dw: next.w - prev.w, dh: next.h - prev.h };
+      if (move.dx !== 0 || move.dy !== 0 || move.dw !== 0 || move.dh !== 0) slotMoves.set(next.id, move);
+    }
+  }
+  const previousRelationEdgeIds = new Set(previousProjection?.edges.map((edge) => edge.id) ?? []);
+  const isPreviousMember = (node: DiagramNode): boolean => {
+    const memberId = node.meta?.memberId;
+    return previous !== null && typeof memberId === "string" && memberId.startsWith(`${previous.id}:`);
+  };
 
   // A member is effectively in scope when the scope owns it or it is a new
   // candidate addition (adding members touches nothing existing).
@@ -251,33 +273,43 @@ export function buildProposalFromCandidate(
 
   // --- nodes: additions and updates --------------------------------------
   for (const projected of projection.nodes) {
-    if (locked.has(projected.id)) {
-      diagnostics.push({
-        key: "diagram.proposal.lockedNode",
-        params: { id: projected.id },
-      });
+    const existing = docNodes.get(projected.id);
+    if (!existing) {
+      if (touched === null) ops.push({ kind: "addNode", node: projected });
       continue;
     }
-    const existing = docNodes.get(projected.id);
-    if (existing && scope !== null && !scope.has(projected.id)) {
+    if (skip(projected.id)) continue;
+    if (ownedElsewhere(existing)) {
+      diagnostics.push({ key: "diagram.proposal.idCollision", params: { id: projected.id } });
+      continue;
+    }
+    const patch = nodeSemanticPatch(existing, projected, slotMoves.get(projected.id));
+    // A locked node blocks only when the candidate would change it.
+    if (locked.has(projected.id)) {
+      if (patch) diagnostics.push({ key: "diagram.proposal.lockedNode", params: { id: projected.id } });
+      continue;
+    }
+    if (scope !== null && !scope.has(projected.id)) {
       diagnostics.push({
         key: "diagram.proposal.outOfScopeNode",
         params: { id: projected.id },
       });
       continue;
     }
-    if (!existing) {
-      ops.push({ kind: "addNode", node: projected });
-      continue;
-    }
-    const patch = nodeSemanticPatch(existing, projected);
     if (patch) ops.push({ kind: "updateNode", id: projected.id, patch });
   }
 
   // --- node removals -------------------------------------------------------
   for (const existing of currentDoc.nodes ?? []) {
-    if (candidateNodeIds.has(existing.id)) continue;
-    if (locked.has(existing.id)) continue; // locked nodes are never touched
+    if (candidateNodeIds.has(existing.id) || skip(existing.id)) continue;
+    if (locked.has(existing.id)) {
+      // Locked nodes are never touched; a locked member the spec drops would
+      // leave the canvas disagreeing with the spec, so that blocks.
+      if (isPreviousMember(existing) && (scope === null || scope.has(existing.id))) {
+        diagnostics.push({ key: "diagram.proposal.lockedNode", params: { id: existing.id } });
+      }
+      continue;
+    }
     if (scope !== null && !scope.has(existing.id)) continue;
     // A scoped removal must not strand a boundary edge silently: the edge
     // cannot be removed (its other endpoint is out of scope), so the removal
@@ -302,6 +334,8 @@ export function buildProposalFromCandidate(
 
   // --- edges: additions and updates ---------------------------------------
   for (const projected of projection.edges) {
+    const existing = docEdges.get(projected.id);
+    if (touched !== null && (!existing || skip(projected.id))) continue;
     const fromOk = candidateNodeIds.has(projected.fromNode) || docNodes.has(projected.fromNode);
     const toOk = candidateNodeIds.has(projected.toNode) || docNodes.has(projected.toNode);
     if (!fromOk || !toOk) {
@@ -320,9 +354,23 @@ export function buildProposalFromCandidate(
       });
       continue;
     }
-    const existing = docEdges.get(projected.id);
     if (!existing) {
       ops.push({ kind: "addEdge", edge: projected });
+      continue;
+    }
+    if (otherRelationIds.has(existing.id) && !previousRelationEdgeIds.has(existing.id)) {
+      diagnostics.push({ key: "diagram.proposal.idCollision", params: { id: projected.id } });
+      continue;
+    }
+    // A freeform edge that shares a candidate id (for example one a detach
+    // left behind) is rewired only when the scope owns both of its current
+    // endpoints; edges outside the scope are never touched.
+    if (
+      scope !== null &&
+      !previousRelationEdgeIds.has(existing.id) &&
+      !(scope.has(existing.fromNode) && scope.has(existing.toNode))
+    ) {
+      diagnostics.push({ key: "diagram.proposal.outOfScopeEdge", params: { id: projected.id } });
       continue;
     }
     const patch = edgeSemanticPatch(existing, projected);
@@ -331,7 +379,10 @@ export function buildProposalFromCandidate(
 
   // --- edge removals --------------------------------------------------------
   for (const existing of currentDoc.edges ?? []) {
-    if (candidateEdgeIds.has(existing.id)) continue;
+    if (candidateEdgeIds.has(existing.id) || skip(existing.id)) continue;
+    // Regenerating a dataset removes only its own relation edges; freeform
+    // annotation edges between members survive.
+    if (previous !== null && !previousRelationEdgeIds.has(existing.id)) continue;
     if (scope === null) {
       // Whole-document candidate owns every edge; removals of edges incident
       // to surviving locked nodes are still fine (the node object is untouched).
@@ -352,8 +403,14 @@ export function buildProposalFromCandidate(
     // Fully out-of-scope edges are never touched.
   }
 
-  // The semantic candidate itself is stored with the patch.
-  ops.push({ kind: "upsertSemanticDataset", dataset: candidate });
+  // The semantic candidate itself is stored with the patch. Regenerating a
+  // dataset in place keeps the imported top-level fields the engine schema
+  // cannot carry, so they are never dropped silently.
+  const stored =
+    previous?.preservedExtensions !== undefined
+      ? { ...candidate, preservedExtensions: { ...previous.preservedExtensions, ...candidate.preservedExtensions } }
+      : candidate;
+  ops.push({ kind: "upsertSemanticDataset", dataset: stored });
 
   return { proposal: { meta, candidate, ops, diagnostics }, diagnostics };
 }
@@ -366,11 +423,14 @@ function applyProposalOps(doc: DiagramDoc, ops: readonly ProposalOp[]): DiagramD
   let nodes = doc.nodes ?? [];
   let edges = doc.edges ?? [];
   let datasets = doc.datasets;
+  // Added containers go first in `nodes` (behind their members), in op order.
+  const containers: DiagramNode[] = [];
 
   for (const op of ops) {
     switch (op.kind) {
       case "addNode":
-        nodes = [...nodes, op.node];
+        if (isSemanticContainerNode(op.node)) containers.push(op.node);
+        else nodes = [...nodes, op.node];
         break;
       case "updateNode":
         nodes = nodes.map((node) => (node.id === op.id ? { ...node, ...op.patch } : node));
@@ -398,6 +458,7 @@ function applyProposalOps(doc: DiagramDoc, ops: readonly ProposalOp[]): DiagramD
     }
   }
 
+  if (containers.length > 0) nodes = [...containers, ...nodes];
   return { ...doc, nodes, edges, ...(datasets !== undefined ? { datasets } : {}) };
 }
 
@@ -467,12 +528,18 @@ export interface ProposalDiff {
   changedNodes: string[];
   addedEdges: number;
   removedEdges: number;
+  /** Spec-level summary; "components" are entities, "connections" relations. */
   semanticSummary: {
     componentsAdded: string[];
     componentsRemoved: string[];
     componentsChanged: string[];
     connectionsAdded: number;
     connectionsRemoved: number;
+    /** Relative order of messages present in both specs changed (sequence). */
+    orderChanged: boolean;
+    containersAdded: number;
+    containersRemoved: number;
+    containersChanged: number;
   };
 }
 
@@ -482,20 +549,24 @@ interface SpecEntry {
   fingerprint: string;
 }
 
-function specComponentEntries(dataset: SemanticSpecDataset): SpecEntry[] {
-  const raw = dataset.diagramType === "architecture" ? dataset.spec.components : dataset.spec.nodes;
-  return asRecordArray(raw)
+function specEntityEntries(dataset: SemanticSpecDataset): SpecEntry[] {
+  const descriptor = SEMANTIC_TYPES[dataset.diagramType];
+  if (!descriptor) return [];
+  return specEntries(dataset.spec, descriptor.entities)
     .filter((entry) => typeof entry.id === "string")
     .map((entry) => ({
       id: entry.id as string,
       label: typeof entry.label === "string" ? entry.label : (entry.id as string),
-      fingerprint: JSON.stringify([entry.label ?? null, entry.sublabel ?? null, entry.type ?? null]),
+      fingerprint: JSON.stringify(
+        ["label", "sublabel", "type", "lane", "col", "stage", "row"].map((key) => entry[key] ?? null),
+      ),
     }));
 }
 
-function specConnectionKeys(dataset: SemanticSpecDataset): string[] {
-  const raw = dataset.diagramType === "architecture" ? dataset.spec.connections : dataset.spec.edges;
-  return asRecordArray(raw)
+function specRelationKeys(dataset: SemanticSpecDataset): string[] {
+  const descriptor = SEMANTIC_TYPES[dataset.diagramType];
+  if (!descriptor) return [];
+  return specEntries(dataset.spec, descriptor.relations)
     .filter((entry) => typeof entry.from === "string" && typeof entry.to === "string")
     .map((entry, index) =>
       typeof entry.id === "string" && entry.id.length > 0
@@ -504,25 +575,31 @@ function specConnectionKeys(dataset: SemanticSpecDataset): string[] {
     );
 }
 
-function currentSemanticDataset(doc: DiagramDoc, candidate: SemanticSpecDataset): SemanticSpecDataset | null {
-  const datasets = doc.datasets ?? [];
-  const byId = datasets.find(
-    (dataset): dataset is SemanticSpecDataset =>
-      isSemanticSpecDataset(dataset) && dataset.id === candidate.id,
+/** Container key → label fingerprint (lanes by id, stages/boundaries by index). */
+function specContainers(dataset: SemanticSpecDataset): Map<string, string> {
+  const container = SEMANTIC_TYPES[dataset.diagramType]?.container;
+  if (!container) return new Map();
+  return new Map(
+    specEntries(dataset.spec, container.field).map((entry, index) => [
+      container.keyedBy === "id" && typeof entry.id === "string" ? entry.id : String(index),
+      JSON.stringify([entry.label ?? null, entry.wraps ?? null]),
+    ]),
   );
-  if (byId) return byId;
-  return (
-    datasets.find(
-      (dataset): dataset is SemanticSpecDataset =>
-        isSemanticSpecDataset(dataset) && dataset.diagramType === candidate.diagramType,
-    ) ?? null
-  );
+}
+
+/** Message ids in sequence order (id-less messages are skipped). */
+function messageOrder(dataset: SemanticSpecDataset): string[] {
+  if (dataset.diagramType !== "sequence") return [];
+  const messages = specEntries(dataset.spec, "messages");
+  return sequenceOrder(dataset.spec)
+    .map((index) => messages[index]?.id)
+    .filter((id): id is string => typeof id === "string");
 }
 
 /**
  * Categorized diff for the preview UI. Node/edge categories come from the op
- * list; the semantic summary compares the candidate spec against the current
- * semantic dataset of the same diagram type (empty categories when absent).
+ * list; the semantic summary compares the candidate spec against the doc's
+ * dataset with the candidate's id (everything is "added" when absent).
  */
 export function diffProposal(currentDoc: DiagramDoc, proposal: Proposal): ProposalDiff {
   const addedNodes: string[] = [];
@@ -552,39 +629,53 @@ export function diffProposal(currentDoc: DiagramDoc, proposal: Proposal): Propos
     }
   }
 
-  const current = currentSemanticDataset(currentDoc, proposal.candidate);
+  const current = semanticDatasetById(currentDoc, proposal.candidate.id);
   const semanticSummary: ProposalDiff["semanticSummary"] = {
     componentsAdded: [],
     componentsRemoved: [],
     componentsChanged: [],
     connectionsAdded: 0,
     connectionsRemoved: 0,
+    orderChanged: false,
+    containersAdded: 0,
+    containersRemoved: 0,
+    containersChanged: 0,
   };
+  const nextEntries = new Map(specEntityEntries(proposal.candidate).map((entry) => [entry.id, entry]));
+  const prevEntries = new Map((current ? specEntityEntries(current) : []).map((entry) => [entry.id, entry]));
+  for (const [id, entry] of nextEntries) {
+    const prev = prevEntries.get(id);
+    if (!prev) semanticSummary.componentsAdded.push(entry.label);
+    else if (prev.fingerprint !== entry.fingerprint) semanticSummary.componentsChanged.push(entry.label);
+  }
+  for (const [id, entry] of prevEntries) {
+    if (!nextEntries.has(id)) semanticSummary.componentsRemoved.push(entry.label);
+  }
+  const nextConnections = new Set(specRelationKeys(proposal.candidate));
+  const prevConnections = new Set(current ? specRelationKeys(current) : []);
+  for (const key of nextConnections) {
+    if (!prevConnections.has(key)) semanticSummary.connectionsAdded += 1;
+  }
+  for (const key of prevConnections) {
+    if (!nextConnections.has(key)) semanticSummary.connectionsRemoved += 1;
+  }
+  const nextContainers = specContainers(proposal.candidate);
+  const prevContainers = current ? specContainers(current) : new Map<string, string>();
+  for (const [key, fingerprint] of nextContainers) {
+    const prev = prevContainers.get(key);
+    if (prev === undefined) semanticSummary.containersAdded += 1;
+    else if (prev !== fingerprint) semanticSummary.containersChanged += 1;
+  }
+  for (const key of prevContainers.keys()) {
+    if (!nextContainers.has(key)) semanticSummary.containersRemoved += 1;
+  }
   if (current) {
-    const nextEntries = new Map(specComponentEntries(proposal.candidate).map((entry) => [entry.id, entry]));
-    const prevEntries = new Map(specComponentEntries(current).map((entry) => [entry.id, entry]));
-    for (const [id, entry] of nextEntries) {
-      const prev = prevEntries.get(id);
-      if (!prev) semanticSummary.componentsAdded.push(entry.label);
-      else if (prev.fingerprint !== entry.fingerprint) semanticSummary.componentsChanged.push(entry.label);
-    }
-    for (const [id, entry] of prevEntries) {
-      if (!nextEntries.has(id)) semanticSummary.componentsRemoved.push(entry.label);
-    }
-    const nextConnections = new Set(specConnectionKeys(proposal.candidate));
-    const prevConnections = new Set(specConnectionKeys(current));
-    for (const key of nextConnections) {
-      if (!prevConnections.has(key)) semanticSummary.connectionsAdded += 1;
-    }
-    for (const key of prevConnections) {
-      if (!nextConnections.has(key)) semanticSummary.connectionsRemoved += 1;
-    }
-  } else {
-    // No prior semantic dataset: everything in the candidate is new.
-    for (const entry of specComponentEntries(proposal.candidate)) {
-      semanticSummary.componentsAdded.push(entry.label);
-    }
-    semanticSummary.connectionsAdded = specConnectionKeys(proposal.candidate).length;
+    const nextOrder = messageOrder(proposal.candidate);
+    const prevOrder = messageOrder(current);
+    const common = new Set(nextOrder.filter((id) => prevOrder.includes(id)));
+    const a = nextOrder.filter((id) => common.has(id));
+    const b = prevOrder.filter((id) => common.has(id));
+    semanticSummary.orderChanged = a.some((id, index) => id !== b[index]);
   }
 
   return { addedNodes, removedNodes, changedNodes, addedEdges, removedEdges, semanticSummary };

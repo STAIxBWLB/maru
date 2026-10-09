@@ -7,7 +7,8 @@ opt out via Settings → Preferences → "Diagram mode", `VITE_MARU_DIAGRAM=0`, 
 `?maru-diagram=0`. The **Report Pattern Studio** track (schema v8) adds typed
 report datasets, pattern views, table editing, a codec registry, and managed
 "Insert/Update in report" links into Markdown documents. Schema v9 (issue #433)
-adds typed semantic datasets for Archify-based generation and editing.
+adds typed semantic datasets for Archify-based generation and editing of
+architecture, workflow, sequence, dataflow and lifecycle diagrams.
 
 ## Documents
 
@@ -99,9 +100,10 @@ clipboard understands HTML tables, TSV, and Markdown tables.
 ## Typed semantic datasets (schema v9)
 
 v9 adds the `semanticSpec` dataset kind (`src/lib/diagram/reportTypes.ts`):
-the canonical, editable meaning of a generated diagram. `spec` is the Archify
-typed JSON (interchange/renderer input); canvas members are a projection of
-the dataset, never a second semantic source. `idMap` is the reversible
+the canonical, editable meaning of a generated diagram, for any of the five
+Archify engine types (architecture, workflow, sequence, dataflow, lifecycle).
+`spec` is the Archify typed JSON (interchange/renderer input); canvas members
+are a projection of the dataset, never a second semantic source. `idMap` is the reversible
 Archify-safe-id → Maru-id mapping (Archify ids forbid `:` and leading digits;
 Maru member ids like `ds:m0` do not), `engine` pins the `archify` engine
 version the spec round-trips through, and `provenance` records the origin
@@ -110,10 +112,36 @@ exists. Fields the pinned engine cannot represent are kept verbatim in
 `preservedExtensions` and reported as fidelity diagnostics — never silently
 stripped, never re-emitted as if the engine supported them.
 
-Because canvas members are projections, freeform edits to a managed member
-require detaching it first (the same detach contract as report pattern
-views); the semantic spec stays the source of truth. v8→v9 is a version bump
-only — v8 documents migrate in memory on load with no content rewrites.
+Because canvas members are projections, the semantic spec stays the source
+of truth: text edits write through to it, structural edits are spec edits,
+and deleting members requires detaching the dataset first (see "Semantic
+editing"). v8→v9 is a version bump only — v8 documents migrate in memory on
+load with no content rewrites. Issue #433 P2 added sequence, dataflow and
+lifecycle without a schema bump: every new datum rides an existing optional
+slot (the dataset, node `meta`, edge `midOff`, the spec's optional relation
+`id`). Builds 1.1.17 to 1.1.19 load and save P2 documents losslessly but show
+containers as plain sections, refuse scoped apply on a dataset of an unknown
+type, and do not write text through.
+
+The per-type descriptor table, `validateSemanticContent`, `mintRelationIds`
+and the projection live in `src/lib/diagram/semantic.ts`:
+
+| Type | Entities | Relations (minted id prefix) | Containers | Not projected |
+|---|---|---|---|---|
+| architecture | `components` | `connections` (`conn`) | `boundaries` (by index) | `cards` |
+| workflow | `nodes` | `edges` (`edge`) | `lanes` (by id) | `phases`, `groups`, `mainPath`, `semanticChecks`, `cards` |
+| sequence | `participants` | `messages` (`msg`) | none | `segments`, `activations`, `cards` |
+| dataflow | `nodes` | `flows` (`flow`) | `stages` (by index) | `cards` |
+| lifecycle | `states` | `transitions` (`tr`) | `lanes` (by id) | `cards` |
+
+Every path that skips the engine (import, gallery copy, manual edits) runs
+`validateSemanticContent`: the generated schema validator plus the reference
+checks JSON Schema cannot express: dangling relation endpoints, lanes,
+stages, boundary `wraps`, `mainPath`/`semanticChecks` and activation
+participants, sequence self-messages, and duplicate ids. Ingest mints ids
+for id-less relations (`diagram.archify.relationIdsAssigned`), so canvas
+edges have stable ids; P1 documents keep their legacy `<datasetId>-e<index>`
+edge ids until regenerated.
 
 ## Generation and safe editing (issue #433)
 
@@ -144,11 +172,73 @@ is therefore not a durable save — canvas state and the on-disk document are
 separate commitments, and a conflict surfaces as a notice, never an
 automatic retry.
 
+Generation offers the five types; a pasted `sequenceDiagram` or
+`stateDiagram[-v2]` header selects sequence or lifecycle. The candidate's
+relation ids are minted and `validateSemanticContent` runs before the engine
+(an early fail), so the engine validates (and its receipt hashes) the
+exact spec that is stored.
+
+A selection on members of exactly one semantic dataset expands the scope to
+that whole dataset (entities and containers, shown in the dialog before
+Run), locks the type, sends the current spec (as untrusted data, omitted
+with `diagram.generate.currentSpecOmitted` above 48 KiB) and reuses the
+dataset id, so the result replaces the dataset in place. Members of several
+datasets cannot run. Regenerating an existing dataset blocks on a locked
+member only when it would change or be removed, moves grid members by their
+slot delta (user offsets survive), removes only that dataset's relation
+edges (freeform annotation edges survive), and adds containers only when the
+dataset already has them. The preview reports element, relation, container
+and message-order changes.
+
 Unavailability degrades honestly: a missing engine surfaces the typed
 `ENGINE_UNAVAILABLE` diagnostic, an unreachable agent host surfaces the
 failed-run state, and the Mermaid paste import path (`mermaidToDocDetailed`,
-agent- and engine-free) keeps working, reporting skipped constructs as
-localized diagnostics.
+agent- and engine-free) keeps working for flowcharts, reporting skipped
+constructs as localized diagnostics. A non-flowchart Mermaid header imports
+nothing (`diagram.mermaid.unsupportedDiagramType`); sequence and state
+diagrams add a hint to use generation instead, and the dialog's direct
+apply is disabled.
+
+## Semantic editing (issue #433 P2)
+
+**Projection.** Entities become nodes (`meta.memberId =
+<datasetId>:m<index>`; lifecycle `start`/`success`/`failure` are ovals,
+`decision` a diamond). Workflow and lifecycle entities sit on a lane grid
+(lane bands top-down, `col` columns), dataflow entities in stage columns
+(ordered by `row`), architecture members are reflowed by `layoutDoc`.
+Lanes, stages and boundaries become `section` containers placed first in
+`nodes`, with id and `memberId` `<datasetId>:<role>:<key>` (Archify ids
+forbid `:`, so they cannot collide) and `meta.semanticContainer` set. A
+sequence is a participant row; each message is an `s→s` bracket edge whose
+`midOff` depth encodes its order (by `y`, then array position), dashed for
+`return`/`dashed` variants. Same-axis auto routes anchor the edge label on
+the middle segment, so brackets carry their labels (identical to before
+when `midOff` is 0). Lifelines and activations come from the engine render.
+
+**Text write-through.** `updateNode` / `updateEdge` (the chokepoint behind
+inline editing, the property panel, layer rename and replace-all) write
+text on a member through to its spec entry: title → `label`, body →
+`sublabel` (empty deletes it), container title → `label`, edge label →
+`label`. An empty required label (entities, containers, messages, flows) is
+refused and the edit is dropped, like an edit on a locked node; an empty
+optional label (connections, workflow edges, transitions) is deleted.
+
+**Inspector.** The property panel shows a semantic inspector
+(`SemanticProps`) for a single member: type, diagram, role, id, label and
+lane/stage/boundary membership. Its editors (message order, lifecycle
+state type, dataflow classification, lane and stage) are spec edits:
+`planSemanticEdit` (`semanticEdit.ts`) validates the edited spec and routes
+it through `buildProposalFromCandidate` and `prepareProposalApply` with a
+touched filter, so each edit is one undo entry and canvas drift on
+untouched members survives. Manual edits never run the engine.
+
+**Detach and delete.** "Detach to freeform..." drops the dataset and the
+member markers after a confirm listing what is lost (types, order,
+variants, classifications, notes, containers, not-projected and preserved
+fields, provenance); the canvas stays and the detach is undoable. Deleting
+semantic members (keyboard Delete or the Edit ribbon) asks to detach the
+dataset first; cancel changes nothing. Adding or removing semantic members
+by hand is not supported; regenerate or detach instead.
 
 ## Archify engine pin
 
@@ -195,13 +285,19 @@ capabilities and export fidelity up front:
 
 - **lossless** — `maru-json` (canonical document) and `maru-svg` (SVG with the
   canonical JSON embedded as metadata; re-import restores the full document).
-- **structural** — csv / tsv / markdown-table / html-table / mermaid: the data
-  or topology survives, styling does not.
+- **structural** — csv / tsv / markdown-table / html-table / mermaid /
+  archify-json: the data or topology survives, styling does not.
 - **visual** — svg-image / png / png-transparent / jpg / pdf: a rendering only.
 
 Exports run through the unified Import/Export dialog or the selected-path
 Tauri save dialog; clipboard codecs copy/paste HTML tables, TSV, and Markdown
-tables directly. Mermaid round-trips (export + import).
+tables directly. Mermaid round-trips flowcharts (export + import); importing
+another Mermaid diagram type is refused, and exporting a document with a
+semantic dataset warns that its semantics are lost
+(`diagram.mermaid.semanticLoss`). Archify JSON (`<name>.architecture.json`,
+`.workflow.json`, `.sequence.json`, `.dataflow.json`, `.lifecycle.json`)
+imports a projected canvas (members and containers) and exports the spec
+verbatim.
 
 ## Insert/Update in report
 
@@ -274,8 +370,9 @@ Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache
   pattern presets, report assets.
 - e2e: `e2e/diagram.spec.ts` (flag visibility, ko/en labels, save/reload,
   templates, Mermaid, export dialog, generation dialog + Mermaid paste
-  diagnostics + agent-host-unavailable degradation, no `localhost:5500` /
-  Google Fonts requests).
+  diagnostics + agent-host-unavailable degradation, semantic import → edit →
+  undo → save/reload, detach, delete guard, no `localhost:5500` / Google
+  Fonts requests).
 
 ## Archify engine pin
 

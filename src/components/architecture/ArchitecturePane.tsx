@@ -13,10 +13,8 @@ import {
 } from "../../lib/api";
 import { assetUrlForPath } from "../../lib/binaryViewer";
 import { parseArchifySpec } from "../../lib/diagram/archifyCodec";
-import { layoutDoc } from "../../lib/diagram/layout";
 import { listDiagrams, writeDiagram } from "../../lib/diagram/persistence";
-import { projectSemanticCandidate } from "../../lib/diagram/proposal";
-import { createDiagramId, createEmptyDoc } from "../../lib/diagram/types";
+import { projectSemanticDocument } from "../../lib/diagram/semantic";
 import { IpcError } from "../../lib/ipcError";
 import { useTranslation } from "../../lib/i18n";
 import { IconButton } from "../ui/Button";
@@ -174,13 +172,7 @@ export function ArchitecturePane({ workspacePath, copyWorkspacePath, onRevealInF
         throw new Error(first ? t(first.key, first.params) : t("architecture.copyToDiagram.invalid"));
       }
       const { dataset } = outcome.result;
-      const projected = projectSemanticCandidate(dataset);
-      const doc = createEmptyDoc(createDiagramId());
-      doc.docTitle = dataset.name;
-      doc.datasets = [dataset];
-      const laidOut = layoutDoc({ ...doc, nodes: projected.nodes, edges: projected.edges });
-      doc.nodes = laidOut.doc.nodes;
-      doc.edges = laidOut.doc.edges;
+      const { doc } = projectSemanticDocument(dataset);
 
       // Never overwrite: pick a name no existing diagram uses.
       const existing = new Set((await listDiagrams(destinationWorkspace)).map((file) => file.name));

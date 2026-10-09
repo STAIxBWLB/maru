@@ -21,6 +21,8 @@ import {
   serializeMatrixToMarkdown,
   sliceMatrix,
 } from "./codecs";
+import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { archifySpecToDataset } from "./archifyCodec";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import {
   MATRIX_MAX_COLS,
@@ -401,6 +403,21 @@ describe("mermaid codec", () => {
     expect(parsed.warnings.map((w) => w.key)).toContain("diagram.codec.warn.mermaidImport");
     if (parsed.result.kind !== "doc") throw new Error("expected doc");
     expect(parsed.result.doc.nodes).toHaveLength(2);
+  });
+
+  it("refuses to import a sequence or state diagram", () => {
+    const codec = getCodec("mermaid")!;
+    expect(() => codec.parse!("sequenceDiagram\n  Alice->>Bob: hi", "s.mmd")).toThrow(
+      /diagram\.mermaid\.unsupportedDiagramType/,
+    );
+    expect(() => codec.parse!("stateDiagram-v2\n  [*] --> A", "s.mmd")).toThrow(/stateDiagram-v2/);
+  });
+
+  it("warns that a semantic dataset does not survive export", () => {
+    const codec = getCodec("mermaid")!;
+    const { dataset } = archifySpecToDataset("sequence", SEMANTIC_FIXTURES.sequence);
+    const out = syncSerialize(codec, { doc: { ...createEmptyDoc("m", 1), datasets: [dataset] } });
+    expect(out.warnings).toContainEqual({ key: "diagram.mermaid.semanticLoss", params: { type: "sequence" } });
   });
 });
 

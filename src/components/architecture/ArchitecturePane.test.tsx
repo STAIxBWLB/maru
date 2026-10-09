@@ -144,6 +144,7 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
       { id: "web", type: "frontend", label: "Web" },
       { id: "api", type: "backend", label: "API" },
     ],
+    boundaries: [{ kind: "region", label: "Cloud", wraps: ["api"] }],
     connections: [{ from: "web", to: "api", label: "HTTPS" }],
   });
 
@@ -200,8 +201,8 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
     const [root_, name, doc] = mocks.writeDiagram.mock.calls[0] as [string, string, {
       docTitle: string;
       datasets?: { kind: string; provenance?: { origin?: string; repository?: string } }[];
-      nodes: unknown[];
-      edges: unknown[];
+      nodes: { id: string; meta?: { semanticContainer?: string } }[];
+      edges: { id: string }[];
     }];
     expect(root_).toBe("/work");
     expect(name).toBe("Alpha Service-2");
@@ -209,8 +210,9 @@ describe("ArchitecturePane copy-to-Diagram handoff (issue #433)", () => {
     expect(doc.datasets?.[0]?.kind).toBe("semanticSpec");
     expect(doc.datasets?.[0]?.provenance?.origin).toBe("gallery-copy");
     expect(doc.datasets?.[0]?.provenance?.repository).toBe("dev/alpha");
-    expect(doc.nodes.length).toBe(2);
-    expect(doc.edges.length).toBe(1);
+    // Members plus the projected boundary container (first), relation id minted.
+    expect(doc.nodes.map((n) => n.meta?.semanticContainer ?? n.id)).toEqual(["boundary", "web", "api"]);
+    expect(doc.edges.map((e) => e.id)).toEqual(["conn1"]);
     expect(opened).toEqual(["Alpha Service-2"]);
   });
 

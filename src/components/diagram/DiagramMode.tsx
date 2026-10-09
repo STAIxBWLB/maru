@@ -17,8 +17,6 @@ import {
   duplicateSelection,
   nudgeSelection,
   redo as redoAction,
-  removeEdges,
-  removeNodes,
   replaceDoc,
   selectAllNodes,
   setDocTitle,
@@ -88,8 +86,6 @@ import {
 } from "../../lib/diagram/convert";
 import { getPattern } from "../../lib/diagram/patterns";
 import {
-  analyzeViewDrag,
-  detachViewMembersSnippetAction,
   insertPatternAt,
   insertPatternAtAction,
   newDocumentFromPattern,
@@ -121,7 +117,6 @@ import {
   type RibbonTab,
   type TableCellAddress,
 } from "../../lib/diagram/types";
-import { confirmDialog } from "../../lib/confirmDialog";
 import { useTranslation } from "../../lib/i18n";
 import {
   DiagramStoreProvider,
@@ -133,6 +128,7 @@ import {
   useDiagramStore,
 } from "./DiagramStoreContext";
 import { CanvasSurface } from "./canvas/CanvasSurface";
+import { deleteSelection } from "./deleteSelection";
 import { InlineTextEditor, type InlineEditField } from "./canvas/InlineTextEditor";
 import { LeftPanel } from "./panels/LeftPanel";
 import { RightPanel } from "./panels/RightPanel";
@@ -1445,31 +1441,8 @@ function DiagramShell({
       if (event.key === "Delete" || event.key === "Backspace") {
         if (hasSelection) {
           event.preventDefault();
-          const state = store.getState();
-          const nodeIds = [...state.ephemeral.selection.nodes];
-          const edgeIds = [...state.ephemeral.selection.edges];
-          // Detach prompt (Phase 2b): deleting a strict subset of a view's
-          // generated members asks to detach them from the projection first.
-          const analysis = analyzeViewDrag(state.doc, nodeIds);
-          void (async () => {
-            if (analysis.subsets.length > 0) {
-              if (!(await confirmDialog(t("diagram.detach.confirm")))) return;
-              for (const subset of analysis.subsets) {
-                store.setState(
-                  withSnapshot(
-                    detachViewMembersSnippetAction(subset.viewId, subset.memberIds),
-                    coalescer,
-                  ),
-                );
-              }
-            }
-            if (nodeIds.length > 0) {
-              store.setState(withSnapshot(removeNodes(nodeIds), coalescer));
-            }
-            if (edgeIds.length > 0) {
-              store.setState(withSnapshot(removeEdges(edgeIds), coalescer));
-            }
-          })();
+          // Pattern-view and semantic-member prompts live in deleteSelection.
+          void deleteSelection(store, coalescer, t);
         }
       }
     };
@@ -1891,20 +1864,8 @@ function DiagramShell({
           for (const id of sel) {
             const node = store.getState().doc.nodes.find((n) => n.id === id);
             if (!node) continue;
-            store.setState(
-              withSnapshot(
-                (state) => ({
-                  ...state,
-                  doc: {
-                    ...state.doc,
-                    nodes: state.doc.nodes.map((n) =>
-                      n.id === id && !n.locked ? { ...n, title: (n.title ?? "") + char } : n,
-                    ),
-                  },
-                }),
-                coalescer,
-              ),
-            );
+            // Through updateNode, so a semantic member's title writes through.
+            store.setState(withSnapshot(updateNode(id, { title: (node.title ?? "") + char }), coalescer));
           }
         }}
         onClose={() => setSpecialOpen(false)}

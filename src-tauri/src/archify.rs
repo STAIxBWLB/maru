@@ -67,6 +67,9 @@ fn validate_diagram_type(diagram_type: &str) -> Result<&'static str, IpcError> {
     match diagram_type {
         "architecture" => Ok("architecture"),
         "workflow" => Ok("workflow"),
+        "sequence" => Ok("sequence"),
+        "dataflow" => Ok("dataflow"),
+        "lifecycle" => Ok("lifecycle"),
         other => Err(typed(
             ARCHIFY_INVALID_DIAGRAM_TYPE,
             format!("Unsupported diagram type: {other}"),
@@ -511,11 +514,58 @@ mod tests {
         // all would fail differently, so the typed code proves the order.
         let err = archify_validate_candidate(
             "/definitely/not/a/workspace".to_string(),
-            "sequence".to_string(),
+            "gantt".to_string(),
             "{}".to_string(),
         )
         .unwrap_err();
         assert_eq!(err.code, ARCHIFY_INVALID_DIAGRAM_TYPE);
+    }
+
+    #[test]
+    fn accepts_all_five_diagram_types() {
+        for diagram_type in [
+            "architecture",
+            "workflow",
+            "sequence",
+            "dataflow",
+            "lifecycle",
+        ] {
+            assert_eq!(validate_diagram_type(diagram_type).unwrap(), diagram_type);
+        }
+    }
+
+    /// The #433 P2 fixtures, verbatim from the issue, validated by the pinned engine.
+    const SEQUENCE_SPEC: &str = r#"{"schema_version":1,"diagram_type":"sequence","meta":{"title":"Login","output":"login.html","locale":"en"},"participants":[{"id":"web","type":"frontend","label":"Web"},{"id":"api","type":"backend","label":"API"},{"id":"db","type":"database","label":"DB"}],"messages":[{"from":"web","to":"api","y":180,"label":"POST /login"},{"from":"api","to":"db","y":230,"label":"find user"},{"from":"db","to":"api","y":280,"label":"row","variant":"return"},{"from":"api","to":"web","y":330,"label":"200 OK","variant":"return"}]}"#;
+    const DATAFLOW_SPEC: &str = r#"{"schema_version":1,"diagram_type":"dataflow","meta":{"title":"Events","output":"events.html","locale":"en"},"stages":[{"label":"Collect"},{"label":"Store"}],"nodes":[{"id":"app","type":"frontend","label":"App","stage":0,"row":0},{"id":"wh","type":"database","label":"Warehouse","stage":1,"row":0}],"flows":[{"from":"app","to":"wh","label":"events","classification":"PII"}]}"#;
+    const LIFECYCLE_SPEC: &str = r#"{"schema_version":2,"diagram_type":"lifecycle","meta":{"title":"Run","output":"run.html","locale":"en"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"queued","type":"start","label":"Queued","lane":"main","col":0},{"id":"running","type":"active","label":"Running","lane":"main","col":1},{"id":"done","type":"success","label":"Done","lane":"main","col":2}],"transitions":[{"from":"queued","to":"running","label":"start"},{"from":"running","to":"done","label":"finish"}]}"#;
+
+    fn assert_fixture_validates(diagram_type: &str, spec: &str) {
+        let _lock = lock_env();
+        std::env::remove_var(TIMEOUT_ENV);
+        if !node_available() {
+            eprintln!("skipping: node is not available on PATH");
+            return;
+        }
+        let (_tmp, work) = setup_workspace();
+        let receipt =
+            archify_validate_candidate(work, diagram_type.to_string(), spec.to_string()).unwrap();
+        assert!(receipt.ok, "{diagram_type} errors: {:?}", receipt.errors);
+        assert_eq!(receipt.diagram_type, diagram_type);
+    }
+
+    #[test]
+    fn sequence_fixture_validates_with_real_engine() {
+        assert_fixture_validates("sequence", SEQUENCE_SPEC);
+    }
+
+    #[test]
+    fn dataflow_fixture_validates_with_real_engine() {
+        assert_fixture_validates("dataflow", DATAFLOW_SPEC);
+    }
+
+    #[test]
+    fn lifecycle_fixture_validates_with_real_engine() {
+        assert_fixture_validates("lifecycle", LIFECYCLE_SPEC);
     }
 
     #[test]

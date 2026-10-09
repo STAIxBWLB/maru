@@ -6,12 +6,16 @@
  * agent host (`generationHost.ts`), preview the typed proposal (candidate
  * summary + categorized diff + engine receipt + diagnostics), then apply:
  *
- * - New diagram (no selection): project the candidate, reflow with
- *   `layoutDoc`, and hand a fresh `DiagramDoc` to `onImportDoc` (DiagramMode's
- *   `handleImportDoc`, which resets file identity).
+ * - New diagram (no selection): project the candidate with
+ *   `projectSemanticDocument` (members plus containers) and hand a fresh
+ *   `DiagramDoc` to `onImportDoc` (DiagramMode's `handleImportDoc`, which
+ *   resets file identity).
  * - Scoped edit (active selection): re-check the base revision and gate
  *   through `prepareProposalApply`; a stale base shows the stale state, an
  *   applied proposal is committed as exactly one `withSnapshot` undo entry.
+ *   A selection on members of exactly one semantic dataset expands to that
+ *   whole dataset (shown before Run), locks the type, and regenerates the
+ *   dataset in place; members of several datasets cannot run.
  *
  * The engine validation step degrades gracefully: an unavailable engine
  * surfaces as the typed ENGINE_UNAVAILABLE diagnostic and the Mermaid paste
@@ -34,17 +38,18 @@ import {
   type GenerationJob,
 } from "../../../lib/diagram/generation";
 import { createGenerationHost } from "../../../lib/diagram/generationHost";
-import { layoutDoc } from "../../../lib/diagram/layout";
-import { mermaidToDocDetailed } from "../../../lib/diagram/mermaid";
+import { mermaidSemanticType, mermaidToDocDetailed } from "../../../lib/diagram/mermaid";
 import { serializeDoc } from "../../../lib/diagram/persistence";
+import { diffProposal, isBlockingDiagnostic, prepareProposalApply } from "../../../lib/diagram/proposal";
+import { SEMANTIC_DIAGRAM_TYPES, type SemanticDiagramType } from "../../../lib/diagram/reportTypes";
 import {
-  diffProposal,
-  isBlockingDiagnostic,
-  prepareProposalApply,
-  projectSemanticCandidate,
-} from "../../../lib/diagram/proposal";
-import type { SemanticDiagramType } from "../../../lib/diagram/reportTypes";
-import { createDiagramId, createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
+  SEMANTIC_TYPES,
+  projectSemanticDocument,
+  semanticDatasetsIn,
+  semanticMemberNodeIds,
+  semanticTypeLabelKey,
+} from "../../../lib/diagram/semantic";
+import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { useTranslation, type Locale } from "../../../lib/i18n";
 import { useShellSettings } from "../../../lib/shellSettingsStore";
@@ -72,15 +77,6 @@ function specEntryCount(candidate: NonNullable<GenerationJob["candidate"]>, fiel
   return Array.isArray(value) ? value.length : 0;
 }
 
-function specTitle(candidate: NonNullable<GenerationJob["candidate"]>): string {
-  const meta = candidate.spec.meta;
-  if (typeof meta === "object" && meta !== null) {
-    const title = (meta as Record<string, unknown>).title;
-    if (typeof title === "string") return title;
-  }
-  return "";
-}
-
 export function GenerateDiagramDialog({
   open,
   selectionNodeIds,
@@ -97,7 +93,24 @@ export function GenerateDiagramDialog({
 
   const scoped = selectionNodeIds.length > 0;
 
-  const [diagramType, setDiagramType] = useState<SemanticDiagramType>("architecture");
+  // Scope at open time: members of exactly one semantic dataset expand to the
+  // whole dataset (G3) and regenerate it in place (G2).
+  const selectedDatasets = useMemo(
+    () => (open ? semanticDatasetsIn(store.getState().doc, selectionNodeIds) : []),
+    [open, selectionNodeIds, store],
+  );
+  const targetDataset = selectedDatasets.length === 1 ? selectedDatasets[0]! : null;
+  const multipleDatasets = selectedDatasets.length > 1;
+  const scopeIds = useMemo(
+    () =>
+      targetDataset
+        ? [...new Set([...semanticMemberNodeIds(store.getState().doc, targetDataset.id), ...selectionNodeIds])]
+        : selectionNodeIds,
+    [targetDataset, selectionNodeIds, store],
+  );
+
+  const [chosenType, setDiagramType] = useState<SemanticDiagramType>("architecture");
+  const diagramType = targetDataset?.diagramType ?? chosenType;
   const [requirements, setRequirements] = useState("");
   const [mermaid, setMermaid] = useState("");
   const [outputLocale, setOutputLocale] = useState<Locale>(locale);
@@ -141,9 +154,13 @@ export function GenerateDiagramDialog({
 
   const handleRun = async () => {
     const doc = store.getState().doc;
-    const scope = scoped ? new Set(selectionNodeIds) : null;
+    const scope = scoped ? new Set(scopeIds) : null;
     const baseMemoryRevision = scope ? await diagramRevision(serializeDoc(doc)) : "";
-    const lockedNodeIds = doc.nodes.filter((node) => node.locked === true).map((node) => node.id);
+    // An unscoped run is applied as a new diagram that replaces the canvas, so
+    // its proposal is built against an empty doc: nothing on the current
+    // canvas (locks, other datasets' ids) can block or shape it.
+    const proposalBase = scope ? doc : createEmptyDoc(doc.id);
+    const lockedNodeIds = proposalBase.nodes.filter((node) => node.locked === true).map((node) => node.id);
     const base = createGenerationJob({
       diagramType,
       prompt: {
@@ -151,10 +168,11 @@ export function GenerateDiagramDialog({
         ...(mermaid.trim().length > 0 ? { mermaid } : {}),
         locale: outputLocale,
       },
-      doc,
+      doc: proposalBase,
       baseMemoryRevision,
       scope,
       lockedNodeIds,
+      ...(targetDataset ? { target: { datasetId: targetDataset.id, spec: targetDataset.spec } } : {}),
     });
     const host =
       hostOverride ??
@@ -210,17 +228,7 @@ export function GenerateDiagramDialog({
   const handleApplyNew = async () => {
     if (!candidate || applying) return;
     if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
-    const projected = projectSemanticCandidate(candidate);
-    const base = createEmptyDoc(createDiagramId("doc"));
-    const draft: DiagramDoc = {
-      ...base,
-      docTitle: specTitle(candidate),
-      nodes: projected.nodes,
-      edges: projected.edges,
-      datasets: [candidate],
-    };
-    const laidOut = layoutDoc(draft, { scope: new Set(projected.nodes.map((node) => node.id)) });
-    onImportDoc(laidOut.doc);
+    onImportDoc(projectSemanticDocument(candidate).doc);
     onClose();
   };
 
@@ -268,8 +276,17 @@ export function GenerateDiagramDialog({
     </ul>
   );
 
-  const nodeField = diagramType === "architecture" ? "components" : "nodes";
-  const edgeField = diagramType === "architecture" ? "connections" : "edges";
+  const scopeHint = multipleDatasets
+    ? t("diagram.generate.multipleDatasets")
+    : targetDataset
+      ? t("diagram.generate.scopeDataset", {
+          type: t(semanticTypeLabelKey(targetDataset.diagramType)),
+          name: targetDataset.name,
+          count: scopeIds.length,
+        })
+      : scoped
+        ? t("diagram.generate.scopeSelection", { count: selectionNodeIds.length })
+        : t("diagram.generate.scopeNew");
 
   return (
     <Dialog.Root open={open} onOpenChange={(next) => { if (!next) handleClose(); }}>
@@ -291,9 +308,7 @@ export function GenerateDiagramDialog({
           </div>
 
           <p className="maru-diagram-ie-hint" data-testid="gen-scope">
-            {scoped
-              ? t("diagram.generate.scopeSelection", { count: selectionNodeIds.length })
-              : t("diagram.generate.scopeNew")}
+            {scopeHint}
           </p>
 
           <label className="maru-diagram-ie-field">
@@ -301,10 +316,14 @@ export function GenerateDiagramDialog({
             <select
               value={diagramType}
               onChange={(e) => setDiagramType(e.target.value as SemanticDiagramType)}
+              disabled={targetDataset !== null}
               data-testid="gen-type-select"
             >
-              <option value="architecture">{t("diagram.generate.typeArchitecture")}</option>
-              <option value="workflow">{t("diagram.generate.typeWorkflow")}</option>
+              {SEMANTIC_DIAGRAM_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {t(semanticTypeLabelKey(type))}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -326,6 +345,8 @@ export function GenerateDiagramDialog({
               onChange={(e) => {
                 setMermaid(e.target.value);
                 setMermaidPreview(null);
+                const detected = mermaidSemanticType(e.target.value);
+                if (detected) setDiagramType(detected);
               }}
               placeholder={t("diagram.generate.mermaidPlaceholder")}
               rows={4}
@@ -375,6 +396,9 @@ export function GenerateDiagramDialog({
               {t("diagram.generate.failed", { message: job.error ?? "unknown" })}
             </p>
           ) : null}
+          {job?.state === "failed" && job.diagnostics.length > 0
+            ? renderDiagnostics(job.diagnostics, "gen-failed-diagnostics")
+            : null}
           {job?.state === "stale" || applyMessage?.kind === "stale" ? (
             <p className="maru-diagram-export-status is-err" data-testid="gen-stale">
               {t("diagram.generate.stale")}
@@ -399,6 +423,7 @@ export function GenerateDiagramDialog({
                 type="button"
                 className="maru-diagram-toolbar-primary"
                 onClick={handleMermaidApply}
+                disabled={mermaidPreview.doc.nodes.length === 0}
                 data-testid="gen-mermaid-apply"
               >
                 {t("diagram.generate.mermaidApply")}
@@ -411,9 +436,9 @@ export function GenerateDiagramDialog({
               <h3>{t("diagram.generate.preview")}</h3>
               <p data-testid="gen-summary">
                 {t("diagram.generate.summary", {
-                  type: candidate.diagramType,
-                  components: specEntryCount(candidate, nodeField),
-                  connections: specEntryCount(candidate, edgeField),
+                  type: t(semanticTypeLabelKey(candidate.diagramType)),
+                  elements: specEntryCount(candidate, SEMANTIC_TYPES[candidate.diagramType].entities),
+                  relations: specEntryCount(candidate, SEMANTIC_TYPES[candidate.diagramType].relations),
                 })}
               </p>
               <div data-testid="gen-diff-added">
@@ -458,6 +483,21 @@ export function GenerateDiagramDialog({
                   removed: diff.semanticSummary.connectionsRemoved,
                 })}
               </p>
+              {diff.semanticSummary.containersAdded +
+                diff.semanticSummary.containersRemoved +
+                diff.semanticSummary.containersChanged >
+              0 ? (
+                <p data-testid="gen-diff-containers">
+                  {t("diagram.generate.diffContainers", {
+                    added: diff.semanticSummary.containersAdded,
+                    removed: diff.semanticSummary.containersRemoved,
+                    changed: diff.semanticSummary.containersChanged,
+                  })}
+                </p>
+              ) : null}
+              {diff.semanticSummary.orderChanged ? (
+                <p data-testid="gen-diff-order">{t("diagram.generate.diffOrderChanged")}</p>
+              ) : null}
               {job && job.diagnostics.length > 0
                 ? renderDiagnostics(job.diagnostics, "gen-diagnostics")
                 : null}
@@ -491,7 +531,7 @@ export function GenerateDiagramDialog({
             <button
               type="button"
               onClick={() => void handleRun()}
-              disabled={busy || applying || requirements.trim().length === 0}
+              disabled={busy || applying || multipleDatasets || requirements.trim().length === 0}
               data-testid="gen-run"
             >
               {t("diagram.generate.run")}

@@ -27,6 +27,7 @@ import {
   type Coalescer,
 } from "./history";
 import { mkNode, type MkNodeOpts } from "./nodeKinds";
+import { writeThroughText } from "./semantic";
 import { relinkClonedNodes } from "./tableActions";
 import type {
   DiagramEdge,
@@ -153,20 +154,23 @@ function lockedNodePatchAllowed(patch: Partial<DiagramNode>): boolean {
   return Object.keys(patch).every((key) => key === "locked" || key === "hidden");
 }
 
+/**
+ * Patch one node. Text on a semantic member writes through to its spec
+ * (`writeThroughText`); a refused write-through (an empty required label)
+ * leaves the state unchanged, like an edit on a locked node.
+ */
 export function updateNode(
   id: NodeId,
   patch: Partial<DiagramNode>,
 ): StateTransformer {
   return (state) => {
-    let changed = false;
-    const nodes = state.doc.nodes.map((n) => {
-      if (n.id !== id) return n;
-      if (n.locked && !lockedNodePatchAllowed(patch)) return n;
-      changed = true;
-      return { ...n, ...patch };
-    });
-    if (!changed) return state;
-    return { ...state, doc: { ...state.doc, nodes } };
+    const target = state.doc.nodes.find((n) => n.id === id);
+    if (!target || (target.locked && !lockedNodePatchAllowed(patch))) return state;
+    const written = writeThroughText(state.doc, { nodeId: id }, patch);
+    if (written === null) return state;
+    const doc = written ?? state.doc;
+    const nodes = doc.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n));
+    return { ...state, doc: { ...doc, nodes } };
   };
 }
 
@@ -613,12 +617,16 @@ export function pasteStyleToSelection(style: DiagramNode["style"]): StateTransfo
   };
 }
 
+/** Patch one edge; a semantic relation's label writes through like {@link updateNode}. */
 export function updateEdge(
   id: EdgeId,
   patch: Partial<DiagramEdge>,
 ): StateTransformer {
   return (state) => {
-    const edges = state.doc.edges.map((e) => (e.id === id ? { ...e, ...patch } : e));
-    return { ...state, doc: { ...state.doc, edges } };
+    const written = writeThroughText(state.doc, { edgeId: id }, patch);
+    if (written === null) return state;
+    const doc = written ?? state.doc;
+    const edges = doc.edges.map((e) => (e.id === id ? { ...e, ...patch } : e));
+    return { ...state, doc: { ...doc, edges } };
   };
 }
