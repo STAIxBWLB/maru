@@ -21,6 +21,7 @@
 import { rasterise } from "./export";
 import { docToMermaid, mermaidToDocDetailed } from "./mermaid";
 import { datasetToArchifySpec, parseArchifySpec } from "./archifyCodec";
+import { projectSemanticDocument } from "./semantic";
 import { mkNode } from "./nodeKinds";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import { renderDocToSvg } from "./renderSvg";
@@ -38,6 +39,7 @@ import {
   type MatrixDataset,
   type MatrixRowRole,
   type ReportDataset,
+  type SemanticSpecDataset,
 } from "./reportTypes";
 import { escapeHtml, sanitizeCssColor } from "./richText";
 import { escapeTsvCell, matrixGrid, parseTsv, renderedCellCount } from "./tableEditing";
@@ -830,6 +832,10 @@ const mermaidCodec: DiagramCodec = {
   exportKind: "mmd",
   parse(bytes) {
     const { doc, diagnostics } = mermaidToDocDetailed(toText(bytes));
+    // An unsupported diagram type imports nothing: refuse instead of handing
+    // the dialog an empty document to confirm.
+    const unsupported = diagnostics.find((d) => d.key === "diagram.mermaid.unsupportedDiagramType");
+    if (unsupported) throw new Error(`${unsupported.key}: ${JSON.stringify(unsupported.params ?? {})}`);
     return {
       result: { kind: "doc", doc },
       fidelity: "structural",
@@ -838,26 +844,38 @@ const mermaidCodec: DiagramCodec = {
     };
   },
   serialize({ doc }) {
+    const semanticLoss = (doc.datasets ?? [])
+      .filter((dataset): dataset is SemanticSpecDataset => dataset.kind === "semanticSpec")
+      .map((dataset) => ({ key: "diagram.mermaid.semanticLoss", params: { type: dataset.diagramType } }));
     return {
       bytes: docToMermaid(doc),
       fidelity: "structural",
-      warnings: [{ key: "diagram.codec.warn.mermaidExport" }],
+      warnings: [{ key: "diagram.codec.warn.mermaidExport" }, ...semanticLoss],
       ignoredFields: ["positions", "styles", "datasets"],
     };
   },
 };
 
+/** Compound extensions of the five Archify types (`<name>.<type>.json`). */
+const ARCHIFY_EXTENSIONS = [
+  ".architecture.json",
+  ".workflow.json",
+  ".sequence.json",
+  ".dataflow.json",
+  ".lifecycle.json",
+];
+
 /**
  * Archify typed JSON interchange (issue #433). Import wraps the spec in a v9
- * semantic dataset inside a fresh doc — the canvas projection is produced by
- * the generation/apply flow, not by file ingest. Export emits the semantic
- * spec exactly as the pinned engine consumes it; canvas geometry and styles
- * are view state and never part of the interchange.
+ * semantic dataset inside a fresh doc and projects its members and
+ * containers (`projectSemanticDocument`). Export emits the semantic spec
+ * exactly as the pinned engine consumes it; canvas geometry and styles are
+ * view state and never part of the interchange.
  */
 const archifyJsonCodec: DiagramCodec = {
   id: "archify-json",
   labelKey: "diagram.codec.label.archifyJson",
-  extensions: [".architecture.json", ".workflow.json"],
+  extensions: ARCHIFY_EXTENSIONS,
   canImport: true,
   canExport: true,
   exportFidelity: "structural",
@@ -874,19 +892,17 @@ const archifyJsonCodec: DiagramCodec = {
       );
     }
     const { dataset, diagnostics } = outcome.result;
-    const doc = createEmptyDoc(createDiagramId());
-    doc.docTitle = dataset.name;
-    doc.datasets = [dataset];
+    const projected = projectSemanticDocument(dataset);
     return {
-      result: { kind: "doc", doc },
+      result: { kind: "doc", doc: projected.doc },
       fidelity: "structural",
-      warnings: [...diagnostics],
+      warnings: [...diagnostics, ...projected.diagnostics],
       ignoredFields: ["positions", "styles"],
     };
   },
   serialize({ doc }) {
     const dataset = (doc.datasets ?? []).find(
-      (entry): entry is import("./reportTypes").SemanticSpecDataset => entry.kind === "semanticSpec",
+      (entry): entry is SemanticSpecDataset => entry.kind === "semanticSpec",
     );
     if (!dataset) throw new Error("diagram.archify.noSemanticDataset");
     return {
@@ -983,9 +999,7 @@ export function getCodec(id: string): DiagramCodec | undefined {
 export function codecForFilename(name: string): DiagramCodec | undefined {
   const lower = name.toLowerCase();
   if (lower.endsWith(".cmd.json")) return getCodec("maru-json");
-  if (lower.endsWith(".architecture.json") || lower.endsWith(".workflow.json")) {
-    return getCodec("archify-json");
-  }
+  if (ARCHIFY_EXTENSIONS.some((extension) => lower.endsWith(extension))) return getCodec("archify-json");
   const dot = lower.lastIndexOf(".");
   if (dot < 0) return undefined;
   const ext = lower.slice(dot);

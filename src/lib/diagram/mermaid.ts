@@ -11,14 +11,17 @@
  *     `A[(...)]`, `A>...]`
  *   - Edges: `-->`, `-.->`, `---`, `==>`, optional `|label|`
  *   - Inline `Id[Label]` and standalone `Id` references.
- * Subgraphs, classDef, click handlers, linkStyle/style overrides, and
- * non-flowchart diagram types are not supported — and since issue #433 they
- * are no longer dropped silently: `mermaidToDocDetailed` reports each as a
- * structured diagnostic the import dialog surfaces.
+ * Subgraphs, classDef, click handlers, and linkStyle/style overrides are not
+ * supported — and since issue #433 they are no longer dropped silently:
+ * `mermaidToDocDetailed` reports each as a structured diagnostic the import
+ * dialog surfaces. A non-flowchart diagram type imports nothing (its lines
+ * would only become junk nodes); sequence and state diagrams point at
+ * generation instead ({@link mermaidSemanticType}).
  */
 
 import { defaultEdge } from "./edgeRouting";
 import { mkNode } from "./nodeKinds";
+import type { SemanticDiagramType } from "./reportTypes";
 import {
   DIAGRAM_SCHEMA_VERSION,
   type DiagramDoc,
@@ -196,8 +199,7 @@ export function mermaidToDoc(text: string, now: () => number = Date.now): Diagra
 
 /**
  * Diagram-type headers the flowchart subset does not support. Detected on the
- * first meaningful line and diagnosed; the parse then continues best-effort
- * so any flowchart-shaped lines still import.
+ * first meaningful line; the import then stops with zero nodes and edges.
  */
 const UNSUPPORTED_DIAGRAM_HEADERS = [
   "sequenceDiagram",
@@ -235,6 +237,35 @@ const UNSUPPORTED_CONSTRUCTS: Array<{ match: (line: string) => boolean; name: st
   { match: (line) => line.startsWith("linkStyle"), name: "linkStyle" },
 ];
 
+/** Mermaid headers whose meaning a semantic diagram type can carry via generation. */
+const SEMANTIC_HEADERS: Record<string, SemanticDiagramType> = {
+  sequenceDiagram: "sequence",
+  stateDiagram: "lifecycle",
+  "stateDiagram-v2": "lifecycle",
+};
+
+function firstMeaningfulLine(text: string): string | null {
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line && !line.startsWith("%%")) return line;
+  }
+  return null;
+}
+
+function headerOf(line: string, headers: readonly string[]): string | undefined {
+  return headers.find((header) => line === header || line.startsWith(`${header} `));
+}
+
+/**
+ * The semantic diagram type a Mermaid text maps to (`sequenceDiagram` →
+ * sequence, `stateDiagram[-v2]` → lifecycle), or null for anything else.
+ */
+export function mermaidSemanticType(text: string): SemanticDiagramType | null {
+  const line = firstMeaningfulLine(text);
+  const header = line ? headerOf(line, Object.keys(SEMANTIC_HEADERS)) : undefined;
+  return header ? SEMANTIC_HEADERS[header]! : null;
+}
+
 const HEADER_DIRECTION = /^(?:flowchart|graph)\s+(TD|TB|BT|LR|RL)\b/;
 
 export function mermaidToDocDetailed(
@@ -252,20 +283,17 @@ export function mermaidToDocDetailed(
     diagnostics.push(diagnostic);
   };
 
-  let headerSeen = false;
-  for (let raw of text.split(/\r?\n/)) {
+  const first = firstMeaningfulLine(text);
+  const unsupported = first ? headerOf(first, UNSUPPORTED_DIAGRAM_HEADERS) : undefined;
+  if (unsupported) {
+    report({ key: "diagram.mermaid.unsupportedDiagramType", params: { type: unsupported } });
+    const semantic = SEMANTIC_HEADERS[unsupported];
+    if (semantic) report({ key: "diagram.mermaid.useGeneration", params: { type: semantic } });
+  }
+  const lines = unsupported ? [] : text.split(/\r?\n/);
+  for (let raw of lines) {
     let line = raw.trim();
     if (!line || line.startsWith("%%")) continue;
-    if (!headerSeen) {
-      headerSeen = true;
-      const unsupported = UNSUPPORTED_DIAGRAM_HEADERS.find(
-        (header) => line === header || line.startsWith(`${header} `),
-      );
-      if (unsupported) {
-        report({ key: "diagram.mermaid.unsupportedDiagramType", params: { type: unsupported } });
-        continue;
-      }
-    }
     const direction = line.match(HEADER_DIRECTION);
     if (direction) {
       const dir = direction[1]!;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { docToMermaid, mermaidToDoc, mermaidToDocDetailed } from "./mermaid";
+import { docToMermaid, mermaidSemanticType, mermaidToDoc, mermaidToDocDetailed } from "./mermaid";
 import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc } from "./types";
 
 describe("docToMermaid", () => {
@@ -91,12 +91,34 @@ describe("mermaidToDoc", () => {
 });
 
 describe("mermaidToDocDetailed diagnostics (issue #433)", () => {
-  it("reports non-flowchart diagram types instead of silently mis-parsing", () => {
-    const { diagnostics } = mermaidToDocDetailed("sequenceDiagram\n  Alice->>Bob: hi");
-    expect(diagnostics).toContainEqual({
-      key: "diagram.mermaid.unsupportedDiagramType",
-      params: { type: "sequenceDiagram" },
-    });
+  it("imports nothing for sequence and state diagrams and points at generation", () => {
+    const sequence = mermaidToDocDetailed("sequenceDiagram\n  participant Alice\n  Alice->>Bob: hi");
+    expect(sequence.doc.nodes).toEqual([]);
+    expect(sequence.doc.edges).toEqual([]);
+    expect(sequence.diagnostics).toEqual([
+      { key: "diagram.mermaid.unsupportedDiagramType", params: { type: "sequenceDiagram" } },
+      { key: "diagram.mermaid.useGeneration", params: { type: "sequence" } },
+    ]);
+    const state = mermaidToDocDetailed("%% comment\nstateDiagram-v2\n  [*] --> S1\n  S1 --> S2 : go");
+    expect(state.doc.nodes).toEqual([]);
+    expect(state.diagnostics).toEqual([
+      { key: "diagram.mermaid.unsupportedDiagramType", params: { type: "stateDiagram-v2" } },
+      { key: "diagram.mermaid.useGeneration", params: { type: "lifecycle" } },
+    ]);
+  });
+
+  it("imports nothing for other non-flowchart types, without a generation hint", () => {
+    const { doc, diagnostics } = mermaidToDocDetailed("classDiagram\n  A <|-- B");
+    expect(doc.nodes).toEqual([]);
+    expect(diagnostics).toEqual([{ key: "diagram.mermaid.unsupportedDiagramType", params: { type: "classDiagram" } }]);
+  });
+
+  it("maps sequence and state headers to semantic types", () => {
+    expect(mermaidSemanticType("\n  sequenceDiagram\n A->>B: x")).toBe("sequence");
+    expect(mermaidSemanticType("stateDiagram\n [*] --> A")).toBe("lifecycle");
+    expect(mermaidSemanticType("stateDiagram-v2")).toBe("lifecycle");
+    expect(mermaidSemanticType("flowchart TD\n A --> B")).toBeNull();
+    expect(mermaidSemanticType("")).toBeNull();
   });
 
   it("reports skipped constructs once per construct kind", () => {
