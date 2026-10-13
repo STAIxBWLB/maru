@@ -42,9 +42,14 @@ accepts an arbitrary executable or unvalidated launch arguments.
   their native skill packages are separate from Maru-owned generic federation
 
 `dotfiles-v2` must not directly copy or rewrite generic skill trees in any agent
-root. It calls `maru skills capabilities --json` and selected `skills sync`;
+root as skill deployment. Explicit operator-selected peer filesystem transport
+is a separate exception defined by dotfiles `docs/BOUNDARIES.md` (read when
+configuring peer home paths); it does not transfer source, installer, registry
+or per-target ownership to dotfiles. For generic skill deployment, dot calls
+`maru skills capabilities --json` and selected `skills sync`;
 unsupported Maru releases are reported as pending. Native installers may manage
-their own plugin packages, but neither side may overwrite the other's entries.
+their own plugin packages; federation and installation must not overwrite the
+other side's entries.
 Global instructions, authentication, trust, hooks and unrelated runtime settings
 remain outside Maru federation.
 
