@@ -1,6 +1,6 @@
-# Maru / dotfiles-v2 Boundary
+# Maru / dotfiles Boundary
 
-Maru owns skills and runtime federation. `dotfiles-v2` owns environment and
+Maru owns skills and runtime federation. `dotfiles` owns environment and
 tool settings. This file mirrors the workspace policy in
 `~/workspace/work/_meta/rules/skills-ssot.md`.
 
@@ -23,14 +23,14 @@ Maru must not write:
 - `~/.claude/settings.json`
 - `~/.claude/settings.local.json`
 - `~/.claude/hooks/**`
-- non-skill global tool settings owned by `dotfiles-v2`
+- non-skill global tool settings owned by `dotfiles`
 
 Maru may read `dot ai policy resolve --json` and apply its typed decision to
 one invocation. The opt-in lives in Maru settings; native model, permission,
 and profile configuration remains owned by dotfiles. Policy resolution never
 accepts an arbitrary executable or unvalidated launch arguments.
 
-## dotfiles-v2 Owns
+## dotfiles Owns
 
 - AGENTS fan-out and global instruction targets
 - Claude/Codex/Antigravity settings and status line integration
@@ -41,7 +41,7 @@ accepts an arbitrary executable or unvalidated launch arguments.
 - Agent CLI installation and updates, instructions, and native add-on installers;
   their native skill packages are separate from Maru-owned generic federation
 
-`dotfiles-v2` must not directly copy or rewrite generic skill trees in any agent
+`dotfiles` must not directly copy or rewrite generic skill trees in any agent
 root as skill deployment. Explicit operator-selected peer filesystem transport
 is a separate exception defined by dotfiles `docs/BOUNDARIES.md` (read when
 configuring peer home paths); it does not transfer source, installer, registry

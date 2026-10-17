@@ -434,7 +434,7 @@ cargo run --manifest-path src-tauri/Cargo.toml -p maru-cli --bin maru-cli -- ski
 ### Selected-agent skill federation
 
 For operator-selected peer filesystem transport, read the separate
-[dotfiles boundary](https://github.com/entelecheia/dotfiles-v2/blob/main/docs/BOUNDARIES.md)
+[dotfiles boundary](https://github.com/STAIxBWLB/dotfiles/blob/main/docs/BOUNDARIES.md)
 when configuring peer home paths. That transport preserves filesystem entries
 under the explicitly selected paths while source, installer, registry and
 per-target ownership remain with their existing managers. The capability and
@@ -442,7 +442,7 @@ deferral rules in this section govern skill installation and federation.
 
 Maru owns generic skill sources, registry records, and deployment. External
 orchestrators such as dotfiles query the native CLI before requesting a selected
-operation (Maru issue #396, dotfiles-v2 issue #150):
+operation (Maru issue #396, dotfiles issue #150):
 
 ```bash
 maru skills capabilities --json
