@@ -84,17 +84,71 @@ impl Resolution {
     }
 }
 
+/// amem's MCP server name: the plain `amem` server `amem setup` registers for Claude Code and Codex,
+/// with no plugin binding (dotfiles#255 D5, agent-mem#13 P2).
+const AMEM_SERVER: &str = "amem";
+
+/// amem's frozen nine-tool MCP surface (agent-mem README "Session MCP and work lists (#13 P2)",
+/// the contract fixed for dotfiles#255 and maru#458). None deletes or moves a note:
+/// `amem_remember` only proposes a candidate a person accepts and `amem_work_state_write`
+/// appends scalar work-list fields. A tool amem adds later is not granted until this list changes.
+const AMEM_TOOLS: [&str; 9] = [
+    "amem_search",
+    "amem_show",
+    "amem_timeline",
+    "amem_graph",
+    "amem_work_state_read",
+    "amem_work_state_write",
+    "amem_remember",
+    "amem_vault_candidates",
+    "amem_capacity",
+];
+
+/// The claude-mem memory tools retired with maru#458. They are kept only to recognize a task
+/// that recorded one of them, so its refusal can name the retirement. They grant nothing.
+const RETIRED_MEMORY_TOOLS: [&str; 16] = [
+    "search",
+    "timeline",
+    "get_observations",
+    "get_tool_uses",
+    "session_start_context",
+    "smart_search",
+    "smart_outline",
+    "smart_unfold",
+    "important_workflow",
+    "list_corpora",
+    "query_corpus",
+    "observation_add",
+    "observation_record_event",
+    "observation_search",
+    "observation_context",
+    "observation_generation_status",
+];
+
+const RETIRED_MEMORY_REASON: &str = "adaptive_policy_knowledge_grant_retired: claude-mem memory grants were retired and replaced by amem (server `amem`, `amem_*` tools); a retired grant is never mapped to amem, so authorize the memory tools again against amem or start a new task";
+
+/// The three spellings a claude-mem memory grant used: Claude's plugin-prefixed server, and
+/// Codex's `mcp-search` server and `claude-mem@claude-mem-local` plugin binding.
+fn retired_memory_grant(grant: &KnowledgeApproval) -> bool {
+    matches!(
+        grant.server.as_str(),
+        "plugin_claude-mem_mcp-search" | "mcp-search"
+    ) || grant.plugin.as_deref() == Some("claude-mem@claude-mem-local")
+}
+
 pub fn knowledge_args(resolution: &Resolution) -> Result<Vec<String>, String> {
     let mut args = Vec::new();
     let mut claude_tools = Vec::new();
     for grant in &resolution.knowledge_approvals {
+        // A retired claude-mem grant is refused by name before anything else reads it, under either
+        // agent and whatever its tool, so it can never be matched, mapped or silently dropped.
+        if retired_memory_grant(grant) {
+            return Err(RETIRED_MEMORY_REASON.into());
+        }
         let vault = grant.server == "obsidian" && grant.plugin.is_none();
-        let memory = (resolution.agent == "claude"
-            && grant.server == "plugin_claude-mem_mcp-search"
-            && grant.plugin.is_none())
-            || (resolution.agent == "codex"
-                && grant.server == "mcp-search"
-                && grant.plugin.as_deref() == Some("claude-mem@claude-mem-local"));
+        let memory = matches!(resolution.agent.as_str(), "claude" | "codex")
+            && grant.server == AMEM_SERVER
+            && grant.plugin.is_none();
         let tool_allowed = if vault {
             matches!(
                 grant.tool.as_str(),
@@ -112,25 +166,7 @@ pub fn knowledge_args(resolution: &Resolution) -> Result<Vec<String>, String> {
                     | "manage_tags"
             )
         } else if memory {
-            matches!(
-                grant.tool.as_str(),
-                "search"
-                    | "timeline"
-                    | "get_observations"
-                    | "get_tool_uses"
-                    | "session_start_context"
-                    | "smart_search"
-                    | "smart_outline"
-                    | "smart_unfold"
-                    | "important_workflow"
-                    | "list_corpora"
-                    | "query_corpus"
-                    | "observation_add"
-                    | "observation_record_event"
-                    | "observation_search"
-                    | "observation_context"
-                    | "observation_generation_status"
-            )
+            AMEM_TOOLS.contains(&grant.tool.as_str())
         } else {
             false
         };
@@ -239,6 +275,15 @@ fn continuation_count(metadata: Option<&Value>, resolution: &Resolution) -> Resu
         serde_json::from_str(&resolution.knowledge_scope())
             .map_err(|_| "adaptive_policy_invalid_knowledge_scope")?
     };
+    // A frozen task that recorded a claude-mem memory grant can never be satisfied by amem: its
+    // recorded tools have no amem counterpart. Name the retirement instead of a generic reduction.
+    if previous_scope.iter().any(|scope| {
+        scope
+            .strip_prefix("memory/")
+            .is_some_and(|tool| RETIRED_MEMORY_TOOLS.contains(&tool))
+    }) {
+        return Err(RETIRED_MEMORY_REASON.into());
+    }
     if previous_scope
         .iter()
         .any(|scope| !current_scope.contains(scope))
@@ -445,9 +490,9 @@ mod tests {
                 approval_mode: "approve".into(),
             },
             KnowledgeApproval {
-                server: "plugin_claude-mem_mcp-search".into(),
+                server: "amem".into(),
                 plugin: None,
-                tool: "observation_add".into(),
+                tool: "amem_remember".into(),
                 approval_mode: "approve".into(),
             },
         ];
@@ -455,8 +500,7 @@ mod tests {
         let metadata = serde_json::json!({"adaptiveContinuation": r.checkpoint(false)});
         r.agent = "codex".into();
         r.model = "gpt-5.4".into();
-        r.knowledge_approvals[1].server = "mcp-search".into();
-        r.knowledge_approvals[1].plugin = Some("claude-mem@claude-mem-local".into());
+        // amem is one plain MCP server for both agents: the switch changes no grant.
         assert_eq!(r.knowledge_scope(), scope);
         assert_eq!(continuation_count(Some(&metadata), &r).unwrap(), 1);
         let all = r.knowledge_approvals.clone();
@@ -501,15 +545,266 @@ mod tests {
                 "mcp_servers.obsidian.tools.write_note.approval_mode=\"approve\""
             ]
         );
-        r.knowledge_approvals[0] = KnowledgeApproval {
-            server: "mcp-search".into(),
-            plugin: Some("claude-mem@claude-mem-local".into()),
-            tool: "observation_add".into(),
-            approval_mode: "approve".into(),
-        };
-        assert_eq!(knowledge_args(&r).unwrap(), vec!["-c", "plugins.claude-mem@claude-mem-local.mcp_servers.mcp-search.tools.observation_add.approval_mode=\"approve\""]);
+        r.knowledge_approvals[0] = amem("amem_remember");
+        assert_eq!(
+            knowledge_args(&r).unwrap(),
+            vec![
+                "-c",
+                "mcp_servers.amem.tools.amem_remember.approval_mode=\"approve\""
+            ]
+        );
         r.knowledge_approvals[0].server = "unregistered".into();
         assert!(knowledge_args(&r).is_err());
+    }
+
+    fn amem(tool: &str) -> KnowledgeApproval {
+        KnowledgeApproval {
+            server: "amem".into(),
+            plugin: None,
+            tool: tool.into(),
+            approval_mode: "approve".into(),
+        }
+    }
+    // The frozen nine-tool contract (agent-mem README "Session MCP and work lists (#13 P2)",
+    // dotfiles internal/aipolicy/knowledge.go memoryKnowledgeTools).
+    const AMEM_FROZEN: [&str; 9] = [
+        "amem_search",
+        "amem_show",
+        "amem_timeline",
+        "amem_graph",
+        "amem_work_state_read",
+        "amem_work_state_write",
+        "amem_remember",
+        "amem_vault_candidates",
+        "amem_capacity",
+    ];
+
+    #[test]
+    fn amem_grants_produce_the_exact_native_approval_rules_for_claude_and_codex() {
+        for tool in AMEM_FROZEN {
+            let mut r = resolution();
+            r.knowledge_approvals = vec![amem(tool)];
+            assert_eq!(
+                knowledge_args(&r).unwrap(),
+                vec!["--allowedTools".to_string(), format!("mcp__amem__{tool}")],
+                "claude {tool}"
+            );
+            r.agent = "codex".into();
+            assert_eq!(
+                knowledge_args(&r).unwrap(),
+                vec![
+                    "-c".to_string(),
+                    format!("mcp_servers.amem.tools.{tool}.approval_mode=\"approve\"")
+                ],
+                "codex {tool}"
+            );
+        }
+        // All nine together keep Claude's single sorted, de-duplicated --allowedTools list.
+        let mut r = resolution();
+        r.knowledge_approvals = AMEM_FROZEN.iter().rev().map(|tool| amem(tool)).collect();
+        let args = knowledge_args(&r).unwrap();
+        assert_eq!(args[0], "--allowedTools");
+        let mut expected: Vec<String> = AMEM_FROZEN
+            .iter()
+            .map(|tool| format!("mcp__amem__{tool}"))
+            .collect();
+        expected.sort();
+        assert_eq!(args[1], expected.join(","));
+        assert_eq!(args.len(), 2);
+    }
+
+    #[test]
+    fn amem_grants_keep_the_exact_rule_set_unknown_tools_deletion_move_and_wildcards_are_refused() {
+        for agent in ["claude", "codex"] {
+            for forbidden in [
+                "amem_delete",
+                "amem_forget",
+                "amem_move",
+                "amem_archive",
+                "amem_correct",
+                "amem_brief",
+                "amem_evidence",
+                "search",
+                "observation_add",
+                "delete_note",
+                "move_note",
+                "amem_*",
+                "*",
+                "",
+            ] {
+                let mut r = resolution();
+                r.agent = agent.into();
+                r.knowledge_approvals = vec![amem(forbidden)];
+                assert_eq!(
+                    knowledge_args(&r).unwrap_err(),
+                    "adaptive_policy_knowledge_grant_unsupported",
+                    "{agent} {forbidden}"
+                );
+            }
+            // A plugin-scoped amem does not exist, an amem approval must be exactly "approve",
+            // and the server name is exact (no case folding, no prefix match).
+            for bad in [
+                KnowledgeApproval {
+                    plugin: Some("amem@local".into()),
+                    ..amem("amem_search")
+                },
+                KnowledgeApproval {
+                    approval_mode: "auto".into(),
+                    ..amem("amem_search")
+                },
+                KnowledgeApproval {
+                    server: "Amem".into(),
+                    ..amem("amem_search")
+                },
+                KnowledgeApproval {
+                    server: "amem2".into(),
+                    ..amem("amem_search")
+                },
+            ] {
+                let mut r = resolution();
+                r.agent = agent.into();
+                r.knowledge_approvals = vec![bad];
+                assert!(knowledge_args(&r).is_err(), "{agent}");
+            }
+        }
+    }
+
+    // The three spellings the retired claude-mem grants used.
+    fn retired() -> Vec<(&'static str, KnowledgeApproval)> {
+        vec![
+            (
+                "claude",
+                KnowledgeApproval {
+                    server: "plugin_claude-mem_mcp-search".into(),
+                    plugin: None,
+                    tool: "observation_add".into(),
+                    approval_mode: "approve".into(),
+                },
+            ),
+            (
+                "codex",
+                KnowledgeApproval {
+                    server: "mcp-search".into(),
+                    plugin: Some("claude-mem@claude-mem-local".into()),
+                    tool: "observation_add".into(),
+                    approval_mode: "approve".into(),
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn claude_mem_grants_are_rejected_with_the_retirement_reason_and_never_mapped_to_amem() {
+        for (agent, grant) in retired() {
+            for tool in [
+                "observation_add",
+                "search",
+                "timeline",
+                "smart_search",
+                "amem_search",
+            ] {
+                let mut r = resolution();
+                r.agent = agent.into();
+                r.knowledge_approvals = vec![KnowledgeApproval {
+                    tool: tool.into(),
+                    ..grant.clone()
+                }];
+                let error = knowledge_args(&r).unwrap_err();
+                assert!(
+                    error.starts_with("adaptive_policy_knowledge_grant_retired"),
+                    "{agent} {tool}: {error}"
+                );
+                assert!(
+                    error.contains("claude-mem")
+                        && error.contains("retired")
+                        && error.contains("amem")
+                );
+                // validate() runs knowledge_args first, so a launch is refused with the same reason.
+                assert!(validate(&r)
+                    .unwrap_err()
+                    .starts_with("adaptive_policy_knowledge_grant_retired"));
+            }
+            // Either spelling is retired under either agent: a claude binding that carries the codex
+            // plugin spelling is not quietly accepted, and vice versa.
+            for other in ["claude", "codex"] {
+                let mut r = resolution();
+                r.agent = other.into();
+                r.knowledge_approvals = vec![grant.clone()];
+                assert!(knowledge_args(&r)
+                    .unwrap_err()
+                    .starts_with("adaptive_policy_knowledge_grant_retired"));
+            }
+        }
+        // The retired plugin binding is recognized on its own: another server name under it, amem's
+        // included, is the retirement refusal too, never a quietly accepted or remapped grant.
+        for server in ["amem", "obsidian", "unregistered"] {
+            for agent in ["claude", "codex"] {
+                let mut r = resolution();
+                r.agent = agent.into();
+                r.knowledge_approvals = vec![KnowledgeApproval {
+                    server: server.into(),
+                    plugin: Some("claude-mem@claude-mem-local".into()),
+                    ..amem("amem_search")
+                }];
+                assert!(
+                    knowledge_args(&r)
+                        .unwrap_err()
+                        .starts_with("adaptive_policy_knowledge_grant_retired"),
+                    "{agent} {server}"
+                );
+            }
+        }
+        // One retired grant next to valid ones refuses the whole set: nothing partial is emitted.
+        let mut r = resolution();
+        r.knowledge_approvals = vec![amem("amem_search"), retired()[0].1.clone()];
+        assert!(knowledge_args(&r)
+            .unwrap_err()
+            .starts_with("adaptive_policy_knowledge_grant_retired"));
+        // An unknown server stays the ordinary refusal, not the retirement one.
+        r.knowledge_approvals = vec![KnowledgeApproval {
+            server: "unregistered".into(),
+            ..amem("amem_search")
+        }];
+        assert_eq!(
+            knowledge_args(&r).unwrap_err(),
+            "adaptive_policy_knowledge_grant_unsupported"
+        );
+    }
+
+    #[test]
+    fn a_frozen_task_that_recorded_a_claude_mem_grant_is_refused_naming_the_retirement() {
+        // The scope a frozen task recorded before the switch: the semantic categories, never server names.
+        let mut old = resolution();
+        old.knowledge_approvals = vec![retired()[0].1.clone()];
+        let recorded = serde_json::json!({"adaptiveContinuation": old.checkpoint(true)});
+        // After the switch the same task resolves with amem's grant and the frozen fingerprint check runs.
+        let mut now = resolution();
+        now.knowledge_approvals = vec![amem("amem_remember")];
+        // The recorded memory/observation_add scope has no amem counterpart: refused, and the
+        // reason names the retirement instead of a generic access reduction.
+        let error = continuation_count(Some(&recorded), &now).unwrap_err();
+        assert!(
+            error.starts_with("adaptive_policy_knowledge_grant_retired"),
+            "{error}"
+        );
+        assert!(
+            error.contains("claude-mem") && error.contains("retired") && error.contains("amem")
+        );
+        // The same recorded task that resolves with its retired grant still present is refused too.
+        let mut still = resolution();
+        still.knowledge_approvals = vec![retired()[0].1.clone()];
+        assert!(continuation_count(Some(&recorded), &still).is_err());
+        // A frozen task that recorded amem grants continues, and an unfrozen one is not affected.
+        let mut fresh = resolution();
+        fresh.knowledge_approvals = vec![amem("amem_search"), amem("amem_remember")];
+        let ok = serde_json::json!({"adaptiveContinuation": fresh.checkpoint(true)});
+        assert_eq!(continuation_count(Some(&ok), &fresh).unwrap(), 0);
+        // Reducing amem access is still the ordinary reduction refusal, not the retirement reason.
+        let mut reduced = resolution();
+        reduced.knowledge_approvals = vec![amem("amem_search")];
+        assert!(continuation_count(Some(&ok), &reduced)
+            .unwrap_err()
+            .starts_with("adaptive_policy_knowledge_access_reduced"));
     }
 
     #[test]
