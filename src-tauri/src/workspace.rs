@@ -205,7 +205,7 @@ fn public_specs_from_config(config: &WorkspaceConfig) -> Vec<PublicWorkspaceSpec
             path: path.clone(),
             provider: "obsidian".to_string(),
             provider_id: None,
-            external_writer: Some("mcp-obsidian".to_string()),
+            external_writer: Some("vmem".to_string()),
             write_policy: "delegated".to_string(),
             role: None,
         })
@@ -626,6 +626,19 @@ mod tests {
             "resolved {resolved} should end with /vault"
         );
         assert!(Path::new(&resolved).is_absolute());
+    }
+
+    #[test]
+    fn vault_fallback_keeps_obsidian_format_and_delegates_writes_to_vmem() {
+        let config: WorkspaceConfig = serde_yaml::from_str(
+            "version: 1\npaths:\n  primary: /synthetic/work\n  vault: /synthetic/vault\n",
+        )
+        .unwrap();
+        let specs = public_specs_from_config(&config);
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].provider, "obsidian");
+        assert_eq!(specs[0].external_writer.as_deref(), Some("vmem"));
+        assert_eq!(specs[0].write_policy, "delegated");
     }
 
     #[test]

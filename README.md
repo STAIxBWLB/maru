@@ -232,15 +232,17 @@ brew upgrade maru-cli
   change; explicit selections freeze the recorded configuration. New turns resolve
   again using capped transcript replay, not native session resume. Maru does
   not automatically replay failed actions or change providers after a rejection.
-  Explicitly authorized amem and Obsidian lookup/record tools receive
+  Explicitly authorized amem and vmem lookup/record tools receive
   exact native approval rules from resolved `knowledge_approvals`: amem is the
-  plain `amem` MCP server with its frozen nine `amem_*` tools; unknown
-  servers, tools, deletion, and move grants are rejected. claude-mem was retired:
-  its grants are rejected with a reason naming the retirement, never mapped to
-  amem, and a frozen task that recorded one is refused the same way. Knowledge approval
+  plain `amem` MCP server with its frozen nine `amem_*` tools; vmem is the
+  plain `vmem` server with its frozen 21-tool grant list from vmem 0.1.0. Unknown
+  servers, tools, deletion, and move grants are rejected. claude-mem and
+  obsidian (mcpvault) grants were retired: old server/tool names are rejected
+  with a reason naming the replacement (amem or vmem), never silently mapped,
+  and a frozen task that recorded one is refused the same way. Knowledge approval
   scope is part of the frozen task fingerprint. A runtime switch must retain
   every previously available memory/vault tool or stop before launch, even when
-  switch budget remains. Vault writes remain MCP-owned.
+  switch budget remains. Vault writes remain vmem-owned; Maru managed writes still use `vault_guard`.
   Native configuration remains owned by dotfiles; Maru only constructs argv.
 - Provider probes and real integrations have bounded output, timeout,
   cancellation, and stale-request handling. The real-binary integration smoke

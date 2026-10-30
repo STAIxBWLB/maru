@@ -9,6 +9,8 @@ tool settings. This file mirrors the workspace policy in
 - `~/.maru/**`
 - `~/.maru/skills/registry.json`
 - `~/.maru/skills/_builtin`, `_sources`, `_managed`
+- Vault note reads are direct; writes go only through `vmem` or `vault_guard`
+  managed writes. Unattended knowledge grants exclude vmem move/delete.
 - `~/.maru/env`
 - `~/.maru/skills/<name>` runtime symlinks
 - Generic skill symlinks created through Maru install actions in Claude,
