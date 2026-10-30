@@ -1106,8 +1106,10 @@ fn parse_kinfo_procs(buf: &[u8], pgid: u32) -> Vec<GroupMember> {
     let word = |entry: &[u8], at: usize| {
         u32::from_ne_bytes([entry[at], entry[at + 1], entry[at + 2], entry[at + 3]])
     };
-    buf.chunks_exact(KINFO_PROC_SIZE)
-        .filter(|entry| entry[KP_P_STAT] != SZOMB && word(entry, KP_E_PGID) == pgid)
+    buf.as_chunks::<KINFO_PROC_SIZE>()
+        .0
+        .iter()
+        .filter(|entry| entry[KP_P_STAT] != SZOMB && word(*entry, KP_E_PGID) == pgid)
         .filter_map(|entry| {
             let pid = word(entry, KP_P_PID);
             i32::try_from(pid).ok().filter(|&pid| pid > 0)?;

@@ -70,7 +70,7 @@ impl Resolution {
             .knowledge_approvals
             .iter()
             .map(|grant| {
-                let category = if grant.server == "obsidian" {
+                let category = if grant.server == VMEM_SERVER || grant.server == "obsidian" {
                     "vault"
                 } else {
                     "memory"
@@ -103,6 +103,54 @@ const AMEM_TOOLS: [&str; 9] = [
     "amem_vault_candidates",
     "amem_capacity",
 ];
+
+/// vmem 0.1.0's plain MCP server and frozen unattended grant surface (maru#461).
+/// Move/delete are excluded even though vmem implements their two-step operations.
+const VMEM_SERVER: &str = "vmem";
+const VMEM_TOOLS: [&str; 21] = [
+    "vmem_append",
+    "vmem_check",
+    "vmem_create",
+    "vmem_graph_build",
+    "vmem_graph_neighbors",
+    "vmem_link",
+    "vmem_links",
+    "vmem_lint",
+    "vmem_list",
+    "vmem_log_append",
+    "vmem_log_tail",
+    "vmem_mocs",
+    "vmem_patch",
+    "vmem_promote",
+    "vmem_promote_from_amem",
+    "vmem_read",
+    "vmem_read_many",
+    "vmem_search",
+    "vmem_set_frontmatter",
+    "vmem_status",
+    "vmem_supersede",
+];
+
+/// Old mcpvault names identify retired grants/checkpoints only, never approvals.
+const RETIRED_VAULT_TOOLS: [&str; 12] = [
+    "read_note",
+    "read_multiple_notes",
+    "search_notes",
+    "list_directory",
+    "get_frontmatter",
+    "get_notes_info",
+    "get_vault_stats",
+    "list_all_tags",
+    "write_note",
+    "patch_note",
+    "update_frontmatter",
+    "manage_tags",
+];
+const RETIRED_VAULT_REASON: &str = "adaptive_policy_knowledge_grant_retired: obsidian (mcpvault) vault grants were retired and replaced by vmem (server `vmem`, `vmem_*` tools); a retired grant is never mapped to vmem, so authorize vault tools again against vmem or start a new task";
+
+fn retired_vault_grant(grant: &KnowledgeApproval) -> bool {
+    grant.server == "obsidian" || RETIRED_VAULT_TOOLS.contains(&grant.tool.as_str())
+}
 
 /// The claude-mem memory tools retired with maru#458. They are kept only to recognize a task
 /// that recorded one of them, so its refusal can name the retirement. They grant nothing.
@@ -145,26 +193,17 @@ pub fn knowledge_args(resolution: &Resolution) -> Result<Vec<String>, String> {
         if retired_memory_grant(grant) {
             return Err(RETIRED_MEMORY_REASON.into());
         }
-        let vault = grant.server == "obsidian" && grant.plugin.is_none();
+        if retired_vault_grant(grant) {
+            return Err(RETIRED_VAULT_REASON.into());
+        }
+        let vault = matches!(resolution.agent.as_str(), "claude" | "codex")
+            && grant.server == VMEM_SERVER
+            && grant.plugin.is_none();
         let memory = matches!(resolution.agent.as_str(), "claude" | "codex")
             && grant.server == AMEM_SERVER
             && grant.plugin.is_none();
         let tool_allowed = if vault {
-            matches!(
-                grant.tool.as_str(),
-                "read_note"
-                    | "read_multiple_notes"
-                    | "search_notes"
-                    | "list_directory"
-                    | "get_frontmatter"
-                    | "get_notes_info"
-                    | "get_vault_stats"
-                    | "list_all_tags"
-                    | "write_note"
-                    | "patch_note"
-                    | "update_frontmatter"
-                    | "manage_tags"
-            )
+            VMEM_TOOLS.contains(&grant.tool.as_str())
         } else if memory {
             AMEM_TOOLS.contains(&grant.tool.as_str())
         } else {
@@ -283,6 +322,15 @@ fn continuation_count(metadata: Option<&Value>, resolution: &Resolution) -> Resu
             .is_some_and(|tool| RETIRED_MEMORY_TOOLS.contains(&tool))
     }) {
         return Err(RETIRED_MEMORY_REASON.into());
+    }
+    // Recorded vault scopes keep their original tool name; retirement must be explicit,
+    // even when the newly resolved task offers vmem tools instead of obsidian's names.
+    if previous_scope.iter().any(|scope| {
+        scope
+            .strip_prefix("vault/")
+            .is_some_and(|tool| RETIRED_VAULT_TOOLS.contains(&tool))
+    }) {
+        return Err(RETIRED_VAULT_REASON.into());
     }
     if previous_scope
         .iter()
@@ -484,9 +532,9 @@ mod tests {
         let mut r = resolution();
         r.knowledge_approvals = vec![
             KnowledgeApproval {
-                server: "obsidian".into(),
+                server: VMEM_SERVER.into(),
                 plugin: None,
-                tool: "write_note".into(),
+                tool: "vmem_create".into(),
                 approval_mode: "approve".into(),
             },
             KnowledgeApproval {
@@ -520,29 +568,29 @@ mod tests {
         let mut r = resolution();
         let before = serde_json::json!({"adaptiveContinuation": r.checkpoint(true)});
         r.knowledge_approvals = vec![KnowledgeApproval {
-            server: "obsidian".into(),
+            server: VMEM_SERVER.into(),
             plugin: None,
-            tool: "write_note".into(),
+            tool: "vmem_create".into(),
             approval_mode: "approve".into(),
         }];
         assert_eq!(
             knowledge_args(&r).unwrap(),
-            vec!["--allowedTools", "mcp__obsidian__write_note"]
+            vec!["--allowedTools", "mcp__vmem__vmem_create"]
         );
         assert!(continuation_count(Some(&before), &r)
             .unwrap_err()
             .starts_with("adaptive_policy_configuration_changed"));
-        for forbidden in ["delete_note", "move_note", "move_file", "*"] {
+        for forbidden in ["vmem_delete", "vmem_move", "vmem_*", "*"] {
             r.knowledge_approvals[0].tool = forbidden.into();
             assert!(knowledge_args(&r).is_err());
         }
-        r.knowledge_approvals[0].tool = "write_note".into();
+        r.knowledge_approvals[0].tool = "vmem_create".into();
         r.agent = "codex".into();
         assert_eq!(
             knowledge_args(&r).unwrap(),
             vec![
                 "-c",
-                "mcp_servers.obsidian.tools.write_note.approval_mode=\"approve\""
+                "mcp_servers.vmem.tools.vmem_create.approval_mode=\"approve\""
             ]
         );
         r.knowledge_approvals[0] = amem("amem_remember");
@@ -667,6 +715,206 @@ mod tests {
                 assert!(knowledge_args(&r).is_err(), "{agent}");
             }
         }
+    }
+
+    fn vmem(tool: &str) -> KnowledgeApproval {
+        KnowledgeApproval {
+            server: VMEM_SERVER.into(),
+            plugin: None,
+            tool: tool.into(),
+            approval_mode: "approve".into(),
+        }
+    }
+
+    // The reviewed vmem 0.1.0 contract; future additions do not gain authority automatically.
+    const VMEM_FROZEN: [&str; 21] = [
+        "vmem_append",
+        "vmem_check",
+        "vmem_create",
+        "vmem_graph_build",
+        "vmem_graph_neighbors",
+        "vmem_link",
+        "vmem_links",
+        "vmem_lint",
+        "vmem_list",
+        "vmem_log_append",
+        "vmem_log_tail",
+        "vmem_mocs",
+        "vmem_patch",
+        "vmem_promote",
+        "vmem_promote_from_amem",
+        "vmem_read",
+        "vmem_read_many",
+        "vmem_search",
+        "vmem_set_frontmatter",
+        "vmem_status",
+        "vmem_supersede",
+    ];
+
+    #[test]
+    fn vmem_grants_produce_exact_rules_for_every_frozen_tool_under_claude_and_codex() {
+        assert_eq!(VMEM_TOOLS, VMEM_FROZEN);
+        for tool in VMEM_FROZEN {
+            let mut r = resolution();
+            r.knowledge_approvals = vec![vmem(tool)];
+            assert_eq!(
+                knowledge_args(&r).unwrap(),
+                vec!["--allowedTools".to_string(), format!("mcp__vmem__{tool}")],
+                "claude {tool}"
+            );
+            assert_eq!(
+                r.knowledge_scope(),
+                serde_json::to_string(&vec![format!("vault/{tool}")]).unwrap()
+            );
+            r.agent = "codex".into();
+            assert_eq!(
+                knowledge_args(&r).unwrap(),
+                vec![
+                    "-c".to_string(),
+                    format!("mcp_servers.vmem.tools.{tool}.approval_mode=\"approve\"")
+                ],
+                "codex {tool}"
+            );
+        }
+        let mut r = resolution();
+        r.knowledge_approvals = VMEM_FROZEN.iter().rev().map(|tool| vmem(tool)).collect();
+        r.knowledge_approvals.push(vmem("vmem_read"));
+        let mut expected: Vec<String> = VMEM_FROZEN
+            .iter()
+            .map(|tool| format!("mcp__vmem__{tool}"))
+            .collect();
+        expected.sort();
+        assert_eq!(
+            knowledge_args(&r).unwrap(),
+            vec!["--allowedTools".to_string(), expected.join(",")]
+        );
+    }
+
+    #[test]
+    fn vmem_grants_reject_move_delete_future_tools_wildcards_and_nonexact_bindings() {
+        for agent in ["claude", "codex"] {
+            for tool in ["vmem_move", "vmem_delete", "vmem_future", "vmem_*", "*", ""] {
+                let mut r = resolution();
+                r.agent = agent.into();
+                r.knowledge_approvals = vec![vmem(tool)];
+                assert_eq!(
+                    knowledge_args(&r).unwrap_err(),
+                    "adaptive_policy_knowledge_grant_unsupported",
+                    "{agent} {tool}"
+                );
+            }
+            for bad in [
+                KnowledgeApproval {
+                    plugin: Some("vmem@local".into()),
+                    ..vmem("vmem_read")
+                },
+                KnowledgeApproval {
+                    approval_mode: "auto".into(),
+                    ..vmem("vmem_read")
+                },
+                KnowledgeApproval {
+                    server: "Vmem".into(),
+                    ..vmem("vmem_read")
+                },
+                KnowledgeApproval {
+                    server: "vmem2".into(),
+                    ..vmem("vmem_read")
+                },
+            ] {
+                let mut r = resolution();
+                r.agent = agent.into();
+                r.knowledge_approvals = vec![bad];
+                assert_eq!(
+                    knowledge_args(&r).unwrap_err(),
+                    "adaptive_policy_knowledge_grant_unsupported"
+                );
+            }
+        }
+        for agent in ["kimi", "kiro"] {
+            let mut r = resolution();
+            r.agent = agent.into();
+            r.knowledge_approvals = vec![vmem("vmem_read")];
+            assert!(knowledge_args(&r).is_err());
+        }
+    }
+
+    #[test]
+    fn obsidian_server_and_retired_tool_names_refuse_without_remapping_or_partial_rules() {
+        for agent in ["claude", "codex"] {
+            for tool in
+                RETIRED_VAULT_TOOLS
+                    .into_iter()
+                    .chain(["vmem_read", "amem_search", "unknown"])
+            {
+                let mut r = resolution();
+                r.agent = agent.into();
+                r.knowledge_approvals = vec![KnowledgeApproval {
+                    server: "obsidian".into(),
+                    ..vmem(tool)
+                }];
+                let error = knowledge_args(&r).unwrap_err();
+                assert_eq!(error, RETIRED_VAULT_REASON);
+                assert!(validate(&r)
+                    .unwrap_err()
+                    .starts_with("adaptive_policy_knowledge_grant_retired"));
+            }
+            for server in ["vmem", "amem", "unregistered"] {
+                for tool in RETIRED_VAULT_TOOLS {
+                    let mut r = resolution();
+                    r.agent = agent.into();
+                    r.knowledge_approvals = vec![KnowledgeApproval {
+                        server: server.into(),
+                        ..vmem(tool)
+                    }];
+                    assert_eq!(
+                        knowledge_args(&r).unwrap_err(),
+                        RETIRED_VAULT_REASON,
+                        "{agent} {server} {tool}"
+                    );
+                }
+            }
+            let mut r = resolution();
+            r.agent = agent.into();
+            r.knowledge_approvals = vec![
+                vmem("vmem_read"),
+                amem("amem_search"),
+                KnowledgeApproval {
+                    server: "obsidian".into(),
+                    ..vmem("write_note")
+                },
+            ];
+            assert_eq!(knowledge_args(&r).unwrap_err(), RETIRED_VAULT_REASON);
+        }
+    }
+
+    #[test]
+    fn frozen_obsidian_scopes_refuse_naming_retirement_and_vmem_scopes_continue() {
+        for tool in RETIRED_VAULT_TOOLS {
+            let mut old = resolution();
+            old.knowledge_approvals = vec![KnowledgeApproval {
+                server: "obsidian".into(),
+                ..vmem(tool)
+            }];
+            let recorded = serde_json::json!({"adaptiveContinuation": old.checkpoint(true)});
+            let mut now = resolution();
+            now.knowledge_approvals = vec![vmem("vmem_read")];
+            assert_eq!(
+                continuation_count(Some(&recorded), &now).unwrap_err(),
+                RETIRED_VAULT_REASON
+            );
+            assert_eq!(
+                continuation_count(Some(&recorded), &old).unwrap_err(),
+                RETIRED_VAULT_REASON
+            );
+        }
+        let mut r = resolution();
+        r.knowledge_approvals = vec![vmem("vmem_read"), vmem("vmem_patch")];
+        let recorded = serde_json::json!({"adaptiveContinuation": r.checkpoint(true)});
+        assert_eq!(continuation_count(Some(&recorded), &r).unwrap(), 0);
+        r.knowledge_approvals.pop();
+        assert!(continuation_count(Some(&recorded), &r)
+            .unwrap_err()
+            .starts_with("adaptive_policy_knowledge_access_reduced"));
     }
 
     // The three spellings the retired claude-mem grants used.
