@@ -9,6 +9,11 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.22 - Settled Grants (2026-10-30)
+
+- Agent tasks get vault access through the vmem server: knowledge grants move from the retired Obsidian MCP server (`obsidian`, mcpvault) to `vmem` with a frozen tool list (move and delete stay out of unattended tasks), and a task still carrying an old `obsidian` grant is refused by name instead of being remapped (#461, #464).
+- Agent tasks get memory access through amem: knowledge grants move from claude-mem to `amem`, and old claude-mem grants are refused by name (#458, #460).
+
 ## v1.1.21 - Even Footing (2026-10-09)
 
 - Rename or trash a workspace folder on Windows while another write waits on a file inside it: a waiting transaction no longer holds a directory handle that made Windows deny the rename. NTFS/ReFS parents are pinned by file identity; other volumes keep the open handle (#455).
