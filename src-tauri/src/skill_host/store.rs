@@ -2122,6 +2122,10 @@ fn skills_reset_registry_impl(
     }
     let admission = PathTransactionRequest::new(paths)?.acquire()?;
     let _guard = registry_guard()?;
+    // Reset rebuilds even an unreadable registry, but never one a newer maru wrote.
+    if let Some(version) = on_disk_registry_version()? {
+        refuse_newer_registry(version)?;
+    }
     validate_defaults(&admission)?;
     let root = host_fs::skills_root()?;
     progress.info(format!(
@@ -3942,17 +3946,29 @@ pub fn load_registry() -> Result<SkillsRegistry, String> {
 }
 
 fn load_registry_unlocked() -> Result<SkillsRegistry, String> {
-    let path = registry_path()?;
+    read_registry_file(&registry_path()?)
+}
+
+fn load_registry_readonly_unlocked() -> Result<SkillsRegistry, String> {
+    read_registry_file(&host_fs::skills_root()?.join(REGISTRY_FILE))
+}
+
+fn read_registry_file(path: &Path) -> Result<SkillsRegistry, String> {
     if !path.is_file() {
         return Ok(SkillsRegistry::default());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&path)))?;
+    let content = fs::read_to_string(path)
+        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(path)))?;
     if content.trim().is_empty() {
         return Ok(SkillsRegistry::default());
     }
+    // Version first: a newer format may not parse as this build's struct, and
+    // the refusal must name the version, not a parse error.
+    if let Some(version) = registry_format_version(&content) {
+        refuse_newer_registry(version)?;
+    }
     let mut registry: SkillsRegistry = serde_json::from_str(&content)
-        .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
+        .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(path)))?;
     let loaded_version = registry.version;
     migrate_loaded_registry(&mut registry, loaded_version);
     normalize_removed_source_ids(&mut registry);
@@ -3960,23 +3976,35 @@ fn load_registry_unlocked() -> Result<SkillsRegistry, String> {
     Ok(registry)
 }
 
-fn load_registry_readonly_unlocked() -> Result<SkillsRegistry, String> {
-    let path = host_fs::skills_root()?.join(REGISTRY_FILE);
-    if !path.is_file() {
-        return Ok(SkillsRegistry::default());
+fn registry_format_version(content: &str) -> Option<u32> {
+    #[derive(Deserialize)]
+    struct Version {
+        version: u32,
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&path)))?;
-    if content.trim().is_empty() {
-        return Ok(SkillsRegistry::default());
+    serde_json::from_str::<Version>(content)
+        .ok()
+        .map(|v| v.version)
+}
+
+/// A registry a newer maru wrote carries records this build does not know;
+/// loading and saving it would drop them and stamp it back to this version
+/// (two builds share `~/.maru/skills`). Refuse with a named reason instead.
+fn refuse_newer_registry(version: u32) -> Result<(), String> {
+    if version > REGISTRY_VERSION {
+        return Err(format!(
+            "registry_newer_than_build: registry.json is format {version}, maru {} reads up to format {REGISTRY_VERSION}; update maru, nothing was written",
+            env!("CARGO_PKG_VERSION")
+        ));
     }
-    let mut registry: SkillsRegistry = serde_json::from_str(&content)
-        .map_err(|err| format!("Cannot parse {}: {err}", host_fs::display_path(&path)))?;
-    let loaded_version = registry.version;
-    migrate_loaded_registry(&mut registry, loaded_version);
-    normalize_removed_source_ids(&mut registry);
-    apply_registry_validation(&mut registry);
-    Ok(registry)
+    Ok(())
+}
+
+/// The on-disk registry's format, when the file exists and names one.
+fn on_disk_registry_version() -> Result<Option<u32>, String> {
+    let path = registry_path()?;
+    Ok(fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| registry_format_version(&content)))
 }
 
 fn migrate_loaded_registry(registry: &mut SkillsRegistry, loaded_version: u32) {
@@ -4006,6 +4034,9 @@ fn migrate_legacy_skill_tiers(registry: &mut SkillsRegistry) {
 }
 
 fn save_registry_unlocked(registry: &SkillsRegistry) -> Result<(), String> {
+    if let Some(version) = on_disk_registry_version()? {
+        refuse_newer_registry(version)?;
+    }
     // Every application registry writer passes this seam, including default
     // sources, linked config replacement, adoption and imports. Observe each
     // committed mutation so identical remove/re-add and change/revert are ABA-safe.
@@ -4634,6 +4665,7 @@ pub struct SkillBundleAvailable {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published_at: Option<String>,
     pub min_app_version: String,
+    pub requires: BTreeMap<String, String>,
     pub env_hash: String,
     pub archive_size: u64,
 }
@@ -4654,6 +4686,8 @@ pub struct SkillBundleStatus {
     pub stale_copy_installs: Vec<String>,
     pub env_update_required: bool,
     pub min_app_ok: bool,
+    /// The available bundle's `requires` floors the installed tools miss.
+    pub unmet_requires: Vec<String>,
     pub auto_applicable: bool,
 }
 
@@ -5185,34 +5219,45 @@ fn skills_bundle_status_impl(
     };
     let registry = load_registry_unlocked()?;
     let stale_copy_installs = stale_copy_installs_report(&registry);
-    let (update_available, available, env_update_required, min_app_ok) = match remote {
-        Some(remote) => {
-            let metadata = &remote.metadata;
-            let newer = active
-                .as_ref()
-                .map(|active| metadata.revision > active.revision)
-                .unwrap_or(true);
-            let env_changed = active
-                .as_ref()
-                .map(|active| metadata.env_hash != active.env_hash)
-                .unwrap_or(false);
-            let min_ok = bundle::app_version_satisfies(&metadata.min_app_version);
-            let available = SkillBundleAvailable {
-                bundle_id: bundle_id_for(metadata),
-                revision: metadata.revision,
-                display_version: metadata.display_version.clone(),
-                commit: metadata.commit.clone(),
-                published_at: metadata.published_at.clone(),
-                min_app_version: metadata.min_app_version.clone(),
-                env_hash: metadata.env_hash.clone(),
-                archive_size: metadata.archive.size,
-            };
-            (newer, Some(available), newer && env_changed, min_ok)
-        }
-        None => (false, None, false, true),
-    };
-    let auto_applicable =
-        update_available && min_app_ok && !env_update_required && dirty.is_empty() && pristine_ok;
+    let (update_available, available, env_update_required, min_app_ok, unmet_requires) =
+        match remote {
+            Some(remote) => {
+                let metadata = &remote.metadata;
+                let newer = active
+                    .as_ref()
+                    .map(|active| metadata.revision > active.revision)
+                    .unwrap_or(true);
+                let env_changed = active
+                    .as_ref()
+                    .map(|active| metadata.env_hash != active.env_hash)
+                    .unwrap_or(false);
+                let min_ok = bundle::app_version_satisfies(&metadata.min_app_version);
+                let unmet = if newer {
+                    bundle::unmet_installed_tool_floors(&metadata.requires)
+                } else {
+                    Vec::new()
+                };
+                let available = SkillBundleAvailable {
+                    bundle_id: bundle_id_for(metadata),
+                    revision: metadata.revision,
+                    display_version: metadata.display_version.clone(),
+                    commit: metadata.commit.clone(),
+                    published_at: metadata.published_at.clone(),
+                    min_app_version: metadata.min_app_version.clone(),
+                    requires: metadata.requires.clone(),
+                    env_hash: metadata.env_hash.clone(),
+                    archive_size: metadata.archive.size,
+                };
+                (newer, Some(available), newer && env_changed, min_ok, unmet)
+            }
+            None => (false, None, false, true, Vec::new()),
+        };
+    let auto_applicable = update_available
+        && min_app_ok
+        && unmet_requires.is_empty()
+        && !env_update_required
+        && dirty.is_empty()
+        && pristine_ok;
     Ok(SkillBundleStatus {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         active,
@@ -5222,6 +5267,7 @@ fn skills_bundle_status_impl(
         stale_copy_installs,
         env_update_required,
         min_app_ok,
+        unmet_requires,
         auto_applicable,
     })
 }
@@ -5347,6 +5393,10 @@ fn skills_apply_bundle_update_blocking(
             metadata.min_app_version,
             env!("CARGO_PKG_VERSION")
         ));
+    }
+    let unmet = bundle::unmet_installed_tool_floors(&metadata.requires);
+    if !unmet.is_empty() {
+        return Err(format!("bundle_requires_tools: {}", unmet.join(", ")));
     }
     let env_changed = metadata.env_hash != active.env_hash;
     if env_changed && !repair_env {
@@ -8179,6 +8229,7 @@ mod tests {
                     commit: None,
                     published_at: None,
                     min_app_version: "0.0.1".into(),
+                    requires: Default::default(),
                     env_hash: "fixture-env".into(),
                     archive: bundle::BundleArchiveInfo {
                         name: "fixture.zip".into(),
@@ -8195,6 +8246,33 @@ mod tests {
                 archive_sig_url: "fixture".into(),
             };
             (remote, archive)
+        }
+        #[test]
+        fn bundle_whose_tool_floor_cannot_be_met_is_refused_before_download() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let before = bundle::read_state().unwrap().unwrap().active;
+            let (mut remote, _) = bundle_fixture();
+            // A floor this build cannot read is unmet on every machine, so the
+            // refusal does not depend on which vmem is installed here.
+            remote
+                .metadata
+                .requires
+                .insert("vmem".into(), "^0.2.3".into());
+            let err = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| panic!("an unmet floor must stop before download"),
+                |_, _, _| panic!("repair"),
+            )
+            .unwrap_err();
+            assert_eq!(
+                err,
+                "bundle_requires_tools: vmem ^0.2.3 (not understood by this build)"
+            );
+            assert_eq!(bundle::read_state().unwrap().unwrap().active, before);
         }
         #[test]
         fn bundle_env_repair_releases_registry_and_preserves_active_preparation() {
@@ -9640,6 +9718,39 @@ mod tests {
             .validation_errors
             .iter()
             .any(|error| error.starts_with("tier_misplaced")));
+    }
+
+    #[test]
+    fn newer_registry_is_refused_by_load_save_and_reset_and_left_byte_identical() {
+        let _home = test_home();
+        let path = registry_path().unwrap();
+        host_fs::write_json_pretty(
+            &path,
+            &serde_json::json!({
+                "version": REGISTRY_VERSION + 1,
+                "sources": "a shape this build cannot parse",
+                "futureField": true
+            }),
+        )
+        .unwrap();
+        let before = fs::read(&path).unwrap();
+        let refused = |result: Result<(), String>| {
+            let err = result.unwrap_err();
+            assert!(err.starts_with("registry_newer_than_build:"), "{err}");
+            assert!(
+                err.contains(&format!("format {}", REGISTRY_VERSION + 1)),
+                "{err}"
+            );
+        };
+        refused(load_registry_unlocked().map(|_| ()));
+        refused(load_registry_readonly_unlocked().map(|_| ()));
+        refused(save_registry_unlocked(&SkillsRegistry::default()));
+        refused(skills_reset_registry_impl(None, ProgressReporter::noop()).map(|_| ()));
+        assert_eq!(fs::read(&path).unwrap(), before);
+
+        // The current format still loads and saves.
+        host_fs::write_json_pretty(&path, &SkillsRegistry::default()).unwrap();
+        save_registry_unlocked(&load_registry_unlocked().unwrap()).unwrap();
     }
 
     #[test]

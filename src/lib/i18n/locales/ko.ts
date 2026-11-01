@@ -2953,6 +2953,7 @@ export const ko: Record<string, string> = {
   "system.skills.bundleApplyFailed": "스킬 번들 적용 실패",
   "system.skills.bundleDirtyHint": "로컬 수정이 있어 업데이트가 차단됩니다: {skills}. Save As로 승격하거나 discard 후 다시 시도하세요.",
   "system.skills.bundleAppTooOld": "이 번들은 앱 {version} 이상이 필요합니다. 앱을 먼저 업데이트하세요.",
+  "system.skills.bundleToolsTooOld": "이 번들은 더 새로운 도구가 필요합니다: {tools}. 먼저 업데이트하세요.",
   "system.skills.refresh": "새로고침",
   "system.skills.adopt": "Adopt",
   "system.skills.bootstrap": "Bootstrap",

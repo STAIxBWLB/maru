@@ -528,6 +528,7 @@ export interface SkillBundleAvailable {
   commit?: string | null;
   publishedAt?: string | null;
   minAppVersion: string;
+  requires: Record<string, string>;
   envHash: string;
   archiveSize: number;
 }
@@ -541,6 +542,7 @@ export interface SkillBundleStatus {
   staleCopyInstalls: string[];
   envUpdateRequired: boolean;
   minAppOk: boolean;
+  unmetRequires: string[];
   autoApplicable: boolean;
 }
 
