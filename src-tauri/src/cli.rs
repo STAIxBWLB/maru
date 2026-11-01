@@ -439,6 +439,12 @@ fn run_skills_update(args: &[String]) -> i32 {
                             if status.env_update_required {
                                 blockers.push("env update required (--repair-env)".to_string());
                             }
+                            if !status.unmet_requires.is_empty() {
+                                blockers.push(format!(
+                                    "tools too old: {}",
+                                    status.unmet_requires.join(", ")
+                                ));
+                            }
                             if !status.min_app_ok {
                                 blockers.push(format!(
                                     "app too old (needs {})",

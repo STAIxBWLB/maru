@@ -103,6 +103,9 @@ pub struct BundleMetadata {
     #[serde(default)]
     pub published_at: Option<String>,
     pub min_app_version: String,
+    /// Tool floors such as `{"vmem": ">=0.2.3"}` (skills#94); absent on older bundles.
+    #[serde(default)]
+    pub requires: BTreeMap<String, String>,
     pub env_hash: String,
     pub archive: BundleArchiveInfo,
     pub files: Vec<BundleFileEntry>,
@@ -255,6 +258,41 @@ pub fn app_version_satisfies(min_app_version: &str) -> bool {
         // Unparseable constraint: refuse rather than guess.
         _ => false,
     }
+}
+
+/// The `requires` floors the installed tools miss, each as a named reason
+/// (`vmem >=0.2.3 (installed 0.2.2)`). Like `minAppVersion`, a floor this build
+/// cannot read (an unknown tool, a range other than `>=X.Y.Z`) is unmet: refuse
+/// rather than guess. `installed` answers a tool's version, None when absent.
+pub fn unmet_tool_floors(
+    requires: &BTreeMap<String, String>,
+    installed: impl Fn(&str) -> Option<(u64, u64, u64)>,
+) -> Vec<String> {
+    let mut unmet = Vec::new();
+    for (tool, range) in requires {
+        let floor = range
+            .trim()
+            .strip_prefix(">=")
+            .and_then(|v| crate::tool_manifest::parse_stable(v.trim()));
+        let known = matches!(tool.as_str(), "amem" | "vmem");
+        let (Some(floor), true) = (floor, known) else {
+            unmet.push(format!("{tool} {range} (not understood by this build)"));
+            continue;
+        };
+        match installed(tool) {
+            Some(version) if version >= floor => {}
+            Some((major, minor, patch)) => unmet.push(format!(
+                "{tool} {range} (installed {major}.{minor}.{patch})"
+            )),
+            None => unmet.push(format!("{tool} {range} (not installed)")),
+        }
+    }
+    unmet
+}
+
+/// `unmet_tool_floors` against the tools installed on this machine.
+pub fn unmet_installed_tool_floors(requires: &BTreeMap<String, String>) -> Vec<String> {
+    unmet_tool_floors(requires, |tool| crate::tool_manifest::read(tool).version)
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +976,7 @@ mod tests {
             commit: None,
             published_at: None,
             min_app_version: "0.0.1".to_string(),
+            requires: BTreeMap::new(),
             env_hash: String::new(),
             archive: BundleArchiveInfo {
                 name: "maru-skills-r2-abc1234.zip".to_string(),
@@ -1144,6 +1183,52 @@ mod tests {
     }
 
     #[test]
+    fn tool_floor_gate_names_each_unmet_floor_and_refuses_what_it_cannot_read() {
+        let installed = |tool: &str| match tool {
+            "vmem" => Some((0, 2, 2)),
+            _ => None,
+        };
+        let requires = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        assert!(unmet_tool_floors(&requires(&[]), installed).is_empty());
+        assert!(unmet_tool_floors(&requires(&[("vmem", ">=0.2.2")]), installed).is_empty());
+        assert!(unmet_tool_floors(&requires(&[("vmem", ">=0.1.9")]), installed).is_empty());
+        assert_eq!(
+            unmet_tool_floors(
+                &requires(&[("vmem", ">=0.2.3"), ("amem", ">=0.13.0")]),
+                installed
+            ),
+            vec![
+                "amem >=0.13.0 (not installed)".to_string(),
+                "vmem >=0.2.3 (installed 0.2.2)".to_string(),
+            ]
+        );
+        for (tool, range) in [("vmem", "^0.2.3"), ("vmem", ">=0.2"), ("hwp", ">=1.0.0")] {
+            assert_eq!(
+                unmet_tool_floors(&requires(&[(tool, range)]), |_| Some((99, 0, 0))),
+                vec![format!("{tool} {range} (not understood by this build)")]
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_without_requires_parses_with_no_floors() {
+        let metadata: BundleMetadata = serde_json::from_str(R42_METADATA).unwrap();
+        assert!(metadata.requires.is_empty());
+        let mut value: serde_json::Value = serde_json::from_str(R42_METADATA).unwrap();
+        value["requires"] = serde_json::json!({"vmem": ">=0.2.3"});
+        let metadata: BundleMetadata = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            metadata.requires.get("vmem").map(String::as_str),
+            Some(">=0.2.3")
+        );
+    }
+
+    #[test]
     fn app_version_gate_refuses_unparseable() {
         assert!(!app_version_satisfies("not-a-version"));
         assert!(app_version_satisfies("0.0.1"));
@@ -1316,6 +1401,7 @@ mod tests {
             commit: None,
             published_at: None,
             min_app_version: "0.4.6".to_string(),
+            requires: BTreeMap::new(),
             env_hash: String::new(),
             archive: BundleArchiveInfo {
                 name: "maru-skills-r1-abc1234.zip".to_string(),

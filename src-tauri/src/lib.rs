@@ -85,6 +85,7 @@ pub mod today_lifecycle;
 pub mod today_notify;
 pub mod today_outbox;
 pub mod today_store;
+mod tool_manifest;
 mod vault;
 mod vault_graph;
 mod vault_guard;

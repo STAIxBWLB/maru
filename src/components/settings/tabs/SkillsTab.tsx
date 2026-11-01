@@ -1045,7 +1045,8 @@ export function SkillsTab({ workPath }: { workPath: string }) {
               disabled={
                 busy ||
                 bundleStatus.dirtySkills.length > 0 ||
-                !bundleStatus.minAppOk
+                !bundleStatus.minAppOk ||
+                bundleStatus.unmetRequires.length > 0
               }
               title={
                 bundleStatus.dirtySkills.length > 0
@@ -1056,7 +1057,11 @@ export function SkillsTab({ workPath }: { workPath: string }) {
                     ? t("system.skills.bundleAppTooOld", {
                         version: bundleStatus.available?.minAppVersion ?? "",
                       })
-                    : undefined
+                    : bundleStatus.unmetRequires.length > 0
+                      ? t("system.skills.bundleToolsTooOld", {
+                          tools: bundleStatus.unmetRequires.join(", "),
+                        })
+                      : undefined
               }
             >
               {t("system.skills.bundleApply", {

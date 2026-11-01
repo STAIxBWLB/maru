@@ -14,6 +14,7 @@ pub fn extra_path_dirs() -> Vec<PathBuf> {
     ];
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
         out.push(home.join(".local/bin"));
+        out.push(home.join(".bun/bin"));
         out.push(home.join(".kimi-code/bin"));
         out.push(home.join(".npm-global/bin"));
         out.push(home.join(".local/share/fnm/aliases/default/bin"));

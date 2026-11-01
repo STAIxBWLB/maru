@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use super::contracts::CompletionRequest;
 use super::provider::CliProviderKind;
 use crate::cli_path::{augmented_path, resolve_program};
+use crate::tool_manifest::ManifestTool;
 use crate::win_process::NoWindow;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -88,10 +89,62 @@ impl Resolution {
 /// with no plugin binding (dotfiles#255 D5, agent-mem#13 P2).
 const AMEM_SERVER: &str = "amem";
 
+/// The grant list for `server`: the installed release's published MCP tools when it publishes them
+/// (`<tool> manifest --json`), else `frozen`. The rule matches dotfiles#320: a published name is
+/// granted only when it is the server's own (`<server>_` prefix), a plain lowercase identifier, and
+/// either already in `frozen` or marked `readOnly: true` by the manifest with no destructive verb in
+/// its name. `frozen` stays the ceiling for anything that writes, and nothing grantable falls back to it.
+fn grantable_tools(server: &str, frozen: &[&str], published: &[ManifestTool]) -> Vec<String> {
+    const DESTRUCTIVE: [&str; 5] = ["delete", "forget", "move", "purge", "remove"];
+    let prefix = format!("{server}_");
+    let mut granted: Vec<String> = Vec::new();
+    for tool in published {
+        let name = tool.name.as_str();
+        let plain = (2..=64).contains(&name.len())
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        let approved = frozen.contains(&name)
+            || (tool.read_only && !DESTRUCTIVE.iter().any(|verb| name.contains(verb)));
+        if plain && name.starts_with(&prefix) && approved && !granted.iter().any(|g| g == name) {
+            granted.push(name.to_string());
+        }
+    }
+    if granted.is_empty() {
+        return frozen.iter().map(|tool| tool.to_string()).collect();
+    }
+    granted
+}
+
+/// `grantable_tools` against the installed `server`, read once per process.
+// ponytail: per-process cache, so a tool upgraded while maru runs is seen after a restart;
+// re-read on a version change if that matters.
+fn knowledge_tools(server: &str, frozen: &[&str]) -> Vec<String> {
+    #[cfg(test)]
+    let published: Vec<ManifestTool> = Vec::new();
+    #[cfg(not(test))]
+    let published = {
+        use std::collections::BTreeMap;
+        use std::sync::{Mutex, OnceLock};
+        static CACHE: OnceLock<Mutex<BTreeMap<String, Vec<ManifestTool>>>> = OnceLock::new();
+        let mut cache = CACHE
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache
+            .entry(server.to_string())
+            .or_insert_with(|| crate::tool_manifest::read(server).tools)
+            .clone()
+    };
+    grantable_tools(server, frozen, &published)
+}
+
 /// amem's frozen nine-tool MCP surface (agent-mem README "Session MCP and work lists (#13 P2)",
 /// the contract fixed for dotfiles#255 and maru#458). None deletes or moves a note:
 /// `amem_remember` only proposes a candidate a person accepts and `amem_work_state_write`
-/// appends scalar work-list fields. A tool amem adds later is not granted until this list changes.
+/// appends scalar work-list fields. A tool amem adds later is granted only through its manifest
+/// (`grantable_tools`); this list is the fallback and the ceiling.
 const AMEM_TOOLS: [&str; 9] = [
     "amem_search",
     "amem_show",
@@ -203,9 +256,9 @@ pub fn knowledge_args(resolution: &Resolution) -> Result<Vec<String>, String> {
             && grant.server == AMEM_SERVER
             && grant.plugin.is_none();
         let tool_allowed = if vault {
-            VMEM_TOOLS.contains(&grant.tool.as_str())
+            knowledge_tools(VMEM_SERVER, &VMEM_TOOLS).contains(&grant.tool)
         } else if memory {
-            AMEM_TOOLS.contains(&grant.tool.as_str())
+            knowledge_tools(AMEM_SERVER, &AMEM_TOOLS).contains(&grant.tool)
         } else {
             false
         };
@@ -836,6 +889,66 @@ mod tests {
             r.knowledge_approvals = vec![vmem("vmem_read")];
             assert!(knowledge_args(&r).is_err());
         }
+    }
+
+    #[test]
+    fn manifest_tools_are_granted_by_the_frozen_list_or_a_readonly_claim_without_a_destructive_verb(
+    ) {
+        let plain = |names: &[&str]| -> Vec<ManifestTool> {
+            names
+                .iter()
+                .map(|name| ManifestTool {
+                    name: name.to_string(),
+                    read_only: false,
+                })
+                .collect()
+        };
+        let read_only = |names: &[&str]| -> Vec<ManifestTool> {
+            names
+                .iter()
+                .map(|name| ManifestTool {
+                    name: name.to_string(),
+                    read_only: true,
+                })
+                .collect()
+        };
+        // No manifest: the frozen list.
+        assert_eq!(
+            grantable_tools(VMEM_SERVER, &VMEM_TOOLS, &[]),
+            VMEM_TOOLS.map(String::from).to_vec()
+        );
+        // A new read-only tool is granted without a maru release (AC5); a new plain-string
+        // name, a read-only claim on a destructive verb, another server's name or a
+        // non-identifier is not; frozen names stay; vmem_move/vmem_delete stay refused.
+        let mut published = plain(&["vmem_read", "vmem_move", "vmem_delete", "vmem_overwrite"]);
+        published.extend(read_only(&[
+            "vmem_skills_mine",
+            "vmem_purge_all",
+            "vmem_remove_note",
+            "vmem_forget_x",
+            "vmem_move_safe",
+            "amem_search",
+            "vmem_Bad",
+            "vmem_skills_mine",
+        ]));
+        assert_eq!(
+            grantable_tools(VMEM_SERVER, &VMEM_TOOLS, &published),
+            vec!["vmem_read".to_string(), "vmem_skills_mine".to_string()]
+        );
+        // The manifest replaces the frozen list: a frozen name it no longer publishes is not granted.
+        assert!(
+            !grantable_tools(AMEM_SERVER, &AMEM_TOOLS, &plain(&["amem_search"]))
+                .contains(&"amem_show".to_string())
+        );
+        // Nothing grantable falls back to the frozen list.
+        assert_eq!(
+            grantable_tools(
+                AMEM_SERVER,
+                &AMEM_TOOLS,
+                &plain(&["amem_forget", "amem_new_write"])
+            ),
+            AMEM_TOOLS.map(String::from).to_vec()
+        );
     }
 
     #[test]

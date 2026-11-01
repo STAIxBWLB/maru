@@ -2956,6 +2956,7 @@ export const en: Record<string, string> = {
   "system.skills.bundleApplyFailed": "Skills bundle apply failed",
   "system.skills.bundleDirtyHint": "Local edits block the update: {skills}. Promote them with Save As or discard, then retry.",
   "system.skills.bundleAppTooOld": "This bundle requires app {version} or newer. Update the app first.",
+  "system.skills.bundleToolsTooOld": "This bundle needs newer tools: {tools}. Update them first.",
   "system.skills.refresh": "Refresh",
   "system.skills.adopt": "Adopt",
   "system.skills.bootstrap": "Bootstrap",

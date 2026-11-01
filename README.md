@@ -234,8 +234,12 @@ brew upgrade maru-cli
   not automatically replay failed actions or change providers after a rejection.
   Explicitly authorized amem and vmem lookup/record tools receive
   exact native approval rules from resolved `knowledge_approvals`: amem is the
-  plain `amem` MCP server with its frozen nine `amem_*` tools; vmem is the
-  plain `vmem` server with its frozen 21-tool grant list from vmem 0.1.0. Unknown
+  plain `amem` MCP server and vmem the plain `vmem` server. Their grant lists
+  come from the installed release's `manifest --json` (read once per process)
+  under the dotfiles rule: a published name is granted only if the frozen list
+  (nine `amem_*` tools, 21 `vmem_*` tools from vmem 0.1.0) has it, or the
+  manifest marks it `readOnly: true` and its name has no delete, forget, move,
+  purge or remove verb. Without a manifest the frozen list applies. Unknown
   servers, tools, deletion, and move grants are rejected. claude-mem and
   obsidian (mcpvault) grants were retired: old server/tool names are rejected
   with a reason naming the replacement (amem or vmem), never silently mapped,
@@ -682,7 +686,12 @@ Skills deploy independently from the desktop application through
 `STAIxBWLB/skills`. Bundle changes are verified, packaged, minisign-signed, and
 published to the `skills-channel` prerelease. Maru checks after launch and every
 six hours, auto-applies only when local skills are clean and runtime-compatible,
-and exposes manual check/apply commands in the CLI and Skills UI.
+and exposes manual check/apply commands in the CLI and Skills UI. A bundle is
+not applied when the app is older than its `minAppVersion` (`bundle_requires_app`)
+or an installed tool misses a `requires` floor such as `{"vmem": ">=0.2.3"}`
+(`bundle_requires_tools`, versions from `<tool> manifest --json`, else
+`<tool> --version`). A `registry.json` in a newer format than the build reads is
+refused (`registry_newer_than_build`) and never rewritten.
 
 `src-tauri/skills-bootstrap/` is a frozen first-run fallback, not the live OTA
 source. Refresh it deliberately with `make skills-bootstrap-refresh` only when
