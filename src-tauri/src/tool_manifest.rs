@@ -48,7 +48,10 @@ pub fn read(tool: &str) -> ToolManifest {
     };
     let run = |args: &[&str]| -> Option<Vec<u8>> {
         let mut command = Command::new(&program);
-        command.args(args);
+        // An `env bun` or `env node` shebang needs the interpreter on the child's PATH too.
+        command
+            .args(args)
+            .env("PATH", crate::cli_path::augmented_path());
         let output = run_command_with_timeout(&mut command, PROBE_TIMEOUT, |_, _| false).ok()?;
         output.status.success().then_some(output.stdout)
     };
