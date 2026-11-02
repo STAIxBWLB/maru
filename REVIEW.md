@@ -8,6 +8,7 @@ Run these passes and tag every finding with its pass:
 
 - **Bugs**: logic errors, broken edge cases, regressions. React hook dependencies and floating
   promises are lint-enforced; look for what lint cannot see.
+- Error messages: a new or changed error, refusal or failure message a person or agent sees names the cause (what failed and why) and the next step (the command, setting or target that fixes it). When secrets, ids or paths must stay out, it names the cause class and how to check it. A message missing either is a finding; Important when it is the only signal of a blocked action (a CLI exit, a refused tool call), otherwise a nit.
 - **Security**: HTML sinks that bypass the DOMPurify helper, subprocess calls that build a shell
   string instead of fixed argv, credentials reaching vault files, logs, localStorage, or fixtures,
   and writes that escape the workspace root.
