@@ -449,10 +449,8 @@ fn start_console(
     let monitor = thread::Builder::new()
         .name("acon-lifetime".into())
         .spawn(move || {
-            if kept.recv().is_ok() {
-                if owned.child.wait().is_ok() {
-                    owned.mark_reaped();
-                }
+            if kept.recv().is_ok() && owned.child.wait().is_ok() {
+                owned.mark_reaped();
             }
         })
         .map_err(|error| failure("start console lifetime monitor", error))?;
