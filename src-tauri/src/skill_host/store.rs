@@ -4892,7 +4892,18 @@ fn ensure_active_bundle(builtin_root: &Path) -> Result<BundleState, String> {
             // externally cleaned): the pristine baseline is the exact active
             // bundle content.
             if !builtin_root.is_dir() && pristine.is_dir() {
-                copy_dir_all(&pristine, builtin_root)?;
+                if host_fs::read_link_target(builtin_root).is_some() {
+                    // _builtin is an alias whose workspace vanished: rebuild
+                    // that generation from pristine and re-point the alias.
+                    let workspace = bundle::workspace_dir(&active.bundle_id)?;
+                    if !workspace.is_dir() {
+                        let expected = hash_directory_filtered(&pristine)?;
+                        publish_bundle_snapshot(&pristine, &workspace, &expected)?;
+                    }
+                    host_fs::replace_symlink(builtin_root, &workspace)?;
+                } else {
+                    copy_dir_all(&pristine, builtin_root)?;
+                }
             }
             return Ok(state);
         }
@@ -9826,6 +9837,32 @@ exit 7
             let error =
                 verify_retained_bundle("r1", root, &files, Some(&BTreeMap::new())).unwrap_err();
             assert!(error.contains("added skills/a/SKILL.md"), "{error}");
+        }
+
+        #[test]
+        fn a_dangling_builtin_alias_is_rebuilt_from_pristine() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let (remote, archive) = bundle_fixture();
+            skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    fs::create_dir_all(root.join(".venv/bin")).unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
+            let builtin = builtin_materialized_root().unwrap();
+            let workspace = host_fs::read_link_target(&builtin).expect("_builtin is an alias");
+            fs::remove_dir_all(&workspace).unwrap();
+            assert!(!builtin.is_dir());
+            ensure_active_bundle(&builtin).unwrap();
+            assert!(builtin.join("skills/updated/SKILL.md").is_file());
+            assert!(host_fs::read_link_target(&builtin).is_some());
         }
 
         #[test]

@@ -186,7 +186,45 @@ fn scan_retained(cleanup: bool) -> Result<(BTreeSet<String>, BTreeSet<String>), 
         let path = entry
             .map_err(|error| host_fs::operation_error("read session pin entry", &dir, error))?
             .path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        // retain() creates the lock before its json, so a lock-only pin may
+        // be a session still publishing in another process: never prune
+        // through it. ponytail: a lock-only pin left by a crash is cleared
+        // after 60 s; raise the bound if pin publication can stall longer.
+        if extension == Some("lock") && !path.with_extension("json").exists() {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .map_err(|error| host_fs::operation_error("open session pin lock", &path, error))?;
+            let stale = match file.try_lock() {
+                Ok(()) => path
+                    .metadata()
+                    .and_then(|metadata| metadata.modified())
+                    .ok()
+                    .and_then(|modified| modified.elapsed().ok())
+                    .is_some_and(|age| age > std::time::Duration::from_secs(60)),
+                Err(TryLockError::WouldBlock) => false,
+                Err(error) => {
+                    return Err(host_fs::operation_error(
+                        "probe session pin lock",
+                        &path,
+                        error,
+                    ))
+                }
+            };
+            drop(file);
+            if !stale {
+                return Err(format!("bundle_session_pin_initializing: {} belongs to a session that is still publishing its pin; cleanup was skipped, retry it after that session starts", path.display()));
+            }
+            if cleanup {
+                fs::remove_file(&path).map_err(|error| {
+                    host_fs::operation_error("remove abandoned session lock", &path, error)
+                })?;
+            }
+            continue;
+        }
+        if extension != Some("json") {
             continue;
         }
         let lock_path = path.with_extension("lock");
@@ -317,5 +355,17 @@ mod tests {
         retained_generations().unwrap();
         assert!(!stale.exists());
         assert!(!stale.with_extension("lock").exists());
+    }
+
+    #[test]
+    fn a_lock_only_pin_blocks_cleanup_until_it_is_old() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let dir = sessions_dir().unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join("publishing.lock");
+        fs::write(&lock, b"").unwrap();
+        let error = retained_generations().unwrap_err();
+        assert!(error.contains("bundle_session_pin_initializing"), "{error}");
+        assert!(lock.exists(), "a fresh lock-only pin must not be removed");
     }
 }
