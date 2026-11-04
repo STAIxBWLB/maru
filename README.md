@@ -672,6 +672,10 @@ backup; the backup is deleted only after the new completion marker exists.
 Environment resolution recovers an interrupted attempt from `.prev`, or keeps
 the completed new root and removes the backup. Hash-specific OS locks prevent
 that recovery from racing a live builder; symlink/file conflicts fail closed.
+A failed restoration preserves the conflicting env path and `.prev` for recovery
+while independently cleaning unapplied bundle artifacts. Backup-cleanup warnings
+appear in the Env status diagnostics alongside existing setup errors; these
+transient warnings are not saved to `status.json` and do not invalidate health.
 Settings health also requires this marker for hashed envs. A live session's hash
 is not rebuilt by bundle Apply; Bootstrap in the Settings > Skills toolbar is
 the explicit repair path while that session remains live. Completion failures
@@ -706,8 +710,11 @@ Cleanup warnings state that activation succeeded and name the retained provider
 alias and shared entry. After closing sessions using the skill, verified owned
 symlinks may be removed manually using the exact command in the warning. If a
 target is unreadable or the entry still has another reference, the warning
-limits removal to the verified alias or asks for inspection; no new CLI action
-or automatic deletion bypasses these checks.
+limits removal to the verified alias or asks for inspection. Unix warnings may
+include a quoted `rm --` command. Windows warnings give link-only wording with
+no removal command and explicitly preserve target directories and contents;
+recursive directory removal is never advised. No new CLI action or automatic
+deletion bypasses these checks.
 
 The release version's major and minor come from the active GSD milestone in
 `.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped

@@ -141,7 +141,7 @@ fn recover_hash_env_locked(root: &Path, force_restore: bool) -> Result<Vec<Strin
     let has_backup = env_directory(&backup)?;
     let has_root = env_directory(root)?;
     if has_backup && !force_restore && has_root && env_complete(root)? {
-        return Ok(fs::remove_dir_all(&backup).err().map(|error| operation_error_with_recovery("remove completed environment backup", &backup, error, "the rebuilt environment is complete; resolve backup permissions and click Refresh in the Settings > Skills toolbar to retry cleanup")).into_iter().collect());
+        return Ok(fs::remove_dir_all(&backup).err().map(|error| operation_error_with_recovery("remove completed environment backup", &backup, error, "the rebuilt environment is complete; resolve backup permissions and click Refresh (새로고침) in the Settings > Skills toolbar to retry cleanup")).into_iter().collect());
     }
     if has_backup || force_restore {
         if has_root {
@@ -287,7 +287,7 @@ impl HashEnvRebuild {
             return Err(operation_error(
                 "complete environment rebuild",
                 &self.root,
-                "setup did not publish a completion marker",
+                "Maru could not certify the rebuilt environment with its completion marker",
             ));
         }
         recover_hash_env_locked(&self.root, false)
@@ -323,7 +323,7 @@ pub(crate) fn lock_direct_hash_env_repair(
         .map_err(|error| operation_error("admit direct environment repair", root, error))?;
     let lock = open_env_repair_lock(root)?;
     if env_directory(&root.with_extension("prev"))? {
-        return Err(operation_error("start direct environment repair", root, "previous backup cleanup is pending; resolve its permissions and click Refresh in the Settings > Skills toolbar before rebuilding"));
+        return Err(operation_error("start direct environment repair", root, "previous backup cleanup is pending; resolve its permissions and click Refresh (새로고침) in the Settings > Skills toolbar before rebuilding"));
     }
     Ok(Some(lock))
 }
@@ -331,6 +331,16 @@ pub(crate) fn lock_direct_hash_env_repair(
 /// All runtime and maintenance callers resolve the same active environment.
 /// Older installations remain usable until their first hashed build succeeds.
 pub fn env_root() -> Result<PathBuf, String> {
+    let (root, warnings) = env_root_with_warnings()?;
+    for warning in warnings {
+        eprintln!("{warning}");
+    }
+    Ok(root)
+}
+
+/// Desktop status callers can display recovery warnings without making a
+/// certified environment unavailable or persisting transient cleanup failures.
+pub(crate) fn env_root_with_warnings() -> Result<(PathBuf, Vec<String>), String> {
     let state_path = super::bundle_update::state_path()?;
     let recovery = format!("restore {} from a known-good backup, then run `maru skills update --apply --repair-env`; if no backup is available, report this file to the skills channel maintainer", display_path(&state_path));
     match fs::symlink_metadata(&state_path) {
@@ -360,15 +370,13 @@ pub fn env_root() -> Result<PathBuf, String> {
                     display_path(&state_path)
                 )
             })?;
-            for warning in recover_hash_env(&root)? {
-                eprintln!("{warning}");
-            }
+            let warnings = recover_hash_env(&root)?;
             if root.is_dir() || super::store::bundle_uses_hashed_env(&active.bundle_id)? {
-                return Ok(root);
+                return Ok((root, warnings));
             }
         }
     }
-    env_base()
+    Ok((env_base()?, Vec::new()))
 }
 
 /// Base directory under which tool install roots (`~/.claude`, `~/.codex`)
