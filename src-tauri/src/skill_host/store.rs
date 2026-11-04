@@ -5431,9 +5431,10 @@ fn skills_bundle_status_impl(
                     .as_ref()
                     .map(|active| metadata.revision > active.revision)
                     .unwrap_or(true);
-                let env_changed = active
+                let env_needs_build = active
                     .as_ref()
-                    .map(|active| metadata.env_hash != active.env_hash)
+                    .map(|active| bundle_env_needs_build(active, &metadata.env_hash))
+                    .transpose()?
                     .unwrap_or(false);
                 let min_ok = bundle::app_version_satisfies(&metadata.min_app_version);
                 let unmet = if newer {
@@ -5452,7 +5453,13 @@ fn skills_bundle_status_impl(
                     env_hash: metadata.env_hash.clone(),
                     archive_size: metadata.archive.size,
                 };
-                (newer, Some(available), newer && env_changed, min_ok, unmet)
+                (
+                    newer,
+                    Some(available),
+                    newer && env_needs_build,
+                    min_ok,
+                    unmet,
+                )
             }
             None => (false, None, false, true, Vec::new()),
         };
@@ -5553,6 +5560,13 @@ pub(super) fn bundle_uses_hashed_env(id: &str) -> Result<bool, String> {
     let compatibility: BundleCompatibility = serde_json::from_slice(&bytes)
         .map_err(|error| host_fs::operation_error("parse bundle env layout", &path, error))?;
     Ok(compatibility.env_layout == Some(BundleEnvLayout::Hashed))
+}
+
+/// Status and activation share the repair condition used by desktop/launch flows.
+fn bundle_env_needs_build(active: &SkillBundleRef, env_hash: &str) -> Result<bool, String> {
+    Ok(env_hash != active.env_hash
+        || (bundle_uses_hashed_env(&active.bundle_id)?
+            && !host_fs::hashed_env_root(env_hash)?.is_dir()))
 }
 
 fn read_bundle_compatibility(id: &str) -> Result<BundleCompatibility, String> {
@@ -5957,10 +5971,7 @@ fn skills_activate_bundle_blocking(
     if let Some(target) = &rollback_target {
         verify_rollback_env(target)?;
     }
-    let env_changed = metadata.env_hash != active.env_hash;
-    let env_needs_build = env_changed
-        || (bundle_uses_hashed_env(&active.bundle_id)?
-            && !host_fs::hashed_env_root(&metadata.env_hash)?.is_dir());
+    let env_needs_build = bundle_env_needs_build(&active, &metadata.env_hash)?;
     if env_needs_build && !repair_env && !is_rollback {
         return Err(format!(
             "bundle_env_update_required: {}; retry `maru skills update --apply --repair-env`",
@@ -6011,9 +6022,7 @@ fn skills_activate_bundle_blocking(
     }
     // Recompute the env gate against the just-read active ref.
     let env_changed = metadata.env_hash != active.env_hash;
-    let env_needs_build = env_changed
-        || (bundle_uses_hashed_env(&active.bundle_id)?
-            && !host_fs::hashed_env_root(&metadata.env_hash)?.is_dir());
+    let env_needs_build = bundle_env_needs_build(&active, &metadata.env_hash)?;
     if env_needs_build && !repair_env && !is_rollback {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!(
@@ -9322,6 +9331,66 @@ exit 7
             let session = held.unwrap();
             assert_eq!(hash_directory(&session.env_root).unwrap(), before.unwrap());
             assert_eq!(host_fs::env_root().unwrap(), session.env_root);
+        }
+
+        #[test]
+        fn bundle_status_requires_repair_for_missing_activated_hash_and_blocks_auto_apply() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            fs::create_dir_all(host_fs::env_base().unwrap().join(".venv")).unwrap();
+            let legacy = bundle::read_state().unwrap().unwrap().active.unwrap();
+            let (mut legacy_update, _) = bundle_fixture();
+            legacy_update.metadata.env_hash = legacy.env_hash;
+            let status = skills_bundle_status_impl(Some(&legacy_update)).unwrap();
+            assert!(status.update_available);
+            assert!(
+                !status.env_update_required,
+                "pre-hash legacy installs keep their env"
+            );
+            assert!(status.auto_applicable);
+
+            let (remote, archive) = bundle_fixture();
+            let applied = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    fs::create_dir_all(root.join(".venv")).map_err(|error| error.to_string())
+                },
+            )
+            .unwrap();
+            let (mut next, _) = bundle_fixture();
+            next.metadata.archive.name = "same-hash-status-next.zip".into();
+            assert_eq!(next.metadata.env_hash, applied.current.env_hash);
+            let status = skills_bundle_status_impl(Some(&next)).unwrap();
+            assert!(status.update_available);
+            assert!(!status.env_update_required);
+            assert!(
+                status.auto_applicable,
+                "a complete unchanged hash remains auto-applicable"
+            );
+
+            let root = host_fs::hashed_env_root(&applied.current.env_hash).unwrap();
+            fs::remove_dir_all(&root).unwrap();
+            let status = skills_bundle_status_impl(Some(&next)).unwrap();
+            assert!(status.update_available);
+            assert!(
+                status.env_update_required,
+                "desktop Apply must request repair"
+            );
+            assert!(
+                !status.auto_applicable,
+                "launch must not auto-apply a missing environment"
+            );
+            assert!(!root.exists(), "status remains read-only");
+
+            next.metadata.revision = applied.current.revision;
+            let status = skills_bundle_status_impl(Some(&next)).unwrap();
+            assert!(!status.update_available);
+            assert!(!status.env_update_required);
+            assert!(!status.auto_applicable);
         }
 
         #[test]
