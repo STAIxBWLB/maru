@@ -281,7 +281,17 @@ pub fn recover_interrupted_swap(builtin_root: &Path) -> Result<(), String> {
                 if current != Path::new(old) && current != Path::new(new) { return Err(format!("bundle_recovery_link_conflict: {}; preserve the foreign builtin link and inspect the journal before retrying", builtin_root.display())); }
                 false
             }
-            Ok(metadata) if metadata.is_dir() && journal.legacy_directory && !swap_completed && journal.old_workspace_hash.as_ref().is_some_and(|hash| super::store::hash_directory_filtered(builtin_root).is_ok_and(|actual| &actual == hash)) => true,
+            Ok(metadata) if metadata.is_dir() && journal.legacy_directory && !swap_completed => {
+                let actual = super::store::hash_directory_filtered(builtin_root).map_err(|error| {
+                    host_fs::operation_error("fingerprint legacy recovery workspace", builtin_root, error)
+                })?;
+                if journal.old_workspace_hash.as_deref() != Some(actual.as_str()) {
+                    return Err(format!("bundle_recovery_link_conflict: {}", host_fs::operation_error(
+                        "verify legacy recovery workspace", builtin_root, "fingerprint differs from the journal",
+                    )));
+                }
+                true
+            },
             Ok(_) => return Err(format!("bundle_recovery_link_conflict: {}; preserve the unmanaged builtin entry and inspect the journal before retrying", builtin_root.display())),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
             Err(error) => return Err(host_fs::operation_error("inspect recovery builtin entry", builtin_root, error)),
@@ -1377,6 +1387,54 @@ mod tests {
                 assert!(read_journal().unwrap().is_some());
             }
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn legacy_recovery_propagates_fingerprint_read_failure_instead_of_link_conflict() {
+        use std::os::unix::fs::PermissionsExt;
+        let _home = host_fs::test_home_for_bundle_tests();
+        let builtin = host_fs::skills_root().unwrap().join("_builtin");
+        let old = workspace_dir("legacy-old").unwrap();
+        let new = workspace_dir("legacy-new").unwrap();
+        for root in [&builtin, &old, &new] {
+            fs::create_dir_all(root.join("skills/demo")).unwrap();
+            fs::write(root.join("skills/demo/SKILL.md"), "same bytes").unwrap();
+        }
+        let expected = super::super::store::hash_directory_filtered(&old).unwrap();
+        write_journal(&SwapJournal {
+            schema: 1,
+            new_bundle_id: "legacy-new".into(),
+            backup_dir: host_fs::display_path(
+                &host_fs::skills_root()
+                    .unwrap()
+                    .join("_cache/retired/legacy-old"),
+            ),
+            started_at: "fixture".into(),
+            legacy_directory: true,
+            old_workspace: Some(host_fs::display_path(&old)),
+            new_workspace: Some(host_fs::display_path(&new)),
+            old_workspace_hash: Some(expected.clone()),
+            new_workspace_hash: Some(expected),
+            links: Vec::new(),
+        })
+        .unwrap();
+        let file = builtin.join("skills/demo/SKILL.md");
+        let permissions = fs::metadata(&file).unwrap().permissions();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = recover_interrupted_swap(&builtin);
+        fs::set_permissions(&file, permissions).unwrap();
+        let error = result.unwrap_err();
+        assert!(
+            error.contains("fingerprint legacy recovery workspace"),
+            "{error}"
+        );
+        assert!(error.contains("read bundle fingerprint file"), "{error}");
+        assert!(error.contains(&host_fs::display_path(&file)), "{error}");
+        assert!(error.contains("maru skills update --check"), "{error}");
+        assert!(!error.contains("bundle_recovery_link_conflict"), "{error}");
+        assert!(read_journal().unwrap().is_some());
+        assert_eq!(fs::read_to_string(&file).unwrap(), "same bytes");
     }
 
     #[test]

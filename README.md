@@ -648,6 +648,12 @@ reports exchange unsupported: fully stage the symlink, retire the old directory,
 then rename the link into place. The old tree is retained for N-1 and recovery.
 Every later switch keeps atomic link replacement (Windows `FileRenameInfoEx`).
 
+After bundle activation, dropped-skill unlink failures are progress warnings;
+they do not skip saving the rescanned registry. A provider alias that could not
+be unlinked keeps its install record and shared Maru entry, while other removed
+installs are saved normally. Shared-entry unlink failures also warn without
+turning an already activated update into a failed apply.
+
 The release version's major and minor come from the active GSD milestone in
 `.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped
 as 1.1.x and closed on 2026-09-27. Opening milestone v1.2, whose scope is being
