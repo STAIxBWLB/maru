@@ -35,8 +35,38 @@ pub fn skills_root() -> Result<PathBuf, String> {
     Ok(maru_home()?.join("skills"))
 }
 
-pub fn env_root() -> Result<PathBuf, String> {
+pub fn env_base() -> Result<PathBuf, String> {
     Ok(maru_home()?.join("env"))
+}
+
+pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
+    if hash.is_empty()
+        || ["node", "node_modules", "temp", "logs", "input", "output"].contains(&hash)
+        || !hash
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    {
+        return Err("invalid_env_hash: expected a nonempty path-safe hash".into());
+    }
+    let root = env_base()?.join(hash);
+    if fs::symlink_metadata(&root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err("invalid_env_hash: environment directory must not be a symlink".into());
+    }
+    Ok(root)
+}
+
+/// All runtime and maintenance callers resolve the same active environment.
+/// Older installations remain usable until their first hashed build succeeds.
+pub fn env_root() -> Result<PathBuf, String> {
+    if let Some(active) = super::bundle_update::read_state()?.and_then(|state| state.active) {
+        if !active.env_hash.is_empty() {
+            let root = hashed_env_root(&active.env_hash)?;
+            if root.is_dir() {
+                return Ok(root);
+            }
+        }
+    }
+    env_base()
 }
 
 /// Base directory under which tool install roots (`~/.claude`, `~/.codex`)

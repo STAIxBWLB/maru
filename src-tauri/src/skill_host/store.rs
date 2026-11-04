@@ -5073,25 +5073,25 @@ fn cleanup_removed_builtin_installs(
     Ok(count)
 }
 
-/// Synchronous env repair used inside the apply transaction, running the
-/// setup script from the STAGED new bundle BEFORE the swap: a failure means
-/// nothing was applied and no rollback is needed. Mutations setup.sh makes
-/// to the shared ~/.maru/env are idempotent by contract but not journaled.
+/// Build only the supplied hash environment before switching bundle state.
+/// Failure cannot mutate the environment selected by the old state.
 // ponytail: no output streaming or env status.json update here — the env
 // pane re-derives health from the venv; add streaming if repairs get long.
 fn run_env_repair_blocking(
     lease: &PathTransactionLease,
     progress: ProgressReporter<'_>,
     bundle_root: &Path,
+    root: &Path,
 ) -> Result<(), String> {
     let setup = bundle_root.join("envs").join("default").join("setup.sh");
     if !setup.is_file() {
-        progress.info("Bundle has no env setup script; skipping env repair");
-        return Ok(());
+        return Err(
+            "env_repair_failed: bundle has no env setup script; retry with a complete bundle"
+                .into(),
+        );
     }
-    let root = host_fs::env_root()?;
     lease.ensure_covered(crate::skill_host::env::env_mutation_paths(
-        &root,
+        root,
         Some(&setup),
     ))?;
     lease.before_effect()?;
@@ -5106,7 +5106,7 @@ fn run_env_repair_blocking(
     let output = command
         .arg(&setup)
         .arg("--target")
-        .arg(&root)
+        .arg(root)
         // The setup script runs pnpm, and `.output()` gives it no TTY. Whenever
         // pnpm decides node_modules has to be purged it refuses to do that
         // without a TTY and aborts with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY,
@@ -5137,6 +5137,25 @@ fn run_env_repair_blocking(
         return Err(format!("env_repair_failed: {line}"));
     }
     progress.success("Skills environment repaired");
+    Ok(())
+}
+
+fn prune_env_dirs(keep: &[&str]) -> Result<(), String> {
+    let base = host_fs::env_base()?;
+    if !base.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(base).map_err(|err| err.to_string())? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        // Never prune legacy runtime directories or foreign entries.
+        if !keep.contains(&name.as_str())
+            && entry.file_type().map_err(|err| err.to_string())?.is_dir()
+            && entry.path().join(".maru-env-complete").is_file()
+        {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
     Ok(())
 }
 
@@ -5315,7 +5334,7 @@ fn skills_apply_bundle_update_blocking(
     progress: ProgressReporter<'_>,
     discover: impl FnOnce(&str, &str) -> Result<Option<bundle::RemoteBundle>, String>,
     download: impl FnOnce(&bundle::RemoteBundle) -> Result<Vec<u8>, String>,
-    repair: impl FnOnce(&PathTransactionLease, ProgressReporter<'_>, &Path) -> Result<(), String>,
+    repair: impl FnOnce(&PathTransactionLease, ProgressReporter<'_>, &Path, &Path) -> Result<(), String>,
 ) -> Result<SkillBundleApplyOutcome, String> {
     let builtin_root = builtin_materialized_root()?;
     let _lease = SourceOperationLease::reserve(registry_path()?, BUILTIN_SOURCE_ID, &builtin_root)?;
@@ -5358,7 +5377,7 @@ fn skills_apply_bundle_update_blocking(
     network_paths.push(next_builtin.clone());
     if repair_env {
         network_paths.extend(crate::skill_host::env::env_mutation_paths(
-            &host_fs::env_root()?,
+            &host_fs::env_base()?,
             Some(&next_builtin.join("envs/default/setup.sh")),
         ));
     }
@@ -5492,13 +5511,22 @@ fn skills_apply_bundle_update_blocking(
         return Err(format!("bundle_prepare_failed: {err}"));
     }
     if env_changed {
-        // ponytail: setup.sh mutations to ~/.maru/env are NOT rolled back on
-        // failure — the script is idempotent by contract and the next repair
-        // reconverges; the bundle itself has not been applied yet.
-        if let Err(err) = repair(&network_admission, progress, &next_builtin) {
-            let _ = fs::remove_dir_all(&next_builtin);
-            let _ = fs::remove_dir_all(&new_pristine);
-            return Err(err);
+        let root = host_fs::hashed_env_root(&metadata.env_hash)?;
+        // Reuse a completed N-1 build, never rebuild it in place. A partial
+        // build from an interrupted attempt is disposable under this lease.
+        if !root.join(".maru-env-complete").is_file() {
+            network_admission.before_effect()?;
+            if root.exists() {
+                fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+            }
+            host_fs::ensure_dir(&root)?;
+            if let Err(err) = repair(&network_admission, progress, &next_builtin, &root) {
+                let _ = fs::remove_dir_all(&root);
+                let _ = fs::remove_dir_all(&next_builtin);
+                let _ = fs::remove_dir_all(&new_pristine);
+                return Err(err);
+            }
+            fs::write(root.join(".maru-env-complete"), "").map_err(|err| err.to_string())?;
         }
     }
 
@@ -5585,6 +5613,9 @@ fn skills_apply_bundle_update_blocking(
     bundle::clear_journal()?;
     let _ = fs::remove_dir_all(&backup);
     prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;
+    if repair_env {
+        prune_env_dirs(&[current.env_hash.as_str(), active.env_hash.as_str()])?;
+    }
 
     // The bundle replaces content at an unchanged configured path. Invalidate
     // captured readers even when its source settings have not changed.
@@ -8166,7 +8197,7 @@ mod tests {
                 ProgressReporter::noop(),
                 |_, _| panic!("dirty preflight must precede network"),
                 |_| panic!("download"),
-                |_, _, _| panic!("repair"),
+                |_, _, _, _| panic!("repair"),
             );
             assert!(result.unwrap_err().contains("bundle_dirty_blocked"));
             assert_eq!(
@@ -8194,7 +8225,7 @@ mod tests {
                         ProgressReporter::noop(),
                         |_, _| Err("fixture_network_failure".into()),
                         |_| panic!("download"),
-                        |_, _, _| panic!("repair"),
+                        |_, _, _, _| panic!("repair"),
                     )
                 },
                 || {
@@ -8265,7 +8296,7 @@ mod tests {
                 ProgressReporter::noop(),
                 |_, _| Ok(Some(remote)),
                 |_| panic!("an unmet floor must stop before download"),
-                |_, _, _| panic!("repair"),
+                |_, _, _, _| panic!("repair"),
             )
             .unwrap_err();
             assert_eq!(
@@ -8274,6 +8305,82 @@ mod tests {
             );
             assert_eq!(bundle::read_state().unwrap().unwrap().active, before);
         }
+        #[test]
+        fn failing_hash_env_build_preserves_old_bytes_and_active_runtime() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let before = bundle::read_state().unwrap().unwrap();
+            let old = host_fs::env_root().unwrap();
+            fs::create_dir_all(old.join(".venv/bin")).unwrap();
+            fs::write(old.join(".venv/bin/python"), b"old python bytes").unwrap();
+            let old_hash = hash_directory(&old).unwrap();
+            let vars = env_vars_for_runs(None).unwrap();
+            let (remote, archive) = bundle_fixture();
+            let target = host_fs::hashed_env_root(&remote.metadata.env_hash).unwrap();
+            let err = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |lease, _, _, root| {
+                    lease.ensure_covered([root.to_path_buf()])?;
+                    assert_eq!(root, target);
+                    fs::create_dir_all(root.join(".venv/bin")).unwrap();
+                    fs::write(root.join(".venv/bin/python"), b"broken replacement").unwrap();
+                    assert_eq!(env_vars_for_runs(None).unwrap(), vars);
+                    Err("env_repair_failed: fixture".into())
+                },
+            )
+            .unwrap_err();
+            assert!(err.contains("env_repair_failed"));
+            assert_eq!(hash_directory(&old).unwrap(), old_hash);
+            assert_eq!(bundle::read_state().unwrap().unwrap().active, before.active);
+            assert_eq!(env_vars_for_runs(None).unwrap(), vars);
+            assert!(!target.exists());
+        }
+
+        #[test]
+        fn successful_hash_env_build_switches_runtime_and_retains_old_env() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let mut state = bundle::read_state().unwrap().unwrap();
+            state.active.as_mut().unwrap().env_hash = "old-env".into();
+            bundle::write_state(&state).unwrap();
+            let old = host_fs::hashed_env_root("old-env").unwrap();
+            fs::create_dir_all(&old).unwrap();
+            fs::write(old.join(".maru-env-complete"), "").unwrap();
+            fs::write(old.join("keep"), "previous").unwrap();
+            let obsolete = host_fs::hashed_env_root("obsolete-env").unwrap();
+            fs::create_dir_all(&obsolete).unwrap();
+            fs::write(obsolete.join(".maru-env-complete"), "").unwrap();
+            let (remote, archive) = bundle_fixture();
+            let target = host_fs::hashed_env_root(&remote.metadata.env_hash).unwrap();
+            skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    assert_eq!(host_fs::env_root().unwrap(), old);
+                    fs::create_dir_all(root.join(".venv/bin")).unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(host_fs::env_root().unwrap(), target);
+            let vars = env_vars_for_runs(None).unwrap();
+            assert_eq!(vars["MARU_SKILLS_ENV"], path_string(&target));
+            assert_eq!(vars["VIRTUAL_ENV"], path_string(&target.join(".venv")));
+            assert_eq!(
+                std::env::split_paths(&vars["PATH"]).next().unwrap(),
+                target.join(".venv/bin")
+            );
+            assert_eq!(fs::read_to_string(old.join("keep")).unwrap(), "previous");
+            assert!(!obsolete.exists());
+        }
+
         #[test]
         fn bundle_env_repair_releases_registry_and_preserves_active_preparation() {
             let _home = test_home();
@@ -8285,7 +8392,7 @@ mod tests {
                 ProgressReporter::noop(),
                 |_, _| Ok(Some(remote)),
                 |_| Ok(archive),
-                |_, _, next| {
+                |_, _, next, _| {
                     assert!(REGISTRY_LOCK.get().unwrap().try_lock().is_ok());
                     skills_list_sources(None).unwrap();
                     assert!(next.join("skills/updated/SKILL.md").is_file());
@@ -8312,7 +8419,7 @@ mod tests {
                     ProgressReporter::noop(),
                     |_, _| Ok(Some(remote)),
                     |_| Ok(archive),
-                    |_, _, _| {
+                    |_, _, _, _| {
                         if reset {
                             skills_reset_registry_impl(None, ProgressReporter::noop())?;
                         } else {
