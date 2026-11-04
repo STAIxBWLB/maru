@@ -170,6 +170,25 @@ describe("Sites launch privacy and pane lifetime", () => {
     expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe(ticket);
   });
 
+  it.each(["before", "after"])("tracks finished while unmounted %s offscreen settlement", async (finishOrder) => {
+    let resolve!: (url: string) => void;
+    const opening = new Promise<string>((done) => { resolve = done; });
+    mocks.invoke.mockImplementation(async (command: string) => command === "site_view_open" ? opening : undefined);
+    await render(); await click('[data-new="console"]'); await frame();
+    const progress = mocks.listeners.get("sites://page-load")!;
+    await act(async () => progress({ payload: { tabId: "t1", state: "started", url: ticket } }));
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    await unmountReactRoot(root!); root = null;
+    expect(mocks.listeners.get("sites://page-load")).toBe(progress);
+    if (finishOrder === "after") await act(async () => resolve(ticket));
+    await act(async () => progress({ payload: { tabId: "t1", state: "finished", url: ticket } }));
+    if (finishOrder === "before") await act(async () => resolve(ticket));
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe(ticket);
+    expect(siteViewTabRuntime("t1")?.shown).toBe(true);
+  });
+
   it.each(["success", "failure"])("retains a %s settled after unmount commit until the replacement pane consumes it", async (outcome) => {
     let resolve!: (url: string) => void;
     let reject!: (error: Error) => void;
