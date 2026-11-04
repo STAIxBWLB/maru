@@ -7,7 +7,7 @@ import {
   unroutedSiteViewOpenRequestId,
   type SiteViewOpenRequest,
 } from "./siteView";
-import { ACON_SITE_LAUNCH } from "./sites";
+import { ACON_SITE_LAUNCH } from "./siteLaunch";
 import type { GraphOpenTarget } from "./settings";
 
 export type VisualModeDomain = "diagram" | "graph" | "sites";

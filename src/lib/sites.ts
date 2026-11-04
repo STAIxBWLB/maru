@@ -1,7 +1,7 @@
 // Pure helpers for Sites mode: registry document parsing, grouping,
 // filtering, and native-webview visibility/bounds math.
 
-export const ACON_SITE_LAUNCH = "acon ui --no-open --json";
+export { ACON_SITE_LAUNCH } from "./siteLaunch";
 
 export interface SiteEntry {
   id: string;
