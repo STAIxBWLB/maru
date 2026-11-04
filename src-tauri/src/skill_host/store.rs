@@ -4160,17 +4160,20 @@ pub(crate) fn capture_bundle_session() -> Result<Option<super::session::BundleSe
         );
     }
     admission.before_effect()?;
-    if let Some(expected) = snapshot_hash {
-        publish_bundle_snapshot(&builtin_materialized_root()?, &root, &expected)?;
-    }
-    super::session::BundleSession {
+    // Pin before publishing: the registry guard and admission are
+    // process-local, so a CLI update in another process may prune _bundles
+    // at any moment; an existing pin makes it keep the snapshot id.
+    let session = super::session::BundleSession {
         bundle_id: id,
         root,
         env_root,
         env_hash: active.env_hash,
     }
-    .retain()
-    .map(Some)
+    .retain()?;
+    if let Some(expected) = snapshot_hash {
+        publish_bundle_snapshot(&builtin_materialized_root()?, &session.root, &expected)?;
+    }
+    Ok(Some(session))
 }
 
 pub fn default_public_env_setup(work_path: Option<&str>) -> Result<Option<PathBuf>, String> {
@@ -9828,6 +9831,7 @@ exit 7
         #[test]
         fn reused_bundle_id_with_different_files_is_refused() {
             let _home = test_home();
+            skills_list_sources(None).unwrap();
             let (remote, _) = bundle_fixture();
             retain_bundle_compatibility("reused", &remote.metadata).unwrap();
             retain_bundle_compatibility("reused", &remote.metadata).unwrap();
