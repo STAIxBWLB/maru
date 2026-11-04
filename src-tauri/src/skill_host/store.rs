@@ -5699,7 +5699,12 @@ fn skills_apply_bundle_update_blocking(
         let _ = fs::remove_dir_all(&backup);
         prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;
         if repair_env {
-            prune_env_dirs(&[current.env_hash.as_str(), active.env_hash.as_str()])?;
+            // Best-effort like prune_bundle_dirs: the new bundle is already
+            // active, so a leftover env must not skip the registry rescan below.
+            if let Err(err) = prune_env_dirs(&[current.env_hash.as_str(), active.env_hash.as_str()])
+            {
+                progress.emit("warn", err, None, None);
+            }
         }
 
         // The bundle replaces content at an unchanged configured path. Invalidate
@@ -8579,6 +8584,39 @@ exit 7
             );
             assert_eq!(fs::read_to_string(old.join("keep")).unwrap(), "previous");
             assert!(!obsolete.exists());
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn env_prune_failure_after_activation_still_rescans_registry() {
+            use std::os::unix::fs::PermissionsExt;
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let obsolete = host_fs::hashed_env_root("obsolete-env").unwrap();
+            let locked = obsolete.join("locked");
+            fs::create_dir_all(&locked).unwrap();
+            fs::write(locked.join("held"), "in use").unwrap();
+            fs::write(obsolete.join(".maru-env-complete"), "").unwrap();
+            // A read-only child makes remove_dir_all fail inside the prune.
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).unwrap();
+            let (remote, archive) = bundle_fixture();
+            let result = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    fs::create_dir_all(root.join(".venv/bin")).unwrap();
+                    Ok(())
+                },
+            );
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+            let outcome = result.unwrap();
+            assert_eq!(outcome.current.display_version, "fixture");
+            assert!(obsolete.exists(), "fixture failed to block the prune");
+            let registry = load_registry().unwrap();
+            assert!(registry.skills.iter().any(|s| s.name == "updated"));
         }
 
         #[test]
