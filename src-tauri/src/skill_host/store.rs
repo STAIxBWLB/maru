@@ -5081,6 +5081,10 @@ fn cleanup_removed_builtin_installs(
     removed: &[String],
 ) -> Result<usize, String> {
     let builtin_prefix = builtin_materialized_root()?;
+    let previous_workspace = bundle::read_state()?
+        .and_then(|state| state.previous)
+        .map(|previous| bundle::workspace_dir(&previous.bundle_id))
+        .transpose()?;
     let mut count = 0;
     for name in removed {
         let skill_id = format!("{BUILTIN_SOURCE_ID}::{name}");
@@ -5094,24 +5098,39 @@ fn cleanup_removed_builtin_installs(
             })
             .cloned()
             .collect();
+        let mut entries = BTreeMap::new();
         for install in matches {
             let tool_target = PathBuf::from(&install.target_path);
             let maru_entry = PathBuf::from(&install.entrypoint_path);
-            let _ = host_fs::remove_if_matching_symlink(&tool_target, &maru_entry);
-            if let Some(link_target) = host_fs::read_link_target(&maru_entry) {
-                if (host_fs::simplified(&link_target)
-                    .starts_with(host_fs::simplified(&builtin_prefix))
-                    && !link_target.exists())
-                    || host_fs::simplified(&link_target)
-                        .starts_with(host_fs::skills_root()?.join("_workspaces"))
-                {
-                    let _ = host_fs::remove_symlink(&maru_entry);
-                }
-            }
+            let removed =
+                host_fs::remove_if_matching_symlink(&tool_target, &maru_entry).unwrap_or(false);
+            *entries.entry(maru_entry).or_insert(true) &= removed;
             registry.installs.retain(|other| {
                 !(other.target == install.target && other.installed_as == install.installed_as)
             });
             count += 1;
+        }
+        // Unpublish every owned tool alias before removing its shared Maru
+        // entry, so another provider never observes a dangling chain.
+        for (maru_entry, all_removed) in entries {
+            if !all_removed {
+                continue;
+            }
+            if let Some(link_target) = host_fs::read_link_target(&maru_entry) {
+                let expected_previous = previous_workspace
+                    .as_ref()
+                    .map(|root| root.join("skills").join(name));
+                let owned_previous = expected_previous.as_ref().is_some_and(|expected| {
+                    host_fs::simplified(&link_target) == host_fs::simplified(expected)
+                });
+                if (host_fs::simplified(&link_target)
+                    .starts_with(host_fs::simplified(&builtin_prefix))
+                    && !link_target.exists())
+                    || owned_previous
+                {
+                    let _ = host_fs::remove_symlink(&maru_entry);
+                }
+            }
         }
     }
     Ok(count)
