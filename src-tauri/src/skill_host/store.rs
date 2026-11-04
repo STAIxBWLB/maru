@@ -9352,7 +9352,8 @@ exit 7
                     env_vars_for_runs(None).unwrap()["MARU_SKILLS_ENV"],
                     host_fs::display_path(&root)
                 );
-                let (remote, _) = bundle_fixture();
+                let (mut remote, _) = bundle_fixture();
+                remote.metadata.archive.name = "same-hash-next.zip".into();
                 assert_eq!(remote.metadata.env_hash, first.current.env_hash);
                 let error = skills_apply_bundle_update_blocking(
                     None,
@@ -9369,7 +9370,8 @@ exit 7
                     error.contains("maru skills update --apply --repair-env"),
                     "{error}"
                 );
-                let (remote, archive) = bundle_fixture();
+                let (mut remote, archive) = bundle_fixture();
+                remote.metadata.archive.name = "same-hash-next.zip".into();
                 let mut repaired = false;
                 let result = skills_apply_bundle_update_blocking(
                     None,
