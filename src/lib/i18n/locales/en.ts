@@ -7,7 +7,7 @@ import { meetingSourceEn } from "./meetingSourceEn";
 export const en: Record<string, string> = {
   ...meetingSourceEn,
   "family.title": "Family tools",
-  "family.boundary": "Status refresh never installs or starts tools. Package installation and updates remain owned by your external installer. Commands below are terminal handoffs only.",
+  "family.boundary": "Status refresh checks versions and runs only bounded, read-only manifest probes. Package installation and updates remain owned by your external installer. Commands below are terminal handoffs only.",
   "family.refresh": "Refresh",
   "family.loading": "Checking versions and supported manifests...",
   "family.select": "Tool",

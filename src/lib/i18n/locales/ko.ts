@@ -7,7 +7,7 @@ import { meetingSourceKo } from "./meetingSourceKo";
 export const ko: Record<string, string> = {
   ...meetingSourceKo,
   "family.title": "패밀리 도구",
-  "family.boundary": "상태 새로고침은 도구를 설치하거나 시작하지 않습니다. 패키지 설치·업데이트는 외부 설치 도구가 담당합니다. 아래 명령은 터미널에서 직접 실행하는 안내입니다.",
+  "family.boundary": "상태 새로고침은 버전을 확인하고 제한된 읽기 전용 manifest 조회만 실행합니다. 패키지 설치·업데이트는 외부 설치 도구가 담당합니다. 아래 명령은 터미널에서 직접 실행하는 안내입니다.",
   "family.refresh": "새로고침",
   "family.loading": "버전과 지원 manifest 확인 중...",
   "family.select": "도구",

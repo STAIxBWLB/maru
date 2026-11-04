@@ -39,6 +39,7 @@ pub(crate) fn validate_launch(value: &str) -> Result<(), String> {
 pub(crate) struct TrustedTool {
     pub bun: PathBuf,
     pub entry: PathBuf,
+    pub program: PathBuf,
     pub home: PathBuf,
     pub version: String,
     pub ownership: &'static str,
@@ -129,6 +130,20 @@ pub(crate) fn resolve_tool_at(
     package_name: &str,
     alias: &Path,
 ) -> Result<TrustedTool, String> {
+    resolve_tool_at_for_platform(home, tool, package_name, alias, cfg!(windows))
+}
+
+pub(crate) fn is_bun_shim(home: &Path, tool: &str, program: &Path, windows: bool) -> bool {
+    windows && program == home.join(".bun/bin").join(format!("{tool}.exe"))
+}
+
+pub(crate) fn resolve_tool_at_for_platform(
+    home: &Path,
+    tool: &str,
+    package_name: &str,
+    alias: &Path,
+    windows: bool,
+) -> Result<TrustedTool, String> {
     let home = home
         .canonicalize()
         .map_err(|error| install_failure("resolve tool home", error))?;
@@ -138,6 +153,7 @@ pub(crate) fn resolve_tool_at(
     let program = alias
         .canonicalize()
         .map_err(|error| install_failure(&format!("resolve trusted {}", alias.display()), error))?;
+    let shim = is_bun_shim(&home, tool, &program, windows);
     let dot_root = home.join(".local/share/dotfiles/tools").join(tool);
     let current = dot_root.join("current").canonicalize().ok();
     let dot_root = dot_root.canonicalize().ok();
@@ -175,6 +191,7 @@ pub(crate) fn resolve_tool_at(
                 tool,
                 releases.as_deref(),
                 global.as_deref(),
+                shim,
             )?
         }
     } else {
@@ -184,6 +201,7 @@ pub(crate) fn resolve_tool_at(
             tool,
             releases.as_deref(),
             global.as_deref(),
+            shim,
         )?
     };
     let package = package
@@ -252,7 +270,6 @@ pub(crate) fn resolve_tool_at(
         .join(entry_name)
         .canonicalize()
         .map_err(|error| install_failure("resolve package bin entry", error))?;
-    let shim = cfg!(windows) && program == home.join(".bun/bin").join(format!("{tool}.exe"));
     if !entry.starts_with(&package) || (!shim && program != entry) || !entry.is_file() {
         return Err(install_failure(
             "validate trusted package executable",
@@ -261,7 +278,7 @@ pub(crate) fn resolve_tool_at(
     }
     let bin = home.join(".bun/bin");
     let candidates = [
-        bin.join(if cfg!(windows) { "bun.exe" } else { "bun" }),
+        bin.join(if windows { "bun.exe" } else { "bun" }),
         #[cfg(unix)]
         PathBuf::from("/opt/homebrew/bin/bun"),
         #[cfg(unix)]
@@ -275,6 +292,7 @@ pub(crate) fn resolve_tool_at(
     Ok(TrustedTool {
         bun,
         entry,
+        program,
         home,
         version,
         ownership,
@@ -287,6 +305,7 @@ fn locate_other_package(
     tool: &str,
     releases: Option<&Path>,
     global: Option<&Path>,
+    shim: bool,
 ) -> Result<(PathBuf, &'static str, Option<String>), String> {
     if tool == "ahub" && releases.is_some_and(|root| program.starts_with(root)) {
         for parent in program.ancestors().skip(1).take(6) {
@@ -298,7 +317,7 @@ fn locate_other_package(
             }
         }
     }
-    if let Some(global) = global.filter(|root| program.starts_with(root)) {
+    if let Some(global) = global.filter(|root| program.starts_with(root) || shim) {
         return Ok((
             global.join(package_name),
             if tool == "ahub" {
@@ -615,8 +634,94 @@ fn start_console(
 }
 
 #[cfg(test)]
+pub(crate) fn windows_shim_fixture() -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().canonicalize().unwrap();
+    let bin = root.join(".bun/bin");
+    let package = root.join(".bun/install/global/node_modules/@staix/agent-console");
+    fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(package.join("bin")).unwrap();
+    // These are identity fixtures only; no test executes the fake .exe bytes.
+    for (path, bytes) in [
+        (bin.join("acon.exe"), "fixed Windows shim"),
+        (bin.join("bun.exe"), "fixed Bun runtime"),
+        (
+            package.join("package.json"),
+            r#"{"name":"@staix/agent-console","version":"1.0.0","bin":{"acon":"bin/acon.js"}}"#,
+        ),
+        (
+            package.join("bin/acon.js"),
+            "throw new Error('must not execute')",
+        ),
+    ] {
+        fs::write(&path, bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+    }
+    home
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_windows_shim_resolves_before_root_check_but_retains_package_guards() {
+        let home = windows_shim_fixture();
+        let root = home.path().canonicalize().unwrap();
+        let alias = root.join(".bun/bin/acon.exe");
+        let package = root.join(".bun/install/global/node_modules/@staix/agent-console");
+        let resolve =
+            || resolve_tool_at_for_platform(&root, "acon", "@staix/agent-console", &alias, true);
+        let trusted = resolve().unwrap();
+        assert_eq!(trusted.ownership, "bun-global");
+        assert_eq!(trusted.program, alias.canonicalize().unwrap());
+        assert_eq!(
+            trusted.entry,
+            package.join("bin/acon.js").canonicalize().unwrap()
+        );
+        assert!(
+            resolve_tool_at_for_platform(&root, "acon", "@staix/agent-console", &alias, false)
+                .err()
+                .unwrap()
+                .contains("outside installer roots")
+        );
+        fs::write(
+            package.join("package.json"),
+            r#"{"name":"foreign","version":"1.0.0","bin":{"acon":"bin/acon.js"}}"#,
+        )
+        .unwrap();
+        assert!(resolve()
+            .err()
+            .unwrap()
+            .contains("validate package identity"));
+        fs::write(
+            package.join("package.json"),
+            r#"{"name":"@staix/agent-console","version":"1.0.0","bin":{"acon":"../outside.js"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            package.parent().unwrap().join("outside.js"),
+            "outside entry",
+        )
+        .unwrap();
+        assert!(resolve().err().unwrap().contains("contained bin entry"));
+        let foreign = root.join(".bun/bin/other.exe");
+        fs::write(&foreign, "foreign shim").unwrap();
+        assert!(resolve_tool_at_for_platform(
+            &root,
+            "acon",
+            "@staix/agent-console",
+            &foreign,
+            true
+        )
+        .err()
+        .unwrap()
+        .contains("outside installer roots"));
+    }
 
     fn readiness(url: &str, origin: &str, pid: u32) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({"url":url,"origin":origin,"pid":pid,"plugins":[]}))

@@ -69,11 +69,21 @@ fn inspect(
     package: &'static str,
     available: Result<String, String>,
 ) -> FamilyToolStatus {
+    inspect_for_platform(home, id, package, available, cfg!(windows))
+}
+
+fn inspect_for_platform(
+    home: &Path,
+    id: &'static str,
+    package: &'static str,
+    available: Result<String, String>,
+    windows: bool,
+) -> FamilyToolStatus {
     let mut detail = Vec::new();
     let available_version = available
         .map_err(|error| detail.push(format!("Latest version unknown: {error}")))
         .ok();
-    let alias = active_program(home, id);
+    let alias = active_program(home, id, windows);
     let mut result = FamilyToolStatus {
         id,
         package,
@@ -93,26 +103,12 @@ fn inspect(
     let Some(alias) = alias else {
         return result;
     };
-    let trusted = match site_launcher::resolve_tool_at(home, id, package, &alias) {
+    let trusted = match site_launcher::resolve_tool_at_for_platform(
+        home, id, package, &alias, windows,
+    ) {
         Ok(trusted) => trusted,
         Err(error) => {
-            let canonical = alias.canonicalize().unwrap_or_else(|_| alias.clone());
-            let managed = [
-                home.join(".local/share/dotfiles/tools"),
-                home.join(".agenthub/releases"),
-                home.join(".bun/install/global/node_modules"),
-            ]
-            .iter()
-            .any(|root| canonical.starts_with(root));
-            result.ownership = if managed {
-                if id == "ahub" {
-                    "ahub-upgrade"
-                } else {
-                    "dot-family"
-                }
-            } else {
-                "external"
-            };
+            result.ownership = installed_owner(home, id, &alias, windows);
             result.state = "unavailable";
             result.detail.push(format!("{}: {error}; use this tool's owning installer; Maru will not execute or overwrite it", alias.display()));
             return result;
@@ -120,7 +116,7 @@ fn inspect(
     };
     result.ownership = trusted.ownership;
     result.installed_version = Some(trusted.version.clone());
-    let shadow = home.join(".bun/bin").join(if cfg!(windows) {
+    let shadow = home.join(".bun/bin").join(if windows {
         format!("{id}.exe")
     } else {
         id.to_string()
@@ -128,7 +124,7 @@ fn inspect(
     if shadow
         .canonicalize()
         .ok()
-        .is_some_and(|path| path != trusted.entry)
+        .is_some_and(|path| path != trusted.program)
     {
         result.detail.push(format!("Shadowed duplicate install at {}; active tool is {}. Use the owning installer to reconcile PATH; no copy was changed.", shadow.display(), alias.display()));
     }
@@ -166,21 +162,7 @@ fn inspect(
             {
                 return Err(format!("{id} manifest identity/version disagrees with the package; repair its installation before using it"));
             }
-            result.commands = manifest["commands"]
-                .as_array()
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .filter(|s| {
-                            s.len() <= 80
-                                && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-                        })
-                        .take(128)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default();
+            result.commands = published_commands(&manifest);
         }
         result.can_launch = id == "acon";
         Ok(())
@@ -199,7 +181,77 @@ fn inspect(
     result
 }
 
-fn active_program(home: &Path, id: &str) -> Option<PathBuf> {
+fn installed_owner(home: &Path, id: &str, alias: &Path, windows: bool) -> &'static str {
+    let target = alias
+        .canonicalize()
+        .ok()
+        .or_else(|| {
+            std::fs::read_link(alias).ok().map(|target| {
+                if target.is_absolute() {
+                    target
+                } else {
+                    alias.parent().unwrap_or(home).join(target)
+                }
+            })
+        })
+        .unwrap_or_else(|| alias.to_path_buf());
+    let target = crate::vault::lexical_normalize(&target);
+    let contains = |root: &Path| {
+        target.starts_with(root)
+            || root
+                .canonicalize()
+                .ok()
+                .is_some_and(|root| target.starts_with(root))
+    };
+    let mut homes = vec![home.to_path_buf()];
+    if let Ok(canonical) = home.canonicalize() {
+        homes.push(canonical);
+    }
+    for home in homes {
+        if contains(&home.join(".local/share/dotfiles/tools").join(id)) {
+            return "dot-family";
+        }
+        if id == "ahub" && contains(&home.join(".agenthub/releases")) {
+            return "ahub-upgrade";
+        }
+        if contains(&home.join(".bun/install/global/node_modules"))
+            || site_launcher::is_bun_shim(&home, id, &target, windows)
+        {
+            return if id == "ahub" {
+                "ahub-upgrade"
+            } else {
+                "bun-global"
+            };
+        }
+    }
+    "external"
+}
+
+fn published_commands(manifest: &serde_json::Value) -> Vec<String> {
+    manifest["commands"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|value| value.as_str())
+                .filter(|command| {
+                    !command.is_empty()
+                        && command.len() <= 80
+                        && command.split(' ').all(|word| {
+                            !word.is_empty()
+                                && word
+                                    .bytes()
+                                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                        })
+                })
+                .take(128)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn active_program(home: &Path, id: &str, windows: bool) -> Option<PathBuf> {
     // Native/test HOME isolation must never resolve a personal tool.
     #[cfg(not(any(test, feature = "native-e2e")))]
     if let Some(program) = crate::cli_path::resolve_program(id) {
@@ -207,7 +259,7 @@ fn active_program(home: &Path, id: &str) -> Option<PathBuf> {
     }
     [
         home.join(".local/bin").join(id),
-        home.join(".bun/bin").join(if cfg!(windows) {
+        home.join(".bun/bin").join(if windows {
             format!("{id}.exe")
         } else {
             id.to_string()
@@ -261,6 +313,134 @@ pub mod ipc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn family_registry_windows_bun_shim_is_installed_without_shadow_false_positive() {
+        let home = site_launcher::windows_shim_fixture();
+        let root = home.path().canonicalize().unwrap();
+        let before = std::fs::read(root.join(".bun/bin/acon.exe")).unwrap();
+        let status = inspect_for_platform(
+            &root,
+            "acon",
+            "@staix/agent-console",
+            Ok("1.0.1".into()),
+            true,
+        );
+        assert_eq!(status.ownership, "bun-global");
+        assert_eq!(status.installed_version.as_deref(), Some("1.0.0"));
+        assert_eq!(status.state, "stale");
+        assert!(status.can_launch);
+        assert!(
+            !status
+                .detail
+                .iter()
+                .any(|detail| detail.contains("Shadowed duplicate")),
+            "{:?}",
+            status.detail
+        );
+        assert_eq!(
+            std::fs::read(root.join(".bun/bin/acon.exe")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn family_registry_manifest_commands_keep_bounded_single_space_words() {
+        let manifest = serde_json::json!({"commands": [
+            "spec get", "graph build", "log tail", "one-word", "A1 word-2",
+            "", " leading", "trailing ", "two  spaces", "tab\tword", "line\nword", "spec; get", "$(cmd)", "명령 보기", 7, null
+        ]});
+        assert_eq!(
+            published_commands(&manifest),
+            [
+                "spec get",
+                "graph build",
+                "log tail",
+                "one-word",
+                "A1 word-2"
+            ]
+        );
+        assert_eq!(
+            published_commands(&serde_json::json!({"commands":["a".repeat(80), "b".repeat(81)]})),
+            ["a".repeat(80)]
+        );
+        let commands: Vec<String> = (0..140).map(|n| format!("command-{n}")).collect();
+        let bounded = published_commands(&serde_json::json!({"commands": commands}));
+        assert_eq!(bounded.len(), 128);
+        assert_eq!(bounded.last().unwrap(), "command-127");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn family_registry_dangling_managed_aliases_keep_owner_and_never_execute() {
+        for (id, package, dir, target, expected) in [
+            (
+                "acon",
+                "@staix/agent-console",
+                ".local/bin",
+                "../share/dotfiles/tools/acon/current/bin/acon",
+                "dot-family",
+            ),
+            (
+                "vmem",
+                "@staix/vault-mem",
+                ".bun/bin",
+                "../install/global/node_modules/@staix/vault-mem/bin/vmem.js",
+                "bun-global",
+            ),
+            (
+                "ahub",
+                "@staix/agent-hub",
+                ".bun/bin",
+                "../../.agenthub/releases/release-0.30.0/src/cli/main.js",
+                "ahub-upgrade",
+            ),
+            (
+                "amem",
+                "@staix/agent-mem",
+                ".local/bin",
+                "../share/dotfiles/tools/amem/../../../../../outside/amem",
+                "external",
+            ),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let root = home.path().canonicalize().unwrap();
+            let alias = root.join(dir).join(id);
+            std::fs::create_dir_all(alias.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(target, &alias).unwrap();
+            let status = inspect(&root, id, package, Ok("1.0.1".into()));
+            assert_eq!(status.ownership, expected, "{id}: {:?}", status.detail);
+            assert_eq!(status.state, "unavailable");
+            assert!(status.installed_version.is_none());
+            assert!(status.commands.is_empty());
+            assert!(!status.can_launch);
+            assert_eq!(std::fs::read_link(&alias).unwrap(), PathBuf::from(target));
+            assert!(
+                !alias.exists(),
+                "inventory must not repair the dangling alias"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn family_registry_dangling_alias_under_canonical_install_root_keeps_owner() {
+        let home = tempfile::tempdir().unwrap();
+        let external_storage = tempfile::tempdir().unwrap();
+        let root = home.path().canonicalize().unwrap();
+        let storage = external_storage.path().canonicalize().unwrap();
+        let managed = root.join(".local/share/dotfiles/tools/amem");
+        std::fs::create_dir_all(managed.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&storage, &managed).unwrap();
+        let alias = root.join(".local/bin/amem");
+        std::fs::create_dir_all(alias.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(storage.join("current/bin/amem"), &alias).unwrap();
+        let status = inspect(&root, "amem", "@staix/agent-mem", Ok("1.0.1".into()));
+        assert_eq!(status.ownership, "dot-family");
+        assert_eq!(status.state, "unavailable");
+        assert!(!status.can_launch && status.commands.is_empty());
+        assert!(!alias.exists());
+    }
+
     #[test]
     fn family_registry_worker_yields_and_maps_join_failure() {
         crate::atomic_file::phase08_06::boundary(
