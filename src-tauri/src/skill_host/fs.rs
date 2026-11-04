@@ -39,6 +39,10 @@ pub fn env_base() -> Result<PathBuf, String> {
     Ok(maru_home()?.join("env"))
 }
 
+pub(crate) fn is_hashed_env_root(root: &Path) -> Result<bool, String> {
+    Ok(root.parent() == Some(env_base()?.as_path()))
+}
+
 pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
     if hash.is_empty()
         || ["node", "node_modules", "temp", "logs", "input", "output"].contains(&hash)
@@ -244,10 +248,17 @@ pub fn simplified(path: &Path) -> PathBuf {
 }
 
 pub fn read_link_target(path: &Path) -> Option<PathBuf> {
-    fs::symlink_metadata(path)
-        .ok()
-        .filter(|meta| meta.file_type().is_symlink())
-        .and_then(|_| fs::read_link(path).ok())
+    read_link_target_checked(path).ok().flatten()
+}
+
+/// Missing/non-link paths are distinct from aliases whose target cannot be inspected.
+pub(crate) fn read_link_target_checked(path: &Path) -> std::io::Result<Option<PathBuf>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::read_link(path).map(Some),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Unlinks the link itself, never its target. Windows stores a directory
@@ -264,13 +275,26 @@ pub fn remove_symlink(path: &Path) -> std::io::Result<()> {
 }
 
 pub fn remove_if_matching_symlink(path: &Path, expected: &Path) -> Result<bool, String> {
-    let Some(target) = read_link_target(path) else {
+    remove_if_matching_symlink_with_recovery(path, expected, SKILLS_IO_RECOVERY)
+}
+
+pub(crate) fn remove_if_matching_symlink_with_recovery(
+    path: &Path,
+    expected: &Path,
+    recovery: &str,
+) -> Result<bool, String> {
+    let Some(target) = read_link_target_checked(path).map_err(|error| {
+        operation_error_with_recovery("read install symlink", path, error, recovery)
+    })?
+    else {
         return Ok(false);
     };
     if simplified(&target) != simplified(expected) {
         return Ok(false);
     }
-    remove_symlink(path).map_err(|err| format!("Cannot remove {}: {err}", display_path(path)))?;
+    remove_symlink(path).map_err(|error| {
+        operation_error_with_recovery("unlink install symlink", path, error, recovery)
+    })?;
     Ok(true)
 }
 
@@ -378,13 +402,27 @@ pub(crate) fn test_home_for_bundle_tests() -> BundleTestHome {
     }
 }
 
+const SKILLS_IO_RECOVERY: &str = "inspect this path and resolve the reported filesystem/archive error, check the active bundle with `maru skills update --check`, then retry the requested skill/update/rollback";
+
 /// Shared boundary for filesystem/archive failures surfaced by skills CLI/IPC.
 pub(crate) fn operation_error(
     operation: &str,
     path: &Path,
     error: impl std::fmt::Display,
 ) -> String {
-    format!("skills_io_failed: {operation} at {}: {error}; inspect this path and resolve the reported filesystem/archive error, check the active bundle with `maru skills update --check`, then retry the requested skill/update/rollback", display_path(path))
+    operation_error_with_recovery(operation, path, error, SKILLS_IO_RECOVERY)
+}
+
+pub(crate) fn operation_error_with_recovery(
+    operation: &str,
+    path: &Path,
+    error: impl std::fmt::Display,
+    recovery: &str,
+) -> String {
+    format!(
+        "skills_io_failed: {operation} at {}: {error}; {recovery}",
+        display_path(path)
+    )
 }
 
 pub(crate) fn link_temp(link: &Path) -> PathBuf {
@@ -597,6 +635,37 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    #[cfg(unix)]
+    fn checked_symlink_cleanup_distinguishes_absent_foreign_and_unreadable_aliases() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("entry");
+        fs::write(&target, "preserved target").unwrap();
+        let parent = dir.path().join("provider");
+        fs::create_dir(&parent).unwrap();
+        let alias = parent.join("skill");
+        assert!(!remove_if_matching_symlink(&alias, &target).unwrap());
+        fs::write(&alias, "unmanaged file").unwrap();
+        assert!(!remove_if_matching_symlink(&alias, &target).unwrap());
+        fs::remove_file(&alias).unwrap();
+        unix_fs::symlink(&target, &alias).unwrap();
+        assert!(!remove_if_matching_symlink(&alias, &dir.path().join("foreign")).unwrap());
+        let permissions = fs::metadata(&parent).unwrap().permissions();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = remove_if_matching_symlink(&alias, &target);
+        fs::set_permissions(&parent, permissions).unwrap();
+        let error = result.unwrap_err();
+        assert!(error.contains("read install symlink"), "{error}");
+        assert!(error.contains(&display_path(&alias)), "{error}");
+        assert!(error.contains("maru skills update --check"), "{error}");
+        assert_eq!(fs::read_link(&alias).unwrap(), target);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "preserved target");
+        assert!(remove_if_matching_symlink(&alias, &target).unwrap());
+        assert!(!alias.exists());
+        assert!(target.is_file());
+    }
 
     #[test]
     fn unsupported_exchange_migrates_with_staged_link_and_retains_the_old_tree() {

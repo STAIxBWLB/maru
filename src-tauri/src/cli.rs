@@ -358,6 +358,7 @@ fn run_skills(args: &[String]) -> i32 {
             }
         }
         "sync" => run_skills_sync(&args[1..]),
+        "cleanup" => run_skills_cleanup(&args[1..]),
         "update" => run_skills_update(&args[1..]),
         "rollback" => run_skills_rollback(&args[1..]),
         "dirty" => run_skills_dirty(&args[1..]),
@@ -367,6 +368,27 @@ fn run_skills(args: &[String]) -> i32 {
         _ => {
             eprintln!("{}", skills_usage());
             2
+        }
+    }
+}
+
+fn run_skills_cleanup(args: &[String]) -> i32 {
+    let [flag, entry] = args else {
+        eprintln!("usage: maru skills cleanup --entry <absolute-Maru-entry-path>");
+        return 2;
+    };
+    if flag != "--entry" {
+        eprintln!("usage: maru skills cleanup --entry <absolute-Maru-entry-path>");
+        return 2;
+    }
+    match crate::skill_host::store::skills_cleanup_entry(std::path::PathBuf::from(entry)) {
+        Ok(()) => {
+            println!("cleanup complete: {entry}");
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
         }
     }
 }
@@ -1075,7 +1097,7 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn skills_usage() -> &'static str {
-    "usage: maru skills capabilities|list|sync|update|rollback|dirty|reconcile|import|import-unmanage"
+    "usage: maru skills capabilities|list|sync|cleanup|update|rollback|dirty|reconcile|import|import-unmanage"
 }
 
 /// The additive federation contract dotfiles discovers first (issue #396).
@@ -1098,7 +1120,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills rollback [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills rollback [--json]\n  skills cleanup --entry <absolute-Maru-entry-path>\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
 }
 
 #[cfg(test)]
@@ -1149,6 +1171,18 @@ mod tests {
     #[test]
     fn missing_skills_subcommand_is_cli_error() {
         assert_eq!(run_cli(vec!["skills".to_string()]), 2);
+    }
+
+    #[test]
+    fn skills_cleanup_requires_one_explicit_entry_path() {
+        for args in [
+            vec!["skills", "cleanup"],
+            vec!["skills", "cleanup", "--entry"],
+            vec!["skills", "cleanup", "--all", "/tmp/unused"],
+            vec!["skills", "cleanup", "--entry", "/tmp/unused", "extra"],
+        ] {
+            assert_eq!(run_cli(args.into_iter().map(str::to_string).collect()), 2);
+        }
     }
 
     #[test]

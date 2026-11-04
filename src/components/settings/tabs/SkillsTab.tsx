@@ -896,6 +896,7 @@ export function SkillsTab({ workPath }: { workPath: string }) {
         invocationId: string;
         success: boolean;
         exitCode: number | null;
+        error?: string | null;
       };
       type SkillsEnvOutputPayload = {
         invocationId: string;
@@ -927,7 +928,7 @@ export function SkillsTab({ workPath }: { workPath: string }) {
           stepOperation();
           finishOperation(t("system.skills.bootstrapComplete"));
         } else {
-          const message = t("system.skills.bootstrapFailed", {
+          const message = payload.error?.trim() || t("system.skills.bootstrapFailed", {
             code: payload.exitCode ?? "unknown",
           });
           setError(message);

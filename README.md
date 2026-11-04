@@ -661,10 +661,17 @@ legacy envs are allowed only for recorded legacy activations or the initial
 pre-hash bootstrap. Direct repair/bootstrap certifies a hashed env with
 `.maru-env-complete` only after actual setup succeeds; status-created directories,
 dry runs and missing setup scripts do not certify completion.
+Settings health also requires this marker for hashed envs. A live session's hash
+is not rebuilt by bundle Apply; Settings > Skills > Environment > Bootstrap is
+the explicit repair path while that session remains live. Completion failures
+surface their error reason even when the setup process itself exited with 0.
 Rollback also checks the retained bundle against the file
 list and hashes recorded when it was applied, and refuses missing, added or
 changed files; a bundle applied before that list existed must still contain
 every skill its `manifest.json` names.
+Where POSIX modes are available, retained files are checked against recorded
+signed modes during both reuse and rollback. Fingerprints prune ignored runtime
+subtrees before traversal and continue to report errors for real bundle files.
 Maru-supplied bundled skill instructions and resource references bind their
 bundle and environment at start; external skill aliases switch atomically for
 subsequent reads.
@@ -684,6 +691,11 @@ they do not skip saving the rescanned registry. A provider alias that could not
 be unlinked keeps its install record and shared Maru entry, while other removed
 installs are saved normally. Shared-entry unlink failures also warn without
 turning an already activated update into a failed apply.
+After resolving the reported path error, `maru skills cleanup --entry <path>`
+retries a dropped builtin entry by its exact path. Cleanup is limited to direct
+Maru skills entries, refuses active/external references and foreign targets,
+and never deletes the target tree. Remaining stale provider records are saved
+as aliases are removed, so retry does not depend on the dropped catalog entry.
 
 The release version's major and minor come from the active GSD milestone in
 `.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped
