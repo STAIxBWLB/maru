@@ -9306,13 +9306,34 @@ mod tests {
             assert!(bundle::read_journal().unwrap().is_none());
         }
 
+        fn register_cleanup_fixture() {
+            let active = bundle::read_state().unwrap().unwrap().active.unwrap();
+            let workspace = builtin_materialized_root().unwrap();
+            let pristine = bundle::bundle_pristine_dir(&active.bundle_id).unwrap();
+            for root in [workspace, pristine] {
+                write_skill(&root, "cleanup-demo");
+                let manifest_path = root.join("manifest.json");
+                let mut manifest: serde_json::Value =
+                    serde_json::from_reader(fs::File::open(&manifest_path).unwrap()).unwrap();
+                manifest["skills"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(serde_json::json!({
+                        "name": "cleanup-demo", "path": "skills/cleanup-demo", "tier": "core"
+                    }));
+                host_fs::write_json_pretty(&manifest_path, &manifest).unwrap();
+            }
+            skills_rescan_source_impl(BUILTIN_SOURCE_ID.into(), ProgressReporter::noop()).unwrap();
+        }
+
         #[test]
         fn removed_skill_with_absent_provider_alias_unlinks_only_unreferenced_maru_entry() {
             for keep_reference in [false, true] {
                 let _home = test_home();
                 skills_list_sources(None).unwrap();
+                register_cleanup_fixture();
                 skills_install_skill(
-                    "maru-builtin::gaejosik".into(),
+                    "maru-builtin::cleanup-demo".into(),
                     "claude".into(),
                     None,
                     Some("symlink".into()),
@@ -9322,13 +9343,17 @@ mod tests {
                 let install = registry
                     .installs
                     .iter()
-                    .find(|install| install.skill_id == "maru-builtin::gaejosik")
+                    .find(|install| install.skill_id == "maru-builtin::cleanup-demo")
                     .unwrap()
                     .clone();
                 let entry = PathBuf::from(&install.entrypoint_path);
                 host_fs::remove_symlink(Path::new(&install.target_path)).unwrap();
-                fs::remove_dir_all(builtin_materialized_root().unwrap().join("skills/gaejosik"))
-                    .unwrap();
+                fs::remove_dir_all(
+                    builtin_materialized_root()
+                        .unwrap()
+                        .join("skills/cleanup-demo"),
+                )
+                .unwrap();
                 if keep_reference {
                     let mut copy = install.clone();
                     copy.target = "codex".into();
@@ -9336,7 +9361,8 @@ mod tests {
                     registry.installs.push(copy);
                 }
                 let (removed, warnings) =
-                    cleanup_removed_builtin_installs(&mut registry, &["gaejosik".into()]).unwrap();
+                    cleanup_removed_builtin_installs(&mut registry, &["cleanup-demo".into()])
+                        .unwrap();
                 assert_eq!(removed, 1);
                 assert!(warnings.is_empty());
                 assert_eq!(host_fs::read_link_target(&entry).is_some(), keep_reference);
@@ -9371,9 +9397,10 @@ mod tests {
             for failure in ["provider", "entry"] {
                 let _home = test_home();
                 skills_list_sources(None).unwrap();
+                register_cleanup_fixture();
                 for target in ["claude", "codex"] {
                     skills_install_skill(
-                        "maru-builtin::gaejosik".into(),
+                        "maru-builtin::cleanup-demo".into(),
                         target.into(),
                         None,
                         Some("symlink".into()),
@@ -9385,7 +9412,8 @@ mod tests {
                     .installs
                     .iter()
                     .find(|install| {
-                        install.target == "claude" && install.skill_id == "maru-builtin::gaejosik"
+                        install.target == "claude"
+                            && install.skill_id == "maru-builtin::cleanup-demo"
                     })
                     .unwrap();
                 let failed = PathBuf::from(if failure == "provider" {
@@ -9436,7 +9464,7 @@ mod tests {
                 assert!(!persisted
                     .skills
                     .iter()
-                    .any(|skill| skill.id == "maru-builtin::gaejosik"));
+                    .any(|skill| skill.id == "maru-builtin::cleanup-demo"));
                 assert!(!persisted
                     .installs
                     .iter()
