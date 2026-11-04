@@ -4,6 +4,7 @@ use crate::command_output::{configure_process_tree, terminate_tree_and_reap, Pro
 use crate::skill_host::fs as host_fs;
 use crate::win_process::NoWindow;
 use serde::Deserialize;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ use tauri::Url;
 pub(crate) const ACON_LAUNCH: &str = "acon ui --no-open --json";
 const MAX_JSON: usize = 32 * 1024;
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 
 fn failure(operation: &str, error: impl std::fmt::Display) -> String {
@@ -105,22 +107,49 @@ fn resolve_console(home: &Path) -> Result<TrustedTool, String> {
         .map_err(|error| failure("resolve installed console", error))
 }
 
+/// Resolve the same active executable for inventory and launch. Production
+/// follows PATH (then Maru's fixed augmented path); tests can inject PATH.
+pub(crate) fn active_program(home: &Path, tool: &str, windows: bool) -> Option<PathBuf> {
+    #[cfg(not(any(test, feature = "native-e2e")))]
+    if let Some(program) = crate::cli_path::resolve_program(tool) {
+        return Some(program);
+    }
+    active_program_with_path(home, tool, windows, None)
+}
+
+pub(crate) fn active_program_with_path(
+    home: &Path,
+    tool: &str,
+    windows: bool,
+    path_env: Option<&OsStr>,
+) -> Option<PathBuf> {
+    path_env
+        .and_then(|path| crate::cli_path::which_in_path(tool, Some(path)).ok())
+        .or_else(|| {
+            [
+                home.join(".local/bin").join(tool),
+                home.join(".bun/bin").join(if windows {
+                    format!("{tool}.exe")
+                } else {
+                    tool.to_string()
+                }),
+            ]
+            .into_iter()
+            .find(|path| path.canonicalize().is_ok_and(|resolved| resolved.is_file()))
+        })
+}
+
 pub(crate) fn resolve_tool(
     home: &Path,
     tool: &str,
     package_name: &str,
 ) -> Result<TrustedTool, String> {
-    let local = home.join(".local/bin").join(tool);
-    let legacy = home.join(".bun/bin").join(if cfg!(windows) {
-        format!("{tool}.exe")
-    } else {
-        tool.to_string()
-    });
-    let alias = if fs::symlink_metadata(&local).is_ok() {
-        local
-    } else {
-        legacy
-    };
+    let alias = active_program(home, tool, cfg!(windows)).ok_or_else(|| {
+        install_failure(
+            "resolve active tool executable",
+            format!("{tool} was not found on PATH or in its supported install aliases"),
+        )
+    })?;
     resolve_tool_at(home, tool, package_name, &alias)
 }
 
@@ -288,7 +317,6 @@ pub(crate) fn resolve_tool_at_for_platform(
     ];
     let bun = resolve_bun_from(&home, &candidates)?;
     verify_permissions(&entry, &home)?;
-    verify_permissions(&package.join("package.json"), &home)?;
     Ok(TrustedTool {
         bun,
         entry,
@@ -398,6 +426,17 @@ fn parse_readiness(bytes: &[u8], pid: u32) -> Result<Url, String> {
         ));
     }
     Ok(url)
+}
+
+fn probe_error_detail(error: reqwest::Error) -> String {
+    let class = if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connection failure"
+    } else {
+        "request failure"
+    };
+    format!("local console probe {class} within the 2-second probe timeout: {error:#}")
 }
 
 struct Permit;
@@ -591,18 +630,13 @@ fn start_console(
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(2))
+        .timeout(PROBE_TIMEOUT)
         .build()
         .map_err(|error| failure("prepare loopback readiness probe", error))?;
     let response = client
         .get(format!("{}/", url.origin().ascii_serialization()))
         .send()
-        .map_err(|_| {
-            failure(
-                "probe console origin",
-                "local console did not answer directly before the readiness deadline",
-            )
-        })?;
+        .map_err(|error| failure("probe console origin", probe_error_detail(error)))?;
     if !response.status().is_success() {
         return Err(failure(
             "probe console origin",
@@ -885,6 +919,102 @@ server.serve_forever()
             .err()
             .unwrap()
             .contains("regular, non-symlink file"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn active_console_resolution_follows_path_order_and_skips_dangling_local_alias() {
+        let home = fixture("valid");
+        let root = home.path();
+        let dot_root = root.join(".local/share/dotfiles/tools/acon");
+        let dot_version = dot_root.join("1.0.0");
+        let dot_package = dot_version.join("lib/node_modules/@staix/agent-console");
+        fs::create_dir_all(dot_package.join("bin")).unwrap();
+        fs::write(
+            dot_package.join("package.json"),
+            br#"{"name":"@staix/agent-console","version":"1.0.0","bin":{"acon":"bin/acon.js"}}"#,
+        )
+        .unwrap();
+        crate::test_support::write_executable_fixture(
+            &dot_package.join("bin/acon.js"),
+            "// dot-family fixture\n",
+            0o755,
+        )
+        .unwrap();
+        fs::create_dir_all(dot_version.join("bin")).unwrap();
+        std::os::unix::fs::symlink(
+            dot_package.join("bin/acon.js"),
+            dot_version.join("bin/acon"),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join(".local/bin")).unwrap();
+        std::os::unix::fs::symlink("1.0.0", dot_root.join("current")).unwrap();
+        std::os::unix::fs::symlink(
+            dot_root.join("current/bin/acon"),
+            root.join(".local/bin/acon"),
+        )
+        .unwrap();
+
+        let local_bin = root.join(".local/bin");
+        let bun_bin = root.join(".bun/bin");
+        let local_first = std::env::join_paths([&local_bin, &bun_bin]).unwrap();
+        let selected = active_program_with_path(root, "acon", false, Some(&local_first)).unwrap();
+        assert_eq!(selected, local_bin.join("acon"));
+        let trusted = resolve_tool_at(root, "acon", "@staix/agent-console", &selected).unwrap();
+        assert_eq!(trusted.version, "1.0.0");
+
+        let bun_first = std::env::join_paths([&bun_bin, &local_bin]).unwrap();
+        let selected = active_program_with_path(root, "acon", false, Some(&bun_first)).unwrap();
+        assert_eq!(selected, bun_bin.join("acon"));
+        let trusted = resolve_tool_at(root, "acon", "@staix/agent-console", &selected).unwrap();
+        assert_eq!(trusted.version, "0.1.0");
+
+        fs::remove_file(local_bin.join("acon")).unwrap();
+        std::os::unix::fs::symlink(root.join("missing/acon"), local_bin.join("acon")).unwrap();
+        let selected = active_program_with_path(root, "acon", false, Some(&local_first)).unwrap();
+        assert_eq!(selected, bun_bin.join("acon"));
+        assert_eq!(
+            resolve_tool_at(root, "acon", "@staix/agent-console", &selected)
+                .unwrap()
+                .version,
+            "0.1.0"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn console_probe_diagnostics_keep_connection_and_timeout_classes() {
+        use std::net::TcpListener;
+
+        let refused = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let refused_addr = refused.local_addr().unwrap();
+        drop(refused);
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(PROBE_TIMEOUT)
+            .build()
+            .unwrap();
+        let refused_error = client
+            .get(format!("http://{refused_addr}/"))
+            .send()
+            .unwrap_err();
+        assert!(refused_error.is_connect());
+        let detail = probe_error_detail(refused_error);
+        assert!(detail.contains("connection failure"), "{detail}");
+        assert!(detail.to_ascii_lowercase().contains("refused"), "{detail}");
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            thread::sleep(PROBE_TIMEOUT + Duration::from_millis(250));
+        });
+        let timeout_error = client.get(format!("http://{address}/")).send().unwrap_err();
+        server.join().unwrap();
+        assert!(timeout_error.is_timeout());
+        let detail = probe_error_detail(timeout_error);
+        assert!(detail.contains("probe timeout"), "{detail}");
+        assert!(detail.contains("timeout"), "{detail}");
     }
 
     #[test]

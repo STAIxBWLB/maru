@@ -1,3 +1,5 @@
+import { LOCAL_CONSOLE_PLACEHOLDER_URL } from "./siteLaunch";
+
 // Pure helpers for Sites mode: registry document parsing, grouping,
 // filtering, and native-webview visibility/bounds math.
 
@@ -60,7 +62,7 @@ export function parseSitesDocument(value: unknown): SitesDocument {
   const sites: SiteEntry[] = [];
   for (const raw of rawSites) {
     if (!isRecord(raw)) continue;
-    const url = readString(raw.url) ?? (raw.launch ? "http://127.0.0.1" : null);
+    const url = readString(raw.url) ?? (raw.launch ? LOCAL_CONSOLE_PLACEHOLDER_URL : null);
     if (!url) continue;
     sites.push({
       id: readString(raw.id) ?? newSiteId(),

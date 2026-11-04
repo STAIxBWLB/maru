@@ -55,6 +55,18 @@ interface SiteViewTabState {
 }
 
 const tabs = new Map<string, SiteViewTabState>();
+const openSettledSubscribers = new Set<(tabId: string) => void>();
+
+/** Completion belongs to the webview session, so a replacement pane can sync it. */
+export function subscribeSiteViewOpenSettled(handler: (tabId: string) => void): () => void {
+  openSettledSubscribers.add(handler);
+  return () => { openSettledSubscribers.delete(handler); };
+}
+
+function notifyOpenSettled(tabId: string): void {
+  for (const handler of openSettledSubscribers) handler(tabId);
+}
+
 const closing = new Map<string, Promise<void>>();
 let closingAll: Promise<void> | null = null;
 
@@ -86,11 +98,13 @@ export async function siteViewOpen(
     state.opening = false;
     state.shown = false; // Native open stays hidden until current UI intent shows it.
     state.url = resolved ?? url;
+    notifyOpenSettled(tabId);
     return state.url;
   } catch (error) {
     if (tabs.get(tabId) !== state) return null;
     if (previous && !previous.opening) { previous.shown = state.shown; tabs.set(tabId, previous); }
     else tabs.delete(tabId);
+    notifyOpenSettled(tabId);
     throw error;
   }
 }

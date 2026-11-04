@@ -752,6 +752,7 @@ pub mod ipc {
 mod tests {
     #[test]
     fn cancelled_open_identity_cannot_remove_or_publish_a_newer_tab_request() {
+        let _guard = phase08_24::serialized();
         tauri::async_runtime::block_on(async {
             let (label, first) = super::begin_site_open("cancel-test").await.unwrap();
             let (_, second) = super::begin_site_open("cancel-test").await.unwrap();
@@ -902,7 +903,7 @@ mod tests {
         // so a stage hook registered by one test cannot intercept a parallel
         // test's worker for the same command stage.
         static TEST_LOCK: Mutex<()> = Mutex::new(());
-        fn serialized() -> MutexGuard<'static, ()> {
+        pub(super) fn serialized() -> MutexGuard<'static, ()> {
             TEST_LOCK
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())

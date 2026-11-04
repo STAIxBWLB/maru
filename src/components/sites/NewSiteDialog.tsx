@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
 import { ACON_SITE_LAUNCH, newSiteId, normalizeSiteUrl, type SiteEntry } from "../../lib/sites";
+import { LEGACY_ACON_SITE_LAUNCH, LOCAL_CONSOLE_PLACEHOLDER_URL } from "../../lib/siteLaunch";
 import { Button } from "../ui/Button";
 import {
   DialogSurface,
@@ -38,7 +39,8 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
     setDevUrl(initial?.devUrl ?? "");
     setLocalPath(initial?.localPath ?? "");
     setNotes(initial?.notes ?? "");
-    setLaunch(initial?.launch?.trim() === "acon ui --json" ? ACON_SITE_LAUNCH : initial?.launch ?? null);
+    const storedLaunch = initial?.launch?.trim() ?? null;
+    setLaunch(storedLaunch === LEGACY_ACON_SITE_LAUNCH ? ACON_SITE_LAUNCH : storedLaunch);
     setError(null);
   }, [open, initial]);
 
@@ -48,7 +50,7 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
       return;
     }
     if (launch !== null && launch !== ACON_SITE_LAUNCH) { setError(t("sites.dialog.launchInvalid")); return; }
-    const normalizedUrl = url.trim() ? normalizeSiteUrl(url) : (launch ? "http://127.0.0.1" : null);
+    const normalizedUrl = url.trim() ? normalizeSiteUrl(url) : (launch ? LOCAL_CONSOLE_PLACEHOLDER_URL : null);
     if (!normalizedUrl) {
       setError(t("sites.dialog.urlInvalid"));
       return;

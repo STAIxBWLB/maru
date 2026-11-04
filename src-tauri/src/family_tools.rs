@@ -252,6 +252,9 @@ fn published_commands(manifest: &serde_json::Value) -> Vec<String> {
 }
 
 fn active_program(home: &Path, id: &str, windows: bool) -> Option<PathBuf> {
+    if id == "acon" {
+        return site_launcher::active_program(home, id, windows);
+    }
     // Native/test HOME isolation must never resolve a personal tool.
     #[cfg(not(any(test, feature = "native-e2e")))]
     if let Some(program) = crate::cli_path::resolve_program(id) {
@@ -269,8 +272,12 @@ fn active_program(home: &Path, id: &str, windows: bool) -> Option<PathBuf> {
     .find(|path| std::fs::symlink_metadata(path).is_ok())
 }
 
+fn inventory_home_error(error: impl std::fmt::Display) -> String {
+    format!("family_tools_home_unavailable: cannot resolve the inventory home: {error}; set HOME to an existing absolute home directory, then retry Refresh")
+}
+
 pub fn family_tools_status() -> Result<Vec<FamilyToolStatus>, String> {
-    let home = host_fs::install_root_base()?;
+    let home = host_fs::install_root_base().map_err(inventory_home_error)?;
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
         .redirect(reqwest::redirect::Policy::none())
@@ -313,6 +320,15 @@ pub mod ipc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inventory_home_error_explains_how_to_recover() {
+        let error = inventory_home_error("Home root must be absolute");
+        assert!(error.contains("family_tools_home_unavailable"));
+        assert!(error.contains("set HOME to an existing absolute home directory"));
+        assert!(error.contains("retry Refresh"));
+    }
+
     #[test]
     fn family_registry_windows_bun_shim_is_installed_without_shadow_false_positive() {
         let home = site_launcher::windows_shim_fixture();
