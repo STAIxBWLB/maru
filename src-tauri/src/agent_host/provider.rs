@@ -206,14 +206,13 @@ pub fn build_cli_command_with_policy(
     permission_mode: &str,
 ) -> Result<PolicyCommand, String> {
     request.validate()?;
-    let session = crate::skill_host::store::capture_bundle_session()?;
     build_cli_command_with_session(
         provider,
         request,
         add_dirs,
         command_override,
         permission_mode,
-        session.as_ref(),
+        None,
     )
 }
 
@@ -415,9 +414,6 @@ impl ProviderAdapter for CliProviderAdapter {
     fn complete(&mut self, mut request: CompletionRequest) -> Result<CompletionResponse, String> {
         if self.metadata.is_some() {
             request.metadata = self.metadata.clone();
-        }
-        if self.bundle_session.is_none() {
-            self.bundle_session = crate::skill_host::store::capture_bundle_session()?;
         }
         let (mut cmd, stdin_payload, resolution) = build_cli_command_with_session(
             self.provider,
@@ -675,6 +671,39 @@ mod tests {
         assert_eq!(CliProviderKind::Kimi.default_binary_name(), "kimi");
         assert_eq!(CliProviderKind::Kiro.default_binary_name(), "kiro-cli");
         assert!(CliProviderKind::parse("openai").is_err());
+    }
+
+    #[test]
+    fn general_commands_never_bind_or_rewrite_prompts_for_missing_or_corrupt_bundles() {
+        let _home = crate::skill_host::fs::test_home_for_bundle_tests();
+        let state = crate::skill_host::bundle_update::state_path().unwrap();
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+        let valid = serde_json::to_vec(&serde_json::json!({"schema":1,"active":{"bundleId":"missing","revision":1,"displayVersion":"missing","source":"remote","envHash":"hash","appliedAt":"t"}})).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let program = std::env::current_exe().unwrap();
+        for bytes in [valid, b"{corrupt state".to_vec()] {
+            std::fs::write(&state, bytes).unwrap();
+            let request = CompletionRequest {
+                schema_version: super::super::contracts::COMPLETION_REQUEST_SCHEMA_VERSION.into(),
+                provider: "codex".into(),
+                prompt: "Discuss ~/.maru/skills/demo and ~/.maru/env without changing them".into(),
+                cwd: cwd.path().to_string_lossy().into_owned(),
+                mode: "background".into(),
+                metadata: None,
+            };
+            let (command, stdin, _) = build_cli_command_with_policy(
+                CliProviderKind::Codex,
+                &request,
+                &[],
+                program.to_str(),
+                "plan",
+            )
+            .unwrap();
+            assert_eq!(stdin.as_deref(), Some(request.prompt.as_str()));
+            assert!(!command
+                .get_envs()
+                .any(|(key, _)| key == "MARU_SKILLS_BUNDLE" || key == "MARU_SKILLS_ENV"));
+        }
     }
 
     #[test]

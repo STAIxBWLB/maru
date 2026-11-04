@@ -26,8 +26,8 @@ pub(crate) fn sessions_dir() -> Result<PathBuf, String> {
 }
 
 impl BundleSession {
-    /// Caller holds bundle/state admission and the registry lock, so capture
-    /// and publishing the retention lock precede any concurrent pruning.
+    /// Caller holds narrow pin admission and the registry guard. Update
+    /// commit/pruning acquires the same pin path, while network/setup does not.
     pub(crate) fn retain(self) -> Result<Self, String> {
         let key = (self.root.clone(), self.env_root.clone());
         let mut locks = SESSION_LOCKS
@@ -125,6 +125,15 @@ impl BundleSession {
 /// Locks are OS-owned, so a crash releases them without PID reuse heuristics.
 /// Any unreadable pin fails closed rather than pruning an uncertain session.
 pub(crate) fn retained_generations() -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
+    scan_retained(true)
+}
+
+pub(crate) fn retained_generations_readonly() -> Result<(BTreeSet<String>, BTreeSet<String>), String>
+{
+    scan_retained(false)
+}
+
+fn scan_retained(cleanup: bool) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     let mut bundles = BTreeSet::new();
     let mut envs = BTreeSet::new();
     let dir = sessions_dir()?;
@@ -142,8 +151,10 @@ pub(crate) fn retained_generations() -> Result<(BTreeSet<String>, BTreeSet<Strin
         match file.try_lock() {
             Ok(()) => {
                 drop(file);
-                fs::remove_file(path).map_err(|error| error.to_string())?;
-                fs::remove_file(lock_path).map_err(|error| error.to_string())?;
+                if cleanup {
+                    fs::remove_file(path).map_err(|error| error.to_string())?;
+                    fs::remove_file(lock_path).map_err(|error| error.to_string())?;
+                }
             }
             Err(TryLockError::WouldBlock) => {
                 let session: BundleSession = serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)

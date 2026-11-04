@@ -376,7 +376,7 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
     )
 }
 
-fn compose(
+pub(crate) fn compose(
     skill_id: String,
     prompt: String,
     cwd: Option<String>,
@@ -402,7 +402,7 @@ fn compose_with_binding(
             skill.validation_errors.join(", ")
         ));
     }
-    let bundle_session = if bind {
+    let bundle_session = if bind && skill.source_id == "maru-builtin" {
         super::store::capture_bundle_session()?
     } else {
         None

@@ -132,6 +132,10 @@ pub struct SwapJournal {
     pub new_workspace: Option<String>,
     #[serde(default)]
     pub links: Vec<BundleLinkSwap>,
+    #[serde(default)]
+    pub old_workspace_hash: Option<String>,
+    #[serde(default)]
+    pub new_workspace_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,6 +253,17 @@ pub fn recover_interrupted_swap(builtin_root: &Path) -> Result<(), String> {
                 "bundle_recovery_missing: {}; restore the bundle workspace before retrying",
                 target.display()
             ));
+        }
+        let expected = if swap_completed {
+            &journal.new_workspace_hash
+        } else {
+            &journal.old_workspace_hash
+        };
+        let valid = expected.as_ref().is_some_and(|expected| {
+            super::store::hash_directory_filtered(&target).is_ok_and(|actual| &actual == expected)
+        });
+        if !valid {
+            return Err(format!("bundle_recovery_incomplete: {}; restore the complete recorded workspace before retrying recovery", target.display()));
         }
         // First detach any legacy aliases, so even recovery's one-time
         // directory migration never leaves an external skill link dangling.
@@ -1213,6 +1228,12 @@ mod tests {
                 started_at: "t".into(),
                 old_workspace: Some(old.to_string_lossy().into_owned()),
                 new_workspace: Some(new.to_string_lossy().into_owned()),
+                old_workspace_hash: Some(
+                    super::super::store::hash_directory_filtered(&old).unwrap(),
+                ),
+                new_workspace_hash: Some(
+                    super::super::store::hash_directory_filtered(&new).unwrap(),
+                ),
                 links: vec![BundleLinkSwap {
                     link: link.clone(),
                     old_target: old.join("skills/demo"),
@@ -1233,6 +1254,58 @@ mod tests {
             assert!(read_journal().unwrap().is_none());
             assert!(!host_fs::link_temp(&builtin).exists());
         }
+    }
+
+    #[test]
+    fn recovery_refuses_an_incomplete_recorded_workspace() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let old = workspace_dir("old").unwrap();
+        let new = workspace_dir("new").unwrap();
+        for (dir, text) in [(&old, "old"), (&new, "new")] {
+            fs::create_dir_all(dir.join("skills/demo")).unwrap();
+            fs::write(dir.join("skills/demo/SKILL.md"), text).unwrap();
+        }
+        let root = host_fs::skills_root().unwrap();
+        let builtin = root.join("_builtin");
+        host_fs::create_symlink_no_clobber(&builtin, &new).unwrap();
+        write_state(&BundleState {
+            schema: 1,
+            active: Some(SkillBundleRef {
+                bundle_id: "old".into(),
+                revision: 1,
+                display_version: "old".into(),
+                commit: None,
+                source: REMOTE_SOURCE.into(),
+                env_hash: "old-env".into(),
+                applied_at: "t".into(),
+            }),
+            previous: None,
+        })
+        .unwrap();
+        write_journal(&SwapJournal {
+            schema: 1,
+            new_bundle_id: "new".into(),
+            backup_dir: root.join("_cache/backup").to_string_lossy().into_owned(),
+            started_at: "t".into(),
+            old_workspace: Some(old.to_string_lossy().into_owned()),
+            new_workspace: Some(new.to_string_lossy().into_owned()),
+            old_workspace_hash: Some(super::super::store::hash_directory_filtered(&old).unwrap()),
+            new_workspace_hash: Some(super::super::store::hash_directory_filtered(&new).unwrap()),
+            links: Vec::new(),
+        })
+        .unwrap();
+        fs::remove_file(old.join("skills/demo/SKILL.md")).unwrap();
+        let error = recover_interrupted_swap(&builtin).unwrap_err();
+        assert!(error.contains("bundle_recovery_incomplete"), "{error}");
+        assert!(
+            error.contains(&old.to_string_lossy().to_string()),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(builtin.join("skills/demo/SKILL.md")).unwrap(),
+            "new"
+        );
+        assert!(read_journal().unwrap().is_some());
     }
 
     #[test]

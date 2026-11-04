@@ -332,6 +332,17 @@ impl PathTransactionRequest {
     /// Owned admission is for dedicated background threads. Acquire in a
     /// blocking worker; never hold this token across an async await.
     pub(crate) fn acquire(self) -> Result<PathTransactionLease, String> {
+        self.acquire_inner(true)?
+            .ok_or_else(|| "Transaction admission unavailable; retry the operation".into())
+    }
+
+    /// Preserve validation/coverage while allowing latency-sensitive readers
+    /// with narrow cache writes to refuse a conflict instead of waiting.
+    pub(crate) fn try_acquire(self) -> Result<Option<PathTransactionLease>, String> {
+        self.acquire_inner(false)
+    }
+
+    fn acquire_inner(self, wait: bool) -> Result<Option<PathTransactionLease>, String> {
         #[cfg(test)]
         PathTransactionLease::test_stage(&self.paths, "before-admission");
         let (mutex, ready) = &PATH_TRANSACTIONS;
@@ -345,6 +356,9 @@ impl PathTransactionRequest {
                     .any(|right| left.starts_with(right) || right.starts_with(left))
             })
         }) {
+            if !wait {
+                return Ok(None);
+            }
             active = ready
                 .wait(active)
                 .map_err(|_| "Transaction bookkeeping poisoned")?;
@@ -360,7 +374,7 @@ impl PathTransactionRequest {
         lease.request.revalidate()?;
         #[cfg(test)]
         Self::stage_admitted(&lease);
-        Ok(lease)
+        Ok(Some(lease))
     }
 
     #[cfg(test)]
@@ -654,6 +668,32 @@ pub(crate) mod phase08_06 {
                 matches!(future.await, Err(error) if error.starts_with(&format!("{command}_task_failed:")))
             );
         });
+    }
+
+    #[test]
+    fn try_admission_refuses_conflicts_without_waiting_and_preserves_disjoint_admission() {
+        let temp = tempfile::tempdir().unwrap();
+        let owned = temp.path().join("owned");
+        let lease = PathTransactionRequest::new([owned.clone()])
+            .unwrap()
+            .acquire()
+            .unwrap();
+        assert!(PathTransactionRequest::new([owned.join("child")])
+            .unwrap()
+            .try_acquire()
+            .unwrap()
+            .is_none());
+        assert!(PathTransactionRequest::new([temp.path().join("other")])
+            .unwrap()
+            .try_acquire()
+            .unwrap()
+            .is_some());
+        drop(lease);
+        assert!(PathTransactionRequest::new([owned])
+            .unwrap()
+            .try_acquire()
+            .unwrap()
+            .is_some());
     }
 
     #[test]

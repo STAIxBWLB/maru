@@ -598,7 +598,10 @@ immutable snapshots used by Maru-launched sessions. `maru skills rollback`
 restores the previous bundle and its environment without downloading or
 rebuilding it. Rollback rechecks the retained bundle's app and tool floors;
 legacy bundles use their original `manifest.json` when no cached compatibility
-record exists, and missing compatibility data blocks rollback.
+record exists, and missing compatibility data blocks rollback. Rollback requires
+the target's completed hashed env even when active and target hashes match;
+legacy envs are allowed only for recorded legacy activations or the initial
+pre-hash bootstrap.
 Maru-supplied bundled skill instructions and resource references bind their
 bundle and environment at start; external skill aliases switch atomically for
 subsequent reads.
