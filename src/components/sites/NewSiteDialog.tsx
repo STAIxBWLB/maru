@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "../../lib/i18n";
-import { newSiteId, normalizeSiteUrl, type SiteEntry } from "../../lib/sites";
+import { ACON_SITE_LAUNCH, newSiteId, normalizeSiteUrl, type SiteEntry } from "../../lib/sites";
 import { Button } from "../ui/Button";
 import {
   DialogSurface,
@@ -26,6 +26,7 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
   const [devUrl, setDevUrl] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [notes, setNotes] = useState("");
+  const [launch, setLaunch] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Re-seed fields whenever the dialog (re)opens for a different target.
@@ -37,6 +38,7 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
     setDevUrl(initial?.devUrl ?? "");
     setLocalPath(initial?.localPath ?? "");
     setNotes(initial?.notes ?? "");
+    setLaunch(initial?.launch?.trim() === "acon ui --json" ? ACON_SITE_LAUNCH : initial?.launch ?? null);
     setError(null);
   }, [open, initial]);
 
@@ -45,7 +47,8 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
       setError(t("sites.dialog.labelRequired"));
       return;
     }
-    const normalizedUrl = normalizeSiteUrl(url);
+    if (launch !== null && launch !== ACON_SITE_LAUNCH) { setError(t("sites.dialog.launchInvalid")); return; }
+    const normalizedUrl = normalizeSiteUrl(url) ?? (launch ? "http://127.0.0.1" : null);
     if (!normalizedUrl) {
       setError(t("sites.dialog.urlInvalid"));
       return;
@@ -67,6 +70,7 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
       createdAt: initial?.createdAt ?? new Date().toISOString(),
       lastUsedAt: initial?.lastUsedAt ?? null,
       notes: notes.trim() || null,
+      launch,
     });
     onClose();
   };
@@ -108,11 +112,19 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
             <input value={label} onChange={(event) => setLabel(event.target.value)} autoFocus />
           </label>
           <label className="field">
+            <span>{t("sites.dialog.field.launch")}</span>
+            <select value={launch ?? ""} onChange={(event) => setLaunch(event.target.value || null)}>
+              <option value="">{t("sites.dialog.launch.manual")}</option>
+              <option value={ACON_SITE_LAUNCH}>{t("sites.dialog.launch.acon")}</option>
+              {launch !== null && launch !== ACON_SITE_LAUNCH ? <option value={launch} disabled>{t("sites.dialog.launchInvalid")}</option> : null}
+            </select>
+          </label>
+          <label className="field">
             <span>{t("sites.dialog.field.url")}</span>
             <input
               value={url}
               onChange={(event) => setUrl(event.target.value)}
-              placeholder="https://example.com"
+              placeholder={launch ? t("sites.dialog.launch.urlOptional") : "https://example.com"}
               inputMode="url"
             />
           </label>

@@ -126,7 +126,7 @@ export function SitesPane({
   const copiedTimerRef = useRef<number | null>(null);
   const desiredVisibleRef = useRef(false);
   const activeTabRef = useRef<string | null>(activeTabId);
-  const pendingOpenRef = useRef(new Map<string, string>());
+  const pendingOpenRef = useRef(new Map<string, { url: string; launch?: string | null }>());
   const handledOpenedUrlIdsRef = useRef(new Set<number>());
   const unsupportedNoticeClaimedRef = useRef(false);
 
@@ -177,6 +177,21 @@ export function SitesPane({
     };
   }, [t]);
 
+  const finishOpen = useCallback((tabId: string, resolved: string | null | undefined) => {
+    if (!resolved) return;
+    setTabs((current) => updateBrowserTab(current, tabId, { url: resolved }));
+    if (!desiredVisibleRef.current) { void siteViewHide().catch(reportError); return; }
+    if (activeTabRef.current !== tabId) return;
+    const el = surfaceRef.current;
+    const bounds = el ? siteViewBoundsFromRect(el.getBoundingClientRect()) : null;
+    if (bounds) void siteViewSetBounds(tabId, bounds).then(() => siteViewShow(tabId)).catch(reportError);
+  }, [reportError]);
+
+  const failOpen = useCallback((tabId: string, error: unknown) => {
+    setTabs((current) => updateBrowserTab(current, tabId, { loading: false }));
+    reportError(error);
+  }, [reportError]);
+
   // ── rAF-batched bounds/visibility sync for the active tab. Every layout
   // source (observer, window resize, visibility flips) funnels through here,
   // so a burst of events collapses into one invoke pass per frame.
@@ -194,18 +209,20 @@ export function SitesPane({
         void siteViewHide().catch(() => undefined);
         return;
       }
-      if (!siteViewTabRuntime(tabId)) {
-        if (!pendingOpenRef.current.has(tabId)) return;
-        const url = pendingOpenRef.current.get(tabId) ?? "";
+      if (pendingOpenRef.current.has(tabId)) {
+        const request = pendingOpenRef.current.get(tabId);
+        if (!request) return;
         pendingOpenRef.current.delete(tabId);
-        void siteViewOpen(tabId, url, bounds).catch(reportError);
+        const opening = request.launch == null ? siteViewOpen(tabId, request.url, bounds) : siteViewOpen(tabId, request.url, bounds, request.launch);
+        void opening.then((resolved) => finishOpen(tabId, resolved)).catch((error) => failOpen(tabId, error));
         return;
       }
+      if (!siteViewTabRuntime(tabId)) return;
       void siteViewSetBounds(tabId, bounds)
         .then(() => siteViewShow(tabId))
         .catch(reportError);
     });
-  }, [reportError]);
+  }, [failOpen, finishOpen, reportError]);
 
   // ── load the registry once (StrictMode-safe via cancelled flag)
   useEffect(() => {
@@ -290,26 +307,27 @@ export function SitesPane({
 
   /** Load a URL into a tab, creating the native webview on first use. */
   const loadInTab = useCallback(
-    (tabId: string, url: string) => {
+    (tabId: string, url: string, launch?: string | null) => {
       if (!tauri) return;
       if (!url) {
         pendingOpenRef.current.delete(tabId);
         return;
       }
-      if (siteViewTabRuntime(tabId)) {
+      if (launch == null && siteViewTabRuntime(tabId)) {
         void siteViewNavigate(tabId, url).then(scheduleSync).catch(reportError);
         return;
       }
       // Defer first open until the measured surface has non-zero bounds.
       // Mode switches and React commits can otherwise race the first click.
-      pendingOpenRef.current.set(tabId, url);
+      pendingOpenRef.current.set(tabId, { url, launch });
+      if (activeTabRef.current === tabId) void siteViewHide().catch(reportError);
       scheduleSync();
     },
     [reportError, scheduleSync, tauri],
   );
 
   const openInNewTab = useCallback(
-    (url: string, siteId: string | null): boolean => {
+    (url: string, siteId: string | null, launch?: string | null): boolean => {
       if (tabs.length >= MAX_BROWSER_TABS) {
         setError(t("sites.tabs.limit"));
         return false;
@@ -329,7 +347,7 @@ export function SitesPane({
         }
         setActiveTabId(id);
         activeTabRef.current = id;
-        loadInTab(id, url);
+        loadInTab(id, url, launch);
         return result.tabs;
       });
       return true;
@@ -405,9 +423,10 @@ export function SitesPane({
       const existing = tabs.find((tab) => tab.siteId === site.id);
       if (existing) {
         activateTab(existing.id);
-        if (existing.url !== site.url) {
-          setTabs((current) => updateBrowserTab(current, existing.id, { url: site.url }));
-          loadInTab(existing.id, site.url);
+        const runtime = siteViewTabRuntime(existing.id);
+        if ((!existing.loading && (!runtime || (runtime.launch ?? null) !== (site.launch ?? null))) || (site.launch == null && existing.url !== site.url)) {
+          setTabs((current) => updateBrowserTab(current, existing.id, { url: site.url, loading: tauri }));
+          loadInTab(existing.id, site.url, site.launch);
         }
         return;
       }
@@ -416,12 +435,12 @@ export function SitesPane({
         setTabs((current) =>
           updateBrowserTab(current, activeTab.id, { url: site.url, siteId: site.id }),
         );
-        loadInTab(activeTab.id, site.url);
+        loadInTab(activeTab.id, site.url, site.launch);
         return;
       }
-      openInNewTab(site.url, site.id);
+      openInNewTab(site.url, site.id, site.launch);
     },
-    [activateTab, activeTab, loadInTab, openInNewTab, persistSites, sites, tabs],
+    [activateTab, activeTab, loadInTab, openInNewTab, persistSites, sites, tabs, tauri],
   );
 
   const submitAddress = useCallback(() => {
@@ -460,7 +479,12 @@ export function SitesPane({
     (entry: SiteEntry) => {
       persistSites(upsertSite(sites, entry));
       const tab = tabs.find((item) => item.siteId === entry.id);
-      if (tab && tab.url !== entry.url) {
+      const previous = sites.find((site) => site.id === entry.id);
+      if (tab && (previous?.launch ?? null) !== (entry.launch ?? null)) {
+        setTabs((current) => updateBrowserTab(current, tab.id, { siteId: null }));
+        return; // Saving a launcher never executes it; the next Open does.
+      }
+      if (tab && entry.launch == null && tab.url !== entry.url) {
         setTabs((current) => updateBrowserTab(current, tab.id, { url: entry.url }));
         loadInTab(tab.id, entry.url);
       }
@@ -480,7 +504,7 @@ export function SitesPane({
   /** Save the current page as a bookmark, or jump to the existing one. */
   const bookmarkCurrent = useCallback(() => {
     if (!activeTab?.url) return;
-    const existing = sites.find((site) => site.url === activeTab.url);
+    const existing = sites.find((site) => site.url === activeTab.url || (site.launch != null && site.id === activeTab.siteId));
     if (existing) {
       setEditSite(existing);
       return;
@@ -560,7 +584,7 @@ export function SitesPane({
 
   const navDisabled = !tauri || !activeTab || !siteViewTabRuntime(activeTab.id);
   const bookmarked = Boolean(
-    activeTab?.url && sites.some((site) => site.url === activeTab.url),
+    activeTab?.url && sites.some((site) => site.url === activeTab.url || (site.launch != null && site.id === activeTab.siteId)),
   );
   const passkeyAuthorization = passkeyStatus?.authorization ?? "unknown";
   const transientUnsupportedStatus =
@@ -622,7 +646,7 @@ export function SitesPane({
         onQueryChange={setQuery}
         onCategoryFilterChange={setCategoryFilter}
         onSelect={activateSite}
-        onOpenInNewTab={(site) => openInNewTab(site.url, site.id)}
+        onOpenInNewTab={(site) => openInNewTab(site.url, site.id, site.launch)}
         onOpenExternal={(site) => openExternal(site.url)}
         onCopyUrl={(site) => void clipboardWriteText(site.url).catch(reportError)}
         onReorder={(next) => persistSites(next)}

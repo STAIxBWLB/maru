@@ -398,16 +398,16 @@ fn join_finished_reader(reader: thread::JoinHandle<()>, stream: &str) -> io::Res
 }
 
 #[cfg(unix)]
-fn configure_process_tree(command: &mut Command) {
+pub(crate) fn configure_process_tree(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
     command.process_group(0);
 }
 
 #[cfg(not(unix))]
-fn configure_process_tree(_command: &mut Command) {}
+pub(crate) fn configure_process_tree(_command: &mut Command) {}
 
-struct ProcessTree {
+pub(crate) struct ProcessTree {
     #[cfg(unix)]
     process_group_id: u32,
     #[cfg(windows)]
@@ -415,7 +415,7 @@ struct ProcessTree {
 }
 
 impl ProcessTree {
-    fn attach(child: &mut std::process::Child) -> io::Result<Self> {
+    pub(crate) fn attach(child: &mut std::process::Child) -> io::Result<Self> {
         #[cfg(windows)]
         {
             windows_job::Job::assign(child)
@@ -488,7 +488,7 @@ fn cleanup_after_attach_failure(
     )
 }
 
-fn terminate_tree_and_reap(
+pub(crate) fn terminate_tree_and_reap(
     child: &mut std::process::Child,
     process_tree: &ProcessTree,
     known_status: Option<ExitStatus>,
@@ -572,11 +572,11 @@ mod windows_job {
     use std::ffi::c_void;
     use std::io;
     use std::mem::{size_of, zeroed};
-    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::process::Child;
     use std::ptr;
 
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
         SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -584,7 +584,9 @@ mod windows_job {
     };
 
     pub(super) struct Job {
-        handle: HANDLE,
+        // OwnedHandle is Send and closes once on the owning/reaper thread.
+        // KILL_ON_JOB_CLOSE remains the final process-tree safety net.
+        handle: OwnedHandle,
     }
 
     impl Job {
@@ -595,7 +597,10 @@ mod windows_job {
             if handle.is_null() {
                 return Err(io::Error::last_os_error());
             }
-            let job = Self { handle };
+            // SAFETY: non-null uniquely owned handle returned above.
+            let job = Self {
+                handle: unsafe { OwnedHandle::from_raw_handle(handle) },
+            };
 
             // SAFETY: The zeroed Windows SDK structure is fully initialized for
             // this information class, and SetInformationJobObject reads exactly
@@ -604,7 +609,7 @@ mod windows_job {
             limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             let configured = unsafe {
                 SetInformationJobObject(
-                    job.handle,
+                    job.handle.as_raw_handle(),
                     JobObjectExtendedLimitInformation,
                     (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
                     size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
@@ -619,7 +624,8 @@ mod windows_job {
             // then kills and reaps the child instead of running it unbounded.
             let process_handle = child.as_raw_handle() as HANDLE;
             // SAFETY: Both handles remain valid for the duration of this call.
-            if unsafe { AssignProcessToJobObject(job.handle, process_handle) } == 0 {
+            if unsafe { AssignProcessToJobObject(job.handle.as_raw_handle(), process_handle) } == 0
+            {
                 return Err(io::Error::last_os_error());
             }
 
@@ -630,21 +636,10 @@ mod windows_job {
             // SAFETY: The job handle is owned by self and remains open. This
             // terminates every process still assigned even if the direct child
             // has already exited.
-            if unsafe { TerminateJobObject(self.handle, 1) } == 0 {
+            if unsafe { TerminateJobObject(self.handle.as_raw_handle(), 1) } == 0 {
                 return Err(io::Error::last_os_error());
             }
             Ok(())
-        }
-    }
-
-    impl Drop for Job {
-        fn drop(&mut self) {
-            // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE makes this a final safety net
-            // for normal returns and early errors.
-            // SAFETY: handle was returned by CreateJobObjectW and is closed once.
-            unsafe {
-                CloseHandle(self.handle);
-            }
         }
     }
 }

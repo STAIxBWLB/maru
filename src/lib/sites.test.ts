@@ -204,3 +204,26 @@ describe("reorderSites", () => {
     expect(reorderSites(base, "missing", "a")).toBe(base);
   });
 });
+
+describe("optional local console launch entries", () => {
+  it("round-trips launcher intent without discarding ordinary URL entries", () => {
+    const parsed = parseSitesDocument({ version: 1, sites: [
+      { id: "console", label: "Console", launch: "acon ui --no-open --json" },
+      { id: "remote", url: "https://console.example.com" },
+    ] });
+    expect(parsed.sites).toHaveLength(2);
+    expect(parsed.sites.find((entry) => entry.id === "console")?.launch).toBe("acon ui --no-open --json");
+    expect(parseSitesDocument(serializeSitesDocument(parsed.sites)).sites).toEqual(parsed.sites);
+    expect(parsed.sites.find((entry) => entry.id === "remote")?.launch).toBeUndefined();
+  });
+
+  it("keeps unsupported intent visible for backend refusal instead of opening its fallback URL", () => {
+    const sites = parseSitesDocument({ sites: [
+      { id: "shell", url: "https://example.com", launch: "sh -c 'acon ui'" },
+      { id: "bad", url: "https://example.com", launch: { executable: "sh" } },
+    ] }).sites;
+    expect(sites[0].launch).not.toBeNull();
+    expect(sites[1].launch).toBeTruthy();
+    expect(sites[1].launch).not.toBe("acon ui --no-open --json");
+  });
+});

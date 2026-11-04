@@ -203,6 +203,27 @@ brew upgrade maru-cli
 - Graph uses a multi-directed Graphology model, Sigma WebGL, an off-thread
   ForceAtlas2 worker, visibility reducers, saved views, and schema-gated writes.
 
+### Sites and Local Agent Console
+
+Sites loads ordinary HTTP(S) entries in native top-level child webviews, with
+no remote IPC grants. H1/H2 URL entries and manual URL opening need no launcher.
+An optional `launch: "acon ui --no-open --json"` entry starts the local console;
+the older `acon ui --json` spelling maps to the same fixed argv. The editor offers
+URL opening or Agent Console, without a free-form executable field. Saving or
+refreshing the registry never launches or installs a tool.
+
+The launcher resolves `~/.bun/bin/acon` against the contained
+`@staix/agent-console` global package bin and uses the installed
+`~/.bun/bin/bun` runtime directly, without a shell or workspace PATH lookup.
+Canonical paths and Unix owner/write permissions are checked before execution.
+Readiness is one bounded JSON line (32 KiB, 10 seconds), followed by a direct,
+non-redirecting HTTP literal-loopback origin probe (2 seconds). URL/origin/owned
+PID mismatches and process failures refuse navigation with a recovery step.
+The single-use URL is ephemeral browser state, not a persisted Sites URL.
+The launched server owns its normal idle shutdown; failed or cancelled startup
+terminates only its owned child tree, and tab cancellation fences stale opens.
+Maru does not change console plugin grants, note writers or task policy.
+
 ### Terminal and AI Runtimes
 
 - The terminal uses `portable-pty` and `alacritty_terminal`, streams ordered

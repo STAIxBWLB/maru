@@ -65,6 +65,7 @@ mod scratchpad_watcher;
 mod secrets;
 mod share_outbox;
 mod shelf;
+mod site_launcher;
 mod site_view;
 mod sites;
 mod skill_host;

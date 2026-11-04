@@ -50,12 +50,17 @@ export interface SiteViewTitlePayload {
 interface SiteViewTabState {
   shown: boolean;
   url: string | null;
+  opening?: boolean;
+  launch?: string | null;
 }
 
 const tabs = new Map<string, SiteViewTabState>();
+const closing = new Map<string, Promise<void>>();
+let closingAll: Promise<void> | null = null;
 
 export function siteViewTabRuntime(tabId: string): Readonly<SiteViewTabState> | null {
-  return tabs.get(tabId) ?? null;
+  const state = tabs.get(tabId);
+  return state?.opening ? null : state ?? null;
 }
 
 export function siteViewOpenTabIds(): string[] {
@@ -66,28 +71,44 @@ export async function siteViewOpen(
   tabId: string,
   url: string,
   bounds: SiteViewBounds,
-): Promise<void> {
-  if (!isTauri()) return;
-  await invoke("site_view_open", { tabId, url, ...bounds });
-  // Rust shows the opened tab and the caller activates it next, so every other
-  // tab is about to be hidden.
-  for (const state of tabs.values()) state.shown = false;
-  tabs.set(tabId, { shown: true, url });
+  launch?: string | null,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  const previous = tabs.get(tabId);
+  const state: SiteViewTabState = { shown: previous?.shown ?? false, url: previous?.url ?? null, opening: true, launch };
+  tabs.set(tabId, state);
+  try {
+    await closingAll;
+    await closing.get(tabId);
+    if (tabs.get(tabId) !== state) return null;
+    const resolved = await invoke<string | null>("site_view_open", { tabId, url, ...bounds, ...(launch == null ? {} : { launch }) });
+    if (tabs.get(tabId) !== state) return null;
+    state.opening = false;
+    state.shown = false; // Native open stays hidden until current UI intent shows it.
+    state.url = resolved ?? url;
+    return state.url;
+  } catch (error) {
+    if (tabs.get(tabId) !== state) return null;
+    if (previous && !previous.opening) { previous.shown = state.shown; tabs.set(tabId, previous); }
+    else tabs.delete(tabId);
+    throw error;
+  }
 }
 
 export async function siteViewNavigate(tabId: string, url: string): Promise<void> {
   if (!isTauri()) return;
   const state = tabs.get(tabId);
-  if (!state) return;
+  if (!state || state.opening) return;
   await invoke("site_view_navigate", { tabId, url });
   state.url = url;
+  state.launch = null;
 }
 
 export async function siteViewSetBounds(
   tabId: string,
   bounds: SiteViewBounds,
 ): Promise<void> {
-  if (!isTauri() || !tabs.has(tabId)) return;
+  if (!isTauri() || !siteViewTabRuntime(tabId)) return;
   await invoke("site_view_set_bounds", { tabId, ...bounds });
 }
 
@@ -96,7 +117,7 @@ export async function siteViewSetBounds(
 export async function siteViewShow(tabId: string): Promise<void> {
   if (!isTauri()) return;
   const state = tabs.get(tabId);
-  if (!state || state.shown) return;
+  if (!state || state.opening || state.shown) return;
   state.shown = true; // optimistic; reverted on failure
   try {
     await invoke("site_view_show", { tabId });
@@ -124,30 +145,35 @@ export async function siteViewHide(): Promise<void> {
 }
 
 export async function siteViewClose(tabId: string): Promise<void> {
-  if (!isTauri()) return;
-  if (!tabs.delete(tabId)) return;
-  await invoke("site_view_close", { tabId });
+  if (!isTauri() || !tabs.delete(tabId)) return;
+  const operation = invoke<void>("site_view_close", { tabId });
+  closing.set(tabId, operation);
+  try { await operation; }
+  finally { if (closing.get(tabId) === operation) closing.delete(tabId); }
 }
 
 export async function siteViewCloseAll(): Promise<void> {
   if (!isTauri()) return;
   if (tabs.size === 0) return;
   tabs.clear();
-  await invoke("site_view_close_all");
+  const operation = invoke<void>("site_view_close_all");
+  closingAll = operation;
+  try { await operation; }
+  finally { if (closingAll === operation) closingAll = null; }
 }
 
 export async function siteViewReload(tabId: string): Promise<void> {
-  if (!isTauri() || !tabs.has(tabId)) return;
+  if (!isTauri() || !siteViewTabRuntime(tabId)) return;
   await invoke("site_view_reload", { tabId });
 }
 
 export async function siteViewBack(tabId: string): Promise<void> {
-  if (!isTauri() || !tabs.has(tabId)) return;
+  if (!isTauri() || !siteViewTabRuntime(tabId)) return;
   await invoke("site_view_back", { tabId });
 }
 
 export async function siteViewForward(tabId: string): Promise<void> {
-  if (!isTauri() || !tabs.has(tabId)) return;
+  if (!isTauri() || !siteViewTabRuntime(tabId)) return;
   await invoke("site_view_forward", { tabId });
 }
 
