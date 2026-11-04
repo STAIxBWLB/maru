@@ -46,7 +46,7 @@ pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
     {
-        return Err("invalid_env_hash: expected a nonempty path-safe hash; check the skills channel envHash and retry with corrected metadata".into());
+        return Err("invalid_env_hash: expected a nonempty path-safe hash; report the invalid envHash to the skills channel maintainer, then retry with `maru skills update --apply --repair-env` after corrected metadata is published".into());
     }
     let root = env_base()?.join(hash);
     if fs::symlink_metadata(&root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
@@ -58,14 +58,20 @@ pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
 /// All runtime and maintenance callers resolve the same active environment.
 /// Older installations remain usable until their first hashed build succeeds.
 pub fn env_root() -> Result<PathBuf, String> {
-    let state = super::bundle_update::read_state().map_err(|error| {
-        format!("skills_env_state_unreadable: {error}; restore a valid skills bundle state file, then retry environment status or repair")
-    })?;
+    let state_path = super::bundle_update::state_path()?;
+    let recovery = format!("restore {} from a known-good backup, then run `maru skills update --apply --repair-env`; if no backup is available, report this file to the skills channel maintainer", display_path(&state_path));
+    let state = super::bundle_update::read_state()
+        .map_err(|error| format!("skills_env_state_unreadable: {error}; {recovery}"))?;
     // A missing state permits legacy fallback. An unreadable state must not
     // redirect repair into the legacy env when the active hash is unknown.
     if let Some(active) = state.and_then(|state| state.active) {
         if !active.env_hash.is_empty() {
-            let root = hashed_env_root(&active.env_hash)?;
+            let root = hashed_env_root(&active.env_hash).map_err(|error| {
+                format!(
+                    "{error}; invalid env hash in bundle state {}: {recovery}",
+                    display_path(&state_path)
+                )
+            })?;
             if root.is_dir() {
                 return Ok(root);
             }
@@ -374,8 +380,11 @@ mod tests {
         fs::write(&state_path, b"{broken state").unwrap();
         let error = env_root().unwrap_err();
         assert!(error.contains("Cannot parse"), "{error}");
+        assert!(error.contains("skills_env_state_unreadable"), "{error}");
+        assert!(error.contains(&display_path(&state_path)), "{error}");
+        assert!(error.contains("known-good backup"), "{error}");
         assert!(
-            error.contains("restore a valid skills bundle state file"),
+            error.contains("maru skills update --apply --repair-env"),
             "{error}"
         );
         assert_eq!(fs::read(&state_path).unwrap(), b"{broken state");

@@ -5085,10 +5085,7 @@ fn run_env_repair_blocking(
 ) -> Result<(), String> {
     let setup = bundle_root.join("envs").join("default").join("setup.sh");
     if !setup.is_file() {
-        return Err(
-            "env_repair_failed: bundle has no env setup script; retry with a complete bundle"
-                .into(),
-        );
+        return Err("env_repair_failed: bundle has no envs/default/setup.sh".into());
     }
     lease.ensure_covered(crate::skill_host::env::env_mutation_paths(
         root,
@@ -5531,7 +5528,7 @@ fn skills_apply_bundle_update_blocking(
                 if let Err(err) = repair(&network_admission, progress, &next_builtin, &root) {
                     let _ = fs::remove_dir_all(&next_builtin);
                     let _ = fs::remove_dir_all(&new_pristine);
-                    return Err(err);
+                    return Err(format!("{err}; bundle {new_bundle_id} (revision {}): report this bundle and error to the skills channel maintainer; the previous bundle remains active", metadata.revision));
                 }
                 fs::write(root.join(".maru-env-complete"), "").map_err(|err| err.to_string())?;
             }
@@ -8388,6 +8385,33 @@ exit 7
             assert_eq!(hash_directory(&old).unwrap(), old_hash);
             assert_eq!(bundle::read_state().unwrap().unwrap().active, before.active);
             assert_eq!(env_vars_for_runs(None).unwrap(), vars);
+            assert!(!target.exists());
+        }
+
+        #[test]
+        fn missing_env_setup_reports_bundle_revision_and_recovery() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let (remote, archive) = bundle_fixture();
+            let id = bundle_id_for(&remote.metadata);
+            let revision = remote.metadata.revision;
+            let target = host_fs::hashed_env_root(&remote.metadata.env_hash).unwrap();
+            let error = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                run_env_repair_blocking,
+            )
+            .unwrap_err();
+            assert!(error.contains("envs/default/setup.sh"), "{error}");
+            assert!(
+                error.contains(&format!("bundle {id} (revision {revision})")),
+                "{error}"
+            );
+            assert!(error.contains("report this bundle"), "{error}");
+            assert!(error.contains("previous bundle remains active"), "{error}");
             assert!(!target.exists());
         }
 
