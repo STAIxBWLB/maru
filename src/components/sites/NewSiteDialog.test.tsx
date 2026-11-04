@@ -37,6 +37,14 @@ describe("site launch selection", () => {
     await submit();
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ launch: ACON_SITE_LAUNCH, url: "http://127.0.0.1" }));
   });
+  it("trims stored supported launcher spellings before saving", async () => {
+    for (const launch of [`  ${ACON_SITE_LAUNCH}  `, "  acon ui --json  "]) {
+      const save = vi.fn();
+      await render({ ...initial, launch }, save);
+      await submit();
+      expect(save).toHaveBeenCalledWith(expect.objectContaining({ launch: ACON_SITE_LAUNCH }));
+    }
+  });
   it("requires an explicit supported selection before saving malformed launch configuration", async () => {
     const save = vi.fn();
     await render({ ...initial, launch: "sh -c 'echo unsafe'" }, save);

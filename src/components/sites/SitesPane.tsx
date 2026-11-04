@@ -61,6 +61,8 @@ import {
   siteViewShow,
   siteViewTabRuntime,
   subscribeSiteViewEvents,
+  subscribeSiteViewOpenSettled,
+  takeSiteViewOpenResult,
   type SiteViewOpenRequest,
 } from "../../lib/siteView";
 import { ImportSitesDialog } from "./ImportSitesDialog";
@@ -80,6 +82,7 @@ const isTauriShell = () =>
 // webviews, which also stay alive (hidden) across mode switches.
 let sessionTabs: BrowserTab[] = [];
 let sessionActiveTabId: string | null = null;
+const pendingOpens = new Map<string, { url: string; launch?: string | null }>();
 const EMPTY_OPENED_URLS: readonly SiteViewOpenRequest[] = [];
 const PASSKEY_UNSUPPORTED_NOTICE_KEY = "maru:sites:passkey-unsupported-shown";
 const PASSKEY_UNSUPPORTED_NOTICE_MS = 5_000;
@@ -126,7 +129,7 @@ export function SitesPane({
   const copiedTimerRef = useRef<number | null>(null);
   const desiredVisibleRef = useRef(false);
   const activeTabRef = useRef<string | null>(activeTabId);
-  const pendingOpenRef = useRef(new Map<string, { url: string; launch?: string | null }>());
+  const pendingOpenRef = useRef(pendingOpens);
   const handledOpenedUrlIdsRef = useRef(new Set<number>());
   const unsupportedNoticeClaimedRef = useRef(false);
 
@@ -177,21 +180,6 @@ export function SitesPane({
     };
   }, [t]);
 
-  const finishOpen = useCallback((tabId: string, resolved: string | null | undefined) => {
-    if (!resolved) return;
-    setTabs((current) => updateBrowserTab(current, tabId, { url: resolved }));
-    if (!desiredVisibleRef.current) { void siteViewHide().catch(reportError); return; }
-    if (activeTabRef.current !== tabId) return;
-    const el = surfaceRef.current;
-    const bounds = el ? siteViewBoundsFromRect(el.getBoundingClientRect()) : null;
-    if (bounds) void siteViewSetBounds(tabId, bounds).then(() => siteViewShow(tabId)).catch(reportError);
-  }, [reportError]);
-
-  const failOpen = useCallback((tabId: string, error: unknown) => {
-    setTabs((current) => updateBrowserTab(current, tabId, { loading: false }));
-    reportError(error);
-  }, [reportError]);
-
   // ── rAF-batched bounds/visibility sync for the active tab. Every layout
   // source (observer, window resize, visibility flips) funnels through here,
   // so a burst of events collapses into one invoke pass per frame.
@@ -214,7 +202,8 @@ export function SitesPane({
         if (!request) return;
         pendingOpenRef.current.delete(tabId);
         const opening = request.launch == null ? siteViewOpen(tabId, request.url, bounds) : siteViewOpen(tabId, request.url, bounds, request.launch);
-        void opening.then((resolved) => finishOpen(tabId, resolved)).catch((error) => failOpen(tabId, error));
+        // Settlement (including failures) is delivered to the current pane.
+        void opening.catch(() => undefined);
         return;
       }
       if (!siteViewTabRuntime(tabId)) return;
@@ -222,7 +211,28 @@ export function SitesPane({
         .then(() => siteViewShow(tabId))
         .catch(reportError);
     });
-  }, [failOpen, finishOpen, reportError]);
+  }, [reportError]);
+
+  // Reconcile completions with the currently mounted pane, including opens
+  // started before a mode switch. Failed relaunches restore the old runtime
+  // hidden; the same sync shows it again using the current visibility intent.
+  useEffect(() => {
+    const settle = (tabId: string) => {
+      const result = takeSiteViewOpenResult(tabId);
+      if (!result) return;
+      setTabs((current) => updateBrowserTab(current, tabId, {
+        ...(result.url ? { url: result.url } : {}),
+        loading: false,
+      }));
+      if (result.error !== undefined) reportError(result.error);
+      scheduleSync();
+    };
+    const unsubscribe = subscribeSiteViewOpenSettled(settle);
+    for (const tab of sessionTabs) {
+      settle(tab.id);
+    }
+    return unsubscribe;
+  }, [reportError, scheduleSync]);
 
   // ── load the registry once (StrictMode-safe via cancelled flag)
   useEffect(() => {
@@ -309,7 +319,6 @@ export function SitesPane({
   const loadInTab = useCallback(
     (tabId: string, url: string, launch?: string | null) => {
       if (!tauri) return;
-      if (launch != null) setTabs((current) => updateBrowserTab(current, tabId, { ephemeralLaunch: true }));
       if (!url) {
         pendingOpenRef.current.delete(tabId);
         return;
@@ -341,6 +350,7 @@ export function SitesPane({
           title: null,
           loading: tauri && Boolean(url),
           siteId,
+          ephemeralLaunch: launch != null,
         });
         if (!result.opened) {
           setError(t("sites.tabs.limit"));
@@ -426,7 +436,7 @@ export function SitesPane({
         activateTab(existing.id);
         const runtime = siteViewTabRuntime(existing.id);
         if ((!existing.loading && (!runtime || (runtime.launch ?? null) !== (site.launch ?? null))) || (site.launch == null && existing.url !== site.url)) {
-          setTabs((current) => updateBrowserTab(current, existing.id, { url: site.url, loading: tauri }));
+          setTabs((current) => updateBrowserTab(current, existing.id, { url: site.url, loading: tauri, ...(site.launch != null ? { ephemeralLaunch: true } : {}) }));
           loadInTab(existing.id, site.url, site.launch);
         }
         return;
@@ -434,7 +444,7 @@ export function SitesPane({
       // Reuse the active tab when it is still the empty starting tab.
       if (activeTab && !activeTab.siteId && !activeTab.url) {
         setTabs((current) =>
-          updateBrowserTab(current, activeTab.id, { url: site.url, siteId: site.id, loading: tauri }),
+          updateBrowserTab(current, activeTab.id, { url: site.url, siteId: site.id, loading: tauri, ...(site.launch != null ? { ephemeralLaunch: true } : {}) }),
         );
         loadInTab(activeTab.id, site.url, site.launch);
         return;
@@ -504,13 +514,12 @@ export function SitesPane({
 
   /** Save the current page as a bookmark, or jump to the existing one. */
   const bookmarkCurrent = useCallback(() => {
-    if (!activeTab?.url) return;
+    if (!activeTab?.url || activeTab.ephemeralLaunch) return;
     const existing = sites.find((site) => site.url === activeTab.url || (site.launch != null && site.id === activeTab.siteId));
     if (existing) {
       setEditSite(existing);
       return;
     }
-    if (activeTab.ephemeralLaunch) return;
     const entry: SiteEntry = {
       id: newSiteId(),
       label: activeTab.title?.trim() || new URL(activeTab.url).host,
@@ -777,7 +786,7 @@ export function SitesPane({
           <button
             type="button"
             className={bookmarked ? "icon-button active" : "icon-button"}
-            disabled={!activeTab?.url || (activeTab.ephemeralLaunch && !bookmarked)}
+            disabled={!activeTab?.url || activeTab.ephemeralLaunch}
             onClick={bookmarkCurrent}
             title={bookmarked ? t("sites.bookmark.edit") : t("sites.bookmark.add")}
             aria-label={bookmarked ? t("sites.bookmark.edit") : t("sites.bookmark.add")}

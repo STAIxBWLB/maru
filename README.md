@@ -212,17 +212,22 @@ the older `acon ui --json` spelling maps to the same fixed argv. The editor offe
 URL opening or Agent Console, without a free-form executable field. Saving or
 refreshing the registry never launches or installs a tool.
 
-The launcher resolves `~/.local/bin/acon` against the active dot-family version first,
-then the legacy `~/.bun/bin/acon` global package bin. It runs that entry with Bun from
-`~/.bun/bin` or the fixed Homebrew/system install paths, without a shell or
-workspace PATH lookup.
+Inventory and launch share the active `acon` selected from the Maru process
+PATH and its fixed augmented install paths, falling back to supported aliases
+when no executable is found. Dangling aliases are skipped. The selected program
+must still match its supported dot-family or Bun-global package identity.
+It runs that entry with Bun from `~/.bun/bin` or the fixed Homebrew/system
+install paths, without a shell or workspace runtime lookup.
 Canonical paths and Unix owner/write permissions are checked before execution.
 Readiness is one bounded JSON line (32 KiB, 10 seconds), followed by a direct,
 non-redirecting HTTP literal-loopback origin probe (2 seconds). URL/origin/owned
 PID mismatches and process failures refuse navigation with a recovery step.
 Launcher-resolved single-use URLs stay in browser state and are not automatically
 written to Sites; bookmark and Copy URL actions also refuse launcher-derived URLs
-even after their bookmark association is detached.
+even after their bookmark association is detached. New tabs carry that privacy
+flag from creation. Open completion is tracked with the webview session so a
+pane remounted after a mode switch receives the result; failed relaunches
+restore the previous page using the current visibility intent.
 The launched server owns its normal idle shutdown. Closing its tab does not stop
 a successfully launched server; on Unix it may also outlive Maru until its idle
 shutdown. Failed or cancelled startup terminates only its owned child tree, and

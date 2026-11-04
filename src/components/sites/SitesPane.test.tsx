@@ -41,6 +41,8 @@ vi.mock("../../lib/siteView", () => ({
   siteViewShow: vi.fn(async () => undefined),
   siteViewTabRuntime: vi.fn(() => ({ shown: true, url: "https://jeju.ai/" })),
   subscribeSiteViewEvents: vi.fn(() => () => {}),
+  subscribeSiteViewOpenSettled: vi.fn(() => () => {}),
+  takeSiteViewOpenResult: vi.fn(() => null),
 }));
 
 import { SitesPane } from "./SitesPane";

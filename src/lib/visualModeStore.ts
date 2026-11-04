@@ -7,7 +7,7 @@ import {
   unroutedSiteViewOpenRequestId,
   type SiteViewOpenRequest,
 } from "./siteView";
-import { ACON_SITE_LAUNCH } from "./siteLaunch";
+import { ACON_SITE_LAUNCH, LOCAL_CONSOLE_PLACEHOLDER_URL } from "./siteLaunch";
 import type { GraphOpenTarget } from "./settings";
 
 export type VisualModeDomain = "diagram" | "graph" | "sites";
@@ -139,7 +139,7 @@ export function createVisualModeController(): VisualModeController {
     },
     enqueueFamilyConsole() {
       const id = ++lastSiteRequestId;
-      state = { ...state, sites: { openedUrls: [...state.sites.openedUrls, { id, url: "http://127.0.0.1", launch: ACON_SITE_LAUNCH }] } };
+      state = { ...state, sites: { openedUrls: [...state.sites.openedUrls, { id, url: LOCAL_CONSOLE_PLACEHOLDER_URL, launch: ACON_SITE_LAUNCH }] } };
       notify("sites");
     },
     enqueueSiteUrls(urls) {
