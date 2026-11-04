@@ -4964,10 +4964,8 @@ fn include_bundle_walk_entry(entry: &walkdir::DirEntry, root: &Path) -> bool {
     };
     if entry.file_type().is_dir() {
         !is_bundle_junk_directory(relative)
-    } else if entry.file_type().is_file() {
-        !is_bundle_junk(relative)
     } else {
-        true
+        !is_bundle_junk(relative)
     }
 }
 
@@ -15307,6 +15305,8 @@ exit 0
 
 #[cfg(test)]
 mod hash_directory_filtered_pruning_tests {
+    #[cfg(unix)]
+    use super::include_bundle_walk_entry;
     use super::{copy_bundle_snapshot, hash_directory_filtered, BUILTIN_HASHES_FILE};
     use crate::skill_host::fs as host_fs;
     use std::fs;
@@ -15385,6 +15385,59 @@ mod hash_directory_filtered_pruning_tests {
         assert!(error.contains("walk bundle fingerprint"), "{error}");
         assert!(error.contains(&host_fs::display_path(&missing)), "{error}");
         assert!(error.contains("maru skills update --check"), "{error}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn junk_symlinks_are_pruned_before_fingerprinting_and_snapshot_copy() {
+        let root = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let skill = root.path().join("skills/demo");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "skill content").unwrap();
+        fs::write(target.path().join("keep"), "external content").unwrap();
+        let baseline = hash_directory_filtered(root.path()).unwrap();
+        let names = [
+            ".venv",
+            "node_modules",
+            ".DS_Store",
+            "runtime.pyc",
+            BUILTIN_HASHES_FILE,
+        ];
+        for name in names {
+            std::os::unix::fs::symlink(target.path(), skill.join(name)).unwrap();
+        }
+        let ordinary = skill.join("runtime-reference");
+        std::os::unix::fs::symlink(target.path(), &ordinary).unwrap();
+        let walked: Vec<_> = walkdir::WalkDir::new(root.path())
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| include_bundle_walk_entry(entry, root.path()))
+            .map(|entry| entry.unwrap().into_path())
+            .collect();
+        for name in names {
+            assert!(
+                !walked.contains(&skill.join(name)),
+                "junk symlink {name} was not pruned"
+            );
+        }
+        assert!(
+            walked.contains(&ordinary),
+            "ordinary symlinks must not be blanket-pruned"
+        );
+        assert_eq!(hash_directory_filtered(root.path()).unwrap(), baseline);
+        let copy = tempdir().unwrap();
+        let snapshot = copy.path().join("snapshot");
+        copy_bundle_snapshot(root.path(), &snapshot).unwrap();
+        assert_eq!(hash_directory_filtered(&snapshot).unwrap(), baseline);
+        for name in names {
+            assert!(fs::symlink_metadata(snapshot.join("skills/demo").join(name)).is_err());
+            assert_eq!(fs::read_link(skill.join(name)).unwrap(), target.path());
+        }
+        assert_eq!(
+            fs::read_to_string(target.path().join("keep")).unwrap(),
+            "external content"
+        );
     }
 
     #[test]
