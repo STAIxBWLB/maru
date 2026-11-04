@@ -188,6 +188,7 @@ describe("site view opened URL bridge", () => {
 describe("local launch handoff and pending tab lifetime", () => {
   beforeEach(() => {
     mocks.invoke.mockReset();
+    mocks.listen.mockResolvedValue(() => {});
     (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
   });
   afterEach(async () => {
@@ -222,7 +223,7 @@ describe("local launch handoff and pending tab lifetime", () => {
     let opens = 0;
     mocks.invoke.mockImplementation((command: string) => command === "site_view_close" ? pendingClose : ++opens === 1 ? pendingOpen : Promise.resolve("https://new.example/"));
     const old = siteViewOpen("launch-race", "http://127.0.0.1", bounds, "acon ui --no-open --json");
-    await flush();
+    await vi.waitFor(() => expect(opens).toBe(1));
     expect(opens).toBe(1);
     expect(siteViewTabRuntime("launch-race")).toBeNull();
     const closed = siteViewClose("launch-race");

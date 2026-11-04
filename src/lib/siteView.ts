@@ -52,6 +52,8 @@ interface SiteViewTabState {
   url: string | null;
   opening?: boolean;
   launch?: string | null;
+  /** Each open starts without progress; only later native events set this. */
+  pageLoading?: boolean;
 }
 
 interface SiteViewOpenResult {
@@ -63,10 +65,36 @@ const tabs = new Map<string, SiteViewTabState>();
 const openResults = new Map<string, SiteViewOpenResult>();
 
 /** Consume only an actual open completion, never an ordinary page-load state. */
-export function takeSiteViewOpenResult(tabId: string): SiteViewOpenResult | null {
+export function takeSiteViewOpenResult(tabId: string): (SiteViewOpenResult & { loading: boolean }) | null {
   const result = openResults.get(tabId) ?? null;
   openResults.delete(tabId);
-  return result;
+  return result ? {
+    ...result,
+    loading: !("error" in result) && (tabs.get(tabId)?.pageLoading ?? false),
+  } : null;
+}
+
+const pageLoadSubscribers = new Set<(payload: SiteViewPageLoadPayload) => void>();
+let pageLoadTracking: Promise<void> | null = null;
+
+/** One native listener owns runtime progress for the webview session, including
+ * mode switches with no SitesPane mounted. Pane subscribers own only UI work. */
+function ensurePageLoadTracking(): Promise<void> {
+  if (!pageLoadTracking) {
+    pageLoadTracking = (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      await listen<SiteViewPageLoadPayload>(SITE_VIEW_PAGE_LOAD_EVENT, ({ payload }) => {
+        const state = tabs.get(payload.tabId);
+        if (state) state.pageLoading = payload.state === "started";
+        for (const subscriber of pageLoadSubscribers) subscriber(payload);
+      });
+    })().catch((error) => {
+      pageLoadTracking = null;
+      for (const state of tabs.values()) state.pageLoading = undefined;
+      console.info("[maru] site view progress listener unavailable:", error);
+    });
+  }
+  return pageLoadTracking;
 }
 
 const openSettledSubscribers = new Set<(tabId: string) => void>();
@@ -106,6 +134,7 @@ export async function siteViewOpen(
   const state: SiteViewTabState = { shown: previous?.shown ?? false, url: previous?.url ?? null, opening: true, launch };
   tabs.set(tabId, state);
   try {
+    await ensurePageLoadTracking();
     await closingAll;
     await closing.get(tabId);
     if (tabs.get(tabId) !== state) return null;
@@ -383,6 +412,9 @@ export function subscribeSiteViewEvents(handlers: SiteViewEventHandlers): () => 
   if (!isTauri()) return () => {};
   let disposed = false;
   const unlisteners: Array<() => void> = [];
+  const forwardPageLoad = (payload: SiteViewPageLoadPayload) => handlers.onPageLoad?.(payload);
+  pageLoadSubscribers.add(forwardPageLoad);
+  void ensurePageLoadTracking();
   void (async () => {
     const { listen } = await import("@tauri-apps/api/event");
     const offNavigated = await listen<SiteViewNavigatedPayload>(
@@ -393,12 +425,6 @@ export function subscribeSiteViewEvents(handlers: SiteViewEventHandlers): () => 
         handlers.onNavigated?.(event.payload);
       },
     );
-    const offPageLoad = await listen<SiteViewPageLoadPayload>(
-      SITE_VIEW_PAGE_LOAD_EVENT,
-      (event) => {
-        handlers.onPageLoad?.(event.payload);
-      },
-    );
     const offTitle = await listen<SiteViewTitlePayload>(
       SITE_VIEW_TITLE_EVENT,
       (event) => {
@@ -407,16 +433,16 @@ export function subscribeSiteViewEvents(handlers: SiteViewEventHandlers): () => 
     );
     if (disposed) {
       offNavigated();
-      offPageLoad();
       offTitle();
       return;
     }
-    unlisteners.push(offNavigated, offPageLoad, offTitle);
+    unlisteners.push(offNavigated, offTitle);
   })().catch((err) => {
     console.info("[maru] site view listeners unavailable:", err);
   });
   return () => {
     disposed = true;
+    pageLoadSubscribers.delete(forwardPageLoad);
     for (const off of unlisteners.splice(0)) off();
   };
 }
