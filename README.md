@@ -627,7 +627,10 @@ legacy bundles use their original `manifest.json` when no cached compatibility
 record exists, and missing compatibility data blocks rollback. Rollback requires
 the target's completed hashed env even when active and target hashes match;
 legacy envs are allowed only for recorded legacy activations or the initial
-pre-hash bootstrap. Rollback also checks the retained bundle against the file
+pre-hash bootstrap. Direct repair/bootstrap certifies a hashed env with
+`.maru-env-complete` only after actual setup succeeds; status-created directories,
+dry runs and missing setup scripts do not certify completion.
+Rollback also checks the retained bundle against the file
 list and hashes recorded when it was applied, and refuses missing, added or
 changed files; a bundle applied before that list existed must still contain
 every skill its `manifest.json` names.

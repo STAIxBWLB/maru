@@ -5431,11 +5431,12 @@ fn skills_bundle_status_impl(
                     .as_ref()
                     .map(|active| metadata.revision > active.revision)
                     .unwrap_or(true);
-                let env_needs_build = active
-                    .as_ref()
-                    .map(|active| bundle_env_needs_build(active, &metadata.env_hash))
-                    .transpose()?
-                    .unwrap_or(false);
+                let env_needs_build = newer
+                    && active
+                        .as_ref()
+                        .map(|active| bundle_env_needs_build(active, &metadata.env_hash))
+                        .transpose()?
+                        .unwrap_or(false);
                 let min_ok = bundle::app_version_satisfies(&metadata.min_app_version);
                 let unmet = if newer {
                     bundle::unmet_installed_tool_floors(&metadata.requires)
@@ -5566,7 +5567,9 @@ pub(super) fn bundle_uses_hashed_env(id: &str) -> Result<bool, String> {
 fn bundle_env_needs_build(active: &SkillBundleRef, env_hash: &str) -> Result<bool, String> {
     Ok(env_hash != active.env_hash
         || (bundle_uses_hashed_env(&active.bundle_id)?
-            && !host_fs::hashed_env_root(env_hash)?.is_dir()))
+            && !host_fs::hashed_env_root(env_hash)?
+                .join(".maru-env-complete")
+                .is_file()))
 }
 
 fn read_bundle_compatibility(id: &str) -> Result<BundleCompatibility, String> {
@@ -5974,7 +5977,7 @@ fn skills_activate_bundle_blocking(
     let env_needs_build = bundle_env_needs_build(&active, &metadata.env_hash)?;
     if env_needs_build && !repair_env && !is_rollback {
         return Err(format!(
-            "bundle_env_update_required: the bundle environment at {} changed or is missing; run `maru skills update --apply --repair-env`",
+            "bundle_env_update_required: the bundle environment at {} changed or is incomplete; run `maru skills update --apply --repair-env`",
             host_fs::display_path(&host_fs::hashed_env_root(&metadata.env_hash)?)
         ));
     }
@@ -6022,7 +6025,7 @@ fn skills_activate_bundle_blocking(
     if env_needs_build && !repair_env && !is_rollback {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!(
-            "bundle_env_update_required: the bundle environment at {} changed or is missing; run `maru skills update --apply --repair-env`",
+            "bundle_env_update_required: the bundle environment at {} changed or is incomplete; run `maru skills update --apply --repair-env`",
             host_fs::display_path(&host_fs::hashed_env_root(&metadata.env_hash)?)
         ));
     }
@@ -9386,12 +9389,39 @@ exit 7
                 "update available but blocked: env update required (--repair-env)"
             );
 
+            let view = crate::skill_host::env::skills_env_status(None).unwrap();
+            assert_eq!(view.root, host_fs::display_path(&root));
+            assert!(
+                root.is_dir(),
+                "opening Settings creates the placeholder directory"
+            );
+            assert!(!root.join(".maru-env-complete").is_file());
+            let status = skills_bundle_status_impl(Some(&next)).unwrap();
+            assert!(
+                status.env_update_required,
+                "a status-created directory is not completed setup"
+            );
+            assert!(!status.auto_applicable);
+
+            fs::write(
+                compatibility_path(&applied.current.bundle_id).unwrap(),
+                "{broken",
+            )
+            .unwrap();
             next.metadata.revision = applied.current.revision;
             let status = skills_bundle_status_impl(Some(&next)).unwrap();
             assert!(!status.update_available);
             assert!(!status.env_update_required);
             assert!(!status.auto_applicable);
             assert_eq!(crate::cli::skills_update_check_text(&status), "up to date");
+            next.metadata.revision += 1;
+            next.metadata.env_hash = "changed-env".into();
+            let status = skills_bundle_status_impl(Some(&next)).unwrap();
+            assert!(
+                status.env_update_required,
+                "hash changes precede activation-record reads"
+            );
+            assert!(!status.auto_applicable);
         }
 
         #[test]

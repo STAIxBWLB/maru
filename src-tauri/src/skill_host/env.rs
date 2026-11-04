@@ -56,6 +56,7 @@ pub(crate) fn env_mutation_paths(root: &Path, setup: Option<&Path>) -> Vec<PathB
             "node_modules",
             "node",
             "status.json",
+            ".maru-env-complete",
             "input/hwp",
             "input/pdf",
             "output/text",
@@ -158,6 +159,7 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
         return Ok(invocation_id);
     }
     let setup = setup.expect("setup checked above");
+    let completion_marker = prepare_hashed_completion_marker(&lease, &root)?;
     host_fs::ensure_dir(&root.join("temp"))?;
     let id = invocation_id.clone();
     thread::spawn(move || {
@@ -212,7 +214,27 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
         };
         #[cfg(test)]
         PathTransactionLease::test_stage(&[root.clone()], "env:before-status");
-        let persisted = write_status_in_transaction(&lease, &root, Some(success), error).is_ok();
+        let persisted = match finish_bootstrap_in_transaction(
+            &lease,
+            &root,
+            completion_marker.as_deref(),
+            success,
+            error,
+        ) {
+            Ok(()) => true,
+            Err(error) => {
+                let _ = app.emit(
+                    "skills-env://output",
+                    EnvOutputEvent {
+                        invocation_id: id.clone(),
+                        stream: "stderr".into(),
+                        line: error.clone(),
+                    },
+                );
+                let _ = write_status_in_transaction(&lease, &root, Some(false), Some(error));
+                false
+            }
+        };
         let _ = app.emit(
             "skills-env://done",
             EnvDoneEvent {
@@ -231,6 +253,63 @@ pub fn skills_env_repair<R: tauri::Runtime>(
     work_path: Option<String>,
 ) -> Result<String, String> {
     skills_env_bootstrap(app, work_path, Some(false))
+}
+
+fn prepare_hashed_completion_marker(
+    lease: &PathTransactionLease,
+    root: &Path,
+) -> Result<Option<PathBuf>, String> {
+    if root.parent() != Some(host_fs::env_base()?.as_path()) {
+        return Ok(None);
+    }
+    let marker = root.join(".maru-env-complete");
+    lease.ensure_covered([marker.clone()]).map_err(|error| {
+        host_fs::operation_error("admit environment completion marker", &marker, error)
+    })?;
+    match fs::remove_file(&marker) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => {
+            return Err(host_fs::operation_error(
+                "clear environment completion marker",
+                &marker,
+                error,
+            ))
+        }
+    }
+    Ok(Some(marker))
+}
+
+fn finish_bootstrap_in_transaction(
+    lease: &PathTransactionLease,
+    root: &Path,
+    marker: Option<&Path>,
+    success: bool,
+    error: Option<String>,
+) -> Result<(), String> {
+    if let Some(marker) = marker.filter(|_| success) {
+        lease
+            .ensure_covered([marker.to_path_buf()])
+            .and_then(|_| lease.before_effect())
+            .map_err(|error| {
+                host_fs::operation_error("admit environment completion marker", marker, error)
+            })?;
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(marker)
+            .map(|_| ())
+            .map_err(|error| {
+                host_fs::operation_error("mark hashed environment complete", marker, error)
+            })?;
+    }
+    write_status_in_transaction(lease, root, Some(success), error).map_err(|error| {
+        host_fs::operation_error(
+            "record environment setup status",
+            &root.join("status.json"),
+            error,
+        )
+    })
 }
 
 pub(crate) fn env_status_in_transaction(
@@ -533,6 +612,115 @@ mod phase08_04 {
         assert!(status.last_error.is_none());
         assert!(std::path::Path::new(&status.root).starts_with(host_fs::maru_home().unwrap()));
     }
+    #[cfg(unix)]
+    #[test]
+    fn hashed_setup_marks_only_successful_real_setup_and_reports_marker_failure() {
+        use crate::atomic_file::PathTransactionTestHook;
+        use crate::skill_host::bundle_update;
+        use tauri::Listener;
+        for scenario in [
+            "repair",
+            "bootstrap",
+            "failure",
+            "dry-run",
+            "no-setup",
+            "marker-failure",
+        ] {
+            let _home = host_fs::test_home_for_bundle_tests();
+            let setup = default_public_env_setup(None).unwrap().unwrap();
+            let mut state = bundle_update::read_state().unwrap().unwrap();
+            let active = state.active.as_mut().unwrap();
+            active.env_hash = "direct-repair-env".into();
+            let record = host_fs::skills_root()
+                .unwrap()
+                .join("_cache/bundle-compatibility")
+                .join(format!("{}.json", active.bundle_id));
+            host_fs::write_json_pretty(
+                &record,
+                &serde_json::json!({"minAppVersion":"0.0.1", "envLayout":"hashed"}),
+            )
+            .unwrap();
+            bundle_update::write_state(&state).unwrap();
+            let root = host_fs::env_root().unwrap();
+            fs::create_dir_all(&root).unwrap();
+            let marker = root.join(".maru-env-complete");
+            if scenario == "failure" {
+                fs::create_dir_all(root.join(".venv")).unwrap();
+                fs::write(&marker, "").unwrap();
+            }
+            fs::write(
+                &setup,
+                format!(
+                    r#"#!/bin/sh
+mkdir -p "$2/.venv"
+exit {}
+"#,
+                    if scenario == "failure" { 7 } else { 0 }
+                ),
+            )
+            .unwrap();
+            let marker_target = marker.clone();
+            let _hook = (scenario == "marker-failure").then(|| {
+                PathTransactionTestHook::new(root.clone(), "env:before-status", move || {
+                    fs::create_dir_all(&marker_target).unwrap();
+                })
+            });
+            let app = tauri::test::mock_app();
+            let (tx, rx) = mpsc::channel();
+            app.listen("skills-env://done", move |event| {
+                tx.send(event.payload().to_string()).unwrap();
+            });
+            let id = if scenario == "no-setup" {
+                let lease = PathTransactionRequest::new(env_mutation_paths(&root, None))
+                    .unwrap()
+                    .acquire()
+                    .unwrap();
+                bootstrap_in_transaction(app.handle().clone(), root.clone(), None, false, lease)
+                    .unwrap()
+            } else if scenario == "repair" {
+                skills_env_repair(app.handle().clone(), None).unwrap()
+            } else {
+                skills_env_bootstrap(app.handle().clone(), None, Some(scenario == "dry-run"))
+                    .unwrap()
+            };
+            let done: serde_json::Value =
+                serde_json::from_str(&rx.recv_timeout(Duration::from_secs(5)).unwrap()).unwrap();
+            assert_eq!(done["invocationId"], id);
+            assert_eq!(
+                done["success"],
+                !matches!(scenario, "failure" | "marker-failure")
+            );
+            assert_eq!(
+                marker.is_file(),
+                matches!(scenario, "repair" | "bootstrap"),
+                "{scenario}"
+            );
+            assert!(!host_fs::env_base()
+                .unwrap()
+                .join(".maru-env-complete")
+                .exists());
+            assert_eq!(
+                root.join(".venv").is_dir(),
+                scenario != "dry-run",
+                "{scenario}"
+            );
+            let status = skills_env_status(None).unwrap();
+            if scenario == "marker-failure" {
+                let error = status.last_error.unwrap();
+                assert!(
+                    error.contains("mark hashed environment complete"),
+                    "{error}"
+                );
+                assert!(error.contains(&host_fs::display_path(&marker)), "{error}");
+                assert!(error.contains("maru skills update --check"), "{error}");
+            } else if scenario == "failure" {
+                assert!(status.last_error.unwrap().contains("env_bootstrap_exit"));
+            } else {
+                assert!(status.last_error.is_none(), "{scenario}");
+            }
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn repair_worker_survives_return_and_failure_persists_before_done() {
