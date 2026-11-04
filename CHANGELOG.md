@@ -9,6 +9,12 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.24 - Closed Doors (2026-11-05)
+
+- Security: application commands now answer only Maru's own windows (the main window and the skill editor). Pages opened in Sites, including the local Agent Console, can no longer reach them; plugin permissions are unchanged. Updating is recommended (#491).
+- Sites keeps an Agent Console start that finishes while you are in another mode, and the loading indicator follows the page's real load progress (#483, #489).
+- Skill fingerprints and snapshots skip runtime junk even when it is a symbolic link, such as a linked `.venv` or `node_modules` (#485, #488).
+
 ## v1.1.23 - Staged Generations (2026-11-05)
 
 - Skill bundle updates are staged: each update publishes a verified side-by-side generation and switches skill links atomically, the previous generation stays for `maru skills rollback [--json]`, and a running bundled skill session keeps the generation it started with (#466, #470).
