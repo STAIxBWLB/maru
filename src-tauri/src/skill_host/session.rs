@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{bundle_update as bundle, fs as host_fs};
+use super::fs as host_fs;
 
 type SessionLocks = BTreeMap<(PathBuf, PathBuf), File>;
 static SESSION_LOCKS: OnceLock<Mutex<SessionLocks>> = OnceLock::new();
@@ -62,7 +62,7 @@ impl BundleSession {
     pub(crate) fn env(&self, work: Option<&Path>) -> Result<BTreeMap<String, String>, String> {
         let mut env = super::store::env_vars_for_root(&self.env_root, work)?;
         let bin = self.env_root.join(".venv/bin");
-        let search = std::ffi::OsString::from(crate::cli_path::augmented_path());
+        let search = crate::cli_path::augmented_path();
         let path = crate::cli_path::merge_path_env(Some(bin.as_os_str()), Some(search.as_os_str()));
         env.insert("PATH".into(), path.to_string_lossy().into_owned());
         env.insert(
@@ -81,15 +81,14 @@ impl BundleSession {
         let legacy_env = host_fs::env_base()?;
         let root = host_fs::display_path(&self.root);
         let env = host_fs::display_path(&self.env_root);
-        let mut text = text
-            .replace(&root, "@PINNED_BUNDLE@")
-            .replace(&env, "@PINNED_ENV@");
-        text = text
-            .replace("~/.maru/skills/_builtin", "@MARU_BUNDLE@")
-            .replace(
-                &host_fs::display_path(&skills.join("_builtin")),
-                "@MARU_BUNDLE@",
-            );
+        let mut text = replace_path(text, &root, "@PINNED_BUNDLE@");
+        text = replace_path(&text, &env, "@PINNED_ENV@");
+        text = replace_path(&text, "~/.maru/skills/_builtin", "@MARU_BUNDLE@");
+        text = replace_path(
+            &text,
+            &host_fs::display_path(&skills.join("_builtin")),
+            "@MARU_BUNDLE@",
+        );
         let catalog = self.root.join("skills");
         for entry in fs::read_dir(&catalog).map_err(|error| {
             host_fs::operation_error("list captured skill catalog", &catalog, error)
@@ -117,9 +116,9 @@ impl BundleSession {
                     &format!("@MARU_BUNDLE@/skills/{name}/"),
                 );
         }
+        text = replace_path(&text, "~/.maru/env", "@MARU_ENV@");
+        text = replace_path(&text, &host_fs::display_path(&legacy_env), "@MARU_ENV@");
         Ok(text
-            .replace("~/.maru/env", "@MARU_ENV@")
-            .replace(&host_fs::display_path(&legacy_env), "@MARU_ENV@")
             .replace("@MARU_BUNDLE@", &root)
             .replace("@MARU_ENV@", &env)
             .replace("@PINNED_BUNDLE@", &root)
@@ -135,6 +134,32 @@ impl BundleSession {
         }
         Ok(format!("{header}\nUse this captured bundle for bundled skills and their resources throughout this session.\n</maru_bundle>\n{rendered}"))
     }
+}
+
+/// Replace `from` only where it ends at a path boundary, so `~/.maru/env`
+/// never rewrites `~/.maru/env-backup` or `~/.maru/env.bak`. A trailing '.'
+/// that ends a sentence still counts as a boundary.
+fn replace_path(text: &str, from: &str, to: &str) -> String {
+    if from.is_empty() {
+        return text.to_string();
+    }
+    let path_char = |c: char| c.is_alphanumeric() || c == '-' || c == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find(from) {
+        let after = &rest[index + from.len()..];
+        let mut next = after.chars();
+        let boundary = match next.next() {
+            None => true,
+            Some('.') => !next.next().is_some_and(path_char),
+            Some(c) => !path_char(c),
+        };
+        out.push_str(&rest[..index]);
+        out.push_str(if boundary { to } else { from });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Locks are OS-owned, so a crash releases them without PID reuse heuristics.
@@ -197,7 +222,33 @@ fn scan_retained(cleanup: bool) -> Result<(BTreeSet<String>, BTreeSet<String>), 
 
 #[cfg(test)]
 mod tests {
+    use super::super::bundle_update as bundle;
     use super::*;
+
+    #[test]
+    fn path_replacement_stops_at_path_boundaries() {
+        assert_eq!(
+            replace_path("~/.maru/env-backup", "~/.maru/env", "X"),
+            "~/.maru/env-backup"
+        );
+        assert_eq!(
+            replace_path("~/.maru/env.bak", "~/.maru/env", "X"),
+            "~/.maru/env.bak"
+        );
+        assert_eq!(
+            replace_path("a/_builtin-old a/_builtin/x", "a/_builtin", "X"),
+            "a/_builtin-old X/x"
+        );
+        assert_eq!(
+            replace_path(
+                "use ~/.maru/env. Then ~/.maru/env/.venv",
+                "~/.maru/env",
+                "X"
+            ),
+            "use X. Then X/.venv"
+        );
+        assert_eq!(replace_path("`~/.maru/env`", "~/.maru/env", "X"), "`X`");
+    }
 
     #[test]
     fn rendered_paths_remain_pinned_and_do_not_rebind_custom_skills() {

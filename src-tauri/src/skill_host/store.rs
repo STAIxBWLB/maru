@@ -5488,6 +5488,11 @@ struct BundleCompatibility {
     requires: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     env_layout: Option<BundleEnvLayout>,
+    /// Signed file list (path -> sha256) recorded at apply time, so rollback
+    /// verifies the retained tree against it. Absent for bundles applied
+    /// before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    files: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -5520,6 +5525,13 @@ fn retain_bundle_compatibility(id: &str, metadata: &bundle::BundleMetadata) -> R
         min_app_version: metadata.min_app_version.clone(),
         requires: metadata.requires.clone(),
         env_layout: None,
+        files: Some(
+            metadata
+                .files
+                .iter()
+                .map(|file| (file.path.clone(), file.sha256.clone()))
+                .collect(),
+        ),
     };
     let path = compatibility_path(id)?;
     if path.exists() {
@@ -5560,6 +5572,79 @@ fn record_env_layout(reference: &SkillBundleRef, layout: BundleEnvLayout) -> Res
     compatibility.env_layout = Some(layout);
     let path = compatibility_path(&reference.bundle_id)?;
     host_fs::write_json_pretty(&path, &compatibility).map_err(|error| format!("bundle_env_record_failed: {}: {error}; resolve the metadata write error and retry the bundle activation", path.display()))
+}
+
+/// Refuse a rollback whose retained tree no longer matches what was applied.
+/// With a recorded file list every path and hash must match; a bundle applied
+/// before the list was recorded must still contain each skill its manifest
+/// names, so a damaged copy never makes the registry drop installs.
+fn verify_retained_bundle(
+    id: &str,
+    root: &Path,
+    files: &[bundle::BundleFileEntry],
+    expected: Option<&BTreeMap<String, String>>,
+) -> Result<(), String> {
+    let actual: BTreeMap<&str, &str> = files
+        .iter()
+        .map(|file| (file.path.as_str(), file.sha256.as_str()))
+        .collect();
+    let mut problems = Vec::new();
+    match expected {
+        Some(expected) => {
+            for (path, sha) in expected {
+                match actual.get(path.as_str()) {
+                    None => problems.push(format!("missing {path}")),
+                    Some(found) if *found != sha.as_str() => {
+                        problems.push(format!("changed {path}"))
+                    }
+                    Some(_) => {}
+                }
+            }
+            for path in actual.keys() {
+                if !expected.contains_key(*path) {
+                    problems.push(format!("added {path}"));
+                }
+            }
+        }
+        None => {
+            let manifest = root.join("manifest.json");
+            let bytes = fs::read(&manifest).map_err(|error| {
+                host_fs::operation_error("read retained bundle manifest", &manifest, error)
+            })?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
+                host_fs::operation_error("parse retained bundle manifest", &manifest, error)
+            })?;
+            for skill in value
+                .get("skills")
+                .and_then(|skills| skills.as_array())
+                .into_iter()
+                .flatten()
+            {
+                if let Some(path) = skill.get("path").and_then(|path| path.as_str()) {
+                    let skill_md = format!("{}/SKILL.md", path.trim_end_matches('/'));
+                    if !actual.contains_key(skill_md.as_str()) {
+                        problems.push(format!("missing {skill_md}"));
+                    }
+                }
+            }
+        }
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    let shown = problems
+        .iter()
+        .take(5)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = problems.len().saturating_sub(5);
+    let more = if more > 0 {
+        format!(" and {more} more")
+    } else {
+        String::new()
+    };
+    Err(format!("bundle_rollback_retained_mismatch: retained bundle {id} at {} no longer matches what was applied ({shown}{more}); restore it from backup, or apply a fresh update with `maru skills update --apply --repair-env` instead of rolling back", host_fs::display_path(root)))
 }
 
 /// Activate the locally retained previous bundle, using exactly the same
@@ -5637,11 +5722,17 @@ pub fn skills_rollback_bundle() -> Result<SkillBundleApplyOutcome, String> {
                     mode: format!("{mode:o}"),
                 });
             }
+            let compatibility = read_bundle_compatibility(&target.bundle_id)?;
+            verify_retained_bundle(
+                &target.bundle_id,
+                &root,
+                &files,
+                compatibility.files.as_ref(),
+            )?;
             let bytes = zip
                 .finish()
                 .map_err(|error| host_fs::operation_error("finish rollback archive", &root, error))?
                 .into_inner();
-            let compatibility = read_bundle_compatibility(&target.bundle_id)?;
             let metadata = bundle::BundleMetadata {
                 schema: 1,
                 revision: target.revision,
@@ -6146,8 +6237,13 @@ fn skills_activate_bundle_blocking(
         // State now owns the new env. Later housekeeping failures must not
         // remove an environment that new sessions can already select.
         built_env = None;
-        bundle::clear_journal()?;
-        let _ = fs::remove_dir_all(&backup);
+        // Activation is committed: cleanup failures warn instead of skipping
+        // the registry settlement below. `backup` (_cache/retired/<active>)
+        // holds the migrated original _builtin for in-flight readers; it stays
+        // as N-1 and the retired-workspace prune removes it next update.
+        if let Err(error) = bundle::clear_journal() {
+            progress.emit("warn", format!("bundle_journal_clear_failed: {error}; activation completed; the next start replays the finished journal, which is safe"), None, None);
+        }
         if let Err(error) =
             prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])
         {
@@ -9655,6 +9751,88 @@ exit 7
             assert!(obsolete.exists(), "fixture failed to block the prune");
             let registry = load_registry().unwrap();
             assert!(registry.skills.iter().any(|s| s.name == "updated"));
+        }
+
+        #[test]
+        fn successful_migration_keeps_the_retired_original_builtin() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let builtin = builtin_materialized_root().unwrap();
+            assert!(
+                host_fs::read_link_target(&builtin).is_none(),
+                "fixture must start from a legacy _builtin directory"
+            );
+            let before = hash_directory_filtered(&builtin).unwrap();
+            let active = bundle::read_state().unwrap().unwrap().active.unwrap();
+            let (remote, archive) = bundle_fixture();
+            skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    fs::create_dir_all(root.join(".venv/bin")).unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap();
+            let retired = host_fs::skills_root()
+                .unwrap()
+                .join("_cache/retired")
+                .join(&active.bundle_id);
+            assert!(fs::symlink_metadata(&retired).unwrap().is_dir());
+            assert_eq!(hash_directory_filtered(&retired).unwrap(), before);
+        }
+
+        #[test]
+        fn rollback_refuses_a_retained_bundle_that_differs_from_its_recorded_files() {
+            let files = vec![bundle::BundleFileEntry {
+                path: "skills/a/SKILL.md".into(),
+                sha256: "aa".into(),
+                mode: "644".into(),
+            }];
+            let root = Path::new("/retained");
+            let mut expected = BTreeMap::new();
+            expected.insert("skills/a/SKILL.md".to_string(), "aa".to_string());
+            verify_retained_bundle("r1", root, &files, Some(&expected)).unwrap();
+            expected.insert("skills/b/SKILL.md".to_string(), "bb".to_string());
+            let error = verify_retained_bundle("r1", root, &files, Some(&expected)).unwrap_err();
+            assert!(
+                error.contains("bundle_rollback_retained_mismatch"),
+                "{error}"
+            );
+            assert!(error.contains("missing skills/b/SKILL.md"), "{error}");
+            assert!(
+                error.contains("maru skills update --apply --repair-env"),
+                "{error}"
+            );
+            expected.remove("skills/b/SKILL.md");
+            expected.insert("skills/a/SKILL.md".to_string(), "changed".to_string());
+            let error = verify_retained_bundle("r1", root, &files, Some(&expected)).unwrap_err();
+            assert!(error.contains("changed skills/a/SKILL.md"), "{error}");
+            let error =
+                verify_retained_bundle("r1", root, &files, Some(&BTreeMap::new())).unwrap_err();
+            assert!(error.contains("added skills/a/SKILL.md"), "{error}");
+        }
+
+        #[test]
+        fn rollback_of_a_legacy_bundle_requires_every_manifest_skill() {
+            let dir = tempfile::tempdir().unwrap();
+            fs::write(
+                dir.path().join("manifest.json"),
+                r#"{"skills":[{"name":"a","path":"skills/a"},{"name":"b","path":"skills/b/"}]}"#,
+            )
+            .unwrap();
+            let entry = |path: &str| bundle::BundleFileEntry {
+                path: path.into(),
+                sha256: "x".into(),
+                mode: "644".into(),
+            };
+            let both = vec![entry("skills/a/SKILL.md"), entry("skills/b/SKILL.md")];
+            verify_retained_bundle("legacy", dir.path(), &both, None).unwrap();
+            let error = verify_retained_bundle("legacy", dir.path(), &both[..1], None).unwrap_err();
+            assert!(error.contains("missing skills/b/SKILL.md"), "{error}");
         }
 
         #[test]
