@@ -268,10 +268,11 @@ pub fn recover_interrupted_swap(builtin_root: &Path) -> Result<(), String> {
         } else {
             &journal.old_workspace_hash
         };
-        let valid = expected.as_ref().is_some_and(|expected| {
-            super::store::hash_directory_filtered(&target).is_ok_and(|actual| &actual == expected)
-        });
-        if !valid {
+        // A read failure is reported as itself, not as an incomplete tree.
+        let actual = super::store::hash_directory_filtered(&target).map_err(|error| {
+            host_fs::operation_error("fingerprint recorded recovery workspace", &target, error)
+        })?;
+        if expected.as_deref() != Some(actual.as_str()) {
             return Err(format!("bundle_recovery_incomplete: {}; restore the complete recorded workspace before retrying recovery", target.display()));
         }
         let legacy_in_place = match fs::symlink_metadata(builtin_root) {

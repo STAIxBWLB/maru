@@ -4154,15 +4154,17 @@ pub(crate) fn capture_bundle_session() -> Result<Option<super::session::BundleSe
     let admission = PathTransactionRequest::new(paths)?.try_acquire()?
         .ok_or("bundle_session_busy: snapshot or pin paths are changing; retry this skill run after the current activation")?;
     let _guard = registry_guard()?;
+    // Shared gate across processes: a prune in another process either ran
+    // before this check (and changed the state, refused below) or waits until
+    // the pin exists and then keeps this generation.
+    let _gate = super::session::pin_gate(false)?;
     if bundle::read_state()?.and_then(|state| state.active) != Some(active.clone()) {
         return Err(
             "bundle_session_changed: activation changed during capture; retry the skill run".into(),
         );
     }
     admission.before_effect()?;
-    // Pin before publishing: the registry guard and admission are
-    // process-local, so a CLI update in another process may prune _bundles
-    // at any moment; an existing pin makes it keep the snapshot id.
+    // Pin before publishing the snapshot, so pruning keeps its id.
     let session = super::session::BundleSession {
         bundle_id: id,
         root,
@@ -5296,6 +5298,7 @@ fn same_generation_name(left: &str, right: &str) -> bool {
 }
 
 fn prune_env_dirs(keep: &[&str]) -> Result<(), String> {
+    let _gate = super::session::pin_gate(true)?;
     let (_, retained) = super::session::retained_generations()?;
     let base = host_fs::env_base()?;
     if !base.is_dir() {
@@ -5327,6 +5330,7 @@ fn prune_env_dirs(keep: &[&str]) -> Result<(), String> {
 }
 
 fn prune_bundle_dirs(keep: &[&str]) -> Result<(), String> {
+    let _gate = super::session::pin_gate(true)?;
     let (retained, _) = super::session::retained_generations()?;
     let dir = bundle::bundles_dir()?;
     if !dir.is_dir() {
@@ -5564,9 +5568,12 @@ fn retain_bundle_compatibility(id: &str, metadata: &bundle::BundleMetadata) -> R
         }
         // Records written before file lists existed gain one now.
         existing.files = compatibility.files;
-        return host_fs::write_json_pretty(&path, &existing);
+        return host_fs::write_json_pretty(&path, &existing).map_err(|error| {
+            host_fs::operation_error("record bundle compatibility", &path, error)
+        });
     }
     host_fs::write_json_pretty(&path, &compatibility)
+        .map_err(|error| host_fs::operation_error("record bundle compatibility", &path, error))
 }
 
 fn verify_rollback_env(target: &SkillBundleRef) -> Result<BundleEnvLayout, String> {
@@ -5997,8 +6004,9 @@ fn skills_activate_bundle_blocking(
             host_fs::operation_error("remove verified duplicate bundle staging", &staging, error)
         })?;
     } else {
-        fs::rename(&staging, &new_pristine)
-            .map_err(|error| format!("Cannot publish {}: {error}", new_pristine.display()))?;
+        fs::rename(&staging, &new_pristine).map_err(|error| {
+            host_fs::operation_error("publish staged pristine bundle", &new_pristine, error)
+        })?;
     }
     if !is_rollback {
         network_admission.before_effect()?;

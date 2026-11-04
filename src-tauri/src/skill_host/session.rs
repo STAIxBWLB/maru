@@ -38,7 +38,9 @@ impl BundleSession {
         if locks.contains_key(&key) {
             return Ok(self);
         }
-        host_fs::ensure_dir(&dir)?;
+        host_fs::ensure_dir(&dir).map_err(|error| {
+            host_fs::operation_error("create session pin directory", &dir, error)
+        })?;
         let path = dir.join(format!("{}.json", Uuid::new_v4()));
         let file = OpenOptions::new()
             .read(true)
@@ -136,6 +138,32 @@ impl BundleSession {
     }
 }
 
+/// Cross-process gate between pinning and pruning. The registry guard and
+/// path admission are process-local, so the app and a `maru` CLI update in
+/// another process meet only here: capture holds it shared while it validates
+/// the active state and publishes its pin, and pruning holds it exclusive
+/// from the pin scan to the last delete.
+pub(crate) fn pin_gate(exclusive: bool) -> Result<File, String> {
+    let dir = sessions_dir()?;
+    host_fs::ensure_dir(&dir)
+        .map_err(|error| host_fs::operation_error("create session pin directory", &dir, error))?;
+    let path = dir.join(".gate");
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|error| host_fs::operation_error("open session pin gate", &path, error))?;
+    let locked = if exclusive {
+        file.lock()
+    } else {
+        file.lock_shared()
+    };
+    locked.map_err(|error| host_fs::operation_error("lock session pin gate", &path, error))?;
+    Ok(file)
+}
+
 /// Replace `from` only where it ends at a path boundary, so `~/.maru/env`
 /// never rewrites `~/.maru/env-backup` or `~/.maru/env.bak`. A trailing '.'
 /// that ends a sentence still counts as a boundary.
@@ -192,11 +220,18 @@ fn scan_retained(cleanup: bool) -> Result<(BTreeSet<String>, BTreeSet<String>), 
         // through it. ponytail: a lock-only pin left by a crash is cleared
         // after 60 s; raise the bound if pin publication can stall longer.
         if extension == Some("lock") && !path.with_extension("json").exists() {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&path)
-                .map_err(|error| host_fs::operation_error("open session pin lock", &path, error))?;
+            // Its json pair may have been swept earlier in this same scan.
+            let file = match OpenOptions::new().read(true).write(true).open(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(host_fs::operation_error(
+                        "open session pin lock",
+                        &path,
+                        error,
+                    ))
+                }
+            };
             let stale = match file.try_lock() {
                 Ok(()) => path
                     .metadata()
@@ -355,6 +390,23 @@ mod tests {
         retained_generations().unwrap();
         assert!(!stale.exists());
         assert!(!stale.with_extension("lock").exists());
+    }
+
+    #[test]
+    fn pruning_gate_excludes_pinning_until_released() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let exclusive = pin_gate(true).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let pinner = std::thread::spawn(move || {
+            let _shared = pin_gate(false).unwrap();
+            tx.send(()).unwrap();
+        });
+        assert!(rx
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .is_err());
+        drop(exclusive);
+        rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        pinner.join().unwrap();
     }
 
     #[test]
