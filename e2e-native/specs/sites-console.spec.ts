@@ -67,8 +67,9 @@ describe("native console site launch", () => {
   // Owner-approved unsupported-driver skip: tauri-plugin-wdio-webdriver resolves
   // handles/executors via webview_windows(), which drops main once add_child runs.
   // This remains true in published 1.5.1. Keep the security gate above active.
-  // https://github.com/webdriverio/desktop-mobile/issues/1034
-  it.skip("shows the console and opens a manual URL without acon (upstream #1034)", async () => {
+  // https://github.com/webdriverio/desktop-mobile/pull/611
+  // https://github.com/webdriverio/desktop-mobile/pull/532
+  it.skip("shows the console and opens a manual URL without acon (upstream #611/#532)", async () => {
     await browser.reloadSession();
     const { bin, proofFile, proof } = await launchAndVerifyConsole();
     const handles = await browser.getWindowHandles();
