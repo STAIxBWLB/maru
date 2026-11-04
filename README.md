@@ -219,7 +219,8 @@ Canonical paths and Unix owner/write permissions are checked before execution.
 Readiness is one bounded JSON line (32 KiB, 10 seconds), followed by a direct,
 non-redirecting HTTP literal-loopback origin probe (2 seconds). URL/origin/owned
 PID mismatches and process failures refuse navigation with a recovery step.
-The single-use URL is ephemeral browser state, not a persisted Sites URL.
+Launcher-resolved single-use URLs stay in browser state and are not automatically
+written to Sites.
 The launched server owns its normal idle shutdown; failed or cancelled startup
 terminates only its owned child tree, and tab cancellation fences stale opens.
 Maru does not change console plugin grants, note writers or task policy.

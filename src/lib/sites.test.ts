@@ -206,6 +206,11 @@ describe("reorderSites", () => {
 });
 
 describe("optional local console launch entries", () => {
+  it("does not request a favicon from a launch-only placeholder before Open", () => {
+    expect(faviconUrlFor({ url: "http://127.0.0.1", favicon: null, launch: "acon ui --no-open --json" })).toBeNull();
+    expect(faviconUrlFor({ url: "https://example.com", favicon: null })).toBe("https://example.com/favicon.ico");
+  });
+
   it("round-trips launcher intent without discarding ordinary URL entries", () => {
     const parsed = parseSitesDocument({ version: 1, sites: [
       { id: "console", label: "Console", launch: "acon ui --no-open --json" },

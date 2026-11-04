@@ -48,7 +48,7 @@ export function NewSiteDialog({ open, initial, nextOrder, onClose, onSave }: New
       return;
     }
     if (launch !== null && launch !== ACON_SITE_LAUNCH) { setError(t("sites.dialog.launchInvalid")); return; }
-    const normalizedUrl = normalizeSiteUrl(url) ?? (launch ? "http://127.0.0.1" : null);
+    const normalizedUrl = url.trim() ? normalizeSiteUrl(url) : (launch ? "http://127.0.0.1" : null);
     if (!normalizedUrl) {
       setError(t("sites.dialog.urlInvalid"));
       return;

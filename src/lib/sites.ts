@@ -126,8 +126,9 @@ export function filterSitesByQuery(sites: SiteEntry[], query: string): SiteEntry
   );
 }
 
-export function faviconUrlFor(site: Pick<SiteEntry, "favicon" | "url">): string | null {
+export function faviconUrlFor(site: Pick<SiteEntry, "favicon" | "url" | "launch">): string | null {
   if (site.favicon) return site.favicon;
+  if (site.launch != null) return null; // No probe of a launch-only placeholder.
   try {
     return `${new URL(site.url).origin}/favicon.ico`;
   } catch {

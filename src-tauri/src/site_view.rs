@@ -364,7 +364,7 @@ pub fn site_view_open<R: tauri::Runtime>(
         builder.data_store_identifier(id)
     };
 
-    window
+    let embed = window
         .add_child(
             builder,
             Position::Logical(LogicalPosition::new(x, y)),

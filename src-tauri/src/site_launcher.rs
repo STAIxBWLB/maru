@@ -368,6 +368,16 @@ fn start_console(
             }
         }
     };
+    if let Some(status) = owned
+        .child
+        .try_wait()
+        .map_err(|error| failure("check console readiness process", error))?
+    {
+        return Err(failure(
+            "start console",
+            format!("process exited with {status} before navigation"),
+        ));
+    }
     let url = parse_readiness(&bytes, owned.child.id())?;
     // Never consume the one-time URL/ticket. Probe only the declared origin,
     // without redirects or environment proxies, then recheck process status.

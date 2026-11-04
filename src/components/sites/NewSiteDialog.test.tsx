@@ -27,6 +27,16 @@ describe("site launch selection", () => {
     await submit();
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ launch: ACON_SITE_LAUNCH, url: "http://127.0.0.1" }));
   });
+  it("allows an absent URL for explicit console launch but refuses a malformed nonempty URL", async () => {
+    const save = vi.fn();
+    await render({ ...initial, url: "file:///tmp/not-http", launch: ACON_SITE_LAUNCH }, save);
+    await submit();
+    expect(save).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("sites.dialog.urlInvalid");
+    await render({ ...initial, url: "", launch: ACON_SITE_LAUNCH }, save);
+    await submit();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ launch: ACON_SITE_LAUNCH, url: "http://127.0.0.1" }));
+  });
   it("requires an explicit supported selection before saving malformed launch configuration", async () => {
     const save = vi.fn();
     await render({ ...initial, launch: "sh -c 'echo unsafe'" }, save);
