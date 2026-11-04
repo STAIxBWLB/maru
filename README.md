@@ -212,8 +212,8 @@ the older `acon ui --json` spelling maps to the same fixed argv. The editor offe
 URL opening or Agent Console, without a free-form executable field. Saving or
 refreshing the registry never launches or installs a tool.
 
-The launcher resolves `~/.bun/bin/acon` against the contained
-`@staix/agent-console` global package bin. It runs that entry with Bun from
+The launcher resolves `~/.local/bin/acon` against the active dot-family version first,
+then the legacy `~/.bun/bin/acon` global package bin. It runs that entry with Bun from
 `~/.bun/bin` or the fixed Homebrew/system install paths, without a shell or
 workspace PATH lookup.
 Canonical paths and Unix owner/write permissions are checked before execution.
@@ -232,21 +232,26 @@ Maru does not change console plugin grants, note writers or task policy.
 ### Family tool inventory
 
 Settings > Family tools lists ahub, amem, vmem and acon. Refresh reads bounded
-npm latest metadata and validates installed Bun-global package/bin identity.
+npm latest metadata and validates the active executable against its owning
+dot-family, ahub-upgrade release or Bun-global package/bin identity.
 For amem/vmem, their supported read-only `manifest --json` supplies command
 capabilities; tools without that contract expose package identity/version only.
-Absent, installed, stale and unavailable states are distinct; a registry failure
-never pretends that an installed tool is current. External installs are labelled
+Absent, installed, stale and unavailable states are distinct. An offline registry
+leaves a verified tool installed with a latest-version-unknown detail; it does
+not mark the executable broken. Shadowed Bun duplicates are reported separately.
+External installs are labelled
 and never executed or overwritten by this inventory.
 
 Installation/update ownership remains with dotfiles or the existing installer
-(`docs/BOUNDARIES.md`). Exact-version `bun add -g` lines are terminal handoffs,
+(`docs/BOUNDARIES.md`). `dot ai family install <id> --version <version>` and
+`ahub upgrade --to <version>` lines are terminal handoffs,
 not executable UI actions. Refresh and selection never install, deploy, restart
-hubs/MCP sessions, change grants/frozen tasks or write notes. A version change
-observed while this panel stays open retains the earlier version for an explicit
-package-reinstall rollback handoff. No earlier version is invented when the
-panel has not observed one. This is neither atomic rollback nor a restore of
-package data/settings; installation failure recovery belongs to the installer.
+hubs/MCP sessions, change grants/frozen tasks or write notes. Rollback belongs to
+[dotfiles#319](https://github.com/STAIxBWLB/dotfiles/issues/319) and the owning
+installer. A verified dot-family previous-version link enables the owning
+`dot ai rollback <id>` handoff. Maru provides command handoffs only and makes no rollback or
+package/data/settings restoration claim. Installation failure recovery belongs
+to that installer.
 
 Only explicit acon selection can enqueue the existing fixed-argv Sites launcher.
 Native integration fixtures cover selection and that handoff with a synthetic

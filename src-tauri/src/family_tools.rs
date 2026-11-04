@@ -4,7 +4,12 @@ use crate::{
     tool_manifest,
 };
 use serde::Serialize;
-use std::{io::Read, path::Path, process::Command, time::Duration};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 const TOOLS: [(&str, &str); 4] = [
     ("ahub", "@staix/agent-hub"),
@@ -24,6 +29,7 @@ pub struct FamilyToolStatus {
     ownership: &'static str,
     commands: Vec<String>,
     can_launch: bool,
+    previous_version: Option<String>,
     detail: Vec<String>,
 }
 
@@ -53,7 +59,7 @@ fn classify(installed: Option<&str>, available: Option<&str>, broken: bool) -> &
             "stale"
         }
         (Some(_), Some(_)) => "installed",
-        (Some(_), None) => "unavailable",
+        (Some(_), None) => "installed",
     }
 }
 
@@ -64,61 +70,84 @@ fn inspect(
     available: Result<String, String>,
 ) -> FamilyToolStatus {
     let mut detail = Vec::new();
-    let available_version = available.map_err(|error| detail.push(error)).ok();
-    let alias = home.join(".bun/bin").join(if cfg!(windows) {
-        format!("{id}.exe")
-    } else {
-        id.to_string()
-    });
-    let alias_metadata = std::fs::symlink_metadata(&alias);
-    let exists = alias_metadata.is_ok();
-    let inspection_error = alias_metadata
-        .err()
-        .filter(|error| error.kind() != std::io::ErrorKind::NotFound);
-    let external = !exists && crate::cli_path::resolve_program(id).is_some();
+    let available_version = available
+        .map_err(|error| detail.push(format!("Latest version unknown: {error}")))
+        .ok();
+    let alias = active_program(home, id);
     let mut result = FamilyToolStatus {
         id,
         package,
         installed_version: None,
         available_version,
         state: "absent",
-        ownership: if external { "external" } else { "bun-global" },
+        ownership: if id == "ahub" {
+            "ahub-upgrade"
+        } else {
+            "dot-family"
+        },
         commands: Vec::new(),
         can_launch: false,
+        previous_version: None,
         detail,
     };
-    if let Some(error) = inspection_error {
-        result.state = "unavailable";
-        result.detail.push(format!(
-            "Cannot inspect {}: {error}; fix access permissions and retry Refresh",
-            alias.display()
-        ));
+    let Some(alias) = alias else {
         return result;
-    }
-    if external {
-        result.state = "unavailable";
-        result.detail.push(format!("{id} is resolved outside the supported Bun global install; use its owning installer to inspect/update it. Maru does not execute or overwrite it."));
-        return result;
-    }
-    if !exists {
-        if std::fs::symlink_metadata(home.join(".bun/install/global/node_modules").join(package))
-            .is_ok()
-        {
+    };
+    let trusted = match site_launcher::resolve_tool_at(home, id, package, &alias) {
+        Ok(trusted) => trusted,
+        Err(error) => {
+            let canonical = alias.canonicalize().unwrap_or_else(|_| alias.clone());
+            let managed = [
+                home.join(".local/share/dotfiles/tools"),
+                home.join(".agenthub/releases"),
+                home.join(".bun/install/global/node_modules"),
+            ]
+            .iter()
+            .any(|root| canonical.starts_with(root));
+            result.ownership = if managed {
+                if id == "ahub" {
+                    "ahub-upgrade"
+                } else {
+                    "dot-family"
+                }
+            } else {
+                "external"
+            };
             result.state = "unavailable";
-            result.detail.push(format!("{package} exists but {} is missing; repair it with the owning installer then retry Refresh", alias.display()));
+            result.detail.push(format!("{}: {error}; use this tool's owning installer; Maru will not execute or overwrite it", alias.display()));
+            return result;
         }
-        return result;
+    };
+    result.ownership = trusted.ownership;
+    result.installed_version = Some(trusted.version.clone());
+    let shadow = home.join(".bun/bin").join(if cfg!(windows) {
+        format!("{id}.exe")
+    } else {
+        id.to_string()
+    });
+    if shadow
+        .canonicalize()
+        .ok()
+        .is_some_and(|path| path != trusted.entry)
+    {
+        result.detail.push(format!("Shadowed duplicate install at {}; active tool is {}. Use the owning installer to reconcile PATH; no copy was changed.", shadow.display(), alias.display()));
+    }
+    if result.ownership == "dot-family" {
+        let root = home.join(".local/share/dotfiles/tools").join(id);
+        result.previous_version = root
+            .join("previous")
+            .canonicalize()
+            .ok()
+            .filter(|previous| root.canonicalize().ok().as_deref() == previous.parent())
+            .and_then(|previous| {
+                previous
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|version| tool_manifest::parse_stable(version).is_some())
+                    .map(str::to_string)
+            });
     }
     let installed = (|| -> Result<(), String> {
-        let trusted = site_launcher::resolve_tool(home, id, package)?;
-        let metadata: serde_json::Value = serde_json::from_slice(&site_launcher::read_small(&home.join(".bun/install/global/node_modules").join(package).join("package.json"))?).map_err(|error| format!("{id}: invalid installed metadata: {error}; repair the package with its owning installer"))?;
-        result.installed_version = metadata["version"]
-            .as_str()
-            .filter(|v| tool_manifest::parse_stable(v).is_some())
-            .map(str::to_string);
-        if result.installed_version.is_none() {
-            return Err(format!("{id}: installed package has no stable version; repair its package metadata using the owning installer"));
-        }
         // These two tools publish a read-only manifest; ahub/acon currently do not.
         if matches!(id, "amem" | "vmem") {
             let mut command = Command::new(trusted.bun);
@@ -168,6 +197,24 @@ fn inspect(
         broken,
     );
     result
+}
+
+fn active_program(home: &Path, id: &str) -> Option<PathBuf> {
+    // Native/test HOME isolation must never resolve a personal tool.
+    #[cfg(not(any(test, feature = "native-e2e")))]
+    if let Some(program) = crate::cli_path::resolve_program(id) {
+        return Some(program);
+    }
+    [
+        home.join(".local/bin").join(id),
+        home.join(".bun/bin").join(if cfg!(windows) {
+            format!("{id}.exe")
+        } else {
+            id.to_string()
+        }),
+    ]
+    .into_iter()
+    .find(|path| std::fs::symlink_metadata(path).is_ok())
 }
 
 pub fn family_tools_status() -> Result<Vec<FamilyToolStatus>, String> {
@@ -253,11 +300,105 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn family_registry_uses_dot_current_over_shadowed_bun_and_keeps_offline_install() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".bun/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        crate::test_support::write_executable_fixture(
+            &bin.join("bun"),
+            "#!/bin/sh\nexit 99\n",
+            0o755,
+        )
+        .unwrap();
+        let global = home
+            .path()
+            .join(".bun/install/global/node_modules/@staix/agent-console");
+        let root = home.path().join(".local/share/dotfiles/tools/acon");
+        let current = root.join("0.1.1");
+        let dot = current.join("lib/node_modules/@staix/agent-console");
+        for (package, version) in [(&global, "0.1.0"), (&dot, "0.1.1")] {
+            std::fs::create_dir_all(package.join("bin")).unwrap();
+            std::fs::write(package.join("package.json"), serde_json::json!({"name":"@staix/agent-console","version":version,"bin":{"acon":"bin/acon.js"}}).to_string()).unwrap();
+            std::fs::write(
+                package.join("bin/acon.js"),
+                "throw new Error('status must not launch')",
+            )
+            .unwrap();
+        }
+        std::os::unix::fs::symlink(global.join("bin/acon.js"), bin.join("acon")).unwrap();
+        std::fs::create_dir_all(current.join("bin")).unwrap();
+        std::os::unix::fs::symlink(dot.join("bin/acon.js"), current.join("bin/acon")).unwrap();
+        std::os::unix::fs::symlink("0.1.1", root.join("current")).unwrap();
+        std::fs::create_dir_all(root.join("0.1.0")).unwrap();
+        std::os::unix::fs::symlink("0.1.0", root.join("previous")).unwrap();
+        std::fs::create_dir_all(home.path().join(".local/bin")).unwrap();
+        std::os::unix::fs::symlink(
+            root.join("current/bin/acon"),
+            home.path().join(".local/bin/acon"),
+        )
+        .unwrap();
+        let status = inspect(
+            home.path(),
+            "acon",
+            "@staix/agent-console",
+            Err("registry offline; retry Refresh".into()),
+        );
+        assert_eq!(status.installed_version.as_deref(), Some("0.1.1"));
+        assert_eq!(status.previous_version.as_deref(), Some("0.1.0"));
+        assert_eq!(status.ownership, "dot-family");
+        assert_eq!(status.state, "installed");
+        assert!(status.can_launch);
+        assert!(status
+            .detail
+            .iter()
+            .any(|detail| detail.contains("Shadowed duplicate")));
+        let trusted =
+            site_launcher::resolve_tool(home.path(), "acon", "@staix/agent-console").unwrap();
+        assert_eq!(
+            trusted.entry,
+            dot.join("bin/acon.js").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn family_registry_recognizes_ahub_upgrade_release_identity_without_executing_it() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".bun/bin");
+        let package = home.path().join(".agenthub/releases/release-0.30.0");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(package.join("src/cli")).unwrap();
+        crate::test_support::write_executable_fixture(
+            &bin.join("bun"),
+            "#!/bin/sh\nexit 99\n",
+            0o755,
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("package.json"),
+            br#"{"name":"@staix/agent-hub","version":"0.30.0","bin":{"ahub":"src/cli/main.js"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("src/cli/main.js"),
+            "throw new Error('never execute')",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(package.join("src/cli/main.js"), bin.join("ahub")).unwrap();
+        let status = inspect(home.path(), "ahub", "@staix/agent-hub", Ok("0.30.1".into()));
+        assert_eq!(status.ownership, "ahub-upgrade");
+        assert_eq!(status.installed_version.as_deref(), Some("0.30.0"));
+        assert_eq!(status.state, "stale");
+        assert!(!status.can_launch);
+    }
+
+    #[test]
     fn family_registry_distinguishes_absent_stale_and_unavailable() {
         assert_eq!(classify(None, Some("1.0.0"), false), "absent");
         assert_eq!(classify(Some("1.0.0"), Some("1.0.1"), false), "stale");
         assert_eq!(classify(Some("1.0.1"), Some("1.0.1"), false), "installed");
-        assert_eq!(classify(Some("1.0.1"), None, false), "unavailable");
+        assert_eq!(classify(Some("1.0.1"), None, false), "installed");
         assert_eq!(classify(None, Some("1.0.0"), true), "unavailable");
         assert!(latest(br#"{"name":"wrong","version":"1.0.0"}"#, TOOLS[0].1).is_err());
         assert!(latest(

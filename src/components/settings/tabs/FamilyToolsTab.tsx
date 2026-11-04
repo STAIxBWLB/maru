@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { familyPackageCommand, familyToolsStatus, type FamilyToolId, type FamilyToolStatus } from "../../../lib/familyTools";
+import { familyPackageCommand, familyRollbackCommand, familyToolsStatus, type FamilyToolId, type FamilyToolStatus } from "../../../lib/familyTools";
 import { closeSettings } from "../../../lib/appOverlayStore";
 import { visualModeController } from "../../../lib/visualModeStore";
 import { useTranslation } from "../../../lib/i18n";
@@ -12,9 +12,7 @@ export function FamilyToolsTab() {
   const [selected, setSelected] = useState<FamilyToolId>("ahub");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previous, setPrevious] = useState<Partial<Record<FamilyToolId, string>>>({});
   const generation = useRef(0);
-  const lastRows = useRef<FamilyToolStatus[]>([]);
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     setBusy(true);
@@ -22,15 +20,6 @@ export function FamilyToolsTab() {
     try {
       const next = await familyToolsStatus();
       if (request !== generation.current) return;
-      const prior = lastRows.current;
-      setPrevious((current) => {
-        const retained = { ...current };
-        for (const old of prior) {
-          if (old.installedVersion && next.some((row) => row.id === old.id && row.installedVersion && row.installedVersion !== old.installedVersion)) retained[old.id] = old.installedVersion;
-        }
-        return retained;
-      });
-      lastRows.current = next;
       setRows(next);
     } catch (cause) {
       if (request === generation.current) setError(String(cause));
@@ -41,8 +30,8 @@ export function FamilyToolsTab() {
   const invalidate = useCallback(() => { generation.current++; }, []);
   useEffect(() => { void refresh(); return invalidate; }, [refresh, invalidate]);
   const tool = rows.find((row) => row.id === selected);
-  const command = tool?.ownership === "bun-global" ? familyPackageCommand(selected, tool.availableVersion) : null;
-  const rollback = tool?.ownership === "bun-global" ? familyPackageCommand(selected, previous[selected] ?? null) : null;
+  const command = tool ? familyPackageCommand(selected, tool.availableVersion, tool.ownership) : null;
+  const rollback = tool ? familyRollbackCommand(tool) : null;
   return <div className="settings-tab wide">
     <SettingsSection title={t("family.title")} description={t("family.boundary")} padded actions={<Button size="sm" disabled={busy} onClick={() => void refresh()}>{t("family.refresh")}</Button>}>
       {busy ? <p role="status">{t("family.loading")}</p> : null}
@@ -55,7 +44,7 @@ export function FamilyToolsTab() {
         {tool.commands.length ? <p>{t("family.commands")}: {tool.commands.join(", ")}</p> : <p>{t("family.noManifest")}</p>}
         {command ? <><h4>{t("family.installUpdate")}</h4><code>{command}</code></> : null}
         <p>{t("family.rollbackScope")}</p>
-        {rollback ? <code>{rollback}</code> : <p>{t("family.noPrevious")}</p>}
+        {rollback ? <code>{rollback}</code> : null}
         {tool.id === "acon" ? <Button disabled={!tool.canLaunch} onClick={() => { visualModeController.enqueueFamilyConsole(); closeSettings(); }}>{t("family.launch")}</Button> : null}
       </> : null}
     </SettingsSection>

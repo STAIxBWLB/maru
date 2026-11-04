@@ -1256,7 +1256,9 @@
         "behaviorCases": [
           "family_registry_worker_yields_and_maps_join_failure",
           "family_registry_distinguishes_absent_stale_and_unavailable",
-          "family_registry_rejects_foreign_bin_without_running_or_mutating_it"
+          "family_registry_rejects_foreign_bin_without_running_or_mutating_it",
+          "family_registry_uses_dot_current_over_shadowed_bun_and_keeps_offline_install",
+          "family_registry_recognizes_ahub_upgrade_release_identity_without_executing_it"
         ],
         "workerProof": "src-tauri/src/family_tools.rs::tests::family_registry_worker_yields_and_maps_join_failure uses the existing same-poll boundary fixture; it is written but execution is UNVERIFIED until hosted Rust CI.",
         "platformScope": "Synthetic Rust fixtures; no personal home mutation, installs or live service starts. Native fixture execution and real platform proof remain unverified."

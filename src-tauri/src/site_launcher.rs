@@ -40,6 +40,8 @@ pub(crate) struct TrustedTool {
     pub bun: PathBuf,
     pub entry: PathBuf,
     pub home: PathBuf,
+    pub version: String,
+    pub ownership: &'static str,
 }
 
 pub(crate) fn read_small(path: &Path) -> Result<Vec<u8>, String> {
@@ -107,47 +109,139 @@ pub(crate) fn resolve_tool(
     tool: &str,
     package_name: &str,
 ) -> Result<TrustedTool, String> {
-    let home = home
-        .canonicalize()
-        .map_err(|error| install_failure("resolve launch home", error))?;
-    let bin = home.join(".bun/bin");
-    let alias = bin.join(if cfg!(windows) {
+    let local = home.join(".local/bin").join(tool);
+    let legacy = home.join(".bun/bin").join(if cfg!(windows) {
         format!("{tool}.exe")
     } else {
         tool.to_string()
     });
+    let alias = if fs::symlink_metadata(&local).is_ok() {
+        local
+    } else {
+        legacy
+    };
+    resolve_tool_at(home, tool, package_name, &alias)
+}
+
+pub(crate) fn resolve_tool_at(
+    home: &Path,
+    tool: &str,
+    package_name: &str,
+    alias: &Path,
+) -> Result<TrustedTool, String> {
+    let home = home
+        .canonicalize()
+        .map_err(|error| install_failure("resolve tool home", error))?;
+    if let Some(parent) = alias.parent() {
+        verify_permissions(parent, &home)?;
+    }
     let program = alias
         .canonicalize()
         .map_err(|error| install_failure(&format!("resolve trusted {}", alias.display()), error))?;
+    let dot_root = home.join(".local/share/dotfiles/tools").join(tool);
+    let current = dot_root.join("current").canonicalize().ok();
+    let dot_root = dot_root.canonicalize().ok();
+    let releases = home.join(".agenthub/releases").canonicalize().ok();
     let global = home
         .join(".bun/install/global/node_modules")
         .canonicalize()
-        .map_err(|error| install_failure("resolve Bun global package root", error))?;
-    let package = global
-        .join(package_name)
+        .ok();
+    let (package, ownership, expected_version) = if let (Some(root), Some(current)) =
+        (&dot_root, &current)
+    {
+        if program.starts_with(root) {
+            if current.parent() != Some(root.as_path()) || !program.starts_with(current) {
+                return Err(install_failure("validate dot family activation", "active binary is outside the current version; inspect `dot ai family status` and repair its links"));
+            }
+            let version = current
+                .file_name()
+                .and_then(|s| s.to_str())
+                .filter(|v| crate::tool_manifest::parse_stable(v).is_some())
+                .ok_or_else(|| {
+                    install_failure(
+                        "validate dot family version",
+                        "current does not name an exact version; inspect `dot ai family status`",
+                    )
+                })?;
+            (
+                current.join("lib/node_modules").join(package_name),
+                "dot-family",
+                Some(version.to_string()),
+            )
+        } else {
+            locate_other_package(
+                &program,
+                package_name,
+                tool,
+                releases.as_deref(),
+                global.as_deref(),
+            )?
+        }
+    } else {
+        locate_other_package(
+            &program,
+            package_name,
+            tool,
+            releases.as_deref(),
+            global.as_deref(),
+        )?
+    };
+    let package = package
         .canonicalize()
-        .map_err(|error| install_failure(&format!("resolve installed {package_name}"), error))?;
-    if !package.starts_with(&global) {
+        .map_err(|error| install_failure("resolve installed tool package", error))?;
+    let allowed = match ownership {
+        "dot-family" => current
+            .as_ref()
+            .is_some_and(|root| package.starts_with(root)),
+        "ahub-upgrade" => {
+            releases
+                .as_ref()
+                .is_some_and(|root| package.starts_with(root))
+                || global
+                    .as_ref()
+                    .is_some_and(|root| package.starts_with(root))
+        }
+        _ => global
+            .as_ref()
+            .is_some_and(|root| package.starts_with(root)),
+    };
+    if !allowed {
         return Err(install_failure(
-            "validate package location",
-            "package resolves outside the Bun global package root",
+            "validate tool package location",
+            "package resolves outside its owning install root; repair the installer-owned links",
         ));
     }
-    verify_permissions(&bin, &home)?;
     verify_permissions(&package, &home)?;
+    verify_permissions(&program, &home)?;
+    verify_permissions(&package.join("package.json"), &home)?;
     let metadata: serde_json::Value =
         serde_json::from_slice(&read_small(&package.join("package.json"))?)
-            .map_err(|error| install_failure("parse installed tool package.json", error))?;
-    if metadata.get("name").and_then(|value| value.as_str()) != Some(package_name) {
+            .map_err(|error| install_failure("parse installed package.json", error))?;
+    if metadata["name"].as_str() != Some(package_name) {
         return Err(install_failure(
             "validate package identity",
-            format!("installed package name is not {package_name}"),
+            format!("installed package does not name {package_name}"),
         ));
     }
-    let entry_name = metadata
-        .get("bin")
-        .and_then(|value| value.get(tool))
-        .and_then(|value| value.as_str())
+    let version = metadata["version"]
+        .as_str()
+        .filter(|v| crate::tool_manifest::parse_stable(v).is_some())
+        .ok_or_else(|| {
+            install_failure(
+                "validate package version",
+                "installed metadata has no exact stable version; repair the package",
+            )
+        })?
+        .to_string();
+    if expected_version.is_some_and(|expected| expected != version) {
+        return Err(install_failure(
+            "validate dot family version",
+            "directory and package version disagree; repair the owning installation",
+        ));
+    }
+    let entry_name = metadata["bin"]
+        .get(tool)
+        .and_then(|v| v.as_str())
         .ok_or_else(|| {
             install_failure(
                 "validate package bin manifest",
@@ -158,13 +252,14 @@ pub(crate) fn resolve_tool(
         .join(entry_name)
         .canonicalize()
         .map_err(|error| install_failure("resolve package bin entry", error))?;
-    let shim = cfg!(windows) && program == bin.join(format!("{tool}.exe"));
+    let shim = cfg!(windows) && program == home.join(".bun/bin").join(format!("{tool}.exe"));
     if !entry.starts_with(&package) || (!shim && program != entry) || !entry.is_file() {
         return Err(install_failure(
             "validate trusted package executable",
             format!("{tool} does not match the installed package's contained bin entry"),
         ));
     }
+    let bin = home.join(".bun/bin");
     let candidates = [
         bin.join(if cfg!(windows) { "bun.exe" } else { "bun" }),
         #[cfg(unix)]
@@ -175,11 +270,46 @@ pub(crate) fn resolve_tool(
         PathBuf::from("/usr/bin/bun"),
     ];
     let bun = resolve_bun_from(&home, &candidates)?;
-    verify_permissions(&bin, &home)?;
     verify_permissions(&entry, &home)?;
     verify_permissions(&package.join("package.json"), &home)?;
-    verify_permissions(&bun, &home)?;
-    Ok(TrustedTool { bun, entry, home })
+    Ok(TrustedTool {
+        bun,
+        entry,
+        home,
+        version,
+        ownership,
+    })
+}
+
+fn locate_other_package(
+    program: &Path,
+    package_name: &str,
+    tool: &str,
+    releases: Option<&Path>,
+    global: Option<&Path>,
+) -> Result<(PathBuf, &'static str, Option<String>), String> {
+    if tool == "ahub" && releases.is_some_and(|root| program.starts_with(root)) {
+        for parent in program.ancestors().skip(1).take(6) {
+            if !releases.is_some_and(|root| parent.starts_with(root)) {
+                break;
+            }
+            if parent.join("package.json").is_file() {
+                return Ok((parent.to_path_buf(), "ahub-upgrade", None));
+            }
+        }
+    }
+    if let Some(global) = global.filter(|root| program.starts_with(root)) {
+        return Ok((
+            global.join(package_name),
+            if tool == "ahub" {
+                "ahub-upgrade"
+            } else {
+                "bun-global"
+            },
+            None,
+        ));
+    }
+    Err(install_failure("identify active tool ownership", format!("{tool} does not match a supported contained package bin: {} is outside installer roots; inspect its owning installer without replacing it", program.display())))
 }
 
 fn resolve_bun_from(home: &Path, candidates: &[PathBuf]) -> Result<PathBuf, String> {
@@ -327,7 +457,7 @@ pub(crate) fn launch_site(launch: &str, cancelled: &AtomicBool) -> Result<Launch
 }
 
 fn start_console(
-    trusted: TrustedConsole,
+    trusted: TrustedTool,
     timeout: Duration,
     cancelled: &AtomicBool,
 ) -> Result<LaunchedSite, String> {

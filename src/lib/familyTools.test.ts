@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { familyPackageCommand, type FamilyToolId } from "./familyTools";
+import { familyPackageCommand, familyRollbackCommand, type FamilyToolId, type FamilyToolStatus } from "./familyTools";
 import { createVisualModeController } from "./visualModeStore";
 import { ACON_SITE_LAUNCH } from "./sites";
 describe("family tool handoffs", () => {
   it("pins exact supported package versions and refuses shell-shaped input", () => {
-    expect(familyPackageCommand("acon", "0.1.1")).toBe("bun add -g @staix/agent-console@0.1.1");
-    expect(familyPackageCommand("sh" as FamilyToolId, "1.0.0")).toBeNull();
-    for (const version of [null, "latest", "1.0.0; touch /tmp/x", "1.0.0-beta", "$(echo x)"]) expect(familyPackageCommand("amem", version)).toBeNull();
+    expect(familyPackageCommand("acon", "0.1.1", "dot-family")).toBe("dot ai family install acon --version 0.1.1");
+    expect(familyPackageCommand("sh" as FamilyToolId, "1.0.0", "dot-family")).toBeNull();
+    for (const version of [null, "latest", "1.0.0; touch /tmp/x", "1.0.0-beta", "$(echo x)"]) expect(familyPackageCommand("amem", version, "dot-family")).toBeNull();
+  });
+  it("routes update and recovery handoffs to the owning manager only", () => {
+    expect(familyPackageCommand("ahub", "0.30.0", "ahub-upgrade")).toBe("ahub upgrade --to 0.30.0");
+    expect(familyPackageCommand("vmem", "0.4.0", "bun-global")).toBe("dot ai family install vmem --version 0.4.0");
+    expect(familyPackageCommand("vmem", "0.4.0", "external")).toBeNull();
+    expect(familyRollbackCommand({ id: "vmem", ownership: "dot-family", previousVersion: "0.3.3" } as FamilyToolStatus)).toBe("dot ai rollback vmem");
+    expect(familyRollbackCommand({ id: "vmem", ownership: "external", previousVersion: "0.3.3" } as FamilyToolStatus)).toBeNull();
   });
   it("queues only the fixed console launcher without executing it or changing ordinary URL requests", () => {
     const controller = createVisualModeController();
