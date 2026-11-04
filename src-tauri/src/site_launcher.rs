@@ -247,6 +247,12 @@ struct ConsoleChild {
     reaped: bool,
     _permit: Permit,
 }
+impl ConsoleChild {
+    fn mark_reaped(&mut self) {
+        self.reaped = true;
+    }
+}
+
 impl Drop for ConsoleChild {
     fn drop(&mut self) {
         if !self.reaped {
@@ -444,8 +450,9 @@ fn start_console(
         .name("acon-lifetime".into())
         .spawn(move || {
             if kept.recv().is_ok() {
-                let _ = owned.child.wait();
-                owned.reaped = true;
+                if owned.child.wait().is_ok() {
+                    owned.mark_reaped();
+                }
             }
         })
         .map_err(|error| failure("start console lifetime monitor", error))?;
