@@ -5994,7 +5994,10 @@ fn skills_activate_bundle_blocking(
 
     let new_pristine = bundle::bundle_pristine_dir(&new_bundle_id)?;
     let created_pristine = !new_pristine.exists();
-    host_fs::ensure_dir(new_pristine.parent().unwrap_or(Path::new("/")))?;
+    let bundles = new_pristine.parent().unwrap_or(Path::new("/"));
+    host_fs::ensure_dir(bundles).map_err(|error| {
+        host_fs::operation_error("create the retained bundles directory", bundles, error)
+    })?;
     if !created_pristine {
         if hash_directory_filtered(&staging)? != hash_directory_filtered(&new_pristine)? {
             let _ = fs::remove_dir_all(&staging);
@@ -6160,11 +6163,20 @@ fn skills_activate_bundle_blocking(
             .join(&active.bundle_id);
         let old_workspace = bundle::workspace_dir(&active.bundle_id)?;
         let new_workspace = bundle::workspace_dir(&new_bundle_id)?;
-        host_fs::ensure_dir(
-            old_workspace
-                .parent()
-                .ok_or("bundle_workspace_parent_missing")?,
-        )?;
+        let workspaces = old_workspace.parent().ok_or_else(|| {
+            host_fs::operation_error(
+                "resolve the workspace generations directory",
+                &old_workspace,
+                "path has no parent",
+            )
+        })?;
+        host_fs::ensure_dir(workspaces).map_err(|error| {
+            host_fs::operation_error(
+                "create the workspace generations directory",
+                workspaces,
+                error,
+            )
+        })?;
         let old_workspace_hash = hash_directory_filtered(&builtin_root)?;
         publish_bundle_snapshot(&builtin_root, &old_workspace, &old_workspace_hash)?;
         if new_workspace.is_dir() {
