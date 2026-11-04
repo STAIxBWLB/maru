@@ -206,7 +206,10 @@ brew upgrade maru-cli
 ### Sites and Local Agent Console
 
 Sites loads ordinary HTTP(S) entries in native top-level child webviews, with
-no remote IPC grants. H1/H2 URL entries and manual URL opening need no launcher.
+no remote IPC grants. Application command dispatch is limited centrally to the
+first-party `main` and `skill-editor` webviews; other labels receive the same
+refusal before dispatch. Plugin permissions remain governed separately by
+Tauri capabilities and their origin checks. H1/H2 URL entries and manual URL opening need no launcher.
 An optional `launch: "acon ui --no-open --json"` entry starts the local console;
 the older `acon ui --json` spelling maps to the same fixed argv. The editor offers
 URL opening or Agent Console, without a free-form executable field. Saving or
