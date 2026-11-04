@@ -90,6 +90,24 @@ fn save_sites_internal(path: &Path, mut value: JsonValue) -> Result<(), String> 
     }
     obj.entry("version")
         .or_insert_with(|| json!(SITES_SCHEMA_VERSION));
+    if let Some(sites) = obj.get("sites").and_then(JsonValue::as_array) {
+        for site in sites {
+            if let Some(launch) = site.get("launch").filter(|value| !value.is_null()) {
+                let identity = format!(
+                    "site id={} label={}",
+                    site.get("id")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or("<missing>"),
+                    site.get("label")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or("<missing>")
+                );
+                let launch = launch.as_str().ok_or("site_launch_not_allowed: launch must be the Agent Console command or null; use the Sites editor to correct it").map_err(|error| format!("{identity}: {error}"))?;
+                crate::site_launcher::validate_launch(launch)
+                    .map_err(|error| format!("{identity}: {error}"))?;
+            }
+        }
+    }
     write_sites_file(path, &value)
 }
 
@@ -414,6 +432,23 @@ fn read_text_capped(path: &Path, cap: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn registry_refuses_shell_launchers_without_changing_existing_sites() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sites.json");
+        let before = br#"{"version":1,"sites":[{"url":"https://example.com"}]}"#;
+        std::fs::write(&path, before).unwrap();
+        let error = super::save_sites_internal(
+            &path,
+            serde_json::json!({"sites":[{"id":"broken-console","label":"Broken Console","url":"https://example.com","launch":"sh -c 'acon ui'"}]}),
+        )
+        .unwrap_err();
+        assert!(error.contains("site_launch_not_allowed"));
+        assert!(error.contains("broken-console") && error.contains("Broken Console"));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        super::save_sites_internal(&path, serde_json::json!({"sites":[{"url":"https://example.com"},{"launch":"acon ui --no-open --json"}]})).unwrap();
+    }
+
     use super::*;
     use tempfile::TempDir;
 

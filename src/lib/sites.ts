@@ -1,6 +1,8 @@
 // Pure helpers for Sites mode: registry document parsing, grouping,
 // filtering, and native-webview visibility/bounds math.
 
+export const ACON_SITE_LAUNCH = "acon ui --no-open --json";
+
 export interface SiteEntry {
   id: string;
   label: string;
@@ -13,6 +15,7 @@ export interface SiteEntry {
   createdAt: string | null;
   lastUsedAt: string | null;
   notes: string | null;
+  launch?: string | null;
 }
 
 export interface SitesDocument {
@@ -57,7 +60,7 @@ export function parseSitesDocument(value: unknown): SitesDocument {
   const sites: SiteEntry[] = [];
   for (const raw of rawSites) {
     if (!isRecord(raw)) continue;
-    const url = readString(raw.url);
+    const url = readString(raw.url) ?? (raw.launch ? "http://127.0.0.1" : null);
     if (!url) continue;
     sites.push({
       id: readString(raw.id) ?? newSiteId(),
@@ -71,6 +74,7 @@ export function parseSitesDocument(value: unknown): SitesDocument {
       createdAt: readString(raw.createdAt),
       lastUsedAt: readString(raw.lastUsedAt),
       notes: typeof raw.notes === "string" && raw.notes.trim() ? raw.notes : null,
+      ...(raw.launch === undefined ? {} : { launch: raw.launch === null ? null : typeof raw.launch === "string" && raw.launch.trim() ? raw.launch : "invalid launch configuration" }),
     });
   }
   return { version: 1, sites: sortSites(sites) };
@@ -122,8 +126,9 @@ export function filterSitesByQuery(sites: SiteEntry[], query: string): SiteEntry
   );
 }
 
-export function faviconUrlFor(site: Pick<SiteEntry, "favicon" | "url">): string | null {
+export function faviconUrlFor(site: Pick<SiteEntry, "favicon" | "url" | "launch">): string | null {
   if (site.favicon) return site.favicon;
+  if (site.launch != null) return null; // No probe of a launch-only placeholder.
   try {
     return `${new URL(site.url).origin}/favicon.ico`;
   } catch {

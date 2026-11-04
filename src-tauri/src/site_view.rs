@@ -19,9 +19,10 @@
 
 use crate::win_process::NoWindow;
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
@@ -178,6 +179,42 @@ fn emit_to_main<R: tauri::Runtime, S: Serialize + Clone>(
     let _ = app.emit_to(MAIN_WINDOW_LABEL, event, payload);
 }
 
+type PendingOpens = HashMap<String, Arc<AtomicBool>>;
+fn pending_opens() -> Arc<tauri::async_runtime::Mutex<PendingOpens>> {
+    static STATE: OnceLock<Arc<tauri::async_runtime::Mutex<PendingOpens>>> = OnceLock::new();
+    STATE
+        .get_or_init(|| Arc::new(tauri::async_runtime::Mutex::new(HashMap::new())))
+        .clone()
+}
+
+// Memory-only async bookkeeping, never filesystem/process work before the
+// owned worker. Tokio's mutex yields instead of blocking the shared runtime.
+async fn begin_site_open(tab_id: &str) -> Result<(String, Arc<AtomicBool>), String> {
+    let label = embed_label(tab_id)?;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let mut pending = pending_opens().lock_owned().await;
+    if pending.len() >= MAX_TABS && !pending.contains_key(&label) {
+        return Err(
+            "site_open_busy: too many sites are starting; wait or close a pending tab and retry"
+                .into(),
+        );
+    }
+    if let Some(previous) = pending.insert(label.clone(), cancelled.clone()) {
+        previous.store(true, Ordering::Release);
+    }
+    Ok((label, cancelled))
+}
+
+async fn finish_site_open(label: &str, cancelled: &Arc<AtomicBool>) {
+    let mut pending = pending_opens().lock_owned().await;
+    if pending
+        .get(label)
+        .is_some_and(|current| Arc::ptr_eq(current, cancelled))
+    {
+        pending.remove(label);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -194,6 +231,7 @@ fn emit_to_main<R: tauri::Runtime, S: Serialize + Clone>(
 // `ipc` below; `add_child` and the webview methods post to the main thread
 // internally, so calling them from a blocking worker is safe.
 
+#[allow(clippy::too_many_arguments)]
 pub fn site_view_open<R: tauri::Runtime>(
     app: AppHandle<R>,
     tab_id: String,
@@ -202,19 +240,35 @@ pub fn site_view_open<R: tauri::Runtime>(
     y: f64,
     width: f64,
     height: f64,
-) -> Result<(), String> {
-    let target = parse_http_url(&url)?;
+    launch: Option<String>,
+    cancelled: Arc<AtomicBool>,
+) -> Result<String, String> {
+    let fallback = parse_http_url(&url)?;
     let label = embed_label(&tab_id)?;
+    let window = app.get_window(MAIN_WINDOW_LABEL).ok_or_else(|| {
+        "site_launch_window_missing: main window is unavailable; reopen Sites and retry".to_string()
+    })?;
+    let console = launch
+        .as_deref()
+        .map(|launch| crate::site_launcher::launch_site(launch, &cancelled))
+        .transpose()?;
+    let target = console
+        .as_ref()
+        .map(|console| console.url.clone())
+        .unwrap_or(fallback);
+    let resolved_url = target.to_string();
 
-    // Serialize concurrent opens so two racing calls never both reach
-    // add_child for the same label. The lock is only ever taken on a
-    // dedicated blocking worker, so a slow native creation never stalls
-    // the shared async runtime.
-    static OPEN_LOCK: Mutex<()> = Mutex::new(());
-    let _guard = OPEN_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
+    // Waiting happens only on an owned blocking worker. Startup above does
+    // not hold this lock; close/new-open can cancel it immediately. Native
+    // navigation is serialized with close, preventing stale tab-id reuse.
+    let state = pending_opens();
+    let _state = state.blocking_lock();
+    if cancelled.load(Ordering::Acquire) {
+        return Err(
+            "site_open_cancelled: this tab was closed or superseded; open the site again if needed"
+                .into(),
+        );
+    }
     if let Some(existing) = app.get_webview(&label) {
         existing
             .set_bounds(embed_rect(x, y, width, height))
@@ -222,19 +276,18 @@ pub fn site_view_open<R: tauri::Runtime>(
         existing
             .navigate(target)
             .map_err(|err| format!("Cannot navigate browser tab: {err}"))?;
-        existing
-            .show()
-            .map_err(|err| format!("Cannot show browser tab: {err}"))?;
-        return Ok(());
+        existing.hide().map_err(|err| {
+            format!("Cannot hide browser tab until its current UI is ready: {err}; close the tab and reopen the site")
+        })?;
+        if let Some(console) = console {
+            console.keep_alive()?;
+        }
+        return Ok(resolved_url);
     }
 
     if embed_labels(&app).len() >= MAX_TABS {
         return Err(format!("Too many browser tabs open (max {MAX_TABS})"));
     }
-
-    let window = app
-        .get_window(MAIN_WINDOW_LABEL)
-        .ok_or_else(|| "main window not found".to_string())?;
 
     let app_nav = app.clone();
     let app_load = app.clone();
@@ -304,14 +357,28 @@ pub fn site_view_open<R: tauri::Runtime>(
             NewWindowResponse::Deny
         });
 
-    window
+    #[cfg(all(feature = "native-e2e", target_os = "macos"))]
+    let builder = {
+        let id = app.config().app.windows.iter().find(|window| window.label == MAIN_WINDOW_LABEL).and_then(|window| window.data_store_identifier)
+            .ok_or("site_fixture_profile_missing: restart the native fixture with isolated config before opening a site")?;
+        builder.data_store_identifier(id)
+    };
+
+    let embed = window
         .add_child(
             builder,
             Position::Logical(LogicalPosition::new(x, y)),
             Size::Logical(LogicalSize::new(width.max(1.0), height.max(1.0))),
         )
         .map_err(|err| format!("Cannot create browser tab webview: {err}"))?;
-    Ok(())
+    if let Err(error) = embed.hide() {
+        let cleanup = embed.close().err();
+        return Err(format!("Cannot hide newly opened site view: {error}; close cleanup: {cleanup:?}; close the tab and retry opening the site"));
+    }
+    if let Some(console) = console {
+        console.keep_alive()?;
+    }
+    Ok(resolved_url)
 }
 
 #[tauri::command]
@@ -380,6 +447,10 @@ pub async fn site_view_close<R: tauri::Runtime>(
     // Idempotent: closing an absent tab is a no-op. A leaked child webview
     // would float over the UI forever, so failures are surfaced.
     let label = embed_label(&tab_id)?;
+    let mut pending = pending_opens().lock_owned().await;
+    if let Some(cancel) = pending.remove(&label) {
+        cancel.store(true, Ordering::Release);
+    }
     match app.get_webview(&label) {
         Some(webview) => webview
             .close()
@@ -390,6 +461,11 @@ pub async fn site_view_close<R: tauri::Runtime>(
 
 #[tauri::command]
 pub async fn site_view_close_all<R: tauri::Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let mut pending = pending_opens().lock_owned().await;
+    for cancel in pending.values() {
+        cancel.store(true, Ordering::Release);
+    }
+    pending.clear();
     for label in embed_labels(&app) {
         if let Some(webview) = app.get_webview(&label) {
             let _ = webview.close();
@@ -598,6 +674,7 @@ pub mod ipc {
     use super::*;
 
     #[tauri::command]
+    #[allow(clippy::too_many_arguments)]
     pub async fn site_view_open<R: tauri::Runtime>(
         app: AppHandle<R>,
         tab_id: String,
@@ -606,17 +683,23 @@ pub mod ipc {
         y: f64,
         width: f64,
         height: f64,
-    ) -> Result<(), String> {
-        tauri::async_runtime::spawn_blocking(move || {
+        launch: Option<String>,
+    ) -> Result<String, String> {
+        let (label, cancelled) = begin_site_open(&tab_id).await?;
+        let operation = cancelled.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
             crate::atomic_file::PathTransactionLease::test_stage(
                 &[super::worker_hook_key("site_view_open")],
                 "worker:site_view_open",
             );
-            super::site_view_open(app, tab_id, url, x, y, width, height)
+            super::site_view_open(app, tab_id, url, x, y, width, height, launch, operation)
         })
         .await
-        .map_err(|err| format!("site_view_open_task_failed: {err}"))?
+        .map_err(|err| format!("site_view_open_task_failed: {err}; retry opening the site"))
+        .and_then(|result| result);
+        finish_site_open(&label, &cancelled).await;
+        result
     }
 
     #[tauri::command]
@@ -667,6 +750,26 @@ pub mod ipc {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cancelled_open_identity_cannot_remove_or_publish_a_newer_tab_request() {
+        tauri::async_runtime::block_on(async {
+            let (label, first) = super::begin_site_open("cancel-test").await.unwrap();
+            let (_, second) = super::begin_site_open("cancel-test").await.unwrap();
+            assert!(first.load(std::sync::atomic::Ordering::Acquire));
+            assert!(!second.load(std::sync::atomic::Ordering::Acquire));
+            super::finish_site_open(&label, &first).await;
+            let app = tauri::test::mock_app();
+            super::site_view_close(app.handle().clone(), "cancel-test".into())
+                .await
+                .unwrap();
+            assert!(second.load(std::sync::atomic::Ordering::Acquire));
+            assert!(!super::pending_opens()
+                .lock_owned()
+                .await
+                .contains_key(&label));
+        });
+    }
+
     use super::*;
 
     fn url(value: &str) -> Url {
@@ -828,6 +931,7 @@ mod tests {
                         0.0,
                         100.0,
                         100.0,
+                        None,
                     )
                     .await
                 },
@@ -864,6 +968,7 @@ mod tests {
                     0.0,
                     100.0,
                     100.0,
+                    None,
                 )
                 .await
                 .unwrap_err();
@@ -880,6 +985,7 @@ mod tests {
                     0.0,
                     100.0,
                     100.0,
+                    None,
                 )
                 .await
                 .unwrap_err();
@@ -893,10 +999,11 @@ mod tests {
                     0.0,
                     100.0,
                     100.0,
+                    None,
                 )
                 .await
                 .unwrap_err();
-                assert_eq!(error, "main window not found");
+                assert!(error.contains("site_launch_window_missing"), "{error}");
 
                 let error = ipc::site_view_open_external("file:///etc/passwd".into())
                     .await

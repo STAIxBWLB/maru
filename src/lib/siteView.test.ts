@@ -21,6 +21,10 @@ import {
   sanitizeSiteViewOpenedUrls,
   SITE_VIEW_OPEN_REQUESTED_EVENT,
   siteViewOpenSafari,
+  siteViewOpen,
+  siteViewClose,
+  siteViewCloseAll,
+  siteViewTabRuntime,
   siteViewTakeOpenedUrls,
   subscribeSiteViewOpenRequests,
 } from "./siteView";
@@ -178,5 +182,58 @@ describe("site view opened URL bridge", () => {
 
     expect(mocks.invoke).not.toHaveBeenCalled();
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe("local launch handoff and pending tab lifetime", () => {
+  beforeEach(() => {
+    mocks.invoke.mockReset();
+    (globalThis as { window?: unknown }).window = { __TAURI_INTERNALS__: {} };
+  });
+  afterEach(async () => {
+    mocks.invoke.mockResolvedValue(undefined);
+    await siteViewCloseAll();
+    delete (globalThis as { window?: unknown }).window;
+  });
+  const bounds = { x: 0, y: 0, width: 400, height: 300 };
+  const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+
+  it("uses the resolved native URL without persisting the configured placeholder as current", async () => {
+    mocks.invoke.mockResolvedValue("http://127.0.0.1:43211/#ticket");
+    const url = await siteViewOpen("launch-url", "http://127.0.0.1", bounds, "acon ui --no-open --json");
+    expect(mocks.invoke).toHaveBeenCalledWith("site_view_open", { tabId: "launch-url", url: "http://127.0.0.1", ...bounds, launch: "acon ui --no-open --json" });
+    expect(siteViewTabRuntime("launch-url")?.url).toBe(url);
+    expect(siteViewTabRuntime("launch-url")?.shown).toBe(false);
+  });
+
+  it("refuses failed launch without a fallback navigation or loss of the previous page", async () => {
+    mocks.invoke.mockResolvedValueOnce("https://example.com/").mockRejectedValueOnce(new Error("site_launch_failed"));
+    await siteViewOpen("launch-error", "https://example.com", bounds);
+    await expect(siteViewOpen("launch-error", "http://127.0.0.1", bounds, "acon ui --no-open --json")).rejects.toThrow("site_launch_failed");
+    expect(siteViewTabRuntime("launch-error")?.url).toBe("https://example.com/");
+    expect(mocks.invoke.mock.calls.every(([command]) => command === "site_view_open")).toBe(true);
+  });
+
+  it("cancels pending tabs and fences a reused id behind the close acknowledgement", async () => {
+    let finishOpen!: (value: string) => void;
+    let finishClose!: () => void;
+    const pendingOpen = new Promise<string>((resolve) => { finishOpen = resolve; });
+    const pendingClose = new Promise<void>((resolve) => { finishClose = resolve; });
+    let opens = 0;
+    mocks.invoke.mockImplementation((command: string) => command === "site_view_close" ? pendingClose : ++opens === 1 ? pendingOpen : Promise.resolve("https://new.example/"));
+    const old = siteViewOpen("launch-race", "http://127.0.0.1", bounds, "acon ui --no-open --json");
+    await flush();
+    expect(opens).toBe(1);
+    expect(siteViewTabRuntime("launch-race")).toBeNull();
+    const closed = siteViewClose("launch-race");
+    const fresh = siteViewOpen("launch-race", "https://new.example", bounds);
+    await flush();
+    expect(opens).toBe(1);
+    finishOpen("http://127.0.0.1:43211/#old-ticket");
+    await expect(old).resolves.toBeNull();
+    finishClose();
+    await closed;
+    await fresh;
+    expect(siteViewTabRuntime("launch-race")?.url).toBe("https://new.example/");
   });
 });
