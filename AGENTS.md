@@ -48,6 +48,8 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 
 ## Things the agent gets wrong
 
+- **Post-activation cleanup (2026-11-04)**: before changing housekeeping after bundle activation, read `README.md` §Release Process and preserve its registry-save boundary.
+
 - **Error propagation (2026-11-04)**: before adding or changing `?` / `map_err` paths,
   read `REVIEW.md` §Passes, Error messages. Recheck propagated filesystem failures
   when adding failure-injection tests.

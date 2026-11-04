@@ -5113,13 +5113,14 @@ fn stale_copy_installs_report(registry: &SkillsRegistry) -> Vec<String> {
 fn cleanup_removed_builtin_installs(
     registry: &mut SkillsRegistry,
     removed: &[String],
-) -> Result<usize, String> {
+) -> Result<(usize, Vec<String>), String> {
     let builtin_prefix = builtin_materialized_root()?;
     let previous_workspace = bundle::read_state()?
         .and_then(|state| state.previous)
         .map(|previous| bundle::workspace_dir(&previous.bundle_id))
         .transpose()?;
     let mut count = 0;
+    let mut warnings = Vec::new();
     for name in removed {
         let skill_id = format!("{BUILTIN_SOURCE_ID}::{name}");
         let matches: Vec<SkillInstall> = registry
@@ -5136,9 +5137,15 @@ fn cleanup_removed_builtin_installs(
         for install in matches {
             let tool_target = PathBuf::from(&install.target_path);
             let maru_entry = PathBuf::from(&install.entrypoint_path);
-            host_fs::remove_if_matching_symlink(&tool_target, &maru_entry).map_err(|error| {
-                host_fs::operation_error("remove dropped skill provider alias", &tool_target, error)
-            })?;
+            if let Err(error) = host_fs::remove_if_matching_symlink(&tool_target, &maru_entry) {
+                warnings.push(host_fs::operation_error(
+                    "remove dropped skill provider alias",
+                    &tool_target,
+                    error,
+                ));
+                // Keep the failed alias registered so its shared entry stays reachable.
+                continue;
+            }
             entries.insert(maru_entry);
             registry.installs.retain(|other| {
                 !(other.target == install.target && other.installed_as == install.installed_as)
@@ -5154,15 +5161,18 @@ fn cleanup_removed_builtin_installs(
             }) {
                 continue;
             }
-            remove_owned_builtin_entry(
-                &maru_entry,
-                name,
-                &builtin_prefix,
-                previous_workspace.as_deref(),
-            )?;
+            warnings.extend(
+                remove_owned_builtin_entry(
+                    &maru_entry,
+                    name,
+                    &builtin_prefix,
+                    previous_workspace.as_deref(),
+                )
+                .err(),
+            );
         }
     }
-    Ok(count)
+    Ok((count, warnings))
 }
 
 fn remove_owned_builtin_entry(
@@ -6403,7 +6413,13 @@ fn skills_activate_bundle_blocking(
             generations.remove(&(registry_path()?, BUILTIN_SOURCE_ID.to_string()));
         }
         rescan_source_in_registry_with_progress(&mut registry, BUILTIN_SOURCE_ID, progress)?;
-        let removed_installs = cleanup_removed_builtin_installs(&mut registry, &removed_skills)?;
+        #[cfg(test)]
+        tests::phase08_03_network_lock::at_edge("bundle_cleanup");
+        let (removed_installs, cleanup_warnings) =
+            cleanup_removed_builtin_installs(&mut registry, &removed_skills)?;
+        for warning in cleanup_warnings {
+            progress.emit("warn", warning, None, None);
+        }
         save_registry_unlocked(&registry)?;
         let stale_copy_installs = stale_copy_installs_report(&registry);
         let workspace_cleanup = (|| {
@@ -9321,10 +9337,10 @@ mod tests {
                     copy.mode = "copy".into();
                     registry.installs.push(copy);
                 }
-                assert_eq!(
-                    cleanup_removed_builtin_installs(&mut registry, &["gaejosik".into()]).unwrap(),
-                    1
-                );
+                let (removed, warnings) =
+                    cleanup_removed_builtin_installs(&mut registry, &["gaejosik".into()]).unwrap();
+                assert_eq!(removed, 1);
+                assert!(warnings.is_empty());
                 assert_eq!(host_fs::read_link_target(&entry).is_some(), keep_reference);
                 assert_eq!(
                     registry
@@ -9333,6 +9349,131 @@ mod tests {
                         .any(|install| install.entrypoint_path == host_fs::display_path(&entry)),
                     keep_reference
                 );
+            }
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn post_activation_unlink_failures_warn_and_still_save_the_rescanned_registry() {
+            use std::os::unix::fs::PermissionsExt;
+            struct Events {
+                events: Mutex<Vec<SkillProgressEvent>>,
+                parent: PathBuf,
+                permissions: fs::Permissions,
+            }
+            impl SkillProgressEmitter for Events {
+                fn emit_progress(&self, event: SkillProgressEvent) {
+                    if event.level == "warn" {
+                        // Restrict the injected failure to cleanup, not the registry write.
+                        fs::set_permissions(&self.parent, self.permissions.clone()).unwrap();
+                    }
+                    self.events.lock().unwrap().push(event);
+                }
+            }
+            for failure in ["provider", "entry"] {
+                let _home = test_home();
+                skills_list_sources(None).unwrap();
+                for target in ["claude", "codex"] {
+                    skills_install_skill(
+                        "maru-builtin::gaejosik".into(),
+                        target.into(),
+                        None,
+                        Some("symlink".into()),
+                    )
+                    .unwrap();
+                }
+                let before = load_registry().unwrap();
+                let install = before
+                    .installs
+                    .iter()
+                    .find(|install| {
+                        install.target == "claude" && install.skill_id == "maru-builtin::gaejosik"
+                    })
+                    .unwrap();
+                let failed = PathBuf::from(if failure == "provider" {
+                    &install.target_path
+                } else {
+                    &install.entrypoint_path
+                });
+                let parent = failed.parent().unwrap().to_path_buf();
+                let permissions = fs::metadata(&parent).unwrap().permissions();
+                let events = Events {
+                    events: Mutex::new(Vec::new()),
+                    parent: parent.clone(),
+                    permissions: permissions.clone(),
+                };
+                let blocked = parent.clone();
+                *HOOK.lock().unwrap() = Some(Arc::new(move |edge| {
+                    if edge == "bundle_cleanup" {
+                        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+                    }
+                }));
+                let _reset = ResetHook;
+                let (remote, archive) = bundle_fixture();
+                let result = skills_apply_bundle_update_blocking(
+                    None,
+                    true,
+                    ProgressReporter {
+                        app: Some(&events),
+                        progress_id: Some("cleanup-warning"),
+                    },
+                    |_, _| Ok(Some(remote)),
+                    |_| Ok(archive),
+                    |_, _, _, root| {
+                        fs::create_dir_all(root.join(".venv")).map_err(|error| error.to_string())
+                    },
+                );
+                fs::set_permissions(&parent, permissions).unwrap();
+                let applied = result.unwrap();
+                assert_eq!(
+                    bundle::read_state().unwrap().unwrap().active,
+                    Some(applied.current)
+                );
+                let persisted: SkillsRegistry =
+                    serde_json::from_slice(&fs::read(registry_path().unwrap()).unwrap()).unwrap();
+                assert!(persisted
+                    .skills
+                    .iter()
+                    .any(|skill| skill.id == "maru-builtin::updated"));
+                assert!(!persisted
+                    .skills
+                    .iter()
+                    .any(|skill| skill.id == "maru-builtin::gaejosik"));
+                assert!(!persisted
+                    .installs
+                    .iter()
+                    .any(|install| install.target == "codex"));
+                assert_eq!(
+                    persisted
+                        .installs
+                        .iter()
+                        .any(|install| install.target == "claude"),
+                    failure == "provider"
+                );
+                assert_eq!(
+                    applied.removed_installs,
+                    if failure == "provider" { 1 } else { 2 }
+                );
+                let captured = events.events.lock().unwrap();
+                let warning = captured
+                    .iter()
+                    .find(|event| {
+                        event.level == "warn"
+                            && event.message.contains(&host_fs::display_path(&failed))
+                    })
+                    .expect("unlink failure must be a progress warning");
+                assert!(
+                    warning.message.contains("skills_io_failed"),
+                    "{}",
+                    warning.message
+                );
+                assert!(
+                    warning.message.contains("maru skills update --check"),
+                    "{}",
+                    warning.message
+                );
+                assert!(captured.iter().any(|event| event.level == "success"));
+                assert!(host_fs::read_link_target(Path::new(&install.entrypoint_path)).is_some());
             }
         }
 
