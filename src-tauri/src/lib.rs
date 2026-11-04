@@ -759,6 +759,16 @@ mod quit_acl_tests {
     use tauri::webview::InvokeRequest;
     use tauri::WebviewWindowBuilder;
 
+    // Tauri's test helper accepts AsRef<Webview>, which WebviewWindow provides
+    // but a child Webview itself does not. Keep the same IPC response path.
+    struct ChildIpc<'a>(&'a tauri::Webview<tauri::test::MockRuntime>);
+
+    impl AsRef<tauri::Webview<tauri::test::MockRuntime>> for ChildIpc<'_> {
+        fn as_ref(&self) -> &tauri::Webview<tauri::test::MockRuntime> {
+            self.0
+        }
+    }
+
     fn invoke_request(cmd: &str) -> InvokeRequest {
         InvokeRequest {
             cmd: cmd.into(),
@@ -857,17 +867,18 @@ mod quit_acl_tests {
                     tauri::Size::Logical(tauri::LogicalSize::new(200.0, 100.0)),
                 )
                 .unwrap();
+            let child_ipc = ChildIpc(&child);
             let mut request = invoke_request("read_sites");
             request.url = remote.clone();
             assert_eq!(
-                get_ipc_response(&child, request).unwrap_err(),
+                get_ipc_response(&child_ipc, request).unwrap_err(),
                 serde_json::json!(
                     "app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"
                 )
             );
             let mut request = invoke_request("plugin:window|is_maximized");
             request.url = remote;
-            let refused = get_ipc_response(&child, request).unwrap_err();
+            let refused = get_ipc_response(&child_ipc, request).unwrap_err();
             assert!(
                 refused.as_str().unwrap_or_default().contains("not allowed"),
                 "{origin}: {refused}"
