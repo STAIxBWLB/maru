@@ -5161,15 +5161,13 @@ fn cleanup_removed_builtin_installs(
             }) {
                 continue;
             }
-            warnings.extend(
-                remove_owned_builtin_entry(
-                    &maru_entry,
-                    name,
-                    &builtin_prefix,
-                    previous_workspace.as_deref(),
-                )
-                .err(),
+            let result = remove_owned_builtin_entry(
+                &maru_entry,
+                name,
+                &builtin_prefix,
+                previous_workspace.as_deref(),
             );
+            warnings.extend(result.err());
         }
     }
     Ok((count, warnings))
