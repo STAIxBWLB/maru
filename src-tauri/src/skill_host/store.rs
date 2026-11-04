@@ -9376,6 +9376,7 @@ exit 7
         }
 
         #[test]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         fn side_by_side_update_keeps_links_and_pins_then_rollback_restores_bundle_and_env() {
             let _home = test_home();
             skills_list_sources(None).unwrap();

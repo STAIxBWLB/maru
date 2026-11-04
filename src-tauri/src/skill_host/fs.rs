@@ -393,12 +393,21 @@ pub(crate) fn link_temp(link: &Path) -> PathBuf {
     link.with_file_name(format!(".maru-next-{}", &hash[..16]))
 }
 
-/// Exchange a legacy directory with a fully published symlink. No reader
-/// that already cached the old _builtin target ever sees that name missing.
+/// Prefer an atomic legacy-directory exchange; use the owner's one-time
+/// migration exception only when the platform/filesystem cannot exchange.
 pub(crate) fn migrate_legacy_directory(
     link: &Path,
     target: &Path,
     retired: &Path,
+) -> Result<(), String> {
+    migrate_legacy_directory_with_exchange(link, target, retired, exchange_paths)
+}
+
+fn migrate_legacy_directory_with_exchange(
+    link: &Path,
+    target: &Path,
+    retired: &Path,
+    exchange: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(), String> {
     let parent = retired.parent().ok_or(
         "skill_migration_parent_missing: inspect the retired-workspace path before retrying",
@@ -411,7 +420,65 @@ pub(crate) fn migrate_legacy_directory(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => create_symlink_no_clobber(retired, target)?,
         Err(error) => return Err(operation_error("inspect retired-workspace staging path", retired, error)),
     }
-    exchange_paths(link, retired).map_err(|error| operation_error("atomically exchange legacy directory and staged symlink (requires filesystem name-exchange support; report unsupported platforms to the maintainer)", link, error))
+    match exchange(link, retired) {
+        Ok(()) => Ok(()),
+        Err(error) if exchange_is_unsupported(&error) => migrate_legacy_with_gap(link, retired),
+        Err(error) => Err(operation_error(
+            "atomically exchange legacy directory and staged symlink",
+            link,
+            error,
+        )),
+    }
+}
+
+fn exchange_is_unsupported(error: &std::io::Error) -> bool {
+    if error.kind() == std::io::ErrorKind::Unsupported {
+        return true;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        matches!(error.raw_os_error(), Some(22 | 38 | 95))
+    } // EINVAL / ENOSYS / ENOTSUP
+    #[cfg(target_os = "macos")]
+    {
+        matches!(error.raw_os_error(), Some(22 | 45 | 78))
+    } // EINVAL / ENOTSUP / ENOSYS
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        false
+    }
+}
+
+fn migrate_legacy_with_gap(link: &Path, retired: &Path) -> Result<(), String> {
+    // Owner's AC1 exception: https://github.com/STAIxBWLB/maru/issues/466#issuecomment-6622259347
+    // Windows and unsupported
+    // exchange filesystems may have a short gap on this ONE-TIME migration.
+    // Fully stage the symlink before retiring the directory; keep the old
+    // tree for N-1/recovery. Later switches retain atomic link replacement.
+    let staged = link_temp(link);
+    match fs::symlink_metadata(&staged) {
+        Ok(_) => return Err(format!("skill_migration_conflict: {}; preserve the existing staging entry and inspect the journal before retrying", staged.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(operation_error("inspect fallback migration staging", &staged, error)),
+    }
+    fs::rename(retired, &staged)
+        .map_err(|error| operation_error("stage fallback migration symlink", &staged, error))?;
+    fs::rename(link, retired).map_err(|error| {
+        operation_error(
+            "retire legacy directory for fallback migration",
+            retired,
+            error,
+        )
+    })?;
+    // Only these two adjacent renames are in the gap. No copy/setup runs here.
+    if let Err(error) = fs::rename(&staged, link) {
+        let publication = operation_error("publish fallback migration symlink", link, error);
+        if let Err(restore) = fs::rename(retired, link) {
+            return Err(format!("{publication}; restoration failed: {restore}; old tree remains at {}; preserve it and retry journal recovery after resolving the path error", retired.display()));
+        }
+        return Err(publication);
+    }
+    Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -530,6 +597,67 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn unsupported_exchange_migrates_with_staged_link_and_retains_the_old_tree() {
+        let _home = test_home_for_bundle_tests();
+        let builtin = skills_root().unwrap().join("_builtin");
+        let target = skills_root().unwrap().join("_workspaces/old");
+        for dir in [&builtin, &target] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(dir.join("keep"), "old bytes").unwrap();
+        }
+        let retired = skills_root().unwrap().join("_cache/retired/old");
+        migrate_legacy_directory_with_exchange(&builtin, &target, &retired, |_, _| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "fixture unsupported exchange",
+            ))
+        })
+        .unwrap();
+        assert_eq!(read_link_target(&builtin).unwrap(), target);
+        assert_eq!(
+            fs::read_to_string(builtin.join("keep")).unwrap(),
+            "old bytes"
+        );
+        assert_eq!(
+            fs::read_to_string(retired.join("keep")).unwrap(),
+            "old bytes"
+        );
+        assert!(fs::symlink_metadata(&retired).unwrap().is_dir());
+        assert!(!link_temp(&builtin).exists());
+    }
+
+    #[test]
+    fn migration_does_not_fall_back_for_an_ordinary_exchange_error() {
+        let _home = test_home_for_bundle_tests();
+        let builtin = skills_root().unwrap().join("_builtin");
+        let target = skills_root().unwrap().join("_workspaces/old");
+        fs::create_dir_all(&builtin).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(builtin.join("keep"), "old bytes").unwrap();
+        let retired = skills_root().unwrap().join("_cache/retired/old");
+        let error = migrate_legacy_directory_with_exchange(&builtin, &target, &retired, |_, _| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "fixture denied exchange",
+            ))
+        })
+        .unwrap_err();
+        assert!(
+            error.contains("atomically exchange legacy directory"),
+            "{error}"
+        );
+        assert!(fs::symlink_metadata(&builtin).unwrap().is_dir());
+        assert_eq!(
+            fs::read_to_string(builtin.join("keep")).unwrap(),
+            "old bytes"
+        );
+        assert!(
+            read_link_target(&retired).is_some(),
+            "failed exchange did not retire the old directory"
+        );
+    }
 
     #[test]
     #[cfg(any(target_os = "linux", target_os = "macos"))]

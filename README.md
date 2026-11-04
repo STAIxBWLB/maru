@@ -609,10 +609,12 @@ subsequent reads.
 update or rollback until preserved with Save As or discarded. Session retention
 is conservative: a launching Maru process keeps its captured versions until it
 exits, including for detached terminal runs.
-Initial migration of an existing `_builtin` directory requires atomic name
-exchange support (Linux/Darwin). Unsupported platforms/filesystems refuse the
-migration with the previous directory intact; there is no rename-away fallback.
-The original exchanged directory is retained alongside N-1 for in-flight readers.
+Initial migration of an existing `_builtin` directory uses atomic name exchange
+on Linux/macOS. The [AC1 Windows exception](https://github.com/STAIxBWLB/maru/issues/466#issuecomment-6622259347)
+permits a short gap for this one-time migration on Windows or a filesystem that
+reports exchange unsupported: fully stage the symlink, retire the old directory,
+then rename the link into place. The old tree is retained for N-1 and recovery.
+Every later switch keeps atomic link replacement (Windows `FileRenameInfoEx`).
 
 The release version's major and minor come from the active GSD milestone in
 `.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped
