@@ -133,23 +133,29 @@ pub(crate) fn active_program_with_path(
     windows: bool,
     path_env: Option<&OsStr>,
 ) -> Option<PathBuf> {
+    let filename = if windows {
+        format!("{tool}.exe")
+    } else {
+        tool.to_string()
+    };
+    let aliases = [
+        home.join(".local/bin").join(&filename),
+        home.join(".bun/bin").join(&filename),
+    ];
     let program = path_env
         .and_then(|path| crate::cli_path::which_in_path(tool, Some(path)).ok())
         .or_else(|| {
-            [
-                home.join(".local/bin").join(if windows {
-                    format!("{tool}.exe")
-                } else {
-                    tool.to_string()
-                }),
-                home.join(".bun/bin").join(if windows {
-                    format!("{tool}.exe")
-                } else {
-                    tool.to_string()
-                }),
-            ]
-            .into_iter()
-            .find(|path| path.canonicalize().is_ok_and(|resolved| resolved.is_file()))
+            aliases
+                .iter()
+                .find(|path| path.canonicalize().is_ok_and(|resolved| resolved.is_file()))
+                .cloned()
+        })
+        // Preserve a broken managed alias for inventory ownership and repair
+        // diagnostics, but only after every usable candidate was considered.
+        .or_else(|| {
+            aliases
+                .into_iter()
+                .find(|path| fs::symlink_metadata(path).is_ok())
         })?;
     Some(normalize_windows_program(program, windows))
 }
@@ -451,7 +457,15 @@ fn probe_error_detail(error: reqwest::Error) -> String {
     } else {
         "request failure"
     };
-    format!("local console probe {class} within the 2-second probe timeout: {error:#}")
+    let mut detail =
+        format!("local console probe {class} within the 2-second probe timeout: {error}");
+    let mut source = std::error::Error::source(&error);
+    while let Some(cause) = source {
+        detail.push_str("; caused by: ");
+        detail.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    detail
 }
 
 struct Permit;
@@ -994,6 +1008,23 @@ server.serve_forever()
                 .version,
             "0.1.0"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn active_console_preserves_a_dangling_alias_when_no_valid_candidate_exists() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path();
+        let alias = root.join(".local/bin/acon");
+        fs::create_dir_all(alias.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("../share/dotfiles/tools/acon/current/bin/acon", &alias)
+            .unwrap();
+        let path = std::env::join_paths([alias.parent().unwrap()]).unwrap();
+        assert_eq!(
+            active_program_with_path(root, "acon", false, Some(&path)),
+            Some(alias)
+        );
+        assert!(resolve_console(root).is_err());
     }
 
     #[test]
