@@ -83,3 +83,6 @@ artifacts/
 
 # === Local design QA captures ===
 docs/design-qa/
+.agenthub/state/
+.agenthub/config.local.json
+.agenthub/routing.local.toml
