@@ -18,7 +18,7 @@ export const en: Record<string, string> = {
   "family.ownership": "Installation owner",
   "family.owner.bun-global": "Bun global package (externally managed)",
   "family.owner.dot-family": "dot family (versioned install)",
-  "family.owner.ahub-upgrade": "ahub upgrade (release manager)",
+  "family.owner.ahub-upgrade": "ahub upgrade (selected project; run in the project directory)",
   "family.owner.external": "External installer; inspect using that installer",
   "family.commands": "Published commands",
   "family.noManifest": "No supported command manifest; package identity/version only.",

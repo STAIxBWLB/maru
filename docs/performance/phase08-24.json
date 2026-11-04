@@ -1235,8 +1235,13 @@
       },
       "tests": [
         {
-          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib family_registry_",
-          "status": "UNVERIFIED: awaits hosted CI; no result count claimed"
+          "command": "make test-rust",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "scope": "The five family_tools::tests::family_registry cases in the full make test-rust run; overall 2034 passed, 0 failed, 3 unrelated ignored.",
+          "source": "https://github.com/STAIxBWLB/maru/actions/runs/41793696764/job/126452745665",
+          "commit": "508f23c2c3c44dd1c1c94c340eeffaa81f638ed6"
         }
       ],
       "processingCaller": {
@@ -1260,7 +1265,7 @@
           "family_registry_uses_dot_current_over_shadowed_bun_and_keeps_offline_install",
           "family_registry_recognizes_ahub_upgrade_release_identity_without_executing_it"
         ],
-        "workerProof": "src-tauri/src/family_tools.rs::tests::family_registry_worker_yields_and_maps_join_failure uses the existing same-poll boundary fixture; it is written but execution is UNVERIFIED until hosted Rust CI.",
+        "workerProof": "src-tauri/src/family_tools.rs::tests::family_registry_worker_yields_and_maps_join_failure uses the existing same-poll boundary fixture and passed with all five family_registry tests in hosted run 41793696764 at 508f23c2c3c44dd1c1c94c340eeffaa81f638ed6 (2034 passed, 0 failed, 3 ignored overall).",
         "platformScope": "Synthetic Rust fixtures; no personal home mutation, installs or live service starts. Native fixture execution and real platform proof remain unverified."
       }
     }

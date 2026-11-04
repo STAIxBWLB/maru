@@ -18,7 +18,7 @@ export const ko: Record<string, string> = {
   "family.ownership": "설치 관리 주체",
   "family.owner.bun-global": "Bun 전역 패키지 (외부 관리)",
   "family.owner.dot-family": "dot family (버전별 설치)",
-  "family.owner.ahub-upgrade": "ahub upgrade (릴리스 관리)",
+  "family.owner.ahub-upgrade": "ahub upgrade (선택한 프로젝트, 해당 프로젝트 디렉터리에서 실행)",
   "family.owner.external": "외부 설치 도구에서 확인 필요",
   "family.commands": "공개된 명령",
   "family.noManifest": "지원하는 명령 manifest가 없어 패키지 이름과 버전만 확인합니다.",

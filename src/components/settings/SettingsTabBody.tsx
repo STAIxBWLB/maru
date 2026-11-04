@@ -4,6 +4,7 @@
 // JSON stays under `<work>/.maru/`; skill management also talks to the
 // global `~/.maru/skills` registry.
 
+import { lazy, Suspense } from "react";
 import { useTranslation } from "../../lib/i18n";
 import type { MaruSettings } from "../../lib/settings";
 import type { SettingsTabId } from "./settingsNav";
@@ -14,7 +15,6 @@ import { AiSettingsTab } from "./tabs/AiSettingsTab";
 import { AppearanceTab } from "./tabs/AppearanceTab";
 import { CommsSettingsSystemTab } from "./tabs/CommsSettingsSystemTab";
 import { ConnectorsTab } from "./tabs/ConnectorsTab";
-import { FamilyToolsTab } from "./tabs/FamilyToolsTab";
 import { GeneralTab } from "./tabs/GeneralTab";
 import { IgnoreTab } from "./tabs/IgnoreTab";
 import { InboxRuntimeConfigTab } from "./tabs/InboxRuntimeConfigTab";
@@ -27,6 +27,10 @@ import { SkillsTab } from "./tabs/SkillsTab";
 import { TasksSettingsSystemTab } from "./tabs/TasksSettingsSystemTab";
 import { TemplatesTab } from "./tabs/TemplatesTab";
 import { TerminalTab } from "./tabs/TerminalTab";
+
+const FamilyToolsTab = lazy(() =>
+  import("./tabs/FamilyToolsTab").then((module) => ({ default: module.FamilyToolsTab })),
+);
 
 interface SettingsTabBodyProps {
   workPath: string | null;
@@ -60,7 +64,11 @@ export function SettingsTabBody({
 
   return (
       <section className="system-body">
-        {tab === "family-tools" ? <FamilyToolsTab /> : null}
+        {tab === "family-tools" ? (
+          <Suspense fallback={<p role="status">{t("family.loading")}</p>}>
+            <FamilyToolsTab />
+          </Suspense>
+        ) : null}
         {tab === "preferences" ? (
           <GeneralTab settings={settings} onSettingsChange={onSettingsChange} />
         ) : null}
