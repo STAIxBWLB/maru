@@ -2,6 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::atomic_file::{PathTransactionLease, PathTransactionParent, PathTransactionRequest};
 use crate::paths::require_absolute;
 
 #[cfg(unix)]
@@ -39,6 +40,10 @@ pub fn env_base() -> Result<PathBuf, String> {
     Ok(maru_home()?.join("env"))
 }
 
+pub(crate) fn is_hashed_env_root(root: &Path) -> Result<bool, String> {
+    Ok(root.parent() == Some(env_base()?.as_path()))
+}
+
 pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
     if hash.is_empty()
         || ["node", "node_modules", "temp", "logs", "input", "output"].contains(&hash)
@@ -53,6 +58,274 @@ pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
         return Err("invalid_env_hash: environment directory must not be a symlink; move the conflicting link aside and retry".into());
     }
     Ok(root)
+}
+
+pub(crate) fn hash_env_repair_paths(root: &Path) -> [PathBuf; 3] {
+    [
+        root.to_path_buf(),
+        root.with_extension("prev"),
+        root.with_extension("repair.lock"),
+    ]
+}
+
+fn env_directory(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() => Ok(true),
+        Ok(_) => Err(operation_error(
+            "inspect environment directory",
+            path,
+            "expected a non-symlink directory; preserve the conflicting entry",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(operation_error(
+            "inspect environment directory",
+            path,
+            error,
+        )),
+    }
+}
+
+fn env_complete(root: &Path) -> Result<bool, String> {
+    let marker = root.join(".maru-env-complete");
+    match fs::symlink_metadata(&marker) {
+        Ok(metadata) => Ok(metadata.file_type().is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(operation_error(
+            "inspect environment completion",
+            &marker,
+            error,
+        )),
+    }
+}
+
+fn open_env_repair_lock(root: &Path) -> Result<fs::File, String> {
+    let path = root.with_extension("repair.lock");
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(operation_error(
+                "validate environment repair lock",
+                &path,
+                "lock is not a regular file; preserve it and inspect the path",
+            ))
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(operation_error(
+                "inspect environment repair lock",
+                &path,
+                error,
+            ))
+        }
+        _ => (),
+    }
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|error| operation_error("open environment repair lock", &path, error))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(operation_error_with_recovery(
+            "lock environment repair",
+            root,
+            "another environment repair is in progress",
+            "wait for that repair to finish, then retry the requested operation",
+        )),
+        Err(error) => Err(operation_error("lock environment repair", &path, error)),
+    }
+}
+
+fn recover_hash_env_locked(root: &Path, force_restore: bool) -> Result<Vec<String>, String> {
+    let backup = root.with_extension("prev");
+    let has_backup = env_directory(&backup)?;
+    let has_root = env_directory(root)?;
+    if has_backup && !force_restore && has_root && env_complete(root)? {
+        return Ok(fs::remove_dir_all(&backup).err().map(|error| operation_error_with_recovery("remove completed environment backup", &backup, error, "the rebuilt environment is complete; resolve backup permissions and click Refresh in the Settings > Skills toolbar to retry cleanup")).into_iter().collect());
+    }
+    if has_backup || force_restore {
+        if has_root {
+            fs::remove_dir_all(root).map_err(|error| {
+                operation_error("remove incomplete environment attempt", root, error)
+            })?;
+        }
+        if has_backup {
+            fs::rename(&backup, root)
+                .map_err(|error| operation_error("restore previous environment", &backup, error))?;
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// Recovery never races a live builder: the sibling OS lock survives only until process exit.
+pub(crate) fn recover_hash_env(root: &Path) -> Result<Vec<String>, String> {
+    let backup = root.with_extension("prev");
+    if !env_directory(&backup)? {
+        return Ok(Vec::new());
+    }
+    let parent_path = root
+        .parent()
+        .ok_or_else(|| operation_error("resolve environment parent", root, "path has no parent"))?;
+    let parent = PathTransactionParent::capture(parent_path).map_err(|error| {
+        operation_error("capture environment recovery parent", parent_path, error)
+    })?;
+    let request = PathTransactionRequest::new(hash_env_repair_paths(root))
+        .and_then(|request| request.require_parent_snapshot(&parent))
+        .map_err(|error| operation_error("admit environment recovery", root, error))?;
+    let lease = request
+        .try_acquire()
+        .map_err(|error| operation_error("admit environment recovery", root, error))?
+        .ok_or_else(|| {
+            operation_error_with_recovery(
+                "admit environment recovery",
+                root,
+                "environment paths are busy",
+                "retry after the current environment operation finishes",
+            )
+        })?;
+    let _lock = open_env_repair_lock(root)?;
+    lease
+        .before_effect()
+        .map_err(|error| operation_error("revalidate environment recovery", root, error))?;
+    recover_hash_env_locked(root, false)
+}
+
+pub(crate) struct HashEnvRebuild {
+    root: PathBuf,
+    parent: PathTransactionParent,
+    _lock: fs::File,
+}
+
+pub(crate) fn lock_hash_env_rebuild(
+    lease: &PathTransactionLease,
+    root: &Path,
+) -> Result<fs::File, String> {
+    lease
+        .ensure_covered(hash_env_repair_paths(root))
+        .and_then(|_| lease.before_effect())
+        .map_err(|error| operation_error("admit environment repair lock", root, error))?;
+    let base = root
+        .parent()
+        .ok_or_else(|| operation_error("resolve repair lock parent", root, "path has no parent"))?;
+    ensure_dir(base).map_err(|error| operation_error("create repair lock parent", base, error))?;
+    open_env_repair_lock(root)
+}
+
+pub(crate) fn begin_hash_env_rebuild(
+    lease: &PathTransactionLease,
+    root: &Path,
+    preserve_existing: bool,
+    lock: fs::File,
+) -> Result<Option<HashEnvRebuild>, String> {
+    lease
+        .ensure_covered(hash_env_repair_paths(root))
+        .and_then(|_| lease.before_effect())
+        .map_err(|error| operation_error("admit environment rebuild", root, error))?;
+    let base = root.parent().ok_or_else(|| {
+        operation_error(
+            "resolve environment rebuild parent",
+            root,
+            "path has no parent",
+        )
+    })?;
+    ensure_dir(base)
+        .map_err(|error| operation_error("create environment rebuild parent", base, error))?;
+    for warning in recover_hash_env_locked(root, false)? {
+        eprintln!("{warning}");
+    }
+    if env_directory(root)? && env_complete(root)? {
+        return Ok(None);
+    }
+    let parent = PathTransactionParent::capture(base)
+        .map_err(|error| operation_error("capture environment rebuild parent", base, error))?;
+    let backup = root.with_extension("prev");
+    if env_directory(&backup)? {
+        return Err(operation_error(
+            "prepare environment backup",
+            &backup,
+            "previous backup cleanup is incomplete; resolve its permissions before another rebuild",
+        ));
+    }
+    if env_directory(root)? {
+        if preserve_existing {
+            fs::rename(root, &backup)
+                .map_err(|error| operation_error("retain previous environment", &backup, error))?;
+        } else {
+            fs::remove_dir_all(root).map_err(|error| {
+                operation_error("clear inactive incomplete environment", root, error)
+            })?;
+        }
+    }
+    if let Err(error) = ensure_dir(root) {
+        let original = operation_error("create environment rebuild target", root, error);
+        return match recover_hash_env_locked(root, true) {
+            Ok(_) => Err(original),
+            Err(restore) => Err(format!(
+                "{original}; {restore}; previous bytes remain at {}",
+                backup.display()
+            )),
+        };
+    }
+    Ok(Some(HashEnvRebuild {
+        root: root.to_path_buf(),
+        parent,
+        _lock: lock,
+    }))
+}
+
+impl HashEnvRebuild {
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub(crate) fn complete(&mut self, lease: &PathTransactionLease) -> Result<Vec<String>, String> {
+        lease
+            .ensure_covered(hash_env_repair_paths(&self.root))
+            .and_then(|_| lease.before_effect())
+            .map_err(|error| operation_error("admit completed environment", &self.root, error))?;
+        if !env_complete(&self.root)? {
+            return Err(operation_error(
+                "complete environment rebuild",
+                &self.root,
+                "setup did not publish a completion marker",
+            ));
+        }
+        recover_hash_env_locked(&self.root, false)
+    }
+
+    pub(crate) fn restore(self) -> Result<(), String> {
+        let lease = PathTransactionRequest::new(hash_env_repair_paths(&self.root))
+            .and_then(|request| request.require_parent_snapshot(&self.parent))
+            .and_then(|request| request.acquire())
+            .map_err(|error| {
+                operation_error("admit failed environment restoration", &self.root, error)
+            })?;
+        lease.before_effect().map_err(|error| {
+            operation_error(
+                "revalidate failed environment restoration",
+                &self.root,
+                error,
+            )
+        })?;
+        recover_hash_env_locked(&self.root, true).map(|_| ())
+    }
+}
+
+pub(crate) fn lock_direct_hash_env_repair(
+    lease: &PathTransactionLease,
+    root: &Path,
+) -> Result<Option<fs::File>, String> {
+    if !is_hashed_env_root(root)? {
+        return Ok(None);
+    }
+    lease
+        .ensure_covered(hash_env_repair_paths(root))
+        .map_err(|error| operation_error("admit direct environment repair", root, error))?;
+    let lock = open_env_repair_lock(root)?;
+    if env_directory(&root.with_extension("prev"))? {
+        return Err(operation_error("start direct environment repair", root, "previous backup cleanup is pending; resolve its permissions and click Refresh in the Settings > Skills toolbar before rebuilding"));
+    }
+    Ok(Some(lock))
 }
 
 /// All runtime and maintenance callers resolve the same active environment.
@@ -87,6 +360,9 @@ pub fn env_root() -> Result<PathBuf, String> {
                     display_path(&state_path)
                 )
             })?;
+            for warning in recover_hash_env(&root)? {
+                eprintln!("{warning}");
+            }
             if root.is_dir() || super::store::bundle_uses_hashed_env(&active.bundle_id)? {
                 return Ok(root);
             }
@@ -244,10 +520,17 @@ pub fn simplified(path: &Path) -> PathBuf {
 }
 
 pub fn read_link_target(path: &Path) -> Option<PathBuf> {
-    fs::symlink_metadata(path)
-        .ok()
-        .filter(|meta| meta.file_type().is_symlink())
-        .and_then(|_| fs::read_link(path).ok())
+    read_link_target_checked(path).ok().flatten()
+}
+
+/// Missing/non-link paths are distinct from aliases whose target cannot be inspected.
+pub(crate) fn read_link_target_checked(path: &Path) -> std::io::Result<Option<PathBuf>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::read_link(path).map(Some),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Unlinks the link itself, never its target. Windows stores a directory
@@ -264,13 +547,26 @@ pub fn remove_symlink(path: &Path) -> std::io::Result<()> {
 }
 
 pub fn remove_if_matching_symlink(path: &Path, expected: &Path) -> Result<bool, String> {
-    let Some(target) = read_link_target(path) else {
+    remove_if_matching_symlink_with_recovery(path, expected, SKILLS_IO_RECOVERY)
+}
+
+pub(crate) fn remove_if_matching_symlink_with_recovery(
+    path: &Path,
+    expected: &Path,
+    recovery: &str,
+) -> Result<bool, String> {
+    let Some(target) = read_link_target_checked(path).map_err(|error| {
+        operation_error_with_recovery("read install symlink", path, error, recovery)
+    })?
+    else {
         return Ok(false);
     };
     if simplified(&target) != simplified(expected) {
         return Ok(false);
     }
-    remove_symlink(path).map_err(|err| format!("Cannot remove {}: {err}", display_path(path)))?;
+    remove_symlink(path).map_err(|error| {
+        operation_error_with_recovery("unlink install symlink", path, error, recovery)
+    })?;
     Ok(true)
 }
 
@@ -378,13 +674,32 @@ pub(crate) fn test_home_for_bundle_tests() -> BundleTestHome {
     }
 }
 
+const SKILLS_IO_RECOVERY: &str = "inspect this path and resolve the reported filesystem/archive error, check the active bundle with `maru skills update --check`, then retry the requested skill/update/rollback";
+
 /// Shared boundary for filesystem/archive failures surfaced by skills CLI/IPC.
 pub(crate) fn operation_error(
     operation: &str,
     path: &Path,
     error: impl std::fmt::Display,
 ) -> String {
-    format!("skills_io_failed: {operation} at {}: {error}; inspect this path and resolve the reported filesystem/archive error, check the active bundle with `maru skills update --check`, then retry the requested skill/update/rollback", display_path(path))
+    operation_error_with_recovery(operation, path, error, SKILLS_IO_RECOVERY)
+}
+
+pub(crate) fn operation_error_with_recovery(
+    operation: &str,
+    path: &Path,
+    error: impl std::fmt::Display,
+    recovery: &str,
+) -> String {
+    let message = format!(
+        "skills_io_failed: {operation} at {}: {error}",
+        display_path(path)
+    );
+    if recovery.is_empty() {
+        message
+    } else {
+        format!("{message}; {recovery}")
+    }
 }
 
 pub(crate) fn link_temp(link: &Path) -> PathBuf {
@@ -597,6 +912,136 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn interrupted_hash_rebuild_restores_backup_or_keeps_completed_new_root() {
+        for state in ["missing", "partial", "complete", "complete-old-uncertified"] {
+            let _home = test_home_for_bundle_tests();
+            let root = hashed_env_root("recovery-env").unwrap();
+            let backup = root.with_extension("prev");
+            fs::create_dir_all(backup.join(".venv")).unwrap();
+            fs::write(backup.join(".venv/keep"), "previous runtime").unwrap();
+            if state != "complete-old-uncertified" {
+                fs::write(backup.join(".maru-env-complete"), "").unwrap();
+            }
+            if state != "missing" {
+                fs::create_dir_all(root.join(".venv")).unwrap();
+                fs::write(root.join(".venv/keep"), "new runtime").unwrap();
+                if state.starts_with("complete") {
+                    fs::write(root.join(".maru-env-complete"), "").unwrap();
+                }
+            }
+            write_json_pretty(&super::super::bundle_update::state_path().unwrap(), &json!({
+                "schema":1,"active":{"bundleId":"recovery","revision":1,"displayVersion":"fixture","source":"remote","envHash":"recovery-env","appliedAt":"fixture"}
+            })).unwrap();
+            assert_eq!(env_root().unwrap(), root);
+            assert_eq!(
+                fs::read_to_string(root.join(".venv/keep")).unwrap(),
+                if state.starts_with("complete") {
+                    "new runtime"
+                } else {
+                    "previous runtime"
+                }
+            );
+            assert!(!backup.exists(), "{state}");
+            assert!(root.join(".maru-env-complete").is_file());
+        }
+    }
+
+    #[test]
+    fn recovery_without_backup_ignores_busy_or_unusable_lock_files() {
+        let _home = test_home_for_bundle_tests();
+        let root = hashed_env_root("no-backup-env").unwrap();
+        fs::create_dir_all(&root).unwrap();
+        let lock_path = root.with_extension("repair.lock");
+        let lock = open_env_repair_lock(&root).unwrap();
+        assert!(recover_hash_env(&root).unwrap().is_empty());
+        drop(lock);
+        fs::remove_file(&lock_path).unwrap();
+        // Even an unusable lock path must not affect a read with nothing to recover.
+        fs::create_dir(&lock_path).unwrap();
+        assert!(recover_hash_env(&root).unwrap().is_empty());
+        assert!(lock_path.is_dir());
+    }
+
+    #[test]
+    fn active_hash_rebuild_lock_prevents_resolution_from_restoring_its_backup() {
+        let _home = test_home_for_bundle_tests();
+        let root = hashed_env_root("busy-env").unwrap();
+        fs::create_dir_all(root.join(".venv")).unwrap();
+        fs::write(root.join(".venv/keep"), "old bytes").unwrap();
+        let lease = PathTransactionRequest::new([env_base().unwrap()])
+            .unwrap()
+            .acquire()
+            .unwrap();
+        let lock = lock_hash_env_rebuild(&lease, &root).unwrap();
+        let rebuild = begin_hash_env_rebuild(&lease, &root, true, lock)
+            .unwrap()
+            .unwrap();
+        drop(lease); // Simulate another caller/process while the builder still owns its OS lock.
+        let error = recover_hash_env(&root).unwrap_err();
+        assert!(error.contains("in progress"), "{error}");
+        assert!(root.with_extension("prev").join(".venv/keep").is_file());
+        rebuild.restore().unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join(".venv/keep")).unwrap(),
+            "old bytes"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn interrupted_hash_recovery_preserves_foreign_backup_symlink() {
+        let _home = test_home_for_bundle_tests();
+        let root = hashed_env_root("foreign-backup").unwrap();
+        let foreign = maru_home().unwrap().join("foreign-data");
+        fs::create_dir_all(&foreign).unwrap();
+        fs::write(foreign.join("keep"), "foreign bytes").unwrap();
+        ensure_dir(&env_base().unwrap()).unwrap();
+        unix_fs::symlink(&foreign, root.with_extension("prev")).unwrap();
+        assert!(recover_hash_env(&root)
+            .unwrap_err()
+            .contains("non-symlink directory"));
+        assert_eq!(
+            fs::read_to_string(foreign.join("keep")).unwrap(),
+            "foreign bytes"
+        );
+        assert!(fs::symlink_metadata(root.with_extension("prev"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn checked_symlink_cleanup_distinguishes_absent_foreign_and_unreadable_aliases() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("entry");
+        fs::write(&target, "preserved target").unwrap();
+        let parent = dir.path().join("provider");
+        fs::create_dir(&parent).unwrap();
+        let alias = parent.join("skill");
+        assert!(!remove_if_matching_symlink(&alias, &target).unwrap());
+        fs::write(&alias, "unmanaged file").unwrap();
+        assert!(!remove_if_matching_symlink(&alias, &target).unwrap());
+        fs::remove_file(&alias).unwrap();
+        unix_fs::symlink(&target, &alias).unwrap();
+        assert!(!remove_if_matching_symlink(&alias, &dir.path().join("foreign")).unwrap());
+        let permissions = fs::metadata(&parent).unwrap().permissions();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = remove_if_matching_symlink(&alias, &target);
+        fs::set_permissions(&parent, permissions).unwrap();
+        let error = result.unwrap_err();
+        assert!(error.contains("read install symlink"), "{error}");
+        assert!(error.contains(&display_path(&alias)), "{error}");
+        assert!(error.contains("maru skills update --check"), "{error}");
+        assert_eq!(fs::read_link(&alias).unwrap(), target);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "preserved target");
+        assert!(remove_if_matching_symlink(&alias, &target).unwrap());
+        assert!(!alias.exists());
+        assert!(target.is_file());
+    }
 
     #[test]
     fn unsupported_exchange_migrates_with_staged_link_and_retains_the_old_tree() {

@@ -44,6 +44,8 @@ struct EnvDoneEvent {
     invocation_id: String,
     success: bool,
     exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 /// Resolve before admission. The setup directory owns uv/pnpm lockfiles and
@@ -69,6 +71,13 @@ pub(crate) fn env_mutation_paths(root: &Path, setup: Option<&Path>) -> Vec<PathB
         .into_iter()
         .map(|name| root.join(name)),
     );
+    if root
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "env")
+    {
+        paths.extend(host_fs::hash_env_repair_paths(root));
+    }
     if let Some(project) = setup.and_then(Path::parent) {
         paths.extend([
             project.to_path_buf(),
@@ -154,11 +163,13 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
                 invocation_id: invocation_id.clone(),
                 success: true,
                 exit_code: Some(0),
+                error: None,
             },
         );
         return Ok(invocation_id);
     }
     let setup = setup.expect("setup checked above");
+    let repair_lock = host_fs::lock_direct_hash_env_repair(&lease, &root)?;
     let completion_marker = prepare_hashed_completion_marker(&lease, &root)?;
     host_fs::ensure_dir(&root.join("temp"))?;
     let id = invocation_id.clone();
@@ -214,14 +225,14 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
         };
         #[cfg(test)]
         PathTransactionLease::test_stage(&[root.clone()], "env:before-status");
-        let persisted = match finish_bootstrap_in_transaction(
+        let (persisted, completion_error) = match finish_bootstrap_in_transaction(
             &lease,
             &root,
             completion_marker.as_deref(),
             success,
             error,
         ) {
-            Ok(()) => true,
+            Ok(()) => (true, None),
             Err(error) => {
                 let _ = app.emit(
                     "skills-env://output",
@@ -231,16 +242,19 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
                         line: error.clone(),
                     },
                 );
-                let _ = write_status_in_transaction(&lease, &root, Some(false), Some(error));
-                false
+                let _ =
+                    write_status_in_transaction(&lease, &root, Some(false), Some(error.clone()));
+                (false, Some(error))
             }
         };
+        drop(repair_lock);
         let _ = app.emit(
             "skills-env://done",
             EnvDoneEvent {
                 invocation_id: id,
                 success: success && persisted,
                 exit_code,
+                error: completion_error,
             },
         );
         drop(lease);
@@ -259,7 +273,7 @@ fn prepare_hashed_completion_marker(
     lease: &PathTransactionLease,
     root: &Path,
 ) -> Result<Option<PathBuf>, String> {
-    if root.parent() != Some(host_fs::env_base()?.as_path()) {
+    if !host_fs::is_hashed_env_root(root)? {
         return Ok(None);
     }
     let marker = root.join(".maru-env-complete");
@@ -339,7 +353,8 @@ pub(crate) fn env_status_in_transaction(
         status_path: host_fs::display_path(&status_path),
         last_bootstrap_at,
         last_error,
-        healthy: venv_exists,
+        healthy: venv_exists
+            && (!host_fs::is_hashed_env_root(root)? || root.join(".maru-env-complete").is_file()),
     })
 }
 
@@ -588,6 +603,32 @@ mod phase08_04 {
         );
     }
     #[test]
+    fn hashed_status_health_requires_completion_while_legacy_keeps_venv_health() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let legacy = host_fs::env_base().unwrap();
+        let hashed = host_fs::hashed_env_root("health-env").unwrap();
+        for root in [&legacy, &hashed] {
+            fs::create_dir_all(root.join(".venv")).unwrap();
+            let lease = PathTransactionRequest::new(env_mutation_paths(root, None))
+                .unwrap()
+                .acquire()
+                .unwrap();
+            let status = env_status_in_transaction(&lease, root, None, None).unwrap();
+            assert!(status.venv_exists);
+            assert_eq!(status.healthy, *root == legacy);
+            if *root == hashed {
+                lease.before_effect().unwrap();
+                fs::write(root.join(".maru-env-complete"), "").unwrap();
+                assert!(
+                    env_status_in_transaction(&lease, root, None, None)
+                        .unwrap()
+                        .healthy
+                );
+            }
+        }
+    }
+
+    #[test]
     fn successful_local_dry_run_preserves_status_and_done_payload() {
         use tauri::Listener;
         let _home = host_fs::test_home_for_bundle_tests();
@@ -707,6 +748,11 @@ exit {}
             let status = skills_env_status(None).unwrap();
             if scenario == "marker-failure" {
                 let error = status.last_error.unwrap();
+                assert_eq!(
+                    done["error"].as_str(),
+                    Some(error.as_str()),
+                    "done must explain marker failure even with exit code 0"
+                );
                 assert!(
                     error.contains("mark hashed environment complete"),
                     "{error}"
