@@ -221,9 +221,12 @@ Readiness is one bounded JSON line (32 KiB, 10 seconds), followed by a direct,
 non-redirecting HTTP literal-loopback origin probe (2 seconds). URL/origin/owned
 PID mismatches and process failures refuse navigation with a recovery step.
 Launcher-resolved single-use URLs stay in browser state and are not automatically
-written to Sites.
-The launched server owns its normal idle shutdown; failed or cancelled startup
-terminates only its owned child tree, and tab cancellation fences stale opens.
+written to Sites; bookmark and Copy URL actions also refuse launcher-derived URLs
+even after their bookmark association is detached.
+The launched server owns its normal idle shutdown. Closing its tab does not stop
+a successfully launched server; on Unix it may also outlive Maru until its idle
+shutdown. Failed or cancelled startup terminates only its owned child tree, and
+tab cancellation fences stale opens.
 Maru does not change console plugin grants, note writers or task policy.
 
 ### Terminal and AI Runtimes

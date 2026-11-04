@@ -309,6 +309,7 @@ export function SitesPane({
   const loadInTab = useCallback(
     (tabId: string, url: string, launch?: string | null) => {
       if (!tauri) return;
+      if (launch != null) setTabs((current) => updateBrowserTab(current, tabId, { ephemeralLaunch: true }));
       if (!url) {
         pendingOpenRef.current.delete(tabId);
         return;
@@ -433,7 +434,7 @@ export function SitesPane({
       // Reuse the active tab when it is still the empty starting tab.
       if (activeTab && !activeTab.siteId && !activeTab.url) {
         setTabs((current) =>
-          updateBrowserTab(current, activeTab.id, { url: site.url, siteId: site.id }),
+          updateBrowserTab(current, activeTab.id, { url: site.url, siteId: site.id, loading: tauri }),
         );
         loadInTab(activeTab.id, site.url, site.launch);
         return;
@@ -509,6 +510,7 @@ export function SitesPane({
       setEditSite(existing);
       return;
     }
+    if (activeTab.ephemeralLaunch) return;
     const entry: SiteEntry = {
       id: newSiteId(),
       label: activeTab.title?.trim() || new URL(activeTab.url).host,
@@ -528,7 +530,7 @@ export function SitesPane({
 
   const copyUrl = useCallback(() => {
     const url = activeTab?.url;
-    if (!url) return;
+    if (!url || activeTab?.ephemeralLaunch) return;
     void clipboardWriteText(url)
       .then(() => {
         setCopied(true);
@@ -775,7 +777,7 @@ export function SitesPane({
           <button
             type="button"
             className={bookmarked ? "icon-button active" : "icon-button"}
-            disabled={!activeTab?.url}
+            disabled={!activeTab?.url || (activeTab.ephemeralLaunch && !bookmarked)}
             onClick={bookmarkCurrent}
             title={bookmarked ? t("sites.bookmark.edit") : t("sites.bookmark.add")}
             aria-label={bookmarked ? t("sites.bookmark.edit") : t("sites.bookmark.add")}
@@ -785,7 +787,7 @@ export function SitesPane({
           <button
             type="button"
             className="icon-button"
-            disabled={!activeTab?.url}
+            disabled={!activeTab?.url || activeTab.ephemeralLaunch}
             onClick={copyUrl}
             title={copied ? t("sites.toolbar.copied") : t("sites.toolbar.copyUrl")}
             aria-label={t("sites.toolbar.copyUrl")}

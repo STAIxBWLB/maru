@@ -277,7 +277,7 @@ pub fn site_view_open<R: tauri::Runtime>(
             .navigate(target)
             .map_err(|err| format!("Cannot navigate browser tab: {err}"))?;
         existing.hide().map_err(|err| {
-            format!("Cannot hide browser tab until its current UI is ready: {err}")
+            format!("Cannot hide browser tab until its current UI is ready: {err}; close the tab and reopen the site")
         })?;
         if let Some(console) = console {
             console.keep_alive()?;
@@ -371,9 +371,10 @@ pub fn site_view_open<R: tauri::Runtime>(
             Size::Logical(LogicalSize::new(width.max(1.0), height.max(1.0))),
         )
         .map_err(|err| format!("Cannot create browser tab webview: {err}"))?;
-    get_embed(&app, &tab_id)?.hide().map_err(|error| {
-        format!("Cannot hide newly opened site view: {error}; retry opening the site")
-    })?;
+    if let Err(error) = embed.hide() {
+        let cleanup = embed.close().err();
+        return Err(format!("Cannot hide newly opened site view: {error}; close cleanup: {cleanup:?}; close the tab and retry opening the site"));
+    }
     if let Some(console) = console {
         console.keep_alive()?;
     }
@@ -967,6 +968,7 @@ mod tests {
                     0.0,
                     100.0,
                     100.0,
+                    None,
                 )
                 .await
                 .unwrap_err();
@@ -983,6 +985,7 @@ mod tests {
                     0.0,
                     100.0,
                     100.0,
+                    None,
                 )
                 .await
                 .unwrap_err();
@@ -996,10 +999,11 @@ mod tests {
                     0.0,
                     100.0,
                     100.0,
+                    None,
                 )
                 .await
                 .unwrap_err();
-                assert_eq!(error, "main window not found");
+                assert!(error.contains("site_launch_window_missing"), "{error}");
 
                 let error = ipc::site_view_open_external("file:///etc/passwd".into())
                     .await

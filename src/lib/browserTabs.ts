@@ -7,6 +7,8 @@ export interface BrowserTab {
   url: string;
   title: string | null;
   loading: boolean;
+  /** Launcher-derived URLs remain private even after bookmark detachment. */
+  ephemeralLaunch?: boolean;
   /** Set when the tab was opened from a bookmark, so the sidebar can mark it. */
   siteId: string | null;
 }

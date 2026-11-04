@@ -72,8 +72,13 @@ fn verify_permissions(path: &Path, home: &Path) -> Result<(), String> {
         for current in path.ancestors() {
             let metadata = fs::metadata(current)
                 .map_err(|error| failure(&format!("inspect {}", current.display()), error))?;
-            if (metadata.uid() != owner && metadata.uid() != 0) || metadata.mode() & 0o022 != 0 {
-                return Err(failure("validate trusted executable ownership", format!("{} has an untrusted owner or group/world write permission; fix that installation's permissions", current.display())));
+            // Homebrew directories may be group-writable under the trusted owner.
+            // Executable/package files still refuse group-write, and every path refuses world-write.
+            if (metadata.uid() != owner && metadata.uid() != 0)
+                || metadata.mode() & 0o002 != 0
+                || (!metadata.is_dir() && metadata.mode() & 0o020 != 0)
+            {
+                return Err(failure("validate trusted executable ownership", format!("{} has an untrusted owner, world write permission, or group-writable file; fix ownership/write permissions or install Bun under ~/.bun/bin", current.display())));
             }
             if current == home {
                 break;
@@ -170,7 +175,7 @@ fn resolve_bun_from(home: &Path, candidates: &[PathBuf]) -> Result<PathBuf, Stri
         }
     }
     Err(failure(
-        "resolve trusted Bun from standard fixed install paths (no PATH search)",
+        "resolve trusted Bun from standard fixed install paths (no PATH search); fix the rejected path ownership/world-write permissions or install Bun under ~/.bun/bin",
         problems.join("; "),
     ))
 }
@@ -599,8 +604,15 @@ server.serve_forever()
         assert!(resolve_console(home.path())
             .err()
             .unwrap()
-            .contains("group/world write"));
-        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+            .contains("world write"));
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o775)).unwrap();
+        resolve_console(home.path()).unwrap();
+        let runtime = bin.join("bun");
+        fs::set_permissions(&runtime, fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(verify_permissions(&runtime, home.path())
+            .unwrap_err()
+            .contains("group-writable file"));
+        fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755)).unwrap();
         let metadata = home
             .path()
             .join(".bun/install/global/node_modules/@staix/agent-console/package.json");

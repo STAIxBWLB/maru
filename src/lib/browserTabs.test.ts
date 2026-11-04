@@ -21,6 +21,12 @@ function tab(id: string, overrides: Partial<BrowserTab> = {}): BrowserTab {
 }
 
 describe("browser tabs", () => {
+  it("keeps launcher URL privacy when detaching a bookmark or updating page state", () => {
+    const launched = [tab("t1", { siteId: "console", ephemeralLaunch: true })];
+    const detached = updateBrowserTab(launched, "t1", { siteId: null });
+    const navigated = updateBrowserTab(detached, "t1", { url: "http://127.0.0.1:1234/#ticket", loading: false });
+    expect(navigated[0].ephemeralLaunch).toBe(true);
+  });
   it("reuses freed ids instead of growing forever", () => {
     const tabs = [tab("t1"), tab("t3")];
     expect(nextBrowserTabId(tabs)).toBe("t2");
