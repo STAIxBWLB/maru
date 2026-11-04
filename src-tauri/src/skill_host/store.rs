@@ -5535,13 +5535,22 @@ fn retain_bundle_compatibility(id: &str, metadata: &bundle::BundleMetadata) -> R
     };
     let path = compatibility_path(id)?;
     if path.exists() {
-        let existing = read_bundle_compatibility(id)?;
+        let mut existing = read_bundle_compatibility(id)?;
         if existing.min_app_version != compatibility.min_app_version
             || existing.requires != compatibility.requires
+            || existing
+                .files
+                .as_ref()
+                .is_some_and(|files| Some(files) != compatibility.files.as_ref())
         {
-            return Err("bundle_id_reused: compatibility requirements changed for a retained bundle; report the bundle ID to the channel maintainer".into());
+            return Err(format!("bundle_id_reused: bundle {id} was applied before with different compatibility requirements or files; nothing was changed. Report the bundle ID to the skills channel maintainer"));
         }
-        return Ok(());
+        if existing.files.is_some() {
+            return Ok(());
+        }
+        // Records written before file lists existed gain one now.
+        existing.files = compatibility.files;
+        return host_fs::write_json_pretty(&path, &existing);
     }
     host_fs::write_json_pretty(&path, &compatibility)
 }
@@ -9814,6 +9823,19 @@ exit 7
             let error =
                 verify_retained_bundle("r1", root, &files, Some(&BTreeMap::new())).unwrap_err();
             assert!(error.contains("added skills/a/SKILL.md"), "{error}");
+        }
+
+        #[test]
+        fn reused_bundle_id_with_different_files_is_refused() {
+            let _home = test_home();
+            let (remote, _) = bundle_fixture();
+            retain_bundle_compatibility("reused", &remote.metadata).unwrap();
+            retain_bundle_compatibility("reused", &remote.metadata).unwrap();
+            let mut changed = remote.metadata.clone();
+            changed.files[0].sha256 = "different".into();
+            let error = retain_bundle_compatibility("reused", &changed).unwrap_err();
+            assert!(error.contains("bundle_id_reused"), "{error}");
+            assert!(error.contains("skills channel maintainer"), "{error}");
         }
 
         #[test]

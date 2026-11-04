@@ -106,15 +106,15 @@ impl BundleSession {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            text = text
-                .replace(
-                    &format!("~/.maru/skills/{name}/"),
-                    &format!("@MARU_BUNDLE@/skills/{name}/"),
-                )
-                .replace(
-                    &format!("{}/{name}/", host_fs::display_path(&skills)),
-                    &format!("@MARU_BUNDLE@/skills/{name}/"),
-                );
+            // Skill roots are rewritten with or without a trailing '/', so
+            // `cd ~/.maru/skills/<name>` stays on the captured generation.
+            let pinned = format!("@MARU_BUNDLE@/skills/{name}");
+            text = replace_path(&text, &format!("~/.maru/skills/{name}"), &pinned);
+            text = replace_path(
+                &text,
+                &format!("{}/{name}", host_fs::display_path(&skills)),
+                &pinned,
+            );
         }
         text = replace_path(&text, "~/.maru/env", "@MARU_ENV@");
         text = replace_path(&text, &host_fs::display_path(&legacy_env), "@MARU_ENV@");
@@ -266,6 +266,17 @@ mod tests {
         assert!(text.contains(&format!("{}/.venv/bin/python", session.env_root.display())));
         assert!(text.contains("~/.maru/skills/custom/run.sh"));
         assert_eq!(session.render(&text).unwrap(), text);
+        let root_ref = session
+            .render("cd ~/.maru/skills/demo && ls ~/.maru/skills/demo-extra")
+            .unwrap();
+        assert!(
+            root_ref.starts_with(&format!("cd {}/skills/demo &&", root.display())),
+            "{root_ref}"
+        );
+        assert!(
+            root_ref.ends_with("~/.maru/skills/demo-extra"),
+            "{root_ref}"
+        );
         let once = session.prompt(&text).unwrap();
         assert_eq!(
             session
