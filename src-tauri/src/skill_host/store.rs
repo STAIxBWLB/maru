@@ -5308,7 +5308,13 @@ fn prune_bundle_dirs(keep: &[&str]) -> Result<(), String> {
     for entry in fs::read_dir(&dir).map_err(|err| err.to_string())? {
         let entry = entry.map_err(|err| err.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if !keep.contains(&name.as_str()) && !retained.contains(&name) && entry.path().is_dir() {
+        if !keep.iter().any(|id| same_generation_name(&name, id))
+            && !retained.iter().any(|id| same_generation_name(&name, id))
+            && entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_dir()
+        {
             let _ = fs::remove_dir_all(entry.path());
         }
     }
