@@ -34,10 +34,33 @@ describe("native console site launch", () => {
     const proofFile = path.join(home, "acon-proof.json");
     await browser.waitUntil(async () => { try { return JSON.parse(await fs.readFile(proofFile, "utf8")).count >= 1; } catch { return false; } }, { timeout: 30_000, timeoutMsg: "console child must execute its CSP-protected same-origin cookie bootstrap" });
     const proof = JSON.parse(await fs.readFile(proofFile, "utf8")) as { origin: string; requestOrigin: string; topLevel: boolean; ipcDenied: boolean; httpOnlyHidden: boolean; cookie: boolean };
-    assert.equal(proof.topLevel, true); assert.equal(proof.ipcDenied, true); assert.equal(proof.httpOnlyHidden, true); assert.equal(proof.cookie, true); assert.equal(proof.requestOrigin, proof.origin);
+    assert.equal(proof.topLevel, true, "the console document must be a top-level native webview, not a frame");
+    assert.equal(proof.ipcDenied, true, "the console document must not receive Tauri IPC");
+    assert.equal(proof.httpOnlyHidden, true, "the console document must not read its HttpOnly session cookie");
+    assert.equal(proof.cookie, true, "the same-origin bootstrap must set its session cookie");
+    assert.equal(proof.requestOrigin, proof.origin, "the console bootstrap request must keep its declared origin");
+
+    const consoleShown = async () => Boolean(await browser.execute(() => {
+      const selected = document.querySelector<HTMLButtonElement>('.sites-tab.active [role="tab"]');
+      const surface = document.querySelector<HTMLElement>(".sites-surface");
+      const rect = surface?.getBoundingClientRect();
+      return selected?.getAttribute("aria-selected") === "true"
+        && selected.textContent?.includes("Native console") === true
+        && Boolean(rect && rect.width > 0 && rect.height > 0);
+    }));
+    await browser.waitUntil(consoleShown, {
+      timeout: 30_000,
+      timeoutMsg: "the launched console tab never became the selected, visible Sites surface",
+    });
+    assert.equal(await consoleShown(), true, "the launched console must be shown in the active Sites surface");
+
     await fs.unlink(path.join(bin, "acon"));
-    const address = await browser.$(".sites-url input");
-    await address.click(); await address.setValue(`${proof.origin}/`); await browser.keys("Enter");
+    const addressBeforeFocus = await browser.$(".sites-url input");
+    await addressBeforeFocus.waitForDisplayed({ timeout: 15_000 });
+    await addressBeforeFocus.click();
+    const addressAfterFocus = await browser.$(".sites-url input");
+    await addressAfterFocus.setValue(`${proof.origin}/`);
+    await browser.keys("Enter");
     await browser.waitUntil(async () => JSON.parse(await fs.readFile(proofFile, "utf8")).count >= 2, { timeout: 15_000, timeoutMsg: "manual URL must still load without a console executable" });
     assert.equal((await fs.readFile(path.join(home, "acon-starts.log"), "utf8")).trim().split("\n").length, 1);
     const stored = await fs.readFile(path.join(home, ".maru", "sites.json"), "utf8");

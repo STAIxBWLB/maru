@@ -20,7 +20,7 @@ describe("native family tool registry", () => {
     const settings = await browser.$('.activity-rail button[aria-label="설정"]'); await settings.waitForDisplayed({ timeout: 30000 }); await settings.click();
     const tab = await browser.$('.settings-nav-item*=패밀리 도구'); await tab.waitForDisplayed({ timeout: 30000 }); await tab.click();
     const select = await browser.$('.settings-content select'); await select.waitForDisplayed({ timeout: 30000 }); await select.selectByAttribute("value", "acon");
-    const launch = await browser.$('.settings-content button*=Agent Console 열기'); await launch.waitForEnabled({ timeout: 30000 });
+    const launch = await browser.$('.settings-content').$('button*=Agent Console 열기'); await launch.waitForEnabled({ timeout: 30000 });
     await assert.rejects(fs.access(path.join(home, "acon-starts.log")), "refresh/selection must not start a console");
     await launch.click();
     await browser.waitUntil(async () => { try { return JSON.parse(await fs.readFile(path.join(home, "acon-proof.json"), "utf8")).topLevel === true; } catch { return false; } }, { timeout: 30000 });
