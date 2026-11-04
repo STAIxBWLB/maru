@@ -92,9 +92,16 @@ describe("native family tool registry", () => {
     assert.equal(selected, true, "the inventory tool selector must accept acon");
     const selectedAcon = await waitForFamilyTool("acon");
     assert.ok(selectedAcon.ready, `selected acon package did not resolve to an enabled launch control: ${JSON.stringify(selectedAcon)}`);
-    const launch = await browser.$('.settings-content').$('button*=Agent Console 열기');
     await assert.rejects(fs.access(path.join(home, "acon-starts.log")), "refresh/selection must not start a console");
-    await launch.click();
+    const launched = await browser.execute(() => {
+      const content = document.querySelector(".settings-content");
+      const launch = [...(content?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+        .find((button) => button.textContent?.trim() === "Agent Console 열기");
+      if (!launch || launch.disabled) return false;
+      launch.click();
+      return true;
+    });
+    assert.equal(launched, true, "explicit launch must use the enabled acon control");
     await browser.waitUntil(async () => { try { return JSON.parse(await fs.readFile(path.join(home, "acon-proof.json"), "utf8")).topLevel === true; } catch { return false; } }, { timeout: 30000 });
     const calls = (await fs.readFile(path.join(home, "acon-starts.log"), "utf8")).trim().split("\n"); assert.equal(calls.length, 1); assert.deepEqual(JSON.parse(calls[0]), ["ui", "--no-open", "--json"]);
   });

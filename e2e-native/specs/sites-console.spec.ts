@@ -10,13 +10,23 @@ import { fixtureRootDir } from "../helpers/fixtureWorkspace";
 
 const shellQuote = (text: string) => `'${text.replaceAll("'", "'\"'\"'")}'`;
 
+interface ConsoleProof {
+  origin: string;
+  requestOrigin: string;
+  topLevel: boolean;
+  ipcDenied: boolean;
+  httpOnlyHidden: boolean;
+  cookie: boolean;
+}
+
 describe("native console site launch", () => {
-  let home: string;
-  after(async () => {
+  let home = "";
+  afterEach(async () => {
     if (!home) return;
     try { const ready = JSON.parse(await fs.readFile(path.join(home, "acon-ready.json"), "utf8")) as { origin: string }; await fetch(`${ready.origin}/stop`, { signal: AbortSignal.timeout(2000) }); } catch { /* owned fixture may already have stopped */ }
   });
-  it("runs fixed argv and proves a top-level session under frame-ancestors none, then opens a manual URL without acon", async () => {
+
+  async function launchAndVerifyConsole(): Promise<{ bin: string; proofFile: string; proof: ConsoleProof }> {
     home = path.join(fixtureRootDir(), "home");
     const bin = path.join(home, ".bun", "bin");
     const pkg = path.join(home, ".bun", "install", "global", "node_modules", "@staix", "agent-console");
@@ -25,25 +35,45 @@ describe("native console site launch", () => {
     await fs.writeFile(path.join(pkg, "package.json"), JSON.stringify({ name: "@staix/agent-console", version: "0.1.0", bin: { acon: "bin/acon.js" } }));
     await fs.writeFile(path.join(pkg, "bin", "acon.js"), consoleFixture);
     await fs.writeFile(path.join(bin, "bun"), `#!/bin/sh\nexec ${shellQuote(process.execPath)} "$@"\n`, { mode: 0o755 });
+    await fs.rm(path.join(bin, "acon"), { force: true });
     await fs.symlink(path.join(pkg, "bin", "acon.js"), path.join(bin, "acon"));
     await fs.writeFile(path.join(home, ".maru", "sites.json"), JSON.stringify({ version: 1, sites: [{ id: "native-console", label: "Native Console", url: "http://127.0.0.1", launch: "acon ui --no-open --json" }] }));
+    for (const name of ["acon-ready.json", "acon-proof.json", "acon-starts.log"]) {
+      await fs.rm(path.join(home, name), { force: true });
+    }
     const sites = await browser.$('.activity-rail button[aria-label="사이트"]');
     await sites.waitForDisplayed({ timeout: 30_000 }); await sites.click();
-    const mainHandle = await browser.getWindowHandle();
     const entry = await browser.$(".sites-item-primary");
     await entry.waitForDisplayed({ timeout: 30_000 }); await entry.click();
     const proofFile = path.join(home, "acon-proof.json");
     await browser.waitUntil(async () => { try { return JSON.parse(await fs.readFile(proofFile, "utf8")).count >= 1; } catch { return false; } }, { timeout: 30_000, timeoutMsg: "console child must execute its CSP-protected same-origin cookie bootstrap" });
-    const proof = JSON.parse(await fs.readFile(proofFile, "utf8")) as { origin: string; requestOrigin: string; topLevel: boolean; ipcDenied: boolean; httpOnlyHidden: boolean; cookie: boolean };
+    const proof = JSON.parse(await fs.readFile(proofFile, "utf8")) as ConsoleProof;
     assert.equal(proof.topLevel, true, "the console document must be a top-level native webview, not a frame");
     assert.equal(proof.ipcDenied, true, "the console document must not receive Tauri IPC");
     assert.equal(proof.httpOnlyHidden, true, "the console document must not read its HttpOnly session cookie");
     assert.equal(proof.cookie, true, "the same-origin bootstrap must set its session cookie");
     assert.equal(proof.requestOrigin, proof.origin, "the console bootstrap request must keep its declared origin");
 
-    // Native child creation can change the driver's current webview context.
-    // Subsequent controls belong to the app shell, not the console document.
-    await browser.switchToWindow(mainHandle);
+    const calls = (await fs.readFile(path.join(home, "acon-starts.log"), "utf8")).trim().split(/\r?\n/);
+    assert.equal(calls.length, 1, "opening the fixture must start exactly one console");
+    assert.deepEqual(JSON.parse(calls[0]), ["ui", "--no-open", "--json"]);
+    return { bin, proofFile, proof };
+  }
+
+  it("runs fixed argv and proves a top-level session under frame-ancestors none", async () => {
+    await launchAndVerifyConsole();
+  });
+
+  // Owner-approved unsupported-driver skip: tauri-plugin-wdio-webdriver resolves
+  // handles/executors via webview_windows(), which drops main once add_child runs.
+  // This remains true in published 1.5.1. Keep the security gate above active.
+  // https://github.com/webdriverio/desktop-mobile/issues/1034
+  it.skip("shows the console and opens a manual URL without acon (upstream #1034)", async () => {
+    await browser.reloadSession();
+    const { bin, proofFile, proof } = await launchAndVerifyConsole();
+    const handles = await browser.getWindowHandles();
+    assert.ok(handles.includes("main"), "the driver must retain main after child creation");
+    await browser.switchToWindow("main");
     const consoleShown = async () => Boolean(await browser.execute(() => {
       const selected = document.querySelector<HTMLButtonElement>('.sites-tab.active [role="tab"]');
       const surface = document.querySelector<HTMLElement>(".sites-surface");
@@ -60,28 +90,14 @@ describe("native console site launch", () => {
     assert.equal(await consoleShown(), true, "the launched console must be shown in the active Sites surface");
 
     await fs.unlink(path.join(bin, "acon"));
-    // Keep UI actions on the main handle and re-query after each React commit.
-    // Synchronous DOM commands avoid retaining WebDriver element IDs across
-    // focus/change renders while exercising the normal address input handlers.
-    await browser.waitUntil(() => browser.execute((url: string) => {
-      const input = document.querySelector<HTMLInputElement>(".sites-url input");
-      if (!input || input.getBoundingClientRect().width === 0) return false;
-      input.focus();
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      if (!setter) throw new Error("native address input has no value setter");
-      setter.call(input, url);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
-    }, `${proof.origin}/`), { timeout: 15_000, timeoutMsg: "the main Sites address input was not available after console launch" });
-    const submitted = await browser.execute((url: string) => {
-      const input = document.querySelector<HTMLInputElement>(".sites-url input");
-      if (!input || input.value !== url) return false;
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-      return true;
-    }, `${proof.origin}/`);
-    assert.equal(submitted, true, "manual URL must be submitted through the current address input");
+    // Once the driver supports this flow, use real WebDriver keys and re-query
+    // the controlled input after focus/change renders rather than synthetic input.
+    await (await browser.$(".sites-url input")).click();
+    await (await browser.$(".sites-url input")).setValue(`${proof.origin}/`);
+    assert.equal(await (await browser.$(".sites-url input")).getValue(), `${proof.origin}/`);
+    await browser.keys("Enter");
     await browser.waitUntil(async () => JSON.parse(await fs.readFile(proofFile, "utf8")).count >= 2, { timeout: 15_000, timeoutMsg: "manual URL must still load without a console executable" });
-    assert.equal((await fs.readFile(path.join(home, "acon-starts.log"), "utf8")).trim().split("\n").length, 1);
+    assert.equal((await fs.readFile(path.join(home, "acon-starts.log"), "utf8")).trim().split(/\r?\n/).length, 1);
     const stored = await fs.readFile(path.join(home, ".maru", "sites.json"), "utf8");
     assert.ok(!stored.includes("fixture-ticket"), "one-time launch URL must not be persisted in Sites");
   });
