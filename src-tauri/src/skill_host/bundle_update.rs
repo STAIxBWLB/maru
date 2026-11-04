@@ -9,10 +9,15 @@
 // Layout under ~/.maru/skills/:
 //   bundle-state.json        active/previous bundle refs (atomic writes)
 //   bundle-txn.json          swap journal, present only mid-transaction
-//   _bundles/<bundle-id>/    verified pristine baselines (dirty/discard source)
-//   _builtin/                active materialization (user-editable)
-//   _cache/staging/          zip extraction target before the swap
-//   _cache/backup-*/         previous _builtin during a swap
+//   _bundles/<bundle-id>/    verified pristine baselines (dirty/discard source,
+//                            session pins and rollback source)
+//   _workspaces/<bundle-id>/ editable generations, current and previous
+//   _builtin                 symlink to the active workspace generation
+//   _sessions/               live session pins (lock + json)
+//   _cache/staging/          zip extraction target before the switch
+//   _cache/retired/<id>/     the original _builtin directory after the
+//                            one-time migration, kept as N-1
+//   _cache/bundle-compatibility/<id>.json  floors, env layout, file list
 
 use base64::Engine;
 use minisign_verify::{PublicKey, Signature};

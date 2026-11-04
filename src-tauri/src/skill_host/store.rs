@@ -6237,13 +6237,13 @@ fn skills_activate_bundle_blocking(
         // State now owns the new env. Later housekeeping failures must not
         // remove an environment that new sessions can already select.
         built_env = None;
-        // Activation is committed: cleanup failures warn instead of skipping
-        // the registry settlement below. `backup` (_cache/retired/<active>)
-        // holds the migrated original _builtin for in-flight readers; it stays
-        // as N-1 and the retired-workspace prune removes it next update.
-        if let Err(error) = bundle::clear_journal() {
-            progress.emit("warn", format!("bundle_journal_clear_failed: {error}; activation completed; the next start replays the finished journal, which is safe"), None, None);
-        }
+        // The journal must be gone before cleanup_removed_builtin_installs
+        // below: a surviving journal would make recovery recreate links that
+        // cleanup removes. Prune failures after this point only warn.
+        // `backup` (_cache/retired/<active>) holds the migrated original
+        // _builtin for in-flight readers; it stays as N-1 and the
+        // retired-workspace prune removes it next update.
+        bundle::clear_journal()?;
         if let Err(error) =
             prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])
         {
