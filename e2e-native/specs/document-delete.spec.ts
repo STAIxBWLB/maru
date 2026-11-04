@@ -25,7 +25,7 @@ async function waitForDeleteStage(stage: string, ready: () => Promise<boolean>):
         return {
           mode: state?.appMode, catalogLoading: state?.catalogLoading,
           listPresent: Boolean(document.querySelector(".document-list")),
-          rows: [...document.querySelectorAll(".document-list .doc-row strong")].slice(0, 10).map((row) => row.textContent),
+          rows: [...document.querySelectorAll(".document-list .doc-row strong, .document-list .tree-row-title")].slice(0, 10).map((row) => row.textContent),
           menu: document.querySelector(".context-menu")?.textContent?.slice(0, 800),
           dialog: document.querySelector(".document-delete-dialog")?.textContent?.slice(0, 1200),
           error: document.querySelector(".inline-error, .error-toast, .error-banner")?.textContent?.slice(0, 800),
@@ -42,7 +42,6 @@ describe("native document delete", () => {
     const name = `delete-probe-${randomUUID().slice(0, 8)}`;
     const file = path.join(fixtureRootDir(), "workspace", `${name}.md`);
     await fs.writeFile(file, `# ${name}\n\nnative delete probe\n`, "utf8");
-    await browser.switchToWindow(await browser.getWindowHandle());
 
     // A mode switch and refresh in one browser task can hit the old surface's
     // refresh closure. Wait for Documents to mount, then use its own refresh.
@@ -57,6 +56,12 @@ describe("native document delete", () => {
         .find((button) => /^(Workspace 다시 읽기|Reload workspace)$/.test(button.getAttribute("aria-label") ?? ""));
       if (!refresh || refresh.disabled) return false;
       refresh.click();
+      return true;
+    }));
+    await waitForDeleteStage("Documents list mode", () => browser.execute(() => {
+      const listMode = document.querySelector<HTMLButtonElement>(".document-list .list-mode-toggle button:first-child");
+      if (!listMode) return false;
+      if (!listMode.classList.contains("active")) listMode.click();
       return true;
     }));
     await waitForDeleteStage("probe row context menu", () => browser.execute((title: string) => {
