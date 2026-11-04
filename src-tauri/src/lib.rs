@@ -42,6 +42,7 @@ mod inbox_drop;
 mod inbox_settings;
 mod inbox_watcher;
 mod ipc_error;
+mod ipc_policy;
 mod jobs;
 mod kakao_relay;
 mod kg_refs;
@@ -279,7 +280,7 @@ pub fn run() {
             kakao_relay::listen_relay_ui_probes(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(ipc_policy::restrict_app_commands(tauri::generate_handler![
             vault::ipc::sample_workspace_path,
             vault::ipc::scan_vault,
             vault::ipc::scan_vault_paths,
@@ -691,7 +692,7 @@ pub fn run() {
             native_e2e::native_e2e_async_probe,
             #[cfg(feature = "native-e2e")]
             native_e2e::native_e2e_load_control,
-        ])
+        ]))
         .build(context)
         .expect("error while building Maru")
         .run(|app_handle, event| match event {
@@ -758,6 +759,16 @@ mod quit_acl_tests {
     use tauri::webview::InvokeRequest;
     use tauri::WebviewWindowBuilder;
 
+    // Tauri's test helper accepts AsRef<Webview>, which WebviewWindow provides
+    // but a child Webview itself does not. Keep the same IPC response path.
+    struct ChildIpc<'a>(&'a tauri::Webview<tauri::test::MockRuntime>);
+
+    impl AsRef<tauri::Webview<tauri::test::MockRuntime>> for ChildIpc<'_> {
+        fn as_ref(&self) -> &tauri::Webview<tauri::test::MockRuntime> {
+            self.0
+        }
+    }
+
     fn invoke_request(cmd: &str) -> InvokeRequest {
         InvokeRequest {
             cmd: cmd.into(),
@@ -788,8 +799,91 @@ mod quit_acl_tests {
     /// defined"), not just a run-time conflict.
     fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
         mock_builder()
+            .invoke_handler(crate::ipc_policy::restrict_app_commands(|invoke| {
+                invoke.resolver.resolve("first-party-dispatch");
+                true
+            }))
             .build(tauri::generate_context!())
             .expect("failed to build the app with this crate's real context/capabilities")
+    }
+
+    #[test]
+    fn app_command_dispatch_allows_only_current_first_party_webviews() {
+        let app = build_test_app();
+        for label in ["main", "skill-editor"] {
+            let view = WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            assert_eq!(
+                get_ipc_response(&view, invoke_request("policy_probe"))
+                    .unwrap()
+                    .deserialize::<String>()
+                    .unwrap(),
+                "first-party-dispatch"
+            );
+        }
+        for label in [
+            "sites-embed-t1",
+            "other-webview",
+            "main-copy",
+            "skill-editor-copy",
+        ] {
+            let view = WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            for command in ["read_sites", "save_sites", "unknown_command"] {
+                assert_eq!(
+                    get_ipc_response(&view, invoke_request(command)).unwrap_err(),
+                    serde_json::json!(
+                        "app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn remote_child_in_main_cannot_dispatch_app_or_plugin_commands() {
+        let app = build_test_app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        // This plugin command is granted to main for a local app origin.
+        assert!(get_ipc_response(&main, invoke_request("plugin:window|is_maximized")).is_ok());
+        for (index, origin) in ["http://127.0.0.1:43210/", "https://example.invalid/"]
+            .iter()
+            .enumerate()
+        {
+            let remote: tauri::Url = origin.parse().unwrap();
+            let child = main
+                .as_ref()
+                .window()
+                .add_child(
+                    tauri::WebviewBuilder::new(
+                        format!("sites-embed-policy-{index}"),
+                        tauri::WebviewUrl::External(remote.clone()),
+                    ),
+                    tauri::Position::Logical(tauri::LogicalPosition::new(0.0, 0.0)),
+                    tauri::Size::Logical(tauri::LogicalSize::new(200.0, 100.0)),
+                )
+                .unwrap();
+            let child_ipc = ChildIpc(&child);
+            let mut request = invoke_request("read_sites");
+            request.url = remote.clone();
+            assert_eq!(
+                get_ipc_response(&child_ipc, request).unwrap_err(),
+                serde_json::json!(
+                    "app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"
+                )
+            );
+            let mut request = invoke_request("plugin:window|is_maximized");
+            request.url = remote;
+            let refused = get_ipc_response(&child_ipc, request).unwrap_err();
+            assert!(
+                refused.as_str().unwrap_or_default().contains("not allowed"),
+                "{origin}: {refused}"
+            );
+        }
     }
 
     #[test]
