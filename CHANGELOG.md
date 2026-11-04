@@ -9,6 +9,16 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.23 - Staged Generations (2026-11-05)
+
+- Skill bundle updates are staged: each update publishes a verified side-by-side generation and switches skill links atomically, the previous generation stays for `maru skills rollback [--json]`, and a running bundled skill session keeps the generation it started with (#466, #470).
+- Skill environments are built per environment hash before activation, so a failed setup leaves the active environment byte-identical; a missing activated environment is rebuilt instead of silently falling back to the legacy one (#466, #469, #471, #477).
+- Bundle updates refuse a registry written by a newer Maru, name each unmet tool floor (`vmem >=X.Y.Z`) before download, and read knowledge grants from installed tool manifests (#466, #467).
+- Bundle recovery, retained-generation reuse and same-hash environment repair are guarded against interrupted journals, reused ids and live sessions, and cleanup failures name the path and the next step (#473, #478, #479, #480).
+- Cleanup advice for a removed skill is platform-safe: Unix gets a quoted `rm --` for the verified links only, Windows gets link-only wording with no removal command, so a target directory is never at risk. A failed environment restore keeps the conflicting env and its backup for recovery while still removing the unapplied bundle artifacts (#481, #484).
+- Sites can start the installed Agent Console and open its single-use local URL; launcher tabs never copy or bookmark that URL, and a console started while Sites is hidden appears when you return (#462, #474, #476, #482).
+- Settings > Family tools shows the installed ahub, amem, vmem and acon versions with read-only checks and the exact install, update or rollback command to run in a terminal (#463, #475).
+
 ## v1.1.22 - Settled Grants (2026-10-30)
 
 - Agent tasks get vault access through the vmem server: knowledge grants move from the retired Obsidian MCP server (`obsidian`, mcpvault) to `vmem` with a frozen tool list (move and delete stay out of unattended tasks), and a task still carrying an old `obsidian` grant is refused by name instead of being remapped (#461, #464).
