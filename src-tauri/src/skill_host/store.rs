@@ -5099,7 +5099,7 @@ fn run_env_repair_blocking(
     } else {
         "bash"
     });
-    crate::skill_host::env::configure_env_command(&mut command, &root);
+    crate::skill_host::env::configure_env_command(&mut command, root);
     let output = command
         .arg(&setup)
         .arg("--target")
