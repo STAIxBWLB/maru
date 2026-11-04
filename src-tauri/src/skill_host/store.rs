@@ -8309,8 +8309,10 @@ mod tests {
         fn failing_hash_env_build_preserves_old_bytes_and_active_runtime() {
             let _home = test_home();
             skills_list_sources(None).unwrap();
-            let before = bundle::read_state().unwrap().unwrap();
-            let old = host_fs::env_root().unwrap();
+            let mut before = bundle::read_state().unwrap().unwrap();
+            before.active.as_mut().unwrap().env_hash = "old-env".into();
+            bundle::write_state(&before).unwrap();
+            let old = host_fs::hashed_env_root("old-env").unwrap();
             fs::create_dir_all(old.join(".venv/bin")).unwrap();
             fs::write(old.join(".venv/bin/python"), b"old python bytes").unwrap();
             let old_hash = hash_directory(&old).unwrap();
@@ -8323,13 +8325,23 @@ mod tests {
                 ProgressReporter::noop(),
                 |_, _| Ok(Some(remote)),
                 |_| Ok(archive),
-                |lease, _, _, root| {
+                |lease, progress, next, root| {
                     lease.ensure_covered([root.to_path_buf()])?;
                     assert_eq!(root, target);
-                    fs::create_dir_all(root.join(".venv/bin")).unwrap();
-                    fs::write(root.join(".venv/bin/python"), b"broken replacement").unwrap();
+                    let setup = next.join("envs/default/setup.sh");
+                    fs::create_dir_all(setup.parent().unwrap()).unwrap();
+                    fs::write(
+                        &setup,
+                        r#"#!/bin/bash
+mkdir -p "$2/.venv/bin"
+echo 'broken replacement' > "$2/.venv/bin/python"
+echo 'fixture failed after writing' >&2
+exit 7
+"#,
+                    )
+                    .unwrap();
                     assert_eq!(env_vars_for_runs(None).unwrap(), vars);
-                    Err("env_repair_failed: fixture".into())
+                    run_env_repair_blocking(lease, progress, next, root)
                 },
             )
             .unwrap_err();
