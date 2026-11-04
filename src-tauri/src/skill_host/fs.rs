@@ -141,7 +141,7 @@ fn recover_hash_env_locked(root: &Path, force_restore: bool) -> Result<Vec<Strin
     let has_backup = env_directory(&backup)?;
     let has_root = env_directory(root)?;
     if has_backup && !force_restore && has_root && env_complete(root)? {
-        return Ok(fs::remove_dir_all(&backup).err().map(|error| operation_error_with_recovery("remove completed environment backup", &backup, error, "the rebuilt environment is complete; resolve backup permissions and refresh Settings > Skills > Environment to retry cleanup")).into_iter().collect());
+        return Ok(fs::remove_dir_all(&backup).err().map(|error| operation_error_with_recovery("remove completed environment backup", &backup, error, "the rebuilt environment is complete; resolve backup permissions and click Refresh in the Settings > Skills toolbar to retry cleanup")).into_iter().collect());
     }
     if has_backup || force_restore {
         if has_root {
@@ -160,23 +160,7 @@ fn recover_hash_env_locked(root: &Path, force_restore: bool) -> Result<Vec<Strin
 /// Recovery never races a live builder: the sibling OS lock survives only until process exit.
 pub(crate) fn recover_hash_env(root: &Path) -> Result<Vec<String>, String> {
     let backup = root.with_extension("prev");
-    let lock = root.with_extension("repair.lock");
-    let has_backup = env_directory(&backup)?;
-    let has_lock = match fs::symlink_metadata(&lock) {
-        Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => {
-            return Err(operation_error(
-                "inspect environment repair lock",
-                &lock,
-                error,
-            ))
-        }
-    };
-    if !has_backup {
-        if has_lock {
-            let _lock = open_env_repair_lock(root)?;
-        }
+    if !env_directory(&backup)? {
         return Ok(Vec::new());
     }
     let parent_path = root
@@ -339,7 +323,7 @@ pub(crate) fn lock_direct_hash_env_repair(
         .map_err(|error| operation_error("admit direct environment repair", root, error))?;
     let lock = open_env_repair_lock(root)?;
     if env_directory(&root.with_extension("prev"))? {
-        return Err(operation_error("start direct environment repair", root, "previous backup cleanup is pending; resolve its permissions and refresh Environment before rebuilding"));
+        return Err(operation_error("start direct environment repair", root, "previous backup cleanup is pending; resolve its permissions and click Refresh in the Settings > Skills toolbar before rebuilding"));
     }
     Ok(Some(lock))
 }
@@ -962,6 +946,22 @@ mod tests {
             assert!(!backup.exists(), "{state}");
             assert!(root.join(".maru-env-complete").is_file());
         }
+    }
+
+    #[test]
+    fn recovery_without_backup_ignores_busy_or_unusable_lock_files() {
+        let _home = test_home_for_bundle_tests();
+        let root = hashed_env_root("no-backup-env").unwrap();
+        fs::create_dir_all(&root).unwrap();
+        let lock_path = root.with_extension("repair.lock");
+        let lock = open_env_repair_lock(&root).unwrap();
+        assert!(recover_hash_env(&root).unwrap().is_empty());
+        drop(lock);
+        fs::remove_file(&lock_path).unwrap();
+        // Even an unusable lock path must not affect a read with nothing to recover.
+        fs::create_dir(&lock_path).unwrap();
+        assert!(recover_hash_env(&root).unwrap().is_empty());
+        assert!(lock_path.is_dir());
     }
 
     #[test]

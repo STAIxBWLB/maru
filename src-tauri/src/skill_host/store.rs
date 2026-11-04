@@ -6233,11 +6233,18 @@ fn skills_activate_bundle_blocking(
             .map(|file| (file.path.clone(), file.mode.clone()))
             .collect();
         verify_retained_modes(&new_pristine, Some(&modes)).map_err(|error| {
-            host_fs::operation_error(
+            let refusal = host_fs::operation_error(
                 "verify reused bundle modes",
                 &new_pristine,
                 format!("bundle_id_reused: {error}"),
-            )
+            );
+            match fs::remove_dir_all(&staging) {
+                Ok(()) => refusal,
+                Err(cleanup) => format!(
+                    "{refusal}; {}",
+                    host_fs::operation_error("remove refused bundle staging", &staging, cleanup)
+                ),
+            }
         })?;
         if hash_directory_filtered(&staging)? != hash_directory_filtered(&new_pristine)? {
             let _ = fs::remove_dir_all(&staging);
@@ -6294,7 +6301,7 @@ fn skills_activate_bundle_blocking(
                     let (_, retained_envs) = super::session::retained_generations_readonly()?;
                     if retained_envs.contains(&metadata.env_hash) {
                         let recovery = if !env_changed {
-                            "use Settings > Skills > Environment > Bootstrap to repair the environment while the session remains live, then retry Apply"
+                            "use Bootstrap in the Settings > Skills toolbar to repair the environment while the session remains live, then retry Apply"
                         } else {
                             "restore the retained environment at the reported path or let its owning sessions finish, then retry Apply"
                         };
@@ -10157,7 +10164,7 @@ exit 7
             )
             .unwrap_err();
             assert!(
-                error.contains("Settings > Skills > Environment > Bootstrap"),
+                error.contains("Bootstrap in the Settings > Skills toolbar"),
                 "{error}"
             );
             let setup = default_public_env_setup(None).unwrap().unwrap();
@@ -10262,6 +10269,13 @@ exit 0
             )
             .unwrap_err();
             assert!(reused.contains("verify retained file mode"), "{reused}");
+            assert_eq!(
+                fs::read_dir(bundle::staging_root().unwrap())
+                    .unwrap()
+                    .count(),
+                0,
+                "retained-mode refusal must remove its staging directory"
+            );
             let rollback = skills_rollback_bundle().unwrap_err();
             assert!(rollback.contains("verify retained file mode"), "{rollback}");
             assert!(

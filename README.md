@@ -668,7 +668,7 @@ Environment resolution recovers an interrupted attempt from `.prev`, or keeps
 the completed new root and removes the backup. Hash-specific OS locks prevent
 that recovery from racing a live builder; symlink/file conflicts fail closed.
 Settings health also requires this marker for hashed envs. A live session's hash
-is not rebuilt by bundle Apply; Settings > Skills > Environment > Bootstrap is
+is not rebuilt by bundle Apply; Bootstrap in the Settings > Skills toolbar is
 the explicit repair path while that session remains live. Completion failures
 surface their error reason even when the setup process itself exited with 0.
 Rollback also checks the retained bundle against the file
