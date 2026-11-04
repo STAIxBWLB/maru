@@ -71,6 +71,13 @@ pub(crate) fn env_mutation_paths(root: &Path, setup: Option<&Path>) -> Vec<PathB
         .into_iter()
         .map(|name| root.join(name)),
     );
+    if root
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "env")
+    {
+        paths.extend(host_fs::hash_env_repair_paths(root));
+    }
     if let Some(project) = setup.and_then(Path::parent) {
         paths.extend([
             project.to_path_buf(),
@@ -162,6 +169,7 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
         return Ok(invocation_id);
     }
     let setup = setup.expect("setup checked above");
+    let repair_lock = host_fs::lock_direct_hash_env_repair(&lease, &root)?;
     let completion_marker = prepare_hashed_completion_marker(&lease, &root)?;
     host_fs::ensure_dir(&root.join("temp"))?;
     let id = invocation_id.clone();
@@ -239,6 +247,7 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
                 (false, Some(error))
             }
         };
+        drop(repair_lock);
         let _ = app.emit(
             "skills-env://done",
             EnvDoneEvent {

@@ -4158,10 +4158,10 @@ pub(crate) fn capture_bundle_session() -> Result<Option<super::session::BundleSe
     // before this check (and changed the state, refused below) or waits until
     // the pin exists and then keeps this generation.
     let _gate = super::session::pin_gate(false)?;
-    if bundle::read_state()?.and_then(|state| state.active) != Some(active.clone()) {
-        return Err(
-            "bundle_session_changed: activation changed during capture; retry the skill run".into(),
-        );
+    if bundle::read_state()?.and_then(|state| state.active) != Some(active.clone())
+        || host_fs::env_root()? != env_root
+    {
+        return Err("bundle_session_changed: bundle or environment changed during capture; retry the skill run".into());
     }
     admission.before_effect()?;
     // Pin before publishing the snapshot, so pruning keeps its id.
@@ -5114,160 +5114,6 @@ fn stale_copy_installs_report(registry: &SkillsRegistry) -> Vec<String> {
 
 /// Remove installs of skills the new bundle dropped — but only links that are
 /// provably Maru-owned end to end. Foreign links and copy installs survive.
-/// CLI-only cleanup for an explicitly named, dropped builtin entry. Never deletes its target.
-pub(crate) fn skills_cleanup_entry(entry: PathBuf) -> Result<(), String> {
-    let root = crate::vault::lexical_normalize(
-        &host_fs::skills_root()
-            .map_err(|error| host_fs::operation_error("resolve cleanup root", &entry, error))?,
-    );
-    let entry = crate::vault::lexical_normalize(&entry);
-    if !entry.is_absolute() || entry.parent() != Some(root.as_path()) {
-        return Err(host_fs::operation_error(
-            "validate cleanup entry",
-            &entry,
-            "expected one direct child of the Maru skills root",
-        ));
-    }
-    let name = entry
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            host_fs::operation_error("identify cleanup entry", &entry, "entry name is not UTF-8")
-        })?;
-    host_fs::safe_entry_name(name)
-        .map_err(|error| host_fs::operation_error("validate cleanup entry name", &entry, error))?;
-    if name.starts_with('_') {
-        return Err(host_fs::operation_error(
-            "validate cleanup entry",
-            &entry,
-            "internal workspace entries cannot be removed by cleanup",
-        ));
-    }
-    let registry_file = registry_path()
-        .map_err(|error| host_fs::operation_error("resolve cleanup registry", &entry, error))?;
-    let parent = PathTransactionParent::capture(&root)
-        .map_err(|error| host_fs::operation_error("capture cleanup root", &root, error))?;
-    let mut paths = vec![registry_file.clone()];
-    paths.push(entry.clone());
-    {
-        let _guard = registry_guard()?;
-        paths.extend(
-            load_registry_readonly_unlocked()
-                .map_err(|error| {
-                    host_fs::operation_error("read cleanup registry", &registry_file, error)
-                })?
-                .installs
-                .iter()
-                .filter(|install| Path::new(&install.entrypoint_path) == entry)
-                .map(|install| PathBuf::from(&install.target_path)),
-        );
-    }
-    let lease = PathTransactionRequest::new(paths)
-        .and_then(|request| request.require_parent_snapshot(&parent))
-        .and_then(|request| request.acquire())
-        .map_err(|error| host_fs::operation_error("admit cleanup entry", &entry, error))?;
-    let _guard = registry_guard()?;
-    let mut registry = load_registry_readonly_unlocked().map_err(|error| {
-        host_fs::operation_error("read cleanup registry", &registry_file, error)
-    })?;
-    let references: Vec<_> = registry
-        .installs
-        .iter()
-        .filter(|install| Path::new(&install.entrypoint_path) == entry)
-        .cloned()
-        .collect();
-    if references.iter().any(|install| {
-        install.managed_by != "maru"
-            || install.mode != "symlink"
-            || registry
-                .skills
-                .iter()
-                .any(|skill| skill.id == install.skill_id)
-    }) {
-        return Err(host_fs::operation_error("validate cleanup references", &entry, "an active or external install still references this entry; uninstall it through its owning interface"));
-    }
-    lease
-        .ensure_covered(
-            references
-                .iter()
-                .map(|install| PathBuf::from(&install.target_path)),
-        )
-        .map_err(|error| host_fs::operation_error("validate cleanup admission", &entry, error))?;
-    let target = host_fs::read_link_target_checked(&entry)
-        .map_err(|error| host_fs::operation_error("inspect cleanup entry", &entry, error))?;
-    if let Some(target) = &target {
-        let target = crate::vault::lexical_normalize(&resolve_link_target(&entry, target.clone()));
-        let builtin = root.join("_builtin/skills").join(name);
-        let workspace = target.strip_prefix(root.join("_workspaces")).ok();
-        let parts: Vec<_> = workspace
-            .map(|path| path.components().collect())
-            .unwrap_or_default();
-        let owned = target == builtin
-            || (parts.len() == 3
-                && parts[1].as_os_str() == "skills"
-                && parts[2].as_os_str() == name
-                && parts
-                    .iter()
-                    .all(|part| matches!(part, Component::Normal(_))));
-        if !owned {
-            return Err(host_fs::operation_error(
-                "validate cleanup ownership",
-                &entry,
-                "symlink no longer points to a builtin workspace; preserve the foreign entry",
-            ));
-        }
-    } else if fs::symlink_metadata(&entry).is_ok() {
-        return Err(host_fs::operation_error(
-            "validate cleanup entry",
-            &entry,
-            "not a symlink; preserve this unmanaged file or directory",
-        ));
-    }
-    lease
-        .before_effect()
-        .map_err(|error| host_fs::operation_error("revalidate cleanup paths", &entry, error))?;
-    let mut errors = Vec::new();
-    for install in references {
-        match host_fs::remove_if_matching_symlink_with_recovery(
-            Path::new(&install.target_path),
-            &entry,
-            &dropped_entry_recovery(&entry),
-        ) {
-            Ok(_) => registry.installs.retain(|other| {
-                !(other.target == install.target && other.installed_as == install.installed_as)
-            }),
-            Err(error) => errors.push(error),
-        }
-    }
-    if !registry
-        .installs
-        .iter()
-        .any(|install| Path::new(&install.entrypoint_path) == entry)
-    {
-        if let Some(target) = target {
-            if let Err(error) = host_fs::remove_if_matching_symlink_with_recovery(
-                &entry,
-                &target,
-                &dropped_entry_recovery(&entry),
-            ) {
-                errors.push(error);
-            }
-        }
-    }
-    save_registry_unlocked(&registry).map_err(|error| {
-        host_fs::operation_error("save cleanup registry", &registry_file, error)
-    })?;
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("; "))
-    }
-}
-
-fn dropped_entry_recovery(entry: &Path) -> String {
-    format!("after resolving the path error, run `maru skills cleanup --entry` with this exact entry path as one argument: {}", host_fs::display_path(entry))
-}
-
 fn cleanup_removed_builtin_installs(
     registry: &mut SkillsRegistry,
     removed: &[String],
@@ -5291,20 +5137,18 @@ fn cleanup_removed_builtin_installs(
             })
             .cloned()
             .collect();
-        let mut entries = BTreeSet::new();
+        let mut entries = BTreeMap::<PathBuf, Vec<PathBuf>>::new();
+        let mut failed = Vec::new();
         for install in matches {
             let tool_target = PathBuf::from(&install.target_path);
             let maru_entry = PathBuf::from(&install.entrypoint_path);
-            if let Err(error) = host_fs::remove_if_matching_symlink_with_recovery(
-                &tool_target,
-                &maru_entry,
-                &dropped_entry_recovery(&maru_entry),
-            ) {
-                warnings.push(error);
-                // Keep the failed alias registered so its shared entry stays reachable.
+            if let Err(error) =
+                host_fs::remove_if_matching_symlink_with_recovery(&tool_target, &maru_entry, "")
+            {
+                failed.push((install, error));
                 continue;
             }
-            entries.insert(maru_entry);
+            entries.entry(maru_entry).or_default().push(tool_target);
             registry.installs.retain(|other| {
                 !(other.target == install.target && other.installed_as == install.installed_as)
             });
@@ -5312,7 +5156,7 @@ fn cleanup_removed_builtin_installs(
         }
         // Unpublish every owned tool alias before removing its shared Maru
         // entry, so another provider never observes a dangling chain.
-        for maru_entry in entries {
+        for (maru_entry, aliases) in entries {
             if registry.installs.iter().any(|install| {
                 host_fs::simplified(Path::new(&install.entrypoint_path))
                     == host_fs::simplified(&maru_entry)
@@ -5325,10 +5169,80 @@ fn cleanup_removed_builtin_installs(
                 &builtin_prefix,
                 previous_workspace.as_deref(),
             );
-            warnings.extend(result.err());
+            if let Err(error) = result {
+                let verified = host_fs::read_link_target_checked(&maru_entry)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|target| {
+                        owned_builtin_entry_target(
+                            &target,
+                            name,
+                            &builtin_prefix,
+                            previous_workspace.as_deref(),
+                        )
+                    });
+                let locations = aliases
+                    .iter()
+                    .map(|path| host_fs::display_path(path))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let recovery = if verified {
+                    format!("the update itself succeeded; provider alias locations {locations} no longer reference this shared entry. After closing sessions that use the skill, remove only the verified shared symlink: `rm -- {}`", shell_quote(&host_fs::display_path(&maru_entry)))
+                } else {
+                    format!("the update itself succeeded; provider alias locations: {locations}; retained shared entry: {}. Its target cannot be verified, so do not remove it until inspected", host_fs::display_path(&maru_entry))
+                };
+                warnings.push(format!("{error}; {recovery}"));
+            }
+        }
+        for (install, error) in failed {
+            let alias = Path::new(&install.target_path);
+            let entry = Path::new(&install.entrypoint_path);
+            let alias_owned = host_fs::read_link_target_checked(alias)
+                .ok()
+                .flatten()
+                .is_some_and(|target| host_fs::simplified(&target) == host_fs::simplified(entry));
+            let entry_owned = host_fs::read_link_target_checked(entry)
+                .ok()
+                .flatten()
+                .is_some_and(|target| {
+                    owned_builtin_entry_target(
+                        &target,
+                        name,
+                        &builtin_prefix,
+                        previous_workspace.as_deref(),
+                    )
+                });
+            let other_refs = registry.installs.iter().any(|other| {
+                other.entrypoint_path == install.entrypoint_path
+                    && !(other.target == install.target
+                        && other.installed_as == install.installed_as)
+            });
+            let context = format!("the update itself succeeded; retained provider alias: {}; retained shared entry: {}", alias.display(), entry.display());
+            let recovery = if alias_owned && entry_owned && !other_refs {
+                format!("{context}. After closing sessions that use this skill, remove only these two verified symlinks: `rm -- {} {}`", shell_quote(&host_fs::display_path(alias)), shell_quote(&host_fs::display_path(entry)))
+            } else if alias_owned {
+                format!("{context}. The shared entry is still referenced or its target is unverified; do not remove it. After closing sessions that use this skill, remove only the verified provider alias: `rm -- {}`", shell_quote(&host_fs::display_path(alias)))
+            } else {
+                format!("{context}. Alias ownership cannot be verified while it is unreadable; close sessions, resolve the reported read error and inspect both targets before removing either link")
+            };
+            warnings.push(format!("{error}; {recovery}"));
         }
     }
     Ok((count, warnings))
+}
+
+fn owned_builtin_entry_target(
+    target: &Path,
+    name: &str,
+    builtin: &Path,
+    previous_workspace: Option<&Path>,
+) -> bool {
+    let previous = previous_workspace.is_some_and(|root| {
+        host_fs::simplified(target) == host_fs::simplified(&root.join("skills").join(name))
+    });
+    previous
+        || (host_fs::simplified(target).starts_with(host_fs::simplified(builtin))
+            && !target.exists())
 }
 
 fn remove_owned_builtin_entry(
@@ -5338,29 +5252,14 @@ fn remove_owned_builtin_entry(
     previous_workspace: Option<&Path>,
 ) -> Result<(), String> {
     let Some(target) = host_fs::read_link_target_checked(entry).map_err(|error| {
-        host_fs::operation_error_with_recovery(
-            "read dropped skill entry",
-            entry,
-            error,
-            &dropped_entry_recovery(entry),
-        )
+        host_fs::operation_error_with_recovery("read dropped skill entry", entry, error, "")
     })?
     else {
         return Ok(());
     };
-    let owned_previous = previous_workspace.is_some_and(|root| {
-        host_fs::simplified(&target) == host_fs::simplified(&root.join("skills").join(name))
-    });
-    if (host_fs::simplified(&target).starts_with(host_fs::simplified(builtin)) && !target.exists())
-        || owned_previous
-    {
+    if owned_builtin_entry_target(&target, name, builtin, previous_workspace) {
         host_fs::remove_symlink(entry).map_err(|error| {
-            host_fs::operation_error_with_recovery(
-                "unlink dropped skill",
-                entry,
-                error,
-                &dropped_entry_recovery(entry),
-            )
+            host_fs::operation_error_with_recovery("unlink dropped skill", entry, error, "")
         })?;
     }
     Ok(())
@@ -6194,6 +6093,12 @@ fn skills_activate_bundle_blocking(
         )
     };
 
+    if repair_env && !is_rollback {
+        let root = host_fs::hashed_env_root(&active.env_hash)?;
+        for warning in host_fs::recover_hash_env(&root)? {
+            progress.emit("warn", warning, None, None);
+        }
+    }
     let next_builtin = host_fs::skills_root()?.join(format!("_builtin.next-{}", Uuid::new_v4()));
     let mut network_paths = bundle_mutation_paths()?;
     network_paths.push(next_builtin.clone());
@@ -6327,7 +6232,13 @@ fn skills_activate_bundle_blocking(
             .iter()
             .map(|file| (file.path.clone(), file.mode.clone()))
             .collect();
-        verify_retained_modes(&new_pristine, Some(&modes))?;
+        verify_retained_modes(&new_pristine, Some(&modes)).map_err(|error| {
+            host_fs::operation_error(
+                "verify reused bundle modes",
+                &new_pristine,
+                format!("bundle_id_reused: {error}"),
+            )
+        })?;
         if hash_directory_filtered(&staging)? != hash_directory_filtered(&new_pristine)? {
             let _ = fs::remove_dir_all(&staging);
             return Err("bundle_id_reused: the retained bundle differs from this archive; report the bundle ID to the channel maintainer before retrying".into());
@@ -6360,86 +6271,68 @@ fn skills_activate_bundle_blocking(
         return Err(format!("bundle_prepare_failed: {err}"));
     }
     let mut built_env = None;
+    let mut env_rebuild: Option<host_fs::HashEnvRebuild> = None;
     let result = (|| {
         if env_needs_build && !is_rollback {
             let root = host_fs::hashed_env_root(&metadata.env_hash)?;
             // An env hash may recur after more than one update. Completed
             // envs are immutable cache entries, including session-pinned N-2.
             if !root.join(".maru-env-complete").is_file() {
-                let (_, retained_envs) = {
-                    let _guard = registry_guard()?;
-                    super::session::retained_generations_readonly()?
-                };
-                if retained_envs.contains(&metadata.env_hash) {
-                    return Err(host_fs::operation_error_with_recovery(
-                        "repair session-pinned environment", &root,
-                        "a live session retains this hash; bundle Apply will not rebuild it in place",
-                        "use Settings > Skills > Environment > Bootstrap to repair the environment while the session remains live, then retry Apply",
-                    ));
-                }
                 network_admission.before_effect().map_err(|error| {
-                    env_build_error(
-                        &metadata.env_hash,
-                        &root,
-                        "env preparation admission failed",
-                        error,
-                    )
+                    host_fs::operation_error("admit environment preparation", &root, error)
                 })?;
-                if root.exists() {
-                    fs::remove_dir_all(&root).map_err(|error| {
+                let base = host_fs::env_base()?;
+                host_fs::ensure_dir(&base).map_err(|error| {
+                    host_fs::operation_error("create environment parent", &base, error)
+                })?;
+                let parent = PathTransactionParent::capture(&base).map_err(|error| {
+                    host_fs::operation_error("capture environment parent", &base, error)
+                })?;
+                let repair_lock = {
+                    let _guard = registry_guard()?;
+                    let _pins = super::session::pin_gate(true)?;
+                    let (_, retained_envs) = super::session::retained_generations_readonly()?;
+                    if retained_envs.contains(&metadata.env_hash) {
+                        let recovery = if !env_changed {
+                            "use Settings > Skills > Environment > Bootstrap to repair the environment while the session remains live, then retry Apply"
+                        } else {
+                            "restore the retained environment at the reported path or let its owning sessions finish, then retry Apply"
+                        };
+                        return Err(host_fs::operation_error_with_recovery("repair session-pinned environment", &root, "a live session retains this hash; bundle Apply will not rebuild it in place", recovery));
+                    }
+                    host_fs::lock_hash_env_rebuild(&network_admission, &root)?
+                };
+                let rebuild = host_fs::begin_hash_env_rebuild(
+                    &network_admission,
+                    &root,
+                    !env_changed,
+                    repair_lock,
+                )?;
+                if let Some(rebuild) = rebuild {
+                    env_rebuild = Some(rebuild);
+                    built_env = Some((root.clone(), parent));
+                    repair(&network_admission, progress, &next_builtin, &root).map_err(|error| env_build_error(&metadata.env_hash, &root, &format!("setup failed for bundle {new_bundle_id} (revision {}); report a missing setup script to the skills channel maintainer", metadata.revision), error))?;
+                    let marker = root.join(".maru-env-complete");
+                    fs::write(&marker, "").map_err(|error| {
                         env_build_error(
                             &metadata.env_hash,
                             &root,
-                            "cannot clear an incomplete environment",
-                            error,
+                            "cannot write completion marker",
+                            host_fs::operation_error(
+                                "write rebuilt environment completion marker",
+                                &marker,
+                                error,
+                            ),
                         )
                     })?;
-                }
-                let base = host_fs::env_base()?;
-                host_fs::ensure_dir(&base).map_err(|error| {
-                    env_build_error(
-                        &metadata.env_hash,
-                        &root,
-                        "cannot create the environment parent",
-                        error,
-                    )
-                })?;
-                let parent = PathTransactionParent::capture(&base).map_err(|error| {
-                    env_build_error(
-                        &metadata.env_hash,
-                        &root,
-                        "cannot capture the environment parent identity",
-                        error,
-                    )
-                })?;
-                built_env = Some((root.clone(), parent));
-                host_fs::ensure_dir(&root).map_err(|error| {
-                    env_build_error(
-                        &metadata.env_hash,
-                        &root,
-                        "cannot create the hash environment",
-                        error,
-                    )
-                })?;
-                if let Err(err) = repair(&network_admission, progress, &next_builtin, &root) {
-                    let _ = fs::remove_dir_all(&next_builtin);
-                    if created_pristine {
-                        let _ = fs::remove_dir_all(&new_pristine);
+                    if let Some(rebuild) = env_rebuild.as_mut() {
+                        for warning in rebuild.complete(&network_admission)? {
+                            progress.emit("warn", warning, None, None);
+                        }
                     }
-                    return Err(env_build_error(&metadata.env_hash, &root, &format!("setup failed for bundle {new_bundle_id} (revision {}); report a missing setup script to the skills channel maintainer", metadata.revision), err));
+                    // A certified same-hash env is valid for the old active bundle too.
+                    env_rebuild = None;
                 }
-                let marker = root.join(".maru-env-complete");
-                fs::write(&marker, "").map_err(|error| {
-                    env_build_error(
-                        &metadata.env_hash,
-                        &root,
-                        &format!(
-                            "cannot write completion marker {}",
-                            host_fs::display_path(&marker)
-                        ),
-                        error,
-                    )
-                })?;
             }
         }
 
@@ -6715,6 +6608,24 @@ fn skills_activate_bundle_blocking(
             restart_required: false,
         })
     })();
+    if let Some(rebuild) = env_rebuild {
+        let root = rebuild.root().to_path_buf();
+        if let Err(restore) = rebuild.restore() {
+            return Err(host_fs::operation_error(
+                "restore failed environment rebuild",
+                &root,
+                format!(
+                    "{}; {restore}; preserve the backup path {} until recovery succeeds",
+                    result
+                        .as_ref()
+                        .err()
+                        .map(String::as_str)
+                        .unwrap_or("environment rebuild did not settle"),
+                    root.with_extension("prev").display()
+                ),
+            ));
+        }
+    }
     if let Some((root, parent)) = built_env {
         // The network/commit leases have been released by the result scope.
         // Admit cleanup separately and reject a replaced parent before writes.
@@ -6728,7 +6639,10 @@ fn skills_activate_bundle_blocking(
             .require_parent_snapshot(&parent)?
             .acquire()?;
             lease.before_effect()?;
-            let mut cleanup_paths = vec![&root, &next_builtin];
+            let mut cleanup_paths = vec![&next_builtin];
+            if env_changed {
+                cleanup_paths.push(&root);
+            }
             if created_pristine {
                 cleanup_paths.push(&new_pristine);
             }
@@ -9724,28 +9638,13 @@ mod tests {
                     warning.message
                 );
                 assert!(
-                    warning.message.contains("maru skills cleanup --entry"),
+                    warning.message.contains("the update itself succeeded"),
                     "{}",
                     warning.message
                 );
+                assert!(warning.message.contains("rm --"), "{}", warning.message);
                 assert!(captured.iter().any(|event| event.level == "success"));
                 assert!(host_fs::read_link_target(Path::new(&install.entrypoint_path)).is_some());
-                drop(captured);
-                assert_eq!(
-                    crate::cli::run_cli(vec![
-                        "skills".into(),
-                        "cleanup".into(),
-                        "--entry".into(),
-                        install.entrypoint_path.clone()
-                    ]),
-                    0
-                );
-                assert!(host_fs::read_link_target(Path::new(&install.entrypoint_path)).is_none());
-                assert!(!load_registry()
-                    .unwrap()
-                    .installs
-                    .iter()
-                    .any(|remaining| remaining.skill_id == install.skill_id));
             }
         }
 
@@ -10164,6 +10063,69 @@ exit 7
         }
 
         #[test]
+        fn failed_same_hash_rebuild_restores_usable_previous_runtime_at_original_path() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let (remote, archive) = bundle_fixture();
+            let first = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    fs::create_dir_all(root.join(".venv/bin")).map_err(|error| error.to_string())
+                },
+            )
+            .unwrap();
+            let root = host_fs::hashed_env_root(&first.current.env_hash).unwrap();
+            let python = root.join(".venv/bin/python");
+            crate::test_support::write_executable_fixture(
+                &python,
+                "#!/bin/sh\nprintf 'old-runtime\\n'\n",
+                0o755,
+            )
+            .unwrap();
+            fs::remove_file(root.join(".maru-env-complete")).unwrap();
+            let before = hash_directory(&root).unwrap();
+            let state = bundle::read_state().unwrap().unwrap().active;
+            let (mut remote, archive) = bundle_fixture();
+            remote.metadata.archive.name = "same-hash-failure.zip".into();
+            assert_eq!(remote.metadata.env_hash, first.current.env_hash);
+            let error = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, target| {
+                    assert_eq!(target, root);
+                    assert!(root
+                        .with_extension("prev")
+                        .join(".venv/bin/python")
+                        .is_file());
+                    fs::create_dir_all(target.join(".venv/bin")).unwrap();
+                    fs::write(target.join(".venv/bin/python"), "broken attempt").unwrap();
+                    Err("injected same-hash setup failure".into())
+                },
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("injected same-hash setup failure"),
+                "{error}"
+            );
+            assert_eq!(hash_directory(&root).unwrap(), before);
+            assert_eq!(bundle::read_state().unwrap().unwrap().active, state);
+            assert!(!root.with_extension("prev").exists());
+            let output = Command::new(&python).output().unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap().trim(),
+                "old-runtime"
+            );
+        }
+
+        #[test]
         #[cfg(unix)]
         fn live_session_refusal_names_settings_bootstrap_and_direct_repair_succeeds() {
             use tauri::Listener;
@@ -10224,35 +10186,6 @@ exit 0
                 .unwrap()
                 .1
                 .contains(&session.env_hash));
-        }
-
-        #[test]
-        fn explicit_cleanup_refuses_active_foreign_and_internal_entries() {
-            let _home = test_home();
-            skills_list_sources(None).unwrap();
-            register_cleanup_fixture();
-            let root = host_fs::skills_root().unwrap();
-            skills_install_skill(
-                "maru-builtin::cleanup-demo".into(),
-                "claude".into(),
-                None,
-                Some("symlink".into()),
-            )
-            .unwrap();
-            let entry = root.join("cleanup-demo");
-            let before = fs::read_link(&entry).unwrap();
-            assert!(skills_cleanup_entry(entry.clone())
-                .unwrap_err()
-                .contains("active or external install"));
-            assert_eq!(fs::read_link(&entry).unwrap(), before);
-            assert!(skills_cleanup_entry(root.join("_builtin")).is_err());
-            assert!(skills_cleanup_entry(root.parent().unwrap().join("outside")).is_err());
-            let foreign = root.join("foreign-entry");
-            host_fs::create_symlink_no_clobber(&foreign, &root.join("_managed")).unwrap();
-            assert!(skills_cleanup_entry(foreign.clone())
-                .unwrap_err()
-                .contains("preserve the foreign entry"));
-            assert!(host_fs::read_link_target(&foreign).is_some());
         }
 
         #[test]
@@ -10368,10 +10301,14 @@ exit 0
             let permissions = fs::metadata(parent).unwrap().permissions();
             fs::set_permissions(parent, fs::Permissions::from_mode(0o000)).unwrap();
             let result = cleanup_removed_builtin_installs(&mut registry, &["cleanup-demo".into()]);
-            fs::set_permissions(parent, permissions).unwrap();
+            fs::set_permissions(parent, permissions.clone()).unwrap();
             let (removed, warnings) = result.unwrap();
             assert_eq!(removed, 0);
             assert_eq!(warnings.len(), 1);
+            assert!(
+                !warnings[0].contains("`rm --"),
+                "unverified aliases must not get removal advice"
+            );
             assert!(
                 warnings[0].contains("read install symlink"),
                 "{:?}",
@@ -10386,6 +10323,31 @@ exit 0
                 fs::read_link(&install.target_path).unwrap(),
                 PathBuf::from(&install.entrypoint_path)
             );
+            let mut other = install.clone();
+            other.target = "codex".into();
+            other.mode = "copy".into();
+            registry.installs.push(other);
+            fs::remove_dir_all(
+                builtin_materialized_root()
+                    .unwrap()
+                    .join("skills/cleanup-demo"),
+            )
+            .unwrap();
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o555)).unwrap();
+            let result = cleanup_removed_builtin_installs(&mut registry, &["cleanup-demo".into()]);
+            fs::set_permissions(parent, permissions).unwrap();
+            let (_, warnings) = result.unwrap();
+            assert!(warnings[0].contains("do not remove it"), "{:?}", warnings);
+            assert!(
+                warnings[0].contains(&format!("`rm -- {}`", shell_quote(&install.target_path))),
+                "{:?}",
+                warnings
+            );
+            assert!(!warnings[0].contains(&format!(
+                "`rm -- {} {}`",
+                shell_quote(&install.target_path),
+                shell_quote(&install.entrypoint_path)
+            )));
         }
 
         #[test]
