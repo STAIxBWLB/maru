@@ -62,6 +62,7 @@ import {
   siteViewTabRuntime,
   subscribeSiteViewEvents,
   subscribeSiteViewOpenSettled,
+  takeSiteViewOpenResult,
   type SiteViewOpenRequest,
 } from "../../lib/siteView";
 import { ImportSitesDialog } from "./ImportSitesDialog";
@@ -201,7 +202,8 @@ export function SitesPane({
         if (!request) return;
         pendingOpenRef.current.delete(tabId);
         const opening = request.launch == null ? siteViewOpen(tabId, request.url, bounds) : siteViewOpen(tabId, request.url, bounds, request.launch);
-        void opening.catch(reportError);
+        // Settlement (including failures) is delivered to the current pane.
+        void opening.catch(() => undefined);
         return;
       }
       if (!siteViewTabRuntime(tabId)) return;
@@ -216,19 +218,21 @@ export function SitesPane({
   // hidden; the same sync shows it again using the current visibility intent.
   useEffect(() => {
     const settle = (tabId: string) => {
-      const runtime = siteViewTabRuntime(tabId);
+      const result = takeSiteViewOpenResult(tabId);
+      if (!result) return;
       setTabs((current) => updateBrowserTab(current, tabId, {
-        ...(runtime?.url ? { url: runtime.url } : {}),
+        ...(result.url ? { url: result.url } : {}),
         loading: false,
       }));
+      if (result.error !== undefined) reportError(result.error);
       scheduleSync();
     };
     const unsubscribe = subscribeSiteViewOpenSettled(settle);
     for (const tab of sessionTabs) {
-      if (siteViewTabRuntime(tab.id)) settle(tab.id);
+      settle(tab.id);
     }
     return unsubscribe;
-  }, [scheduleSync]);
+  }, [reportError, scheduleSync]);
 
   // ── load the registry once (StrictMode-safe via cancelled flag)
   useEffect(() => {

@@ -54,7 +54,21 @@ interface SiteViewTabState {
   launch?: string | null;
 }
 
+interface SiteViewOpenResult {
+  url: string | null;
+  error?: unknown;
+}
+
 const tabs = new Map<string, SiteViewTabState>();
+const openResults = new Map<string, SiteViewOpenResult>();
+
+/** Consume only an actual open completion, never an ordinary page-load state. */
+export function takeSiteViewOpenResult(tabId: string): SiteViewOpenResult | null {
+  const result = openResults.get(tabId) ?? null;
+  openResults.delete(tabId);
+  return result;
+}
+
 const openSettledSubscribers = new Set<(tabId: string) => void>();
 
 /** Completion belongs to the webview session, so a replacement pane can sync it. */
@@ -63,7 +77,8 @@ export function subscribeSiteViewOpenSettled(handler: (tabId: string) => void): 
   return () => { openSettledSubscribers.delete(handler); };
 }
 
-function notifyOpenSettled(tabId: string): void {
+function notifyOpenSettled(tabId: string, result: SiteViewOpenResult): void {
+  openResults.set(tabId, result);
   for (const handler of openSettledSubscribers) handler(tabId);
 }
 
@@ -87,6 +102,7 @@ export async function siteViewOpen(
 ): Promise<string | null> {
   if (!isTauri()) return null;
   const previous = tabs.get(tabId);
+  openResults.delete(tabId);
   const state: SiteViewTabState = { shown: previous?.shown ?? false, url: previous?.url ?? null, opening: true, launch };
   tabs.set(tabId, state);
   try {
@@ -98,13 +114,13 @@ export async function siteViewOpen(
     state.opening = false;
     state.shown = false; // Native open stays hidden until current UI intent shows it.
     state.url = resolved ?? url;
-    notifyOpenSettled(tabId);
+    notifyOpenSettled(tabId, { url: state.url });
     return state.url;
   } catch (error) {
     if (tabs.get(tabId) !== state) return null;
     if (previous && !previous.opening) { previous.shown = state.shown; tabs.set(tabId, previous); }
     else tabs.delete(tabId);
-    notifyOpenSettled(tabId);
+    notifyOpenSettled(tabId, { url: tabs.get(tabId)?.url ?? null, error });
     throw error;
   }
 }
@@ -159,7 +175,9 @@ export async function siteViewHide(): Promise<void> {
 }
 
 export async function siteViewClose(tabId: string): Promise<void> {
-  if (!isTauri() || !tabs.delete(tabId)) return;
+  if (!isTauri()) return;
+  openResults.delete(tabId);
+  if (!tabs.delete(tabId)) return;
   const operation = invoke<void>("site_view_close", { tabId });
   closing.set(tabId, operation);
   try { await operation; }
@@ -168,6 +186,7 @@ export async function siteViewClose(tabId: string): Promise<void> {
 
 export async function siteViewCloseAll(): Promise<void> {
   if (!isTauri()) return;
+  openResults.clear();
   if (tabs.size === 0) return;
   tabs.clear();
   const operation = invoke<void>("site_view_close_all");

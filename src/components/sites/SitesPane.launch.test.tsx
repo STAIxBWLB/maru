@@ -4,9 +4,16 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SiteEntry } from "../../lib/sites";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), readSites: vi.fn(), clipboard: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(), readSites: vi.fn(), clipboard: vi.fn(), setError: vi.fn(),
+  listeners: new Map<string, (event: { payload: unknown }) => void>(),
+}));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => {
+  mocks.listeners.set(name, handler);
+  return () => { if (mocks.listeners.get(name) === handler) mocks.listeners.delete(name); };
+}) }));
+vi.mock("../../lib/errorStore", () => ({ setError: mocks.setError }));
 vi.mock("../../lib/maruDir", () => ({ readSites: mocks.readSites, saveSites: vi.fn(async () => {}) }));
 vi.mock("../../lib/confirmDialog", () => ({ confirmDialog: vi.fn(async () => true) }));
 vi.mock("../../lib/clipboard", () => ({ clipboardWriteText: mocks.clipboard }));
@@ -112,6 +119,34 @@ describe("Sites launch privacy and pane lifetime", () => {
     expect(siteViewTabRuntime("t1")?.url).toBe("https://previous.example/");
     expect(siteViewTabRuntime("t1")?.shown).toBe(true);
     expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe("https://previous.example/");
+  });
+
+  it("preserves ordinary page-load progress on remount after its open settled", async () => {
+    await render(); await click('[data-new="console"]'); await frame(); await frame();
+    await act(async () => mocks.listeners.get("sites://page-load")!({
+      payload: { tabId: "t1", state: "started", url: ticket },
+    }));
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    await unmountReactRoot(root!); root = null;
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+  });
+
+  it("clears a first-open failure completed offscreen and lets the bookmark retry", async () => {
+    let reject!: (error: Error) => void;
+    const opening = new Promise<string>((_, fail) => { reject = fail; });
+    mocks.invoke.mockImplementation(async (command: string) => command === "site_view_open" ? opening : undefined);
+    await render(); await click('[data-new="console"]'); await frame();
+    await unmountReactRoot(root!); root = null;
+    await act(async () => reject(new Error("offscreen first-open failure")));
+    expect(siteViewTabRuntime("t1")).toBeNull();
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
+    expect(mocks.setError).toHaveBeenCalledWith("offscreen first-open failure");
+    mocks.invoke.mockImplementation(async (command: string) => command === "site_view_open" ? ticket : undefined);
+    await click('[data-select="console"]'); await frame(); await frame();
+    expect(siteViewTabRuntime("t1")?.shown).toBe(true);
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "site_view_open")).toHaveLength(2);
   });
 
   it.each(["before remount", "after remount"])("settles an in-flight launch completed %s into the replacement pane", async (completion) => {

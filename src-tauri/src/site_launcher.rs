@@ -112,9 +112,19 @@ fn resolve_console(home: &Path) -> Result<TrustedTool, String> {
 pub(crate) fn active_program(home: &Path, tool: &str, windows: bool) -> Option<PathBuf> {
     #[cfg(not(any(test, feature = "native-e2e")))]
     if let Some(program) = crate::cli_path::resolve_program(tool) {
-        return Some(program);
+        return Some(normalize_windows_program(program, windows));
     }
     active_program_with_path(home, tool, windows, None)
+}
+
+fn normalize_windows_program(program: PathBuf, windows: bool) -> PathBuf {
+    if windows && program.extension().is_none() {
+        let executable = program.with_extension("exe");
+        if executable.is_file() {
+            return executable;
+        }
+    }
+    program
 }
 
 pub(crate) fn active_program_with_path(
@@ -123,11 +133,15 @@ pub(crate) fn active_program_with_path(
     windows: bool,
     path_env: Option<&OsStr>,
 ) -> Option<PathBuf> {
-    path_env
+    let program = path_env
         .and_then(|path| crate::cli_path::which_in_path(tool, Some(path)).ok())
         .or_else(|| {
             [
-                home.join(".local/bin").join(tool),
+                home.join(".local/bin").join(if windows {
+                    format!("{tool}.exe")
+                } else {
+                    tool.to_string()
+                }),
                 home.join(".bun/bin").join(if windows {
                     format!("{tool}.exe")
                 } else {
@@ -136,7 +150,8 @@ pub(crate) fn active_program_with_path(
             ]
             .into_iter()
             .find(|path| path.canonicalize().is_ok_and(|resolved| resolved.is_file()))
-        })
+        })?;
+    Some(normalize_windows_program(program, windows))
 }
 
 pub(crate) fn resolve_tool(
@@ -979,6 +994,29 @@ server.serve_forever()
                 .version,
             "0.1.0"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn windows_path_resolution_prefers_existing_exe_over_extensionless_match() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = windows_shim_fixture();
+        let root = home.path().canonicalize().unwrap();
+        let bin = root.join(".bun/bin");
+        let bare = bin.join("acon");
+        fs::write(&bare, "extensionless Windows-shaped candidate").unwrap();
+        fs::set_permissions(&bare, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::join_paths([&bin]).unwrap();
+
+        let selected = active_program_with_path(&root, "acon", true, Some(&path)).unwrap();
+
+        assert_eq!(selected, bin.join("acon.exe"));
+        let trusted =
+            resolve_tool_at_for_platform(&root, "acon", "@staix/agent-console", &selected, true)
+                .unwrap();
+        assert_eq!(trusted.program, bin.join("acon.exe"));
+        assert_eq!(trusted.ownership, "bun-global");
     }
 
     #[test]
