@@ -35,8 +35,64 @@ pub fn skills_root() -> Result<PathBuf, String> {
     Ok(maru_home()?.join("skills"))
 }
 
-pub fn env_root() -> Result<PathBuf, String> {
+pub fn env_base() -> Result<PathBuf, String> {
     Ok(maru_home()?.join("env"))
+}
+
+pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
+    if hash.is_empty()
+        || ["node", "node_modules", "temp", "logs", "input", "output"].contains(&hash)
+        || !hash
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_')
+    {
+        return Err("invalid_env_hash: expected a nonempty lowercase ASCII path-safe hash; report the invalid envHash to the skills channel maintainer, then retry with `maru skills update --apply --repair-env` after corrected metadata is published".into());
+    }
+    let root = env_base()?.join(hash);
+    if fs::symlink_metadata(&root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err("invalid_env_hash: environment directory must not be a symlink; move the conflicting link aside and retry".into());
+    }
+    Ok(root)
+}
+
+/// All runtime and maintenance callers resolve the same active environment.
+/// Older installations remain usable until their first hashed build succeeds.
+pub fn env_root() -> Result<PathBuf, String> {
+    let state_path = super::bundle_update::state_path()?;
+    let recovery = format!("restore {} from a known-good backup, then run `maru skills update --apply --repair-env`; if no backup is available, report this file to the skills channel maintainer", display_path(&state_path));
+    match fs::symlink_metadata(&state_path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(format!(
+                "skills_env_state_unreadable: {} is not a regular file; {recovery}",
+                display_path(&state_path)
+            ));
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "skills_env_state_unreadable: cannot inspect {}: {error}; {recovery}",
+                display_path(&state_path)
+            ));
+        }
+        _ => (),
+    }
+    let state = super::bundle_update::read_state()
+        .map_err(|error| format!("skills_env_state_unreadable: {error}; {recovery}"))?;
+    // A missing state permits legacy fallback. An unreadable state must not
+    // redirect repair into the legacy env when the active hash is unknown.
+    if let Some(active) = state.and_then(|state| state.active) {
+        if !active.env_hash.is_empty() {
+            let root = hashed_env_root(&active.env_hash).map_err(|error| {
+                format!(
+                    "{error}; invalid env hash in bundle state {}: {recovery}",
+                    display_path(&state_path)
+                )
+            })?;
+            if root.is_dir() {
+                return Ok(root);
+            }
+        }
+    }
+    env_base()
 }
 
 /// Base directory under which tool install roots (`~/.claude`, `~/.codex`)
@@ -327,6 +383,72 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn hashed_env_root_rejects_case_aliases_of_active_and_reserved_directories() {
+        let _home = test_home_for_bundle_tests();
+        assert!(hashed_env_root("active-env").is_ok());
+        for hash in ["ACTIVE-ENV", "Active-env", "NODE", "Temp", "Abcdef"] {
+            let error = hashed_env_root(hash).unwrap_err();
+            assert!(error.contains("invalid_env_hash"), "{hash}: {error}");
+            assert!(error.contains("lowercase ASCII"), "{hash}: {error}");
+        }
+    }
+
+    #[test]
+    fn env_resolver_refuses_a_directory_at_the_state_path() {
+        let _home = test_home_for_bundle_tests();
+        let state_path = super::super::bundle_update::state_path().unwrap();
+        fs::create_dir_all(&state_path).unwrap();
+        fs::create_dir_all(env_base().unwrap().join(".venv")).unwrap();
+        let error = env_root().unwrap_err();
+        assert!(error.contains("skills_env_state_unreadable"), "{error}");
+        assert!(error.contains("not a regular file"), "{error}");
+        assert!(error.contains(&display_path(&state_path)), "{error}");
+        assert!(
+            error.contains("maru skills update --apply --repair-env"),
+            "{error}"
+        );
+        assert!(state_path.is_dir());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn env_resolver_refuses_a_dangling_state_symlink() {
+        let _home = test_home_for_bundle_tests();
+        let state_path = super::super::bundle_update::state_path().unwrap();
+        fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("missing-state", &state_path).unwrap();
+        let error = env_root().unwrap_err();
+        assert!(error.contains("skills_env_state_unreadable"), "{error}");
+        assert!(error.contains("not a regular file"), "{error}");
+        assert!(error.contains(&display_path(&state_path)), "{error}");
+        assert_eq!(
+            fs::read_link(&state_path).unwrap(),
+            PathBuf::from("missing-state")
+        );
+    }
+
+    #[test]
+    fn env_resolver_preserves_legacy_fallback_but_rejects_corrupt_state() {
+        let _home = test_home_for_bundle_tests();
+        let legacy = env_base().unwrap();
+        fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(env_root().unwrap(), legacy);
+        let state_path = super::super::bundle_update::state_path().unwrap();
+        fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        fs::write(&state_path, b"{broken state").unwrap();
+        let error = env_root().unwrap_err();
+        assert!(error.contains("Cannot parse"), "{error}");
+        assert!(error.contains("skills_env_state_unreadable"), "{error}");
+        assert!(error.contains(&display_path(&state_path)), "{error}");
+        assert!(error.contains("known-good backup"), "{error}");
+        assert!(
+            error.contains("maru skills update --apply --repair-env"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&state_path).unwrap(), b"{broken state");
+    }
 
     #[test]
     #[cfg(not(feature = "native-e2e"))]
