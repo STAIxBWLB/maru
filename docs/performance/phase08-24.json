@@ -1235,7 +1235,9 @@
       },
       "tests": [
         {
-          "command": "make test-rust",
+          "command": "cargo test --lib family_registry_",
+          "actualCommand": "cargo test --lib (via make test-rust in make verify)",
+          "resultSelection": "command is the reproducible selector for the five observed passing cases, not a claim that CI invoked this filtered command separately.",
           "passed": 5,
           "failed": 0,
           "ignored": 0,
