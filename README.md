@@ -213,8 +213,9 @@ URL opening or Agent Console, without a free-form executable field. Saving or
 refreshing the registry never launches or installs a tool.
 
 The launcher resolves `~/.bun/bin/acon` against the contained
-`@staix/agent-console` global package bin and uses the installed
-`~/.bun/bin/bun` runtime directly, without a shell or workspace PATH lookup.
+`@staix/agent-console` global package bin. It runs that entry with Bun from
+`~/.bun/bin` or the fixed Homebrew/system install paths, without a shell or
+workspace PATH lookup.
 Canonical paths and Unix owner/write permissions are checked before execution.
 Readiness is one bounded JSON line (32 KiB, 10 seconds), followed by a direct,
 non-redirecting HTTP literal-loopback origin probe (2 seconds). URL/origin/owned

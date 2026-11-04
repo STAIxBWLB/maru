@@ -137,18 +137,42 @@ fn resolve_console(home: &Path) -> Result<TrustedConsole, String> {
             "acon does not match the installed package's contained bin entry",
         ));
     }
-    let bun = bin
-        .join(if cfg!(windows) { "bun.exe" } else { "bun" })
-        .canonicalize()
-        .map_err(|error| failure("resolve trusted Bun runtime from ~/.bun/bin", error))?;
-    if !bun.is_file() {
-        return Err(failure("validate Bun runtime", "Bun is not a regular file"));
-    }
+    let candidates = [
+        bin.join(if cfg!(windows) { "bun.exe" } else { "bun" }),
+        #[cfg(unix)]
+        PathBuf::from("/opt/homebrew/bin/bun"),
+        #[cfg(unix)]
+        PathBuf::from("/usr/local/bin/bun"),
+        #[cfg(unix)]
+        PathBuf::from("/usr/bin/bun"),
+    ];
+    let bun = resolve_bun_from(&home, &candidates)?;
     verify_permissions(&bin, &home)?;
     verify_permissions(&entry, &home)?;
     verify_permissions(&package.join("package.json"), &home)?;
     verify_permissions(&bun, &home)?;
     Ok(TrustedConsole { bun, entry, home })
+}
+
+fn resolve_bun_from(home: &Path, candidates: &[PathBuf]) -> Result<PathBuf, String> {
+    let mut problems = Vec::new();
+    for candidate in candidates {
+        match candidate.canonicalize() {
+            Ok(runtime) if runtime.is_file() => match verify_permissions(&runtime, home) {
+                Ok(()) => return Ok(runtime),
+                Err(error) => problems.push(error),
+            },
+            Ok(_) => problems.push(format!(
+                "{} is not a regular runtime file",
+                candidate.display()
+            )),
+            Err(error) => problems.push(format!("{}: {error}", candidate.display())),
+        }
+    }
+    Err(failure(
+        "resolve trusted Bun from standard fixed install paths (no PATH search)",
+        problems.join("; "),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -586,6 +610,19 @@ server.serve_forever()
             .err()
             .unwrap()
             .contains("regular, non-symlink file"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn runtime_resolution_can_skip_absent_home_bun_without_searching_workspace_path() {
+        let home = fixture("valid");
+        let expected = home.path().join(".bun/bin/bun").canonicalize().unwrap();
+        let selected = resolve_bun_from(
+            home.path(),
+            &[home.path().join("missing-runtime"), expected.clone()],
+        )
+        .unwrap();
+        assert_eq!(selected, expected);
     }
 
     #[test]
