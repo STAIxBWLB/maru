@@ -596,7 +596,10 @@ add an N-1 release-note line.
 Skills updates retain the active and previous bundle and environment, plus
 immutable snapshots used by Maru-launched sessions. `maru skills rollback`
 restores the previous bundle and its environment without downloading or
-rebuilding it. Maru-supplied bundled skill instructions and resource references bind their
+rebuilding it. Rollback rechecks the retained bundle's app and tool floors;
+legacy bundles use their original `manifest.json` when no cached compatibility
+record exists, and missing compatibility data blocks rollback.
+Maru-supplied bundled skill instructions and resource references bind their
 bundle and environment at start; external skill aliases switch atomically for
 subsequent reads.
 `_builtin` remains the editable workspace alias, with dirty edits blocking an

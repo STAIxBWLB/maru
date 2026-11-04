@@ -5241,6 +5241,14 @@ fn bundle_link_swaps(
     Ok(links)
 }
 
+fn same_generation_name(left: &str, right: &str) -> bool {
+    if cfg!(any(windows, target_os = "macos")) {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
+}
+
 fn prune_env_dirs(keep: &[&str]) -> Result<(), String> {
     let (_, retained) = super::session::retained_generations()?;
     let base = host_fs::env_base()?;
@@ -5254,8 +5262,8 @@ fn prune_env_dirs(keep: &[&str]) -> Result<(), String> {
             .map_err(|error| env_prune_error(&base, "cannot read an environment entry", error))?;
         let name = entry.file_name().to_string_lossy().to_string();
         // Never prune legacy runtime directories or foreign entries.
-        if !keep.contains(&name.as_str())
-            && !retained.contains(&name)
+        if !keep.iter().any(|id| same_generation_name(&name, id))
+            && !retained.iter().any(|id| same_generation_name(&name, id))
             && entry
                 .file_type()
                 .map_err(|error| {
@@ -5427,6 +5435,47 @@ pub fn skills_apply_bundle_update_headless(
     skills_apply_bundle_update_impl(bundle_id, repair_env, ProgressReporter::noop())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct BundleCompatibility {
+    min_app_version: String,
+    #[serde(default)]
+    requires: BTreeMap<String, String>,
+}
+
+fn compatibility_path(id: &str) -> Result<PathBuf, String> {
+    host_fs::safe_entry_name(id)?;
+    Ok(host_fs::skills_root()?
+        .join("_cache/bundle-compatibility")
+        .join(format!("{id}.json")))
+}
+
+fn read_bundle_compatibility(id: &str) -> Result<BundleCompatibility, String> {
+    let cached = compatibility_path(id)?;
+    let path = if cached.exists() {
+        cached
+    } else {
+        bundle::bundle_pristine_dir(id)?.join("manifest.json")
+    };
+    let bytes = fs::read(&path).map_err(|error| format!("bundle_rollback_metadata_missing: {}: {error}; restore the bundle's original compatibility manifest before retrying rollback", path.display()))?;
+    serde_json::from_slice(&bytes).map_err(|error| format!("bundle_rollback_metadata_invalid: {}: {error}; restore the original compatibility manifest before retrying rollback", path.display()))
+}
+
+fn retain_bundle_compatibility(id: &str, metadata: &bundle::BundleMetadata) -> Result<(), String> {
+    let compatibility = BundleCompatibility {
+        min_app_version: metadata.min_app_version.clone(),
+        requires: metadata.requires.clone(),
+    };
+    let path = compatibility_path(id)?;
+    if path.exists() {
+        if read_bundle_compatibility(id)? != compatibility {
+            return Err("bundle_id_reused: compatibility requirements changed for a retained bundle; report the bundle ID to the channel maintainer".into());
+        }
+        return Ok(());
+    }
+    host_fs::write_json_pretty(&path, &compatibility)
+}
+
 /// Activate the locally retained previous bundle, using exactly the same
 /// admission, journal, link switch and state transaction as an update.
 pub fn skills_rollback_bundle() -> Result<SkillBundleApplyOutcome, String> {
@@ -5489,14 +5538,15 @@ pub fn skills_rollback_bundle() -> Result<SkillBundleApplyOutcome, String> {
                 .finish()
                 .map_err(|error| error.to_string())?
                 .into_inner();
+            let compatibility = read_bundle_compatibility(&target.bundle_id)?;
             let metadata = bundle::BundleMetadata {
                 schema: 1,
                 revision: target.revision,
                 display_version: target.display_version.clone(),
                 commit: target.commit.clone(),
                 published_at: None,
-                min_app_version: env!("CARGO_PKG_VERSION").into(),
-                requires: Default::default(),
+                min_app_version: compatibility.min_app_version,
+                requires: compatibility.requires,
                 env_hash: target.env_hash.clone(),
                 archive: bundle::BundleArchiveInfo {
                     name: format!("maru-skills-{}.zip", target.bundle_id),
@@ -5625,6 +5675,9 @@ fn skills_activate_bundle_blocking(
     let remote = discover(&repo, &tag)?.ok_or_else(|| "bundle_update_not_available".to_string())?;
     let metadata = remote.metadata.clone();
     let new_bundle_id = bundle_id_for(&metadata);
+    if !is_rollback && new_bundle_id == active.bundle_id {
+        return Err("bundle_id_reused: channel must publish a new ID for an update; report the repeated bundle ID to its maintainer".into());
+    }
     if let Some(requested) = &requested_bundle_id {
         if requested != &new_bundle_id {
             return Err(format!(
@@ -5731,6 +5784,10 @@ fn skills_activate_bundle_blocking(
     } else {
         fs::rename(&staging, &new_pristine)
             .map_err(|error| format!("Cannot publish {}: {error}", new_pristine.display()))?;
+    }
+    if !is_rollback {
+        network_admission.before_effect()?;
+        retain_bundle_compatibility(&new_bundle_id, &metadata)?;
     }
     let (added_skills, updated_skills, removed_skills) =
         diff_bundle_skills(&old_pristine, &new_pristine);
@@ -5979,8 +6036,8 @@ fn skills_activate_bundle_blocking(
             for entry in fs::read_dir(&workspaces).map_err(|error| error.to_string())? {
                 let entry = entry.map_err(|error| error.to_string())?;
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name != current.bundle_id
-                    && name != active.bundle_id
+                if !same_generation_name(&name, &current.bundle_id)
+                    && !same_generation_name(&name, &active.bundle_id)
                     && entry
                         .file_type()
                         .map_err(|error| error.to_string())?
@@ -8919,6 +8976,20 @@ exit 7
             )
             .unwrap();
             assert!(pinned.root.is_dir(), "live session retains N-2");
+            let compatibility_file = compatibility_path(&first.current.bundle_id).unwrap();
+            let original_compatibility = fs::read(&compatibility_file).unwrap();
+            let mut incompatible = read_bundle_compatibility(&first.current.bundle_id).unwrap();
+            incompatible.requires.insert("vmem".into(), "^0.2.3".into());
+            host_fs::write_json_pretty(&compatibility_file, &incompatible).unwrap();
+            let before_refusal = bundle::read_state().unwrap().unwrap().active;
+            assert!(skills_rollback_bundle()
+                .unwrap_err()
+                .contains("bundle_requires_tools"));
+            assert_eq!(
+                bundle::read_state().unwrap().unwrap().active,
+                before_refusal
+            );
+            fs::write(&compatibility_file, original_compatibility).unwrap();
             let rolled_back = skills_rollback_bundle().unwrap();
             assert_eq!(rolled_back.current, first.current);
             assert_eq!(

@@ -58,6 +58,10 @@ impl BundleSession {
 
     pub(crate) fn env(&self, work: Option<&Path>) -> Result<BTreeMap<String, String>, String> {
         let mut env = super::store::env_vars_for_root(&self.env_root, work)?;
+        let bin = self.env_root.join(".venv/bin");
+        let search = std::ffi::OsString::from(crate::cli_path::augmented_path());
+        let path = crate::cli_path::merge_path_env(Some(bin.as_os_str()), Some(search.as_os_str()));
+        env.insert("PATH".into(), path.to_string_lossy().into_owned());
         env.insert(
             "MARU_SKILLS_BUNDLE".into(),
             host_fs::display_path(&self.root),
