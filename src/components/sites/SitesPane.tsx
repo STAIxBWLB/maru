@@ -376,7 +376,7 @@ export function SitesPane({
     for (const request of candidates) {
       const normalized = normalizeSiteUrl(request.url);
       if (!normalized) continue;
-      if (!openInNewTab(normalized, null)) continue;
+      if (!openInNewTab(normalized, null, request.launch)) continue;
       handledOpenedUrlIdsRef.current.add(request.id);
       handledIds.push(request.id);
     }

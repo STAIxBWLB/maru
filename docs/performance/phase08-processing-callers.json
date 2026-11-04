@@ -6278,6 +6278,23 @@
    "progressOwnership": "flow busy state",
    "viewGuard": "StudioMode flowAdmissionRef generation ticket (beginAdmittedFlow); workspaceRoot effect bumps generation on every workspace switch",
    "status": "resolved"
+  },
+  {
+   "command": "family_tools_status",
+   "definition": "src-tauri/src/family_tools.rs::ipc::family_tools_status",
+   "inventoryForm": "async fn",
+   "inventoryDisposition": "ISOLATED",
+   "disposition": "component-owned-read",
+   "frontendCaller": "src/lib/familyTools.ts::familyToolsStatus; src/components/settings/tabs/FamilyToolsTab.tsx",
+   "owningWrapper": "FamilyToolsTab read inventory with generation guard",
+   "terminalNoticeDedupeKey": "component generation and inline error",
+   "fulfilledClassifier": "n/a: bounded synchronous write, not a file-processing batch",
+   "domainFields": "installed and available versions, ownership, supported manifest commands",
+   "successfulResultRetention": "rows state in FamilyToolsTab",
+   "actionableFailureReasonSource": "call-site catch error message (single publisher)",
+   "progressOwnership": "FamilyToolsTab busy state",
+   "viewGuard": "generation invalidated on unmount or a newer refresh",
+   "status": "resolved"
   }
  ]
 }

@@ -25,6 +25,10 @@ fn failure(operation: &str, error: impl std::fmt::Display) -> String {
     format!("site_launch_failed: {operation}: {error}; run `acon ui --no-open --json` in a terminal to inspect the console, or reinstall with `bun add -g @staix/agent-console`; a manual URL site remains available")
 }
 
+fn install_failure(operation: &str, error: impl std::fmt::Display) -> String {
+    format!("tool_install_failed: {operation}: {error}; inspect and repair this package with its owning installer, then retry Refresh or opening the site")
+}
+
 pub(crate) fn validate_launch(value: &str) -> Result<(), String> {
     match value.trim() {
         ACON_LAUNCH | "acon ui --json" => Ok(()),
@@ -32,29 +36,32 @@ pub(crate) fn validate_launch(value: &str) -> Result<(), String> {
     }
 }
 
-struct TrustedConsole {
-    bun: PathBuf,
-    entry: PathBuf,
-    home: PathBuf,
+pub(crate) struct TrustedTool {
+    pub bun: PathBuf,
+    pub entry: PathBuf,
+    pub program: PathBuf,
+    pub home: PathBuf,
+    pub version: String,
+    pub ownership: &'static str,
 }
 
-fn read_small(path: &Path) -> Result<Vec<u8>, String> {
+pub(crate) fn read_small(path: &Path) -> Result<Vec<u8>, String> {
     let metadata = fs::symlink_metadata(path)
-        .map_err(|error| failure(&format!("inspect {}", path.display()), error))?;
+        .map_err(|error| install_failure(&format!("inspect {}", path.display()), error))?;
     if !metadata.file_type().is_file() {
-        return Err(failure(
+        return Err(install_failure(
             "validate installed package metadata",
             format!("{} must be a regular, non-symlink file", path.display()),
         ));
     }
     let file = fs::File::open(path)
-        .map_err(|error| failure(&format!("read {}", path.display()), error))?;
+        .map_err(|error| install_failure(&format!("read {}", path.display()), error))?;
     let mut bytes = Vec::new();
     file.take((64 * 1024 + 1) as u64)
         .read_to_end(&mut bytes)
-        .map_err(|error| failure(&format!("read {}", path.display()), error))?;
+        .map_err(|error| install_failure(&format!("read {}", path.display()), error))?;
     if bytes.len() > 64 * 1024 {
-        return Err(failure(
+        return Err(install_failure(
             "validate installed package metadata",
             "package.json exceeds 64 KiB",
         ));
@@ -62,23 +69,24 @@ fn read_small(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn verify_permissions(path: &Path, home: &Path) -> Result<(), String> {
+pub(crate) fn verify_permissions(path: &Path, home: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         let owner = fs::metadata(home)
-            .map_err(|error| failure("identify launch home", error))?
+            .map_err(|error| install_failure("identify launch home", error))?
             .uid();
         for current in path.ancestors() {
-            let metadata = fs::metadata(current)
-                .map_err(|error| failure(&format!("inspect {}", current.display()), error))?;
+            let metadata = fs::metadata(current).map_err(|error| {
+                install_failure(&format!("inspect {}", current.display()), error)
+            })?;
             // Homebrew directories may be group-writable under the trusted owner.
             // Executable/package files still refuse group-write, and every path refuses world-write.
             if (metadata.uid() != owner && metadata.uid() != 0)
                 || metadata.mode() & 0o002 != 0
                 || (!metadata.is_dir() && metadata.mode() & 0o020 != 0)
             {
-                return Err(failure("validate trusted executable ownership", format!("{} has an untrusted owner, world write permission, or group-writable file; fix ownership/write permissions or install Bun under ~/.bun/bin", current.display())));
+                return Err(install_failure("validate trusted executable ownership", format!("{} has an untrusted owner, world write permission, or group-writable file; fix ownership/write permissions or install Bun under ~/.bun/bin", current.display())));
             }
             if current == home {
                 break;
@@ -92,58 +100,185 @@ fn verify_permissions(path: &Path, home: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_console(home: &Path) -> Result<TrustedConsole, String> {
+fn resolve_console(home: &Path) -> Result<TrustedTool, String> {
+    resolve_tool(home, "acon", "@staix/agent-console")
+        .map_err(|error| failure("resolve installed console", error))
+}
+
+pub(crate) fn resolve_tool(
+    home: &Path,
+    tool: &str,
+    package_name: &str,
+) -> Result<TrustedTool, String> {
+    let local = home.join(".local/bin").join(tool);
+    let legacy = home.join(".bun/bin").join(if cfg!(windows) {
+        format!("{tool}.exe")
+    } else {
+        tool.to_string()
+    });
+    let alias = if fs::symlink_metadata(&local).is_ok() {
+        local
+    } else {
+        legacy
+    };
+    resolve_tool_at(home, tool, package_name, &alias)
+}
+
+pub(crate) fn resolve_tool_at(
+    home: &Path,
+    tool: &str,
+    package_name: &str,
+    alias: &Path,
+) -> Result<TrustedTool, String> {
+    resolve_tool_at_for_platform(home, tool, package_name, alias, cfg!(windows))
+}
+
+pub(crate) fn is_bun_shim(home: &Path, tool: &str, program: &Path, windows: bool) -> bool {
+    windows && program == home.join(".bun/bin").join(format!("{tool}.exe"))
+}
+
+pub(crate) fn resolve_tool_at_for_platform(
+    home: &Path,
+    tool: &str,
+    package_name: &str,
+    alias: &Path,
+    windows: bool,
+) -> Result<TrustedTool, String> {
     let home = home
         .canonicalize()
-        .map_err(|error| failure("resolve launch home", error))?;
-    let bin = home.join(".bun/bin");
-    let alias = bin.join(if cfg!(windows) { "acon.exe" } else { "acon" });
+        .map_err(|error| install_failure("resolve tool home", error))?;
+    if let Some(parent) = alias.parent() {
+        verify_permissions(parent, &home)?;
+    }
     let program = alias
         .canonicalize()
-        .map_err(|error| failure(&format!("resolve trusted {}", alias.display()), error))?;
+        .map_err(|error| install_failure(&format!("resolve trusted {}", alias.display()), error))?;
+    let shim = is_bun_shim(&home, tool, &program, windows);
+    let dot_root = home.join(".local/share/dotfiles/tools").join(tool);
+    let current = dot_root.join("current").canonicalize().ok();
+    let dot_root = dot_root.canonicalize().ok();
+    let releases = home.join(".agenthub/releases").canonicalize().ok();
     let global = home
         .join(".bun/install/global/node_modules")
         .canonicalize()
-        .map_err(|error| failure("resolve Bun global package root", error))?;
-    let package = global
-        .join("@staix/agent-console")
+        .ok();
+    let (package, ownership, expected_version) = if let (Some(root), Some(current)) =
+        (&dot_root, &current)
+    {
+        if program.starts_with(root) {
+            if current.parent() != Some(root.as_path()) || !program.starts_with(current) {
+                return Err(install_failure("validate dot family activation", "active binary is outside the current version; inspect `dot ai family status` and repair its links"));
+            }
+            let version = current
+                .file_name()
+                .and_then(|s| s.to_str())
+                .filter(|v| crate::tool_manifest::parse_stable(v).is_some())
+                .ok_or_else(|| {
+                    install_failure(
+                        "validate dot family version",
+                        "current does not name an exact version; inspect `dot ai family status`",
+                    )
+                })?;
+            (
+                current.join("lib/node_modules").join(package_name),
+                "dot-family",
+                Some(version.to_string()),
+            )
+        } else {
+            locate_other_package(
+                &program,
+                package_name,
+                tool,
+                releases.as_deref(),
+                global.as_deref(),
+                shim,
+            )?
+        }
+    } else {
+        locate_other_package(
+            &program,
+            package_name,
+            tool,
+            releases.as_deref(),
+            global.as_deref(),
+            shim,
+        )?
+    };
+    let package = package
         .canonicalize()
-        .map_err(|error| failure("resolve installed @staix/agent-console", error))?;
-    if !package.starts_with(&global) {
-        return Err(failure(
-            "validate console package location",
-            "package resolves outside the Bun global package root",
+        .map_err(|error| install_failure("resolve installed tool package", error))?;
+    let allowed = match ownership {
+        "dot-family" => current
+            .as_ref()
+            .is_some_and(|root| package.starts_with(root)),
+        "ahub-upgrade" => {
+            releases
+                .as_ref()
+                .is_some_and(|root| package.starts_with(root))
+                || global
+                    .as_ref()
+                    .is_some_and(|root| package.starts_with(root))
+        }
+        _ => global
+            .as_ref()
+            .is_some_and(|root| package.starts_with(root)),
+    };
+    if !allowed {
+        return Err(install_failure(
+            "validate tool package location",
+            "package resolves outside its owning install root; repair the installer-owned links",
         ));
     }
-    verify_permissions(&bin, &home)?;
     verify_permissions(&package, &home)?;
+    verify_permissions(&program, &home)?;
+    verify_permissions(&package.join("package.json"), &home)?;
     let metadata: serde_json::Value =
         serde_json::from_slice(&read_small(&package.join("package.json"))?)
-            .map_err(|error| failure("parse installed console package.json", error))?;
-    if metadata.get("name").and_then(|value| value.as_str()) != Some("@staix/agent-console") {
-        return Err(failure(
-            "validate console package identity",
-            "installed package name is not @staix/agent-console",
+            .map_err(|error| install_failure("parse installed package.json", error))?;
+    if metadata["name"].as_str() != Some(package_name) {
+        return Err(install_failure(
+            "validate package identity",
+            format!("installed package does not name {package_name}"),
         ));
     }
-    let entry_name = metadata
-        .get("bin")
-        .and_then(|value| value.get("acon"))
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| failure("validate console bin manifest", "missing bin.acon entry"))?;
+    let version = metadata["version"]
+        .as_str()
+        .filter(|v| crate::tool_manifest::parse_stable(v).is_some())
+        .ok_or_else(|| {
+            install_failure(
+                "validate package version",
+                "installed metadata has no exact stable version; repair the package",
+            )
+        })?
+        .to_string();
+    if expected_version.is_some_and(|expected| expected != version) {
+        return Err(install_failure(
+            "validate dot family version",
+            "directory and package version disagree; repair the owning installation",
+        ));
+    }
+    let entry_name = metadata["bin"]
+        .get(tool)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            install_failure(
+                "validate package bin manifest",
+                format!("missing bin.{tool} entry"),
+            )
+        })?;
     let entry = package
         .join(entry_name)
         .canonicalize()
-        .map_err(|error| failure("resolve console bin entry", error))?;
-    let shim = cfg!(windows) && program == bin.join("acon.exe");
+        .map_err(|error| install_failure("resolve package bin entry", error))?;
     if !entry.starts_with(&package) || (!shim && program != entry) || !entry.is_file() {
-        return Err(failure(
-            "validate trusted acon executable",
-            "acon does not match the installed package's contained bin entry",
+        return Err(install_failure(
+            "validate trusted package executable",
+            format!("{tool} does not match the installed package's contained bin entry"),
         ));
     }
+    let bin = home.join(".bun/bin");
     let candidates = [
-        bin.join(if cfg!(windows) { "bun.exe" } else { "bun" }),
+        bin.join(if windows { "bun.exe" } else { "bun" }),
         #[cfg(unix)]
         PathBuf::from("/opt/homebrew/bin/bun"),
         #[cfg(unix)]
@@ -152,11 +287,48 @@ fn resolve_console(home: &Path) -> Result<TrustedConsole, String> {
         PathBuf::from("/usr/bin/bun"),
     ];
     let bun = resolve_bun_from(&home, &candidates)?;
-    verify_permissions(&bin, &home)?;
     verify_permissions(&entry, &home)?;
     verify_permissions(&package.join("package.json"), &home)?;
-    verify_permissions(&bun, &home)?;
-    Ok(TrustedConsole { bun, entry, home })
+    Ok(TrustedTool {
+        bun,
+        entry,
+        program,
+        home,
+        version,
+        ownership,
+    })
+}
+
+fn locate_other_package(
+    program: &Path,
+    package_name: &str,
+    tool: &str,
+    releases: Option<&Path>,
+    global: Option<&Path>,
+    shim: bool,
+) -> Result<(PathBuf, &'static str, Option<String>), String> {
+    if tool == "ahub" && releases.is_some_and(|root| program.starts_with(root)) {
+        for parent in program.ancestors().skip(1).take(6) {
+            if !releases.is_some_and(|root| parent.starts_with(root)) {
+                break;
+            }
+            if parent.join("package.json").is_file() {
+                return Ok((parent.to_path_buf(), "ahub-upgrade", None));
+            }
+        }
+    }
+    if let Some(global) = global.filter(|root| program.starts_with(root) || shim) {
+        return Ok((
+            global.join(package_name),
+            if tool == "ahub" {
+                "ahub-upgrade"
+            } else {
+                "bun-global"
+            },
+            None,
+        ));
+    }
+    Err(install_failure("identify active tool ownership", format!("{tool} does not match a supported contained package bin: {} is outside installer roots; inspect its owning installer without replacing it", program.display())))
 }
 
 fn resolve_bun_from(home: &Path, candidates: &[PathBuf]) -> Result<PathBuf, String> {
@@ -174,7 +346,7 @@ fn resolve_bun_from(home: &Path, candidates: &[PathBuf]) -> Result<PathBuf, Stri
             Err(error) => problems.push(format!("{}: {error}", candidate.display())),
         }
     }
-    Err(failure(
+    Err(install_failure(
         "resolve trusted Bun from standard fixed install paths (no PATH search); fix the rejected path ownership/world-write permissions or install Bun under ~/.bun/bin",
         problems.join("; "),
     ))
@@ -304,7 +476,7 @@ pub(crate) fn launch_site(launch: &str, cancelled: &AtomicBool) -> Result<Launch
 }
 
 fn start_console(
-    trusted: TrustedConsole,
+    trusted: TrustedTool,
     timeout: Duration,
     cancelled: &AtomicBool,
 ) -> Result<LaunchedSite, String> {
@@ -462,8 +634,94 @@ fn start_console(
 }
 
 #[cfg(test)]
+pub(crate) fn windows_shim_fixture() -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().canonicalize().unwrap();
+    let bin = root.join(".bun/bin");
+    let package = root.join(".bun/install/global/node_modules/@staix/agent-console");
+    fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(package.join("bin")).unwrap();
+    // These are identity fixtures only; no test executes the fake .exe bytes.
+    for (path, bytes) in [
+        (bin.join("acon.exe"), "fixed Windows shim"),
+        (bin.join("bun.exe"), "fixed Bun runtime"),
+        (
+            package.join("package.json"),
+            r#"{"name":"@staix/agent-console","version":"1.0.0","bin":{"acon":"bin/acon.js"}}"#,
+        ),
+        (
+            package.join("bin/acon.js"),
+            "throw new Error('must not execute')",
+        ),
+    ] {
+        fs::write(&path, bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+    }
+    home
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_windows_shim_resolves_before_root_check_but_retains_package_guards() {
+        let home = windows_shim_fixture();
+        let root = home.path().canonicalize().unwrap();
+        let alias = root.join(".bun/bin/acon.exe");
+        let package = root.join(".bun/install/global/node_modules/@staix/agent-console");
+        let resolve =
+            || resolve_tool_at_for_platform(&root, "acon", "@staix/agent-console", &alias, true);
+        let trusted = resolve().unwrap();
+        assert_eq!(trusted.ownership, "bun-global");
+        assert_eq!(trusted.program, alias.canonicalize().unwrap());
+        assert_eq!(
+            trusted.entry,
+            package.join("bin/acon.js").canonicalize().unwrap()
+        );
+        assert!(
+            resolve_tool_at_for_platform(&root, "acon", "@staix/agent-console", &alias, false)
+                .err()
+                .unwrap()
+                .contains("outside installer roots")
+        );
+        fs::write(
+            package.join("package.json"),
+            r#"{"name":"foreign","version":"1.0.0","bin":{"acon":"bin/acon.js"}}"#,
+        )
+        .unwrap();
+        assert!(resolve()
+            .err()
+            .unwrap()
+            .contains("validate package identity"));
+        fs::write(
+            package.join("package.json"),
+            r#"{"name":"@staix/agent-console","version":"1.0.0","bin":{"acon":"../outside.js"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            package.parent().unwrap().join("outside.js"),
+            "outside entry",
+        )
+        .unwrap();
+        assert!(resolve().err().unwrap().contains("contained bin entry"));
+        let foreign = root.join(".bun/bin/other.exe");
+        fs::write(&foreign, "foreign shim").unwrap();
+        assert!(resolve_tool_at_for_platform(
+            &root,
+            "acon",
+            "@staix/agent-console",
+            &foreign,
+            true
+        )
+        .err()
+        .unwrap()
+        .contains("outside installer roots"));
+    }
 
     fn readiness(url: &str, origin: &str, pid: u32) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({"url":url,"origin":origin,"pid":pid,"plugins":[]}))

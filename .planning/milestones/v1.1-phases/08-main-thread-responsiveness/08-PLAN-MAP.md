@@ -167,6 +167,7 @@ Early shards 01/02/03/04/05 record `integrationRequired: "08-29"` and final modu
 | 08-23 | `src-tauri/src/e2e_flow.rs` | `maru_e2e_run`, `maru_e2e_read` |
 | 08-24 | `src-tauri/src/html_editor.rs` | `prepare_html_editor_assets` |
 | 08-24 | `src-tauri/src/browser_passkeys.rs` | `browser_passkey_status`, `browser_passkey_request_authorization` |
+| 08-24 | `src-tauri/src/family_tools.rs` | `family_tools_status` |
 | 08-24 | `src-tauri/src/site_view.rs` | `site_view_open`, `site_view_navigate`, `site_view_set_bounds`, `site_view_show`, `site_view_hide`, `site_view_close`, `site_view_close_all`, `site_view_reload`, `site_view_back`, `site_view_forward`, `site_view_open_external`, `site_view_open_safari`, `site_view_take_opened_urls` |
 | 08-24 | `src-tauri/src/today_notify.rs` | `today_notify_new_day` |
 | 08-24 | `src-tauri/src/approval.rs` | `prepare_approval`, `record_approval` |
