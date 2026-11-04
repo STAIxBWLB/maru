@@ -5510,144 +5510,183 @@ fn skills_apply_bundle_update_blocking(
         let _ = fs::remove_dir_all(&new_pristine);
         return Err(format!("bundle_prepare_failed: {err}"));
     }
-    if env_changed {
-        let root = host_fs::hashed_env_root(&metadata.env_hash)?;
-        // Reuse a completed N-1 build, never rebuild it in place. A partial
-        // build from an interrupted attempt is disposable under this lease.
-        if !root.join(".maru-env-complete").is_file() {
-            network_admission.before_effect()?;
-            if root.exists() {
-                fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+    let mut built_env = None;
+    let result = (|| {
+        if env_changed {
+            let root = host_fs::hashed_env_root(&metadata.env_hash)?;
+            // Reuse a completed N-1 build, never rebuild it in place. A partial
+            // build from an interrupted attempt is disposable under this lease.
+            let previously_applied = bundle::read_state()?
+                .and_then(|state| state.previous)
+                .is_some_and(|previous| previous.env_hash == metadata.env_hash);
+            if !previously_applied || !root.join(".maru-env-complete").is_file() {
+                network_admission.before_effect()?;
+                if root.exists() {
+                    fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+                }
+                let base = host_fs::env_base()?;
+                host_fs::ensure_dir(&base)?;
+                built_env = Some((root.clone(), PathTransactionParent::capture(&base)?));
+                host_fs::ensure_dir(&root)?;
+                if let Err(err) = repair(&network_admission, progress, &next_builtin, &root) {
+                    let _ = fs::remove_dir_all(&next_builtin);
+                    let _ = fs::remove_dir_all(&new_pristine);
+                    return Err(err);
+                }
+                fs::write(root.join(".maru-env-complete"), "").map_err(|err| err.to_string())?;
             }
-            host_fs::ensure_dir(&root)?;
-            if let Err(err) = repair(&network_admission, progress, &next_builtin, &root) {
-                let _ = fs::remove_dir_all(&root);
-                let _ = fs::remove_dir_all(&next_builtin);
-                let _ = fs::remove_dir_all(&new_pristine);
-                return Err(err);
-            }
-            fs::write(root.join(".maru-env-complete"), "").map_err(|err| err.to_string())?;
         }
-    }
 
-    let prepared_hash = hash_directory(&next_builtin)?;
-    let pristine_hash = hash_directory(&new_pristine)?;
-    drop(network_admission);
-    let mut commit_paths = network_paths;
-    commit_paths.extend(registry_mutation_paths()?);
-    {
-        let _guard = registry_guard()?;
-        commit_paths.extend(install_mutation_paths(&load_registry_readonly_unlocked()?)?);
-    }
-    let commit_admission = PathTransactionRequest::new(commit_paths)?
-        .require_parent_snapshot(&original_parent)?
-        .acquire()?;
-    let _guard = registry_guard()?;
-    let mut registry = load_registry_unlocked()?;
-    let validation = (|| {
-        commit_admission.ensure_covered(install_mutation_paths(&registry)?)?;
-        if hash_directory(&next_builtin)? != prepared_hash
-            || hash_directory(&new_pristine)? != pristine_hash
+        let prepared_hash = hash_directory(&next_builtin)?;
+        let pristine_hash = hash_directory(&new_pristine)?;
+        drop(network_admission);
+        let mut commit_paths = network_paths;
+        commit_paths.extend(registry_mutation_paths()?);
         {
-            return Err("bundle_content_changed: retry manually".to_string());
+            let _guard = registry_guard()?;
+            commit_paths.extend(install_mutation_paths(&load_registry_readonly_unlocked()?)?);
         }
-        commit_admission.before_effect()?;
-        snapshot.validate(&registry)?;
-        if bundle::read_state()?.and_then(|state| state.active) != Some(active.clone()) {
-            return Err("bundle_state_changed: retry manually".to_string());
+        let commit_admission = PathTransactionRequest::new(commit_paths)?
+            .require_parent_snapshot(&original_parent)?
+            .acquire()?;
+        let _guard = registry_guard()?;
+        let mut registry = load_registry_unlocked()?;
+        let validation = (|| {
+            commit_admission.ensure_covered(install_mutation_paths(&registry)?)?;
+            if hash_directory(&next_builtin)? != prepared_hash
+                || hash_directory(&new_pristine)? != pristine_hash
+            {
+                return Err("bundle_content_changed: retry manually".to_string());
+            }
+            commit_admission.before_effect()?;
+            snapshot.validate(&registry)?;
+            if bundle::read_state()?.and_then(|state| state.active) != Some(active.clone()) {
+                return Err("bundle_state_changed: retry manually".to_string());
+            }
+            if !bundle_dirty_areas(&builtin_root, &old_pristine)?.is_empty() {
+                return Err("bundle_dirty_blocked: local edits during preparation".to_string());
+            }
+            Ok(())
+        })();
+        if let Err(err) = validation {
+            let _ = fs::remove_dir_all(&next_builtin);
+            let _ = fs::remove_dir_all(&new_pristine);
+            return Err(err);
         }
-        if !bundle_dirty_areas(&builtin_root, &old_pristine)?.is_empty() {
-            return Err("bundle_dirty_blocked: local edits during preparation".to_string());
+        progress.info("Applying bundle");
+        let backup = host_fs::skills_root()?
+            .join("_cache")
+            .join(format!("backup-{}", Utc::now().format("%Y%m%d%H%M%S%.9f")));
+        bundle::write_journal(&SwapJournal {
+            schema: 1,
+            new_bundle_id: new_bundle_id.clone(),
+            backup_dir: host_fs::display_path(&backup),
+            started_at: Utc::now().to_rfc3339(),
+        })?;
+        if let Err(err) = fs::rename(&builtin_root, &backup) {
+            let _ = bundle::clear_journal();
+            let _ = fs::remove_dir_all(&next_builtin);
+            let _ = fs::remove_dir_all(&new_pristine);
+            return Err(format!("bundle_swap_failed: {err}"));
         }
-        Ok(())
+        let rollback = |reason: String| -> String {
+            let _ = fs::remove_dir_all(&builtin_root);
+            let _ = fs::rename(&backup, &builtin_root);
+            let _ = bundle::clear_journal();
+            let _ = fs::remove_dir_all(&next_builtin);
+            let _ = fs::remove_dir_all(&new_pristine);
+            reason
+        };
+        if let Err(err) = fs::rename(&next_builtin, &builtin_root) {
+            return Err(rollback(format!("bundle_apply_failed: {err}")));
+        }
+
+        let current = SkillBundleRef {
+            bundle_id: new_bundle_id.clone(),
+            revision: metadata.revision,
+            display_version: metadata.display_version.clone(),
+            commit: metadata.commit.clone(),
+            source: bundle::REMOTE_SOURCE.to_string(),
+            env_hash: metadata.env_hash.clone(),
+            applied_at: Utc::now().to_rfc3339(),
+        };
+        if let Err(err) = bundle::write_state(&BundleState {
+            schema: 1,
+            active: Some(current.clone()),
+            previous: Some(active.clone()),
+        }) {
+            return Err(rollback(format!("bundle_state_write_failed: {err}")));
+        }
+        // State now owns the new env. Later housekeeping failures must not
+        // remove an environment that new sessions can already select.
+        built_env = None;
+        bundle::clear_journal()?;
+        let _ = fs::remove_dir_all(&backup);
+        prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;
+        if repair_env {
+            prune_env_dirs(&[current.env_hash.as_str(), active.env_hash.as_str()])?;
+        }
+
+        // The bundle replaces content at an unchanged configured path. Invalidate
+        // captured readers even when its source settings have not changed.
+        {
+            let mut generations = SOURCE_GENERATIONS
+                .get_or_init(Default::default)
+                .lock()
+                .map_err(|_| "source_generation_lock_poisoned".to_string())?;
+            generations.remove(&(registry_path()?, BUILTIN_SOURCE_ID.to_string()));
+        }
+        rescan_source_in_registry_with_progress(&mut registry, BUILTIN_SOURCE_ID, progress)?;
+        let removed_installs = cleanup_removed_builtin_installs(&mut registry, &removed_skills)?;
+        save_registry_unlocked(&registry)?;
+        let stale_copy_installs = stale_copy_installs_report(&registry);
+
+        progress.success(format!(
+            "Skills bundle {} applied ({} added, {} updated, {} removed)",
+            current.display_version,
+            added_skills.len(),
+            updated_skills.len(),
+            removed_skills.len()
+        ));
+        Ok(SkillBundleApplyOutcome {
+            previous: Some(active),
+            current,
+            added_skills,
+            updated_skills,
+            removed_skills,
+            stale_copy_installs,
+            removed_installs,
+            restart_required: false,
+        })
     })();
-    if let Err(err) = validation {
-        let _ = fs::remove_dir_all(&next_builtin);
-        let _ = fs::remove_dir_all(&new_pristine);
-        return Err(err);
+    if let Some((root, parent)) = built_env {
+        // The network/commit leases have been released by the result scope.
+        // Admit cleanup separately and reject a replaced parent before writes.
+        let cleanup = (|| {
+            let lease = PathTransactionRequest::new(vec![
+                root.clone(),
+                next_builtin.clone(),
+                new_pristine.clone(),
+            ])?
+            .require_parent_snapshot(&original_parent)?
+            .require_parent_snapshot(&parent)?
+            .acquire()?;
+            lease.before_effect()?;
+            for path in [&root, &next_builtin, &new_pristine] {
+                match fs::remove_dir_all(path) {
+                    Ok(()) => (),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = cleanup {
+            return Err(format!("{}; env_cleanup_failed: {}: {error}. Remove the unapplied env directory after resolving the path conflict, then retry.",
+                result.unwrap_err(), host_fs::display_path(&root)));
+        }
     }
-    progress.info("Applying bundle");
-    let backup = host_fs::skills_root()?
-        .join("_cache")
-        .join(format!("backup-{}", Utc::now().format("%Y%m%d%H%M%S%.9f")));
-    bundle::write_journal(&SwapJournal {
-        schema: 1,
-        new_bundle_id: new_bundle_id.clone(),
-        backup_dir: host_fs::display_path(&backup),
-        started_at: Utc::now().to_rfc3339(),
-    })?;
-    if let Err(err) = fs::rename(&builtin_root, &backup) {
-        let _ = bundle::clear_journal();
-        let _ = fs::remove_dir_all(&next_builtin);
-        let _ = fs::remove_dir_all(&new_pristine);
-        return Err(format!("bundle_swap_failed: {err}"));
-    }
-    let rollback = |reason: String| -> String {
-        let _ = fs::remove_dir_all(&builtin_root);
-        let _ = fs::rename(&backup, &builtin_root);
-        let _ = bundle::clear_journal();
-        let _ = fs::remove_dir_all(&next_builtin);
-        let _ = fs::remove_dir_all(&new_pristine);
-        reason
-    };
-    if let Err(err) = fs::rename(&next_builtin, &builtin_root) {
-        return Err(rollback(format!("bundle_apply_failed: {err}")));
-    }
-
-    let current = SkillBundleRef {
-        bundle_id: new_bundle_id.clone(),
-        revision: metadata.revision,
-        display_version: metadata.display_version.clone(),
-        commit: metadata.commit.clone(),
-        source: bundle::REMOTE_SOURCE.to_string(),
-        env_hash: metadata.env_hash.clone(),
-        applied_at: Utc::now().to_rfc3339(),
-    };
-    if let Err(err) = bundle::write_state(&BundleState {
-        schema: 1,
-        active: Some(current.clone()),
-        previous: Some(active.clone()),
-    }) {
-        return Err(rollback(format!("bundle_state_write_failed: {err}")));
-    }
-    bundle::clear_journal()?;
-    let _ = fs::remove_dir_all(&backup);
-    prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;
-    if repair_env {
-        prune_env_dirs(&[current.env_hash.as_str(), active.env_hash.as_str()])?;
-    }
-
-    // The bundle replaces content at an unchanged configured path. Invalidate
-    // captured readers even when its source settings have not changed.
-    {
-        let mut generations = SOURCE_GENERATIONS
-            .get_or_init(Default::default)
-            .lock()
-            .map_err(|_| "source_generation_lock_poisoned".to_string())?;
-        generations.remove(&(registry_path()?, BUILTIN_SOURCE_ID.to_string()));
-    }
-    rescan_source_in_registry_with_progress(&mut registry, BUILTIN_SOURCE_ID, progress)?;
-    let removed_installs = cleanup_removed_builtin_installs(&mut registry, &removed_skills)?;
-    save_registry_unlocked(&registry)?;
-    let stale_copy_installs = stale_copy_installs_report(&registry);
-
-    progress.success(format!(
-        "Skills bundle {} applied ({} added, {} updated, {} removed)",
-        current.display_version,
-        added_skills.len(),
-        updated_skills.len(),
-        removed_skills.len()
-    ));
-    Ok(SkillBundleApplyOutcome {
-        previous: Some(active),
-        current,
-        added_skills,
-        updated_skills,
-        removed_skills,
-        stale_copy_installs,
-        removed_installs,
-        restart_required: false,
-    })
+    result
 }
 
 fn upsert_default_linked_source(
@@ -8353,6 +8392,35 @@ exit 7
         }
 
         #[test]
+        fn marker_write_failure_removes_unapplied_env_and_prepared_bundles() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let before = bundle::read_state().unwrap().unwrap().active;
+            let (remote, archive) = bundle_fixture();
+            let target = host_fs::hashed_env_root(&remote.metadata.env_hash).unwrap();
+            let pristine = bundle::bundle_pristine_dir(&bundle_id_for(&remote.metadata)).unwrap();
+            let mut prepared = None;
+            skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, next, root| {
+                    prepared = Some(next.to_path_buf());
+                    // A directory at the marker path forces fs::write to fail.
+                    fs::create_dir_all(root.join(".maru-env-complete")).unwrap();
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+            assert!(!target.exists());
+            assert!(!pristine.exists());
+            assert!(!prepared.unwrap().exists());
+            assert_eq!(bundle::read_state().unwrap().unwrap().active, before);
+        }
+
+        #[test]
         fn successful_hash_env_build_switches_runtime_and_retains_old_env() {
             let _home = test_home();
             skills_list_sources(None).unwrap();
@@ -8425,6 +8493,7 @@ exit 7
                 skills_list_sources(None).unwrap();
                 let before = bundle::read_state().unwrap().unwrap().active;
                 let (remote, archive) = bundle_fixture();
+                let target = host_fs::hashed_env_root(&remote.metadata.env_hash).unwrap();
                 let result = skills_apply_bundle_update_blocking(
                     None,
                     true,
@@ -8442,6 +8511,7 @@ exit 7
                     },
                 );
                 let err = result.unwrap_err();
+                assert!(!target.exists(), "failed apply kept its newly built env");
                 assert!(
                     err.contains(if reset {
                         "source_changed"

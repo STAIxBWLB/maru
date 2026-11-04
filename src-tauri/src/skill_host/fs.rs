@@ -46,11 +46,11 @@ pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
     {
-        return Err("invalid_env_hash: expected a nonempty path-safe hash".into());
+        return Err("invalid_env_hash: expected a nonempty path-safe hash; check the skills channel envHash and retry with corrected metadata".into());
     }
     let root = env_base()?.join(hash);
     if fs::symlink_metadata(&root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return Err("invalid_env_hash: environment directory must not be a symlink".into());
+        return Err("invalid_env_hash: environment directory must not be a symlink; move the conflicting link aside and retry".into());
     }
     Ok(root)
 }
@@ -58,7 +58,12 @@ pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
 /// All runtime and maintenance callers resolve the same active environment.
 /// Older installations remain usable until their first hashed build succeeds.
 pub fn env_root() -> Result<PathBuf, String> {
-    if let Some(active) = super::bundle_update::read_state()?.and_then(|state| state.active) {
+    let state = super::bundle_update::read_state().map_err(|error| {
+        format!("skills_env_state_unreadable: {error}; restore a valid skills bundle state file, then retry environment status or repair")
+    })?;
+    // A missing state permits legacy fallback. An unreadable state must not
+    // redirect repair into the legacy env when the active hash is unknown.
+    if let Some(active) = state.and_then(|state| state.active) {
         if !active.env_hash.is_empty() {
             let root = hashed_env_root(&active.env_hash)?;
             if root.is_dir() {
@@ -357,6 +362,24 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn env_resolver_preserves_legacy_fallback_but_rejects_corrupt_state() {
+        let _home = test_home_for_bundle_tests();
+        let legacy = env_base().unwrap();
+        fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(env_root().unwrap(), legacy);
+        let state_path = super::super::bundle_update::state_path().unwrap();
+        fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        fs::write(&state_path, b"{broken state").unwrap();
+        let error = env_root().unwrap_err();
+        assert!(error.contains("Cannot parse"), "{error}");
+        assert!(
+            error.contains("restore a valid skills bundle state file"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&state_path).unwrap(), b"{broken state");
+    }
 
     #[test]
     #[cfg(not(feature = "native-e2e"))]
