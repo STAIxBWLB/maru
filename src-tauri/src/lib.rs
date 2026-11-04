@@ -825,7 +825,7 @@ mod quit_acl_tests {
                 assert_eq!(
                     get_ipc_response(&view, invoke_request(command)).unwrap_err(),
                     serde_json::json!(
-                        "app_command_unavailable: this webview cannot dispatch app commands"
+                        "app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"
                     )
                 );
             }
@@ -862,7 +862,7 @@ mod quit_acl_tests {
             assert_eq!(
                 get_ipc_response(&child, request).unwrap_err(),
                 serde_json::json!(
-                    "app_command_unavailable: this webview cannot dispatch app commands"
+                    "app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"
                 )
             );
             let mut request = invoke_request("plugin:window|is_maximized");
