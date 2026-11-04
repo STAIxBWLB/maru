@@ -5318,17 +5318,24 @@ fn prune_bundle_dirs(keep: &[&str]) -> Result<(), String> {
     if !dir.is_dir() {
         return Ok(());
     }
-    for entry in fs::read_dir(&dir).map_err(|err| err.to_string())? {
-        let entry = entry.map_err(|err| err.to_string())?;
+    for entry in fs::read_dir(&dir)
+        .map_err(|error| host_fs::operation_error("list retained bundles", &dir, error))?
+    {
+        let entry = entry
+            .map_err(|error| host_fs::operation_error("read retained bundle entry", &dir, error))?;
         let name = entry.file_name().to_string_lossy().to_string();
         if !keep.iter().any(|id| same_generation_name(&name, id))
             && !retained.iter().any(|id| same_generation_name(&name, id))
             && entry
                 .file_type()
-                .map_err(|error| error.to_string())?
+                .map_err(|error| {
+                    host_fs::operation_error("inspect retained bundle entry", &entry.path(), error)
+                })?
                 .is_dir()
         {
-            let _ = fs::remove_dir_all(entry.path());
+            fs::remove_dir_all(entry.path()).map_err(|error| {
+                host_fs::operation_error("remove unused bundle", &entry.path(), error)
+            })?;
         }
     }
     Ok(())
@@ -5579,23 +5586,36 @@ pub fn skills_rollback_bundle() -> Result<SkillBundleApplyOutcome, String> {
             let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
             let mut files = Vec::new();
             for entry in WalkDir::new(&root).follow_links(false) {
-                let entry = entry.map_err(|error| error.to_string())?;
+                let entry = entry.map_err(|error| {
+                    host_fs::operation_error("iterate rollback source", &root, error)
+                })?;
                 if !entry.file_type().is_file() {
                     continue;
                 }
-                let relative = entry
-                    .path()
-                    .strip_prefix(&root)
-                    .map_err(|error| error.to_string())?;
+                let relative = entry.path().strip_prefix(&root).map_err(|error| {
+                    host_fs::operation_error(
+                        "resolve rollback source-relative file",
+                        entry.path(),
+                        error,
+                    )
+                })?;
                 if is_bundle_junk(relative) {
                     continue;
                 }
                 let name = relative.to_string_lossy().replace('\\', "/");
-                let bytes = fs::read(entry.path()).map_err(|error| error.to_string())?;
+                let bytes = fs::read(entry.path()).map_err(|error| {
+                    host_fs::operation_error("read rollback source file", entry.path(), error)
+                })?;
                 #[cfg(unix)]
                 let mode = entry
                     .metadata()
-                    .map_err(|error| error.to_string())?
+                    .map_err(|error| {
+                        host_fs::operation_error(
+                            "inspect rollback source permissions",
+                            entry.path(),
+                            error,
+                        )
+                    })?
                     .permissions()
                     .mode()
                     & 0o777;
@@ -5605,8 +5625,12 @@ pub fn skills_rollback_bundle() -> Result<SkillBundleApplyOutcome, String> {
                     &name,
                     zip::write::SimpleFileOptions::default().unix_permissions(mode),
                 )
-                .map_err(|error| error.to_string())?;
-                zip.write_all(&bytes).map_err(|error| error.to_string())?;
+                .map_err(|error| {
+                    host_fs::operation_error("start rollback archive entry", entry.path(), error)
+                })?;
+                zip.write_all(&bytes).map_err(|error| {
+                    host_fs::operation_error("write rollback archive entry", entry.path(), error)
+                })?;
                 files.push(bundle::BundleFileEntry {
                     path: name,
                     sha256: bundle::sha256_hex(&bytes),
@@ -5615,7 +5639,7 @@ pub fn skills_rollback_bundle() -> Result<SkillBundleApplyOutcome, String> {
             }
             let bytes = zip
                 .finish()
-                .map_err(|error| error.to_string())?
+                .map_err(|error| host_fs::operation_error("finish rollback archive", &root, error))?
                 .into_inner();
             let compatibility = read_bundle_compatibility(&target.bundle_id)?;
             let metadata = bundle::BundleMetadata {
@@ -5855,7 +5879,9 @@ fn skills_activate_bundle_blocking(
             let _ = fs::remove_dir_all(&staging);
             return Err("bundle_id_reused: the retained bundle differs from this archive; report the bundle ID to the channel maintainer before retrying".into());
         }
-        fs::remove_dir_all(&staging).map_err(|error| error.to_string())?;
+        fs::remove_dir_all(&staging).map_err(|error| {
+            host_fs::operation_error("remove verified duplicate bundle staging", &staging, error)
+        })?;
     } else {
         fs::rename(&staging, &new_pristine)
             .map_err(|error| format!("Cannot publish {}: {error}", new_pristine.display()))?;
@@ -6008,8 +6034,8 @@ fn skills_activate_bundle_blocking(
         }
         progress.info("Applying bundle");
         let backup = host_fs::skills_root()?
-            .join("_cache")
-            .join(format!("backup-{}", Utc::now().format("%Y%m%d%H%M%S%.9f")));
+            .join("_cache/retired")
+            .join(&active.bundle_id);
         let old_workspace = bundle::workspace_dir(&active.bundle_id)?;
         let new_workspace = bundle::workspace_dir(&new_bundle_id)?;
         host_fs::ensure_dir(
@@ -6023,9 +6049,17 @@ fn skills_activate_bundle_blocking(
             if hash_directory_filtered(&new_workspace)? != hash_directory_filtered(&next_builtin)? {
                 return Err("bundle_workspace_dirty: previous workspace changed; preserve its edits before retrying rollback".into());
             }
-            fs::remove_dir_all(&next_builtin).map_err(|error| error.to_string())?;
+            fs::remove_dir_all(&next_builtin).map_err(|error| {
+                host_fs::operation_error(
+                    "remove duplicate prepared workspace",
+                    &next_builtin,
+                    error,
+                )
+            })?;
         } else {
-            fs::rename(&next_builtin, &new_workspace).map_err(|error| error.to_string())?;
+            fs::rename(&next_builtin, &new_workspace).map_err(|error| {
+                host_fs::operation_error("publish prepared workspace", &new_workspace, error)
+            })?;
         }
         let prior_layout = read_bundle_compatibility(&active.bundle_id)
             .ok()
@@ -6055,6 +6089,7 @@ fn skills_activate_bundle_blocking(
             new_bundle_id: new_bundle_id.clone(),
             backup_dir: host_fs::display_path(&backup),
             started_at: Utc::now().to_rfc3339(),
+            legacy_directory: host_fs::read_link_target(&builtin_root).is_none(),
             old_workspace: Some(host_fs::display_path(&old_workspace)),
             new_workspace: Some(host_fs::display_path(&new_workspace)),
             links: links.clone(),
@@ -6071,8 +6106,7 @@ fn skills_activate_bundle_blocking(
                 )?;
             }
             if host_fs::read_link_target(&builtin_root).is_none() {
-                fs::rename(&builtin_root, &backup).map_err(|error| error.to_string())?;
-                host_fs::create_symlink_no_clobber(&builtin_root, &old_workspace)?;
+                host_fs::migrate_legacy_directory(&builtin_root, &old_workspace, &backup)?;
             }
             host_fs::replace_symlink(&builtin_root, &new_workspace)?;
             for link in &links {
@@ -6142,23 +6176,46 @@ fn skills_activate_bundle_blocking(
         save_registry_unlocked(&registry)?;
         let stale_copy_installs = stale_copy_installs_report(&registry);
         let workspace_cleanup = (|| {
-            let workspaces = host_fs::skills_root()?.join("_workspaces");
-            if workspaces.is_dir() {
-                for entry in fs::read_dir(&workspaces).map_err(|error| error.to_string())? {
-                    let entry = entry.map_err(|error| error.to_string())?;
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if !same_generation_name(&name, &current.bundle_id)
-                        && !same_generation_name(&name, &active.bundle_id)
-                        && entry
-                            .file_type()
-                            .map_err(|error| error.to_string())?
-                            .is_dir()
-                    {
-                        fs::remove_dir_all(entry.path()).map_err(|error| error.to_string())?;
+            for workspaces in [
+                host_fs::skills_root()?.join("_workspaces"),
+                host_fs::skills_root()?.join("_cache/retired"),
+            ] {
+                if workspaces.is_dir() {
+                    for entry in fs::read_dir(&workspaces).map_err(|error| {
+                        host_fs::operation_error("list retired workspaces", &workspaces, error)
+                    })? {
+                        let entry = entry.map_err(|error| {
+                            host_fs::operation_error(
+                                "read retired workspace entry",
+                                &workspaces,
+                                error,
+                            )
+                        })?;
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if !same_generation_name(&name, &current.bundle_id)
+                            && !same_generation_name(&name, &active.bundle_id)
+                            && entry
+                                .file_type()
+                                .map_err(|error| {
+                                    host_fs::operation_error(
+                                        "inspect retired workspace entry",
+                                        &entry.path(),
+                                        error,
+                                    )
+                                })?
+                                .is_dir()
+                        {
+                            fs::remove_dir_all(entry.path()).map_err(|error| {
+                                host_fs::operation_error(
+                                    "remove retired workspace",
+                                    &entry.path(),
+                                    error,
+                                )
+                            })?;
+                        }
                     }
                 }
             }
-
             Ok::<(), String>(())
         })();
         if let Err(error) = workspace_cleanup {
@@ -7386,16 +7443,21 @@ fn copy_bundle_snapshot(from: &Path, to: &Path) -> Result<(), String> {
                 .is_ok_and(|relative| !is_bundle_junk(relative))
         })
     {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let relative = entry
-            .path()
-            .strip_prefix(from)
-            .map_err(|error| error.to_string())?;
+        let entry = entry
+            .map_err(|error| host_fs::operation_error("iterate snapshot source", from, error))?;
+        let relative = entry.path().strip_prefix(from).map_err(|error| {
+            host_fs::operation_error(
+                "resolve snapshot source-relative entry",
+                entry.path(),
+                error,
+            )
+        })?;
         let target = to.join(relative);
         if entry.file_type().is_dir() {
             host_fs::ensure_dir(&target)?;
         } else if entry.file_type().is_file() {
-            fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+            fs::copy(entry.path(), &target)
+                .map_err(|error| host_fs::operation_error("copy snapshot file", &target, error))?;
         }
     }
     Ok(())
@@ -9227,6 +9289,43 @@ exit 7
                 .skills
                 .iter()
                 .any(|skill| skill.id == "maru-builtin::updated"));
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn unreadable_rollback_source_names_the_archive_operation_path_and_next_step() {
+            use std::os::unix::fs::PermissionsExt;
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            fs::create_dir_all(host_fs::env_base().unwrap().join(".venv")).unwrap();
+            let previous = bundle::read_state().unwrap().unwrap().active.unwrap();
+            let (remote, archive) = bundle_fixture();
+            skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    fs::create_dir_all(root.join(".venv")).map_err(|error| error.to_string())
+                },
+            )
+            .unwrap();
+            let path = bundle::bundle_pristine_dir(&previous.bundle_id)
+                .unwrap()
+                .join("manifest.json");
+            let permissions = fs::metadata(&path).unwrap().permissions();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+            let result = skills_rollback_bundle();
+            fs::set_permissions(&path, permissions).unwrap();
+            let error = result.unwrap_err();
+            assert!(error.contains("read rollback source file"), "{error}");
+            assert!(error.contains(&path_string(&path)), "{error}");
+            assert!(error.contains("maru skills update --check"), "{error}");
+            assert!(
+                error.contains("retry the requested skill/update/rollback"),
+                "{error}"
+            );
         }
 
         #[test]

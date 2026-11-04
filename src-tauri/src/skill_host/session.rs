@@ -30,14 +30,14 @@ impl BundleSession {
     /// commit/pruning acquires the same pin path, while network/setup does not.
     pub(crate) fn retain(self) -> Result<Self, String> {
         let key = (self.root.clone(), self.env_root.clone());
+        let dir = sessions_dir()?;
         let mut locks = SESSION_LOCKS
             .get_or_init(Default::default)
             .lock()
-            .map_err(|_| "bundle_session_lock_poisoned")?;
+            .map_err(|_| format!("bundle_session_lock_poisoned: pin bookkeeping at {} is unavailable; preserve the pin files and restart Maru before retrying this skill run", dir.display()))?;
         if locks.contains_key(&key) {
             return Ok(self);
         }
-        let dir = sessions_dir()?;
         host_fs::ensure_dir(&dir)?;
         let path = dir.join(format!("{}.json", Uuid::new_v4()));
         let file = OpenOptions::new()
@@ -46,12 +46,15 @@ impl BundleSession {
             .create_new(true)
             .open(path.with_extension("lock"))
             .map_err(|error| format!("bundle_session_pin_failed: {error}; retry the session"))?;
-        file.lock().map_err(|error| error.to_string())?;
+        file.lock().map_err(|error| {
+            host_fs::operation_error("lock session pin", &path.with_extension("lock"), error)
+        })?;
         fs::write(
             &path,
-            serde_json::to_vec(&self).map_err(|error| error.to_string())?,
+            serde_json::to_vec(&self)
+                .map_err(|error| host_fs::operation_error("serialize session pin", &path, error))?,
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| host_fs::operation_error("write session pin", &path, error))?;
         locks.insert(key, file);
         Ok(self)
     }
@@ -87,11 +90,18 @@ impl BundleSession {
                 &host_fs::display_path(&skills.join("_builtin")),
                 "@MARU_BUNDLE@",
             );
-        for entry in fs::read_dir(self.root.join("skills")).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
+        let catalog = self.root.join("skills");
+        for entry in fs::read_dir(&catalog).map_err(|error| {
+            host_fs::operation_error("list captured skill catalog", &catalog, error)
+        })? {
+            let entry = entry.map_err(|error| {
+                host_fs::operation_error("read captured skill catalog entry", &catalog, error)
+            })?;
             if !entry
                 .file_type()
-                .map_err(|error| error.to_string())?
+                .map_err(|error| {
+                    host_fs::operation_error("inspect captured skill entry", &entry.path(), error)
+                })?
                 .is_dir()
             {
                 continue;
@@ -117,8 +127,13 @@ impl BundleSession {
     }
 
     pub(crate) fn prompt(&self, text: &str) -> Result<String, String> {
-        Ok(format!("<maru_bundle root={:?} env={:?}>\nUse this captured bundle for bundled skills and their resources throughout this session.\n</maru_bundle>\n{}",
-            self.root, self.env_root, self.render(text)?))
+        let header = format!("<maru_bundle root={:?} env={:?}>", self.root, self.env_root);
+        let rendered = self.render(text)?;
+        // Structured role prompts embed the already-composed directive.
+        if rendered.contains(&header) {
+            return Ok(rendered);
+        }
+        Ok(format!("{header}\nUse this captured bundle for bundled skills and their resources throughout this session.\n</maru_bundle>\n{rendered}"))
     }
 }
 
@@ -140,8 +155,12 @@ fn scan_retained(cleanup: bool) -> Result<(BTreeSet<String>, BTreeSet<String>), 
     if !dir.is_dir() {
         return Ok((bundles, envs));
     }
-    for entry in fs::read_dir(dir).map_err(|error| error.to_string())? {
-        let path = entry.map_err(|error| error.to_string())?.path();
+    for entry in fs::read_dir(&dir)
+        .map_err(|error| host_fs::operation_error("list session pins", &dir, error))?
+    {
+        let path = entry
+            .map_err(|error| host_fs::operation_error("read session pin entry", &dir, error))?
+            .path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
@@ -152,12 +171,16 @@ fn scan_retained(cleanup: bool) -> Result<(BTreeSet<String>, BTreeSet<String>), 
             Ok(()) => {
                 drop(file);
                 if cleanup {
-                    fs::remove_file(path).map_err(|error| error.to_string())?;
-                    fs::remove_file(lock_path).map_err(|error| error.to_string())?;
+                    fs::remove_file(&path).map_err(|error| {
+                        host_fs::operation_error("remove expired session metadata", &path, error)
+                    })?;
+                    fs::remove_file(&lock_path).map_err(|error| {
+                        host_fs::operation_error("remove expired session lock", &lock_path, error)
+                    })?;
                 }
             }
             Err(TryLockError::WouldBlock) => {
-                let session: BundleSession = serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
+                let session: BundleSession = serde_json::from_slice(&fs::read(&path).map_err(|error| host_fs::operation_error("read retained session metadata", &path, error))?)
                     .map_err(|error| format!("bundle_session_pin_invalid: {}: {error}; inspect the pin before retrying cleanup", path.display()))?;
                 bundles.insert(session.bundle_id);
                 envs.insert(session.env_hash);
@@ -192,6 +215,24 @@ mod tests {
         assert!(text.contains(&format!("{}/.venv/bin/python", session.env_root.display())));
         assert!(text.contains("~/.maru/skills/custom/run.sh"));
         assert_eq!(session.render(&text).unwrap(), text);
+        let once = session.prompt(&text).unwrap();
+        assert_eq!(
+            session
+                .prompt(&once)
+                .unwrap()
+                .matches("<maru_bundle ")
+                .count(),
+            1
+        );
+        let role = format!("<role>worker</role><input>{once}</input>");
+        assert_eq!(
+            session
+                .prompt(&role)
+                .unwrap()
+                .matches("<maru_bundle ")
+                .count(),
+            1
+        );
     }
 
     #[test]

@@ -378,10 +378,83 @@ pub(crate) fn test_home_for_bundle_tests() -> BundleTestHome {
     }
 }
 
+/// Shared boundary for filesystem/archive failures surfaced by skills CLI/IPC.
+pub(crate) fn operation_error(
+    operation: &str,
+    path: &Path,
+    error: impl std::fmt::Display,
+) -> String {
+    format!("skills_io_failed: {operation} at {}: {error}; inspect this path and resolve the reported filesystem/archive error, check the active bundle with `maru skills update --check`, then retry the requested skill/update/rollback", display_path(path))
+}
+
 pub(crate) fn link_temp(link: &Path) -> PathBuf {
     let name = link.file_name().unwrap_or_default().to_string_lossy();
     let hash = super::bundle_update::sha256_hex(name.as_bytes());
     link.with_file_name(format!(".maru-next-{}", &hash[..16]))
+}
+
+/// Exchange a legacy directory with a fully published symlink. No reader
+/// that already cached the old _builtin target ever sees that name missing.
+pub(crate) fn migrate_legacy_directory(
+    link: &Path,
+    target: &Path,
+    retired: &Path,
+) -> Result<(), String> {
+    let parent = retired.parent().ok_or(
+        "skill_migration_parent_missing: inspect the retired-workspace path before retrying",
+    )?;
+    ensure_dir(parent)
+        .map_err(|error| operation_error("create retired-workspace parent", parent, error))?;
+    match fs::symlink_metadata(retired) {
+        Ok(metadata) if metadata.file_type().is_symlink() && read_link_target(retired).as_deref() == Some(target) => (),
+        Ok(_) => return Err(format!("skill_migration_conflict: {} already contains an entry; preserve it and inspect the migration journal before retrying", retired.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => create_symlink_no_clobber(retired, target)?,
+        Err(error) => return Err(operation_error("inspect retired-workspace staging path", retired, error)),
+    }
+    exchange_paths(link, retired).map_err(|error| operation_error("atomically exchange legacy directory and staged symlink (requires filesystem name-exchange support; report unsupported platforms to the maintainer)", link, error))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn exchange_paths(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let from = std::ffi::CString::new(from.as_os_str().as_bytes())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    let to = std::ffi::CString::new(to.as_os_str().as_bytes())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        fn renameat2(
+            old_dir: i32,
+            old: *const std::ffi::c_char,
+            new_dir: i32,
+            new: *const std::ffi::c_char,
+            flags: u32,
+        ) -> i32;
+    }
+    #[cfg(target_os = "macos")]
+    unsafe extern "C" {
+        fn renamex_np(
+            old: *const std::ffi::c_char,
+            new: *const std::ffi::c_char,
+            flags: u32,
+        ) -> i32;
+    }
+    // SAFETY: live NUL-terminated paths; flag 2 is RENAME_EXCHANGE on Linux
+    // and RENAME_SWAP on Darwin. Both exchange existing names atomically.
+    #[cfg(target_os = "linux")]
+    let result = unsafe { renameat2(-100, from.as_ptr(), -100, to.as_ptr(), 2) };
+    #[cfg(target_os = "macos")]
+    let result = unsafe { renamex_np(from.as_ptr(), to.as_ptr(), 2) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn exchange_paths(_from: &Path, _to: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "atomic legacy-directory migration is unavailable on this platform; the old directory was preserved"))
 }
 
 /// Publish a new symlink by rename, never by unlinking the old entry first.
@@ -395,7 +468,9 @@ pub(crate) fn replace_symlink(link: &Path, target: &Path) -> Result<(), String> 
                 display_path(&temp)
             ));
         }
-        remove_symlink(&temp).map_err(|error| error.to_string())?;
+        remove_symlink(&temp).map_err(|error| {
+            operation_error("remove stale skill-link staging entry", &temp, error)
+        })?;
     }
     create_symlink_no_clobber(&temp, target)?;
     let result = rename_link(&temp, link);
@@ -455,6 +530,28 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn legacy_migration_exchanges_names_and_retains_the_original_directory() {
+        let _home = test_home_for_bundle_tests();
+        let builtin = skills_root().unwrap().join("_builtin");
+        let workspace = skills_root().unwrap().join("_workspaces/old");
+        for root in [&builtin, &workspace] {
+            fs::create_dir_all(root.join("skills/demo")).unwrap();
+            fs::write(root.join("skills/demo/SKILL.md"), "old").unwrap();
+        }
+        let cached_target = builtin.join("skills/demo/SKILL.md");
+        let retired = skills_root().unwrap().join("_cache/retired/old");
+        migrate_legacy_directory(&builtin, &workspace, &retired).unwrap();
+        assert_eq!(read_link_target(&builtin).unwrap(), workspace);
+        assert_eq!(fs::read_to_string(cached_target).unwrap(), "old");
+        assert!(fs::symlink_metadata(&retired).unwrap().is_dir());
+        assert_eq!(
+            fs::read_to_string(retired.join("skills/demo/SKILL.md")).unwrap(),
+            "old"
+        );
+    }
 
     #[test]
     fn hashed_env_root_rejects_case_aliases_of_active_and_reserved_directories() {
