@@ -1209,6 +1209,58 @@
         "limits": "The linter checks a fixed rule set for Korean official-document style; documents are scanned whole, so very large documents still pay an O(n) pass on the worker. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
         "contract": "The GaejosikLintResponse payload, the rule ids, the span reporting and the dismissal semantics are unchanged; the only new failure path is the JoinError-to-String mapping at the worker boundary."
       }
+    },
+    {
+      "name": "family_tools_status",
+      "module": "src-tauri/src/family_tools.rs",
+      "registrationPath": "src-tauri/src/lib.rs::family_tools::ipc::family_tools_status",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/family_tools.rs::ipc::family_tools_status awaits spawn_blocking calling src-tauri/src/family_tools.rs::family_tools_status; inspect resolves trusted packages and bounded read-only manifest commands; latest validates package identity/version from bounded npm metadata."
+      ],
+      "workerBoundary": {
+        "entry": "src-tauri/src/family_tools.rs::ipc::family_tools_status",
+        "proof": "Physical src-tauri/src/family_tools.rs::tests::family_registry_worker_yields_and_maps_join_failure exercises same-poll progress and worker failure via the test-only stage before network or filesystem reads; spawn_blocking is awaited.",
+        "bounds": "Four fixed packages, at most 64 KiB per response/manifest and 3 seconds per HTTP request or subprocess."
+      },
+      "syncCallers": [
+        "src/lib/familyTools.ts::familyToolsStatus is the frontend IPC adapter; no synchronous Rust caller beyond the owned worker."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only metadata/manifest probes; no filesystem mutation, setup, deploy, note writes, package installation or grant changes."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib family_registry_",
+          "status": "UNVERIFIED: awaits hosted CI; no result count claimed"
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/familyTools.ts",
+          "src/components/settings/tabs/FamilyToolsTab.tsx"
+        ],
+        "payload": "familyToolsStatus returns four owned status records.",
+        "terminalNoticeOwner": "FamilyToolsTab owns busy/error/rows and generation fencing.",
+        "classifier": "Read-only inventory, not a processing batch.",
+        "successRetention": "Rows retained in component state.",
+        "failureReasons": "Inline error and per-tool diagnostic strings; single publisher.",
+        "singleTerminalNoticeOwner": true,
+        "closureSource": "docs/performance/phase08-processing-callers.json rows[].command=family_tools_status"
+      },
+      "evidence": {
+        "behaviorCases": [
+          "family_registry_worker_yields_and_maps_join_failure",
+          "family_registry_distinguishes_absent_stale_and_unavailable",
+          "family_registry_rejects_foreign_bin_without_running_or_mutating_it"
+        ],
+        "workerProof": "src-tauri/src/family_tools.rs::tests::family_registry_worker_yields_and_maps_join_failure uses the existing same-poll boundary fixture; it is written but execution is UNVERIFIED until hosted Rust CI.",
+        "platformScope": "Synthetic Rust fixtures; no personal home mutation, installs or live service starts. Native fixture execution and real platform proof remain unverified."
+      }
     }
   ]
 }

@@ -229,6 +229,32 @@ shutdown. Failed or cancelled startup terminates only its owned child tree, and
 tab cancellation fences stale opens.
 Maru does not change console plugin grants, note writers or task policy.
 
+### Family tool inventory
+
+Settings > Family tools lists ahub, amem, vmem and acon. Refresh reads bounded
+npm latest metadata and validates installed Bun-global package/bin identity.
+For amem/vmem, their supported read-only `manifest --json` supplies command
+capabilities; tools without that contract expose package identity/version only.
+Absent, installed, stale and unavailable states are distinct; a registry failure
+never pretends that an installed tool is current. External installs are labelled
+and never executed or overwritten by this inventory.
+
+Installation/update ownership remains with dotfiles or the existing installer
+(`docs/BOUNDARIES.md`). Exact-version `bun add -g` lines are terminal handoffs,
+not executable UI actions. Refresh and selection never install, deploy, restart
+hubs/MCP sessions, change grants/frozen tasks or write notes. A version change
+observed while this panel stays open retains the earlier version for an explicit
+package-reinstall rollback handoff. No earlier version is invented when the
+panel has not observed one. This is neither atomic rollback nor a restore of
+package data/settings; installation failure recovery belongs to the installer.
+
+Only explicit acon selection can enqueue the existing fixed-argv Sites launcher.
+Native integration fixtures cover selection and that handoff with a synthetic
+console; compiling them is separate from executing WKWebView/Origin/CSP/session
+checks. The inventory is portable Rust/TypeScript; native runtime proof and
+platform-specific package/runtime availability must be verified separately on
+macOS, Linux and Windows. No local native build is implied by a passing web test.
+
 ### Terminal and AI Runtimes
 
 - The terminal uses `portable-pty` and `alacritty_terminal`, streams ordered

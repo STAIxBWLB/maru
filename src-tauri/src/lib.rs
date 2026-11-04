@@ -24,6 +24,7 @@ mod drafts;
 mod e2e_flow;
 mod evidence_binder;
 mod export;
+mod family_tools;
 mod file_manager;
 mod filename_rules;
 mod frontmatter;
@@ -667,6 +668,7 @@ pub fn run() {
             // Sites (in-app browser pane + global registry + scanner)
             browser_passkey_status,
             browser_passkey_request_authorization,
+            family_tools::ipc::family_tools_status,
             site_view_open,
             site_view_navigate,
             site_view_set_bounds,

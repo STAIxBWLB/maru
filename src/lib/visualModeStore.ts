@@ -7,6 +7,7 @@ import {
   unroutedSiteViewOpenRequestId,
   type SiteViewOpenRequest,
 } from "./siteView";
+import { ACON_SITE_LAUNCH } from "./sites";
 import type { GraphOpenTarget } from "./settings";
 
 export type VisualModeDomain = "diagram" | "graph" | "sites";
@@ -72,6 +73,7 @@ export interface VisualModeController {
   setGraphReferenceFocus(focus: GraphModeSlice["referenceFocus"]): void;
   setGraphReferenceWalk(walk: GraphModeSlice["referenceWalk"]): void;
   enqueueSiteUrls(urls: unknown): void;
+  enqueueFamilyConsole(): void;
   acknowledgeSiteUrls(ids: readonly number[]): void;
 }
 
@@ -82,6 +84,7 @@ export interface VisualModeController {
  */
 export function createVisualModeController(): VisualModeController {
   let state = INITIAL_STATE;
+  let lastSiteRequestId = 0;
   const listeners: Record<VisualModeDomain, Set<() => void>> = {
     diagram: new Set(),
     graph: new Set(),
@@ -134,9 +137,14 @@ export function createVisualModeController(): VisualModeController {
       state = { ...state, graph: { ...state.graph, referenceWalk } };
       notify("graph");
     },
+    enqueueFamilyConsole() {
+      const id = ++lastSiteRequestId;
+      state = { ...state, sites: { openedUrls: [...state.sites.openedUrls, { id, url: "http://127.0.0.1", launch: ACON_SITE_LAUNCH }] } };
+      notify("sites");
+    },
     enqueueSiteUrls(urls) {
-      const nextId = state.sites.openedUrls.at(-1)?.id ?? 0;
-      const batch = buildSiteViewOpenRequests(urls, nextId);
+      const batch = buildSiteViewOpenRequests(urls, lastSiteRequestId);
+      lastSiteRequestId = batch.nextId;
       if (batch.requests.length === 0) return;
       state = { ...state, sites: { openedUrls: [...state.sites.openedUrls, ...batch.requests] } };
       notify("sites");

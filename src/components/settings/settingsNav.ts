@@ -36,6 +36,7 @@ export const SETTINGS_NAV_GROUPS = [
 export type SettingsNavGroup = (typeof SETTINGS_NAV_GROUPS)[number];
 
 export const SETTINGS_NAV = [
+  { id: "family-tools", group: "connections", icon: Puzzle, labelKey: "family.title", keywords: ["tools", "ahub", "amem", "vmem", "acon"] },
   {
     id: "ai",
     group: "ai",

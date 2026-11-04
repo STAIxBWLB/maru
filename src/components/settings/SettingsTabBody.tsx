@@ -14,6 +14,7 @@ import { AiSettingsTab } from "./tabs/AiSettingsTab";
 import { AppearanceTab } from "./tabs/AppearanceTab";
 import { CommsSettingsSystemTab } from "./tabs/CommsSettingsSystemTab";
 import { ConnectorsTab } from "./tabs/ConnectorsTab";
+import { FamilyToolsTab } from "./tabs/FamilyToolsTab";
 import { GeneralTab } from "./tabs/GeneralTab";
 import { IgnoreTab } from "./tabs/IgnoreTab";
 import { InboxRuntimeConfigTab } from "./tabs/InboxRuntimeConfigTab";
@@ -59,6 +60,7 @@ export function SettingsTabBody({
 
   return (
       <section className="system-body">
+        {tab === "family-tools" ? <FamilyToolsTab /> : null}
         {tab === "preferences" ? (
           <GeneralTab settings={settings} onSettingsChange={onSettingsChange} />
         ) : null}

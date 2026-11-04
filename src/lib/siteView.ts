@@ -216,6 +216,7 @@ export function sanitizeSiteViewOpenedUrls(urls: unknown): string[] {
 export interface SiteViewOpenRequest {
   id: number;
   url: string;
+  launch?: string;
 }
 
 /** Assigns frontend-lifetime identities after validation. Equal URLs remain

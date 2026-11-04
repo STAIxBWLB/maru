@@ -25,6 +25,10 @@ fn failure(operation: &str, error: impl std::fmt::Display) -> String {
     format!("site_launch_failed: {operation}: {error}; run `acon ui --no-open --json` in a terminal to inspect the console, or reinstall with `bun add -g @staix/agent-console`; a manual URL site remains available")
 }
 
+fn install_failure(operation: &str, error: impl std::fmt::Display) -> String {
+    format!("tool_install_failed: {operation}: {error}; inspect and repair this package with its owning installer, then retry Refresh or opening the site")
+}
+
 pub(crate) fn validate_launch(value: &str) -> Result<(), String> {
     match value.trim() {
         ACON_LAUNCH | "acon ui --json" => Ok(()),
@@ -32,29 +36,29 @@ pub(crate) fn validate_launch(value: &str) -> Result<(), String> {
     }
 }
 
-struct TrustedConsole {
-    bun: PathBuf,
-    entry: PathBuf,
-    home: PathBuf,
+pub(crate) struct TrustedTool {
+    pub bun: PathBuf,
+    pub entry: PathBuf,
+    pub home: PathBuf,
 }
 
-fn read_small(path: &Path) -> Result<Vec<u8>, String> {
+pub(crate) fn read_small(path: &Path) -> Result<Vec<u8>, String> {
     let metadata = fs::symlink_metadata(path)
-        .map_err(|error| failure(&format!("inspect {}", path.display()), error))?;
+        .map_err(|error| install_failure(&format!("inspect {}", path.display()), error))?;
     if !metadata.file_type().is_file() {
-        return Err(failure(
+        return Err(install_failure(
             "validate installed package metadata",
             format!("{} must be a regular, non-symlink file", path.display()),
         ));
     }
     let file = fs::File::open(path)
-        .map_err(|error| failure(&format!("read {}", path.display()), error))?;
+        .map_err(|error| install_failure(&format!("read {}", path.display()), error))?;
     let mut bytes = Vec::new();
     file.take((64 * 1024 + 1) as u64)
         .read_to_end(&mut bytes)
-        .map_err(|error| failure(&format!("read {}", path.display()), error))?;
+        .map_err(|error| install_failure(&format!("read {}", path.display()), error))?;
     if bytes.len() > 64 * 1024 {
-        return Err(failure(
+        return Err(install_failure(
             "validate installed package metadata",
             "package.json exceeds 64 KiB",
         ));
@@ -62,23 +66,24 @@ fn read_small(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn verify_permissions(path: &Path, home: &Path) -> Result<(), String> {
+pub(crate) fn verify_permissions(path: &Path, home: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         let owner = fs::metadata(home)
-            .map_err(|error| failure("identify launch home", error))?
+            .map_err(|error| install_failure("identify launch home", error))?
             .uid();
         for current in path.ancestors() {
-            let metadata = fs::metadata(current)
-                .map_err(|error| failure(&format!("inspect {}", current.display()), error))?;
+            let metadata = fs::metadata(current).map_err(|error| {
+                install_failure(&format!("inspect {}", current.display()), error)
+            })?;
             // Homebrew directories may be group-writable under the trusted owner.
             // Executable/package files still refuse group-write, and every path refuses world-write.
             if (metadata.uid() != owner && metadata.uid() != 0)
                 || metadata.mode() & 0o002 != 0
                 || (!metadata.is_dir() && metadata.mode() & 0o020 != 0)
             {
-                return Err(failure("validate trusted executable ownership", format!("{} has an untrusted owner, world write permission, or group-writable file; fix ownership/write permissions or install Bun under ~/.bun/bin", current.display())));
+                return Err(install_failure("validate trusted executable ownership", format!("{} has an untrusted owner, world write permission, or group-writable file; fix ownership/write permissions or install Bun under ~/.bun/bin", current.display())));
             }
             if current == home {
                 break;
@@ -92,26 +97,39 @@ fn verify_permissions(path: &Path, home: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_console(home: &Path) -> Result<TrustedConsole, String> {
+fn resolve_console(home: &Path) -> Result<TrustedTool, String> {
+    resolve_tool(home, "acon", "@staix/agent-console")
+        .map_err(|error| failure("resolve installed console", error))
+}
+
+pub(crate) fn resolve_tool(
+    home: &Path,
+    tool: &str,
+    package_name: &str,
+) -> Result<TrustedTool, String> {
     let home = home
         .canonicalize()
-        .map_err(|error| failure("resolve launch home", error))?;
+        .map_err(|error| install_failure("resolve launch home", error))?;
     let bin = home.join(".bun/bin");
-    let alias = bin.join(if cfg!(windows) { "acon.exe" } else { "acon" });
+    let alias = bin.join(if cfg!(windows) {
+        format!("{tool}.exe")
+    } else {
+        tool.to_string()
+    });
     let program = alias
         .canonicalize()
-        .map_err(|error| failure(&format!("resolve trusted {}", alias.display()), error))?;
+        .map_err(|error| install_failure(&format!("resolve trusted {}", alias.display()), error))?;
     let global = home
         .join(".bun/install/global/node_modules")
         .canonicalize()
-        .map_err(|error| failure("resolve Bun global package root", error))?;
+        .map_err(|error| install_failure("resolve Bun global package root", error))?;
     let package = global
-        .join("@staix/agent-console")
+        .join(package_name)
         .canonicalize()
-        .map_err(|error| failure("resolve installed @staix/agent-console", error))?;
+        .map_err(|error| install_failure(&format!("resolve installed {package_name}"), error))?;
     if !package.starts_with(&global) {
-        return Err(failure(
-            "validate console package location",
+        return Err(install_failure(
+            "validate package location",
             "package resolves outside the Bun global package root",
         ));
     }
@@ -119,27 +137,32 @@ fn resolve_console(home: &Path) -> Result<TrustedConsole, String> {
     verify_permissions(&package, &home)?;
     let metadata: serde_json::Value =
         serde_json::from_slice(&read_small(&package.join("package.json"))?)
-            .map_err(|error| failure("parse installed console package.json", error))?;
-    if metadata.get("name").and_then(|value| value.as_str()) != Some("@staix/agent-console") {
-        return Err(failure(
-            "validate console package identity",
-            "installed package name is not @staix/agent-console",
+            .map_err(|error| install_failure("parse installed tool package.json", error))?;
+    if metadata.get("name").and_then(|value| value.as_str()) != Some(package_name) {
+        return Err(install_failure(
+            "validate package identity",
+            format!("installed package name is not {package_name}"),
         ));
     }
     let entry_name = metadata
         .get("bin")
-        .and_then(|value| value.get("acon"))
+        .and_then(|value| value.get(tool))
         .and_then(|value| value.as_str())
-        .ok_or_else(|| failure("validate console bin manifest", "missing bin.acon entry"))?;
+        .ok_or_else(|| {
+            install_failure(
+                "validate package bin manifest",
+                format!("missing bin.{tool} entry"),
+            )
+        })?;
     let entry = package
         .join(entry_name)
         .canonicalize()
-        .map_err(|error| failure("resolve console bin entry", error))?;
-    let shim = cfg!(windows) && program == bin.join("acon.exe");
+        .map_err(|error| install_failure("resolve package bin entry", error))?;
+    let shim = cfg!(windows) && program == bin.join(format!("{tool}.exe"));
     if !entry.starts_with(&package) || (!shim && program != entry) || !entry.is_file() {
-        return Err(failure(
-            "validate trusted acon executable",
-            "acon does not match the installed package's contained bin entry",
+        return Err(install_failure(
+            "validate trusted package executable",
+            format!("{tool} does not match the installed package's contained bin entry"),
         ));
     }
     let candidates = [
@@ -156,7 +179,7 @@ fn resolve_console(home: &Path) -> Result<TrustedConsole, String> {
     verify_permissions(&entry, &home)?;
     verify_permissions(&package.join("package.json"), &home)?;
     verify_permissions(&bun, &home)?;
-    Ok(TrustedConsole { bun, entry, home })
+    Ok(TrustedTool { bun, entry, home })
 }
 
 fn resolve_bun_from(home: &Path, candidates: &[PathBuf]) -> Result<PathBuf, String> {
@@ -174,7 +197,7 @@ fn resolve_bun_from(home: &Path, candidates: &[PathBuf]) -> Result<PathBuf, Stri
             Err(error) => problems.push(format!("{}: {error}", candidate.display())),
         }
     }
-    Err(failure(
+    Err(install_failure(
         "resolve trusted Bun from standard fixed install paths (no PATH search); fix the rejected path ownership/world-write permissions or install Bun under ~/.bun/bin",
         problems.join("; "),
     ))
