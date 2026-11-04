@@ -117,13 +117,19 @@ fn env_parent_snapshot(root: &Path) -> Result<PathTransactionParent, String> {
 pub fn skills_env_status(work_path: Option<String>) -> Result<SkillsEnvStatus, String> {
     // Materializing defaults owns a separate, finite store transaction. Never
     // call it while the environment subprocess owns its network lease.
-    let root = host_fs::env_root()?;
+    let (root, warnings) = host_fs::env_root_with_warnings()?;
     let parent = env_parent_snapshot(&root)?;
     let setup = default_public_env_setup(work_path.as_deref())?;
     let lease = PathTransactionRequest::new(env_mutation_paths(&root, None))?
         .require_parent_snapshot(&parent)?
         .acquire()?;
-    env_status_in_transaction(&lease, &root, setup.as_deref(), None)
+    let mut status = env_status_in_transaction(&lease, &root, setup.as_deref(), None)?;
+    if !warnings.is_empty() {
+        let mut messages: Vec<String> = status.last_error.take().into_iter().collect();
+        messages.extend(warnings);
+        status.last_error = Some(messages.join("\n"));
+    }
+    Ok(status)
 }
 
 pub fn skills_env_bootstrap<R: tauri::Runtime>(
@@ -602,6 +608,50 @@ mod phase08_04 {
             ipc::skills_env_repair(app.handle().clone(), None),
         );
     }
+    #[test]
+    #[cfg(unix)]
+    fn env_status_displays_backup_cleanup_warning_without_persisting_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let _home = host_fs::test_home_for_bundle_tests();
+        crate::skill_host::store::skills_list_sources(None).unwrap();
+        let active = crate::skill_host::bundle_update::read_state()
+            .unwrap()
+            .unwrap()
+            .active
+            .unwrap();
+        let root = host_fs::hashed_env_root(&active.env_hash).unwrap();
+        fs::create_dir_all(root.join(".venv")).unwrap();
+        fs::write(root.join(".maru-env-complete"), "").unwrap();
+        let status_path = root.join("status.json");
+        let saved = r#"{"lastError":"previous setup diagnostic"}"#;
+        fs::write(&status_path, saved).unwrap();
+        let backup = root.with_extension("prev");
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(backup.join("keep"), "old runtime").unwrap();
+        let permissions = fs::metadata(&backup).unwrap().permissions();
+        fs::set_permissions(&backup, fs::Permissions::from_mode(0o500)).unwrap();
+        let result = skills_env_status(None);
+        fs::set_permissions(&backup, permissions).unwrap();
+        let status = result.unwrap();
+        assert!(status.healthy);
+        let warning = status.last_error.unwrap();
+        assert!(warning.contains("previous setup diagnostic"), "{warning}");
+        assert!(
+            warning.contains("remove completed environment backup"),
+            "{warning}"
+        );
+        assert!(
+            warning.contains(&host_fs::display_path(&backup)),
+            "{warning}"
+        );
+        assert!(warning.contains("Refresh (새로고침)"), "{warning}");
+        assert_eq!(fs::read_to_string(status_path).unwrap(), saved);
+        assert_eq!(
+            fs::read_to_string(backup.join("keep")).unwrap(),
+            "old runtime"
+        );
+    }
+
     #[test]
     fn hashed_status_health_requires_completion_while_legacy_keeps_venv_health() {
         let _home = host_fs::test_home_for_bundle_tests();
