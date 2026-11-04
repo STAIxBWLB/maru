@@ -44,9 +44,9 @@ pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
         || ["node", "node_modules", "temp", "logs", "input", "output"].contains(&hash)
         || !hash
             .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_')
     {
-        return Err("invalid_env_hash: expected a nonempty path-safe hash; report the invalid envHash to the skills channel maintainer, then retry with `maru skills update --apply --repair-env` after corrected metadata is published".into());
+        return Err("invalid_env_hash: expected a nonempty lowercase ASCII path-safe hash; report the invalid envHash to the skills channel maintainer, then retry with `maru skills update --apply --repair-env` after corrected metadata is published".into());
     }
     let root = env_base()?.join(hash);
     if fs::symlink_metadata(&root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
@@ -60,6 +60,21 @@ pub fn hashed_env_root(hash: &str) -> Result<PathBuf, String> {
 pub fn env_root() -> Result<PathBuf, String> {
     let state_path = super::bundle_update::state_path()?;
     let recovery = format!("restore {} from a known-good backup, then run `maru skills update --apply --repair-env`; if no backup is available, report this file to the skills channel maintainer", display_path(&state_path));
+    match fs::symlink_metadata(&state_path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(format!(
+                "skills_env_state_unreadable: {} is not a regular file; {recovery}",
+                display_path(&state_path)
+            ));
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "skills_env_state_unreadable: cannot inspect {}: {error}; {recovery}",
+                display_path(&state_path)
+            ));
+        }
+        _ => (),
+    }
     let state = super::bundle_update::read_state()
         .map_err(|error| format!("skills_env_state_unreadable: {error}; {recovery}"))?;
     // A missing state permits legacy fallback. An unreadable state must not
@@ -368,6 +383,51 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::TempDir;
+
+    #[test]
+    fn hashed_env_root_rejects_case_aliases_of_active_and_reserved_directories() {
+        let _home = test_home_for_bundle_tests();
+        assert!(hashed_env_root("active-env").is_ok());
+        for hash in ["ACTIVE-ENV", "Active-env", "NODE", "Temp", "Abcdef"] {
+            let error = hashed_env_root(hash).unwrap_err();
+            assert!(error.contains("invalid_env_hash"), "{hash}: {error}");
+            assert!(error.contains("lowercase ASCII"), "{hash}: {error}");
+        }
+    }
+
+    #[test]
+    fn env_resolver_refuses_a_directory_at_the_state_path() {
+        let _home = test_home_for_bundle_tests();
+        let state_path = super::super::bundle_update::state_path().unwrap();
+        fs::create_dir_all(&state_path).unwrap();
+        fs::create_dir_all(env_base().unwrap().join(".venv")).unwrap();
+        let error = env_root().unwrap_err();
+        assert!(error.contains("skills_env_state_unreadable"), "{error}");
+        assert!(error.contains("not a regular file"), "{error}");
+        assert!(error.contains(&display_path(&state_path)), "{error}");
+        assert!(
+            error.contains("maru skills update --apply --repair-env"),
+            "{error}"
+        );
+        assert!(state_path.is_dir());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn env_resolver_refuses_a_dangling_state_symlink() {
+        let _home = test_home_for_bundle_tests();
+        let state_path = super::super::bundle_update::state_path().unwrap();
+        fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("missing-state", &state_path).unwrap();
+        let error = env_root().unwrap_err();
+        assert!(error.contains("skills_env_state_unreadable"), "{error}");
+        assert!(error.contains("not a regular file"), "{error}");
+        assert!(error.contains(&display_path(&state_path)), "{error}");
+        assert_eq!(
+            fs::read_link(&state_path).unwrap(),
+            PathBuf::from("missing-state")
+        );
+    }
 
     #[test]
     fn env_resolver_preserves_legacy_fallback_but_rejects_corrupt_state() {
