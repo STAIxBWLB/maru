@@ -16,8 +16,7 @@ use crate::agent_host::contracts::{
 use crate::agent_host::event_store::{append_run_event_payload_in_transaction, run_events_path};
 use crate::agent_host::proposal::parse_skill_proposal;
 use crate::agent_host::provider::{
-    build_cli_command_with_policy, normalize_permission_mode, resolve_provider_binary,
-    CliProviderKind,
+    normalize_permission_mode, resolve_provider_binary, CliProviderKind,
 };
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::atomic_file::{
@@ -39,6 +38,8 @@ pub struct SkillContextItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DispatchComposition {
+    #[serde(skip)]
+    pub(crate) bundle_session: Option<super::session::BundleSession>,
     pub skill_id: String,
     pub skill_name: String,
     pub cwd: String,
@@ -87,7 +88,7 @@ pub fn skills_dispatch_compose(
     cwd: Option<String>,
     context: Option<Vec<SkillContextItem>>,
 ) -> Result<DispatchComposition, String> {
-    compose(skill_id, prompt, cwd, context.unwrap_or_default())
+    compose_with_binding(skill_id, prompt, cwd, context.unwrap_or_default(), false)
 }
 
 pub fn skills_dispatch_terminal(
@@ -300,13 +301,15 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
         metadata: metadata.clone(),
     };
     let provider = CliProviderKind::parse(&runtime)?;
-    let (cmd, stdin_payload, resolution) = build_cli_command_with_policy(
-        provider,
-        &completion_request,
-        &add_dirs,
-        command_override.as_deref(),
-        &permission_mode,
-    )?;
+    let (cmd, stdin_payload, resolution) =
+        crate::agent_host::provider::build_cli_command_with_session(
+            provider,
+            &completion_request,
+            &add_dirs,
+            command_override.as_deref(),
+            &permission_mode,
+            composition.bundle_session.as_ref(),
+        )?;
     if let Some(resolution) = &resolution {
         if ["HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]
             .iter()
@@ -379,6 +382,16 @@ fn compose(
     cwd: Option<String>,
     context: Vec<SkillContextItem>,
 ) -> Result<DispatchComposition, String> {
+    compose_with_binding(skill_id, prompt, cwd, context, true)
+}
+
+fn compose_with_binding(
+    skill_id: String,
+    prompt: String,
+    cwd: Option<String>,
+    context: Vec<SkillContextItem>,
+    bind: bool,
+) -> Result<DispatchComposition, String> {
     if prompt.trim().is_empty() {
         return Err("skill_prompt_required".to_string());
     }
@@ -389,18 +402,41 @@ fn compose(
             skill.validation_errors.join(", ")
         ));
     }
-    let skill_md = Path::new(&skill.abs_path).join("SKILL.md");
+    let bundle_session = if bind {
+        super::store::capture_bundle_session()?
+    } else {
+        None
+    };
+    let skill_root = if skill.source_id == "maru-builtin" {
+        bundle_session
+            .as_ref()
+            .map(|session| session.root.join(&skill.rel_path))
+            .unwrap_or_else(|| PathBuf::from(&skill.abs_path))
+    } else {
+        PathBuf::from(&skill.abs_path)
+    };
+    let skill_md = skill_root.join("SKILL.md");
     let skill_content = std::fs::read_to_string(&skill_md)
         .map_err(|err| format!("Cannot read {}: {err}", host_fs::display_path(&skill_md)))?;
     let cwd = resolve_cwd(cwd.as_deref(), &context)?;
     let prompt = build_prompt(&skill.name, &skill_content, &context, &prompt);
+    let prompt = bundle_session
+        .as_ref()
+        .map(|session| session.prompt(&prompt))
+        .transpose()?
+        .unwrap_or(prompt);
+    let extra_env = match &bundle_session {
+        Some(session) => session.env(Some(&cwd))?,
+        None => env_vars_for_runs(Some(&cwd))?,
+    };
     Ok(DispatchComposition {
+        bundle_session,
         skill_id,
         skill_name: skill.name,
         cwd: host_fs::display_path(&cwd),
         prompt,
         context,
-        extra_env: env_vars_for_runs(Some(&cwd))?,
+        extra_env,
     })
 }
 
@@ -1309,6 +1345,7 @@ mod tests {
 
     fn composition_for(prompt: &str) -> DispatchComposition {
         DispatchComposition {
+            bundle_session: None,
             skill_id: "src::demo".to_string(),
             skill_name: "demo".to_string(),
             cwd: "/tmp/work".to_string(),
@@ -1720,6 +1757,7 @@ mod phase08_04 {
             tx.send(()).unwrap();
         });
         let composition = DispatchComposition {
+            bundle_session: None,
             skill_id: "test::skill".into(),
             skill_name: "skill".into(),
             cwd: cwd.clone(),

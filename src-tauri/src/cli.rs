@@ -359,6 +359,7 @@ fn run_skills(args: &[String]) -> i32 {
         }
         "sync" => run_skills_sync(&args[1..]),
         "update" => run_skills_update(&args[1..]),
+        "rollback" => run_skills_rollback(&args[1..]),
         "dirty" => run_skills_dirty(&args[1..]),
         "reconcile" => run_skills_reconcile(&args[1..]),
         "import" => run_skills_import(&args[1..]),
@@ -366,6 +367,37 @@ fn run_skills(args: &[String]) -> i32 {
         _ => {
             eprintln!("{}", skills_usage());
             2
+        }
+    }
+}
+
+fn run_skills_rollback(args: &[String]) -> i32 {
+    let json = match args {
+        [] => false,
+        [flag] if flag == "--json" => true,
+        _ => {
+            eprintln!("usage: maru skills rollback [--json]");
+            return 2;
+        }
+    };
+    match crate::skill_host::store::skills_rollback_bundle() {
+        Ok(outcome) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&outcome).unwrap_or_default()
+                );
+            } else {
+                println!(
+                    "skills bundle rolled back to {} (r{})",
+                    outcome.current.display_version, outcome.current.revision
+                );
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
         }
     }
 }
@@ -1042,7 +1074,7 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn skills_usage() -> &'static str {
-    "usage: maru skills capabilities|list|sync|update|dirty|reconcile|import|import-unmanage"
+    "usage: maru skills capabilities|list|sync|update|rollback|dirty|reconcile|import|import-unmanage"
 }
 
 /// The additive federation contract dotfiles discovers first (issue #396).
@@ -1065,7 +1097,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills rollback [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
 }
 
 #[cfg(test)]

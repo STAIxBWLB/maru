@@ -154,13 +154,15 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     };
     let add_dirs = vec![cwd.clone()];
 
+    let bundle_session = crate::skill_host::store::capture_bundle_session()?;
     let app_thread = app.clone();
     let run_id_thread = run_id.clone();
     let cwd_thread = cwd;
     thread::spawn(move || {
         let mut adapter =
             CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode)
-                .with_metadata(metadata);
+                .with_metadata(metadata)
+                .with_bundle_session(bundle_session);
         match run_five_role_loop(&mut adapter, input) {
             Ok(result) => {
                 for role_output in &result.role_outputs {

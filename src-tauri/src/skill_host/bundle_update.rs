@@ -119,13 +119,33 @@ pub struct RemoteBundle {
     pub archive_sig_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SwapJournal {
     pub schema: u32,
     pub new_bundle_id: String,
     pub backup_dir: String,
     pub started_at: String,
+    #[serde(default)]
+    pub old_workspace: Option<String>,
+    #[serde(default)]
+    pub new_workspace: Option<String>,
+    #[serde(default)]
+    pub links: Vec<BundleLinkSwap>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundleLinkSwap {
+    pub link: PathBuf,
+    pub old_target: PathBuf,
+    #[serde(default)]
+    pub preserved_target: Option<PathBuf>,
+    pub new_target: PathBuf,
+}
+
+pub fn workspace_dir(bundle_id: &str) -> Result<PathBuf, String> {
+    host_fs::safe_entry_name(bundle_id)?;
+    Ok(host_fs::skills_root()?.join("_workspaces").join(bundle_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +213,23 @@ pub fn clear_journal() -> Result<(), String> {
     Ok(())
 }
 
+fn clear_switch_temp(link: &Path, targets: &[&Path]) -> Result<(), String> {
+    let temp = host_fs::link_temp(link);
+    if let Some(target) = host_fs::read_link_target(&temp) {
+        if !targets
+            .iter()
+            .any(|expected| host_fs::simplified(&target) == host_fs::simplified(expected))
+        {
+            return Err(format!(
+                "bundle_recovery_link_conflict: {}; inspect the staging link before retrying",
+                temp.display()
+            ));
+        }
+        host_fs::remove_symlink(&temp).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 /// Roll an interrupted swap back (or forward) to a consistent state. Called
 /// before any bundle operation and from the builtin-source bootstrap path.
 pub fn recover_interrupted_swap(builtin_root: &Path) -> Result<(), String> {
@@ -205,6 +242,50 @@ pub fn recover_interrupted_swap(builtin_root: &Path) -> Result<(), String> {
         .as_ref()
         .map(|active| active.bundle_id == journal.new_bundle_id)
         .unwrap_or(false);
+    if let (Some(old), Some(new)) = (&journal.old_workspace, &journal.new_workspace) {
+        let target = PathBuf::from(if swap_completed { new } else { old });
+        if !target.is_dir() {
+            return Err(format!(
+                "bundle_recovery_missing: {}; restore the bundle workspace before retrying",
+                target.display()
+            ));
+        }
+        // First detach any legacy aliases, so even recovery's one-time
+        // directory migration never leaves an external skill link dangling.
+        for link in &journal.links {
+            let preserved = link.preserved_target.as_deref().unwrap_or(&link.old_target);
+            let desired = if swap_completed {
+                &link.new_target
+            } else {
+                preserved
+            };
+            let allowed: [&Path; 3] = [&link.old_target, preserved, &link.new_target];
+            let current = host_fs::read_link_target(&link.link);
+            if current.as_ref().is_some_and(|value| {
+                !allowed
+                    .iter()
+                    .any(|expected| host_fs::simplified(value) == host_fs::simplified(expected))
+            }) {
+                return Err(format!(
+                    "bundle_recovery_link_conflict: {}; inspect the changed link before retrying",
+                    link.link.display()
+                ));
+            }
+            clear_switch_temp(&link.link, &allowed)?;
+            host_fs::replace_symlink(&link.link, desired)?;
+        }
+        clear_switch_temp(builtin_root, &[Path::new(old), Path::new(new)])?;
+        if host_fs::read_link_target(builtin_root).is_none() && builtin_root.exists() {
+            let backup = PathBuf::from(&journal.backup_dir);
+            fs::rename(builtin_root, &backup).map_err(|error| error.to_string())?;
+        }
+        host_fs::replace_symlink(builtin_root, &target)?;
+        let backup = PathBuf::from(&journal.backup_dir);
+        if backup.is_dir() {
+            fs::remove_dir_all(backup).map_err(|error| error.to_string())?;
+        }
+        return clear_journal();
+    }
     let backup = PathBuf::from(&journal.backup_dir);
     if swap_completed {
         // Crash after the state write: the new bundle is fully applied; the
@@ -1093,6 +1174,68 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_generation_switch_recovers_links_to_recorded_state() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let root = host_fs::skills_root().unwrap();
+        let builtin = root.join("_builtin");
+        let old = workspace_dir("old").unwrap();
+        let new = workspace_dir("new").unwrap();
+        for (dir, text) in [(&old, "old"), (&new, "new")] {
+            fs::create_dir_all(dir.join("skills/demo")).unwrap();
+            fs::write(dir.join("skills/demo/SKILL.md"), text).unwrap();
+        }
+        let link = root.join("demo");
+        host_fs::create_symlink_no_clobber(&builtin, &new).unwrap();
+        host_fs::create_symlink_no_clobber(&link, &new.join("skills/demo")).unwrap();
+        let reference = |id: &str| SkillBundleRef {
+            bundle_id: id.into(),
+            revision: if id == "old" { 1 } else { 2 },
+            display_version: id.into(),
+            commit: None,
+            source: REMOTE_SOURCE.into(),
+            env_hash: "same-env".into(),
+            applied_at: "t".into(),
+        };
+        for committed in [false, true] {
+            write_state(&BundleState {
+                schema: 1,
+                active: Some(reference(if committed { "new" } else { "old" })),
+                previous: None,
+            })
+            .unwrap();
+            write_journal(&SwapJournal {
+                schema: 1,
+                new_bundle_id: "new".into(),
+                backup_dir: root
+                    .join("_cache/backup-test")
+                    .to_string_lossy()
+                    .into_owned(),
+                started_at: "t".into(),
+                old_workspace: Some(old.to_string_lossy().into_owned()),
+                new_workspace: Some(new.to_string_lossy().into_owned()),
+                links: vec![BundleLinkSwap {
+                    link: link.clone(),
+                    old_target: old.join("skills/demo"),
+                    preserved_target: None,
+                    new_target: new.join("skills/demo"),
+                }],
+            })
+            .unwrap();
+            // Simulate a crash after staging, before replacing the builtin pointer.
+            host_fs::create_symlink_no_clobber(&host_fs::link_temp(&builtin), &new).unwrap();
+            recover_interrupted_swap(&builtin).unwrap();
+            let expected = if committed { "new" } else { "old" };
+            assert_eq!(fs::read_to_string(link.join("SKILL.md")).unwrap(), expected);
+            assert_eq!(
+                fs::read_to_string(builtin.join("skills/demo/SKILL.md")).unwrap(),
+                expected
+            );
+            assert!(read_journal().unwrap().is_none());
+            assert!(!host_fs::link_temp(&builtin).exists());
+        }
+    }
+
+    #[test]
     fn journal_recovery_restores_backup_for_incomplete_swap() {
         let _home = crate::skill_host::fs::test_home_for_bundle_tests();
         let skills_root = host_fs::skills_root().unwrap();
@@ -1122,6 +1265,7 @@ mod tests {
             new_bundle_id: "new".to_string(),
             backup_dir: host_fs::display_path(&backup),
             started_at: "t".to_string(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -1162,6 +1306,7 @@ mod tests {
             new_bundle_id: "new".to_string(),
             backup_dir: host_fs::display_path(&backup),
             started_at: "t".to_string(),
+            ..Default::default()
         })
         .unwrap();
 

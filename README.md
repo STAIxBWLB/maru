@@ -588,6 +588,22 @@ test file even when all assertions passed.
 
 ## Release Process
 
+Each minor release must state N-1 compatibility for wire, files, CLI and MCP
+surfaces in its release notes and test against the latest published patch of
+the previous minor line. Patch releases preserve that compatibility and do not
+add an N-1 release-note line.
+
+Skills updates retain the active and previous bundle and environment, plus
+immutable snapshots used by Maru-launched sessions. `maru skills rollback`
+restores the previous bundle and its environment without downloading or
+rebuilding it. Maru-supplied bundled skill instructions and resource references bind their
+bundle and environment at start; external skill aliases switch atomically for
+subsequent reads.
+`_builtin` remains the editable workspace alias, with dirty edits blocking an
+update or rollback until preserved with Save As or discarded. Session retention
+is conservative: a launching Maru process keeps its captured versions until it
+exits, including for detached terminal runs.
+
 The release version's major and minor come from the active GSD milestone in
 `.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped
 as 1.1.x and closed on 2026-09-27. Opening milestone v1.2, whose scope is being

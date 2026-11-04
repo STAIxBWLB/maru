@@ -324,7 +324,7 @@ pub fn safe_entry_name(input: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
-fn test_maru_home_override() -> Option<PathBuf> {
+pub(crate) fn test_maru_home_override() -> Option<PathBuf> {
     std::env::var_os("MARU_TEST_HOME").map(PathBuf::from)
 }
 
@@ -340,7 +340,7 @@ pub(crate) fn test_maru_home_lock() -> MutexGuard<'static, ()> {
 }
 
 #[cfg(not(test))]
-fn test_maru_home_override() -> Option<PathBuf> {
+pub(crate) fn test_maru_home_override() -> Option<PathBuf> {
     None
 }
 
@@ -607,4 +607,77 @@ mod tests {
         );
         drop(env);
     }
+}
+
+pub(crate) fn link_temp(link: &Path) -> PathBuf {
+    link.with_file_name(format!(
+        ".{}.maru-next",
+        link.file_name().unwrap_or_default().to_string_lossy()
+    ))
+}
+
+/// Publish a new symlink by rename, never by unlinking the old entry first.
+/// The caller has already checked ownership and admitted link + temporary path.
+pub(crate) fn replace_symlink(link: &Path, target: &Path) -> Result<(), String> {
+    let temp = link_temp(link);
+    if let Some(existing) = read_link_target(&temp) {
+        if simplified(&existing) != simplified(target) {
+            return Err(format!(
+                "skill_link_staging_conflict: {}; inspect the staging link before retrying",
+                display_path(&temp)
+            ));
+        }
+        remove_symlink(&temp).map_err(|error| error.to_string())?;
+    }
+    create_symlink_no_clobber(&temp, target)?;
+    let result = rename_link(&temp, link);
+    if result.is_err() {
+        let _ = remove_symlink(&temp);
+    }
+    result.map_err(|error| format!("skill_link_switch_failed: {}: {error}; the previous link was preserved, retry after resolving the filesystem error", display_path(link)))
+}
+
+#[cfg(not(windows))]
+fn rename_link(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::rename(from, to)
+}
+
+#[cfg(windows)]
+fn rename_link(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileRenameInfoEx, SetFileInformationByHandle, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_RENAME_INFO,
+    };
+    let file = fs::OpenOptions::new()
+        .access_mode(0x00010000)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(from)?;
+    let name: Vec<u16> = to.as_os_str().encode_wide().collect();
+    let offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let size = offset + name.len() * 2;
+    let mut storage = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
+    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    // SAFETY: aligned storage has room for the header and complete UTF-16 name;
+    // the open handle names the reparse point itself, never its target.
+    unsafe {
+        (*info).Anonymous.Flags = 0x1 | 0x2; // REPLACE_IF_EXISTS | POSIX_SEMANTICS
+        (*info).RootDirectory = std::ptr::null_mut();
+        (*info).FileNameLength = (name.len() * 2) as u32;
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr(),
+            storage.as_mut_ptr().cast::<u8>().add(offset).cast::<u16>(),
+            name.len(),
+        );
+        if SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileRenameInfoEx,
+            info.cast(),
+            size as u32,
+        ) == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
