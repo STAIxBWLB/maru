@@ -9483,9 +9483,17 @@ exit 7
             let captured = capture_bundle_session().unwrap().unwrap();
             let repeated = capture_bundle_session().unwrap().unwrap();
             assert_eq!(captured.root, repeated.root);
+            // Count pin files only; `.gate` is the cross-process pin/prune lock.
             assert_eq!(
                 fs::read_dir(crate::skill_host::session::sessions_dir().unwrap())
                     .unwrap()
+                    .filter(|entry| {
+                        let path = entry.as_ref().unwrap().path();
+                        matches!(
+                            path.extension().and_then(|ext| ext.to_str()),
+                            Some("json" | "lock")
+                        )
+                    })
                     .count(),
                 2,
                 "one pin metadata/lock pair per generation, even after repeated captures"
