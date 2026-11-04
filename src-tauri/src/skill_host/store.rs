@@ -6114,7 +6114,11 @@ fn skills_activate_bundle_blocking(
         built_env = None;
         bundle::clear_journal()?;
         let _ = fs::remove_dir_all(&backup);
-        prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])?;
+        if let Err(error) =
+            prune_bundle_dirs(&[current.bundle_id.as_str(), active.bundle_id.as_str()])
+        {
+            progress.emit("warn", error, None, None);
+        }
         if repair_env {
             // Best-effort like prune_bundle_dirs: the new bundle is already
             // active, so a leftover env must not skip the registry rescan below.
@@ -6137,21 +6141,28 @@ fn skills_activate_bundle_blocking(
         let removed_installs = cleanup_removed_builtin_installs(&mut registry, &removed_skills)?;
         save_registry_unlocked(&registry)?;
         let stale_copy_installs = stale_copy_installs_report(&registry);
-        let workspaces = host_fs::skills_root()?.join("_workspaces");
-        if workspaces.is_dir() {
-            for entry in fs::read_dir(&workspaces).map_err(|error| error.to_string())? {
-                let entry = entry.map_err(|error| error.to_string())?;
-                let name = entry.file_name().to_string_lossy().to_string();
-                if !same_generation_name(&name, &current.bundle_id)
-                    && !same_generation_name(&name, &active.bundle_id)
-                    && entry
-                        .file_type()
-                        .map_err(|error| error.to_string())?
-                        .is_dir()
-                {
-                    fs::remove_dir_all(entry.path()).map_err(|error| error.to_string())?;
+        let workspace_cleanup = (|| {
+            let workspaces = host_fs::skills_root()?.join("_workspaces");
+            if workspaces.is_dir() {
+                for entry in fs::read_dir(&workspaces).map_err(|error| error.to_string())? {
+                    let entry = entry.map_err(|error| error.to_string())?;
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !same_generation_name(&name, &current.bundle_id)
+                        && !same_generation_name(&name, &active.bundle_id)
+                        && entry
+                            .file_type()
+                            .map_err(|error| error.to_string())?
+                            .is_dir()
+                    {
+                        fs::remove_dir_all(entry.path()).map_err(|error| error.to_string())?;
+                    }
                 }
             }
+
+            Ok::<(), String>(())
+        })();
+        if let Err(error) = workspace_cleanup {
+            progress.emit("warn", format!("bundle_workspace_prune_failed: {error}; activation and registry save completed; inspect _workspaces permissions before the next update"), None, None);
         }
 
         progress.success(format!(
@@ -9183,6 +9194,39 @@ exit 7
                 !destination.join("second").exists(),
                 "an incomplete generation must not be reused or silently overwritten"
             );
+        }
+
+        #[test]
+        fn invalid_live_pin_skips_pruning_without_skipping_the_registry_rescan() {
+            let _home = test_home();
+            skills_list_sources(None).unwrap();
+            let (remote, archive) = bundle_fixture();
+            let outcome = skills_apply_bundle_update_blocking(
+                None,
+                true,
+                ProgressReporter::noop(),
+                |_, _| Ok(Some(remote)),
+                |_| Ok(archive),
+                |_, _, _, root| {
+                    capture_bundle_session()?.ok_or("missing fixture capture")?;
+                    let path = fs::read_dir(crate::skill_host::session::sessions_dir()?)
+                        .unwrap()
+                        .map(|entry| entry.unwrap().path())
+                        .find(|path| {
+                            path.extension().and_then(|value| value.to_str()) == Some("json")
+                        })
+                        .unwrap();
+                    fs::write(path, b"{invalid pinned metadata").unwrap();
+                    fs::create_dir_all(root.join(".venv")).map_err(|error| error.to_string())
+                },
+            )
+            .unwrap();
+            assert_eq!(outcome.current.display_version, "fixture");
+            assert!(load_registry()
+                .unwrap()
+                .skills
+                .iter()
+                .any(|skill| skill.id == "maru-builtin::updated"));
         }
 
         #[test]
