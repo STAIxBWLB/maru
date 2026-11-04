@@ -5137,20 +5137,43 @@ fn run_env_repair_blocking(
     Ok(())
 }
 
+fn env_build_error(
+    hash: &str,
+    root: &Path,
+    operation: &str,
+    error: impl std::fmt::Display,
+) -> String {
+    format!("env_build_failed: {operation} for hash {hash} at {}: {error}; the previous bundle remains active. Resolve the reported filesystem or setup error, then retry `maru skills update --apply --repair-env`", host_fs::display_path(root))
+}
+
+fn env_prune_error(path: &Path, operation: &str, error: impl std::fmt::Display) -> String {
+    format!("env_prune_failed: {operation} at {}: {error}; the new bundle is already active. Resolve the reported filesystem error at this path before the next update; confirm the active bundle with `maru skills update --check`", host_fs::display_path(path))
+}
+
 fn prune_env_dirs(keep: &[&str]) -> Result<(), String> {
     let base = host_fs::env_base()?;
     if !base.is_dir() {
         return Ok(());
     }
-    for entry in fs::read_dir(base).map_err(|err| err.to_string())? {
-        let entry = entry.map_err(|err| err.to_string())?;
+    for entry in fs::read_dir(&base)
+        .map_err(|error| env_prune_error(&base, "cannot list retained environments", error))?
+    {
+        let entry = entry
+            .map_err(|error| env_prune_error(&base, "cannot read an environment entry", error))?;
         let name = entry.file_name().to_string_lossy().to_string();
         // Never prune legacy runtime directories or foreign entries.
         if !keep.contains(&name.as_str())
-            && entry.file_type().map_err(|err| err.to_string())?.is_dir()
+            && entry
+                .file_type()
+                .map_err(|error| {
+                    env_prune_error(&entry.path(), "cannot inspect an environment entry", error)
+                })?
+                .is_dir()
             && entry.path().join(".maru-env-complete").is_file()
         {
-            let _ = fs::remove_dir_all(entry.path());
+            fs::remove_dir_all(entry.path()).map_err(|error| {
+                env_prune_error(&entry.path(), "cannot remove an unused environment", error)
+            })?;
         }
     }
     Ok(())
@@ -5513,24 +5536,79 @@ fn skills_apply_bundle_update_blocking(
             let root = host_fs::hashed_env_root(&metadata.env_hash)?;
             // Reuse a completed N-1 build, never rebuild it in place. A partial
             // build from an interrupted attempt is disposable under this lease.
-            let previously_applied = bundle::read_state()?
+            let previously_applied = bundle::read_state()
+                .map_err(|error| {
+                    env_build_error(
+                        &metadata.env_hash,
+                        &root,
+                        "cannot read bundle state before env preparation",
+                        error,
+                    )
+                })?
                 .and_then(|state| state.previous)
                 .is_some_and(|previous| previous.env_hash == metadata.env_hash);
             if !previously_applied || !root.join(".maru-env-complete").is_file() {
-                network_admission.before_effect()?;
+                network_admission.before_effect().map_err(|error| {
+                    env_build_error(
+                        &metadata.env_hash,
+                        &root,
+                        "env preparation admission failed",
+                        error,
+                    )
+                })?;
                 if root.exists() {
-                    fs::remove_dir_all(&root).map_err(|err| err.to_string())?;
+                    fs::remove_dir_all(&root).map_err(|error| {
+                        env_build_error(
+                            &metadata.env_hash,
+                            &root,
+                            "cannot clear an incomplete environment",
+                            error,
+                        )
+                    })?;
                 }
                 let base = host_fs::env_base()?;
-                host_fs::ensure_dir(&base)?;
-                built_env = Some((root.clone(), PathTransactionParent::capture(&base)?));
-                host_fs::ensure_dir(&root)?;
+                host_fs::ensure_dir(&base).map_err(|error| {
+                    env_build_error(
+                        &metadata.env_hash,
+                        &root,
+                        "cannot create the environment parent",
+                        error,
+                    )
+                })?;
+                let parent = PathTransactionParent::capture(&base).map_err(|error| {
+                    env_build_error(
+                        &metadata.env_hash,
+                        &root,
+                        "cannot capture the environment parent identity",
+                        error,
+                    )
+                })?;
+                built_env = Some((root.clone(), parent));
+                host_fs::ensure_dir(&root).map_err(|error| {
+                    env_build_error(
+                        &metadata.env_hash,
+                        &root,
+                        "cannot create the hash environment",
+                        error,
+                    )
+                })?;
                 if let Err(err) = repair(&network_admission, progress, &next_builtin, &root) {
                     let _ = fs::remove_dir_all(&next_builtin);
                     let _ = fs::remove_dir_all(&new_pristine);
-                    return Err(format!("{err}; bundle {new_bundle_id} (revision {}): report this bundle and error to the skills channel maintainer; the previous bundle remains active", metadata.revision));
+                    return Err(env_build_error(&metadata.env_hash, &root, &format!("setup failed for bundle {new_bundle_id} (revision {}); report a missing setup script to the skills channel maintainer", metadata.revision), err));
                 }
-                fs::write(root.join(".maru-env-complete"), "").map_err(|err| err.to_string())?;
+                let marker = root.join(".maru-env-complete");
+                fs::write(&marker, "").map_err(|error| {
+                    env_build_error(
+                        &metadata.env_hash,
+                        &root,
+                        &format!(
+                            "cannot write completion marker {}",
+                            host_fs::display_path(&marker)
+                        ),
+                        error,
+                    )
+                })?;
             }
         }
 
@@ -5673,14 +5751,19 @@ fn skills_apply_bundle_update_blocking(
                 match fs::remove_dir_all(path) {
                     Ok(()) => (),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-                    Err(error) => return Err(error.to_string()),
+                    Err(error) => {
+                        return Err(format!(
+                            "cannot remove unapplied artifact {}: {error}",
+                            host_fs::display_path(path)
+                        ))
+                    }
                 }
             }
             Ok(())
         })();
         if let Err(error) = cleanup {
-            return Err(format!("{}; env_cleanup_failed: {}: {error}. Remove the unapplied env directory after resolving the path conflict, then retry.",
-                result.unwrap_err(), host_fs::display_path(&root)));
+            return Err(format!("{}; env_cleanup_failed: hash {} at {}: {error}; the previous bundle remains active. Inspect the reported path and resolve its filesystem or admission error, then retry `maru skills update --apply --repair-env`.",
+                result.unwrap_err(), metadata.env_hash, host_fs::display_path(&root)));
         }
     }
     result
@@ -8410,7 +8493,7 @@ exit 7
                 error.contains(&format!("bundle {id} (revision {revision})")),
                 "{error}"
             );
-            assert!(error.contains("report this bundle"), "{error}");
+            assert!(error.contains("skills channel maintainer"), "{error}");
             assert!(error.contains("previous bundle remains active"), "{error}");
             assert!(!target.exists());
         }
@@ -8424,7 +8507,7 @@ exit 7
             let target = host_fs::hashed_env_root(&remote.metadata.env_hash).unwrap();
             let pristine = bundle::bundle_pristine_dir(&bundle_id_for(&remote.metadata)).unwrap();
             let mut prepared = None;
-            skills_apply_bundle_update_blocking(
+            let error = skills_apply_bundle_update_blocking(
                 None,
                 true,
                 ProgressReporter::noop(),
@@ -8438,6 +8521,19 @@ exit 7
                 },
             )
             .unwrap_err();
+            assert!(error.contains("env_build_failed"), "{error}");
+            assert!(error.contains("fixture-env"), "{error}");
+            assert!(error.contains(&path_string(&target)), "{error}");
+            assert!(error.contains("cannot write completion marker"), "{error}");
+            assert!(error.contains(".maru-env-complete"), "{error}");
+            assert!(
+                error.contains("the previous bundle remains active"),
+                "{error}"
+            );
+            assert!(
+                error.contains("maru skills update --apply --repair-env"),
+                "{error}"
+            );
             assert!(!target.exists());
             assert!(!pristine.exists());
             assert!(!prepared.unwrap().exists());

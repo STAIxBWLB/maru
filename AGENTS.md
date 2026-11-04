@@ -48,6 +48,10 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 
 ## Things the agent gets wrong
 
+- **Error propagation (2026-11-04)**: before adding or changing `?` / `map_err` paths,
+  read `REVIEW.md` §Passes, Error messages. Recheck propagated filesystem failures
+  when adding failure-injection tests.
+
 - **Radix dialog fixtures (2026-10-05)**: before adding or changing a dialog test,
   read `README.md` §Verification and CI for the canonical unmount helper.
 - **Executable Rust test fixtures (2026-10-05)**: before adding or changing a generated
