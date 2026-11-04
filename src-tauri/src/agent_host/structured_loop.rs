@@ -158,10 +158,42 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     let run_id_thread = run_id.clone();
     let cwd_thread = cwd;
     thread::spawn(move || {
-        let mut adapter =
-            CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode)
-                .with_metadata(metadata);
-        match run_five_role_loop(&mut adapter, input) {
+        let result = (|| {
+            let mut input = input;
+            // General agent calls have no skill binding. Only the explicit
+            // skill-compose flow re-reads and binds bundled content here on
+            // the worker, never while the synchronous command is returning.
+            let bundle_session = if let Some(skill_id) = metadata
+                .as_ref()
+                .and_then(|value| value.get("skillId"))
+                .and_then(|value| value.as_str())
+            {
+                let raw_prompt = metadata.as_ref().and_then(|value| value.get("skillPrompt")).and_then(|value| value.as_str())
+                    .ok_or("skill_run_prompt_missing: resend this skill run from Compose with its original prompt")?;
+                let context = metadata
+                    .as_ref()
+                    .and_then(|value| value.get("skillContext"))
+                    .cloned()
+                    .unwrap_or_else(|| json!([]));
+                let context = serde_json::from_value(context).map_err(|error| format!("skill_run_context_invalid: {error}; resend the skill run with valid context"))?;
+                let composition = crate::skill_host::dispatch::compose(
+                    skill_id.into(),
+                    raw_prompt.into(),
+                    Some(input.cwd.clone()),
+                    context,
+                )?;
+                input.directive = composition.prompt;
+                composition.bundle_session
+            } else {
+                None
+            };
+            let mut adapter =
+                CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode)
+                    .with_metadata(metadata)
+                    .with_bundle_session(bundle_session);
+            run_five_role_loop(&mut adapter, input)
+        })();
+        match result {
             Ok(result) => {
                 for role_output in &result.role_outputs {
                     let _ = append_run_event_payload(

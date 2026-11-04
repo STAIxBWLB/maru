@@ -285,7 +285,13 @@ export function ComposeDialog({
         });
         const runId = await agentRunStructuredLoop({
           provider: runtime,
-          metadata: { origin: "skillCompose", ...(invocationPolicy ? { adaptivePolicy: invocationPolicy } : {}) },
+          metadata: {
+            origin: "skillCompose",
+            skillId: selectedSkill.id,
+            skillPrompt: effectivePrompt,
+            skillContext: effectiveContext,
+            ...(invocationPolicy ? { adaptivePolicy: invocationPolicy } : {}),
+          },
           directive: composition.prompt,
           cwd: seed.cwd,
           commandOverride: policyActive ? null : aiRuntimeCommands[runtime] ?? null,

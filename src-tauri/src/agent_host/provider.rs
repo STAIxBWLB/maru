@@ -206,6 +206,30 @@ pub fn build_cli_command_with_policy(
     permission_mode: &str,
 ) -> Result<PolicyCommand, String> {
     request.validate()?;
+    build_cli_command_with_session(
+        provider,
+        request,
+        add_dirs,
+        command_override,
+        permission_mode,
+        None,
+    )
+}
+
+pub(crate) fn build_cli_command_with_session(
+    provider: CliProviderKind,
+    request: &CompletionRequest,
+    add_dirs: &[String],
+    command_override: Option<&str>,
+    permission_mode: &str,
+    session: Option<&crate::skill_host::session::BundleSession>,
+) -> Result<PolicyCommand, String> {
+    let mut bound_request = request.clone();
+    if let Some(session) = session {
+        bound_request.prompt = session.prompt(&request.prompt)?;
+    }
+    let request = &bound_request;
+    request.validate()?;
     let policy = super::runtime_policy::options(request)?;
     let resolution = policy
         .as_ref()
@@ -314,6 +338,9 @@ pub fn build_cli_command_with_policy(
         }
     }
     crate::agent_runtime_env::apply_to_command(&mut cmd, Path::new(&request.cwd))?;
+    if let Some(session) = session {
+        cmd.envs(session.env(Some(Path::new(&request.cwd)))?);
+    }
     Ok((cmd, stdin_payload, resolution))
 }
 
@@ -339,6 +366,7 @@ pub struct CliProviderAdapter {
     command_override: Option<String>,
     permission_mode: String,
     metadata: Option<serde_json::Value>,
+    bundle_session: Option<crate::skill_host::session::BundleSession>,
 }
 
 impl CliProviderAdapter {
@@ -354,11 +382,20 @@ impl CliProviderAdapter {
             command_override,
             permission_mode,
             metadata: None,
+            bundle_session: None,
         }
     }
 }
 
 impl CliProviderAdapter {
+    pub(crate) fn with_bundle_session(
+        mut self,
+        session: Option<crate::skill_host::session::BundleSession>,
+    ) -> Self {
+        self.bundle_session = session;
+        self
+    }
+
     pub fn with_metadata(mut self, metadata: Option<serde_json::Value>) -> Self {
         self.metadata = metadata;
         self
@@ -378,12 +415,13 @@ impl ProviderAdapter for CliProviderAdapter {
         if self.metadata.is_some() {
             request.metadata = self.metadata.clone();
         }
-        let (mut cmd, stdin_payload, resolution) = build_cli_command_with_policy(
+        let (mut cmd, stdin_payload, resolution) = build_cli_command_with_session(
             self.provider,
             &request,
             &self.add_dirs,
             self.command_override.as_deref(),
             &self.permission_mode,
+            self.bundle_session.as_ref(),
         )?;
         cmd.current_dir(&request.cwd)
             .stdin(if stdin_payload.is_some() {
@@ -633,6 +671,107 @@ mod tests {
         assert_eq!(CliProviderKind::Kimi.default_binary_name(), "kimi");
         assert_eq!(CliProviderKind::Kiro.default_binary_name(), "kiro-cli");
         assert!(CliProviderKind::parse("openai").is_err());
+    }
+
+    #[test]
+    fn general_commands_never_bind_or_rewrite_prompts_for_missing_or_corrupt_bundles() {
+        let _home = crate::skill_host::fs::test_home_for_bundle_tests();
+        let state = crate::skill_host::bundle_update::state_path().unwrap();
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+        let valid = serde_json::to_vec(&serde_json::json!({"schema":1,"active":{"bundleId":"missing","revision":1,"displayVersion":"missing","source":"remote","envHash":"hash","appliedAt":"t"}})).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let program = std::env::current_exe().unwrap();
+        for bytes in [valid, b"{corrupt state".to_vec()] {
+            std::fs::write(&state, bytes).unwrap();
+            let request = CompletionRequest {
+                schema_version: super::super::contracts::COMPLETION_REQUEST_SCHEMA_VERSION.into(),
+                provider: "codex".into(),
+                prompt: "Discuss ~/.maru/skills/demo and ~/.maru/env without changing them".into(),
+                cwd: cwd.path().to_string_lossy().into_owned(),
+                mode: "background".into(),
+                metadata: None,
+            };
+            let (command, stdin, _) = build_cli_command_with_policy(
+                CliProviderKind::Codex,
+                &request,
+                &[],
+                program.to_str(),
+                "plan",
+            )
+            .unwrap();
+            assert_eq!(stdin.as_deref(), Some(request.prompt.as_str()));
+            assert!(!command
+                .get_envs()
+                .any(|(key, _)| key == "MARU_SKILLS_BUNDLE" || key == "MARU_SKILLS_ENV"));
+        }
+    }
+
+    #[test]
+    fn command_binding_keeps_bundle_paths_and_env_when_another_bundle_is_active() {
+        let _home = crate::skill_host::fs::test_home_for_bundle_tests();
+        let root = crate::skill_host::bundle_update::bundle_pristine_dir("captured").unwrap();
+        std::fs::create_dir_all(root.join("skills/demo")).unwrap();
+        let session = crate::skill_host::session::BundleSession {
+            bundle_id: "captured".into(),
+            root: root.clone(),
+            env_root: crate::skill_host::fs::hashed_env_root("captured-env").unwrap(),
+            env_hash: "captured-env".into(),
+        };
+        crate::skill_host::bundle_update::write_state(
+            &crate::skill_host::bundle_update::BundleState {
+                schema: 1,
+                active: Some(crate::skill_host::bundle_update::SkillBundleRef {
+                    bundle_id: "new-active".into(),
+                    revision: 2,
+                    display_version: "new".into(),
+                    commit: None,
+                    source: "remote".into(),
+                    env_hash: "new-env".into(),
+                    applied_at: "t".into(),
+                }),
+                previous: None,
+            },
+        )
+        .unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let request = CompletionRequest {
+            schema_version: super::super::contracts::COMPLETION_REQUEST_SCHEMA_VERSION.into(),
+            provider: "codex".into(),
+            prompt: "Read ~/.maru/skills/demo/SKILL.md and use ~/.maru/env/.venv/bin/python".into(),
+            cwd: cwd.path().to_string_lossy().into_owned(),
+            mode: "background".into(),
+            metadata: None,
+        };
+        let (command, stdin, _) = build_cli_command_with_session(
+            CliProviderKind::Codex,
+            &request,
+            &[],
+            Some("rustc"),
+            "plan",
+            Some(&session),
+        )
+        .unwrap();
+        let env: std::collections::BTreeMap<_, _> = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            env["MARU_SKILLS_BUNDLE"].as_deref(),
+            Some(root.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            env["MARU_SKILLS_ENV"].as_deref(),
+            Some(session.env_root.to_string_lossy().as_ref())
+        );
+        let prompt = stdin.unwrap();
+        assert!(prompt.contains(&format!("{}/skills/demo/SKILL.md", root.display())));
+        assert!(!prompt.contains("~/.maru/skills/demo"));
+        assert!(!prompt.contains("~/.maru/env"));
     }
 
     #[cfg(unix)]

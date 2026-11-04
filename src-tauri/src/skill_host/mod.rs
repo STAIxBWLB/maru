@@ -2,6 +2,7 @@ pub mod bundle_update;
 pub mod dispatch;
 pub mod env;
 pub mod fs;
+pub(crate) mod session;
 pub mod store;
 
 pub use dispatch::{

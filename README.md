@@ -614,6 +614,37 @@ test file even when all assertions passed.
 
 ## Release Process
 
+Each minor release must state N-1 compatibility for wire, files, CLI and MCP
+surfaces in its release notes and test against the latest published patch of
+the previous minor line. Patch releases preserve that compatibility and do not
+add an N-1 release-note line.
+
+Skills updates retain the active and previous bundle and environment, plus
+immutable snapshots used by Maru-launched sessions. `maru skills rollback`
+restores the previous bundle and its environment without downloading or
+rebuilding it. Rollback rechecks the retained bundle's app and tool floors;
+legacy bundles use their original `manifest.json` when no cached compatibility
+record exists, and missing compatibility data blocks rollback. Rollback requires
+the target's completed hashed env even when active and target hashes match;
+legacy envs are allowed only for recorded legacy activations or the initial
+pre-hash bootstrap. Rollback also checks the retained bundle against the file
+list and hashes recorded when it was applied, and refuses missing, added or
+changed files; a bundle applied before that list existed must still contain
+every skill its `manifest.json` names.
+Maru-supplied bundled skill instructions and resource references bind their
+bundle and environment at start; external skill aliases switch atomically for
+subsequent reads.
+`_builtin` remains the editable workspace alias, with dirty edits blocking an
+update or rollback until preserved with Save As or discarded. Session retention
+is conservative: a launching Maru process keeps its captured versions until it
+exits, including for detached terminal runs.
+Initial migration of an existing `_builtin` directory uses atomic name exchange
+on Linux/macOS. The [AC1 Windows exception](https://github.com/STAIxBWLB/maru/issues/466#issuecomment-6622259347)
+permits a short gap for this one-time migration on Windows or a filesystem that
+reports exchange unsupported: fully stage the symlink, retire the old directory,
+then rename the link into place. The old tree is retained for N-1 and recovery.
+Every later switch keeps atomic link replacement (Windows `FileRenameInfoEx`).
+
 The release version's major and minor come from the active GSD milestone in
 `.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped
 as 1.1.x and closed on 2026-09-27. Opening milestone v1.2, whose scope is being

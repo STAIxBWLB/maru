@@ -9,10 +9,15 @@
 // Layout under ~/.maru/skills/:
 //   bundle-state.json        active/previous bundle refs (atomic writes)
 //   bundle-txn.json          swap journal, present only mid-transaction
-//   _bundles/<bundle-id>/    verified pristine baselines (dirty/discard source)
-//   _builtin/                active materialization (user-editable)
-//   _cache/staging/          zip extraction target before the swap
-//   _cache/backup-*/         previous _builtin during a swap
+//   _bundles/<bundle-id>/    verified pristine baselines (dirty/discard source,
+//                            session pins and rollback source)
+//   _workspaces/<bundle-id>/ editable generations, current and previous
+//   _builtin                 symlink to the active workspace generation
+//   _sessions/               live session pins (lock + json)
+//   _cache/staging/          zip extraction target before the switch
+//   _cache/retired/<id>/     the original _builtin directory after the
+//                            one-time migration, kept as N-1
+//   _cache/bundle-compatibility/<id>.json  floors, env layout, file list
 
 use base64::Engine;
 use minisign_verify::{PublicKey, Signature};
@@ -119,13 +124,39 @@ pub struct RemoteBundle {
     pub archive_sig_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SwapJournal {
     pub schema: u32,
     pub new_bundle_id: String,
     pub backup_dir: String,
     pub started_at: String,
+    #[serde(default)]
+    pub legacy_directory: bool,
+    #[serde(default)]
+    pub old_workspace: Option<String>,
+    #[serde(default)]
+    pub new_workspace: Option<String>,
+    #[serde(default)]
+    pub links: Vec<BundleLinkSwap>,
+    #[serde(default)]
+    pub old_workspace_hash: Option<String>,
+    #[serde(default)]
+    pub new_workspace_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BundleLinkSwap {
+    pub link: PathBuf,
+    pub old_target: PathBuf,
+    #[serde(default)]
+    pub preserved_target: Option<PathBuf>,
+    pub new_target: PathBuf,
+}
+
+pub fn workspace_dir(bundle_id: &str) -> Result<PathBuf, String> {
+    host_fs::safe_entry_name(bundle_id)?;
+    Ok(host_fs::skills_root()?.join("_workspaces").join(bundle_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +224,25 @@ pub fn clear_journal() -> Result<(), String> {
     Ok(())
 }
 
+fn clear_switch_temp(link: &Path, targets: &[&Path]) -> Result<(), String> {
+    let temp = host_fs::link_temp(link);
+    if let Some(target) = host_fs::read_link_target(&temp) {
+        if !targets
+            .iter()
+            .any(|expected| host_fs::simplified(&target) == host_fs::simplified(expected))
+        {
+            return Err(format!(
+                "bundle_recovery_link_conflict: {}; inspect the staging link before retrying",
+                temp.display()
+            ));
+        }
+        host_fs::remove_symlink(&temp).map_err(|error| {
+            host_fs::operation_error("remove interrupted link staging entry", &temp, error)
+        })?;
+    }
+    Ok(())
+}
+
 /// Roll an interrupted swap back (or forward) to a consistent state. Called
 /// before any bundle operation and from the builtin-source bootstrap path.
 pub fn recover_interrupted_swap(builtin_root: &Path) -> Result<(), String> {
@@ -205,6 +255,93 @@ pub fn recover_interrupted_swap(builtin_root: &Path) -> Result<(), String> {
         .as_ref()
         .map(|active| active.bundle_id == journal.new_bundle_id)
         .unwrap_or(false);
+    if let (Some(old), Some(new)) = (&journal.old_workspace, &journal.new_workspace) {
+        let target = PathBuf::from(if swap_completed { new } else { old });
+        if !target.is_dir() {
+            return Err(format!(
+                "bundle_recovery_missing: {}; restore the bundle workspace before retrying",
+                target.display()
+            ));
+        }
+        let expected = if swap_completed {
+            &journal.new_workspace_hash
+        } else {
+            &journal.old_workspace_hash
+        };
+        // A read failure is reported as itself, not as an incomplete tree.
+        let actual = super::store::hash_directory_filtered(&target).map_err(|error| {
+            host_fs::operation_error("fingerprint recorded recovery workspace", &target, error)
+        })?;
+        if expected.as_deref() != Some(actual.as_str()) {
+            return Err(format!("bundle_recovery_incomplete: {}; restore the complete recorded workspace before retrying recovery", target.display()));
+        }
+        let legacy_in_place = match fs::symlink_metadata(builtin_root) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let current = host_fs::read_link_target(builtin_root).ok_or_else(|| format!("bundle_recovery_link_conflict: {}; inspect the unreadable builtin symlink before retrying", builtin_root.display()))?;
+                if current != Path::new(old) && current != Path::new(new) { return Err(format!("bundle_recovery_link_conflict: {}; preserve the foreign builtin link and inspect the journal before retrying", builtin_root.display())); }
+                false
+            }
+            Ok(metadata) if metadata.is_dir() && journal.legacy_directory && !swap_completed && journal.old_workspace_hash.as_ref().is_some_and(|hash| super::store::hash_directory_filtered(builtin_root).is_ok_and(|actual| &actual == hash)) => true,
+            Ok(_) => return Err(format!("bundle_recovery_link_conflict: {}; preserve the unmanaged builtin entry and inspect the journal before retrying", builtin_root.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(host_fs::operation_error("inspect recovery builtin entry", builtin_root, error)),
+        };
+        for link in &journal.links {
+            match fs::symlink_metadata(&link.link) {
+                Ok(metadata) if !metadata.file_type().is_symlink() => {
+                    return Err(format!("bundle_recovery_link_conflict: {} is an unmanaged file/directory; preserve it and inspect the journal before retrying recovery", link.link.display()));
+                }
+                Ok(_) => (),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => {
+                    return Err(host_fs::operation_error(
+                        "inspect recovery link",
+                        &link.link,
+                        error,
+                    ))
+                }
+            }
+        }
+        // First detach any legacy aliases, so even recovery's one-time
+        // directory migration never leaves an external skill link dangling.
+        for link in &journal.links {
+            let preserved = link.preserved_target.as_deref().unwrap_or(&link.old_target);
+            let desired = if swap_completed {
+                &link.new_target
+            } else if legacy_in_place {
+                &link.old_target
+            } else {
+                preserved
+            };
+            let allowed: [&Path; 3] = [&link.old_target, preserved, &link.new_target];
+            let current = host_fs::read_link_target(&link.link);
+            if current.as_ref().is_some_and(|value| {
+                !allowed
+                    .iter()
+                    .any(|expected| host_fs::simplified(value) == host_fs::simplified(expected))
+            }) {
+                return Err(format!(
+                    "bundle_recovery_link_conflict: {}; inspect the changed link before retrying",
+                    link.link.display()
+                ));
+            }
+            clear_switch_temp(&link.link, &allowed)?;
+            host_fs::replace_symlink(&link.link, desired)?;
+        }
+        clear_switch_temp(builtin_root, &[Path::new(old), Path::new(new)])?;
+        if !legacy_in_place {
+            host_fs::replace_symlink(builtin_root, &target)?;
+        }
+        let retired = PathBuf::from(&journal.backup_dir);
+        // Before exchange this is merely our staged symlink. After exchange
+        // it is the original directory, retained with its N-1 generation.
+        if host_fs::read_link_target(&retired).as_deref() == Some(Path::new(old)) {
+            host_fs::remove_symlink(&retired).map_err(|error| {
+                host_fs::operation_error("remove uncommitted migration symlink", &retired, error)
+            })?;
+        }
+        return clear_journal();
+    }
     let backup = PathBuf::from(&journal.backup_dir);
     if swap_completed {
         // Crash after the state write: the new bundle is fully applied; the
@@ -1093,6 +1230,209 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_generation_switch_recovers_links_to_recorded_state() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let root = host_fs::skills_root().unwrap();
+        let builtin = root.join("_builtin");
+        let old = workspace_dir("old").unwrap();
+        let new = workspace_dir("new").unwrap();
+        for (dir, text) in [(&old, "old"), (&new, "new")] {
+            fs::create_dir_all(dir.join("skills/demo")).unwrap();
+            fs::write(dir.join("skills/demo/SKILL.md"), text).unwrap();
+        }
+        let link = root.join("demo");
+        host_fs::create_symlink_no_clobber(&builtin, &new).unwrap();
+        host_fs::create_symlink_no_clobber(&link, &new.join("skills/demo")).unwrap();
+        let reference = |id: &str| SkillBundleRef {
+            bundle_id: id.into(),
+            revision: if id == "old" { 1 } else { 2 },
+            display_version: id.into(),
+            commit: None,
+            source: REMOTE_SOURCE.into(),
+            env_hash: "same-env".into(),
+            applied_at: "t".into(),
+        };
+        for committed in [false, true] {
+            write_state(&BundleState {
+                schema: 1,
+                active: Some(reference(if committed { "new" } else { "old" })),
+                previous: None,
+            })
+            .unwrap();
+            write_journal(&SwapJournal {
+                schema: 1,
+                new_bundle_id: "new".into(),
+                backup_dir: root
+                    .join("_cache/backup-test")
+                    .to_string_lossy()
+                    .into_owned(),
+                started_at: "t".into(),
+                legacy_directory: false,
+                old_workspace: Some(old.to_string_lossy().into_owned()),
+                new_workspace: Some(new.to_string_lossy().into_owned()),
+                old_workspace_hash: Some(
+                    super::super::store::hash_directory_filtered(&old).unwrap(),
+                ),
+                new_workspace_hash: Some(
+                    super::super::store::hash_directory_filtered(&new).unwrap(),
+                ),
+                links: vec![BundleLinkSwap {
+                    link: link.clone(),
+                    old_target: old.join("skills/demo"),
+                    preserved_target: None,
+                    new_target: new.join("skills/demo"),
+                }],
+            })
+            .unwrap();
+            // Simulate a crash after staging, before replacing the builtin pointer.
+            host_fs::create_symlink_no_clobber(&host_fs::link_temp(&builtin), &new).unwrap();
+            recover_interrupted_swap(&builtin).unwrap();
+            let expected = if committed { "new" } else { "old" };
+            assert_eq!(fs::read_to_string(link.join("SKILL.md")).unwrap(), expected);
+            assert_eq!(
+                fs::read_to_string(builtin.join("skills/demo/SKILL.md")).unwrap(),
+                expected
+            );
+            assert!(read_journal().unwrap().is_none());
+            assert!(!host_fs::link_temp(&builtin).exists());
+        }
+    }
+
+    #[test]
+    fn recovery_preserves_unmanaged_files_and_directories_at_link_paths() {
+        for kind in ["file", "directory", "missing"] {
+            let _home = host_fs::test_home_for_bundle_tests();
+            let root = host_fs::skills_root().unwrap();
+            let old = workspace_dir("old").unwrap();
+            let new = workspace_dir("new").unwrap();
+            for (dir, text) in [(&old, "old"), (&new, "new")] {
+                fs::create_dir_all(dir.join("skills/demo")).unwrap();
+                fs::write(dir.join("skills/demo/SKILL.md"), text).unwrap();
+            }
+            let builtin = root.join("_builtin");
+            host_fs::create_symlink_no_clobber(&builtin, &new).unwrap();
+            let entry = root.join("demo");
+            if kind == "file" {
+                fs::write(&entry, "unmanaged bytes").unwrap();
+            } else if kind == "directory" {
+                fs::create_dir_all(&entry).unwrap();
+                fs::write(entry.join("keep"), "unmanaged bytes").unwrap();
+            }
+            write_state(&BundleState {
+                schema: 1,
+                active: Some(SkillBundleRef {
+                    bundle_id: "old".into(),
+                    revision: 1,
+                    display_version: "old".into(),
+                    commit: None,
+                    source: REMOTE_SOURCE.into(),
+                    env_hash: "old-env".into(),
+                    applied_at: "t".into(),
+                }),
+                previous: None,
+            })
+            .unwrap();
+            write_journal(&SwapJournal {
+                schema: 1,
+                new_bundle_id: "new".into(),
+                backup_dir: root
+                    .join("_cache/retired/old")
+                    .to_string_lossy()
+                    .into_owned(),
+                started_at: "t".into(),
+                legacy_directory: false,
+                old_workspace: Some(old.to_string_lossy().into_owned()),
+                new_workspace: Some(new.to_string_lossy().into_owned()),
+                old_workspace_hash: Some(
+                    super::super::store::hash_directory_filtered(&old).unwrap(),
+                ),
+                new_workspace_hash: Some(
+                    super::super::store::hash_directory_filtered(&new).unwrap(),
+                ),
+                links: vec![BundleLinkSwap {
+                    link: entry.clone(),
+                    old_target: old.join("skills/demo"),
+                    preserved_target: None,
+                    new_target: new.join("skills/demo"),
+                }],
+            })
+            .unwrap();
+            let result = recover_interrupted_swap(&builtin);
+            if kind == "missing" {
+                result.unwrap();
+                assert_eq!(fs::read_to_string(entry.join("SKILL.md")).unwrap(), "old");
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.contains("bundle_recovery_link_conflict"), "{error}");
+                assert_eq!(host_fs::read_link_target(&builtin).unwrap(), new);
+                assert_eq!(
+                    fs::read_to_string(if kind == "file" {
+                        entry.clone()
+                    } else {
+                        entry.join("keep")
+                    })
+                    .unwrap(),
+                    "unmanaged bytes"
+                );
+                assert!(read_journal().unwrap().is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_refuses_an_incomplete_recorded_workspace() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let old = workspace_dir("old").unwrap();
+        let new = workspace_dir("new").unwrap();
+        for (dir, text) in [(&old, "old"), (&new, "new")] {
+            fs::create_dir_all(dir.join("skills/demo")).unwrap();
+            fs::write(dir.join("skills/demo/SKILL.md"), text).unwrap();
+        }
+        let root = host_fs::skills_root().unwrap();
+        let builtin = root.join("_builtin");
+        host_fs::create_symlink_no_clobber(&builtin, &new).unwrap();
+        write_state(&BundleState {
+            schema: 1,
+            active: Some(SkillBundleRef {
+                bundle_id: "old".into(),
+                revision: 1,
+                display_version: "old".into(),
+                commit: None,
+                source: REMOTE_SOURCE.into(),
+                env_hash: "old-env".into(),
+                applied_at: "t".into(),
+            }),
+            previous: None,
+        })
+        .unwrap();
+        write_journal(&SwapJournal {
+            schema: 1,
+            new_bundle_id: "new".into(),
+            backup_dir: root.join("_cache/backup").to_string_lossy().into_owned(),
+            started_at: "t".into(),
+            legacy_directory: false,
+            old_workspace: Some(old.to_string_lossy().into_owned()),
+            new_workspace: Some(new.to_string_lossy().into_owned()),
+            old_workspace_hash: Some(super::super::store::hash_directory_filtered(&old).unwrap()),
+            new_workspace_hash: Some(super::super::store::hash_directory_filtered(&new).unwrap()),
+            links: Vec::new(),
+        })
+        .unwrap();
+        fs::remove_file(old.join("skills/demo/SKILL.md")).unwrap();
+        let error = recover_interrupted_swap(&builtin).unwrap_err();
+        assert!(error.contains("bundle_recovery_incomplete"), "{error}");
+        assert!(
+            error.contains(&old.to_string_lossy().to_string()),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(builtin.join("skills/demo/SKILL.md")).unwrap(),
+            "new"
+        );
+        assert!(read_journal().unwrap().is_some());
+    }
+
+    #[test]
     fn journal_recovery_restores_backup_for_incomplete_swap() {
         let _home = crate::skill_host::fs::test_home_for_bundle_tests();
         let skills_root = host_fs::skills_root().unwrap();
@@ -1122,6 +1462,7 @@ mod tests {
             new_bundle_id: "new".to_string(),
             backup_dir: host_fs::display_path(&backup),
             started_at: "t".to_string(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -1162,6 +1503,7 @@ mod tests {
             new_bundle_id: "new".to_string(),
             backup_dir: host_fs::display_path(&backup),
             started_at: "t".to_string(),
+            ..Default::default()
         })
         .unwrap();
 
