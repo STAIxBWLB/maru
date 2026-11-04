@@ -39,6 +39,14 @@ struct TrustedConsole {
 }
 
 fn read_small(path: &Path) -> Result<Vec<u8>, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| failure(&format!("inspect {}", path.display()), error))?;
+    if !metadata.file_type().is_file() {
+        return Err(failure(
+            "validate installed package metadata",
+            format!("{} must be a regular, non-symlink file", path.display()),
+        ));
+    }
     let file = fs::File::open(path)
         .map_err(|error| failure(&format!("read {}", path.display()), error))?;
     let mut bytes = Vec::new();
@@ -102,6 +110,8 @@ fn resolve_console(home: &Path) -> Result<TrustedConsole, String> {
             "package resolves outside the Bun global package root",
         ));
     }
+    verify_permissions(&bin, &home)?;
+    verify_permissions(&package, &home)?;
     let metadata: serde_json::Value =
         serde_json::from_slice(&read_small(&package.join("package.json"))?)
             .map_err(|error| failure("parse installed console package.json", error))?;
@@ -280,6 +290,8 @@ fn start_console(
         .env_remove("ENV")
         .env("HOME", &trusted.home)
         .env("USERPROFILE", &trusted.home)
+        .env("CODEX_HOME", trusted.home.join(".codex"))
+        .env("XDG_CONFIG_HOME", trusted.home.join(".config"))
         .env("AGENTHUB_HOME", trusted.home.join(".agenthub"));
     configure_process_tree(&mut command);
     let mut child = command
@@ -554,6 +566,16 @@ server.serve_forever()
             .err()
             .unwrap()
             .contains("group/world write"));
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let metadata = home
+            .path()
+            .join(".bun/install/global/node_modules/@staix/agent-console/package.json");
+        fs::remove_file(&metadata).unwrap();
+        fs::create_dir(&metadata).unwrap();
+        assert!(resolve_console(home.path())
+            .err()
+            .unwrap()
+            .contains("regular, non-symlink file"));
     }
 
     #[test]
