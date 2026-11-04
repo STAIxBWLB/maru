@@ -87,7 +87,7 @@ pub fn env_root() -> Result<PathBuf, String> {
                     display_path(&state_path)
                 )
             })?;
-            if root.is_dir() {
+            if root.is_dir() || super::store::bundle_uses_hashed_env(&active.bundle_id)? {
                 return Ok(root);
             }
         }
@@ -690,6 +690,58 @@ mod tests {
             assert!(error.contains("invalid_env_hash"), "{hash}: {error}");
             assert!(error.contains("lowercase ASCII"), "{hash}: {error}");
         }
+    }
+
+    #[test]
+    fn env_resolver_keeps_legacy_fallback_until_hashed_activation_is_recorded() {
+        let _home = test_home_for_bundle_tests();
+        let legacy = env_base().unwrap();
+        fs::create_dir_all(legacy.join(".venv")).unwrap();
+        let state_path = super::super::bundle_update::state_path().unwrap();
+        write_json_pretty(
+            &state_path,
+            &serde_json::json!({
+                "schema": 1,
+                "active": {
+                    "bundleId": "fixture", "revision": 1, "displayVersion": "fixture",
+                    "source": "remote", "envHash": "fixture-env", "appliedAt": "fixture"
+                }
+            }),
+        )
+        .unwrap();
+        let hashed = hashed_env_root("fixture-env").unwrap();
+        assert!(!hashed.exists());
+        assert_eq!(env_root().unwrap(), legacy);
+        let record = skills_root()
+            .unwrap()
+            .join("_cache/bundle-compatibility/fixture.json");
+        write_json_pretty(
+            &record,
+            &serde_json::json!({
+                "minAppVersion": "0.0.1", "envLayout": "hashed"
+            }),
+        )
+        .unwrap();
+        assert_eq!(env_root().unwrap(), hashed);
+        assert!(
+            !hashed.exists(),
+            "resolving does not recreate the environment"
+        );
+        for contents in ["{invalid", "null"] {
+            fs::write(&record, contents).unwrap();
+            let error = env_root().unwrap_err();
+            assert!(
+                error.contains("skills_io_failed: parse bundle env layout"),
+                "{error}"
+            );
+            assert!(error.contains(&display_path(&record)), "{error}");
+            assert!(error.contains("maru skills update --check"), "{error}");
+        }
+        fs::remove_file(&record).unwrap();
+        fs::create_dir(&record).unwrap();
+        let error = env_root().unwrap_err();
+        assert!(error.contains("not a regular file"), "{error}");
+        assert!(error.contains(&display_path(&record)), "{error}");
     }
 
     #[test]

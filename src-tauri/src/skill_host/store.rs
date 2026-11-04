@@ -5527,6 +5527,34 @@ fn compatibility_path(id: &str) -> Result<PathBuf, String> {
         .join(format!("{id}.json")))
 }
 
+/// Activation provenance is optional only for installs predating this record.
+pub(super) fn bundle_uses_hashed_env(id: &str) -> Result<bool, String> {
+    let path = compatibility_path(id)?;
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(host_fs::operation_error(
+                "inspect bundle env layout",
+                &path,
+                error,
+            ));
+        }
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(host_fs::operation_error(
+                "read bundle env layout",
+                &path,
+                "activation record is not a regular file",
+            ));
+        }
+        Ok(_) => (),
+    }
+    let bytes = fs::read(&path)
+        .map_err(|error| host_fs::operation_error("read bundle env layout", &path, error))?;
+    let compatibility: BundleCompatibility = serde_json::from_slice(&bytes)
+        .map_err(|error| host_fs::operation_error("parse bundle env layout", &path, error))?;
+    Ok(compatibility.env_layout == Some(BundleEnvLayout::Hashed))
+}
+
 fn read_bundle_compatibility(id: &str) -> Result<BundleCompatibility, String> {
     let cached = compatibility_path(id)?;
     let path = if cached.exists() {
@@ -5930,8 +5958,18 @@ fn skills_activate_bundle_blocking(
         verify_rollback_env(target)?;
     }
     let env_changed = metadata.env_hash != active.env_hash;
-    if env_changed && !repair_env && !is_rollback {
-        return Err("bundle_env_update_required".to_string());
+    let env_needs_build = env_changed
+        || (bundle_uses_hashed_env(&active.bundle_id)?
+            && !host_fs::hashed_env_root(&metadata.env_hash)?.is_dir());
+    if env_needs_build && !repair_env && !is_rollback {
+        return Err(format!(
+            "bundle_env_update_required: {}; retry `maru skills update --apply --repair-env`",
+            host_fs::operation_error(
+                "prepare bundle environment",
+                &host_fs::hashed_env_root(&metadata.env_hash)?,
+                "the environment hash changed or its activated directory is missing, but repair was not requested",
+            )
+        ));
     }
 
     progress.info(format!(
@@ -5973,9 +6011,19 @@ fn skills_activate_bundle_blocking(
     }
     // Recompute the env gate against the just-read active ref.
     let env_changed = metadata.env_hash != active.env_hash;
-    if env_changed && !repair_env && !is_rollback {
+    let env_needs_build = env_changed
+        || (bundle_uses_hashed_env(&active.bundle_id)?
+            && !host_fs::hashed_env_root(&metadata.env_hash)?.is_dir());
+    if env_needs_build && !repair_env && !is_rollback {
         let _ = fs::remove_dir_all(&staging);
-        return Err("bundle_env_update_required".to_string());
+        return Err(format!(
+            "bundle_env_update_required: {}; retry `maru skills update --apply --repair-env`",
+            host_fs::operation_error(
+                "prepare bundle environment",
+                &host_fs::hashed_env_root(&metadata.env_hash)?,
+                "the environment hash changed or its activated directory is missing, but repair was not requested",
+            )
+        ));
     }
     let old_pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
     let dirty = if old_pristine.is_dir() {
@@ -6032,7 +6080,7 @@ fn skills_activate_bundle_blocking(
     }
     let mut built_env = None;
     let result = (|| {
-        if env_changed && !is_rollback {
+        if env_needs_build && !is_rollback {
             let root = host_fs::hashed_env_root(&metadata.env_hash)?;
             // An env hash may recur after more than one update. Completed
             // envs are immutable cache entries, including session-pinned N-2.
@@ -9274,6 +9322,97 @@ exit 7
             let session = held.unwrap();
             assert_eq!(hash_directory(&session.env_root).unwrap(), before.unwrap());
             assert_eq!(host_fs::env_root().unwrap(), session.env_root);
+        }
+
+        #[test]
+        fn missing_activated_hash_never_selects_legacy_and_same_hash_update_repairs_it() {
+            for repair_succeeds in [false, true] {
+                let _home = test_home();
+                skills_list_sources(None).unwrap();
+                let legacy = host_fs::env_base().unwrap();
+                fs::create_dir_all(legacy.join(".venv")).unwrap();
+                fs::write(legacy.join(".venv/legacy-kept"), "legacy bytes").unwrap();
+                let (remote, archive) = bundle_fixture();
+                let first = skills_apply_bundle_update_blocking(
+                    None,
+                    true,
+                    ProgressReporter::noop(),
+                    |_, _| Ok(Some(remote)),
+                    |_| Ok(archive),
+                    |_, _, _, root| {
+                        fs::create_dir_all(root.join(".venv")).map_err(|error| error.to_string())
+                    },
+                )
+                .unwrap();
+                let root = host_fs::hashed_env_root(&first.current.env_hash).unwrap();
+                assert!(bundle_uses_hashed_env(&first.current.bundle_id).unwrap());
+                fs::remove_dir_all(&root).unwrap();
+                assert_eq!(host_fs::env_root().unwrap(), root);
+                assert_eq!(
+                    env_vars_for_runs(None).unwrap()["MARU_SKILLS_ENV"],
+                    host_fs::display_path(&root)
+                );
+                let (remote, _) = bundle_fixture();
+                assert_eq!(remote.metadata.env_hash, first.current.env_hash);
+                let error = skills_apply_bundle_update_blocking(
+                    None,
+                    false,
+                    ProgressReporter::noop(),
+                    |_, _| Ok(Some(remote)),
+                    |_| panic!("explicit repair is required before download"),
+                    |_, _, _, _| panic!("explicit repair is required before setup"),
+                )
+                .unwrap_err();
+                assert!(error.contains("bundle_env_update_required"), "{error}");
+                assert!(error.contains(&host_fs::display_path(&root)), "{error}");
+                assert!(
+                    error.contains("maru skills update --apply --repair-env"),
+                    "{error}"
+                );
+                let (remote, archive) = bundle_fixture();
+                let mut repaired = false;
+                let result = skills_apply_bundle_update_blocking(
+                    None,
+                    true,
+                    ProgressReporter::noop(),
+                    |_, _| Ok(Some(remote)),
+                    |_| Ok(archive),
+                    |_, _, _, target| {
+                        assert_eq!(target, root);
+                        repaired = true;
+                        if !repair_succeeds {
+                            return Err("injected setup failure".into());
+                        }
+                        fs::create_dir_all(target.join(".venv")).map_err(|error| error.to_string())
+                    },
+                );
+                assert!(
+                    repaired,
+                    "same-hash update must rebuild a missing activated env"
+                );
+                if repair_succeeds {
+                    let current = result.unwrap().current;
+                    assert!(root.join(".venv").is_dir());
+                    assert!(root.join(".maru-env-complete").is_file());
+                    assert!(bundle_uses_hashed_env(&current.bundle_id).unwrap());
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(error.contains("injected setup failure"), "{error}");
+                    assert_eq!(
+                        bundle::read_state().unwrap().unwrap().active,
+                        Some(first.current)
+                    );
+                    assert!(
+                        !root.exists(),
+                        "failed repair removes only the unapplied env"
+                    );
+                }
+                assert_eq!(host_fs::env_root().unwrap(), root);
+                assert_eq!(
+                    fs::read_to_string(legacy.join(".venv/legacy-kept")).unwrap(),
+                    "legacy bytes"
+                );
+            }
         }
 
         #[test]
