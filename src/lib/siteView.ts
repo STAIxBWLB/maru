@@ -52,6 +52,8 @@ interface SiteViewTabState {
   url: string | null;
   opening?: boolean;
   launch?: string | null;
+  /** Each open starts without progress; only later native events set this. */
+  pageLoading?: boolean;
 }
 
 interface SiteViewOpenResult {
@@ -63,10 +65,13 @@ const tabs = new Map<string, SiteViewTabState>();
 const openResults = new Map<string, SiteViewOpenResult>();
 
 /** Consume only an actual open completion, never an ordinary page-load state. */
-export function takeSiteViewOpenResult(tabId: string): SiteViewOpenResult | null {
+export function takeSiteViewOpenResult(tabId: string): (SiteViewOpenResult & { loading: boolean }) | null {
   const result = openResults.get(tabId) ?? null;
   openResults.delete(tabId);
-  return result;
+  return result ? {
+    ...result,
+    loading: !("error" in result) && (tabs.get(tabId)?.pageLoading ?? false),
+  } : null;
 }
 
 const openSettledSubscribers = new Set<(tabId: string) => void>();
@@ -396,6 +401,8 @@ export function subscribeSiteViewEvents(handlers: SiteViewEventHandlers): () => 
     const offPageLoad = await listen<SiteViewPageLoadPayload>(
       SITE_VIEW_PAGE_LOAD_EVENT,
       (event) => {
+        const state = tabs.get(event.payload.tabId);
+        if (state) state.pageLoading = event.payload.state === "started";
         handlers.onPageLoad?.(event.payload);
       },
     );

@@ -7,12 +7,33 @@ import type { SiteEntry } from "../../lib/sites";
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(), readSites: vi.fn(), clipboard: vi.fn(), setError: vi.fn(),
   listeners: new Map<string, (event: { payload: unknown }) => void>(),
+  deferOpenUnsubscribe: false,
+  deferredOpenUnsubscribes: [] as Array<() => void>,
+  settledDeliveries: 0,
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => {
   mocks.listeners.set(name, handler);
   return () => { if (mocks.listeners.get(name) === handler) mocks.listeners.delete(name); };
 }) }));
+vi.mock("../../lib/siteView", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/siteView")>();
+  return {
+    ...actual,
+    subscribeSiteViewOpenSettled: (handler: (tabId: string) => void) => {
+      const off = actual.subscribeSiteViewOpenSettled((tabId) => {
+        mocks.settledDeliveries += 1;
+        handler(tabId);
+      });
+      return () => {
+        // Deterministically retain the passive subscription past unmount
+        // commit while the real SitesPane layout cleanup has already run.
+        if (mocks.deferOpenUnsubscribe) mocks.deferredOpenUnsubscribes.push(off);
+        else off();
+      };
+    },
+  };
+});
 vi.mock("../../lib/errorStore", () => ({ setError: mocks.setError }));
 vi.mock("../../lib/maruDir", () => ({ readSites: mocks.readSites, saveSites: vi.fn(async () => {}) }));
 vi.mock("../../lib/confirmDialog", () => ({ confirmDialog: vi.fn(async () => true) }));
@@ -69,6 +90,7 @@ describe("Sites launch privacy and pane lifetime", () => {
   beforeEach(() => {
     container = document.createElement("div"); document.body.appendChild(container);
     root = null; frames = new Map(); nextFrame = 0;
+    mocks.deferOpenUnsubscribe = false; mocks.settledDeliveries = 0;
     Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; });
@@ -78,6 +100,8 @@ describe("Sites launch privacy and pane lifetime", () => {
     mocks.invoke.mockReset().mockImplementation(async (command: string) => command === "site_view_open" ? ticket : undefined);
   });
   afterEach(async () => {
+    mocks.deferOpenUnsubscribe = false;
+    for (const off of mocks.deferredOpenUnsubscribes.splice(0)) off();
     if (!root) await render();
     await act(async () => {
       for (const button of container.querySelectorAll<HTMLButtonElement>('[aria-label="sites.tabs.close"]')) button.click();
@@ -130,6 +154,49 @@ describe("Sites launch privacy and pane lifetime", () => {
     await unmountReactRoot(root!); root = null;
     await render(); await frame();
     expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+  });
+
+  it.each(["started", "finished"] as const)("preserves page-load %s received before successful settlement", async (state) => {
+    let resolve!: (url: string) => void;
+    const opening = new Promise<string>((done) => { resolve = done; });
+    mocks.invoke.mockImplementation(async (command: string) => command === "site_view_open" ? opening : undefined);
+    await render(); await click('[data-new="console"]'); await frame();
+    await act(async () => mocks.listeners.get("sites://page-load")!({
+      payload: { tabId: "t1", state, url: ticket },
+    }));
+    await act(async () => resolve(ticket));
+    await frame();
+    expect(Boolean(container.querySelector(".sites-url .spin"))).toBe(state === "started");
+    expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe(ticket);
+  });
+
+  it.each(["success", "failure"])("retains a %s settled after unmount commit until the replacement pane consumes it", async (outcome) => {
+    let resolve!: (url: string) => void;
+    let reject!: (error: Error) => void;
+    const opening = new Promise<string>((done, fail) => { resolve = done; reject = fail; });
+    mocks.invoke.mockImplementation(async (command: string) => command === "site_view_open" ? opening : undefined);
+    await render(); await click('[data-new="console"]'); await frame();
+    mocks.deferOpenUnsubscribe = true;
+    await unmountReactRoot(root!); root = null;
+    expect(mocks.deferredOpenUnsubscribes).toHaveLength(1);
+    await act(async () => {
+      if (outcome === "success") resolve(ticket);
+      else reject(new Error("commit-gap failure"));
+    });
+    expect(mocks.settledDeliveries).toBe(1); // The stale passive handler really ran.
+    for (const off of mocks.deferredOpenUnsubscribes.splice(0)) off();
+    mocks.deferOpenUnsubscribe = false;
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
+    if (outcome === "success") {
+      expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe(ticket);
+      expect(siteViewTabRuntime("t1")?.shown).toBe(true);
+    } else {
+      expect(mocks.setError).toHaveBeenCalledWith("commit-gap failure");
+      mocks.invoke.mockImplementation(async (command: string) => command === "site_view_open" ? ticket : undefined);
+      await click('[data-select="console"]'); await frame(); await frame();
+      expect(siteViewTabRuntime("t1")?.shown).toBe(true);
+    }
   });
 
   it("clears a first-open failure completed offscreen and lets the bookmark retry", async () => {

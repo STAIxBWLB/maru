@@ -12,7 +12,7 @@ import {
   Star,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { readSites, saveSites } from "../../lib/maruDir";
 import { clipboardWriteText } from "../../lib/clipboard";
 import { setError } from "../../lib/errorStore";
@@ -124,6 +124,12 @@ export function SitesPane({
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
   const [unsupportedNoticeVisible, setUnsupportedNoticeVisible] = useState(false);
 
+  const mountedRef = useRef(false);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
@@ -218,11 +224,12 @@ export function SitesPane({
   // hidden; the same sync shows it again using the current visibility intent.
   useEffect(() => {
     const settle = (tabId: string) => {
+      if (!mountedRef.current) return;
       const result = takeSiteViewOpenResult(tabId);
       if (!result) return;
       setTabs((current) => updateBrowserTab(current, tabId, {
         ...(result.url ? { url: result.url } : {}),
-        loading: false,
+        loading: result.loading,
       }));
       if (result.error !== undefined) reportError(result.error);
       scheduleSync();
