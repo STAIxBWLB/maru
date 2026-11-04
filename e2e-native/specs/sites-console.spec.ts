@@ -29,6 +29,7 @@ describe("native console site launch", () => {
     await fs.writeFile(path.join(home, ".maru", "sites.json"), JSON.stringify({ version: 1, sites: [{ id: "native-console", label: "Native Console", url: "http://127.0.0.1", launch: "acon ui --no-open --json" }] }));
     const sites = await browser.$('.activity-rail button[aria-label="사이트"]');
     await sites.waitForDisplayed({ timeout: 30_000 }); await sites.click();
+    const mainHandle = await browser.getWindowHandle();
     const entry = await browser.$(".sites-item-primary");
     await entry.waitForDisplayed({ timeout: 30_000 }); await entry.click();
     const proofFile = path.join(home, "acon-proof.json");
@@ -40,13 +41,17 @@ describe("native console site launch", () => {
     assert.equal(proof.cookie, true, "the same-origin bootstrap must set its session cookie");
     assert.equal(proof.requestOrigin, proof.origin, "the console bootstrap request must keep its declared origin");
 
+    // Native child creation can change the driver's current webview context.
+    // Subsequent controls belong to the app shell, not the console document.
+    await browser.switchToWindow(mainHandle);
     const consoleShown = async () => Boolean(await browser.execute(() => {
       const selected = document.querySelector<HTMLButtonElement>('.sites-tab.active [role="tab"]');
       const surface = document.querySelector<HTMLElement>(".sites-surface");
       const rect = surface?.getBoundingClientRect();
       return selected?.getAttribute("aria-selected") === "true"
         && selected.textContent?.includes("Native console") === true
-        && Boolean(rect && rect.width > 0 && rect.height > 0);
+        && Boolean(rect && rect.width > 0 && rect.height > 0)
+        && Boolean(surface && getComputedStyle(surface).visibility === "visible");
     }));
     await browser.waitUntil(consoleShown, {
       timeout: 30_000,
@@ -55,12 +60,26 @@ describe("native console site launch", () => {
     assert.equal(await consoleShown(), true, "the launched console must be shown in the active Sites surface");
 
     await fs.unlink(path.join(bin, "acon"));
-    const addressBeforeFocus = await browser.$(".sites-url input");
-    await addressBeforeFocus.waitForDisplayed({ timeout: 15_000 });
-    await addressBeforeFocus.click();
-    const addressAfterFocus = await browser.$(".sites-url input");
-    await addressAfterFocus.setValue(`${proof.origin}/`);
-    await browser.keys("Enter");
+    // Keep UI actions on the main handle and re-query after each React commit.
+    // Synchronous DOM commands avoid retaining WebDriver element IDs across
+    // focus/change renders while exercising the normal address input handlers.
+    await browser.waitUntil(() => browser.execute((url: string) => {
+      const input = document.querySelector<HTMLInputElement>(".sites-url input");
+      if (!input || input.getBoundingClientRect().width === 0) return false;
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      if (!setter) throw new Error("native address input has no value setter");
+      setter.call(input, url);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    }, `${proof.origin}/`), { timeout: 15_000, timeoutMsg: "the main Sites address input was not available after console launch" });
+    const submitted = await browser.execute((url: string) => {
+      const input = document.querySelector<HTMLInputElement>(".sites-url input");
+      if (!input || input.value !== url) return false;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    }, `${proof.origin}/`);
+    assert.equal(submitted, true, "manual URL must be submitted through the current address input");
     await browser.waitUntil(async () => JSON.parse(await fs.readFile(proofFile, "utf8")).count >= 2, { timeout: 15_000, timeoutMsg: "manual URL must still load without a console executable" });
     assert.equal((await fs.readFile(path.join(home, "acon-starts.log"), "utf8")).trim().split("\n").length, 1);
     const stored = await fs.readFile(path.join(home, ".maru", "sites.json"), "utf8");
