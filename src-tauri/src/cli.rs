@@ -402,6 +402,41 @@ fn run_skills_rollback(args: &[String]) -> i32 {
     }
 }
 
+pub(crate) fn skills_update_check_text(
+    status: &crate::skill_host::store::SkillBundleStatus,
+) -> String {
+    if !status.update_available {
+        return "up to date".to_string();
+    }
+    if status.auto_applicable {
+        return "update available: run `maru skills update --apply`".to_string();
+    }
+    let mut blockers = Vec::new();
+    if !status.dirty_skills.is_empty() {
+        blockers.push(format!("local edits: {}", status.dirty_skills.join(", ")));
+    }
+    if status.env_update_required {
+        blockers.push("env update required (--repair-env)".to_string());
+    }
+    if !status.unmet_requires.is_empty() {
+        blockers.push(format!(
+            "tools too old: {}",
+            status.unmet_requires.join(", ")
+        ));
+    }
+    if !status.min_app_ok {
+        blockers.push(format!(
+            "app too old (needs {})",
+            status
+                .available
+                .as_ref()
+                .map(|available| available.min_app_version.as_str())
+                .unwrap_or("newer app")
+        ));
+    }
+    format!("update available but blocked: {}", blockers.join("; "))
+}
+
 fn run_skills_update(args: &[String]) -> i32 {
     let mut check: Option<bool> = None;
     let mut repair_env = false;
@@ -457,41 +492,7 @@ fn run_skills_update(args: &[String]) -> i32 {
                         })
                         .unwrap_or_else(|| "none published".to_string());
                     println!("skills bundle: active {active}; channel {channel}");
-                    if status.update_available {
-                        if status.auto_applicable {
-                            println!("update available: run `maru skills update --apply`");
-                        } else {
-                            let mut blockers = Vec::new();
-                            if !status.dirty_skills.is_empty() {
-                                blockers.push(format!(
-                                    "local edits: {}",
-                                    status.dirty_skills.join(", ")
-                                ));
-                            }
-                            if status.env_update_required {
-                                blockers.push("env update required (--repair-env)".to_string());
-                            }
-                            if !status.unmet_requires.is_empty() {
-                                blockers.push(format!(
-                                    "tools too old: {}",
-                                    status.unmet_requires.join(", ")
-                                ));
-                            }
-                            if !status.min_app_ok {
-                                blockers.push(format!(
-                                    "app too old (needs {})",
-                                    status
-                                        .available
-                                        .as_ref()
-                                        .map(|a| a.min_app_version.as_str())
-                                        .unwrap_or("newer app")
-                                ));
-                            }
-                            println!("update available but blocked: {}", blockers.join("; "));
-                        }
-                    } else {
-                        println!("up to date");
-                    }
+                    println!("{}", skills_update_check_text(&status));
                 }
                 0
             }

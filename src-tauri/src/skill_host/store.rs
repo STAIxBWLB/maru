@@ -5974,12 +5974,8 @@ fn skills_activate_bundle_blocking(
     let env_needs_build = bundle_env_needs_build(&active, &metadata.env_hash)?;
     if env_needs_build && !repair_env && !is_rollback {
         return Err(format!(
-            "bundle_env_update_required: {}; retry `maru skills update --apply --repair-env`",
-            host_fs::operation_error(
-                "prepare bundle environment",
-                &host_fs::hashed_env_root(&metadata.env_hash)?,
-                "the environment hash changed or its activated directory is missing, but repair was not requested",
-            )
+            "bundle_env_update_required: the bundle environment at {} changed or is missing; run `maru skills update --apply --repair-env`",
+            host_fs::display_path(&host_fs::hashed_env_root(&metadata.env_hash)?)
         ));
     }
 
@@ -6026,12 +6022,8 @@ fn skills_activate_bundle_blocking(
     if env_needs_build && !repair_env && !is_rollback {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!(
-            "bundle_env_update_required: {}; retry `maru skills update --apply --repair-env`",
-            host_fs::operation_error(
-                "prepare bundle environment",
-                &host_fs::hashed_env_root(&metadata.env_hash)?,
-                "the environment hash changed or its activated directory is missing, but repair was not requested",
-            )
+            "bundle_env_update_required: the bundle environment at {} changed or is missing; run `maru skills update --apply --repair-env`",
+            host_fs::display_path(&host_fs::hashed_env_root(&metadata.env_hash)?)
         ));
     }
     let old_pristine = bundle::bundle_pristine_dir(&active.bundle_id)?;
@@ -9367,6 +9359,10 @@ exit 7
             let status = skills_bundle_status_impl(Some(&next)).unwrap();
             assert!(status.update_available);
             assert!(!status.env_update_required);
+            assert_eq!(
+                crate::cli::skills_update_check_text(&status),
+                "update available: run `maru skills update --apply`"
+            );
             assert!(
                 status.auto_applicable,
                 "a complete unchanged hash remains auto-applicable"
@@ -9385,12 +9381,17 @@ exit 7
                 "launch must not auto-apply a missing environment"
             );
             assert!(!root.exists(), "status remains read-only");
+            assert_eq!(
+                crate::cli::skills_update_check_text(&status),
+                "update available but blocked: env update required (--repair-env)"
+            );
 
             next.metadata.revision = applied.current.revision;
             let status = skills_bundle_status_impl(Some(&next)).unwrap();
             assert!(!status.update_available);
             assert!(!status.env_update_required);
             assert!(!status.auto_applicable);
+            assert_eq!(crate::cli::skills_update_check_text(&status), "up to date");
         }
 
         #[test]
@@ -9434,6 +9435,14 @@ exit 7
                 )
                 .unwrap_err();
                 assert!(error.contains("bundle_env_update_required"), "{error}");
+                assert!(!error.contains("skills_io_failed"), "{error}");
+                assert!(!error.contains("--check"), "{error}");
+                assert_eq!(
+                    error
+                        .matches("maru skills update --apply --repair-env")
+                        .count(),
+                    1
+                );
                 assert!(error.contains(&host_fs::display_path(&root)), "{error}");
                 assert!(
                     error.contains("maru skills update --apply --repair-env"),
