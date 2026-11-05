@@ -198,9 +198,16 @@ describe("Sites launch privacy and pane lifetime", () => {
     expect(container.querySelector(".sites-url .spin")).toBeNull();
   });
 
-  it("preserves an existing navigation spinner when runtime progress is unknown", async () => {
+  it.each(["unknown", "finished"] as const)("preserves a new navigation spinner across remount after %s progress", async (previousProgress) => {
     await render(); await click('[data-new="console"]'); await frame(); await frame();
-    expect(siteViewTabRuntime("t1")?.pageLoading).toBeUndefined();
+    if (previousProgress === "finished") {
+      await act(async () => mocks.listeners.get("sites://page-load")!({
+        payload: { tabId: "t1", state: "finished", url: ticket },
+      }));
+      expect(siteViewTabRuntime("t1")?.pageLoading).toBe(false);
+    } else {
+      expect(siteViewTabRuntime("t1")?.pageLoading).toBeUndefined();
+    }
     const input = container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')!;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
     await act(async () => { input.focus(); });
@@ -209,13 +216,18 @@ describe("Sites launch privacy and pane lifetime", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
-    expect(mocks.invoke).toHaveBeenCalledWith("site_view_navigate", expect.objectContaining({ tabId: "t1", url: "https://next.example/" }));
+    expect(mocks.invoke).toHaveBeenCalledWith("site_view_navigate", expect.objectContaining({ tabId: "t1", url: "https://next.example" }));
     expect(container.querySelector(".sites-url .spin")).not.toBeNull();
     expect(siteViewTabRuntime("t1")?.pageLoading).toBeUndefined();
     await unmountReactRoot(root!); root = null;
     await render(); await frame();
     expect(container.querySelector(".sites-url .spin")).not.toBeNull();
-    expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe("https://next.example/");
+    expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe("https://next.example");
+    const progress = mocks.listeners.get("sites://page-load")!;
+    await act(async () => progress({ payload: { tabId: "t1", state: "started", url: "https://next.example/" } }));
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    await act(async () => progress({ payload: { tabId: "t1", state: "finished", url: "https://next.example/" } }));
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
   });
 
   it.each(["started", "finished"] as const)("preserves page-load %s received before successful settlement", async (state) => {
