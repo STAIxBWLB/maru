@@ -9,6 +9,10 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.26 - Clear Frames (2026-11-05)
+
+- The Kakao relay console now opens in your system browser instead of inside the Maru window, and the Maru window no longer hosts any remote frame. If the browser cannot be launched, Communications shows the cause and how to open the console manually. Updating is recommended (#505, #508).
+
 ## v1.1.25 - Bound Channels (2026-11-05)
 
 - Security hardening: application commands also require the requesting window to be on Maru's own address, Sites pages cannot navigate to Tauri-internal hosts, and large streamed replies such as terminal output go only to the Maru window that asked for them. Updating is recommended (#492, #496, #499, #500).
