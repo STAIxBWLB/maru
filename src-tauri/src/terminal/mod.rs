@@ -172,6 +172,23 @@ pub enum TerminalStreamMessage {
     },
 }
 
+#[cfg(test)]
+pub(crate) fn full_screen_stream_fixture() -> TerminalStreamMessage {
+    let mut model = model::TerminalModel::new(120, 30, model::NullTerminalWriter);
+    model.advance(
+        "full-screen 한글 'quoted' terminal frame"
+            .repeat(100)
+            .as_bytes(),
+    );
+    TerminalStreamMessage::Frame {
+        session_id: "bound-frame".into(),
+        generation: "test-generation".into(),
+        seq: 1,
+        prev_seq: 0,
+        frame: Box::new(model.snapshot("bound-frame").into()),
+    }
+}
+
 struct TerminalStream {
     session_id: String,
     generation: String,

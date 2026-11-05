@@ -203,12 +203,15 @@ function registrations(sources) {
   insist(result.length, "No generate_handler registrations found");
   return result;
 }
-function requireProductionInvokeHandlerGuard(sources) {
+function productionRunFunction(sources) {
   const productionRuns = sources.get(LIB).functions.filter((fn) =>
     fn.symbol === "run" && !fn.testOnly && !fn.native,
   );
   insist(productionRuns.length === 1, "Expected exactly one production run() function");
-  const run = productionRuns[0];
+  return productionRuns[0];
+}
+function requireProductionInvokeHandlerGuard(sources) {
+  const run = productionRunFunction(sources);
   const invokeCalls = [...run.body.matchAll(/\.\s*invoke_handler\s*\(/g)];
   insist(invokeCalls.length === 1, "Production run() must contain exactly one invoke_handler call");
   const callStart = invokeCalls[0].index;
@@ -221,6 +224,19 @@ function requireProductionInvokeHandlerGuard(sources) {
   const wrapperEnd = closeAt(argument, wrapperOpen, "(", ")");
   const handler = argument.slice(wrapperOpen + 1, wrapperEnd);
   insist(/^\s*tauri::generate_handler!\s*\[/.test(handler), "Production restrict_app_commands wrapper must directly protect tauri::generate_handler!");
+}
+function requireProductionChannelInterceptorGuard(sources) {
+  const run = productionRunFunction(sources);
+  const interceptorCalls = [...run.body.matchAll(/\.\s*channel_interceptor\s*\(/g)];
+  insist(interceptorCalls.length === 1, "Production run() must contain exactly one channel_interceptor call");
+  const callStart = interceptorCalls[0].index;
+  const callOpen = run.body.indexOf("(", callStart);
+  const callEnd = closeAt(run.body, callOpen, "(", ")");
+  const argument = run.body.slice(callOpen + 1, callEnd);
+  insist(
+    /^\s*(?:crate::)?channel_delivery::intercept\s*$/.test(argument),
+    "Production run().channel_interceptor must use channel_delivery::intercept",
+  );
 }
 function inventory(sources) {
   const rows = new Map();
@@ -489,6 +505,7 @@ export function parseArgs(argv) {
 export function checkIsolation(options, root = process.cwd()) {
   const sources = new Sources(resolve(root));
   requireProductionInvokeHandlerGuard(sources);
+  requireProductionChannelInterceptorGuard(sources);
   const rows = inventory(sources), owners = ownership(sources);
   const readJson = (path) => JSON.parse(sources.read(path));
   const changesPath = "docs/performance/phase08-registration-changes.json";

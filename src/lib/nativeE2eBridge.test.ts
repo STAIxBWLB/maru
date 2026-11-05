@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type MaruNativeE2eBridge,
+  type NativeE2eChannelEvalSample,
   type NativeAppState,
   nativeE2eEnabled,
   installNativeE2eHarness,
@@ -205,5 +206,46 @@ describe("native app-state reader", () => {
     track(registerNativeAppStateReader(() => ({ ...appState(), privateData: { input: "must not expose" } })));
     expect(bridge()?.readAppState()).toEqual(appState());
     expect(bridge()?.readAppState()).not.toHaveProperty("privateData");
+  });
+});
+
+describe("native channel-evaluation measurements", () => {
+  it("does not install the measurement bridge without the runner flag", () => {
+    vi.stubEnv("VITE_NATIVE_E2E", "");
+    installNativeE2eHarness();
+    expect(bridge()).toBeUndefined();
+  });
+
+  it("keeps a bounded immutable copy of metrics without payload fields", () => {
+    vi.stubEnv("VITE_NATIVE_E2E", "1");
+    installNativeE2eHarness();
+    const namespace = bridge();
+    expect(namespace).toBeDefined();
+
+    for (let index = 0; index < 260; index += 1) {
+      const sample = {
+        bytes: 9000 + index,
+        durationMs: index / 10,
+        sessionId: `frame-${index}`,
+        cols: 120,
+        rows: 42,
+        fullFrame: true,
+        payload: "terminal text must not be retained",
+      } as NativeE2eChannelEvalSample & { payload: string };
+      namespace!.recordChannelEval(sample);
+    }
+
+    const samples = namespace!.channelEvals();
+    expect(samples).toHaveLength(256);
+    expect(samples[0].sessionId).toBe("frame-4");
+    expect(samples.at(-1)?.sessionId).toBe("frame-259");
+    expect(Object.isFrozen(samples)).toBe(true);
+    expect(Object.isFrozen(samples[0])).toBe(true);
+    expect(Object.keys(samples[0]).sort()).toEqual([
+      "bytes", "cols", "durationMs", "fullFrame", "rows", "sessionId",
+    ]);
+    const secondRead = namespace!.channelEvals();
+    expect(secondRead).not.toBe(samples);
+    expect(secondRead[0]).not.toBe(samples[0]);
   });
 });

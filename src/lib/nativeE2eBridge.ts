@@ -36,6 +36,19 @@ export interface NativeAppState {
   terminalSplitOpen: boolean;
 }
 
+/** Timing for one terminal-frame JSON parse and receiver callback in the
+ *  native-only channel harness. Rust preparation, transport and script
+ *  compilation are outside this measurement. */
+export type NativeE2eChannelEvalSample = Readonly<{
+  bytes: number;
+  durationMs: number;
+  sessionId: string;
+  cols: number;
+  rows: number;
+  /** True when the received frame had dirtyRows === null. */
+  fullFrame: boolean;
+}>;
+
 export interface MaruNativeE2eBridge {
   /** Whole-screen text mirror for one terminal session, or null when the
    *  session id was never registered (a spec racing a session teardown gets
@@ -62,6 +75,8 @@ export interface MaruNativeE2eBridge {
   skillsSyncAllSources(): Promise<NativeE2eSyncAllOutcome>;
   skillsRemoveSource(sourceId: string): Promise<void>;
   parseKoreanDate(input: string, nowIso: string): Promise<string | null>;
+  recordChannelEval(sample: NativeE2eChannelEvalSample): void;
+  channelEvals(): ReadonlyArray<NativeE2eChannelEvalSample>;
 }
 
 export interface NativeE2eProbeResult {
@@ -141,6 +156,8 @@ export function nativeE2eEnabled(): boolean {
 }
 
 const terminalTextReaders = new Map<string, () => string>();
+const CHANNEL_EVAL_CAPACITY = 256;
+const channelEvalSamples: NativeE2eChannelEvalSample[] = [];
 let menuCommandRegistration: { dispatch: (id: string) => void } | null = null;
 let appStateRegistration: { read: () => NativeAppState } | null = null;
 
@@ -186,6 +203,30 @@ function bridgeNamespace(): MaruNativeE2eBridge {
       skillsRemoveSource: (sourceId) => invoke("skills_remove_source", { sourceId }),
       parseKoreanDate: (input, nowIso) =>
         invoke<string | null>("parse_korean_date_cmd", { input, nowIso }),
+      recordChannelEval: (sample) => {
+        if (
+          !Number.isSafeInteger(sample.bytes) || sample.bytes < 0
+          || !Number.isFinite(sample.durationMs) || sample.durationMs < 0
+          || typeof sample.sessionId !== "string" || sample.sessionId.length === 0 || sample.sessionId.length > 128
+          || !Number.isSafeInteger(sample.cols) || sample.cols <= 0
+          || !Number.isSafeInteger(sample.rows) || sample.rows <= 0
+          || typeof sample.fullFrame !== "boolean"
+        ) return;
+        // Copy only the allowlisted measurements; terminal/frame content never
+        // enters the bridge ring or its readback.
+        channelEvalSamples.push(Object.freeze({
+          bytes: sample.bytes,
+          durationMs: sample.durationMs,
+          sessionId: sample.sessionId,
+          cols: sample.cols,
+          rows: sample.rows,
+          fullFrame: sample.fullFrame,
+        }));
+        if (channelEvalSamples.length > CHANNEL_EVAL_CAPACITY) {
+          channelEvalSamples.splice(0, channelEvalSamples.length - CHANNEL_EVAL_CAPACITY);
+        }
+      },
+      channelEvals: () => Object.freeze(channelEvalSamples.map((sample) => Object.freeze({ ...sample }))),
     };
   }
   return window.__MARU_NATIVE_E2E__;

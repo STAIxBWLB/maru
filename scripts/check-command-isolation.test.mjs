@@ -10,7 +10,7 @@ import { maskRust, parseArgs } from "./check-command-isolation.mjs";
 const CHECKER = fileURLToPath(new URL("./check-command-isolation.mjs", import.meta.url));
 const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
 const MOD = "src-tauri/src/model.rs";
-const protectedRun = (handlers) => `fn run() { builder.invoke_handler(crate::ipc_policy::restrict_app_commands(tauri::generate_handler![${handlers}])); }`;
+const protectedRun = (handlers) => `fn run() { builder.channel_interceptor(crate::channel_delivery::intercept).invoke_handler(crate::ipc_policy::restrict_app_commands(tauri::generate_handler![${handlers}])); }`;
 const integrationModules = ["skill_host/store", "skill_host/env", "skill_host/dispatch", "git", "dot_sync", "mission_state", "agent_host/event_store"];
 function fixture(t, specs = [{ name: "sample", plan: "06", module: MOD }]) {
   const root = mkdtempSync(join(tmpdir(), "maru-command-evidence-"));
@@ -110,6 +110,23 @@ test("production invoke_handler requires the app command policy wrapper", (t) =>
   const f = fixture(t);
   f.write("src-tauri/src/lib.rs", "fn run() { builder.invoke_handler(tauri::generate_handler![model::sample]); }");
   fail(f.run("--plan", "06"), /Production run\(\)\.invoke_handler must wrap/);
+});
+test("production run requires the application channel interceptor", (t) => {
+  const f = fixture(t);
+  f.write("src-tauri/src/lib.rs", "fn run() { builder.invoke_handler(crate::ipc_policy::restrict_app_commands(tauri::generate_handler![model::sample])); }");
+  fail(f.run("--plan", "06"), /Production run\(\) must contain exactly one channel_interceptor/);
+});
+test("helper, comment and test-only interceptors do not protect production run", (t) => {
+  const f = fixture(t);
+  f.write("src-tauri/src/lib.rs", `
+    fn helper() { builder.channel_interceptor(crate::channel_delivery::intercept); }
+    // builder.channel_interceptor(channel_delivery::intercept)
+    #[cfg(test)] mod tests {
+      fn helper() { builder.channel_interceptor(crate::channel_delivery::intercept); }
+    }
+    fn run() { builder.invoke_handler(crate::ipc_policy::restrict_app_commands(tauri::generate_handler![model::sample])); }
+  `);
+  fail(f.run("--plan", "06"), /Production run\(\) must contain exactly one channel_interceptor/);
 });
 test("helper, comment and test-only wrappers do not protect production invoke_handler", (t) => {
   const f = fixture(t);
