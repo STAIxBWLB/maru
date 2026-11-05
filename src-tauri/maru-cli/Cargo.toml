@@ -5,7 +5,7 @@ description = "Standalone command-line interface for Maru"
 authors = ["Maru Contributors"]
 license = "UNLICENSED"
 edition = "2021"
-rust-version = "1.89.0"
+rust-version = "1.90.0"
 
 [[bin]]
 name = "maru-cli"

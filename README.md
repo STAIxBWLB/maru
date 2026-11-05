@@ -457,7 +457,7 @@ Requirements:
 
 - Node.js 22 or newer
 - pnpm 9.15 or newer
-- Rust MSRV 1.89.0; `rust-toolchain.toml` pins the repository verification
+- Rust MSRV 1.90.0; `rust-toolchain.toml` pins the repository verification
   toolchain
 - Platform libraries required by Tauri 2
 
