@@ -21,6 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
+use tauri::Manager;
 
 use crate::atomic_file::{
     with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,

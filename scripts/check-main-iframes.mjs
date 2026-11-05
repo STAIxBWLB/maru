@@ -9,10 +9,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 
 export function iframeViolations(text, filename) {
-  const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const extension = posix.extname(filename).toLowerCase();
+  const kind = extension === ".jsx" ? ts.ScriptKind.JSX
+    : extension === ".tsx" ? ts.ScriptKind.TSX
+      : /\.[cm]?js$/.test(extension) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, kind);
   // Bind only this source file. Symbol identity preserves lexical scope without
   // resolving dependencies or trusting another same-named constant/import.
-  const options = { noLib: true, noResolve: true, target: ts.ScriptTarget.Latest };
+  const options = { allowJs: true, noLib: true, noResolve: true, target: ts.ScriptTarget.Latest };
   const host = ts.createCompilerHost(options);
   host.getSourceFile = (name) => resolve(name) === resolve(filename) ? source : undefined;
   host.fileExists = (name) => resolve(name) === resolve(filename);
@@ -113,12 +117,12 @@ export function iframeViolations(text, filename) {
   return violations;
 }
 
-function scan(root, directory = "src") {
+export function scanIframeSources(root, directory = "src") {
   const violations = [];
   for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
     const relative = `${directory}/${entry.name}`;
-    if (entry.isDirectory() && entry.name !== "__tests__") violations.push(...scan(root, relative));
-    else if (entry.isFile() && /\.tsx?$/.test(entry.name) && !/\.(?:test|spec)\./.test(entry.name)) {
+    if (entry.isDirectory() && entry.name !== "__tests__") violations.push(...scanIframeSources(root, relative));
+    else if (entry.isFile() && /\.(?:[cm]?[jt]s|[jt]sx)$/i.test(entry.name) && !/\.(?:test|spec)\./.test(entry.name)) {
       violations.push(...iframeViolations(readFileSync(join(root, relative), "utf8"), relative));
     }
   }
@@ -127,7 +131,7 @@ function scan(root, directory = "src") {
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const violations = scan(root);
+  const violations = scanIframeSources(root);
   if (violations.length) {
     console.error(violations.join("\n"));
     process.exitCode = 1;

@@ -1,10 +1,33 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { iframeViolations } from "./check-main-iframes.mjs";
+import { iframeViolations, scanIframeSources } from "./check-main-iframes.mjs";
 
 const file = "src/components/Probe.tsx";
 const assetImport = 'import { assetUrlForPath } from "../lib/binaryViewer";';
 
 describe("main iframe source boundary", () => {
+  it("discovers JavaScript and JSX production modules in the source tree", () => {
+    const root = mkdtempSync(join(tmpdir(), "maru-iframe-discovery-"));
+    try {
+      mkdirSync(join(root, "src/nested"), { recursive: true });
+      mkdirSync(join(root, "src/__tests__"));
+      writeFileSync(join(root, "src/nested/Remote.jsx"), 'export default function Remote({ relayUrl }) { return <iframe src={relayUrl} />; }');
+      writeFileSync(join(root, "src/Factory.js"), 'const make = document.createElement; make("iframe");');
+      writeFileSync(join(root, "src/safe.js"), 'document.createElement("div");');
+      writeFileSync(join(root, "src/Preview.tsx"), 'const preview = <iframe srcDoc={html} />;');
+      writeFileSync(join(root, "src/ignored.test.jsx"), '<iframe src={relayUrl} />;');
+      writeFileSync(join(root, "src/__tests__/ignored.jsx"), '<iframe src={relayUrl} />;');
+      const violations = scanIframeSources(root);
+      expect(violations).toHaveLength(2);
+      expect(violations.some((item) => item.startsWith("src/nested/Remote.jsx:"))).toBe(true);
+      expect(violations.some((item) => item.startsWith("src/Factory.js:"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("admits srcDoc previews and local asset helper flows", () => {
     for (const source of [
       '<iframe srcDoc={html} sandbox="" />',

@@ -17,7 +17,7 @@ identifier and on-disk migration to Maru.
 | Application shell | Complete | 19 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 388 production commands classified: 379 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Main-thread isolation | PERF-01/02 closed | Phase 08 baseline classified 388 production commands: 379 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
 | Active milestone | None, v1.2 being defined | v1.1 closed 2026-09-27; opening v1.2 moves releases to 1.2.0 |
 
 The milestone archive, audit, retrospective, and summary live under
@@ -141,11 +141,11 @@ brew upgrade maru-cli
   boundaries. Nothing imports `src/App.tsx`.
 - Shared UI state follows keyed module-store plus `useSyncExternalStore`
   patterns. No additional global state library or provider tree is used.
-- Production commands never block the UI/shared async worker thread: 379
-  ISOLATED commands run on awaited `spawn_blocking` workers and 9
+- Production commands never block the UI/shared async worker thread:
+  ISOLATED commands run on awaited `spawn_blocking` workers and
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  388-command inventory, worker-boundary, and admission evidence are gated by
+  389-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -495,8 +495,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (388 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 388
+# Phase 08 evidence closure gate alone (389 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 389
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -599,8 +599,8 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 388-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 388`)
+  mutation-admission and processing-caller evidence against the 389-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 389`)
 
 The iframe source guard prevents accidental reintroduction, rather than
 analyzing adversarial JavaScript. Its regressions cover factory aliases,
