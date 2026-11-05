@@ -1551,14 +1551,11 @@ export const ko: Record<string, string> = {
   "comms.kakao.relayUiUrlHelp":
     "릴레이 운영 콘솔의 기본 URL입니다(데몬의 ui.bind). 비워 두면 기본값으로 돌아갑니다.",
   "comms.kakao.console.title": "릴레이 콘솔",
-  "comms.kakao.console.open": "릴레이 콘솔 열기",
-  "comms.kakao.console.close": "콘솔 닫기",
-  "comms.kakao.console.reload": "콘솔 새로고침",
   "comms.kakao.console.openExternal": "브라우저에서 열기",
   "comms.kakao.console.invalidUrl":
-    "콘솔을 표시하려면 메시지 설정에서 올바른 릴레이 콘솔 URL을 입력하세요.",
-  "comms.kakao.console.loadFailed":
-    "{url}에서 릴레이 콘솔을 불러오지 못했습니다. 릴레이 UI가 실행 중인지 확인하세요.",
+    "콘솔을 열려면 메시지 설정에서 올바른 릴레이 콘솔 URL을 입력하세요.",
+  "comms.kakao.console.openFailed":
+    "브라우저에서 콘솔을 열지 못했습니다: {error}. 기본 브라우저 설정과 릴레이 콘솔 URL을 확인한 뒤 다시 시도하세요.",
   "comms.kakao.viewer.title": "릴레이 메시지",
   "comms.kakao.viewer.room": "방",
   "comms.kakao.viewer.loading": "메시지 불러오는 중...",

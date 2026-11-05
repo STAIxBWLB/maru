@@ -47,7 +47,6 @@ import {
 import { AddWorkspaceDialog } from "./components/AddWorkspaceDialog";
 import maruSealMicroUrl from "./assets/brand/maru-seal-micro.svg";
 import { CommandPalette } from "./components/CommandPalette";
-import { KakaoRelayUiOriginPublisher } from "./components/comms/KakaoRelayConsole";
 import { CommitDialog } from "./components/CommitDialog";
 import { DocumentList } from "./components/DocumentList";
 import { EditorPaneFacade } from "./components/EditorPaneFacade";
@@ -8391,7 +8390,6 @@ export function MainApp() {
       <ModeHostPublisher controller={communicationsModeController} host={communicationsModeHost} />
       <ModeHostPublisher controller={planningModeController} host={planningModeHost} />
       <ModeHostPublisher controller={documentOpsModeController} host={documentOpsModeHost} />
-      <KakaoRelayUiOriginPublisher relayUiUrl={effectiveCommsSettings.kakao.relayUiUrl} />
       <div className={shellClass} style={shellStyle} ref={appShellRef}>
         <header
           className="topbar"

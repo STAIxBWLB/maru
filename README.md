@@ -211,9 +211,16 @@ first-party `main` or `skill-editor` label and the current native webview URL:
 `tauri://localhost` or `http://tauri.localhost`, or the configured development
 server origin in debug builds only. Other callers receive the same refusal.
 Caller-supplied headers are not authentication. This checks the current top-level
-webview document, not requesting subframe origins; Tauri 2.12.5 initializes IPC
-in the main frame only. Plugin permissions normally use Tauri capabilities and origin
-checks, with Tauri's internal channel-fetch path exempt from that gate.
+webview document, not requesting subframe origins. Tauri 2.12.5 requests
+main-frame-only IPC initialization on macOS/WKWebView and Linux/WebKitGTK;
+Windows/WebView2 applies initialization scripts to every frame
+([platform notes](https://docs.rs/tauri/2.12.5/tauri/webview/struct.WebviewWindowBuilder.html#method.initialization_script)). Maru keeps
+configurable HTTP(S) content outside the main webview: the Kakao relay console
+opens explicitly in the system browser with its initial theme query, browser
+cookies and independent window lifetime. Live theme postMessages are not used.
+Plugin permissions normally use Tauri capabilities and origin checks, with
+Tauri's internal channel-fetch path exempt from that gate; its pending data is
+scoped to the owning webview in the upgraded framework.
 JavaScript-bound application channel payloads, including terminal frames, use a
 recipient-bound inline callback/index envelope. Each payload rechecks the bound
 view's first-party label and native URL. Formatting or dispatch failures are
@@ -585,6 +592,7 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
 - four TypeScript projects: application, Node config, E2E, and scripts
 - ESLint correctness rules with zero warnings
 - release-version synchronization and static architecture guards
+- main iframe sources restricted to srcDoc previews or traced local asset URLs
 - frontend tests and Rust library tests
 - rustfmt and clippy with warnings denied
 - production frontend build and gzip bundle budgets, including the native-e2e

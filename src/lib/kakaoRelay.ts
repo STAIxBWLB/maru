@@ -93,21 +93,14 @@ export type KakaoRelayLiveness =
 // --- Relay operator console (web UI) ----------------------------------------
 // The relay daemon serves a plain operator console on its own bind (default
 // http://127.0.0.1:8787), independent of the Dropbox sync bus above. Maru
-// embeds that console in an iframe and keeps its theme in sync through the
-// contract from STAIxBWLB/maru-kakao-relay#68: a `?theme=` query param on
-// load plus live `maru-theme` postMessages afterwards.
+// opens that console in the system browser with its initial `?theme=` query
+// param (STAIxBWLB/maru-kakao-relay#68). Browser cookies and lifetime stay
+// outside Maru's main webview.
 
 export const DEFAULT_KAKAO_RELAY_UI_URL = "http://127.0.0.1:8787";
 
-/** Theme names the relay console understands (`?theme=` and postMessage). */
+/** Theme names the standalone relay console understands (`?theme=`). */
 export type KakaoRelayTheme = "light" | "dark" | "system";
-
-export const MARU_THEME_MESSAGE_TYPE = "maru-theme";
-
-export interface MaruThemeMessage {
-  type: typeof MARU_THEME_MESSAGE_TYPE;
-  theme: KakaoRelayTheme;
-}
 
 /** Trim + fall back to the default bind when the stored value is blank. */
 export function normalizeKakaoRelayUiUrl(value: unknown): string {
@@ -135,38 +128,13 @@ export function kakaoRelayUiSrc(
   return url.toString();
 }
 
-/** Live theme-switch message posted to the embedded console (relay contract). */
-export function buildMaruThemeMessage(theme: KakaoRelayTheme): MaruThemeMessage {
-  return { type: MARU_THEME_MESSAGE_TYPE, theme };
-}
-
-// --- Native origin channel + reachability probe ------------------------------
-// Two event round-trips keep the native app working without a new Tauri
-// command (command isolation stays at its recorded count) and without
-// widening the webview CSP (`connect-src` forbids the frontend from
-// fetching the console origin directly):
-// - KAKAO_RELAY_UI_ORIGIN_EVENT publishes the effective console URL so the
-//   external-link navigation guard can exempt exactly its origin (#418).
-// - KAKAO_RELAY_UI_PROBE_EVENT / _RESULT_EVENT probe daemon reachability.
-
-export const KAKAO_RELAY_UI_ORIGIN_EVENT = "maru:kakao-relay-ui-origin";
+// --- Reachability probe ----------------------------------------------------
+// Rust event round-trips avoid widening the frontend connect-src policy.
 export const KAKAO_RELAY_UI_PROBE_RESULT_EVENT = "maru:kakao-relay-ui-probe-result";
 const KAKAO_RELAY_UI_PROBE_EVENT = "maru:kakao-relay-ui-probe";
 
 const isTauriRuntime = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-/** Publish the effective console URL for the native navigation guard.
- *  Best effort and a no-op outside Tauri (the guard only exists there). */
-export async function publishKakaoRelayUiUrl(url: string): Promise<void> {
-  if (!isTauriRuntime()) return;
-  try {
-    const { emit } = await import("@tauri-apps/api/event");
-    await emit(KAKAO_RELAY_UI_ORIGIN_EVENT, url);
-  } catch {
-    // The localhost default keeps working even if the publish fails.
-  }
-}
 
 /**
  * no-cors fetch probe: resolves on ANY HTTP response, so a resolved promise
