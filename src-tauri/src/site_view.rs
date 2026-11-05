@@ -34,6 +34,7 @@ pub const SITES_EMBED_PREFIX: &str = "sites-embed-";
 const MAIN_WINDOW_LABEL: &str = "main";
 /// Each tab is a real native webview, so the count is capped.
 const MAX_TABS: usize = 12;
+const SITE_NAVIGATION_BLOCKED: &str = "site_navigation_blocked: Sites cannot navigate to Tauri-local origins; use an ordinary HTTP(S) URL or a different local port";
 
 // Keep in sync with src/lib/siteView.ts (naming follows catalog://refresh).
 const EVENT_NAVIGATED: &str = "sites://navigated";
@@ -116,6 +117,28 @@ fn parse_http_url(input: &str) -> Result<Url, String> {
             "Unsupported URL scheme {other:?} (http/https only)"
         )),
     }
+}
+
+fn is_tauri_localhost_subdomain(host: &str) -> bool {
+    host.trim_end_matches('.')
+        .to_ascii_lowercase()
+        .ends_with(".localhost")
+}
+
+fn site_navigation_allowed(url: &Url, dev_url: Option<&Url>, debug: bool) -> bool {
+    if url.as_str() == "about:blank" {
+        return true;
+    }
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_some_and(is_tauri_localhost_subdomain)
+    {
+        return false;
+    }
+    !crate::ipc_policy::is_app_origin(url, dev_url, debug)
+}
+
+fn site_popup_navigation_allowed(url: &Url, dev_url: Option<&Url>, debug: bool) -> bool {
+    matches!(url.scheme(), "http" | "https") && site_navigation_allowed(url, dev_url, debug)
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -244,6 +267,11 @@ pub fn site_view_open<R: tauri::Runtime>(
     cancelled: Arc<AtomicBool>,
 ) -> Result<String, String> {
     let fallback = parse_http_url(&url)?;
+    let dev_url = app.config().build.dev_url.clone();
+    let debug = cfg!(debug_assertions);
+    if !site_navigation_allowed(&fallback, dev_url.as_ref(), debug) {
+        return Err(SITE_NAVIGATION_BLOCKED.into());
+    }
     let label = embed_label(&tab_id)?;
     let window = app.get_window(MAIN_WINDOW_LABEL).ok_or_else(|| {
         "site_launch_window_missing: main window is unavailable; reopen Sites and retry".to_string()
@@ -256,6 +284,9 @@ pub fn site_view_open<R: tauri::Runtime>(
         .as_ref()
         .map(|console| console.url.clone())
         .unwrap_or(fallback);
+    if !site_navigation_allowed(&target, dev_url.as_ref(), debug) {
+        return Err(SITE_NAVIGATION_BLOCKED.into());
+    }
     let resolved_url = target.to_string();
 
     // Waiting happens only on an owned blocking worker. Startup above does
@@ -293,6 +324,8 @@ pub fn site_view_open<R: tauri::Runtime>(
     let app_load = app.clone();
     let app_title = app.clone();
     let app_popup = app.clone();
+    let navigation_dev_url = dev_url.clone();
+    let popup_dev_url = dev_url;
     let nav_tab = tab_id.clone();
     let load_tab = tab_id.clone();
     let title_tab = tab_id.clone();
@@ -302,7 +335,7 @@ pub fn site_view_open<R: tauri::Runtime>(
         // Do not steal keyboard focus from the main UI on open.
         .focused(false)
         .on_navigation(move |url| {
-            let allowed = matches!(url.scheme(), "http" | "https") || url.as_str() == "about:blank";
+            let allowed = site_navigation_allowed(url, navigation_dev_url.as_ref(), debug);
             if allowed {
                 emit_to_main(
                     &app_nav,
@@ -345,7 +378,7 @@ pub fn site_view_open<R: tauri::Runtime>(
             // popup, then steer the embed itself to the URL. Navigation is
             // deferred off the callback to avoid re-entrancy in the
             // platform webview delegate.
-            if matches!(url.scheme(), "http" | "https") {
+            if site_popup_navigation_allowed(&url, popup_dev_url.as_ref(), debug) {
                 let app = app_popup.clone();
                 let label = popup_label.clone();
                 tauri::async_runtime::spawn(async move {
@@ -388,6 +421,10 @@ pub async fn site_view_navigate<R: tauri::Runtime>(
     url: String,
 ) -> Result<(), String> {
     let target = parse_http_url(&url)?;
+    let dev_url = app.config().build.dev_url.clone();
+    if !site_navigation_allowed(&target, dev_url.as_ref(), cfg!(debug_assertions)) {
+        return Err(SITE_NAVIGATION_BLOCKED.into());
+    }
     get_embed(&app, &tab_id)?
         .navigate(target)
         .map_err(|err| format!("Cannot navigate browser tab: {err}"))
@@ -791,6 +828,114 @@ mod tests {
                 "http://localhost:3000/path?q=1".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn sites_navigation_blocks_tauri_localhost_hosts_for_initial_and_redirect_urls() {
+        for value in [
+            "http://tauri.localhost/",
+            "https://auth.localhost/",
+            "http://nested.auth.localhost./",
+            "https://auth.localhost.:8443/",
+        ] {
+            assert!(
+                !site_navigation_allowed(&url(value), None, false),
+                "reserved Tauri-local host should be blocked: {value}"
+            );
+        }
+        assert!(!site_navigation_allowed(
+            &url("tauri://localhost/index.html"),
+            None,
+            false
+        ));
+    }
+
+    #[test]
+    fn site_view_open_rejects_reserved_initial_target_before_window_lookup() {
+        let app = tauri::test::mock_app();
+        let error = site_view_open(
+            app.handle().clone(),
+            "reserved-initial".into(),
+            "https://auth.localhost/".into(),
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            None,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("site_navigation_blocked"), "{error}");
+        assert!(!error.contains("site_launch_window_missing"), "{error}");
+        assert!(app.get_webview("sites-embed-reserved-initial").is_none());
+    }
+
+    #[test]
+    fn site_view_navigate_rejects_reserved_target_before_missing_embed_lookup() {
+        let app = tauri::test::mock_app();
+        let error = tauri::async_runtime::block_on(site_view_navigate(
+            app.handle().clone(),
+            "missing-embed".into(),
+            "http://auth.localhost/".into(),
+        ))
+        .unwrap_err();
+
+        assert!(error.contains("site_navigation_blocked"), "{error}");
+        assert!(
+            !error.contains("Browser tab missing-embed is not open"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn sites_navigation_preserves_ordinary_localhost_and_loopback_origins() {
+        let dev_url = url("http://localhost:5307/");
+        for value in [
+            "http://localhost:3000/",
+            "http://127.0.0.1:5307/",
+            "http://[::1]:5307/",
+        ] {
+            assert!(
+                site_navigation_allowed(&url(value), Some(&dev_url), true),
+                "ordinary local origin should remain available: {value}"
+            );
+        }
+        assert!(!site_navigation_allowed(
+            &url("http://localhost:5307/another-path"),
+            Some(&dev_url),
+            true
+        ));
+        assert!(!site_navigation_allowed(
+            &url("http://user:password@localhost:5307/another-path"),
+            Some(&dev_url),
+            true
+        ));
+        assert!(site_navigation_allowed(
+            &url("http://localhost:5307/"),
+            Some(&dev_url),
+            false
+        ));
+        assert!(site_navigation_allowed(&url("about:blank"), None, true));
+    }
+
+    #[test]
+    fn popup_navigation_remains_http_and_https_only() {
+        assert!(!site_popup_navigation_allowed(
+            &url("about:blank"),
+            None,
+            true
+        ));
+        assert!(site_popup_navigation_allowed(
+            &url("http://localhost:3000/"),
+            None,
+            true
+        ));
+        assert!(!site_popup_navigation_allowed(
+            &url("https://auth.localhost/"),
+            None,
+            true
+        ));
     }
 
     #[test]

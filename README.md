@@ -206,10 +206,20 @@ brew upgrade maru-cli
 ### Sites and Local Agent Console
 
 Sites loads ordinary HTTP(S) entries in native top-level child webviews, with
-no remote IPC grants. Application command dispatch is limited centrally to the
-first-party `main` and `skill-editor` webviews; other labels receive the same
-refusal before dispatch. Plugin permissions remain governed separately by
-Tauri capabilities and their origin checks. H1/H2 URL entries and manual URL opening need no launcher.
+no remote IPC grants. Application command dispatch centrally requires both a
+first-party `main` or `skill-editor` label and the current native webview URL:
+`tauri://localhost` or `http://tauri.localhost`, or the configured development
+server origin in debug builds only. Other callers receive the same refusal.
+Caller-supplied headers are not authentication. This checks the current top-level
+webview document, not requesting subframe origins; Tauri 2.10.3 initializes IPC
+in the main frame only. Plugin permissions normally use Tauri capabilities and origin
+checks, with Tauri's internal channel-fetch path exempt from that gate. Terminal
+output uses `ipc::Channel`: admission to its creation path and ownership of
+payload delivery are separate boundaries, so delivery needs its own per-webview
+review. Channel delivery remains framework-managed.
+H1/H2 URL entries and manual URL opening need no launcher. Sites refuses
+Tauri-localhost subdomains and the configured app development origin in debug
+builds, while ordinary localhost/loopback sites remain available.
 An optional `launch: "acon ui --no-open --json"` entry starts the local console;
 the older `acon ui --json` spelling maps to the same fixed argv. The editor offers
 URL opening or Agent Console, without a free-form executable field. Saving or

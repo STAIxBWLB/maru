@@ -843,6 +843,72 @@ mod quit_acl_tests {
     }
 
     #[test]
+    fn first_party_labels_require_a_current_app_url_regardless_of_headers() {
+        for label in ["main", "skill-editor"] {
+            for origin in [
+                "https://example.invalid/",
+                "http://127.0.0.1:43210/",
+                "tauri://other/",
+            ] {
+                let app = build_test_app();
+                let remote: tauri::Url = origin.parse().unwrap();
+                let view = WebviewWindowBuilder::new(
+                    &app,
+                    label,
+                    tauri::WebviewUrl::External(remote.clone()),
+                )
+                .build()
+                .unwrap();
+                assert_eq!(view.as_ref().url().unwrap(), remote);
+                for with_header in [false, true] {
+                    let mut request = invoke_request("policy_probe");
+                    request.url = remote.clone();
+                    if with_header {
+                        request
+                            .headers
+                            .insert("origin", "http://tauri.localhost".parse().unwrap());
+                    }
+                    assert_eq!(get_ipc_response(&view, request).unwrap_err(), serde_json::json!("app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"));
+                }
+            }
+            let app = build_test_app();
+            let view = WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let mut request = invoke_request("policy_probe");
+            request
+                .headers
+                .insert("origin", "https://example.invalid".parse().unwrap());
+            assert_eq!(
+                get_ipc_response(&view, request)
+                    .unwrap()
+                    .deserialize::<String>()
+                    .unwrap(),
+                "first-party-dispatch"
+            );
+        }
+    }
+
+    #[test]
+    fn first_party_admission_rechecks_the_native_url_after_navigation() {
+        for label in ["main", "skill-editor"] {
+            let app = build_test_app();
+            let view = WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let own_url = view.as_ref().url().unwrap();
+            assert!(get_ipc_response(&view, invoke_request("policy_probe")).is_ok());
+            let remote: tauri::Url = "https://example.invalid/".parse().unwrap();
+            view.navigate(remote.clone()).unwrap();
+            let mut request = invoke_request("policy_probe");
+            request.url = remote;
+            assert_eq!(get_ipc_response(&view, request).unwrap_err(), serde_json::json!("app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"));
+            view.navigate(own_url).unwrap();
+            assert!(get_ipc_response(&view, invoke_request("policy_probe")).is_ok());
+        }
+    }
+
+    #[test]
     fn remote_child_in_main_cannot_dispatch_app_or_plugin_commands() {
         let app = build_test_app();
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
