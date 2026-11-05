@@ -10,6 +10,7 @@ import { maskRust, parseArgs } from "./check-command-isolation.mjs";
 const CHECKER = fileURLToPath(new URL("./check-command-isolation.mjs", import.meta.url));
 const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
 const MOD = "src-tauri/src/model.rs";
+const protectedRun = (handlers) => `fn run() { builder.invoke_handler(crate::ipc_policy::restrict_app_commands(tauri::generate_handler![${handlers}])); }`;
 const integrationModules = ["skill_host/store", "skill_host/env", "skill_host/dispatch", "git", "dot_sync", "mission_state", "agent_host/event_store"];
 function fixture(t, specs = [{ name: "sample", plan: "06", module: MOD }]) {
   const root = mkdtempSync(join(tmpdir(), "maru-command-evidence-"));
@@ -31,7 +32,7 @@ mod tests_${name} {
 `).join("\n"));
   }
   const pathOf = ({ module, name }) => module.replace(/^src-tauri\/src\//, "").replace(/\/mod\.rs$|\.rs$/, "").replaceAll("/", "::") + "::" + name;
-  write("src-tauri/src/lib.rs", `fn run() { tauri::generate_handler![${specs.map(pathOf).join(",")}]; }`);
+  write("src-tauri/src/lib.rs", protectedRun(specs.map(pathOf).join(",")));
   write(`${PHASE}/08-COMMAND-INVENTORY.md`, specs.map(({ name, module, disposition = "CONVERT" }) => `| \`${name}\` | \`${module}:1\` | sync | **${disposition}**: research |`).join("\n"));
   write(`${PHASE}/08-PLAN-MAP.md`, specs.map(({ plan, module, name }) => `| 08-${plan} | \`${module}\` | \`${name}\` |`).join("\n"));
   const shards = new Map();
@@ -102,20 +103,37 @@ test("missing behavior test name fails", (t) => { const f = fixture(t); f.row.ev
 test("test selector unrelated to named case fails", (t) => { const f = fixture(t); f.row.tests[0].command = "cargo test --lib unrelated"; f.save(); fail(f.run("--plan", "06"), /not covered by a recorded passing selector/); });
 test("missing synchronous caller evidence fails", (t) => { const f = fixture(t); f.row.syncCallers = []; f.save(); fail(f.run("--plan", "06"), /empty syncCallers/); });
 test("missing processing outcome owner fails", (t) => { const f = fixture(t); delete f.row.processingCaller.terminalNoticeOwner; f.save(); fail(f.run("--plan", "06"), /processingCaller.terminalNoticeOwner/); });
-test("new unowned production registration fails", (t) => { const f = fixture(t); f.write(MOD, f.read(MOD) + "\npub fn surprise() {}\n"); f.write("src-tauri/src/lib.rs", "fn run() { tauri::generate_handler![model::sample, model::surprise]; }"); fail(f.run("--plan", "06"), /New production registration/); });
-test("missing production registration fails", (t) => { const f = fixture(t); f.write("src-tauri/src/lib.rs", "fn run() { tauri::generate_handler![]; }"); fail(f.run("--plan", "06"), /No generate_handler/); });
-test("duplicate production registration fails", (t) => { const f = fixture(t); f.write("src-tauri/src/lib.rs", "fn run() { tauri::generate_handler![model::sample,model::sample]; }"); fail(f.run("--plan", "06"), /Duplicate production/); });
+test("new unowned production registration fails", (t) => { const f = fixture(t); f.write(MOD, f.read(MOD) + "\npub fn surprise() {}\n"); f.write("src-tauri/src/lib.rs", protectedRun("model::sample, model::surprise")); fail(f.run("--plan", "06"), /New production registration/); });
+test("missing production registration fails", (t) => { const f = fixture(t); f.write("src-tauri/src/lib.rs", protectedRun("")); fail(f.run("--plan", "06"), /No generate_handler/); });
+test("duplicate production registration fails", (t) => { const f = fixture(t); f.write("src-tauri/src/lib.rs", protectedRun("model::sample,model::sample")); fail(f.run("--plan", "06"), /Duplicate production/); });
+test("production invoke_handler requires the app command policy wrapper", (t) => {
+  const f = fixture(t);
+  f.write("src-tauri/src/lib.rs", "fn run() { builder.invoke_handler(tauri::generate_handler![model::sample]); }");
+  fail(f.run("--plan", "06"), /Production run\(\)\.invoke_handler must wrap/);
+});
+test("helper, comment and test-only wrappers do not protect production invoke_handler", (t) => {
+  const f = fixture(t);
+  f.write("src-tauri/src/lib.rs", `
+    fn helper() { let _ = ipc_policy::restrict_app_commands(|invoke| invoke); }
+    // ipc_policy::restrict_app_commands(tauri::generate_handler![model::sample])
+    #[cfg(test)] mod tests {
+      fn helper() { let _ = crate::ipc_policy::restrict_app_commands(|invoke| invoke); }
+    }
+    fn run() { builder.invoke_handler(tauri::generate_handler![model::sample]); }
+  `);
+  fail(f.run("--plan", "06"), /Production run\(\)\.invoke_handler must wrap/);
+});
 test("native feature commands use a separate positive allowlist", (t) => {
   const f = fixture(t); f.write(MOD, f.read(MOD) + "\n#[cfg(feature = \"native-e2e\")]\npub fn probe() {}\n");
-  f.write("src-tauri/src/lib.rs", 'fn run() { tauri::generate_handler![model::sample, #[cfg(feature = "native-e2e")] model::probe]; }');
+  f.write("src-tauri/src/lib.rs", protectedRun('model::sample, #[cfg(feature = "native-e2e")] model::probe'));
   fail(f.run("--plan", "06"), /Native feature command missing separate allowlist/);
   f.write("docs/performance/phase08-native-allowlist.json", { commands: [{ name: "probe", registrationPath: "src-tauri/src/lib.rs::model::probe", feature: "native-e2e", reason: "synthetic observation only" }] });
   pass(f.run("--plan", "06"));
-  f.write("src-tauri/src/lib.rs", "fn run() { tauri::generate_handler![model::sample, model::probe]; }");
+  f.write("src-tauri/src/lib.rs", protectedRun("model::sample, model::probe"));
   fail(f.run("--plan", "06"), /New production registration/);
 });
 test("reexports and same-name ipc wrappers resolve current physical definition", (t) => {
-  const f = fixture(t); f.write("src-tauri/src/lib.rs", "use bridge::sample; fn run() { tauri::generate_handler![sample]; }");
+  const f = fixture(t); f.write("src-tauri/src/lib.rs", `use bridge::sample; ${protectedRun("sample")}`);
   f.write("src-tauri/src/bridge.rs", "pub use crate::model::sample;"); pass(f.run("--plan", "06"));
 });
 test("early-stage integration obligation passes without future overlay", (t) => {
@@ -181,7 +199,7 @@ fn ${name}_blocking() -> u32 { std::fs::read("fixture").unwrap().len() as u32 }
 `;
     f.write(`${PHASE}/08-COMMAND-INVENTORY.md`, f.read(`${PHASE}/08-COMMAND-INVENTORY.md`) + `\n| \`${name}\` | \`${module}:1\` | sync | **CONVERT**: research |`);
     f.write(`${PHASE}/08-PLAN-MAP.md`, f.read(`${PHASE}/08-PLAN-MAP.md`) + `\n| 08-07 | \`${module}\` | \`${name}\` |`);
-    f.write("src-tauri/src/lib.rs", f.read("src-tauri/src/lib.rs").replace("];", `,document::${name}];`));
+    f.write("src-tauri/src/lib.rs", f.read("src-tauri/src/lib.rs").replace("tauri::generate_handler![", `tauri::generate_handler![document::${name},`));
   }
   const selector = "phase08_07_earlier_writer_document_races";
   const cases = f.overlay.documentRaceConsumer.requiredPairs.map((pair) => {
@@ -222,13 +240,13 @@ test("wrong nonstaged module integration owner fails", (t) => { const f = fixtur
 test("blocking work before worker boundary fails", (t) => { const f = fixture(t); f.write(MOD, f.read(MOD).replace("tauri::async_runtime::spawn_blocking", 'std::fs::read("early").unwrap(); tauri::async_runtime::spawn_blocking')); fail(f.run("--plan", "06"), /blocking work before/); });
 test("native registration feature gate does not excuse ungated definition", (t) => {
   const f = fixture(t); f.write(MOD, f.read(MOD) + "\npub fn probe() {}\n");
-  f.write("src-tauri/src/lib.rs", 'fn run() { tauri::generate_handler![model::sample, #[cfg(feature = "native-e2e")] model::probe]; }');
+  f.write("src-tauri/src/lib.rs", protectedRun('model::sample, #[cfg(feature = "native-e2e")] model::probe'));
   f.write("docs/performance/phase08-native-allowlist.json", { commands: [{ name: "probe", registrationPath: "src-tauri/src/lib.rs::model::probe", feature: "native-e2e", reason: "synthetic observation only" }] });
   fail(f.run("--plan", "06"), /definition is not feature-gated/);
 });
 test("native module definition feature gate is accepted", (t) => {
   const f = fixture(t); f.write("src-tauri/src/probe.rs", "pub fn inspect() {}\n");
-  f.write("src-tauri/src/lib.rs", '#[cfg(feature = "native-e2e")] mod probe; fn run() { tauri::generate_handler![model::sample, #[cfg(feature = "native-e2e")] probe::inspect]; }');
+  f.write("src-tauri/src/lib.rs", `#[cfg(feature = "native-e2e")] mod probe; ${protectedRun('model::sample, #[cfg(feature = "native-e2e")] probe::inspect')}`);
   f.write("docs/performance/phase08-native-allowlist.json", { commands: [{ name: "inspect", registrationPath: "src-tauri/src/lib.rs::probe::inspect", feature: "native-e2e", reason: "synthetic observation only" }] });
   pass(f.run("--plan", "06"));
 });
@@ -357,7 +375,7 @@ fn ${name}_blocking() -> u32 { std::fs::read("fixture").unwrap().len() as u32 }
 `);
   f.write(`${PHASE}/08-COMMAND-INVENTORY.md`, f.read(`${PHASE}/08-COMMAND-INVENTORY.md`) + `\n| \`${name}\` | \`${module}:1\` | sync | **CONVERT**: research |`);
   f.write(`${PHASE}/08-PLAN-MAP.md`, f.read(`${PHASE}/08-PLAN-MAP.md`) + `\n| 08-04 | \`${module}\` | \`${name}\` |`);
-  f.write("src-tauri/src/lib.rs", f.read("src-tauri/src/lib.rs").replace("];", `,skill_host::store::${name}];`));
+  f.write("src-tauri/src/lib.rs", f.read("src-tauri/src/lib.rs").replace("tauri::generate_handler![", `tauri::generate_handler![skill_host::store::${name},`));
   const row = JSON.parse(JSON.stringify(f.row).replaceAll("skills_save_skill_file", name));
   row.registrationPath = `src-tauri/src/lib.rs::skill_host::store::${name}`;
   row.tests = [{ command: "cargo test --manifest-path src-tauri/Cargo.toml --lib phase08_batch_transactions", passed: 2, failed: 0, ignored: 0 }];

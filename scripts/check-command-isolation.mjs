@@ -109,7 +109,11 @@ class Sources {
   get(path) {
     if (this.cache.has(path)) return this.cache.get(path);
     const raw = this.read(path), code = maskRust(raw);
-    const modules = [...code.matchAll(/\bmod\s+(\w+)\s*\{/g)].map((m) => ({ name: m[1], start: m.index, end: closeAt(code, code.indexOf("{", m.index)), prefix: raw.slice(Math.max(code.lastIndexOf("}", m.index), code.lastIndexOf(";", m.index)) + 1, m.index) }));
+    const modules = [...code.matchAll(/\bmod\s+(\w+)\s*\{/g)].map((m) => {
+      const prefixStart = Math.max(code.lastIndexOf("}", m.index), code.lastIndexOf(";", m.index));
+      const prefixStartOffset = prefixStart + 1;
+      return { name: m[1], start: m.index, end: closeAt(code, code.indexOf("{", m.index)), codePrefix: code.slice(prefixStartOffset, m.index), prefix: raw.slice(prefixStartOffset, m.index) };
+    });
     const functions = [...code.matchAll(/\b(async\s+)?fn\s+(\w+)\s*(?:<|\()/g)].flatMap((m) => {
       const start = code.indexOf("{", m.index), semi = code.indexOf(";", m.index);
       if (start < 0 || (semi >= 0 && semi < start)) return [];
@@ -117,7 +121,10 @@ class Sources {
       const ancestors = modules.filter((mod) => mod.start < m.index && mod.end > end);
       const parents = ancestors.map((mod) => mod.name);
       const prefixStart = Math.max(code.lastIndexOf("}", m.index), code.lastIndexOf(";", m.index));
-      return [{ name: m[2], symbol: [...parents, m[2]].join("::"), async: Boolean(m[1]), start, end, body: code.slice(start + 1, end), prefix: raw.slice(prefixStart + 1, m.index), native: ancestors.some((mod) => nativeCfg(mod.prefix)) || nativeCfg(raw.slice(prefixStart + 1, m.index)), testOnly: ancestors.some((mod) => /#\[cfg\(test\)\]/.test(mod.prefix)), path }];
+      const codePrefix = code.slice(prefixStart + 1, m.index);
+      const rawPrefix = raw.slice(prefixStart + 1, m.index);
+      const testOnly = (prefix) => /#\[cfg\s*\(\s*test\s*\)\]/.test(prefix);
+      return [{ name: m[2], symbol: [...parents, m[2]].join("::"), async: Boolean(m[1]), start, end, body: code.slice(start + 1, end), codePrefix, prefix: rawPrefix, native: ancestors.some((mod) => nativeCfg(mod.prefix)) || nativeCfg(rawPrefix), testOnly: ancestors.some((mod) => testOnly(mod.codePrefix)) || testOnly(codePrefix), path }];
     });
     const imports = new Map([...code.matchAll(/\buse\s+([^;]+);/g)].flatMap((m) => useEntries(m[1])).map((entry) => [entry.name, entry.path.replace(/^crate::/, "")]));
     const result = { raw, code, functions, imports };
@@ -195,6 +202,25 @@ function registrations(sources) {
   }
   insist(result.length, "No generate_handler registrations found");
   return result;
+}
+function requireProductionInvokeHandlerGuard(sources) {
+  const productionRuns = sources.get(LIB).functions.filter((fn) =>
+    fn.symbol === "run" && !fn.testOnly && !fn.native,
+  );
+  insist(productionRuns.length === 1, "Expected exactly one production run() function");
+  const run = productionRuns[0];
+  const invokeCalls = [...run.body.matchAll(/\.\s*invoke_handler\s*\(/g)];
+  insist(invokeCalls.length === 1, "Production run() must contain exactly one invoke_handler call");
+  const callStart = invokeCalls[0].index;
+  const callOpen = run.body.indexOf("(", callStart);
+  const callEnd = closeAt(run.body, callOpen, "(", ")");
+  const argument = run.body.slice(callOpen + 1, callEnd);
+  const wrapper = argument.match(/^\s*(?:crate::)?ipc_policy::restrict_app_commands\s*\(/);
+  insist(wrapper, "Production run().invoke_handler must wrap its handler with ipc_policy::restrict_app_commands");
+  const wrapperOpen = wrapper[0].lastIndexOf("(");
+  const wrapperEnd = closeAt(argument, wrapperOpen, "(", ")");
+  const handler = argument.slice(wrapperOpen + 1, wrapperEnd);
+  insist(/^\s*tauri::generate_handler!\s*\[/.test(handler), "Production restrict_app_commands wrapper must directly protect tauri::generate_handler!");
 }
 function inventory(sources) {
   const rows = new Map();
@@ -462,6 +488,7 @@ export function parseArgs(argv) {
 }
 export function checkIsolation(options, root = process.cwd()) {
   const sources = new Sources(resolve(root));
+  requireProductionInvokeHandlerGuard(sources);
   const rows = inventory(sources), owners = ownership(sources);
   const readJson = (path) => JSON.parse(sources.read(path));
   const changesPath = "docs/performance/phase08-registration-changes.json";
