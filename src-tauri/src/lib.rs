@@ -756,10 +756,11 @@ mod quit_acl_tests {
     // never granted in src-tauri/capabilities/default.json (only
     // `core:window:allow-close` was), so the IPC call was silently denied
     // and the window never closed.
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tauri::ipc::{CallbackFn, InvokeBody};
     use tauri::test::{get_ipc_response, mock_builder, INVOKE_KEY};
     use tauri::webview::InvokeRequest;
-    use tauri::WebviewWindowBuilder;
+    use tauri::{Manager, WebviewWindowBuilder};
 
     // Tauri's test helper accepts AsRef<Webview>, which WebviewWindow provides
     // but a child Webview itself does not. Keep the same IPC response path.
@@ -803,11 +804,25 @@ mod quit_acl_tests {
         build_test_app_from(mock_builder().channel_interceptor(crate::channel_delivery::intercept))
     }
 
+    #[derive(Default)]
+    struct PolicyDispatchCount(AtomicUsize);
+
+    fn policy_dispatch_count(app: &tauri::App<tauri::test::MockRuntime>) -> usize {
+        app.state::<PolicyDispatchCount>().0.load(Ordering::SeqCst)
+    }
+
     fn build_test_app_from(
         builder: tauri::Builder<tauri::test::MockRuntime>,
     ) -> tauri::App<tauri::test::MockRuntime> {
         builder
+            .manage(PolicyDispatchCount::default())
             .invoke_handler(crate::ipc_policy::restrict_app_commands(|invoke| {
+                invoke
+                    .message
+                    .webview_ref()
+                    .state::<PolicyDispatchCount>()
+                    .0
+                    .fetch_add(1, Ordering::SeqCst);
                 invoke.resolver.resolve("first-party-dispatch");
                 true
             }))
@@ -1084,8 +1099,17 @@ mod quit_acl_tests {
                             .headers
                             .insert("origin", "http://tauri.localhost".parse().unwrap());
                     }
-                    assert_eq!(get_ipc_response(&view, request).unwrap_err(), serde_json::json!("app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"));
+                    // Tauri refuses remote-origin requests before our wrapper.
+                    assert!(get_ipc_response(&view, request).is_err());
+                    assert_eq!(policy_dispatch_count(&app), 0);
                 }
+                // A locally classified request still reaches our wrapper, which
+                // must independently reject the current remote native URL.
+                assert_eq!(
+                    get_ipc_response(&view, invoke_request("policy_probe")).unwrap_err(),
+                    serde_json::json!("app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor")
+                );
+                assert_eq!(policy_dispatch_count(&app), 0);
             }
             let app = build_test_app();
             let view = WebviewWindowBuilder::new(&app, label, Default::default())
@@ -1118,9 +1142,18 @@ mod quit_acl_tests {
             view.navigate(remote.clone()).unwrap();
             let mut request = invoke_request("policy_probe");
             request.url = remote;
-            assert_eq!(get_ipc_response(&view, request).unwrap_err(), serde_json::json!("app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"));
+            assert!(get_ipc_response(&view, request).is_err());
+            assert_eq!(policy_dispatch_count(&app), 1);
+            // Keep the wrapper's native-URL recheck covered separately from
+            // Tauri's request-origin gate.
+            assert_eq!(
+                get_ipc_response(&view, invoke_request("policy_probe")).unwrap_err(),
+                serde_json::json!("app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor")
+            );
+            assert_eq!(policy_dispatch_count(&app), 1);
             view.navigate(own_url).unwrap();
             assert!(get_ipc_response(&view, invoke_request("policy_probe")).is_ok());
+            assert_eq!(policy_dispatch_count(&app), 2);
         }
     }
 
@@ -1152,12 +1185,8 @@ mod quit_acl_tests {
             let child_ipc = ChildIpc(&child);
             let mut request = invoke_request("read_sites");
             request.url = remote.clone();
-            assert_eq!(
-                get_ipc_response(&child_ipc, request).unwrap_err(),
-                serde_json::json!(
-                    "app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor"
-                )
-            );
+            assert!(get_ipc_response(&child_ipc, request).is_err());
+            assert_eq!(policy_dispatch_count(&app), 0);
             let mut request = invoke_request("plugin:window|is_maximized");
             request.url = remote;
             let refused = get_ipc_response(&child_ipc, request).unwrap_err();
@@ -1165,6 +1194,7 @@ mod quit_acl_tests {
                 refused.as_str().unwrap_or_default().contains("not allowed"),
                 "{origin}: {refused}"
             );
+            assert_eq!(policy_dispatch_count(&app), 0);
         }
     }
 
