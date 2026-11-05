@@ -156,6 +156,68 @@ describe("Sites launch privacy and pane lifetime", () => {
     expect(container.querySelector(".sites-url .spin")).not.toBeNull();
   });
 
+  it("reconciles an already-settled tab started offscreen and finishes it while mounted", async () => {
+    await render(); await click('[data-new="console"]'); await frame(); await frame();
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
+    const progress = mocks.listeners.get("sites://page-load")!;
+    await unmountReactRoot(root!); root = null;
+    await act(async () => progress({ payload: { tabId: "t1", state: "started", url: ticket } }));
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe(ticket);
+    await act(async () => progress({ payload: { tabId: "t1", state: "finished", url: ticket } }));
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
+  });
+
+  it("reconciles an already-settled tab finished offscreen without changing its URL", async () => {
+    await render(); await click('[data-new="console"]'); await frame(); await frame();
+    const progress = mocks.listeners.get("sites://page-load")!;
+    await act(async () => progress({ payload: { tabId: "t1", state: "started", url: ticket } }));
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    await unmountReactRoot(root!); root = null;
+    await act(async () => progress({ payload: { tabId: "t1", state: "finished", url: ticket } }));
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe(ticket);
+  });
+
+  it("reconciles offscreen progress for background tabs as well as the active tab", async () => {
+    await render(); await click('[data-new="console"]'); await frame(); await frame();
+    const progress = mocks.listeners.get("sites://page-load")!;
+    await act(async () => progress({ payload: { tabId: "t1", state: "started", url: ticket } }));
+    await click('[data-new="console"]'); await frame(); await frame();
+    await unmountReactRoot(root!); root = null;
+    await act(async () => {
+      progress({ payload: { tabId: "t1", state: "finished", url: ticket } });
+      progress({ payload: { tabId: "t2", state: "started", url: ticket } });
+    });
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    const firstTab = container.querySelectorAll<HTMLButtonElement>('.sites-tabstrip [role="tab"]')[0];
+    await act(async () => firstTab.click()); await frame();
+    expect(container.querySelector(".sites-url .spin")).toBeNull();
+  });
+
+  it("preserves an existing navigation spinner when runtime progress is unknown", async () => {
+    await render(); await click('[data-new="console"]'); await frame(); await frame();
+    expect(siteViewTabRuntime("t1")?.pageLoading).toBeUndefined();
+    const input = container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => { input.focus(); });
+    await act(async () => {
+      setter.call(input, "https://next.example/");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(mocks.invoke).toHaveBeenCalledWith("site_view_navigate", expect.objectContaining({ tabId: "t1", url: "https://next.example/" }));
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    expect(siteViewTabRuntime("t1")?.pageLoading).toBeUndefined();
+    await unmountReactRoot(root!); root = null;
+    await render(); await frame();
+    expect(container.querySelector(".sites-url .spin")).not.toBeNull();
+    expect(container.querySelector<HTMLInputElement>('[aria-label="sites.address.label"]')?.value).toBe("https://next.example/");
+  });
+
   it.each(["started", "finished"] as const)("preserves page-load %s received before successful settlement", async (state) => {
     let resolve!: (url: string) => void;
     const opening = new Promise<string>((done) => { resolve = done; });

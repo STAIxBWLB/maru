@@ -235,8 +235,19 @@ export function SitesPane({
       scheduleSync();
     };
     const unsubscribe = subscribeSiteViewOpenSettled(settle);
-    for (const tab of sessionTabs) {
-      settle(tab.id);
+    if (mountedRef.current) {
+      setTabs((current) => {
+        let changed = false;
+        const next = current.map((tab) => {
+          const loading = siteViewTabRuntime(tab.id)?.pageLoading;
+          if (typeof loading !== "boolean" || loading === tab.loading) return tab;
+          changed = true;
+          return { ...tab, loading };
+        });
+        return changed ? next : current;
+      });
+      // Actual open results remain authoritative, including failure cleanup.
+      for (const tab of sessionTabs) settle(tab.id);
     }
     return unsubscribe;
   }, [reportError, scheduleSync]);
