@@ -741,8 +741,10 @@ Release sequence:
 2. Verify exact-tree `main` CI.
 3. Verify that the `native-e2e` real-app suite passed on that `main` commit
    (`gh workflow run native-e2e.yml --ref main` if the push run was skipped or
-   cancelled). A failing spec blocks the release; an intentional `it.skip`
-   states its cause and an upstream link in the spec.
+   cancelled). A failing spec blocks the release. An intentional skip states its
+   cause in the spec, and links the upstream issue when an external defect
+   causes it; opt-in local checks gated by an environment variable count as
+   intentional skips.
 4. Dispatch and pass Release Preflight.
 5. Publish a GitHub Release whose tag is exactly `v<package version>` and whose
    target is the verified `main` commit. `Validate release inputs` enforces the
