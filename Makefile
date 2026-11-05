@@ -183,6 +183,10 @@ check-dom-sanitizer: ## Static guard: every dangerouslySetInnerHTML sink in src/
 check-native-e2e-isolation: ## Static guard: no native-e2e runner affordances in the production bundle or Cargo manifest (D-10)
 	$(NODE) scripts/check-native-e2e-isolation.mjs
 
+.PHONY: check-main-iframes
+check-main-iframes: ## Refuse remote iframe sources in the application webview
+	$(NODE) scripts/check-main-iframes.mjs
+
 .PHONY: check-csp-blob
 check-csp-blob: ## Static guard: the shipped CSP script-src carries no blob: (SEC-01, D-04)
 	$(NODE) scripts/check-csp-blob.mjs --binary $(TAURI_DIR)/target/debug/maru
@@ -398,7 +402,7 @@ homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-type-tokens check-archify-pin test-ts test-rust fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
+verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-main-iframes check-type-tokens check-archify-pin test-ts test-rust fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
 
 # ---------------------------------------------------------------------------
 # Clean

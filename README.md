@@ -17,7 +17,7 @@ identifier and on-disk migration to Maru.
 | Application shell | Complete | 19 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
-| Main-thread isolation | PERF-01/02 closed | All 388 production commands classified: 379 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
+| Main-thread isolation | PERF-01/02 closed | Phase 08 baseline classified 388 production commands: 379 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
 | Active milestone | None, v1.2 being defined | v1.1 closed 2026-09-27; opening v1.2 moves releases to 1.2.0 |
 
 The milestone archive, audit, retrospective, and summary live under
@@ -141,11 +141,11 @@ brew upgrade maru-cli
   boundaries. Nothing imports `src/App.tsx`.
 - Shared UI state follows keyed module-store plus `useSyncExternalStore`
   patterns. No additional global state library or provider tree is used.
-- Production commands never block the UI/shared async worker thread: 379
-  ISOLATED commands run on awaited `spawn_blocking` workers and 9
+- Production commands never block the UI/shared async worker thread:
+  ISOLATED commands run on awaited `spawn_blocking` workers and
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  388-command inventory, worker-boundary, and admission evidence are gated by
+  389-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 
 ## Capability Highlights
@@ -211,9 +211,16 @@ first-party `main` or `skill-editor` label and the current native webview URL:
 `tauri://localhost` or `http://tauri.localhost`, or the configured development
 server origin in debug builds only. Other callers receive the same refusal.
 Caller-supplied headers are not authentication. This checks the current top-level
-webview document, not requesting subframe origins; Tauri 2.12.5 initializes IPC
-in the main frame only. Plugin permissions normally use Tauri capabilities and origin
-checks, with Tauri's internal channel-fetch path exempt from that gate.
+webview document, not requesting subframe origins. Tauri 2.12.5 requests
+main-frame-only IPC initialization on macOS/WKWebView and Linux/WebKitGTK;
+Windows/WebView2 applies initialization scripts to every frame
+([platform notes](https://docs.rs/tauri/2.12.5/tauri/webview/struct.WebviewWindowBuilder.html#method.initialization_script)). Maru keeps
+configurable HTTP(S) content outside the main webview: the Kakao relay console
+opens explicitly in the system browser with its initial theme query, browser
+cookies and independent window lifetime. Live theme postMessages are not used.
+Plugin permissions normally use Tauri capabilities and origin checks, with
+Tauri's internal channel-fetch path exempt from that gate; its pending data is
+scoped to the owning webview in the upgraded framework.
 JavaScript-bound application channel payloads, including terminal frames, use a
 recipient-bound inline callback/index envelope. Each payload rechecks the bound
 view's first-party label and native URL. Formatting or dispatch failures are
@@ -488,8 +495,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (388 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 388
+# Phase 08 evidence closure gate alone (389 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 389
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -585,14 +592,22 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
 - four TypeScript projects: application, Node config, E2E, and scripts
 - ESLint correctness rules with zero warnings
 - release-version synchronization and static architecture guards
+- main iframe sources restricted to srcDoc previews or traced local asset URLs
 - frontend tests and Rust library tests
 - rustfmt and clippy with warnings denied
 - production frontend build and gzip bundle budgets, including the native-e2e
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 388-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 388`)
+  mutation-admission and processing-caller evidence against the 389-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 389`)
+
+The iframe source guard prevents accidental reintroduction, rather than
+analyzing adversarial JavaScript. Its regressions cover factory aliases,
+indirect calls and lexical asset bindings; computed or obfuscated access is
+outside its guarantee. The relay's browser UI no longer needs an app-side
+reachability probe, so its former event listener and outbound HTTP path are
+removed.
 
 On Windows, run Make with Git for Windows' Bash and Unix tools on `PATH`,
 alongside Node, pnpm, and Cargo. For a native Windows GNU Make installation,

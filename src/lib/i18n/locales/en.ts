@@ -1552,14 +1552,11 @@ export const en: Record<string, string> = {
   "comms.kakao.relayUiUrlHelp":
     "Base URL of the relay operator console (the daemon's ui.bind). Blank restores the default.",
   "comms.kakao.console.title": "Relay console",
-  "comms.kakao.console.open": "Open relay console",
-  "comms.kakao.console.close": "Close console",
-  "comms.kakao.console.reload": "Reload console",
   "comms.kakao.console.openExternal": "Open in browser",
   "comms.kakao.console.invalidUrl":
-    "Set a valid relay console URL in the comms settings to embed the console.",
-  "comms.kakao.console.loadFailed":
-    "Could not load the relay console at {url}. Check that the relay UI is running.",
+    "Set a valid relay console URL in the comms settings to open the console.",
+  "comms.kakao.console.openFailed":
+    "Could not open the console in the browser: {error}. Check the default browser and relay console URL, then try again.",
   "comms.kakao.viewer.title": "Relay messages",
   "comms.kakao.viewer.room": "Room",
   "comms.kakao.viewer.loading": "Loading messages...",

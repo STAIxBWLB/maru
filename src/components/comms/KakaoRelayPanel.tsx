@@ -1,4 +1,4 @@
-import { RefreshCcw, Send, SquareArrowOutUpRight, X } from "lucide-react";
+import { RefreshCcw, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import {
@@ -41,7 +41,6 @@ export function KakaoRelayPanel({
   onConfirmApproval,
 }: KakaoRelayPanelProps) {
   const { t } = useTranslation();
-  const [consoleOpen, setConsoleOpen] = useState(false);
   const rooms = useMemo(
     () => status?.rooms.filter((room) => room.managed) ?? [],
     [status],
@@ -185,22 +184,8 @@ export function KakaoRelayPanel({
     <div className="kakao-relay-section">
       <div className="kakao-relay-section-header">
         <h3 className="comms-results-title">{t("comms.kakao.console.title")}</h3>
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() => setConsoleOpen((open) => !open)}
-        >
-          {consoleOpen ? <X size={14} /> : <SquareArrowOutUpRight size={14} />}
-          <span>
-            {consoleOpen
-              ? t("comms.kakao.console.close")
-              : t("comms.kakao.console.open")}
-          </span>
-        </button>
       </div>
-      {consoleOpen ? (
-        <KakaoRelayConsole relayUiUrl={relayUiUrl} themeMode={themeMode} />
-      ) : null}
+      <KakaoRelayConsole relayUiUrl={relayUiUrl} themeMode={themeMode} />
     </div>
   );
 

@@ -20,14 +20,16 @@
 use crate::win_process::NoWindow;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
-    AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, Url,
-    Webview, WebviewUrl,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Rect, Size, Url, Webview,
+    WebviewUrl,
 };
 
 pub const SITES_EMBED_PREFIX: &str = "sites-embed-";
@@ -594,42 +596,111 @@ fn open_in_system_browser(url: &str) -> Result<(), String> {
         c.arg(url);
         c
     };
-    command
-        .no_window()
-        .spawn()
-        .map_err(|err| format!("Cannot open system browser: {err}"))?;
+    if let Some(reaper) = launch_browser_command(&mut command, BROWSER_LAUNCH_OBSERVE)? {
+        // The launcher has not exited, but it accepted the request. Let a
+        // detached waiter reap it when the browser process eventually exits.
+        drop(reaper);
+    }
     Ok(())
 }
 
-/// Main-webview guard: a remote http(s) navigation, a link in the sandboxed
-/// blueprint iframe (#410) or a preview link past its click handler (#382),
-/// never replaces app or frame content and opens in the system browser.
-/// WKWebView reports subframe and new-window navigations here; WebView2 only
-/// reports the main frame, so on Windows such viewer links stay inert.
-/// Sites embeds are separate webviews and keep their own handlers.
+const BROWSER_LAUNCH_OBSERVE: Duration = Duration::from_secs(2);
+const BROWSER_LAUNCH_NEXT_STEP: &str =
+    "Check that a default HTTP(S) browser is installed and configured, or open the URL manually.";
+
+fn launch_browser_command(
+    command: &mut Command,
+    observe_for: Duration,
+) -> Result<Option<JoinHandle<()>>, String> {
+    // Prepare the waiter before spawning the browser. A live child is always
+    // transferred to this thread without a blocking fallback wait.
+    let (reaper_sender, reaper) = start_browser_reaper()?;
+    let mut child = match command.no_window().spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            drop(reaper_sender);
+            let _ = reaper.join();
+            return Err(format!(
+                "Cannot start the system browser launcher: {err}. {BROWSER_LAUNCH_NEXT_STEP}"
+            ));
+        }
+    };
+    let deadline = Instant::now() + observe_for;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                drop(reaper_sender);
+                let _ = reaper.join();
+                return Ok(None);
+            }
+            Ok(Some(status)) => {
+                drop(reaper_sender);
+                let _ = reaper.join();
+                return Err(format!(
+                    "The system browser launcher exited unsuccessfully ({status}). {BROWSER_LAUNCH_NEXT_STEP}"
+                ));
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(
+                    Duration::from_millis(25)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Ok(None) => {
+                transfer_browser_child(reaper_sender, child)?;
+                return Ok(Some(reaper));
+            }
+            Err(err) => {
+                transfer_browser_child(reaper_sender, child)?;
+                return Err(format!(
+                    "Cannot observe the system browser launcher status: {err}. The launcher was handed to its waiter for cleanup. {BROWSER_LAUNCH_NEXT_STEP}"
+                ));
+            }
+        }
+    }
+}
+
+fn start_browser_reaper() -> Result<(Sender<Child>, JoinHandle<()>), String> {
+    let (sender, receiver) = mpsc::channel::<Child>();
+    let handle = thread::Builder::new()
+        .name("maru-browser-launcher-reaper".into())
+        .spawn(move || {
+            if let Ok(mut child) = receiver.recv() {
+                let _ = child.wait();
+            }
+        })
+        .map_err(|err| {
+            format!(
+                "Cannot prepare a waiter for the system browser launcher: {err}. {BROWSER_LAUNCH_NEXT_STEP}"
+            )
+        })?;
+    Ok((sender, handle))
+}
+
+fn transfer_browser_child(sender: Sender<Child>, child: Child) -> Result<(), String> {
+    sender.send(child).map_err(|err| {
+        // The prestarted receiver only blocks on recv/Child::wait, so this
+        // indicates an unexpected waiter failure rather than normal flow.
+        format!(
+            "The system browser launcher could not be handed to its waiter (process {}). {BROWSER_LAUNCH_NEXT_STEP}",
+            err.0.id()
+        )
+    })
+}
+
+/// Main-webview guard: a remote http(s) navigation, including a link in a
+/// sandboxed viewer or preview, never replaces app content and opens in the
+/// system browser. Sites embeds are separate webviews and keep their own
+/// handlers.
 ///
-/// One exemption: the configured kakao relay operator console (#418). The
-/// frontend publishes the effective `comms.kakao.relayUiUrl` over
-/// KAKAO_RELAY_UI_ORIGIN_EVENT and this guard admits navigations to exactly
-/// that origin, so the console iframe keeps loading when the relay daemon
-/// lives on another Mac (e.g. relay-mac.local). The callback carries no
-/// frame identity, so a subframe-only exemption is impossible; pinning the
-/// exemption to the user-configured origin keeps every other remote
-/// navigation on the external-open path.
+/// Platform behavior differs: WKWebView reports subframe and new-window
+/// navigations here; WebView2 reports only main-frame navigations. This guard
+/// does not establish which frame requested a navigation.
 pub(crate) fn external_link_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("maru-external-links")
-        .setup(|app, _| {
-            app.listen_any(KAKAO_RELAY_UI_ORIGIN_EVENT, |event| {
-                let url = serde_json::from_str::<String>(event.payload()).unwrap_or_default();
-                set_kakao_relay_ui_origin(&url);
-            });
-            Ok(())
-        })
         .on_navigation(|webview, url| {
-            if webview.label() != MAIN_WINDOW_LABEL
-                || !is_remote_http(url)
-                || is_kakao_relay_ui_frame(url)
-            {
+            if !should_open_external_navigation(webview.label(), url) {
                 return true;
             }
             let admitted = LAST_EXTERNAL_OPEN
@@ -671,32 +742,8 @@ fn is_remote_http(url: &Url) -> bool {
         })
 }
 
-/// Event the main webview publishes with the effective
-/// `comms.kakao.relayUiUrl` whenever it changes (#418). Not a command, so
-/// command isolation is unaffected.
-pub(crate) const KAKAO_RELAY_UI_ORIGIN_EVENT: &str = "maru:kakao-relay-ui-origin";
-
-static KAKAO_RELAY_UI_ORIGIN: Mutex<Option<String>> = Mutex::new(None);
-
-/// Record the relay console origin from the frontend-published URL.
-/// Anything unparseable or non-http(s) clears the exemption: a corrupt
-/// setting must fail closed, never widen the guard.
-pub(crate) fn set_kakao_relay_ui_origin(raw: &str) {
-    let origin = Url::parse(raw.trim())
-        .ok()
-        .filter(|url| matches!(url.scheme(), "http" | "https"))
-        .map(|url| url.origin().ascii_serialization());
-    if let Ok(mut slot) = KAKAO_RELAY_UI_ORIGIN.lock() {
-        *slot = origin;
-    }
-}
-
-fn is_kakao_relay_ui_frame(url: &Url) -> bool {
-    KAKAO_RELAY_UI_ORIGIN
-        .lock()
-        .ok()
-        .and_then(|slot| slot.clone())
-        .is_some_and(|origin| url.origin().ascii_serialization() == origin)
+fn should_open_external_navigation(webview_label: &str, url: &Url) -> bool {
+    webview_label == MAIN_WINDOW_LABEL && is_remote_http(url)
 }
 
 #[cfg(test)]
@@ -958,35 +1005,22 @@ mod tests {
     }
 
     #[test]
-    fn kakao_relay_ui_origin_exemption_matches_the_exact_origin_only() {
-        set_kakao_relay_ui_origin("http://relay-mac.local:8787");
-        assert!(is_kakao_relay_ui_frame(&url(
-            "http://relay-mac.local:8787/"
-        )));
-        assert!(is_kakao_relay_ui_frame(&url(
-            "http://relay-mac.local:8787/?theme=dark"
-        )));
-        // Port, host, and scheme all pin the exemption.
-        assert!(!is_kakao_relay_ui_frame(&url(
-            "http://relay-mac.local:8788/"
-        )));
-        assert!(!is_kakao_relay_ui_frame(&url("http://other.local:8787/")));
-        assert!(!is_kakao_relay_ui_frame(&url(
-            "https://relay-mac.local:8787/"
-        )));
-        // Unparseable or non-http(s) input clears the exemption (fail closed).
-        set_kakao_relay_ui_origin("not a url");
-        assert!(!is_kakao_relay_ui_frame(&url(
-            "http://relay-mac.local:8787/"
-        )));
-        set_kakao_relay_ui_origin("file:///etc/passwd");
-        assert!(!is_kakao_relay_ui_frame(&url(
-            "http://relay-mac.local:8787/"
-        )));
-        set_kakao_relay_ui_origin("");
-        assert!(!is_kakao_relay_ui_frame(&url(
-            "http://relay-mac.local:8787/"
-        )));
+    fn relay_remote_origin_uses_the_same_external_navigation_route_as_other_remotes() {
+        let relay = url("http://relay-mac.local:8787/?theme=dark");
+        let ordinary_remote = url("https://example.com/");
+        assert!(should_open_external_navigation(MAIN_WINDOW_LABEL, &relay));
+        assert_eq!(
+            should_open_external_navigation(MAIN_WINDOW_LABEL, &relay),
+            should_open_external_navigation(MAIN_WINDOW_LABEL, &ordinary_remote)
+        );
+        assert!(!should_open_external_navigation(
+            MAIN_WINDOW_LABEL,
+            &url("http://localhost:3000/")
+        ));
+        assert!(!should_open_external_navigation(
+            "sites-embed-relay",
+            &relay
+        ));
     }
 
     #[test]
@@ -1023,6 +1057,68 @@ mod tests {
             Some("https://example.com/64")
         );
         assert!(state.take().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_browser_launcher_reports_failures_and_reaps_still_running_processes() {
+        use std::process::Command;
+
+        let temp = tempfile::tempdir().unwrap();
+        let success = temp.path().join("browser-success");
+        crate::test_support::write_executable_fixture(&success, "#!/bin/sh\nexit 0\n", 0o755)
+            .unwrap();
+        let mut command = Command::new(&success);
+        assert!(
+            launch_browser_command(&mut command, Duration::from_secs(30))
+                .unwrap()
+                .is_none()
+        );
+
+        let failure = temp.path().join("browser-failure");
+        crate::test_support::write_executable_fixture(&failure, "#!/bin/sh\nexit 17\n", 0o755)
+            .unwrap();
+        let mut command = Command::new(&failure);
+        let error = launch_browser_command(&mut command, Duration::from_secs(30)).unwrap_err();
+        assert!(error.contains("exited unsuccessfully (exit status: 17)"));
+        assert!(error.contains("open the URL manually"));
+
+        let missing = temp.path().join("missing-browser-launcher");
+        let mut command = Command::new(missing);
+        let error = launch_browser_command(&mut command, Duration::from_secs(30)).unwrap_err();
+        assert!(error.contains("Cannot start the system browser launcher"));
+        assert!(error.contains("open the URL manually"));
+
+        let running = temp.path().join("browser-running");
+        crate::test_support::write_executable_fixture(
+            &running,
+            "#!/bin/sh\nprintf started > \"$STARTED_FILE\"\nwhile [ ! -e \"$RELEASE_FILE\" ]; do sleep 0.02; done\nprintf finished > \"$FINISHED_FILE\"\n",
+            0o755,
+        )
+        .unwrap();
+        let started = temp.path().join("started");
+        let release = temp.path().join("release");
+        let finished = temp.path().join("finished");
+        struct ReleaseFixture(std::path::PathBuf);
+        impl Drop for ReleaseFixture {
+            fn drop(&mut self) {
+                // Release the fake child even if a launcher assertion panics.
+                let _ = std::fs::write(&self.0, b"release");
+            }
+        }
+        let _release_fixture = ReleaseFixture(release.clone());
+        let mut command = Command::new(&running);
+        command
+            .env("STARTED_FILE", &started)
+            .env("RELEASE_FILE", &release)
+            .env("FINISHED_FILE", &finished);
+        let reaper = launch_browser_command(&mut command, Duration::from_millis(100))
+            .expect("a still-running launcher counts as launched")
+            .expect("still-running child needs a reaper");
+        std::fs::write(release, b"release").unwrap();
+        reaper.join().expect("launcher reaper thread");
+        assert!(started.exists());
+        assert!(finished.exists());
     }
 
     #[cfg(target_os = "macos")]

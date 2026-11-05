@@ -277,77 +277,47 @@ test("filters processed results on the backend and refreshes without clearing th
   ).toHaveLength(1);
 });
 
-test("embeds the kakao relay console with the resolved theme param", async ({ page }) => {
-  // Simulate a live relay daemon: the reachability probe (no-cors fetch in
-  // the browser shell) must resolve before the iframe stays visible.
-  await page.route("http://127.0.0.1:8787/**", (route) =>
-    route.fulfill({ contentType: "text/html", body: "<html><body>relay</body></html>" }),
-  );
+test("opens the kakao relay console in the browser with the resolved theme", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __relayOpens: Array<{ url: string; target?: string; features?: string }> }).__relayOpens = [];
+    window.open = (url, target, features) => {
+      (window as unknown as { __relayOpens: Array<{ url: string; target?: string; features?: string }> }).__relayOpens.push({ url: String(url), target, features });
+      return null;
+    };
+  });
   await page.goto("/");
-
-  const rail = page.locator(".activity-rail");
-  await rail.getByRole("button", { name: "메시지", exact: true }).click();
-
+  await page.locator(".activity-rail").getByRole("button", { name: "메시지", exact: true }).click();
   const pane = page.locator(".comms-pane");
-  await expect(pane).toBeVisible();
-  await pane
-    .locator(".comms-source-selector")
-    .getByRole("button", { name: /카카오톡/ })
-    .click();
-
-  const panel = pane.locator(".kakao-relay-panel");
-  await expect(panel).toBeVisible();
-
-  // The console section leads the panel; its header button toggles the embed.
-  const consoleToggle = panel
-    .locator(".kakao-relay-section")
-    .first()
-    .locator(".kakao-relay-section-header")
-    .getByRole("button");
-  await consoleToggle.click();
-
-  const console_ = panel.locator(".kakao-relay-console");
+  await pane.locator(".comms-source-selector").getByRole("button", { name: /카카오톡/ }).click();
+  const console_ = pane.locator(".kakao-relay-console");
   await expect(console_).toBeVisible();
-  // The configured (default) URL is echoed in the toolbar.
-  await expect(console_.locator(".kakao-relay-console-url")).toHaveText(
-    "http://127.0.0.1:8787",
+  await expect(console_.locator(".kakao-relay-console-url")).toHaveText("http://127.0.0.1:8787");
+  await expect(console_.locator("iframe")).toHaveCount(0);
+  const readOpens = () => page.evaluate(() =>
+    (window as unknown as { __relayOpens: Array<{ url: string; target?: string; features?: string }> }).__relayOpens,
   );
-  const frame = console_.locator("iframe");
-  await expect(frame).toHaveAttribute("src", /^http:\/\/127\.0\.0\.1:8787\//);
-  await expect(frame).toHaveAttribute("src", /theme=(light|dark)/);
-
-  // Toggle closed again.
-  await consoleToggle.click();
-  await expect(panel.locator(".kakao-relay-console")).toHaveCount(0);
+  expect(await readOpens()).toEqual([]);
+  await console_.getByRole("button", { name: "브라우저에서 열기" }).click();
+  const opens = await readOpens();
+  expect(opens).toHaveLength(1);
+  expect(opens[0].url).toMatch(/^http:\/\/127\.0\.0\.1:8787\/\?theme=(light|dark)$/);
+  expect(opens[0].target).toBe("_blank");
+  expect(opens[0].features).toBe("noopener,noreferrer");
+  await expect(console_.locator("iframe")).toHaveCount(0);
 });
 
-test("shows the empty state when the relay console is unreachable", async ({ page }) => {
-  // Daemon down: every request to the bind fails at the transport level.
-  await page.route("http://127.0.0.1:8787/**", (route) => route.abort());
+test("shows browser handoff failures without embedding the relay", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.open = () => { throw new Error("browser unavailable"); };
+  });
   await page.goto("/");
-
-  const rail = page.locator(".activity-rail");
-  await rail.getByRole("button", { name: "메시지", exact: true }).click();
-
+  await page.locator(".activity-rail").getByRole("button", { name: "메시지", exact: true }).click();
   const pane = page.locator(".comms-pane");
-  await expect(pane).toBeVisible();
-  await pane
-    .locator(".comms-source-selector")
-    .getByRole("button", { name: /카카오톡/ })
-    .click();
-
-  const panel = pane.locator(".kakao-relay-panel");
-  await expect(panel).toBeVisible();
-  const consoleToggle = panel
-    .locator(".kakao-relay-section")
-    .first()
-    .locator(".kakao-relay-section-header")
-    .getByRole("button");
-  await consoleToggle.click();
-
-  const console_ = panel.locator(".kakao-relay-console");
-  await expect(console_).toBeVisible();
-  // The probe fails, so the i18n'd hint replaces the broken frame.
-  await expect(console_.locator(".kakao-relay-hint")).toBeVisible();
+  await pane.locator(".comms-source-selector").getByRole("button", { name: /카카오톡/ }).click();
+  const console_ = pane.locator(".kakao-relay-console");
+  await console_.getByRole("button", { name: "브라우저에서 열기" }).click();
+  await expect(console_.getByRole("alert")).toContainText("browser unavailable");
+  await expect(console_.getByRole("alert")).toContainText("다시 시도하세요");
   await expect(console_.locator("iframe")).toHaveCount(0);
+  await expect(console_.getByRole("button", { name: "브라우저에서 열기" })).toBeEnabled();
 });
