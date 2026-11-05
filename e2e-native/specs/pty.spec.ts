@@ -67,9 +67,14 @@ async function waitForFullFrameChannelEvals(sessionId: string): Promise<NativeE2
 
   assert.ok(
     probe.bridgePresent,
-    "native channel-evaluation bridge is absent; the app is serving a frontend built without the runner flag",
+    "native channel-evaluation bridge is absent; the app is serving a frontend built without the runner flag. " +
+      "Rebuild with `pnpm build:frontend:native-e2e` (or run `make test-e2e-native`) before running this spec.",
   );
-  assert.ok(probe.readerPresent, "native channel-evaluation reader is missing from the bridge namespace");
+  assert.ok(
+    probe.readerPresent,
+    "native channel-evaluation reader is missing from the bridge namespace. " +
+      "Rebuild with `pnpm build:frontend:native-e2e` (or run `make test-e2e-native`) before running this spec.",
+  );
   const fullFrames = probe.samples.filter((sample) =>
     sample.fullFrame && sample.bytes > 8192 && Number.isFinite(sample.durationMs)
     && sample.durationMs >= 0 && Number.isInteger(sample.cols) && sample.cols > 0
@@ -77,7 +82,9 @@ async function waitForFullFrameChannelEvals(sessionId: string): Promise<NativeE2
   );
   assert.ok(
     fullFrames.length > 0,
-    `no large full-screen channel frame was recorded for PTY session ${sessionId}: ${JSON.stringify(probe.samples)}`,
+    `no large full-screen channel frame was recorded for PTY session ${sessionId}: ${JSON.stringify(probe.samples)}. ` +
+      "Check the native-e2e callback_script in src-tauri/src/channel_delivery.rs and " +
+      "recordChannelEval in src/lib/nativeE2eBridge.ts, then rerun this spec.",
   );
   return fullFrames;
 }
