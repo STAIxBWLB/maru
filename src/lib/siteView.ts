@@ -158,6 +158,7 @@ export async function siteViewNavigate(tabId: string, url: string): Promise<void
   if (!isTauri()) return;
   const state = tabs.get(tabId);
   if (!state || state.opening) return;
+  state.pageLoading = undefined; // The previous document's progress is no longer current.
   await invoke("site_view_navigate", { tabId, url });
   state.url = url;
   state.launch = null;
