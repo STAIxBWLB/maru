@@ -39,11 +39,22 @@ export interface NativeAppState {
   terminalSplitOpen: boolean;
 }
 
+export type NativeE2eChannelEvalSample = Readonly<{
+  bytes: number;
+  durationMs: number;
+  sessionId: string;
+  cols: number;
+  rows: number;
+  fullFrame: boolean;
+}>;
+
 interface MaruNativeE2eBridge {
   terminalText(sessionId: string): string | null;
   menuCommandReady(): boolean;
   readAppState(): NativeAppState | null;
   menuCommand(id: string): boolean;
+  recordChannelEval(sample: NativeE2eChannelEvalSample): void;
+  channelEvals(): ReadonlyArray<NativeE2eChannelEvalSample>;
 }
 
 declare global {

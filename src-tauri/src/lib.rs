@@ -12,6 +12,7 @@ mod binary_viewer;
 mod browser_passkeys;
 mod calendar_search;
 mod calendar_sync;
+mod channel_delivery;
 mod cli;
 mod cli_path;
 mod command_output;
@@ -231,6 +232,7 @@ pub fn run() {
     #[cfg(feature = "native-e2e")]
     native_e2e::install_test_runtime();
     let builder = tauri::Builder::default()
+        .channel_interceptor(channel_delivery::intercept)
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -798,13 +800,225 @@ mod quit_acl_tests {
     /// test build is a link error ("symbol _EMBED_INFO_PLIST is already
     /// defined"), not just a run-time conflict.
     fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
-        mock_builder()
+        build_test_app_from(mock_builder().channel_interceptor(crate::channel_delivery::intercept))
+    }
+
+    fn build_test_app_from(
+        builder: tauri::Builder<tauri::test::MockRuntime>,
+    ) -> tauri::App<tauri::test::MockRuntime> {
+        builder
             .invoke_handler(crate::ipc_policy::restrict_app_commands(|invoke| {
                 invoke.resolver.resolve("first-party-dispatch");
                 true
             }))
             .build(tauri::generate_context!())
             .expect("failed to build the app with this crate's real context/capabilities")
+    }
+
+    fn isolated_channel_case() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        let root = tempfile::tempdir().unwrap();
+        let output = std::fs::File::create(root.path().join("output.log")).unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.env_clear();
+        for key in [
+            "PATH",
+            "SYSTEMROOT",
+            "LD_LIBRARY_PATH",
+            "DYLD_FALLBACK_LIBRARY_PATH",
+        ] {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+        let mut child = command
+            .args([
+                "--exact",
+                "quit_acl_tests::large_terminal_frames_use_only_bound_inline_delivery",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env("MARU_BOUND_CHANNEL_TEST_CHILD", "1")
+            .env("HOME", root.path())
+            .env("USERPROFILE", root.path())
+            .env("TMPDIR", root.path())
+            .env("TEMP", root.path())
+            .env("TOKIO_WORKER_THREADS", "2")
+            .current_dir(root.path())
+            .stdout(Stdio::from(output.try_clone().unwrap()))
+            .stderr(Stdio::from(output))
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!(
+                    "isolated channel test timed out: {}",
+                    std::fs::read_to_string(root.path().join("output.log")).unwrap()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let output = std::fs::read_to_string(root.path().join("output.log")).unwrap();
+        assert!(status.success(), "isolated channel test failed: {output}");
+        assert!(
+            output.contains("bound_channel_isolation_complete"),
+            "isolated scenario did not run: {output}"
+        );
+    }
+
+    #[test]
+    fn large_terminal_frames_use_only_bound_inline_delivery() {
+        // Channel data IDs are process-wide. A fresh one-test process makes
+        // the black-box empty-queue probe deterministic, even under parallel CI.
+        if std::env::var("MARU_BOUND_CHANNEL_TEST_CHILD")
+            .ok()
+            .as_deref()
+            != Some("1")
+        {
+            isolated_channel_case();
+            return;
+        }
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+        };
+        use tauri::ipc::{Channel, InvokeResponseBody, JavaScriptChannelId};
+        let delivered = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let fail_eval = Arc::new(AtomicBool::new(false));
+        let captured = delivered.clone();
+        let failure = fail_eval.clone();
+        let app = build_test_app_from(mock_builder().channel_interceptor(
+            move |view, callback, index, body| {
+                crate::channel_delivery::intercept_with_eval(
+                    view,
+                    callback,
+                    index,
+                    body,
+                    |target, script| {
+                        if failure.load(Ordering::Acquire) {
+                            return Err(());
+                        }
+                        let recorded = script.clone();
+                        target.eval(script).map_err(|_| ())?;
+                        captured
+                            .lock()
+                            .unwrap()
+                            .push((target.label().to_string(), recorded));
+                        Ok(())
+                    },
+                )
+            },
+        ));
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let editor = WebviewWindowBuilder::new(&app, "skill-editor", Default::default())
+            .build()
+            .unwrap();
+        let observer = WebviewWindowBuilder::new(
+            &app,
+            "observer",
+            tauri::WebviewUrl::External("https://example.invalid/".parse().unwrap()),
+        )
+        .build()
+        .unwrap();
+        let channel_id: JavaScriptChannelId = "__CHANNEL__:41".parse().unwrap();
+        let channel: Channel<crate::terminal::TerminalStreamMessage> =
+            channel_id.channel_on(main.as_ref().clone());
+        let frame = crate::terminal::full_screen_stream_fixture();
+        let expected = serde_json::to_value(&frame).unwrap();
+        assert!(serde_json::to_vec(&frame).unwrap().len() > 8192);
+        channel.send(frame.clone()).unwrap();
+        {
+            let sent = delivered.lock().unwrap();
+            assert_eq!(sent.len(), 1);
+            assert_eq!(sent[0].0, "main");
+            assert!(sent[0].1.contains("runCallback(41,"));
+            assert!(sent[0].1.contains("index: 0"));
+            let quoted = sent[0].1.split_once("JSON.parse(").unwrap().1;
+            let json = serde_json::Deserializer::from_str(quoted)
+                .into_iter::<String>()
+                .next()
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+                expected
+            );
+        }
+        let editor_id: JavaScriptChannelId = "__CHANNEL__:42".parse().unwrap();
+        let editor_channel: Channel<crate::terminal::TerminalStreamMessage> =
+            editor_id.channel_on(editor.as_ref().clone());
+        editor_channel.send(frame.clone()).unwrap();
+        assert_eq!(delivered.lock().unwrap().len(), 2);
+        assert_eq!(delivered.lock().unwrap()[1].0, "skill-editor");
+        fail_eval.store(true, Ordering::Release);
+        channel.send(frame.clone()).unwrap(); // consumed despite injected eval error
+        assert_eq!(delivered.lock().unwrap().len(), 2);
+        fail_eval.store(false, Ordering::Release);
+        let foreign_id: JavaScriptChannelId = "__CHANNEL__:43".parse().unwrap();
+        let foreign: Channel<crate::terminal::TerminalStreamMessage> =
+            foreign_id.channel_on(observer.as_ref().clone());
+        foreign.send(frame.clone()).unwrap();
+        let own_url = main.as_ref().url().unwrap();
+        main.navigate("https://example.invalid/".parse().unwrap())
+            .unwrap();
+        channel.send(frame).unwrap();
+        main.navigate(own_url).unwrap();
+        assert_eq!(delivered.lock().unwrap().len(), 2);
+        let malformed_id: JavaScriptChannelId = "__CHANNEL__:44".parse().unwrap();
+        let malformed: Channel<InvokeResponseBody> = malformed_id.channel_on(main.as_ref().clone());
+        malformed
+            .send(InvokeResponseBody::Json("invalid JSON".into()))
+            .unwrap();
+        assert_eq!(delivered.lock().unwrap().len(), 2);
+        let raw_id: JavaScriptChannelId = "__CHANNEL__:45".parse().unwrap();
+        let raw: Channel<InvokeResponseBody> = raw_id.channel_on(main.as_ref().clone());
+        raw.send(InvokeResponseBody::Raw(vec![255; 2048])).unwrap();
+        assert_eq!(delivered.lock().unwrap().len(), 3);
+        assert_eq!(delivered.lock().unwrap()[2].0, "main");
+        for view in [&main, &editor, &observer] {
+            let mut request = invoke_request("plugin:__TAURI_CHANNEL__|fetch");
+            request.url = view.as_ref().url().unwrap();
+            request
+                .headers
+                .insert("tauri-channel-id", "0".parse().unwrap());
+            let response = get_ipc_response(view, request);
+            assert!(
+                response.is_err(),
+                "inline delivery must leave no pending fetch body"
+            );
+        }
+        // Positive control: the same framework route has data when an app
+        // deliberately uses its default transport. It must allocate ID 0 in
+        // this fresh process, proving no preceding intercepted send queued data.
+        let control = build_test_app_from(mock_builder());
+        let control_view = WebviewWindowBuilder::new(&control, "main", Default::default())
+            .build()
+            .unwrap();
+        let payload = serde_json::json!({"control": "synthetic".repeat(2000)});
+        let control_channel: Channel<serde_json::Value> =
+            channel_id.channel_on(control_view.as_ref().clone());
+        control_channel.send(payload.clone()).unwrap();
+        let mut request = invoke_request("plugin:__TAURI_CHANNEL__|fetch");
+        request
+            .headers
+            .insert("tauri-channel-id", "0".parse().unwrap());
+        assert_eq!(
+            get_ipc_response(&control_view, request)
+                .unwrap()
+                .deserialize::<serde_json::Value>()
+                .unwrap(),
+            payload
+        );
+        println!("bound_channel_isolation_complete");
     }
 
     #[test]

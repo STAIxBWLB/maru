@@ -21,12 +21,77 @@
 import assert from "node:assert/strict";
 import type {} from "webdriverio";
 
-import { assertTerminalInk, readTerminalText } from "../helpers/ptyAssertions";
+import {
+  assertTerminalInk,
+  readTerminalText,
+  type NativeE2eChannelEvalSample,
+} from "../helpers/ptyAssertions";
 import { openShellSession } from "../helpers/shellSession";
 
 /** In-page poll deadline; the embedded driver's default script timeout is
  *  30s, so every executeAsync loop below must resolve before that. */
 const POLL_TIMEOUT_MS = 20_000;
+
+interface ChannelEvalProbe {
+  bridgePresent: boolean;
+  readerPresent: boolean;
+  samples: NativeE2eChannelEvalSample[];
+}
+
+async function waitForFullFrameChannelEvals(sessionId: string): Promise<NativeE2eChannelEvalSample[]> {
+  const probe = await browser.executeAsync(
+    (id: string, timeout: number, done: (result: ChannelEvalProbe) => void) => {
+      const deadline = Date.now() + timeout;
+      const tick = () => {
+        const bridge = window.__MARU_NATIVE_E2E__;
+        const readerPresent = typeof bridge?.channelEvals === "function";
+        const samples = readerPresent && bridge
+          ? bridge.channelEvals().filter((sample) => sample.sessionId === id)
+          : [];
+        const qualifying = samples.filter((sample) =>
+          sample.fullFrame && sample.bytes > 8192 && Number.isFinite(sample.durationMs)
+          && sample.durationMs >= 0 && Number.isInteger(sample.cols) && sample.cols > 0
+          && Number.isInteger(sample.rows) && sample.rows > 0,
+        );
+        if (!bridge || !readerPresent || qualifying.length > 0 || Date.now() >= deadline) {
+          done({ bridgePresent: Boolean(bridge), readerPresent, samples });
+          return;
+        }
+        setTimeout(tick, 100);
+      };
+      tick();
+    },
+    sessionId,
+    POLL_TIMEOUT_MS,
+  ) as ChannelEvalProbe;
+
+  assert.ok(
+    probe.bridgePresent,
+    "native channel-evaluation bridge is absent; the app is serving a frontend built without the runner flag",
+  );
+  assert.ok(probe.readerPresent, "native channel-evaluation reader is missing from the bridge namespace");
+  const fullFrames = probe.samples.filter((sample) =>
+    sample.fullFrame && sample.bytes > 8192 && Number.isFinite(sample.durationMs)
+    && sample.durationMs >= 0 && Number.isInteger(sample.cols) && sample.cols > 0
+    && Number.isInteger(sample.rows) && sample.rows > 0,
+  );
+  assert.ok(
+    fullFrames.length > 0,
+    `no large full-screen channel frame was recorded for PTY session ${sessionId}: ${JSON.stringify(probe.samples)}`,
+  );
+  return fullFrames;
+}
+
+function percentile(sorted: number[], quantile: number): number {
+  return sorted[Math.max(0, Math.ceil(quantile * sorted.length) - 1)];
+}
+
+function median(sorted: number[]): number {
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
 
 describe("native terminal PTY", () => {
   it(
@@ -34,6 +99,23 @@ describe("native terminal PTY", () => {
     async () => {
       const sessionId = await openShellSession();
       const viewSelector = `.native-terminal-view[data-session-id="${sessionId}"]`;
+
+      const fullFrames = await waitForFullFrameChannelEvals(sessionId);
+      const frameDurationsMs = fullFrames.map((sample) => sample.durationMs).sort((a, b) => a - b);
+      const latestFullFrame = fullFrames[fullFrames.length - 1]!;
+      console.info("native_terminal_full_frame_channel_eval", JSON.stringify({
+        measurement: "JavaScript JSON parse + bound channel callback",
+        excludes: "Rust frame preparation, IPC transport, generated-script compilation, and asynchronous paint",
+        sessionId: latestFullFrame.sessionId,
+        sampleCount: fullFrames.length,
+        bytes: latestFullFrame.bytes,
+        cols: latestFullFrame.cols,
+        rows: latestFullFrame.rows,
+        fullFrame: latestFullFrame.fullFrame,
+        minMs: frameDurationsMs[0],
+        medianMs: median(frameDurationsMs),
+        p95Ms: percentile(frameDurationsMs, 0.95),
+      }));
 
       // The marker split is the point of the whole spec: the typed line is
       // `echo MARU""_PTY_OK_7F3A2B`, but the shell evaluates the empty quoted

@@ -1,6 +1,6 @@
 //! Central routing policy for application commands.
 
-use tauri::{ipc::Invoke, Manager, Runtime, Url};
+use tauri::{ipc::Invoke, Manager, Runtime, Url, Webview};
 
 const APP_COMMAND_REFUSAL: &str =
     "app_command_unavailable: this webview cannot dispatch app commands; use the Maru main window or skill editor";
@@ -27,6 +27,17 @@ pub(crate) fn is_app_url(url: &Url, dev_url: Option<&Url>, debug: bool) -> bool 
     url.username().is_empty() && url.password().is_none() && is_app_origin(url, dev_url, debug)
 }
 
+pub(crate) fn is_first_party_webview<R: Runtime>(webview: &Webview<R>) -> bool {
+    matches!(webview.label(), "main" | "skill-editor")
+        && webview.url().is_ok_and(|url| {
+            is_app_url(
+                &url,
+                webview.app_handle().config().build.dev_url.as_ref(),
+                cfg!(debug_assertions),
+            )
+        })
+}
+
 /// Application dispatch requires both a first-party label and its current
 /// native URL. Public Invoke does not expose the requesting subframe URL;
 /// caller-supplied headers are intentionally not used as authentication.
@@ -34,15 +45,7 @@ pub(crate) fn restrict_app_commands<R: Runtime>(
     handler: impl Fn(Invoke<R>) -> bool + Send + Sync + 'static,
 ) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
-        let webview = invoke.message.webview_ref();
-        let allowed = matches!(webview.label(), "main" | "skill-editor")
-            && webview.url().is_ok_and(|url| {
-                is_app_url(
-                    &url,
-                    webview.app_handle().config().build.dev_url.as_ref(),
-                    cfg!(debug_assertions),
-                )
-            });
+        let allowed = is_first_party_webview(invoke.message.webview_ref());
         if !allowed {
             invoke.resolver.reject(APP_COMMAND_REFUSAL);
             return true;

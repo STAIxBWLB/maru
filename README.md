@@ -213,10 +213,13 @@ server origin in debug builds only. Other callers receive the same refusal.
 Caller-supplied headers are not authentication. This checks the current top-level
 webview document, not requesting subframe origins; Tauri 2.10.3 initializes IPC
 in the main frame only. Plugin permissions normally use Tauri capabilities and origin
-checks, with Tauri's internal channel-fetch path exempt from that gate. Terminal
-output uses `ipc::Channel`: admission to its creation path and ownership of
-payload delivery are separate boundaries, so delivery needs its own per-webview
-review. Channel delivery remains framework-managed.
+checks, with Tauri's internal channel-fetch path exempt from that gate.
+JavaScript-bound application channel payloads, including terminal frames, use a
+recipient-bound inline callback/index envelope. Each payload rechecks the bound
+view's first-party label and native URL. Formatting or dispatch failures are
+consumed with content-free diagnostics, without selecting the fallback transport.
+Channel ordering and end notifications retain their framework contract. Other
+framework-managed command-response paths remain separate from this channel policy.
 H1/H2 URL entries and manual URL opening need no launcher. Sites refuses
 Tauri-localhost subdomains and the configured app development origin in debug
 builds, while ordinary localhost/loopback sites remain available.
@@ -660,6 +663,12 @@ their fixture containers. Radix FocusScope defers disposal to a timer; awaiting
 it inside the fixture's React act keeps CustomEvent construction in the same
 jsdom realm. Closing that realm first can leak an invalid Event into the next
 test file even when all assertions passed.
+
+The command-isolation source guard also checks the production app-command and
+channel-delivery routing hooks. Its mutation regressions cover removing either
+hook. Native PTY output logs full-frame channel JSON parse and receiver-callback
+timings, with payload size and dimensions; these samples exclude Rust preparation,
+native dispatch, generated-script compilation and asynchronous paint.
 
 ## Release Process
 
