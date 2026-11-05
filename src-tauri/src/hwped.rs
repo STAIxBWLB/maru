@@ -812,8 +812,8 @@ mod tests {
     }
 }
 
-/// Serializes the MARU_HWP_BIN fixture overrides across every phase08_21
-/// module so parallel tests never observe each other's binaries.
+/// Serializes MARU_HWP_BIN overrides and temp-root worker failure hooks
+/// across phase08_21 tests so real fixture calls cannot enter another test's hook.
 #[cfg(test)]
 pub(crate) static PHASE08_21_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -836,6 +836,12 @@ mod phase08_21 {
         use crate::atomic_file::PathTransactionTestHook;
         use std::sync::{mpsc, Mutex};
 
+        // Each wrapper stages the same temp-root path. Hold the fixture lock
+        // until the hooked worker joins and the hook is removed, otherwise a
+        // parallel real fixture call can enter it after its receiver is gone.
+        let _fixture_lock = super::PHASE08_21_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let (entered_tx, mut entered_rx) = tauri::async_runtime::channel(1);
         let (release_tx, release_rx) = mpsc::channel();
         let release_rx = Mutex::new(release_rx);
