@@ -1113,9 +1113,12 @@ server.serve_forever()
         let cancel = AtomicBool::new(false);
         let home = fixture("valid");
         let before = LIVE.load(Ordering::Acquire);
+        // This test covers readiness/lifetime, not the production startup SLA.
+        // Its cold Python/http.server fixture can take longer on a busy runner.
+        // Keep READY_TIMEOUT and the intentional timeout case below unchanged.
         let console = start_console(
             resolve_console(home.path()).unwrap(),
-            Duration::from_secs(5),
+            Duration::from_secs(30),
             &cancel,
         )
         .unwrap();
