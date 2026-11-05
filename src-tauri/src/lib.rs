@@ -975,8 +975,10 @@ mod quit_acl_tests {
         assert_eq!(delivered.lock().unwrap().len(), 2);
         let malformed_id: JavaScriptChannelId = "__CHANNEL__:44".parse().unwrap();
         let malformed: Channel<InvokeResponseBody> = malformed_id.channel_on(main.as_ref().clone());
+        let malformed_body = "invalid JSON".repeat(1024);
+        assert!(malformed_body.len() > 8192);
         malformed
-            .send(InvokeResponseBody::Json("invalid JSON".into()))
+            .send(InvokeResponseBody::Json(malformed_body))
             .unwrap();
         assert_eq!(delivered.lock().unwrap().len(), 2);
         let raw_id: JavaScriptChannelId = "__CHANNEL__:45".parse().unwrap();
