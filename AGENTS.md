@@ -48,6 +48,8 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 
 ## Things the agent gets wrong
 
+- **Iframe source checks (2026-11-05)**: when changing `scripts/check-main-iframes.mjs`, preserve lexical binding checks and non-call factory-reference regressions in its test file.
+
 - **Sites session state (2026-11-05)**: when changing Sites lifecycle, keep webview open results and page-load progress in `src/lib/siteView.ts` across `SitesPane` unmounts, and test unmount/remount ordering.
 - **Post-activation cleanup (2026-11-04)**: before changing housekeeping after bundle activation, read `README.md` §Release Process and preserve its registry-save boundary.
 

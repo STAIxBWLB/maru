@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   DEFAULT_KAKAO_RELAY_UI_URL,
   envelopePreview,
@@ -6,8 +6,6 @@ import {
   kakaoRelayAuthStatus,
   kakaoRelayUiSrc,
   normalizeKakaoRelayUiUrl,
-  probeKakaoRelayUi,
-  probeKakaoRelayUiFetch,
   relayLiveness,
   type KakaoRelayEnvelope,
   type KakaoRelayStatus,
@@ -172,31 +170,5 @@ describe("kakaoRelayUiSrc", () => {
     expect(kakaoRelayUiSrc("not a url", "dark")).toBeNull();
     expect(kakaoRelayUiSrc("file:///etc/passwd", "dark")).toBeNull();
     expect(kakaoRelayUiSrc("ftp://relay.local", "dark")).toBeNull();
-  });
-});
-
-describe("probeKakaoRelayUiFetch", () => {
-  it("resolves true on any HTTP response and false on transport failure", async () => {
-    const up = vi.fn<typeof fetch>().mockResolvedValue(new Response(null));
-    await expect(probeKakaoRelayUiFetch("http://relay.local:8787", up)).resolves.toBe(true);
-    expect(up).toHaveBeenCalledWith(
-      "http://relay.local:8787",
-      expect.objectContaining({ mode: "no-cors", cache: "no-store" }),
-    );
-
-    const down = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed"));
-    await expect(probeKakaoRelayUiFetch("http://relay.local:8787", down)).resolves.toBe(false);
-  });
-});
-
-describe("probeKakaoRelayUi outside Tauri", () => {
-  it("probe falls back to the no-cors fetch without the Tauri runtime", async () => {
-    const original = globalThis.fetch;
-    globalThis.fetch = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("refused"));
-    try {
-      await expect(probeKakaoRelayUi("http://127.0.0.1:8787")).resolves.toBe(false);
-    } finally {
-      globalThis.fetch = original;
-    }
   });
 });

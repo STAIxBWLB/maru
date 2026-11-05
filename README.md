@@ -602,6 +602,13 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   mutation-admission and processing-caller evidence against the 388-command
   inventory (`node scripts/check-command-isolation.mjs --all --expected-count 388`)
 
+The iframe source guard prevents accidental reintroduction, rather than
+analyzing adversarial JavaScript. Its regressions cover factory aliases,
+indirect calls and lexical asset bindings; computed or obfuscated access is
+outside its guarantee. The relay's browser UI no longer needs an app-side
+reachability probe, so its former event listener and outbound HTTP path are
+removed.
+
 On Windows, run Make with Git for Windows' Bash and Unix tools on `PATH`,
 alongside Node, pnpm, and Cargo. For a native Windows GNU Make installation,
 use `make verify "SHELL=C:/Program Files/Git/bin/bash.exe"` (and the same

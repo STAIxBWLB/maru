@@ -1,5 +1,8 @@
 // Main owns app IPC. Remote documents belong in a separate native webview or
 // the system browser. Allow srcDoc previews and traced local asset URLs only.
+// This prevents accidental reintroduction, not adversarial code. Computed or
+// obfuscated access is outside its guarantee (literal computed names are checked
+// where recognizable).
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -62,6 +65,14 @@ export function iframeViolations(text, filename) {
     }
     return false;
   };
+  const factoryName = (node) => {
+    const name = ts.isIdentifier(node) ? node.text
+      : ts.isPropertyAccessExpression(node) ? node.name.text
+        : ts.isElementAccessExpression(node) && node.argumentExpression
+          && (ts.isStringLiteral(node.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(node.argumentExpression))
+          ? node.argumentExpression.text : undefined;
+    return name === "createElement" || name === "createElementNS" ? name : undefined;
+  };
   const visit = (node) => {
     if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(source) === "iframe") {
       const attributes = node.attributes.properties;
@@ -75,19 +86,25 @@ export function iframeViolations(text, filename) {
         }
       } else if (!srcDoc) report(node, "iframe requires srcDoc or a traced local asset URL");
     }
-    if (ts.isCallExpression(node)) {
-      const callee = node.expression;
-      const factory = ts.isIdentifier(callee) ? callee.text
-        : ts.isPropertyAccessExpression(callee) ? callee.name.text
-          : ts.isElementAccessExpression(callee) && callee.argumentExpression
-            && (ts.isStringLiteral(callee.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(callee.argumentExpression))
-            ? callee.argumentExpression.text : undefined;
-      if (factory === "createElement" || factory === "createElementNS") {
-        const tag = node.arguments[factory === "createElementNS" ? 1 : 0];
-        // No dynamic-tag call sites are currently reviewed/allow-listed. A
-        // variable or template can select an iframe, so uncertainty is refused.
-        if (!tag || !ts.isStringLiteral(tag)) report(node, "non-literal element tag is not admitted");
-        else if (tag.text.toLowerCase().split(":").at(-1) === "iframe") report(node, "imperative iframe creation is not admitted");
+    if (ts.isImportSpecifier(node)) {
+      const imported = (node.propertyName ?? node.name).text;
+      if ((imported === "createElement" || imported === "createElementNS") && node.name.text !== imported) {
+        report(node, "aliased element factory imports are not admitted");
+      }
+    }
+    const factory = factoryName(node);
+    // Visit the whole member expression, not its property-name identifier.
+    const memberName = ts.isIdentifier(node) && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
+    const importName = ts.isIdentifier(node) && ts.isImportSpecifier(node.parent);
+    if (factory && !memberName && !importName) {
+      const parent = node.parent;
+      if (!ts.isCallExpression(parent) || parent.expression !== node) {
+        report(node, "non-call element factory references are not admitted");
+      } else {
+        const tag = parent.arguments[factory === "createElementNS" ? 1 : 0];
+        // No dynamic-tag call sites are currently reviewed/allow-listed.
+        if (!tag || !ts.isStringLiteral(tag)) report(parent, "non-literal element tag is not admitted");
+        else if (tag.text.toLowerCase().split(":").at(-1) === "iframe") report(parent, "imperative iframe creation is not admitted");
       }
     }
     ts.forEachChild(node, visit);
