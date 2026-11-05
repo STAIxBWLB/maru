@@ -25,6 +25,31 @@ describe("main iframe source boundary", () => {
     ]) expect(iframeViolations(source, file).length).toBeGreaterThan(0);
   });
 
+  it("refuses variable/template tags and namespaced imperative iframe creation", () => {
+    for (const source of [
+      'const tag = "iframe"; document.createElement(tag);',
+      'document.createElement(`iframe`);',
+      'React.createElement(tag, { src: remote });',
+      'document["createElement"](tag);',
+      'document.createElementNS(namespace, "iframe");',
+      'document.createElementNS(namespace, "html:iframe");',
+      'document.createElementNS(namespace, tag);',
+      'document.createElementNS(namespace, `iframe`);',
+    ]) expect(iframeViolations(source, file).length).toBeGreaterThan(0);
+    expect(iframeViolations('document.createElement("div"); document.createElementNS(namespace, "svg");', file)).toEqual([]);
+  });
+
+  it("resolves asset aliases within their lexical scope", () => {
+    for (const source of [
+      `${assetImport} const url = assetUrlForPath("/local.pdf"); function Remote(url: string) { return <iframe src={url} />; }`,
+      `${assetImport} const url = assetUrlForPath("/local.pdf"); function Remote({ url }: Props) { return <iframe src={url} />; }`,
+      `${assetImport} const url = assetUrlForPath("/local.pdf"); function Remote([url]: string[]) { return <iframe src={url} />; }`,
+      `${assetImport} function Local() { const url = assetUrlForPath("/local.pdf"); } function Remote() { return <iframe src={url} />; }`,
+      `${assetImport} const url = assetUrlForPath("/local.pdf"); try {} catch (url) { const view = <iframe src={url} />; }`,
+    ]) expect(iframeViolations(source, file).length).toBeGreaterThan(0);
+    expect(iframeViolations(`${assetImport} function View() { const url = assetUrlForPath("/local.pdf"); return <iframe src={url} />; }`, file)).toEqual([]);
+  });
+
   it("requires asset helper provenance and refuses shadowed or mutable bindings", () => {
     for (const source of [
       'import { assetUrlForPath } from "./untrusted"; const view = <iframe src={assetUrlForPath(url)} />;',

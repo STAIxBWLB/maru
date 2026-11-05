@@ -7,10 +7,17 @@ import ts from "typescript";
 
 export function iframeViolations(text, filename) {
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  // Bind only this source file. Symbol identity preserves lexical scope without
+  // resolving dependencies or trusting another same-named constant/import.
+  const options = { noLib: true, noResolve: true, target: ts.ScriptTarget.Latest };
+  const host = ts.createCompilerHost(options);
+  host.getSourceFile = (name) => resolve(name) === resolve(filename) ? source : undefined;
+  host.fileExists = (name) => resolve(name) === resolve(filename);
+  host.readFile = (name) => resolve(name) === resolve(filename) ? text : undefined;
+  const checker = ts.createProgram([filename], options, host).getTypeChecker();
   const violations = [];
   const assetBindings = new Set();
   const constants = new Map();
-  const declarations = new Map();
   const report = (node, cause) => {
     const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
     violations.push(`${filename}:${line}: ${cause}; open remote content in Sites or the system browser`);
@@ -22,32 +29,32 @@ export function iframeViolations(text, filename) {
     const bindings = statement.importClause?.namedBindings;
     if (bindings && ts.isNamedImports(bindings)) {
       for (const binding of bindings.elements) {
-        if ((binding.propertyName ?? binding.name).text === "assetUrlForPath") assetBindings.add(binding.name.text);
+        if ((binding.propertyName ?? binding.name).text === "assetUrlForPath") {
+          const symbol = checker.getSymbolAtLocation(binding.name);
+          if (symbol) assetBindings.add(symbol);
+        }
       }
     }
   }
   const collect = (node) => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-      const name = node.name.text;
-      declarations.set(name, (declarations.get(name) ?? 0) + 1);
-      if (node.initializer && ts.isVariableDeclarationList(node.parent)
-          && (node.parent.flags & ts.NodeFlags.Const)) constants.set(name, node.initializer);
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
+        && ts.isVariableDeclarationList(node.parent) && (node.parent.flags & ts.NodeFlags.Const)) {
+      const symbol = checker.getSymbolAtLocation(node.name);
+      if (symbol) constants.set(symbol, node.initializer);
     }
-    // Shadowing a traced import must not turn an arbitrary function into an asset helper.
-    if (ts.isIdentifier(node) && assetBindings.has(node.text)
-        && ((ts.isParameter(node.parent) && node.parent.name === node)
-          || (ts.isVariableDeclaration(node.parent) && node.parent.name === node)
-          || (ts.isFunctionDeclaration(node.parent) && node.parent.name === node))) assetBindings.delete(node.text);
     ts.forEachChild(node, collect);
   };
   collect(source);
   const isAsset = (expression, seen = new Set()) => {
     if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
-      return assetBindings.has(expression.expression.text) && expression.arguments.length === 1;
+      const symbol = checker.getSymbolAtLocation(expression.expression);
+      return Boolean(symbol && assetBindings.has(symbol)) && expression.arguments.length === 1;
     }
-    if (ts.isIdentifier(expression) && !seen.has(expression.text) && declarations.get(expression.text) === 1) {
-      const value = constants.get(expression.text);
-      return value ? isAsset(value, new Set([...seen, expression.text])) : false;
+    if (ts.isIdentifier(expression)) {
+      const symbol = checker.getSymbolAtLocation(expression);
+      if (!symbol || seen.has(symbol)) return false;
+      const value = constants.get(symbol);
+      return value ? isAsset(value, new Set([...seen, symbol])) : false;
     }
     if (ts.isTemplateExpression(expression) && expression.head.text === "") {
       const first = expression.templateSpans[0];
@@ -68,8 +75,21 @@ export function iframeViolations(text, filename) {
         }
       } else if (!srcDoc) report(node, "iframe requires srcDoc or a traced local asset URL");
     }
-    if (ts.isCallExpression(node) && node.arguments.some((argument) => ts.isStringLiteral(argument) && argument.text.toLowerCase() === "iframe")
-        && /(?:^|\.)createElement$/.test(node.expression.getText(source))) report(node, "imperative iframe creation is not admitted");
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const factory = ts.isIdentifier(callee) ? callee.text
+        : ts.isPropertyAccessExpression(callee) ? callee.name.text
+          : ts.isElementAccessExpression(callee) && callee.argumentExpression
+            && (ts.isStringLiteral(callee.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(callee.argumentExpression))
+            ? callee.argumentExpression.text : undefined;
+      if (factory === "createElement" || factory === "createElementNS") {
+        const tag = node.arguments[factory === "createElementNS" ? 1 : 0];
+        // No dynamic-tag call sites are currently reviewed/allow-listed. A
+        // variable or template can select an iframe, so uncertainty is refused.
+        if (!tag || !ts.isStringLiteral(tag)) report(node, "non-literal element tag is not admitted");
+        else if (tag.text.toLowerCase().split(":").at(-1) === "iframe") report(node, "imperative iframe creation is not admitted");
+      }
+    }
     ts.forEachChild(node, visit);
   };
   visit(source);

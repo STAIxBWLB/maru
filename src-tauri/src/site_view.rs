@@ -20,9 +20,11 @@
 use crate::win_process::NoWindow;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{
@@ -594,11 +596,97 @@ fn open_in_system_browser(url: &str) -> Result<(), String> {
         c.arg(url);
         c
     };
-    command
-        .no_window()
-        .spawn()
-        .map_err(|err| format!("Cannot open system browser: {err}"))?;
+    if let Some(reaper) = launch_browser_command(&mut command, BROWSER_LAUNCH_OBSERVE)? {
+        // The launcher has not exited, but it accepted the request. Let a
+        // detached waiter reap it when the browser process eventually exits.
+        drop(reaper);
+    }
     Ok(())
+}
+
+const BROWSER_LAUNCH_OBSERVE: Duration = Duration::from_secs(2);
+const BROWSER_LAUNCH_NEXT_STEP: &str =
+    "Check that a default HTTP(S) browser is installed and configured, or open the URL manually.";
+
+fn launch_browser_command(
+    command: &mut Command,
+    observe_for: Duration,
+) -> Result<Option<JoinHandle<()>>, String> {
+    // Prepare the waiter before spawning the browser. A live child is always
+    // transferred to this thread without a blocking fallback wait.
+    let (reaper_sender, reaper) = start_browser_reaper()?;
+    let mut child = match command.no_window().spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            drop(reaper_sender);
+            let _ = reaper.join();
+            return Err(format!(
+                "Cannot start the system browser launcher: {err}. {BROWSER_LAUNCH_NEXT_STEP}"
+            ));
+        }
+    };
+    let deadline = Instant::now() + observe_for;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                drop(reaper_sender);
+                let _ = reaper.join();
+                return Ok(None);
+            }
+            Ok(Some(status)) => {
+                drop(reaper_sender);
+                let _ = reaper.join();
+                return Err(format!(
+                    "The system browser launcher exited unsuccessfully ({status}). {BROWSER_LAUNCH_NEXT_STEP}"
+                ));
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(
+                    Duration::from_millis(25)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Ok(None) => {
+                transfer_browser_child(reaper_sender, child)?;
+                return Ok(Some(reaper));
+            }
+            Err(err) => {
+                transfer_browser_child(reaper_sender, child)?;
+                return Err(format!(
+                    "Cannot observe the system browser launcher status: {err}. The launcher was handed to its waiter for cleanup. {BROWSER_LAUNCH_NEXT_STEP}"
+                ));
+            }
+        }
+    }
+}
+
+fn start_browser_reaper() -> Result<(Sender<Child>, JoinHandle<()>), String> {
+    let (sender, receiver) = mpsc::channel::<Child>();
+    let handle = thread::Builder::new()
+        .name("maru-browser-launcher-reaper".into())
+        .spawn(move || {
+            if let Ok(mut child) = receiver.recv() {
+                let _ = child.wait();
+            }
+        })
+        .map_err(|err| {
+            format!(
+                "Cannot prepare a waiter for the system browser launcher: {err}. {BROWSER_LAUNCH_NEXT_STEP}"
+            )
+        })?;
+    Ok((sender, handle))
+}
+
+fn transfer_browser_child(sender: Sender<Child>, child: Child) -> Result<(), String> {
+    sender.send(child).map_err(|err| {
+        // The prestarted receiver only blocks on recv/Child::wait, so this
+        // indicates an unexpected waiter failure rather than normal flow.
+        format!(
+            "The system browser launcher could not be handed to its waiter (process {}). {BROWSER_LAUNCH_NEXT_STEP}",
+            err.0.id()
+        )
+    })
 }
 
 /// Main-webview guard: a remote http(s) navigation, including a link in a
@@ -969,6 +1057,68 @@ mod tests {
             Some("https://example.com/64")
         );
         assert!(state.take().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_browser_launcher_reports_failures_and_reaps_still_running_processes() {
+        use std::process::Command;
+
+        let temp = tempfile::tempdir().unwrap();
+        let success = temp.path().join("browser-success");
+        crate::test_support::write_executable_fixture(&success, "#!/bin/sh\nexit 0\n", 0o755)
+            .unwrap();
+        let mut command = Command::new(&success);
+        assert!(
+            launch_browser_command(&mut command, Duration::from_secs(30))
+                .unwrap()
+                .is_none()
+        );
+
+        let failure = temp.path().join("browser-failure");
+        crate::test_support::write_executable_fixture(&failure, "#!/bin/sh\nexit 17\n", 0o755)
+            .unwrap();
+        let mut command = Command::new(&failure);
+        let error = launch_browser_command(&mut command, Duration::from_secs(30)).unwrap_err();
+        assert!(error.contains("exited unsuccessfully (exit status: 17)"));
+        assert!(error.contains("open the URL manually"));
+
+        let missing = temp.path().join("missing-browser-launcher");
+        let mut command = Command::new(missing);
+        let error = launch_browser_command(&mut command, Duration::from_secs(30)).unwrap_err();
+        assert!(error.contains("Cannot start the system browser launcher"));
+        assert!(error.contains("open the URL manually"));
+
+        let running = temp.path().join("browser-running");
+        crate::test_support::write_executable_fixture(
+            &running,
+            "#!/bin/sh\nprintf started > \"$STARTED_FILE\"\nwhile [ ! -e \"$RELEASE_FILE\" ]; do sleep 0.02; done\nprintf finished > \"$FINISHED_FILE\"\n",
+            0o755,
+        )
+        .unwrap();
+        let started = temp.path().join("started");
+        let release = temp.path().join("release");
+        let finished = temp.path().join("finished");
+        struct ReleaseFixture(std::path::PathBuf);
+        impl Drop for ReleaseFixture {
+            fn drop(&mut self) {
+                // Release the fake child even if a launcher assertion panics.
+                let _ = std::fs::write(&self.0, b"release");
+            }
+        }
+        let _release_fixture = ReleaseFixture(release.clone());
+        let mut command = Command::new(&running);
+        command
+            .env("STARTED_FILE", &started)
+            .env("RELEASE_FILE", &release)
+            .env("FINISHED_FILE", &finished);
+        let reaper = launch_browser_command(&mut command, Duration::from_millis(100))
+            .expect("a still-running launcher counts as launched")
+            .expect("still-running child needs a reaper");
+        std::fs::write(release, b"release").unwrap();
+        reaper.join().expect("launcher reaper thread");
+        assert!(started.exists());
+        assert!(finished.exists());
     }
 
     #[cfg(target_os = "macos")]
