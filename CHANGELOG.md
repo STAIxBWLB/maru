@@ -9,6 +9,12 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.25 - Bound Channels (2026-11-05)
+
+- Security hardening: application commands also require the requesting window to be on Maru's own address, Sites pages cannot navigate to Tauri-internal hosts, and large streamed replies such as terminal output go only to the Maru window that asked for them. Updating is recommended (#492, #496, #499, #500).
+- Sites shows the right loading state for pages that started or finished loading while you were in another mode (#490, #498).
+- Maru now builds on Tauri 2.12.5, which includes the fixes for the published Tauri advisories GHSA-w28w-mhc8-qvjv and GHSA-7gmj-67g7-phm9 (CVE-2026-42184). Building from source needs Rust 1.90 or newer (#503, #504).
+
 ## v1.1.24 - Closed Doors (2026-11-05)
 
 - Security: application commands now answer only Maru's own windows (the main window and the skill editor). Pages opened in Sites, including the local Agent Console, can no longer reach them; plugin permissions are unchanged. Updating is recommended (#491).
