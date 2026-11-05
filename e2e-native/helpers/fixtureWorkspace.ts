@@ -204,7 +204,7 @@ export async function restoreSkillFixtures(): Promise<void> {
  * against the same literal rather than duplicating it. */
 export const FIXTURE_DOC_NAME = "Welcome";
 
-const FIXTURE_DOC_CONTENT = [
+export const FIXTURE_DOC_CONTENT = [
   "# Welcome",
   "",
   "Seeded by e2e-native/helpers/fixtureWorkspace.ts for the native-e2e runner.",
