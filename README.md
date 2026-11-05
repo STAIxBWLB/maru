@@ -211,7 +211,7 @@ first-party `main` or `skill-editor` label and the current native webview URL:
 `tauri://localhost` or `http://tauri.localhost`, or the configured development
 server origin in debug builds only. Other callers receive the same refusal.
 Caller-supplied headers are not authentication. This checks the current top-level
-webview document, not requesting subframe origins; Tauri 2.10.3 initializes IPC
+webview document, not requesting subframe origins; Tauri 2.12.5 initializes IPC
 in the main frame only. Plugin permissions normally use Tauri capabilities and origin
 checks, with Tauri's internal channel-fetch path exempt from that gate.
 JavaScript-bound application channel payloads, including terminal frames, use a
