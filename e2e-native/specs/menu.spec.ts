@@ -16,11 +16,22 @@
 import assert from "node:assert/strict";
 import type {} from "webdriverio";
 
-import { FIXTURE_DOC_NAME } from "../helpers/fixtureWorkspace";
+import { FIXTURE_DOC_CONTENT, FIXTURE_DOC_NAME } from "../helpers/fixtureWorkspace";
 
 /** In-page poll deadline; the embedded driver's default script timeout is
  *  30s, so every executeAsync loop below must resolve before that. */
 const POLL_TIMEOUT_MS = 20_000;
+
+interface DirtyEditorProbe {
+  ok: boolean;
+  nodeBefore: string;
+  originalText: string;
+  editorPresent: boolean;
+  textNodePresent: boolean;
+  contentReady: boolean;
+  clean: boolean;
+  textLength: number;
+}
 
 /** Dispatches a menu command id through the debug bridge, after waiting for
  *  the bridge's menuCommand member to register (App.tsx's effect installs it
@@ -230,15 +241,22 @@ describe("native macOS quit route (app.quit)", () => {
     // Radix Tabs activates a trigger on mousedown, not click (see
     // ime.spec.ts's openRichEditor for the same observation).
     const richReady = await browser.executeAsync(
-      (timeout: number, done: (ok: boolean) => void) => {
+      (docName: string, fixture: string, timeout: number, done: (ok: boolean) => void) => {
         const deadline = Date.now() + timeout;
+        const expectedText = fixture.replace(/^# /gm, "").replace(/\s+/g, "");
         const tick = () => {
-          if (document.querySelector('.rich-editor-surface [contenteditable="true"]')) {
+          const pane = Array.from(document.querySelectorAll<HTMLElement>(".editor-pane"))
+            .find((candidate) => candidate.querySelector(".document-mode-surface") && candidate.getClientRects().length > 0
+              && candidate.querySelector(".document-tab.active")?.getAttribute("title") === `${docName}.md`);
+          const editor = pane?.querySelector<HTMLElement>('.rich-editor-surface [contenteditable="true"]');
+          if (editor && editor.getClientRects().length > 0
+            && editor.textContent?.replace(/\s+/g, "") === expectedText
+            && pane?.querySelector(".save-state.saved")) {
             done(true);
             return;
           }
           const triggers = Array.from(
-            document.querySelectorAll<HTMLButtonElement>(".document-mode-surface .tab-trigger"),
+            pane?.querySelectorAll<HTMLButtonElement>(".tab-trigger") ?? [],
           );
           const rich = triggers.find(
             (el) =>
@@ -260,42 +278,53 @@ describe("native macOS quit route (app.quit)", () => {
         };
         tick();
       },
+      FIXTURE_DOC_NAME,
+      FIXTURE_DOC_CONTENT,
       POLL_TIMEOUT_MS,
     );
-    assert.ok(richReady, "the rich editor contenteditable never appeared");
+    assert.ok(richReady, "the selected fixture's rich editor never loaded its saved text; inspect openRichEditor in e2e-native/specs/menu.spec.ts and the Welcome.md fixture, then rerun this spec");
   }
 
-  async function readEditorText(): Promise<string> {
-    return (
-      ((await browser.execute(
-        () =>
-          document.querySelector('.rich-editor-surface [contenteditable="true"]')?.textContent ??
-          null,
-      )) as string | null) ?? ""
-    );
-  }
-
-  /** Dirties the first text node in the rich editor via a synthetic
-   *  composition sequence — the only mechanism proven (ime.spec.ts mechanism
-   *  B) to reach ProseMirror's mutation observer; a synthetic event alone
-   *  changes nothing on this surface. Returns the node's original text so the
-   *  caller can restore it byte-for-byte afterward. */
-  async function dirtyFirstTextNode(marker: string): Promise<{ ok: boolean; nodeBefore: string }> {
-    return browser.execute((mark: string) => {
-      const ed = document.querySelector<HTMLElement>(
-        '.rich-editor-surface [contenteditable="true"]',
-      );
-      if (!ed) return { ok: false, nodeBefore: "" };
-      const walker = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
-      const textNode = walker.nextNode() as Text | null;
-      if (!textNode) return { ok: false, nodeBefore: "" };
-      const nodeBefore = textNode.data;
-      ed.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
-      textNode.data = nodeBefore + mark;
-      ed.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: mark }));
-      ed.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: mark }));
-      return { ok: true, nodeBefore };
-    }, marker);
+  /** Wait for the selected fixture's saved text, then capture and mutate in
+   *  the same browser callback. A mounted contenteditable can still be empty
+   *  or replaced while BlockNote asynchronously imports the selected document.
+   *  This polls readiness only; the composition edit is issued exactly once. */
+  async function dirtyFirstTextNode(marker: string): Promise<DirtyEditorProbe> {
+    return browser.executeAsync((mark: string, docName: string, fixture: string, timeout: number, done: (state: DirtyEditorProbe) => void) => {
+      const deadline = Date.now() + timeout;
+      const expectedText = fixture.replace(/^# /gm, "").replace(/\s+/g, "");
+      const tick = () => {
+        const pane = Array.from(document.querySelectorAll<HTMLElement>(".editor-pane"))
+          .find((candidate) => candidate.querySelector(".document-mode-surface") && candidate.getClientRects().length > 0
+            && candidate.querySelector(".document-tab.active")?.getAttribute("title") === `${docName}.md`);
+        const ed = pane?.querySelector<HTMLElement>('.rich-editor-surface [contenteditable="true"]');
+        const originalText = ed?.textContent ?? "";
+        const walker = ed ? document.createTreeWalker(ed, NodeFilter.SHOW_TEXT) : null;
+        let textNode = (walker?.nextNode() ?? null) as Text | null;
+        while (textNode && !textNode.data.trim()) textNode = walker!.nextNode() as Text | null;
+        const state = {
+          ok: false, nodeBefore: "", originalText: "",
+          editorPresent: Boolean(ed && ed.getClientRects().length > 0),
+          textNodePresent: Boolean(textNode),
+          contentReady: originalText.replace(/\s+/g, "") === expectedText,
+          clean: Boolean(pane?.querySelector(".save-state.saved"))
+            && !pane?.querySelector(".document-tab.active .document-tab-dirty"),
+          textLength: originalText.length,
+        };
+        if (ed && textNode && state.editorPresent && state.contentReady && state.clean) {
+          const nodeBefore = textNode.data;
+          ed.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+          textNode.data = nodeBefore + mark;
+          ed.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: mark }));
+          ed.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: mark }));
+          done({ ...state, ok: true, nodeBefore, originalText });
+          return;
+        }
+        if (Date.now() > deadline) { done(state); return; }
+        setTimeout(tick, 200);
+      };
+      tick();
+    }, marker, FIXTURE_DOC_NAME, FIXTURE_DOC_CONTENT, POLL_TIMEOUT_MS);
   }
 
   /** Reverses dirtyFirstTextNode: restores the first text node to its
@@ -303,40 +332,43 @@ describe("native macOS quit route (app.quit)", () => {
    *  mechanism, so the session ends with no dirty draft (Task 1 acceptance
    *  criteria). */
   async function restoreFirstTextNode(nodeBefore: string): Promise<boolean> {
-    return browser.execute((original: string) => {
-      const ed = document.querySelector<HTMLElement>(
-        '.rich-editor-surface [contenteditable="true"]',
-      );
+    return browser.execute((original: string, docName: string) => {
+      const pane = Array.from(document.querySelectorAll<HTMLElement>(".editor-pane"))
+        .find((candidate) => candidate.querySelector(".document-mode-surface") && candidate.getClientRects().length > 0
+          && candidate.querySelector(".document-tab.active")?.getAttribute("title") === `${docName}.md`);
+      const ed = pane?.querySelector<HTMLElement>('.rich-editor-surface [contenteditable="true"]');
       if (!ed) return false;
       const walker = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
-      const textNode = walker.nextNode() as Text | null;
+      let textNode = walker.nextNode() as Text | null;
+      while (textNode && !textNode.data.trim()) textNode = walker.nextNode() as Text | null;
       if (!textNode) return false;
       ed.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
       textNode.data = original;
       ed.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: original }));
       ed.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: original }));
       return true;
-    }, nodeBefore);
+    }, nodeBefore, FIXTURE_DOC_NAME);
   }
 
   it(
     "app.quit routes into the window-close guard",
     async () => {
       await openRichEditor();
-      const originalText = await readEditorText();
-
       const marker = "!";
-      const { ok, nodeBefore } = await dirtyFirstTextNode(marker);
-      assert.ok(ok, "could not locate a text node in the rich editor to dirty");
+      const edit = await dirtyFirstTextNode(marker);
+      assert.ok(edit.ok, `the fixture rich editor was not ready for its single composition edit: ${JSON.stringify(edit)}; inspect openRichEditor in e2e-native/specs/menu.spec.ts and the fixtureWorkspace.ts seed, then rerun this spec`);
+      const { nodeBefore, originalText } = edit;
 
       const dirtied = await browser.executeAsync(
-        (mark: string, timeout: number, done: (hit: boolean) => void) => {
+        (mark: string, docName: string, timeout: number, done: (hit: boolean) => void) => {
           const deadline = Date.now() + timeout;
           const tick = () => {
-            const text =
-              document.querySelector('.rich-editor-surface [contenteditable="true"]')
-                ?.textContent ?? "";
-            if (text.includes(mark)) {
+            const pane = Array.from(document.querySelectorAll<HTMLElement>(".editor-pane"))
+              .find((candidate) => candidate.querySelector(".document-mode-surface") && candidate.getClientRects().length > 0
+                && candidate.querySelector(".document-tab.active")?.getAttribute("title") === `${docName}.md`);
+            const text = pane?.querySelector('.rich-editor-surface [contenteditable="true"]')?.textContent ?? "";
+            if (text.includes(mark) && pane?.querySelector(".save-state.dirty")
+              && pane.querySelector(".document-tab.active .document-tab-dirty")) {
               done(true);
               return;
             }
@@ -349,9 +381,10 @@ describe("native macOS quit route (app.quit)", () => {
           tick();
         },
         marker,
+        FIXTURE_DOC_NAME,
         POLL_TIMEOUT_MS,
       );
-      assert.ok(dirtied, "the synthetic composition edit never landed in the rich editor");
+      assert.ok(dirtied, "the composition edit never became a dirty fixture draft; inspect src/components/RichMarkdownEditor.tsx change publication and the menu spec composition setup, then rerun this spec");
 
       await dispatchMenuCommand("app.quit");
 
@@ -419,13 +452,15 @@ describe("native macOS quit route (app.quit)", () => {
       assert.ok(restored, "could not restore the rich editor text to its original content");
 
       const textRestored = await browser.executeAsync(
-        (original: string, timeout: number, done: (ok: boolean) => void) => {
+        (original: string, docName: string, timeout: number, done: (ok: boolean) => void) => {
           const deadline = Date.now() + timeout;
           const tick = () => {
-            const text =
-              document.querySelector('.rich-editor-surface [contenteditable="true"]')
-                ?.textContent ?? "";
-            if (text === original) {
+            const pane = Array.from(document.querySelectorAll<HTMLElement>(".editor-pane"))
+              .find((candidate) => candidate.querySelector(".document-mode-surface") && candidate.getClientRects().length > 0
+                && candidate.querySelector(".document-tab.active")?.getAttribute("title") === `${docName}.md`);
+            const text = pane?.querySelector('.rich-editor-surface [contenteditable="true"]')?.textContent ?? "";
+            if (text === original && pane?.querySelector(".save-state.saved")
+              && !pane.querySelector(".document-tab.active .document-tab-dirty")) {
               done(true);
               return;
             }
@@ -438,11 +473,12 @@ describe("native macOS quit route (app.quit)", () => {
           tick();
         },
         originalText,
+        FIXTURE_DOC_NAME,
         POLL_TIMEOUT_MS,
       );
       assert.ok(
         textRestored,
-        "the rich editor text was not restored to its original content after the test",
+        "the fixture text and clean draft state were not restored after the test; inspect restoreFirstTextNode in e2e-native/specs/menu.spec.ts, then rerun this spec",
       );
     },
   ).timeout(120_000);
