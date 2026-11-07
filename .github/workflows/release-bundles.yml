@@ -31,7 +31,9 @@ jobs:
     # another 10 minutes for checkout/setup and validation.
     timeout-minutes: 60
     permissions:
-      contents: read
+      # Releases API hides drafts without push access, even for read requests.
+      # Admission itself only reads; the token must still be write-capable.
+      contents: write
       actions: read
     outputs:
       tag: ${{ steps.release.outputs.tag }}

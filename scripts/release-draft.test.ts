@@ -221,6 +221,20 @@ describe("draft finalization", () => {
     expect(source.match(/if: steps.publication.outputs.published == 'true'/g)).toHaveLength(3);
     expect(source.indexOf("id: publication")).toBeLessThan(source.indexOf("- name: Checkout Homebrew tap"));
   });
+
+  it("keeps push-capable tokens for all private-draft readers", () => {
+    const source = readFileSync(resolve(process.cwd(), ".github/workflows/release-bundles.yml"), "utf8");
+    const globalWrite = /^permissions:\n  contents: write$/m.test(source.split("\njobs:")[0]);
+    for (const job of ["prepare", "build", "finalize"]) {
+      const block = source.match(new RegExp(`^  ${job}:\\n[\\s\\S]*?(?=^  [A-Za-z0-9_-]+:|$(?![\\s\\S]))`, "m"))?.[0];
+      expect(block, job).toBeDefined();
+      const permissions = block!.match(/^    permissions:\n((?:^      .*\n)+)/m)?.[1];
+      if (permissions) expect(permissions, job).toMatch(/^      contents: write$/m);
+      else expect(globalWrite, `${job} inherits workflow permission`).toBe(true);
+      expect(block, job).toContain("GH_TOKEN: ${{ github.token }}");
+      if (job === "prepare") expect(permissions).toMatch(/^      actions: read$/m);
+    }
+  });
 });
 
 describe.skipIf(process.platform === "win32")("Homebrew release boundary (POSIX CLI fixture)", () => {
