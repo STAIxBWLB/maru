@@ -42,7 +42,7 @@ describe("native-e2e CI placement (T-06-11)", () => {
   });
 
   it("the compile job runs on macOS and compiles and typechecks the native-e2e build", () => {
-    expect(compileJob).toMatch(/^ {4}runs-on: macos-14$/m);
+    expect(compileJob).toMatch(/^ {4}runs-on: macos-26$/m);
     expect(compileJob).toMatch(/^ {8}run: pnpm typecheck$/m);
     expect(compileJob).toMatch(/^ {8}run: cd src-tauri && cargo check --locked --features native-e2e$/m);
   });
