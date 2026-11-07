@@ -235,6 +235,23 @@ describe("draft finalization", () => {
       if (job === "prepare") expect(permissions).toMatch(/^      actions: read$/m);
     }
   });
+
+  it("uses Bash environment expansion for every cross-platform release-draft call", () => {
+    const source = readFileSync(resolve(process.cwd(), ".github/workflows/release-bundles.yml"), "utf8");
+    const jobs = source.matchAll(/^  [A-Za-z0-9_-]+:\n[\s\S]*?(?=^  [A-Za-z0-9_-]+:|$(?![\s\S]))/gm);
+    let checked = 0;
+    for (const [job] of jobs) {
+      const macJob = /^    runs-on: macos-[^\n]+$/m.test(job);
+      for (const step of job.split(/^      - /m).slice(1)) {
+        if (!step.includes("release-draft.mjs")) continue;
+        const bash = /^        shell: bash$/m.test(step);
+        const macStep = /^        if: matrix\.platform == 'macos-[^']+'$/m.test(step);
+        expect(bash || macJob || macStep, step.split("\n")[0]).toBe(true);
+        checked += 1;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
 });
 
 describe.skipIf(process.platform === "win32")("Homebrew release boundary (POSIX CLI fixture)", () => {

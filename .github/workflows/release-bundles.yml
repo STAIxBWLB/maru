@@ -59,6 +59,7 @@ jobs:
 
       - name: Admit draft ID and immutable target through CI and native E2E
         id: release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -263,6 +264,7 @@ jobs:
           echo "APPLE_API_KEY_PATH=$key_file" >> "$GITHUB_ENV"
 
       - name: Confirm the admitted draft before bundle upload
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: node .release-tools/scripts/release-draft.mjs assert "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA"
@@ -405,6 +407,7 @@ jobs:
 
       - name: Verify all 21 draft assets and publish unless rehearsing
         id: publication
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: node .release-tools/scripts/release-draft.mjs finalize "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA"
