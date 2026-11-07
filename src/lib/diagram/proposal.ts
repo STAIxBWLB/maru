@@ -215,7 +215,11 @@ export function buildProposalFromCandidate(
   opts: BuildProposalOptions = {},
 ): { proposal: Proposal; diagnostics: ValidationDiagnostic[] } {
   const previous = semanticDatasetById(currentDoc, candidate.id);
-  const containers = previous === null || datasetHasContainers(currentDoc, candidate.id);
+  const descriptor = descriptorFor(candidate);
+  const hasRanges = descriptor !== null && semanticContainers(descriptor).some((container) =>
+    ["phase", "group", "segment", "activation"].includes(container.role) && specEntries(candidate.spec, container.field).length > 0,
+  );
+  const containers = previous === null || datasetHasContainers(currentDoc, candidate.id) || hasRanges;
   const projection = projectSemanticDataset(candidate, { containers, doc: currentDoc });
   const previousProjection = previous ? projectSemanticDataset(previous, { containers, doc: currentDoc }) : null;
   const diagnostics: ValidationDiagnostic[] = [...projection.diagnostics];

@@ -581,13 +581,15 @@ function containerNode(
   const id = semanticContainerId(dataset.id, role, rect.key);
   return {
     id,
-    kind: "section",
+    // Activations have no label in the schema. Their derived caption uses
+    // an outline instead of the section's opaque header over a message.
+    kind: role === "activation" ? "simple" : "section",
     x: rect.x,
     y: rect.y,
     w: rect.w,
     h: rect.h,
     title: rect.label,
-    ...(role === "phase" ? { style: { bg: "transparent" } } : {}),
+    ...(["phase", "segment", "activation"].includes(role) ? { style: { bg: "transparent" } } : {}),
     meta: { memberId: id, semanticContainer: role },
   };
 }
@@ -1011,7 +1013,15 @@ export function writeThroughText(
       else delete next.sublabel;
     }
   }
-  return replaceSpecEntry(doc, member.dataset, member.field, member.entry, next);
+  const written = replaceSpecEntry(doc, member.dataset, member.field, member.entry, next);
+  if (member.kind !== "entity" || member.dataset.diagramType !== "sequence" || !("title" in values)) return written;
+  const activationIds = new Set(specEntries(member.dataset.spec, "activations").flatMap((entry, index) =>
+    entry.participant === member.specId ? [semanticContainerId(member.dataset.id, "activation", String(index))] : [],
+  ));
+  const dependent = (node: DiagramNode) => activationIds.has(node.id) &&
+    isMemberOf(node, member.dataset.id) && node.meta?.semanticContainer === "activation";
+  if (doc.nodes.some((node) => dependent(node) && node.locked && node.title !== next.label)) return null;
+  return { ...written, nodes: written.nodes.map((node) => dependent(node) ? { ...node, title: String(next.label) } : node) };
 }
 
 // ---------------------------------------------------------------------------

@@ -118,7 +118,7 @@ describe("SemanticProps", () => {
     const text = q("semantic-props")!.textContent!;
     expect(text).toContain(ko(`diagram.semantic.role.${role}`));
     expect(text).toContain(`${ko("diagram.semantic.members")}${count}`);
-    expect(q("semantic-label")!.textContent).toBe("label" in entry ? entry.label : "api");
+    expect(q("semantic-label")!.textContent).toBe("label" in entry ? entry.label : "API");
   });
 
   it("stays hidden for freeform objects", () => {

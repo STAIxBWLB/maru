@@ -508,12 +508,36 @@ describe("buildProposalFromCandidate with a previous dataset", () => {
     expect(outcome.transformer(stateOf(base)).doc.nodes[0]!.id).toBe("ds-workflow:lane:ops");
   });
 
-  it("never adds containers to a container-less (P1) dataset", () => {
+  it("keeps legacy primary-only datasets container-less when there are no range fields", () => {
     const dataset = datasetOf("workflow", SEMANTIC_FIXTURES.workflow);
     const members = projectSemanticCandidate(dataset);
     const p1 = doc(members.nodes, members.edges, { datasets: [dataset] });
     const { proposal } = buildProposalFromCandidate(memberMeta(p1, "ds-workflow"), dataset, p1);
     expect(proposal.ops.filter((op) => op.kind === "addNode")).toEqual([]);
+  });
+
+  it.each(["sequence", "workflow"] as const)("projects range containers on explicit regeneration of a legacy %s canvas", (type) => {
+    const spec = structuredClone(SEMANTIC_FIXTURES[type]);
+    if (type === "sequence") {
+      spec.segments = [{ from: 170, to: 290, label: "Lookup" }];
+      spec.activations = [{ participant: "api", from: 180, to: 280 }];
+    } else {
+      spec.phases = [{ id: "build", label: "Build", fromCol: 0, toCol: 2 }];
+      spec.groups = [{ id: "publish", label: "Publish", lane: "author", fromCol: 2, toCol: 2 }];
+    }
+    const dataset = datasetOf(type, spec);
+    const members = projectSemanticCandidate(dataset);
+    const p1 = doc(members.nodes, members.edges, { datasets: [dataset] });
+    const before = JSON.stringify(p1);
+    const { proposal } = buildProposalFromCandidate(memberMeta(p1, dataset.id), dataset, p1);
+    expect(JSON.stringify(p1)).toBe(before);
+    const added = proposal.ops.filter((op) => op.kind === "addNode").map((op) => op.node.meta?.semanticContainer);
+    expect(added).toEqual(type === "sequence" ? ["segment", "activation"] : ["phase", "lane", "lane", "group"]);
+    const outcome = prepareProposalApply(stateOf(p1), proposal, "");
+    if (outcome.status !== "applied") throw new Error(JSON.stringify(outcome));
+    const applied = outcome.transformer(stateOf(p1)).doc;
+    expect(applied.edges).toEqual(p1.edges);
+    for (const old of p1.nodes) expect(applied.nodes.find((node) => node.id === old.id)).toEqual(old);
   });
 
   it("keeps only touched ids when a manual edit passes the touched filter", () => {

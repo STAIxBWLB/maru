@@ -103,6 +103,9 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
           ? member.entry.id
           : "-";
 
+  const participantLabel = typeof member.entry.participant === "string"
+    ? labelOf(specEntries(spec, "participants").find((entry) => entry.id === member.entry.participant), member.entry.participant)
+    : "";
   const membership: Array<{ labelKey: string; value: string }> = [];
   if (member.kind === "entity") {
     const lane = lanes.find((entry) => entry.id === member.entry.lane);
@@ -155,7 +158,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
         <Row labelKey="diagram.semantic.dataset" value={dataset.name} />
         <Row labelKey="diagram.semantic.role" value={t(`diagram.semantic.role.${role}`)} />
         <Row labelKey="diagram.semantic.id" value={id} />
-        <Row labelKey="diagram.semantic.label" value={labelOf(member.entry, typeof member.entry.participant === "string" ? member.entry.participant : "")} testId="semantic-label" />
+        <Row labelKey="diagram.semantic.label" value={labelOf(member.entry, participantLabel)} testId="semantic-label" />
         {membership.map((row) => (
           <Row key={row.labelKey} labelKey={row.labelKey} value={row.value} />
         ))}

@@ -253,7 +253,8 @@ describe("projectSemanticDataset", () => {
     const activation = doc.nodes.find((node) => node.id === "ds-sequence:activation:0")!;
     expect(segment.y).toBeCloseTo(105.6);
     expect(segment.y + segment.h).toBeCloseTo(230.4);
-    expect(activation).toMatchObject({ x: 304, y: 144, w: 32, h: 64, title: "API" });
+    expect(segment.style?.bg).toBe("transparent");
+    expect(activation).toMatchObject({ kind: "simple", x: 304, y: 144, w: 32, h: 64, title: "API", style: { bg: "transparent" } });
     expect(doc.edges).toEqual(projectSemanticDataset(datasetOf("sequence")).edges);
     expect(resolveSemanticMember(doc, { nodeId: segment.id })).toMatchObject({ role: "segment", field: "segments", index: 0 });
     expect(resolveSemanticMember(doc, { nodeId: activation.id })).toMatchObject({ role: "activation", field: "activations", index: 0 });
