@@ -156,22 +156,26 @@ pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, 
     let usage = object.get("usage").and_then(JsonValue::as_object);
     let model_usage = object.get("modelUsage").and_then(JsonValue::as_object);
     // Top-level `usage` covers the main loop only; `modelUsage` also counts
-    // subagents and compaction. Prefer the per-model sum per field when any
-    // model entry reports it.
+    // subagents and compaction. Per field: sum when every model entry
+    // reports it, top-level when none does, unknown when only some do.
     let count = |usage_key: &str, model_key: &str| {
-        let per_model: Vec<u64> = model_usage
+        let per_model: Vec<Option<u64>> = model_usage
             .map(|m| {
                 m.values()
-                    .filter_map(|v| v.get(model_key).and_then(JsonValue::as_u64))
+                    .map(|v| v.get(model_key).and_then(JsonValue::as_u64))
                     .collect()
             })
             .unwrap_or_default();
-        if per_model.is_empty() {
+        if per_model.iter().all(Option::is_none) {
+            // No model entry has it (or no modelUsage): top-level usage.
             usage
                 .and_then(|u| u.get(usage_key))
                 .and_then(JsonValue::as_u64)
         } else {
-            Some(per_model.iter().fold(0u64, |a, b| a.saturating_add(*b)))
+            // Every entry must report it; a partial set is unknown, not a total.
+            per_model
+                .into_iter()
+                .try_fold(0u64, |acc, value| acc.checked_add(value?))
         }
     };
     let tokens = UsageTokens {
@@ -297,29 +301,58 @@ pub fn summarize_usage(events: &[AgentRunEvent]) -> RunUsageSummary {
         if !seen.insert(receipt.receipt_id.clone()) {
             continue;
         }
+        let t = &receipt.tokens;
+        let add = |total: u64, value: Option<u64>| total.checked_add(value.unwrap_or(0));
+        let money = |total: i64, value: Option<i64>| total.checked_add(value.unwrap_or(0));
+        let (confirmed, estimate) = match receipt.pricing_status {
+            PricingStatus::Billed | PricingStatus::Zero => (
+                money(summary.confirmed_micros, receipt.billed_micros),
+                Some(summary.estimate_micros),
+            ),
+            PricingStatus::Estimate => (
+                Some(summary.confirmed_micros),
+                money(summary.estimate_micros, receipt.estimate_micros),
+            ),
+            _ => (
+                Some(summary.confirmed_micros),
+                Some(summary.estimate_micros),
+            ),
+        };
+        let sums = (
+            add(summary.input_tokens, t.input),
+            add(summary.cached_read_tokens, t.cached_read),
+            add(summary.cache_write_tokens, t.cache_write),
+            add(summary.output_tokens, t.output),
+            confirmed,
+            estimate,
+        );
+        // A receipt that would overflow any total is not trusted: count it as
+        // unavailable and leave every total unchanged.
+        let (Some(input), Some(cached), Some(write), Some(output), Some(confirmed), Some(estimate)) =
+            sums
+        else {
+            summary.receipt_count += 1;
+            summary.unavailable_count += 1;
+            continue;
+        };
         summary.receipt_count += 1;
         if receipt.outcome != "ok" {
             summary.failed_count += 1;
         }
-        let t = &receipt.tokens;
         summary.input_counted += usize::from(t.input.is_some());
         summary.cached_read_counted += usize::from(t.cached_read.is_some());
         summary.cache_write_counted += usize::from(t.cache_write.is_some());
         summary.output_counted += usize::from(t.output.is_some());
-        summary.input_tokens += t.input.unwrap_or(0);
-        summary.cached_read_tokens += t.cached_read.unwrap_or(0);
-        summary.cache_write_tokens += t.cache_write.unwrap_or(0);
-        summary.output_tokens += t.output.unwrap_or(0);
+        summary.input_tokens = input;
+        summary.cached_read_tokens = cached;
+        summary.cache_write_tokens = write;
+        summary.output_tokens = output;
+        summary.confirmed_micros = confirmed;
+        summary.estimate_micros = estimate;
         match receipt.pricing_status {
-            PricingStatus::Billed | PricingStatus::Zero => {
-                summary.priced_count += 1;
-                summary.confirmed_micros += receipt.billed_micros.unwrap_or(0);
-            }
+            PricingStatus::Billed | PricingStatus::Zero => summary.priced_count += 1,
             PricingStatus::SubscriptionIncluded => summary.subscription_included_count += 1,
-            PricingStatus::Estimate => {
-                summary.estimate_count += 1;
-                summary.estimate_micros += receipt.estimate_micros.unwrap_or(0);
-            }
+            PricingStatus::Estimate => summary.estimate_count += 1,
             PricingStatus::Unpriced => summary.unpriced_count += 1,
             PricingStatus::Unavailable => summary.unavailable_count += 1,
         }
@@ -503,6 +536,32 @@ mod tests {
         e.id = "event-inc".into();
         let s = summarize_usage(&[e.clone(), e]);
         assert_eq!(s.pending_count, 2);
+    }
+
+    #[test]
+    fn partial_model_usage_counter_is_unknown() {
+        let raw = r#"{"type":"result","result":"x","usage":{"input_tokens":100,"output_tokens":50},"modelUsage":{"a":{"inputTokens":10,"outputTokens":20},"b":{"outputTokens":30}}}"#;
+        let r = parse_claude_json_result(raw, "ok").unwrap().1;
+        assert_eq!(r.tokens.input, None);
+        assert_eq!(r.tokens.output, Some(50));
+    }
+
+    #[test]
+    fn overflowing_receipt_is_unavailable_and_totals_unchanged() {
+        let raw = r#"{"type":"result","result":"x","usage":{"input_tokens":18446744073709551615}}"#;
+        let big = parse_claude_json_result(raw, "ok").unwrap().1;
+        let small = parse_claude_json_result(
+            r#"{"type":"result","result":"x","usage":{"input_tokens":1}}"#,
+            "ok",
+        )
+        .unwrap()
+        .1;
+        let s = summarize_usage(&[event(&big), event(&small)]);
+        assert_eq!(s.input_tokens, u64::MAX);
+        assert_eq!(
+            (s.receipt_count, s.unavailable_count, s.input_counted),
+            (2, 1, 1)
+        );
     }
 
     #[test]
