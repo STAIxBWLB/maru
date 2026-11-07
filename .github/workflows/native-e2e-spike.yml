@@ -25,7 +25,7 @@ on:
 jobs:
   spike:
     name: hosted macOS session-establishment spike
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -50,7 +50,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          shared-key: macos-14-native-e2e
+          shared-key: macos-26-native-e2e
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
