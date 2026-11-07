@@ -169,17 +169,18 @@ pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, 
         })
         .unwrap_or_default();
     models.sort();
-    let cost_bases: HashSet<&str> = model_usage
+    // Confirmed classes need every model entry to state the same basis; a
+    // missing or mixed basis is not verified spend.
+    let bases: Vec<Option<&str>> = model_usage
         .map(|m| {
             m.values()
-                .filter_map(|v| v.get("costBasis").and_then(JsonValue::as_str))
+                .map(|v| v.get("costBasis").and_then(JsonValue::as_str))
                 .collect()
         })
         .unwrap_or_default();
-    let basis = if cost_bases.len() == 1 {
-        cost_bases.iter().next().copied()
-    } else {
-        None
+    let basis = match bases.first() {
+        Some(Some(first)) if bases.iter().all(|b| *b == Some(*first)) => Some(*first),
+        _ => None,
     };
     let cost = object
         .get("total_cost_usd")
@@ -230,9 +231,12 @@ pub struct RunUsageSummary {
     pub cached_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub output_tokens: u64,
-    /// Receipts that reported token counters. 0 means tokens are unknown,
+    /// Receipts that reported each counter. 0 means that counter is unknown,
     /// not a measured zero.
-    pub counted_count: usize,
+    pub input_counted: usize,
+    pub cached_read_counted: usize,
+    pub cache_write_counted: usize,
+    pub output_counted: usize,
     /// Sum of `billed`/`zero` receipts only, in USD millionths.
     pub confirmed_micros: i64,
     /// Sum of advisory estimates, never mixed into `confirmed_micros`.
@@ -270,14 +274,10 @@ pub fn summarize_usage(events: &[AgentRunEvent]) -> RunUsageSummary {
             summary.failed_count += 1;
         }
         let t = &receipt.tokens;
-        if t.input
-            .or(t.cached_read)
-            .or(t.cache_write)
-            .or(t.output)
-            .is_some()
-        {
-            summary.counted_count += 1;
-        }
+        summary.input_counted += usize::from(t.input.is_some());
+        summary.cached_read_counted += usize::from(t.cached_read.is_some());
+        summary.cache_write_counted += usize::from(t.cache_write.is_some());
+        summary.output_counted += usize::from(t.output.is_some());
         summary.input_tokens += t.input.unwrap_or(0);
         summary.cached_read_tokens += t.cached_read.unwrap_or(0);
         summary.cache_write_tokens += t.cache_write.unwrap_or(0);
@@ -401,6 +401,47 @@ mod tests {
     }
 
     #[test]
+    fn ac1_missing_or_mixed_model_basis_is_not_confirmed() {
+        let base: JsonValue = serde_json::from_str(CLAUDE_FIXTURE).unwrap();
+        let with_models = |models: JsonValue, cost: JsonValue| {
+            let mut v = base.clone();
+            v["modelUsage"] = models;
+            if cost.is_null() {
+                v.as_object_mut().unwrap().remove("total_cost_usd");
+            } else {
+                v["total_cost_usd"] = cost;
+            }
+            parse_claude_json_result(&v.to_string(), "ok").unwrap().1
+        };
+        let missing = with_models(json!({"a":{"costBasis":"actual"},"b":{}}), json!(1));
+        assert_eq!(missing.pricing_status, PricingStatus::Estimate);
+        assert_eq!(missing.billed_micros, None);
+        let mixed = with_models(
+            json!({"a":{"costBasis":"billed"},"b":{"costBasis":"subscription"}}),
+            json!(1),
+        );
+        assert_eq!(mixed.pricing_status, PricingStatus::Estimate);
+        let mixed_zero = with_models(json!({"a":{"costBasis":"billed"},"b":{}}), json!(0));
+        assert_eq!(mixed_zero.pricing_status, PricingStatus::Estimate);
+        let none = with_models(json!({"a":{"costBasis":"billed"},"b":{}}), JsonValue::Null);
+        assert_eq!(none.pricing_status, PricingStatus::Unpriced);
+        let all = with_models(
+            json!({"a":{"costBasis":"billed"},"b":{"costBasis":"billed"}}),
+            json!(1),
+        );
+        assert_eq!(all.pricing_status, PricingStatus::Billed);
+    }
+
+    #[test]
+    fn partial_counters_stay_unknown_per_field() {
+        let raw = r#"{"type":"result","result":"x","usage":{"input_tokens":4,"output_tokens":5}}"#;
+        let r = parse_claude_json_result(raw, "ok").unwrap().1;
+        let s = summarize_usage(&[event(&r)]);
+        assert_eq!((s.input_counted, s.output_counted), (1, 1));
+        assert_eq!((s.cached_read_counted, s.cache_write_counted), (0, 0));
+    }
+
+    #[test]
     fn ac3_error_result_without_result_field_keeps_usage() {
         let raw = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.2,"usage":{"input_tokens":5,"output_tokens":6},"modelUsage":{"m":{"costBasis":"list"}}}"#;
         let (content, r) = parse_claude_json_result(raw, "failed").unwrap();
@@ -472,7 +513,7 @@ mod tests {
         assert_eq!(u.billed_micros, None);
         let s = summarize_usage(&[event(&u)]);
         assert_eq!(
-            (s.unavailable_count, s.confirmed_micros, s.counted_count),
+            (s.unavailable_count, s.confirmed_micros, s.input_counted),
             (1, 0, 0)
         );
         let r = parse_claude_json_result(CLAUDE_FIXTURE, "ok").unwrap().1;

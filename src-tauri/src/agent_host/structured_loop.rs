@@ -194,7 +194,10 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
                     // Each call's usage is appended when the call ends, so a
                     // failed, cancelled or interrupted run keeps it (maru#431).
                     .with_usage_sink(cwd_thread.clone(), run_id_thread.clone());
-            run_five_role_loop(&mut adapter, input)
+            let result = run_five_role_loop(&mut adapter, input);
+            // One retry for receipts whose append failed mid-run.
+            adapter.flush_pending_usage();
+            result
         })();
         match result {
             Ok(result) => {

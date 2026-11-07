@@ -454,13 +454,13 @@ function usageLine(
   t: ReturnType<typeof useTranslation>["t"],
 ): string {
   if (!usage || usage.receiptCount === 0) return t("skillRuns.summary.usageNone");
-  // No receipt reported counters: show unknown, not a measured zero.
-  const tokens = (value: number) => (usage.countedCount > 0 ? value : "-");
+  // A counter no receipt reported is unknown, not a measured zero.
+  const tokens = (value: number, counted: number) => (counted > 0 ? value : "-");
   return t("skillRuns.summary.usage", {
-    input: tokens(usage.inputTokens),
-    cached: tokens(usage.cachedReadTokens),
-    cacheWrite: tokens(usage.cacheWriteTokens),
-    output: tokens(usage.outputTokens),
+    input: tokens(usage.inputTokens, usage.inputCounted),
+    cached: tokens(usage.cachedReadTokens, usage.cachedReadCounted),
+    cacheWrite: tokens(usage.cacheWriteTokens, usage.cacheWriteCounted),
+    output: tokens(usage.outputTokens, usage.outputCounted),
     confirmed: usage.pricedCount > 0 ? formatUsdMicros(usage.confirmedMicros) : "-",
     estimate: usage.estimateCount > 0 ? formatUsdMicros(usage.estimateMicros) : "-",
     priced: usage.pricedCount,

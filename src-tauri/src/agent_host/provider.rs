@@ -417,18 +417,32 @@ impl CliProviderAdapter {
             self.usage_receipts.push(receipt);
             return;
         };
-        if let Err(err) = crate::agent_host::event_store::append_run_event_payload(
-            cwd,
-            run_id,
-            crate::agent_host::usage::USAGE_RECORDED_EVENT,
-            &receipt.provider,
-            serde_json::json!({ "receipt": receipt }),
-        ) {
+        if let Err(err) = append_usage_receipt(cwd, run_id, &receipt) {
+            // Keep it for `flush_pending_usage`; the same receiptId makes a
+            // later double write harmless.
             eprintln!("maru: usage receipt not recorded for run {run_id}: {err}");
+            self.usage_receipts.push(receipt);
         }
     }
 
-    /// Receipts recorded since the last drain, oldest first (sink unset only).
+    /// Retry receipts whose sink append failed. Returns how many are still
+    /// unrecorded. No-op without a sink.
+    pub fn flush_pending_usage(&mut self) -> usize {
+        let Some((cwd, run_id)) = self.usage_sink.clone() else {
+            return 0;
+        };
+        let pending = std::mem::take(&mut self.usage_receipts);
+        for receipt in pending {
+            if let Err(err) = append_usage_receipt(&cwd, &run_id, &receipt) {
+                eprintln!("maru: usage receipt retry failed for run {run_id}: {err}");
+                self.usage_receipts.push(receipt);
+            }
+        }
+        self.usage_receipts.len()
+    }
+
+    /// Receipts not yet persisted, oldest first: every receipt without a sink,
+    /// or the ones whose sink append failed.
     pub fn take_usage_receipts(&mut self) -> Vec<UsageReceipt> {
         std::mem::take(&mut self.usage_receipts)
     }
@@ -437,6 +451,17 @@ impl CliProviderAdapter {
         self.metadata = metadata;
         self
     }
+}
+
+fn append_usage_receipt(cwd: &str, run_id: &str, receipt: &UsageReceipt) -> Result<(), String> {
+    crate::agent_host::event_store::append_run_event_payload(
+        cwd,
+        run_id,
+        crate::agent_host::usage::USAGE_RECORDED_EVENT,
+        &receipt.provider,
+        serde_json::json!({ "receipt": receipt }),
+    )
+    .map(|_| ())
 }
 
 impl ProviderAdapter for CliProviderAdapter {
@@ -922,6 +947,37 @@ mod tests {
         assert_eq!(usage.estimate_count, 1);
         assert_eq!(usage.unavailable_count, 0);
         assert!(adapter.take_usage_receipts().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_adapter_usage_sink_failure_keeps_receipt_for_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().to_str().unwrap().to_string();
+        let ok = r#"{"type":"result","result":"A","usage":{"input_tokens":1}}"#;
+        let cli = write_fake_cli(
+            dir.path().join("fake-claude"),
+            &format!("#!/bin/sh\necho '{ok}'\n"),
+        );
+        // A file where the run directory must go makes the append fail once.
+        let skills = dir.path().join(".maru/runs/skills");
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::write(skills.join("ai-retry"), "blocker").unwrap();
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Claude,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
+        )
+        .with_usage_sink(cwd.clone(), "ai-retry".into());
+        adapter.complete(completion_request("a", &cwd)).unwrap();
+        assert_eq!(adapter.flush_pending_usage(), 1);
+        std::fs::remove_file(skills.join("ai-retry")).unwrap();
+        assert_eq!(adapter.flush_pending_usage(), 0);
+        let usage = crate::agent_host::event_store::replay_run_summary(&cwd, "ai-retry")
+            .unwrap()
+            .usage;
+        assert_eq!((usage.receipt_count, usage.input_tokens), (1, 1));
     }
 
     #[cfg(unix)]
