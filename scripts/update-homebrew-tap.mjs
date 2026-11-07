@@ -96,16 +96,23 @@ if (shouldCommit) {
   });
 }
 
+// The tap audits publish/** and merges it into main itself; main takes no direct
+// pushes. Force so a re-run of the same release replaces a failed attempt.
+const publishBranch = `publish/maru-${tag}`;
 if (shouldPush) {
-  execFileSync("git", ["-C", tapDir, "push"], { stdio: "inherit" });
+  execFileSync(
+    "git",
+    ["-C", tapDir, "push", "--force", "origin", `HEAD:refs/heads/${publishBranch}`],
+    { stdio: "inherit" },
+  );
 }
 
 console.log("");
 console.log(`Homebrew tap target: ${tapRepo}`);
 console.log("Next:");
 console.log(`  cd ${tapDir}`);
-console.log("  brew audit --cask maru-workspace");
-console.log("  brew audit --formula maru-cli");
+console.log("  brew audit --cask staixbwlb/cask/maru-workspace");
+console.log("  brew audit --formula staixbwlb/cask/maru-cli");
 if (!shouldCommit) {
   const pathsForNextSteps = [
     ...removedLegacy,
