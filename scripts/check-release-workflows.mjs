@@ -78,8 +78,10 @@ function githubJson(route, fields, paginate = false) {
       encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
       timeout: 30_000, maxBuffer: 16 * 1024 * 1024,
     }));
-  } catch {
-    throw new Error("GitHub lookup failed; check repository access and Actions read permission, then retry Release Bundles");
+  } catch (error) {
+    const status = Number.isInteger(error?.status) ? `exit status ${error.status}` : error?.code ?? "invalid response";
+    const detail = error?.stderr?.toString().trim() || (error instanceof Error ? error.message : "unknown failure");
+    throw new Error(`GitHub lookup failed (gh ${status}): ${detail}. Check gh availability, repository access and Actions read permission, then retry Release Bundles`);
   }
 }
 
@@ -109,18 +111,18 @@ export async function verifyReleaseWorkflows(tag, repo, readJson = githubJson, r
         const pages = await readJson(`repos/${repo}/actions/workflows/${workflow}/runs`, { head_sha: sha, per_page: "100" }, true);
         if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page.workflow_runs))) throw new Error("invalid pages");
         runs = pages.flatMap((page) => page.workflow_runs);
-      } catch {
-        throw new Error(`${workflow}: run lookup failed for ${sha}; inspect https://github.com/${repo}/actions/workflows/${workflow}, check Actions read permission and retry Release Bundles`);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`${workflow}: run lookup failed for ${sha}; inspect https://github.com/${repo}/actions/workflows/${workflow}, check Actions read permission and retry Release Bundles. Cause: ${detail}`);
       }
       const result = evaluateWorkflowRuns(workflow, runs, { repo, sha, tag });
-      // A missing/malformed receipt remains fatal; there is no run to await.
-      if (result.fatal) throw new Error(result.message);
+      // A settled red workflow cannot be rescued by waiting for its sibling.
+      // Its own in-flight runs still take precedence inside evaluation.
+      if (result.fatal || (!result.ok && !result.pending)) throw new Error(result.message);
       results.push(result);
     }
     const pending = results.find((result) => result.pending);
     if (!pending) {
-      const failed = results.find((result) => !result.ok);
-      if (failed) throw new Error(failed.message);
       for (const result of results) report(result.message);
       break;
     }
