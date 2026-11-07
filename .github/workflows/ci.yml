@@ -1,14 +1,10 @@
 name: CI
-run-name: "${{ github.event_name == 'pull_request' && format('CI PR #{0}', github.event.pull_request.number) || format('CI {0}', github.sha) }}"
+# Unrelated labels neither cancel validation nor replace the required ci-ok check.
+run-name: "${{ (github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'native-e2e') && format('CI ignored label PR #{0}', github.event.pull_request.number) || github.event_name == 'pull_request' && format('CI PR #{0}', github.event.pull_request.number) || format('CI {0}', github.sha) }}"
 
 on:
   pull_request:
-    paths-ignore:
-      - README.md
-      - CHANGELOG.md
-      - docs/**
-      - .planning/**
-      - .github/**/*.md
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches:
       - main
@@ -26,8 +22,8 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ (github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'native-e2e') && format('ignored-label-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,19 +35,92 @@ jobs:
     timeout-minutes: 10
     outputs:
       run_full: ${{ steps.dedupe.outputs.run_full }}
+      run_e2e: ${{ steps.dedupe.outputs.run_e2e }}
+      run_native: ${{ steps.dedupe.outputs.run_native }}
+      run_native_compile: ${{ steps.dedupe.outputs.run_native_compile }}
 
     steps:
-      - name: Deduplicate an already verified main tree
+      - name: Checkout CI policy
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci-policy.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Setup Node for policy only
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+
+      - name: Classify PR changes
+        id: classify
+        if: github.event_name == 'pull_request' && !((github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'native-e2e'))
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$RUNNER_TEMP/ci-files.json"
+          node scripts/ci-policy.mjs classify "$RUNNER_TEMP/ci-files.json" "$GITHUB_EVENT_PATH"
+
+      - name: Decide intended validation
         id: dedupe
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_RUN_FULL: ${{ steps.classify.outputs.run_full }}
+          PR_RUN_E2E: ${{ steps.classify.outputs.run_e2e }}
+          PR_RUN_NATIVE: ${{ steps.classify.outputs.run_native }}
+          PR_RUN_COMPILE: ${{ steps.classify.outputs.run_native_compile }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_LABEL: ${{ github.event.label.name }}
         run: |
           set -uo pipefail
+          PR_LABEL=${PR_LABEL,,}
           run_full=true
-          reason="this event requires full validation"
+          run_e2e=false
+          run_native=false
+          run_native_compile=false
+          reason="this event requires verify; main avoids repeating PR-only checks"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            run_e2e=true
+            run_native_compile=true
+            reason="manual CI dispatch requests full verification"
+          fi
 
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if { [ "$PR_ACTION" = "labeled" ] || [ "$PR_ACTION" = "unlabeled" ]; } && [ "$PR_LABEL" != "native-e2e" ]; then
+              run_full=false
+              reason="unrelated label event; existing required CI check is unchanged"
+            else
+              run_full="$PR_RUN_FULL"
+              run_e2e="$PR_RUN_E2E"
+              run_native="$PR_RUN_NATIVE"
+              run_native_compile="$PR_RUN_COMPILE"
+              reason="PR path/label policy selected validation"
+              # A native label requests the suite, not another copy of already
+              # successful verify/browser/compile work on this identical SHA.
+              if [ "$PR_ACTION" = "labeled" ] || [ "$PR_ACTION" = "unlabeled" ]; then
+                if merge_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha) \
+                  && head_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$PR_HEAD_SHA" --jq .tree.sha) \
+                  && [ "$merge_tree" = "$head_tree" ] \
+                  && runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$PR_HEAD_SHA&status=completed&per_page=100"); then
+                  expected_title="CI PR #$PR_NUMBER"
+                  previous=$(jq -r --arg title "$expected_title" '[.workflow_runs[] | select(.display_title == $title)] | sort_by(.run_started_at) | last | .conclusion // ""' <<<"$runs")
+                  if [ "$previous" = "success" ]; then
+                    run_full=false
+                    run_e2e=false
+                    run_native_compile=false
+                    reason="native label event reused successful CI on $PR_HEAD_SHA; current native intent is still enforced"
+                  fi
+                fi
+              fi
+            fi
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
             reason="no exact successful pull request validation was found"
 
             if ! pulls=$(gh api \
@@ -91,11 +160,16 @@ jobs:
             fi
           fi
 
-          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+          {
+            echo "run_full=$run_full"
+            echo "run_e2e=$run_e2e"
+            echo "run_native=$run_native"
+            echo "run_native_compile=$run_native_compile"
+          } >> "$GITHUB_OUTPUT"
           echo "CI decision: $reason"
           if [ "$run_full" = "false" ]; then
             echo "### CI deduplicated" >> "$GITHUB_STEP_SUMMARY"
-            echo "$reason. Expensive validation is skipped for this main push." >> "$GITHUB_STEP_SUMMARY"
+            echo "$reason. Jobs run only when their decision output requests them." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   verify:
@@ -188,7 +262,7 @@ jobs:
   e2e:
     name: playwright e2e
     needs: decision
-    if: needs.decision.outputs.run_full == 'true'
+    if: needs.decision.outputs.run_e2e == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
@@ -228,13 +302,12 @@ jobs:
             test-results/
           retention-days: 7
 
-  # D-03: keep the native runner compiling on every PR without executing the
-  # suite - launching the real app per PR is rejected on cost and early-flake
-  # grounds (D-16). The gated suite lives in native-e2e.yml.
+  # Other code PRs retain compile/typecheck coverage. Selected native PRs
+  # call the full suite below, which already compiles the native feature.
   native-e2e-compile:
     name: native e2e compile check
     needs: decision
-    if: needs.decision.outputs.run_full == 'true'
+    if: needs.decision.outputs.run_native_compile == 'true'
     runs-on: macos-26
     timeout-minutes: 45
 
@@ -280,3 +353,35 @@ jobs:
       # a cold job, so --offline would fail for a reason unrelated to the code.
       - name: Cargo check with the native-e2e feature on
         run: cd src-tauri && cargo check --locked --features native-e2e
+
+  # PR native scope is listed in native-e2e.yml and shared in ci-policy.mjs.
+  # The reusable suite owns its 45-minute runner timeout; no second Mac compile.
+  native-e2e:
+    needs: decision
+    if: needs.decision.outputs.run_native == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/native-e2e.yml
+
+  ci-ok:
+    name: ${{ (github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'native-e2e') && 'ci-label-ignored' || 'ci-ok' }}
+    if: always()
+    needs: [decision, verify, e2e, native-e2e-compile, native-e2e]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout CI policy
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci-policy.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Setup Node for policy only
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - name: Require all intended gates
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci-policy.mjs aggregate

@@ -622,10 +622,17 @@ Use workspace-relative paths such as `task_management.root: tasks` in shared
 machine can resolve outside the selected workspace and is correctly rejected
 by the containment guard.
 
-Pull requests run a lightweight decision job first. Source changes fan out to
-`make verify` and Playwright E2E. Version-changing PRs run `make release-checks`
-instead of the ordinary verify target, adding release-mode CLI and debug Tauri
-checks. Documentation-only and `.planning/**` changes skip expensive CI.
+Every pull request reports `ci-ok`, including docs-only changes. A lightweight
+path/label decision selects verify and Playwright; native fixtures, IPC,
+window/menu/webview, PTY and runtime/config changes (listed in
+`native-e2e.yml`) or the `native-e2e` label additionally select the full native
+suite through a reusable workflow. Other code PRs keep native compile coverage;
+selected native PRs do not compile twice. `ci-ok` requires every selected job,
+including the suite, and rejects failures, cancellations and unplanned skips.
+Version-changing PRs use `make release-checks`. Docs-only and `.planning/**`
+changes skip builds; performance evidence JSON remains validation input. Native
+label changes may reuse successful CI for the same SHA, while unrelated labels
+cannot replace or cancel the required check. Browser E2E runs on PRs and explicit manual CI dispatches, not main pushes.
 
 A push to `main` may reuse the exact PR tree only when the successful PR run is
 for the identical head SHA. Direct pushes, merge-tree differences, missing
