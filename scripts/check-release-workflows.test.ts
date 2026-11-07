@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -114,6 +116,21 @@ describe("release workflow run eligibility", () => {
 });
 
 describe("verifyReleaseWorkflows polling", () => {
+  it.each(REQUIRED_WORKFLOWS)("rejects settled red %s without waiting for its pending sibling", async (failedWorkflow) => {
+    const sleeps: number[] = [];
+    const readJson = async (route: string) => {
+      if (route.endsWith("/commits")) return [{ sha }];
+      return workflowPages([route.includes(failedWorkflow)
+        ? run({ id: 50, conclusion: "failure" })
+        : run({ id: 51, status: "in_progress", conclusion: null })]);
+    };
+    await expect(verifyReleaseWorkflows(tag, repo, readJson, () => {}, {
+      now: () => 0,
+      sleep: async (ms: number) => { sleeps.push(ms); throw new Error("must not wait"); },
+    })).rejects.toThrow(`${failedWorkflow}: latest run concluded failure, not success`);
+    expect(sleeps).toEqual([]);
+  });
+
   it("refreshes both workflow snapshots until a newer tag run succeeds", async () => {
     let now = 0;
     let nativePolls = 0;
@@ -260,5 +277,43 @@ describe("verifyReleaseWorkflows polling", () => {
     expect(prepareTimeout).not.toBeNull();
     expect(MAX_WAIT_MS).toBe((Number(nativeTimeout?.[1]) + 5) * 60_000);
     expect(Number(prepareTimeout?.[1]) * 60_000).toBeGreaterThanOrEqual(MAX_WAIT_MS + 10 * 60_000);
+  });
+});
+
+describe("release lookup diagnostics", () => {
+  it.each([
+    { stage: "tag", detail: "gh: Not Found (HTTP 404)", status: 1 },
+    { stage: "runs", detail: "gh: Resource not accessible by integration (HTTP 403)", status: 4 },
+    { stage: "runs", detail: "gh: API rate limit exceeded (HTTP 403)", status: 1 },
+    { stage: "missing", detail: "ENOENT", status: undefined },
+  ])("retains gh cause for $stage: $detail", ({ stage, detail, status }) => {
+    const fixture = mkdtempSync(resolve(tmpdir(), "maru-release-lookup-"));
+    try {
+      if (stage !== "missing") {
+        writeFileSync(resolve(fixture, "gh"), `#!${process.execPath}
+if (${JSON.stringify(stage)} === "runs" && process.argv.includes("repos/${repo}/commits")) {
+  console.log(JSON.stringify([{ sha: ${JSON.stringify(sha)} }]));
+} else {
+  process.stderr.write(${JSON.stringify(`  ${detail}\n`)});
+  process.exit(${status});
+}
+`, { mode: 0o755 });
+      }
+      const output = resolve(fixture, "github-output");
+      const result = spawnSync(process.execPath, [resolve(process.cwd(), "scripts/check-release-workflows.mjs"), tag], {
+        encoding: "utf8",
+        timeout: 5000,
+        env: { PATH: fixture, HOME: fixture, GITHUB_REPOSITORY: repo, GITHUB_OUTPUT: output },
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(detail);
+      if (status !== undefined) expect(result.stderr).toContain(`gh exit status ${status}`);
+      expect(result.stderr).toContain("retry Release Bundles");
+      if (stage === "runs") expect(result.stderr).toContain("ci.yml: run lookup failed");
+      expect(existsSync(output)).toBe(false);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 });
