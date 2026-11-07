@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: release-bundles-${{ github.event.release.tag_name || inputs.tag }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,10 +25,16 @@ jobs:
   prepare:
     name: Validate release inputs
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Gate waits up to 50 minutes (native suite 45 + queue margin), with
+    # another 10 minutes for checkout/setup and validation.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       id: ${{ steps.release.outputs.id }}
+      sha: ${{ steps.verification.outputs.sha }}
 
     steps:
       - name: Resolve release
@@ -59,16 +65,34 @@ jobs:
           echo "id=$id" >> "$GITHUB_OUTPUT"
           echo "Resolved release: tag=$tag id=$id"
 
-      - name: Checkout release tag
+      # Read admission code from this workflow's revision, not an older tag
+      # that may predate the gate. No dependencies or release assets are built.
+      - name: Checkout release gate tooling
         uses: actions/checkout@v5
         with:
-          ref: ${{ steps.release.outputs.tag }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-checks
+          sparse-checkout: scripts/check-release-workflows.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: 22.22.3
           package-manager-cache: false
+
+      - name: Require successful CI and native E2E on the release commit
+        id: verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: node .release-checks/scripts/check-release-workflows.mjs "$RELEASE_TAG"
+
+      - name: Checkout verified release commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.verification.outputs.sha }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -154,10 +178,10 @@ jobs:
             dmg_arch: ""
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout verified release commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -326,10 +350,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout Maru release tag
+      - name: Checkout verified Maru release commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v5
