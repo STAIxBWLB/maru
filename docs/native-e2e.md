@@ -168,7 +168,7 @@ Verdict: **ci-viable** (per-condition evidence in `## Spike log` below).
 Consequences:
 
 - **Every pull request:** the `native-e2e-compile` job in
-  `.github/workflows/ci.yml` runs on `macos-14` — install, `pnpm typecheck`,
+  `.github/workflows/ci.yml` runs on `macos-26` (macOS 14 images were retired 2026-11-02) — install, `pnpm typecheck`,
   `pnpm lint`, and `cargo check --locked --features native-e2e`. It compiles
   and typechecks the runner so it cannot rot between releases; it never
   executes the suite (D-03).
