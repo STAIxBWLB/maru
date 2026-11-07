@@ -5,6 +5,10 @@ const port = Number(process.env.MARU_E2E_PORT ?? 5307);
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
+  // Owner decision 2026-11-07 (#512 item 7): on CI a test that fails then passes is
+  // reported flaky instead of being hidden by a manual rerun; the failed attempt's
+  // trace is still retained (GATE-04 below is unchanged). Per-spec retries override this.
+  retries: process.env.CI ? 1 : 0,
   workers: process.platform === "win32" ? 2 : undefined,
   expect: {
     timeout: 8_000,
