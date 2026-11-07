@@ -654,6 +654,20 @@ retention, and the per-language and per-crate totals table appears in the
 run's Job Summary. There is no threshold, so a lower number never fails
 anything.
 
+`platform-build.yml` runs daily at 19:23 UTC and supports manual dispatch.
+It builds production Tauri bundles on Windows (`windows-latest`) and macOS
+(`macos-26`), one platform at a time, without signing, notarization or updater
+artifacts. Scheduled runs build main's SHA from the schedule event and skip
+packaging when that SHA is still main and already has a successful run of
+this workflow. Manual dispatches validate the selected branch SHA; only
+dispatches at the current main SHA reuse its successful receipt. A PR runs
+these builds only when it changes `.github/workflows/platform-build.yml`,
+building its head SHA. PRs cancel superseded runs in their own group;
+scheduled/manual runs share a non-cancelling group. Bundles are discarded;
+only failure logs upload, with three-day retention. This checks packaging
+before release day and does not publish assets or replace signed release
+validation.
+
 The compiled CSP gate invokes the built host-native desktop binary with
 `--print-compiled-csp`. This headless diagnostic reports the runtime-effective
 CSP from the same generated Tauri Context used by startup (including `devCsp`

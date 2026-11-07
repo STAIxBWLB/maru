@@ -1,0 +1,149 @@
+name: Platform Bundle Build
+
+# macOS runners are shared: schedule daily, and validate PRs only when this
+# workflow itself changes. No signing, notarization, updater assets or publication.
+on:
+  schedule:
+    - cron: '23 19 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/platform-build.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('platform-build-pr-{0}', github.event.pull_request.number) || 'platform-build' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  decision:
+    name: Select bundle build commit
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      run_build: ${{ steps.target.outputs.run_build }}
+    steps:
+      - name: Resolve target and reuse successful main receipt
+        id: target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if ! main_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha); then
+            echo "::error::Cannot resolve main for the platform build. Check repository access and retry Platform Bundle Build."
+            exit 1
+          fi
+          if [[ ! "$main_sha" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::Main lookup did not return a commit SHA. Inspect main in the repository and retry Platform Bundle Build."
+            exit 1
+          fi
+          # Build the PR head rather than GitHub's synthetic merge commit;
+          # schedule/dispatch stays at its event SHA if main advances in queue.
+          sha="$EVENT_SHA"
+          if [[ ! "$sha" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::Platform build target is not a commit SHA. Inspect the selected branch and retry Platform Bundle Build."
+            exit 1
+          fi
+          run_build=true
+          # PR heads and branch dispatches validate their selected commit even
+          # if main is green. Only an exact main SHA may reuse prior success.
+          if [ "$sha" = "$main_sha" ]; then
+            if ! gh api --method GET --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/platform-build.yml/runs" \
+              -f head_sha="$sha" -f status=success -f per_page=100 \
+              > "$RUNNER_TEMP/platform-build-runs.json"; then
+              echo "::error::Cannot read platform build receipts. Check Actions read permission and retry Platform Bundle Build."
+              exit 1
+            fi
+            if ! count=$(jq --arg sha "$sha" \
+              '[.[].workflow_runs[] | select(.head_sha == $sha and .conclusion == "success")] | length' \
+              "$RUNNER_TEMP/platform-build-runs.json"); then
+              echo "::error::Platform build receipts are malformed. Inspect the workflow runs API response and retry Platform Bundle Build."
+              exit 1
+            fi
+            if [ "$count" -gt 0 ]; then
+              run_build=false
+            fi
+          fi
+          {
+            echo "sha=$sha"
+            echo "run_build=$run_build"
+          } >> "$GITHUB_OUTPUT"
+          echo "Platform bundle target: $sha; build required: $run_build" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Unsigned bundles (${{ matrix.platform }})
+    needs: decision
+    if: needs.decision.outputs.run_build == 'true'
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        platform: [windows-latest, macos-26]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.decision.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: platform-bundles-${{ matrix.platform }}
+
+      - name: Install frontend dependencies
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee platform-build.log
+
+      - name: Build unsigned production bundles
+        run: |
+          set -euo pipefail
+          # The checked-in release config enables updater artifacts; disable
+          # them here so no TAURI_SIGNING_PRIVATE_KEY is needed. --no-sign
+          # also bypasses platform signing/notarization, including ad-hoc signing.
+          printf '%s\n' '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/unsigned-tauri.json"
+          pnpm exec tauri build --ci --no-sign \
+            --config "$RUNNER_TEMP/unsigned-tauri.json" 2>&1 | tee -a platform-build.log
+
+      - name: Retain failure log only
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-build-${{ matrix.platform }}-failure
+          path: platform-build.log
+          retention-days: 3
+          if-no-files-found: ignore
