@@ -167,20 +167,18 @@ sources and recorded evidence only, and never builds or launches the app.
 Verdict: **ci-viable** (per-condition evidence in `## Spike log` below).
 Consequences:
 
-- **Every pull request:** the `native-e2e-compile` job in
-  `.github/workflows/ci.yml` runs on `macos-26` (macOS 14 images were retired 2026-11-02) — install, `pnpm typecheck`,
-  `pnpm lint`, and `cargo check --locked --features native-e2e`. It compiles
-  and typechecks the runner so it cannot rot between releases; it never
-  executes the suite (D-03).
-- **Pushes to `main` and release tags (`v*`):** the `native-e2e-suite` job in
-  `.github/workflows/native-e2e.yml` runs the full suite unattended and
-  uploads failure evidence (run log plus a screencapture of the runner's
-  screen). Per-PR execution was rejected on macOS runner cost and
-  early-flakiness grounds; release-tag-only was rejected because it finds
-  regressions at the worst possible moment (D-16). Documentation-only pushes
-  to `main` skip the suite (same `paths-ignore` list as ci.yml and
-  coverage.yml); tags always run it, since GitHub does not evaluate path
-  filters for tag pushes.
+- **Selected pull requests:** CI calls `native-e2e.yml` through `workflow_call`
+  for the native/IPC/window paths listed in its header or the `native-e2e`
+  label. The reusable suite runs on `macos-26`, and its result is a dependency
+  of `ci-ok`; no cross-workflow polling or duplicate native compile is needed.
+- **Other code pull requests:** `native-e2e-compile` retains typecheck, lint and
+  `cargo check --locked --features native-e2e` coverage. Docs-only PRs skip
+  builds but still report `ci-ok`.
+- **Main/tag pushes and manual dispatch:** the standalone native workflow
+  retains exact-commit receipts for release admission, with non-cancelling
+  ref groups. These receipts certify the later main/tag SHA rather than a
+  PR head. Docs-only main pushes skip; tag pushes still run. PR callers use
+  separate native groups and cancel superseded PR runs.
 - **A human must run:** `make release-preflight`, which blocks on
   `make test-e2e-native` on every machine regardless of the verdict (D-03),
   and the checklist below.
@@ -364,9 +362,9 @@ Retry cap: 3 hosted runs. Runs used: 2.
    menu 2.7s) inside a `workflow_dispatch` job, start to finish with no human
    present.
 
-Consequence: the full suite runs in CI on pushes to `main` and on release tags
-(`.github/workflows/native-e2e.yml`, plan 06-05), pull requests get the
-compile-and-typecheck job only (D-16), and the spike workflow is retired.
+The original plan 06-05 / D-16 consequence was full main/tag runs with
+compile-only PR coverage and a retired spike. The current CI placement above
+adds selected full native PR runs under #512 while preserving that verdict.
 
 ### Ratification
 
