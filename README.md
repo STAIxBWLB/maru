@@ -852,7 +852,12 @@ Developer ID signing and Tauri updater signing are separate. The normal release
 does not enable the browser-passkey provisioning overlay.
 
 Notarization uses an App Store Connect API key. `APPLE_API_KEY` stores the
-private `.p8` contents; the runner writes them to a mode-600 temporary file.
+private `.p8` contents, as raw PEM or base64 PEM (wrapped lines are accepted).
+The shared credential helper normalizes them, requires a
+`-----BEGIN PRIVATE KEY-----` header and writes a mode-600 temporary file
+without logging the material. A format refusal asks for
+`gh secret set APPLE_API_KEY < AuthKey_<id>.p8` from the original key file.
+The helper comes from the workflow revision, even when rebuilding an older tag.
 Tauri receives that path as `APPLE_API_KEY_PATH`, the stored `APPLE_API_KEY_ID`
 as its `APPLE_API_KEY` environment variable, and `APPLE_API_ISSUER_ID` as
 `APPLE_API_ISSUER`, matching the
