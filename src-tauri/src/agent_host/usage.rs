@@ -378,7 +378,7 @@ mod tests {
     /// Captured from `claude -p ... --output-format json` (Claude Code CLI,
     /// 2026-11-08), trimmed to the fields Maru reads plus some it must ignore.
     /// Session id, uuid and credential expiry are replaced.
-    const CLAUDE_FIXTURE: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","stop_reason":"end_turn","session_id":"00000000-0000-0000-0000-000000000000","total_cost_usd":0.4407342,"usage":{"input_tokens":2,"cache_creation_input_tokens":54611,"cache_read_input_tokens":11491,"output_tokens":77,"service_tier":"standard"},"modelUsage":{"claude-opus-5-5":{"inputTokens":2,"outputTokens":77,"cacheReadInputTokens":11491,"cacheCreationInputTokens":54611,"costUSD":0.4407342,"provider":"firstParty","costBasis":"list"}},"credential_expires_at":"2000-01-01T00:00:00Z"}"#;
+    const CLAUDE_FIXTURE: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"FIXTURE-ANSWER-7f3a","stop_reason":"end_turn","session_id":"00000000-0000-0000-0000-000000000000","total_cost_usd":0.4407342,"usage":{"input_tokens":2,"cache_creation_input_tokens":54611,"cache_read_input_tokens":11491,"output_tokens":77,"service_tier":"standard"},"modelUsage":{"claude-opus-5-5":{"inputTokens":2,"outputTokens":77,"cacheReadInputTokens":11491,"cacheCreationInputTokens":54611,"costUSD":0.4407342,"provider":"firstParty","costBasis":"list"}},"credential_expires_at":"2000-01-01T00:00:00Z"}"#;
 
     fn with_cost(cost: JsonValue, basis: &str) -> String {
         let mut v: JsonValue = serde_json::from_str(CLAUDE_FIXTURE).unwrap();
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn claude_fixture_parses_content_and_distinct_counters() {
         let (content, r) = parse_claude_json_result(CLAUDE_FIXTURE, "ok").unwrap();
-        assert_eq!(content, "ok");
+        assert_eq!(content, "FIXTURE-ANSWER-7f3a");
         assert_eq!(r.tokens.input, Some(2));
         assert_eq!(r.tokens.cached_read, Some(11491));
         assert_eq!(r.tokens.cache_write, Some(54611));
@@ -650,7 +650,12 @@ mod tests {
         );
         let r = parse_claude_json_result(CLAUDE_FIXTURE, "ok").unwrap().1;
         let serialized = serde_json::to_string(&r).unwrap();
-        for leaked in ["session_id", "credential", "00000000", "\"ok\""] {
+        for leaked in [
+            "session_id",
+            "credential",
+            "00000000",
+            "FIXTURE-ANSWER-7f3a",
+        ] {
             assert!(!serialized.contains(leaked), "{leaked} in {serialized}");
         }
     }
