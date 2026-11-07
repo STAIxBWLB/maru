@@ -794,7 +794,8 @@ Release sequence:
 1. Merge a version PR after release checks and Playwright E2E pass.
 2. Verify exact-tree `main` CI.
 3. Verify that CI and the `native-e2e` real-app suite passed on the release
-   commit. Release Bundles enforces this in `prepare`: it resolves the tag SHA
+   commit. Release Bundles enforces this in `prepare`: it admits the draft's
+   immutable target SHA (the pending tag need not exist yet)
    and requires each workflow's latest eligible run (main/tag push or manual
    dispatch on that SHA) to be completed and successful. Eligible queued or
    running receipts are polled every 60 seconds for up to 50 minutes (the
@@ -804,25 +805,49 @@ Release sequence:
    A wait deadline also blocks with the run URL. No older success or PR-only
    run can substitute. Checkouts are pinned to the verified SHA throughout the
    bundle pipeline. A successful CI decision that intentionally skipped
-   duplicate full verification counts. Run the missing workflow on that tag,
-   wait for success, then retry Release Bundles. An
+   duplicate full verification counts. Run the missing workflow on a branch
+   or tag at that SHA, wait for success, then retry Release Bundles. An
    intentional native skip states its cause in the spec and links an upstream
    issue when applicable; opt-in environment-gated checks count as intentional
    skips.
 4. Dispatch and pass Release Preflight.
-5. Publish a GitHub Release whose tag is exactly `v<package version>` and whose
-   target is the verified `main` commit. `Validate release inputs` enforces the
-   prefix and fails before release lookup or bundle creation.
-6. Wait for Release Bundles to finish across macOS ARM, macOS Intel, Linux, and
-   Windows.
-7. Verify the public artifacts, updater manifest, signatures, and Homebrew tap.
-   The tap lands a few minutes after the finalizer, once the tap audit passes on
-   `publish/maru-<tag>`.
+5. Create an unpublished GitHub Release draft with pending tag exactly
+   `v<package version>` and `--target` set to the full verified 40-character
+   commit SHA: `gh release create "$TAG" --draft --target "$SHA"` (add title
+   and release notes). Branch-name targets are refused. Do not publish it
+   manually; the pending tag may not exist until finalization.
+6. Dispatch `release-bundles.yml` with `tag=$TAG`. `prepare` finds the release
+   through the paginated release list, pins its ID and target SHA, and applies
+   the CI/native admission and five-surface version checks. macOS ARM, macOS
+   Intel, Linux and Windows upload to that draft. Re-running the same draft
+   replaces only matching asset names. No `release: published` trigger exists,
+   so a manual publication cannot start a second build.
+7. The single finalizer uploads `latest.json`, re-reads the draft by ID and
+   verifies all 21 non-empty assets, SHA-256 metadata and the exact 11-platform
+   manifest against its signatures. Only then does it publish the draft at
+   the admitted target (creating the tag), then push the Homebrew update.
+   Verify public installers, updater manifest/signatures and the tap; the tap
+   lands after its own audit on `publish/maru-<tag>`.
 
 The release workflow produces 20 platform assets, then a single finalizer
 publishes `latest.json` for 11 updater platforms and updates Homebrew. A complete
 release therefore has 21 non-empty assets. Platform jobs never race to write
-the manifest.
+the manifest. Metadata, signature reads and uploads use the admitted release
+and asset IDs, so a tag lookup cannot select a different draft or public release.
+Draft manifest dates use its creation time and remain stable across retries.
+
+For a private rehearsal, dispatch with `dry_run=true` against a throwaway
+prerelease draft. Admission, version checks, builds, signing, upload and asset
+verification still run; publication and every tap step are skipped. The draft
+must never be published, even as a prerelease. Inspect the receipts and delete
+the throwaway draft afterward, leaving public releases, tags and tap untouched.
+A prerelease draft cannot enter the normal stable-publication path.
+
+Published releases cannot be rebuilt through this workflow. If publication
+succeeded but the tap push failed, recover only the tap using
+`make homebrew-update-push RELEASE_TAG="$TAG" HOMEBREW_TAP_DIR="$TAP_DIR"`
+against a clean tap checkout. The tap script refuses drafts/prereleases and
+does not create an empty commit when its two rendered files already match.
 
 Useful local checks:
 

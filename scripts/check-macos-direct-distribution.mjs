@@ -374,7 +374,7 @@ for (const [description, needle] of [
   ["staple the DMG ticket", "stapler staple \"$dmg\""],
   ["validate the stapled DMG ticket", "stapler validate \"$dmg\""],
   ["verify the DMG with Gatekeeper", "context:primary-signature \"$dmg\""],
-  ["upload the DMG after validation", "gh release upload \"$RELEASE_TAG\" \"$asset\""],
+  ["upload the DMG after validation", "node .release-tools/scripts/release-draft.mjs upload"],
 ]) {
   if (workflow.includes(needle)) {
     ok(`release workflow will ${description}`);
