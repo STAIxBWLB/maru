@@ -428,7 +428,10 @@ mod phase08_16 {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let records = run(crate::mission_state::ipc::list_ai_missions(handle.clone())).unwrap();
-            if let Some(record) = records.iter().find(|r| r.id == run_id) {
+            // The record can still read Running just after run.completed is written.
+            if let Some(record) = records.iter().find(|r| {
+                r.id == run_id && r.status != crate::mission_state::MissionStatus::Running
+            }) {
                 assert_eq!(record.status, crate::mission_state::MissionStatus::Done);
                 assert_eq!(record.exit_code, Some(0));
                 break;
