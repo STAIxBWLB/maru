@@ -836,6 +836,16 @@ the manifest. Metadata, signature reads and uploads use the admitted release
 and asset IDs, so a tag lookup cannot select a different draft or public release.
 Draft manifest dates use its creation time and remain stable across retries.
 
+The Tauri action builds only, without a release ID or tag/upload target. Its
+reported production bundle/signature paths are mapped to the existing release
+names and sent through the checked draft uploader after the build. Each file
+gets a fresh draft-ID/target assertion immediately before replacement/upload;
+if the release became public during the build, that leg uploads nothing.
+Missing pairs, duplicates, unknown file names and build-version mismatches
+fail before the upload batch. The raw macOS `.app` directory is excluded only
+when the complete signed archive pair is present. Finalize's 21-asset and
+11-platform manifest contract remains the same.
+
 For a private rehearsal, dispatch with `dry_run=true` against a throwaway
 prerelease draft. Admission, version checks, builds, signing, upload and asset
 verification still run; publication and every tap step are skipped. The draft

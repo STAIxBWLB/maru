@@ -132,10 +132,9 @@ export function assetText(asset, repo, runGh = ghText) {
     "-H", "Accept: application/octet-stream"]);
 }
 
-export function uploadDraftAsset(file, { tag, id, sha, repo, dryRun = false, runGh = ghText }) {
+export function uploadDraftAsset(file, { tag, id, sha, repo, dryRun = false, name = basename(file), runGh = ghText }) {
   const release = getRelease(id, repo, runGh);
   assertDraft(release, { tag, id, sha, dryRun });
-  const name = basename(file);
   let info;
   try { info = statSync(file); } catch {
     throw new Error(`release asset ${name} is unreadable; rebuild the required file and retry Release Bundles`);

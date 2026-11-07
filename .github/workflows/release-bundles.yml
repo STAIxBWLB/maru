@@ -263,18 +263,18 @@ jobs:
           write_notary_key "$key_file"
           echo "APPLE_API_KEY_PATH=$key_file" >> "$GITHUB_ENV"
 
-      - name: Confirm the admitted draft before bundle upload
+      - name: Confirm the admitted draft before building
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: node .release-tools/scripts/release-draft.mjs assert "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA"
 
-      # Each leg uploads only its unique bundles and signatures. The finalizer
-      # writes latest.json once after every platform succeeds.
-      - name: Build and upload Tauri bundles
+      # Build only: the action must never upload after its long build without
+      # a fresh draft check. The following step owns all bundle/signature writes.
+      - name: Build Tauri bundles
+        id: tauri_build
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           APPIMAGE_EXTRACT_AND_RUN: ${{ matrix.platform == 'ubuntu-22.04' && '1' || '' }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ matrix.platform == 'macos-26' && secrets.APPLE_API_ISSUER_ID || '' }}
@@ -283,11 +283,19 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          releaseId: ${{ needs.prepare.outputs.id }}
           tauriScript: pnpm tauri
           args: ${{ matrix.args }}
           includeUpdaterJson: false
-          assetNamePattern: Maru_[version]_[platform]_[arch]_[bundle][ext]
+
+      - name: Upload checked Tauri bundles
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAURI_ARTIFACT_PATHS: ${{ steps.tauri_build.outputs.artifactPaths }}
+          TAURI_APP_VERSION: ${{ steps.tauri_build.outputs.appVersion }}
+          TAURI_PLATFORM: ${{ matrix.platform }}
+          TAURI_TARGET: ${{ matrix.cli_target }}
+        run: node .release-tools/scripts/release-draft.mjs upload "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA" --tauri-artifacts
 
       - name: Build and upload standalone macOS CLI
         if: matrix.cli_target != ''
