@@ -80,6 +80,8 @@ describe("PR change classification", () => {
       "src/components/sites/SitesPane.tsx",
       "src/lib/terminalStore.ts",
       "src-tauri/src/app_menu.rs",
+      "src-tauri/src/paths.rs",
+      "src-tauri/src/terminal_hooks.rs",
     ]) {
       expect(classifyPrChanges([path]), path).toEqual({
         run_full: true,
@@ -88,7 +90,7 @@ describe("PR change classification", () => {
         run_native_compile: false,
       });
     }
-    expect(classifyPrChanges(["src/lib/ordinary.ts"], ["native-e2e"])).toEqual({
+    expect(classifyPrChanges(["src/lib/ordinary.ts"], ["Native-E2E"])).toEqual({
       run_full: true,
       run_e2e: true,
       run_native: true,

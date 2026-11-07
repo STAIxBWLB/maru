@@ -20,6 +20,8 @@
 # - src-tauri/src/site_launcher.rs
 # - src-tauri/src/native_e2e.rs
 # - src-tauri/src/browser_passkeys.rs
+# - src-tauri/src/paths.rs
+# - src-tauri/src/terminal_hooks.rs
 # - src-tauri/build.rs
 # - src-tauri/tauri.conf.json
 # - src-tauri/Cargo.toml

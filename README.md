@@ -631,7 +631,7 @@ selected native PRs do not compile twice. `ci-ok` requires every selected job,
 including the suite, and rejects failures, cancellations and unplanned skips.
 Version-changing PRs use `make release-checks`. Docs-only and `.planning/**`
 changes skip builds; performance evidence JSON remains validation input. Native
-label changes may reuse successful CI for the same SHA, while unrelated labels
+label changes may reuse successful CI for the same SHA and tree, while unrelated labels
 cannot replace or cancel the required check. Browser E2E runs on PRs and explicit manual CI dispatches, not main pushes.
 
 A push to `main` may reuse the exact PR tree only when the successful PR run is
