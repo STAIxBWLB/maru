@@ -25,7 +25,9 @@ jobs:
   prepare:
     name: Validate release inputs
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Gate waits up to 50 minutes (native suite 45 + queue margin), with
+    # another 10 minutes for checkout/setup and validation.
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read

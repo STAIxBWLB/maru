@@ -776,10 +776,13 @@ Release sequence:
 3. Verify that CI and the `native-e2e` real-app suite passed on the release
    commit. Release Bundles enforces this in `prepare`: it resolves the tag SHA
    and requires each workflow's latest eligible run (main/tag push or manual
-   dispatch on that SHA) to be completed and successful. A newer unfinished
-   run, a missing run or any other conclusion blocks bundle jobs; no older
-   success or PR-only run can substitute. Checkouts are pinned to the verified
-   SHA throughout the bundle pipeline. A successful CI decision that
+   dispatch on that SHA) to be completed and successful. Eligible queued or
+   running receipts are polled every 60 seconds for up to 50 minutes (the
+   native job's 45-minute timeout plus queue/startup margin); prepare allows
+   60 minutes overall. Missing receipts fail immediately. After in-flight runs
+   settle, the latest non-success receipt blocks bundle jobs; a wait deadline
+   also blocks with the run URL. No older success or PR-only run can substitute.
+   Checkouts are pinned to the verified SHA throughout the bundle pipeline. A successful CI decision that
    intentionally skipped duplicate full verification counts. Run the missing
    workflow on that tag, wait for success, then retry Release Bundles. An
    intentional native skip states its cause in the spec and links an upstream
