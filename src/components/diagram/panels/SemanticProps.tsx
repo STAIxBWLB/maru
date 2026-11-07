@@ -36,6 +36,7 @@ import {
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { useTranslation } from "../../../lib/i18n";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
+import { SemanticStructureEditor } from "./SemanticStructureEditor";
 
 function Row({ labelKey, value, testId }: { labelKey: string; value: string; testId?: string }) {
   const { t } = useTranslation();
@@ -78,9 +79,11 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
     if (outcome.status === "applied") {
       store.setState(withSnapshot(outcome.transformer, defaultCoalescer()));
       setStatus(outcome.warnings);
+      return true;
     } else if (outcome.status === "invalid") {
-      setStatus(outcome.diagnostics);
+      setStatus([{ key: "diagram.semantic.editRefused" }, ...outcome.diagnostics]);
     }
+    return false;
   };
 
   const detach = async () => {
@@ -251,6 +254,8 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
             />
           </label>
         ) : null}
+
+        <SemanticStructureEditor key={`${dataset.id}:${member.field}:${member.index}:${JSON.stringify(member.entry)}`} member={member} run={run} />
 
         {status.length > 0 ? (
           <ul className="maru-diagram-ie-warnings" data-testid="semantic-status">

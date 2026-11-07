@@ -78,6 +78,25 @@ describe("validateSemanticContent", () => {
     expect(keys("workflow", workflow)).toContain("diagram.semantic.danglingReference");
   });
 
+  it("refuses reversed, overlapping and empty workflow ranges before applying edits", () => {
+    const spec = fixture("workflow");
+    spec.phases = [
+      { id: "one", label: "One", fromCol: 0, toCol: 2 },
+      { id: "two", label: "Two", fromCol: 1, toCol: 3 },
+      { id: "bad", label: "Bad", fromCol: 3, toCol: 2 },
+    ];
+    spec.groups = [{ id: "empty", label: "Empty", lane: "author", fromCol: 4, toCol: 5 }];
+    expect(keys("workflow", spec)).toEqual(expect.arrayContaining(["diagram.semantic.invalidRange", "diagram.semantic.phaseOverlap", "diagram.semantic.emptyGroup"]));
+  });
+
+  it("refuses empty/reversed timeline ranges and segments outside an authored canvas", () => {
+    const spec = fixture("sequence");
+    spec.meta = { ...(spec.meta as object), viewBox: [920, 760] };
+    spec.segments = [{ from: 60, to: 740, label: "Outside" }];
+    spec.activations = [{ participant: "api", from: 200, to: 200 }];
+    expect(keys("sequence", spec)).toEqual(expect.arrayContaining(["diagram.semantic.rangeOutsideCanvas", "diagram.semantic.invalidRange"]));
+  });
+
   it("reports duplicate relation ids", () => {
     const spec = fixture("dataflow");
     spec.flows = [

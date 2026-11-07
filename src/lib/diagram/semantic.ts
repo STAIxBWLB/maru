@@ -245,7 +245,7 @@ export function sequenceOrder(spec: Record<string, unknown>): number[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Schema plus reference validation of a spec. Schema errors reuse
+ * Schema, reference and structural-range validation of a spec. Schema errors reuse
  * `diagram.validation.specMeta`; references, self-messages and duplicate ids
  * get `diagram.semantic.*` keys. Duplicate ids are checked across every
  * id-bearing collection because the id map must stay reversible.
@@ -303,6 +303,25 @@ export function validateSemanticContent(
     }
   }
   if (diagramType === "workflow") {
+    const phases = specEntries(spec, "phases");
+    for (const field of ["phases", "groups"]) {
+      specEntries(spec, field).forEach((entry, index) => {
+        if (isFiniteNumber(entry.fromCol) && isFiniteNumber(entry.toCol) && entry.toCol < entry.fromCol) {
+          diagnostics.push({ key: "diagram.semantic.invalidRange", params: { field: `${field}[${index}]` } });
+        }
+        if (field === "groups" && !specEntries(spec, "nodes").some((node) => node.lane === entry.lane &&
+          isFiniteNumber(node.col) && isFiniteNumber(entry.fromCol) && isFiniteNumber(entry.toCol) &&
+          node.col >= entry.fromCol && node.col <= entry.toCol)) {
+          diagnostics.push({ key: "diagram.semantic.emptyGroup", params: { field: `groups[${index}]` } });
+        }
+      });
+    }
+    phases.forEach((phase, index) => {
+      if (phases.slice(0, index).some((other) => isFiniteNumber(phase.fromCol) && isFiniteNumber(phase.toCol) &&
+        isFiniteNumber(other.fromCol) && isFiniteNumber(other.toCol) && phase.fromCol <= other.toCol && other.fromCol <= phase.toCol)) {
+        diagnostics.push({ key: "diagram.semantic.phaseOverlap", params: { field: `phases[${index}]` } });
+      }
+    });
     const mainPath = Array.isArray(spec.mainPath) ? spec.mainPath : [];
     mainPath.forEach((id, index) => dangling(`mainPath[${index}]`, id, entityIds));
     const checks = isRecord(spec.semanticChecks) ? spec.semanticChecks : {};
@@ -336,6 +355,18 @@ export function validateSemanticContent(
     });
   }
   if (diagramType === "sequence") {
+    for (const field of ["segments", "activations"]) {
+      specEntries(spec, field).forEach((entry, index) => {
+        if (isFiniteNumber(entry.from) && isFiniteNumber(entry.to) && entry.to <= entry.from) {
+          diagnostics.push({ key: "diagram.semantic.invalidRange", params: { field: `${field}[${index}]` } });
+        }
+        const viewBox = isRecord(spec.meta) && Array.isArray(spec.meta.viewBox) ? spec.meta.viewBox : [];
+        if (field === "segments" && isFiniteNumber(entry.from) && isFiniteNumber(entry.to) &&
+          (entry.from < 72 || (isFiniteNumber(viewBox[1]) && entry.to > viewBox[1] - 45))) {
+          diagnostics.push({ key: "diagram.semantic.rangeOutsideCanvas", params: { field: `${field}[${index}]` } });
+        }
+      });
+    }
     specEntries(spec, "activations").forEach((entry, index) => {
       dangling(`activations[${index}].participant`, entry.participant, entityIds);
     });

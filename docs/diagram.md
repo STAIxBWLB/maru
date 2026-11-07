@@ -186,9 +186,11 @@ dataset id, so the result replaces the dataset in place. Members of several
 datasets cannot run. Regenerating an existing dataset blocks on a locked
 member only when it would change or be removed, moves grid members by their
 slot delta (user offsets survive), removes only that dataset's relation
-edges (freeform annotation edges survive), and adds containers only when the
-dataset already has them. The preview reports element, relation, container
-and message-order changes.
+edges (freeform annotation edges survive), and adds containers when the
+dataset already has them or the explicit regeneration contains workflow
+phases/groups or sequence segments/activations. Plain reopening never
+projects missing containers. The preview reports element, relation,
+container and message-order changes.
 
 Unavailability degrades honestly: a missing engine surfaces the typed
 `ENGINE_UNAVAILABLE` diagnostic, an unreachable agent host surfaces the
@@ -249,9 +251,31 @@ untouched members survives. Manual edits never run the engine.
 member markers after a confirm listing what is lost (types, order,
 variants, classifications, notes, containers, not-projected and preserved
 fields, provenance); the canvas stays and the detach is undoable. Deleting
-semantic members (keyboard Delete or the Edit ribbon) asks to detach the
-dataset first; cancel changes nothing. Adding or removing semantic members
-by hand is not supported; regenerate or detach instead.
+semantic members (keyboard Delete or the Edit ribbon) previews a spec
+cascade instead of detaching. The inspector also offers a Remove button.
+Participant removal includes messages and activations; node/state removal
+includes incident relations, wraps memberships, main-path/check references
+and any group or boundary left empty. Container removals include their
+contained entities when those entities require the lane or stage. Schema
+minimum counts and locks can refuse the whole operation. The dialog lists
+the direct and dependent changes before confirmation. Cancel or a document
+change while the dialog is open leaves the document untouched. Multiple
+selected semantic datasets, pattern detaches and freeform removals are
+planned first and committed together in one undo snapshot.
+
+**Structure controls (issue #527).** The inspector's Add form selects an
+entity, relation or managed container collection and asks for typed labels,
+endpoints, lane/stage, column/range or boundary members as appropriate.
+New IDs are minted without rewriting existing entity/relation IDs. Sequence
+insert/remove deterministically re-space message y coordinates and retain
+valid timeline ranges. Boundary member checkboxes apply the entire wraps
+set in one edit; phase/group and segment/activation ranges have explicit
+Apply controls, with group lane and activation participant selectors.
+Every command runs `validateSemanticContent` and proposal validation before
+one undoable commit. New range checks refuse reversed ranges, overlapping
+phases, empty groups and segments outside an authored canvas. Manual edits
+remain synchronous and do not call the engine; per-type fixtures also run
+the pinned engine validator in the focused test suite.
 
 ## Archify engine pin
 

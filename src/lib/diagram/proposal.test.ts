@@ -554,4 +554,21 @@ describe("buildProposalFromCandidate with a previous dataset", () => {
     expect(proposal.ops.map((op) => op.kind)).toEqual(["updateNode", "upsertSemanticDataset"]);
     expect(proposal.ops[0]).toEqual({ kind: "updateNode", id: "wh", patch: { title: "Lake" } });
   });
+
+  it("admits touched new members and relations while suppressing untouched additions", () => {
+    const original = structuredClone(SPEC);
+    const baseDataset = candidateOf(original, "manual-add");
+    const base = projectSemanticDocument(baseDataset).doc;
+    const candidateSpec = structuredClone(original);
+    (candidateSpec.components as Record<string, unknown>[]).push({ id: "c", type: "database", label: "Cache" });
+    (candidateSpec.connections as Record<string, unknown>[]).push({ id: "e2", from: "b", to: "c", label: "stores" });
+    const candidate = candidateOf(candidateSpec, "manual-add");
+    const meta = metaFor({ docId: base.id, scope: new Set(semanticMemberNodeIds(base, "manual-add")) });
+    const allowed = buildProposalFromCandidate(meta, candidate, base, { touched: new Set(["c", "e2"]) }).proposal;
+    expect(allowed.ops).toContainEqual(expect.objectContaining({ kind: "addNode", node: expect.objectContaining({ id: "c" }) }));
+    expect(allowed.ops).toContainEqual(expect.objectContaining({ kind: "addEdge", edge: expect.objectContaining({ id: "e2" }) }));
+
+    const suppressed = buildProposalFromCandidate(meta, candidate, base, { touched: new Set(["e2"]) }).proposal;
+    expect(suppressed.ops.some((op) => op.kind === "addNode" || op.kind === "addEdge")).toBe(false);
+  });
 });

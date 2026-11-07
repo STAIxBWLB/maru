@@ -1,54 +1,54 @@
-/**
- * Delete the current selection: the one path behind keyboard Delete /
- * Backspace and the ribbon's Delete button.
- *
- * Every prompt is answered before anything mutates, and cancelling any of
- * them leaves the doc untouched:
- *
- * - a strict subset of a pattern view's members asks to detach them first
- *   (Phase 2b), then detaches one snapshot per subset;
- * - semantic members (issue #433 P2) ask `diagram.semantic.deleteRequiresDetach`
- *   with what detaching loses, then detach one snapshot per dataset; the
- *   spec stays canonical, so members are never deleted out from under it.
- *
- * The selection is then removed (nodes, then edges), as before.
+/** Keyboard and ribbon Delete share a previewed, atomic semantic cascade.
+ * Every confirmation settles before mutation; a changed doc invalidates it.
  */
-
-import { confirmDialog } from "../../lib/confirmDialog";
+import { confirmDialog, messageDialog } from "../../lib/confirmDialog";
 import { removeEdges, removeNodes, withSnapshot } from "../../lib/diagram/actions";
 import type { Coalescer } from "../../lib/diagram/history";
 import { analyzeViewDrag, detachViewMembersSnippetAction } from "../../lib/diagram/patternStudio";
-import { semanticDatasetsIn, semanticLosses } from "../../lib/diagram/semantic";
-import { detachSemanticDatasetAction } from "../../lib/diagram/semanticEdit";
+import { resolveSemanticMember, semanticDatasetsIn } from "../../lib/diagram/semantic";
+import { planSemanticEdit, removeSemanticEntries } from "../../lib/diagram/semanticEdit";
 import type { DiagramStore } from "../../lib/diagram/state";
+import { semanticCascadeLines, type SemanticTranslate } from "./semanticCascade";
 
-type Translate = (key: string, vars?: Record<string, string | number>) => string;
-
-export async function deleteSelection(store: DiagramStore, coalescer: Coalescer, t: Translate): Promise<void> {
+export async function deleteSelection(store: DiagramStore, coalescer: Coalescer, t: SemanticTranslate): Promise<void> {
   const state = store.getState();
-  const nodeIds = [...state.ephemeral.selection.nodes];
+  const nodeIds = [...state.ephemeral.selection.nodes].filter((id) => !state.doc.nodes.find((node) => node.id === id)?.locked);
   const edgeIds = [...state.ephemeral.selection.edges];
   if (nodeIds.length + edgeIds.length === 0) return;
-
   const analysis = analyzeViewDrag(state.doc, nodeIds);
   if (analysis.subsets.length > 0 && !(await confirmDialog(t("diagram.detach.confirm")))) return;
-  // Locked nodes are never removed, so they never force a detach either.
-  const removable = nodeIds.filter((id) => !state.doc.nodes.find((node) => node.id === id)?.locked);
-  const datasets = semanticDatasetsIn(state.doc, removable, edgeIds);
-  if (datasets.length > 0) {
-    const lines = datasets.flatMap((dataset) => [
-      dataset.name,
-      ...semanticLosses(dataset).map((loss) => `- ${t(loss.key, loss.params ?? {})}`),
-    ]);
-    if (!(await confirmDialog([t("diagram.semantic.deleteRequiresDetach"), ...lines].join("\n")))) return;
+  const targets = [
+    ...nodeIds.map((nodeId) => resolveSemanticMember(state.doc, { nodeId })),
+    ...edgeIds.map((edgeId) => resolveSemanticMember(state.doc, { edgeId })),
+  ].filter((member) => member !== null);
+  const plans = semanticDatasetsIn(state.doc, nodeIds, edgeIds).map((dataset) => ({
+    dataset,
+    removal: removeSemanticEntries(dataset.diagramType, dataset.spec,
+      targets.filter((member) => member.dataset.id === dataset.id).map(({ field, index }) => ({ field, index }))),
+  }));
+  if (plans.length > 0) {
+    const lines = plans.flatMap(({ dataset, removal }) => [dataset.name, ...semanticCascadeLines(removal.effects, t)]);
+    if (!(await confirmDialog([t("diagram.semantic.removeConfirm"), ...lines].join("\n")))) return;
   }
-
-  for (const subset of analysis.subsets) {
-    store.setState(withSnapshot(detachViewMembersSnippetAction(subset.viewId, subset.memberIds), coalescer));
+  if (store.getState().doc !== state.doc) {
+    await messageDialog(t("diagram.semantic.editStale"), "warning");
+    return;
   }
-  for (const dataset of datasets) {
-    store.setState(withSnapshot(detachSemanticDatasetAction(dataset.id), coalescer));
+  // Plan everything on an isolated state. A later refusal must not commit an
+  // earlier dataset's cascade or a pattern detach.
+  let next = state;
+  for (const subset of analysis.subsets) next = detachViewMembersSnippetAction(subset.viewId, subset.memberIds)(next);
+  for (const { dataset, removal } of plans) {
+    const outcome = planSemanticEdit(next, dataset.id, removal.transform);
+    if (outcome.status === "invalid") {
+      await messageDialog([t("diagram.semantic.editRefused"), ...outcome.diagnostics.map((item) => t(item.key, item.params ?? {}))].join("\n"), "warning");
+      return;
+    }
+    if (outcome.status === "applied") next = outcome.transformer(next);
   }
-  if (nodeIds.length > 0) store.setState(withSnapshot(removeNodes(nodeIds), coalescer));
-  if (edgeIds.length > 0) store.setState(withSnapshot(removeEdges(edgeIds), coalescer));
+  const freeNodes = nodeIds.filter((nodeId) => resolveSemanticMember(state.doc, { nodeId }) === null);
+  const freeEdges = edgeIds.filter((edgeId) => resolveSemanticMember(state.doc, { edgeId }) === null);
+  next = removeNodes(freeNodes)(next);
+  next = removeEdges(freeEdges)(next);
+  if (next !== state) store.setState(withSnapshot(() => next, coalescer));
 }
