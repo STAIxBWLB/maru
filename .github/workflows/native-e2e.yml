@@ -50,7 +50,7 @@ env:
 jobs:
   native-e2e-suite:
     name: native e2e suite (real app, macOS)
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -75,7 +75,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          shared-key: macos-14-native-e2e
+          shared-key: macos-26-native-e2e
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile

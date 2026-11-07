@@ -387,15 +387,22 @@ homebrew-update-commit: ## Render and commit Homebrew cask/formula update
 homebrew-update-push: ## Render, commit, and push Homebrew cask/formula update
 	$(NODE) scripts/update-homebrew-tap.mjs "$(RELEASE_TAG)" "$(HOMEBREW_TAP_DIR)" --commit --push
 
+# Homebrew 6+ loads untrusted-tap items only for install/reinstall/upgrade by full
+# name; audit and fetch need the two items trusted (not the whole tap).
+.PHONY: homebrew-trust
+homebrew-trust: ## Trust the Maru cask and CLI formula from the installed tap
+	brew trust --cask staixbwlb/cask/maru-workspace
+	brew trust --formula staixbwlb/cask/maru-cli
+
 .PHONY: homebrew-audit
-homebrew-audit: ## Audit Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
-	cd "$(HOMEBREW_TAP_DIR)" && brew audit --cask maru-workspace
-	cd "$(HOMEBREW_TAP_DIR)" && brew audit --formula maru-cli
+homebrew-audit: homebrew-trust ## Audit the published Maru cask and CLI formula
+	brew audit --cask staixbwlb/cask/maru-workspace
+	brew audit --formula staixbwlb/cask/maru-cli
 
 .PHONY: homebrew-fetch
-homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
-	cd "$(HOMEBREW_TAP_DIR)" && brew fetch --cask maru-workspace
-	cd "$(HOMEBREW_TAP_DIR)" && brew fetch maru-cli
+homebrew-fetch: homebrew-trust ## Fetch the published Maru cask and CLI formula
+	brew fetch --cask staixbwlb/cask/maru-workspace
+	brew fetch staixbwlb/cask/maru-cli
 
 # ---------------------------------------------------------------------------
 # Verify (the full pre-merge / pre-PR check)
