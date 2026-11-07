@@ -14,6 +14,49 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  notary-credentials:
+    name: App Store Connect credential probe
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - name: Checkout notarization tooling
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: scripts/lib/notary-key.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Validate notarization API credentials without submitting an app
+        shell: bash
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APPLE_API_PRIVATE_KEY" ] || [ -z "$APPLE_API_KEY_ID" ] || [ -z "$APPLE_API_ISSUER_ID" ]; then
+            echo "::error::App Store Connect API credentials are incomplete. Configure APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER_ID in Actions secrets, then retry Release Preflight."
+            exit 1
+          fi
+          key_file="$RUNNER_TEMP/maru-notary-probe.p8"
+          cleanup() {
+            if ! rm -f "$key_file"; then
+              echo "::error::Cannot remove the temporary notarization probe key. Inspect runner temporary-directory permissions before retrying Release Preflight."
+              exit 1
+            fi
+          }
+          trap cleanup EXIT
+          source .release-tools/scripts/lib/notary-key.sh
+          write_notary_key "$key_file"
+          if ! xcrun notarytool history --key "$key_file" \
+            --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" > /dev/null; then
+            echo "::error::App Store Connect credential probe failed. Check the API key, issuer, key ID and Notary service access, then retry Release Preflight."
+            exit 1
+          fi
+          echo "App Store Connect notarization credentials accepted; no app submitted."
+
   release-preflight-core:
     name: make release-preflight-core
     runs-on: ubuntu-22.04

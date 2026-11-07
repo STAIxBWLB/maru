@@ -330,14 +330,15 @@ for (const needle of [
   "max-parallel: 4",
   "scripts/publish-updater-manifest.mjs",
   "APPLE_SIGNING_IDENTITY",
-  "APPLE_ID",
-  "APPLE_PASSWORD",
-  "APPLE_TEAM_ID",
+  "APPLE_API_ISSUER_ID",
+  "APPLE_API_KEY",
+  "APPLE_API_KEY_ID",
+  "APPLE_API_KEY_PATH",
 ]) {
   if (workflow.includes(needle)) {
     ok(`release workflow contains ${needle}`);
   } else {
-    fail(`release workflow does not contain ${needle}`);
+    fail(`release workflow does not contain ${needle}; restore its wiring in .github/workflows/release-bundles.yml and rerun make macos-distribution-check`);
   }
 }
 
@@ -441,9 +442,9 @@ function checkGitHubSecrets() {
     "APPLE_CERTIFICATE",
     "APPLE_CERTIFICATE_PASSWORD",
     "KEYCHAIN_PASSWORD",
-    "APPLE_ID",
-    "APPLE_PASSWORD",
-    "APPLE_TEAM_ID",
+    "APPLE_API_ISSUER_ID",
+    "APPLE_API_KEY",
+    "APPLE_API_KEY_ID",
     "TAURI_SIGNING_PRIVATE_KEY",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
   ];
@@ -466,7 +467,7 @@ function checkGitHubSecrets() {
   );
   const missing = requiredSecrets.filter((name) => !present.has(name));
   if (missing.length > 0) {
-    fail(`missing GitHub secret(s) in ${releaseRepo}: ${missing.join(", ")}`);
+    fail(`missing GitHub secret(s) in ${releaseRepo}: ${missing.join(", ")}; configure them in repository Actions secrets and rerun make macos-distribution-check`);
   } else {
     ok(`required GitHub secrets are present in ${releaseRepo}`);
   }
