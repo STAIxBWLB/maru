@@ -773,12 +773,18 @@ Release sequence:
 
 1. Merge a version PR after release checks and Playwright E2E pass.
 2. Verify exact-tree `main` CI.
-3. Verify that the `native-e2e` real-app suite passed on that `main` commit
-   (`gh workflow run native-e2e.yml --ref main` if the push run was skipped or
-   cancelled). A failing spec blocks the release. An intentional skip states its
-   cause in the spec, and links the upstream issue when an external defect
-   causes it; opt-in local checks gated by an environment variable count as
-   intentional skips.
+3. Verify that CI and the `native-e2e` real-app suite passed on the release
+   commit. Release Bundles enforces this in `prepare`: it resolves the tag SHA
+   and requires each workflow's latest eligible run (main/tag push or manual
+   dispatch on that SHA) to be completed and successful. A newer unfinished
+   run, a missing run or any other conclusion blocks bundle jobs; no older
+   success or PR-only run can substitute. Checkouts are pinned to the verified
+   SHA throughout the bundle pipeline. A successful CI decision that
+   intentionally skipped duplicate full verification counts. Run the missing
+   workflow on that tag, wait for success, then retry Release Bundles. An
+   intentional native skip states its cause in the spec and links an upstream
+   issue when applicable; opt-in environment-gated checks count as intentional
+   skips.
 4. Dispatch and pass Release Preflight.
 5. Publish a GitHub Release whose tag is exactly `v<package version>` and whose
    target is the verified `main` commit. `Validate release inputs` enforces the
