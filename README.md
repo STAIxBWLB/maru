@@ -81,18 +81,17 @@ Graph are enabled by default; E2E Flow is flag-gated.
 The desktop application and standalone CLI are separate artifacts.
 
 ```bash
-brew tap STAIxBWLB/homebrew-cask
-
 # Desktop application only
-brew install --cask maru-workspace
+brew install --cask staixbwlb/cask/maru-workspace
 
 # Standalone CLI only; installs the executable as `maru`
-brew install maru-cli
+brew install staixbwlb/cask/maru-cli
 
 maru --version
 ```
 
-The cask installs `Maru.app` and does not create a CLI symlink. The desktop app
+Homebrew 6 refuses short names from an untrusted tap; installing by the full
+name trusts that item. The cask installs `Maru.app` and does not create a CLI symlink. The desktop app
 uses signed Tauri updater metadata from GitHub Releases. Homebrew installations
 can also be upgraded explicitly:
 
@@ -786,6 +785,8 @@ Release sequence:
 6. Wait for Release Bundles to finish across macOS ARM, macOS Intel, Linux, and
    Windows.
 7. Verify the public artifacts, updater manifest, signatures, and Homebrew tap.
+   The tap lands a few minutes after the finalizer, once the tap audit passes on
+   `publish/maru-<tag>`.
 
 The release workflow produces 20 platform assets, then a single finalizer
 publishes `latest.json` for 11 updater platforms and updates Homebrew. A complete
@@ -848,8 +849,9 @@ make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
 ```
 
 The explicit `make homebrew-update*` targets are recovery tools. The release
-finalizer normally updates `STAIxBWLB/homebrew-cask` automatically after the
-manifest succeeds.
+finalizer pushes the rendered cask and formula to `publish/maru-<tag>` in
+`STAIxBWLB/homebrew-cask` after the manifest succeeds, never to tap `main`. The
+tap audits that commit, then opens and merges its own PR.
 
 ## Skills OTA Channel
 

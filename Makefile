@@ -389,13 +389,13 @@ homebrew-update-push: ## Render, commit, and push Homebrew cask/formula update
 
 .PHONY: homebrew-audit
 homebrew-audit: ## Audit Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
-	cd "$(HOMEBREW_TAP_DIR)" && brew audit --cask maru-workspace
-	cd "$(HOMEBREW_TAP_DIR)" && brew audit --formula maru-cli
+	cd "$(HOMEBREW_TAP_DIR)" && brew audit --cask staixbwlb/cask/maru-workspace
+	cd "$(HOMEBREW_TAP_DIR)" && brew audit --formula staixbwlb/cask/maru-cli
 
 .PHONY: homebrew-fetch
 homebrew-fetch: ## Fetch Maru Homebrew cask and CLI formula in HOMEBREW_TAP_DIR
-	cd "$(HOMEBREW_TAP_DIR)" && brew fetch --cask maru-workspace
-	cd "$(HOMEBREW_TAP_DIR)" && brew fetch maru-cli
+	cd "$(HOMEBREW_TAP_DIR)" && brew fetch --cask staixbwlb/cask/maru-workspace
+	cd "$(HOMEBREW_TAP_DIR)" && brew fetch staixbwlb/cask/maru-cli
 
 # ---------------------------------------------------------------------------
 # Verify (the full pre-merge / pre-PR check)
