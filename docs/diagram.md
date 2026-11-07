@@ -129,8 +129,8 @@ and the projection live in `src/lib/diagram/semantic.ts`:
 | Type | Entities | Relations (minted id prefix) | Containers | Not projected |
 |---|---|---|---|---|
 | architecture | `components` | `connections` (`conn`) | `boundaries` (by index) | `cards` |
-| workflow | `nodes` | `edges` (`edge`) | `lanes` (by id) | `phases`, `groups`, `mainPath`, `semanticChecks`, `cards` |
-| sequence | `participants` | `messages` (`msg`) | none | `segments`, `activations`, `cards` |
+| workflow | `nodes` | `edges` (`edge`) | `lanes`, `phases`, `groups` (by id) | `mainPath`, `semanticChecks`, `cards` |
+| sequence | `participants` | `messages` (`msg`) | `segments`, `activations` (by index) | `cards` |
 | dataflow | `nodes` | `flows` (`flow`) | `stages` (by index) | `cards` |
 | lifecycle | `states` | `transitions` (`tr`) | `lanes` (by id) | `cards` |
 
@@ -206,14 +206,23 @@ apply is disabled.
 `decision` a diamond). Workflow and lifecycle entities sit on a lane grid
 (lane bands top-down, `col` columns), dataflow entities in stage columns
 (ordered by `row`), architecture members are reflowed by `layoutDoc`.
-Lanes, stages and boundaries become `section` containers placed first in
+Lanes, stages, boundaries, workflow phases/groups and sequence segments/activations become `section` containers placed first in
 `nodes`, with id and `memberId` `<datasetId>:<role>:<key>` (Archify ids
 forbid `:`, so they cannot collide) and `meta.semanticContainer` set. A
 sequence is a participant row; each message is an `s→s` bracket edge whose
 `midOff` depth encodes its order (by `y`, then array position), dashed for
 `return`/`dashed` variants. Same-axis auto routes anchor the edge label on
 the middle segment, so brackets carry their labels (identical to before
-when `midOff` is 0). Lifelines and activations come from the engine render.
+when `midOff` is 0). Lifelines come from the engine render. Workflow range containers cover inclusive
+column ranges (groups within their lane). Phase headers sit above the lanes;
+phase bodies are transparent and outer frames stay behind lanes and groups,
+including after proposal additions. Sequence range coordinates are
+interpolated onto the existing rank-based message brackets, with linear
+extrapolation outside the message range. Equal-y messages use their mean rank.
+Activations follow the participant center and show its label; their title is
+read-only because the schema has no activation label. Segment/activation keys
+are positional, matching the pinned schema. Existing documents are not
+reprojected on load; new documents and explicit proposals project containers.
 
 **Text write-through.** `updateNode` / `updateEdge` (the chokepoint behind
 inline editing, the property panel, layer rename and replace-all) write

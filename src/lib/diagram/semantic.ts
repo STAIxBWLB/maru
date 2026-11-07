@@ -23,8 +23,8 @@ import {
  * - **Projection.** Entities become nodes (`meta.memberId =
  *   <datasetId>:m<index>`), relations become edges (id = relation id, or the
  *   legacy `<datasetId>-e<index>` for id-less P1 relations), and lanes,
- *   stages and boundaries become `section` containers whose id and memberId
- *   are `<datasetId>:<role>:<key>` (Archify ids forbid `:`, so they cannot
+ *   stages, boundaries and secondary ranges become `section` containers
+ *   whose id and memberId are `<datasetId>:<role>:<key>` (Archify ids forbid `:`, so they cannot
  *   collide). Grid types place entities deterministically; sequence messages
  *   are ordered `s→s` brackets whose `midOff` depth encodes their order.
  * - **Write-through.** {@link writeThroughText} maps canvas text edits on a
@@ -51,7 +51,14 @@ import type { ValidationDiagnostic } from "./validation";
 // Per-type descriptor
 // ---------------------------------------------------------------------------
 
-export type SemanticContainerRole = "lane" | "stage" | "boundary";
+export type SemanticContainerRole =
+  | "lane" | "stage" | "boundary" | "phase" | "group" | "segment" | "activation";
+
+export interface SemanticContainerDescriptor {
+  field: string;
+  role: SemanticContainerRole;
+  keyedBy: "id" | "index";
+}
 
 export interface SemanticTypeDescriptor {
   /** Entity collection (projected to member nodes). */
@@ -63,7 +70,9 @@ export interface SemanticTypeDescriptor {
   /** Empty relation labels are refused (schema `minLength: 1`) instead of dropped. */
   relationLabelRequired: boolean;
   /** Container collection; `index`-keyed collections have no ids in the schema. */
-  container: { field: string; role: SemanticContainerRole; keyedBy: "id" | "index" } | null;
+  container: SemanticContainerDescriptor | null;
+  /** Secondary structures, independent of the primary lane/stage placement. */
+  additionalContainers?: readonly SemanticContainerDescriptor[];
   /** Entities sit on a deterministic grid, so a slot change moves the member. */
   grid: boolean;
   /** Top-level fields the pinned schema defines. */
@@ -95,7 +104,11 @@ export const SEMANTIC_TYPES: Record<SemanticDiagramType, SemanticTypeDescriptor>
     grid: true,
     knownFields: ["schema_version", "diagram_type", "meta", "lanes", "nodes", "edges", "phases", "groups", "mainPath", "semanticChecks", "cards"],
     idFields: ["lanes", "nodes", "edges", "phases", "groups"],
-    notProjected: ["phases", "groups", "mainPath", "semanticChecks", "cards"],
+    additionalContainers: [
+      { field: "phases", role: "phase", keyedBy: "id" },
+      { field: "groups", role: "group", keyedBy: "id" },
+    ],
+    notProjected: ["mainPath", "semanticChecks", "cards"],
   },
   sequence: {
     entities: "participants",
@@ -106,7 +119,11 @@ export const SEMANTIC_TYPES: Record<SemanticDiagramType, SemanticTypeDescriptor>
     grid: true,
     knownFields: ["schema_version", "diagram_type", "meta", "participants", "segments", "messages", "activations", "cards"],
     idFields: ["participants", "messages"],
-    notProjected: ["segments", "activations", "cards"],
+    additionalContainers: [
+      { field: "segments", role: "segment", keyedBy: "index" },
+      { field: "activations", role: "activation", keyedBy: "index" },
+    ],
+    notProjected: ["cards"],
   },
   dataflow: {
     entities: "nodes",
@@ -131,6 +148,11 @@ export const SEMANTIC_TYPES: Record<SemanticDiagramType, SemanticTypeDescriptor>
     notProjected: ["cards"],
   },
 };
+
+/** All managed collections, including secondary range containers. */
+export function semanticContainers(descriptor: SemanticTypeDescriptor): readonly SemanticContainerDescriptor[] {
+  return [...(descriptor.container ? [descriptor.container] : []), ...(descriptor.additionalContainers ?? [])];
+}
 
 const VALIDATORS = { architecture, workflow, sequence, dataflow, lifecycle };
 
@@ -540,6 +562,17 @@ export function isSemanticContainerNode(node: DiagramNode): boolean {
   return typeof node.meta?.semanticContainer === "string";
 }
 
+/** Keep outer frames behind lane frames and inner frames, without moving
+ * non-container slots or changing the relative order within one role. */
+export function orderSemanticContainers(nodes: readonly DiagramNode[], datasetId: string): DiagramNode[] {
+  const ownedContainer = (node: DiagramNode) => isSemanticContainerNode(node) && isMemberOf(node, datasetId);
+  const depth = (node: DiagramNode) => node.meta?.semanticContainer === "phase" ? -1
+    : node.meta?.semanticContainer === "group" || node.meta?.semanticContainer === "activation" ? 1 : 0;
+  const containers = nodes.filter(ownedContainer).sort((a, b) => depth(a) - depth(b));
+  let index = 0;
+  return nodes.map((node) => ownedContainer(node) ? containers[index++]! : node);
+}
+
 function containerNode(
   dataset: SemanticSpecDataset,
   role: SemanticContainerRole,
@@ -554,6 +587,7 @@ function containerNode(
     w: rect.w,
     h: rect.h,
     title: rect.label,
+    ...(role === "phase" ? { style: { bg: "transparent" } } : {}),
     meta: { memberId: id, semanticContainer: role },
   };
 }
@@ -591,6 +625,87 @@ function boundaryRects(
     });
   });
   return rects;
+}
+
+function workflowRangeRects(
+  dataset: SemanticSpecDataset,
+  role: "phase" | "group",
+  placement: GridPlacement,
+): ContainerRect[] {
+  return specEntries(dataset.spec, role === "phase" ? "phases" : "groups").flatMap((entry) => {
+    const key = idOf(entry);
+    if (key === null || !isFiniteNumber(entry.fromCol) || !isFiniteNumber(entry.toCol) || entry.toCol < entry.fromCol) return [];
+    const bands = role === "group"
+      ? placement.containers.filter((band) => band.key === entry.lane)
+      : placement.containers;
+    if (bands.length === 0) return [];
+    const top = Math.min(...bands.map((band) => band.y));
+    const bottom = Math.max(...bands.map((band) => band.y + band.h));
+    return [{
+      key,
+      label: labelOf(entry, key),
+      x: ORIGIN.x + entry.fromCol * LAYOUT_STEP_X + INSET - GAP,
+      y: role === "phase" ? top - HEADER - GAP : top,
+      w: (entry.toCol - entry.fromCol) * LAYOUT_STEP_X + NODE_W + 2 * GAP,
+      h: bottom - top + (role === "phase" ? HEADER + GAP : 0),
+    }];
+  });
+}
+
+/** Map authored range coordinates onto the unchanged rank-based message brackets.
+ * Equal-y messages share an anchor at their mean rank; empty/single-message
+ * sequences use unit scale. Extrapolation keeps ranges outside the messages.
+ */
+function sequenceRangeY(spec: Record<string, unknown>): (y: number) => number {
+  const messages = specEntries(spec, "messages");
+  const anchors: Array<{ source: number; target: number; count: number }> = [];
+  sequenceOrder(spec).forEach((index, rank) => {
+    const source = messages[index]?.y;
+    if (!isFiniteNumber(source)) return;
+    const target = ORIGIN.y + NODE_H + ORIGIN.y + HEADER * rank;
+    const last = anchors.at(-1);
+    if (last?.source === source) {
+      last.target = (last.target * last.count + target) / (last.count + 1);
+      last.count += 1;
+    } else anchors.push({ source, target, count: 1 });
+  });
+  return (y) => {
+    if (anchors.length === 0) return y;
+    if (anchors.length === 1) return anchors[0]!.target + y - anchors[0]!.source;
+    let index = anchors.findIndex((anchor) => anchor.source >= y);
+    if (index <= 0) index = index === 0 ? 1 : anchors.length - 1;
+    const before = anchors[index - 1]!;
+    const after = anchors[index]!;
+    return before.target + (y - before.source) * (after.target - before.target) / (after.source - before.source);
+  };
+}
+
+function sequenceRangeRects(
+  dataset: SemanticSpecDataset,
+  role: "segment" | "activation",
+  nodes: readonly DiagramNode[],
+): ContainerRect[] {
+  if (nodes.length === 0) return [];
+  const mapY = sequenceRangeY(dataset.spec);
+  return specEntries(dataset.spec, role === "segment" ? "segments" : "activations").flatMap((entry, index) => {
+    if (!isFiniteNumber(entry.from) || !isFiniteNumber(entry.to) || entry.to <= entry.from) return [];
+    const participantId = role === "activation" && typeof entry.participant === "string"
+      ? maruIdFor(dataset, entry.participant) : null;
+    const participant = nodes.find((node) => node.id === participantId);
+    if (role === "activation" && !participant) return [];
+    const left = Math.min(...nodes.map((node) => node.x));
+    const right = Math.max(...nodes.map((node) => node.x + node.w));
+    const top = mapY(entry.from);
+    const bottom = mapY(entry.to);
+    return [{
+      key: String(index),
+      label: role === "activation" ? participant!.title ?? String(entry.participant) : labelOf(entry, String(index + 1)),
+      x: participant ? participant.x + participant.w / 2 - GAP : left - GAP,
+      y: role === "segment" ? top - HEADER : top,
+      w: participant ? 2 * GAP : right - left + 2 * GAP,
+      h: Math.max(HEADER, bottom - top + (role === "segment" ? HEADER + GAP : 0)),
+    }];
+  });
 }
 
 /**
@@ -676,11 +791,18 @@ export function projectSemanticDataset(
     });
   });
 
-  if (!opts.containers || !descriptor.container) return { nodes, edges, diagnostics };
-  const role = descriptor.container.role;
-  const rects =
-    role === "boundary" ? boundaryRects(dataset, nodes, opts.doc) : placement.containers;
-  return { nodes: [...rects.map((rect) => containerNode(dataset, role, rect)), ...nodes], edges, diagnostics };
+  if (!opts.containers) return { nodes, edges, diagnostics };
+  const containers = semanticContainers(descriptor).flatMap(({ role }) => {
+    const rects = role === "boundary"
+      ? boundaryRects(dataset, nodes, opts.doc)
+      : role === "phase" || role === "group"
+        ? workflowRangeRects(dataset, role, placement)
+        : role === "segment" || role === "activation"
+          ? sequenceRangeRects(dataset, role, nodes)
+          : placement.containers;
+    return rects.map((rect) => containerNode(dataset, role, rect));
+  });
+  return { nodes: orderSemanticContainers([...containers, ...nodes], dataset.id), edges, diagnostics };
 }
 
 /**
@@ -778,8 +900,8 @@ export function resolveSemanticMember(
     if (!dataset || !descriptor) return null;
     const role = node.meta?.semanticContainer;
     if (role !== undefined) {
-      const container = descriptor.container;
-      if (!container || container.role !== role) return null;
+      const container = semanticContainers(descriptor).find((candidate) => candidate.role === role);
+      if (!container) return null;
       const prefix = `${dataset.id}:${role}:`;
       if (!memberId.startsWith(prefix)) return null;
       const key = memberId.slice(prefix.length);
@@ -880,7 +1002,7 @@ export function writeThroughText(
     else delete next.label;
   } else {
     if ("title" in values) {
-      if (!nonEmpty(values.title)) return null;
+      if (!nonEmpty(values.title) || (member.kind === "container" && member.role === "activation")) return null;
       next.label = values.title;
     }
     if ("body" in values) {
@@ -915,7 +1037,7 @@ export function semanticLosses(dataset: SemanticSpecDataset): ValidationDiagnost
   count("relationStyles", relations.filter((entry) => entry.variant !== undefined || entry.role !== undefined).length);
   count("classifications", relations.filter((entry) => typeof entry.classification === "string").length);
   count("notes", relations.filter((entry) => typeof entry.note === "string").length);
-  if (descriptor.container) count(descriptor.container.field, specEntries(spec, descriptor.container.field).length);
+  for (const container of semanticContainers(descriptor)) count(container.field, specEntries(spec, container.field).length);
   count("sources", entities.filter((entry) => entry.sources !== undefined).length);
   const notProjected = descriptor.notProjected.filter((field) => spec[field] !== undefined);
   if (notProjected.length > 0) {

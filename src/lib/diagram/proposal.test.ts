@@ -474,6 +474,27 @@ describe("buildProposalFromCandidate with a previous dataset", () => {
     expect(diffProposal(base, proposal).semanticSummary.orderChanged).toBe(true);
   });
 
+  it("counts secondary containers and detects range-only changes in previews", () => {
+    const spec = structuredClone(SEMANTIC_FIXTURES.workflow);
+    spec.phases = [{ id: "build", label: "Build", fromCol: 0, toCol: 1 }];
+    const base = projectSemanticDocument(datasetOf("workflow", spec)).doc;
+    const candidateSpec = structuredClone(spec);
+    (candidateSpec.phases as Record<string, unknown>[])[0]!.toCol = 2;
+    candidateSpec.groups = [{ id: "publish", label: "Publish", lane: "author", fromCol: 2, toCol: 2 }];
+    const { proposal } = buildProposalFromCandidate(memberMeta(base, "ds-workflow"), datasetOf("workflow", candidateSpec), base);
+    const summary = diffProposal(base, proposal).semanticSummary;
+    expect([summary.containersAdded, summary.containersChanged, summary.containersRemoved]).toEqual([1, 1, 0]);
+    expect(proposal.ops).toContainEqual({ kind: "updateNode", id: "ds-workflow:phase:build", patch: { w: 592 } });
+    const outcome = prepareProposalApply(stateOf(base), proposal, "");
+    if (outcome.status !== "applied") throw new Error(JSON.stringify(outcome));
+    const doc = outcome.transformer(stateOf(base)).doc;
+    expect(doc.nodes.some((node) => node.id === "ds-workflow:group:publish")).toBe(true);
+    expect(doc.nodes.findIndex((node) => node.id === "ds-workflow:group:publish")).toBeGreaterThan(
+      doc.nodes.findIndex((node) => node.id === "ds-workflow:lane:author"),
+    );
+    expect(doc.edges).toEqual(base.edges);
+  });
+
   it("reports container counts and prepends added containers", () => {
     const base = projectedDoc("workflow");
     const spec = structuredClone(SEMANTIC_FIXTURES.workflow);

@@ -106,6 +106,21 @@ describe("SemanticProps", () => {
     _resetDiagramSharedStoreForTests();
   });
 
+  it.each([
+    { type: "workflow", field: "phases", entry: { id: "build", label: "Build", fromCol: 0, toCol: 2 }, role: "phase", key: "build", count: 3 },
+    { type: "workflow", field: "groups", entry: { id: "publish", label: "Publish", lane: "author", fromCol: 2, toCol: 2 }, role: "group", key: "publish", count: 1 },
+    { type: "sequence", field: "segments", entry: { label: "Lookup", from: 170, to: 290 }, role: "segment", key: "0", count: 3 },
+    { type: "sequence", field: "activations", entry: { participant: "api", from: 180, to: 280 }, role: "activation", key: "0", count: 3 },
+  ] as const)("shows $role semantics and membership counts", ({ type, field, entry, role, key, count }) => {
+    const spec = { ...structuredClone(SEMANTIC_FIXTURES[type]), [field]: [entry] };
+    const doc = projectSemanticDocument(archifySpecToDataset(type, spec, { id: "ds" }).dataset).doc;
+    render(doc, { nodes: [`ds:${role}:${key}`] });
+    const text = q("semantic-props")!.textContent!;
+    expect(text).toContain(ko(`diagram.semantic.role.${role}`));
+    expect(text).toContain(`${ko("diagram.semantic.members")}${count}`);
+    expect(q("semantic-label")!.textContent).toBe("label" in entry ? entry.label : "api");
+  });
+
   it("stays hidden for freeform objects", () => {
     const doc = docOf("lifecycle");
     render({ ...doc, nodes: [...doc.nodes, { id: "note", kind: "text", x: 0, y: 0, w: 20, h: 20 }] }, { nodes: ["note"] });

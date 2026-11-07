@@ -61,6 +61,8 @@ import {
   datasetHasContainers,
   descriptorFor,
   isSemanticContainerNode,
+  orderSemanticContainers,
+  semanticContainers,
   projectSemanticDataset,
   semanticDatasetsOf,
   sequenceOrder,
@@ -458,7 +460,12 @@ function applyProposalOps(doc: DiagramDoc, ops: readonly ProposalOp[]): DiagramD
     }
   }
 
-  if (containers.length > 0) nodes = [...containers, ...nodes];
+  if (containers.length > 0) {
+    nodes = [...containers, ...nodes];
+    for (const op of ops) {
+      if (op.kind === "upsertSemanticDataset") nodes = orderSemanticContainers(nodes, op.dataset.id);
+    }
+  }
   return { ...doc, nodes, edges, ...(datasets !== undefined ? { datasets } : {}) };
 }
 
@@ -575,16 +582,16 @@ function specRelationKeys(dataset: SemanticSpecDataset): string[] {
     );
 }
 
-/** Container key → label fingerprint (lanes by id, stages/boundaries by index). */
+/** Role-qualified keys keep the independent container collections distinct. */
 function specContainers(dataset: SemanticSpecDataset): Map<string, string> {
-  const container = SEMANTIC_TYPES[dataset.diagramType]?.container;
-  if (!container) return new Map();
-  return new Map(
+  const descriptor = descriptorFor(dataset);
+  if (!descriptor) return new Map();
+  return new Map(semanticContainers(descriptor).flatMap((container) =>
     specEntries(dataset.spec, container.field).map((entry, index) => [
-      container.keyedBy === "id" && typeof entry.id === "string" ? entry.id : String(index),
-      JSON.stringify([entry.label ?? null, entry.wraps ?? null]),
-    ]),
-  );
+      `${container.role}:${container.keyedBy === "id" && typeof entry.id === "string" ? entry.id : index}`,
+      JSON.stringify(entry),
+    ] as [string, string]),
+  ));
 }
 
 /** Message ids in sequence order (id-less messages are skipped). */

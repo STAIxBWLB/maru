@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { archifySpecToDataset } from "./archifyCodec";
+import { deserializeDoc, serializeDoc } from "./persistence";
 import { SEMANTIC_DIAGRAM_TYPES, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
 import {
   detachSemanticDataset,
   mintRelationIds,
+  orderSemanticContainers,
   projectSemanticDataset,
   projectSemanticDocument,
   resolveSemanticMember,
@@ -196,11 +198,106 @@ describe("projectSemanticDataset", () => {
     expect(contains(nodes[0]!, retry)).toBe(true);
   });
 
-  it("reports not-projected fields as informational diagnostics", () => {
+  it("projects workflow column ranges as owned phase/group containers without moving members", () => {
+    const spec = fixture("workflow");
+    spec.phases = [{ id: "build", label: "Build", fromCol: 0, toCol: 2 }];
+    spec.groups = [{ id: "publish", label: "Publish", lane: "author", fromCol: 2, toCol: 2 }];
+    const dataset = datasetOf("workflow", spec);
+    expect(validateSemanticContent("workflow", spec)).toEqual([]);
+    const projected = projectSemanticDataset(dataset, { containers: true });
+    expect(projected.diagnostics).toEqual([]);
+    expect(projected.nodes[0]!.id).toBe("ds-workflow:phase:build");
+    const phase = projected.nodes.find((node) => node.id === "ds-workflow:phase:build")!;
+    const group = projected.nodes.find((node) => node.id === "ds-workflow:group:publish")!;
+    for (const id of ["draft", "review", "merge"]) expect(contains(phase, projected.nodes.find((node) => node.id === id)!)).toBe(true);
+    expect(contains(group, projected.nodes.find((node) => node.id === "merge")!)).toBe(true);
+    expect(contains(group, projected.nodes.find((node) => node.id === "review")!)).toBe(false);
+    expect(projectSemanticDataset(dataset).nodes).toEqual(projectSemanticDataset(datasetOf("workflow")).nodes);
+    const doc = projectSemanticDocument(dataset).doc;
+    expect(resolveSemanticMember(doc, { nodeId: phase.id })).toMatchObject({ kind: "container", role: "phase", field: "phases", key: "build" });
+    expect(resolveSemanticMember(doc, { nodeId: group.id })).toMatchObject({ kind: "container", role: "group", field: "groups", key: "publish" });
+    const detached = detachSemanticDataset(doc, dataset.id);
+    expect(detached.losses).toContainEqual({ key: "diagram.semantic.loss.phases", params: { count: 1 } });
+    expect(detached.losses).toContainEqual({ key: "diagram.semantic.loss.groups", params: { count: 1 } });
+    const forged = { ...doc, nodes: doc.nodes.map((node) => node.id === phase.id ? { ...node, meta: { ...node.meta, semanticContainer: "group" } } : node) };
+    expect(resolveSemanticMember(forged, { nodeId: phase.id })).toBeNull();
+  });
+
+  it.each(["workflow", "sequence"] as const)("reopens an existing %s canvas without adding ranges or changing geometry", (type) => {
+    // Persisted canvases already carry the migrator's default fields.
+    const doc = deserializeDoc(serializeDoc(docOf(type)));
+    const spec = fixture(type);
+    if (type === "workflow") {
+      spec.phases = [{ id: "build", label: "Build", fromCol: 0, toCol: 2 }];
+      spec.groups = [{ id: "publish", label: "Publish", lane: "author", fromCol: 2, toCol: 2 }];
+    } else {
+      spec.segments = [{ from: 170, to: 290, label: "Lookup" }];
+      spec.activations = [{ participant: "api", from: 180, to: 280 }];
+    }
+    doc.datasets = [datasetOf(type, spec)];
+    doc.nodes = doc.nodes.map((node) => ({ ...node, x: node.x + 7, y: node.y + 3 }));
+    const body = serializeDoc(doc);
+    const reopened = deserializeDoc(body);
+    expect(serializeDoc(reopened)).toBe(body);
+    expect(reopened.nodes.map((node) => node.id)).toEqual(doc.nodes.map((node) => node.id));
+  });
+
+  it("maps sequence ranges to the unchanged message brackets and resolves their index keys", () => {
     const spec = fixture("sequence");
-    spec.segments = [{ from: 170, to: 240, label: "auth" }];
-    const { diagnostics } = projectSemanticDataset(datasetOf("sequence", spec));
-    expect(diagnostics).toEqual([{ key: "diagram.semantic.notProjected", params: { field: "segments" } }]);
+    spec.segments = [{ from: 170, to: 290, label: "Lookup" }];
+    spec.activations = [{ participant: "api", from: 180, to: 280 }];
+    expect(validateSemanticContent("sequence", spec)).toEqual([]);
+    const dataset = datasetOf("sequence", spec);
+    const doc = projectSemanticDocument(dataset).doc;
+    const segment = doc.nodes.find((node) => node.id === "ds-sequence:segment:0")!;
+    const activation = doc.nodes.find((node) => node.id === "ds-sequence:activation:0")!;
+    expect(segment.y).toBeCloseTo(105.6);
+    expect(segment.y + segment.h).toBeCloseTo(230.4);
+    expect(activation).toMatchObject({ x: 304, y: 144, w: 32, h: 64, title: "API" });
+    expect(doc.edges).toEqual(projectSemanticDataset(datasetOf("sequence")).edges);
+    expect(resolveSemanticMember(doc, { nodeId: segment.id })).toMatchObject({ role: "segment", field: "segments", index: 0 });
+    expect(resolveSemanticMember(doc, { nodeId: activation.id })).toMatchObject({ role: "activation", field: "activations", index: 0 });
+    const renamed = writeThroughText(doc, { nodeId: segment.id }, { title: "Fetch" })!;
+    expect((renamed.datasets![0] as SemanticSpecDataset).spec.segments).toEqual([{ from: 170, to: 290, label: "Fetch" }]);
+    expect(writeThroughText(doc, { nodeId: activation.id }, { title: "Work" })).toBeNull();
+    const detached = detachSemanticDataset(doc, dataset.id);
+    expect(detached.losses).toContainEqual({ key: "diagram.semantic.loss.segments", params: { count: 1 } });
+    expect(detached.losses).toContainEqual({ key: "diagram.semantic.loss.activations", params: { count: 1 } });
+    expect(detached.doc.nodes.every((node) => node.meta?.semanticContainer === undefined)).toBe(true);
+  });
+
+  it("keeps empty, single-message and equal-y sequence ranges finite and deterministic", () => {
+    for (const ys of [[], [180], [180, 180], [180, 180, 280]]) {
+      const spec = fixture("sequence");
+      spec.messages = ys.map((y) => ({ from: "web", to: "api", y, label: "Request" }));
+      spec.segments = [{ from: 160, to: 340, label: "Exchange" }];
+      const dataset = datasetOf("sequence", spec);
+      const projection = projectSemanticDataset(dataset, { containers: true });
+      const segment = projection.nodes.find((node) => node.meta?.semanticContainer === "segment")!;
+      expect([segment.x, segment.y, segment.w, segment.h].every(Number.isFinite)).toBe(true);
+      expect(segment.h).toBeGreaterThan(0);
+      expect(projection).toEqual(projectSemanticDataset(dataset, { containers: true }));
+    }
+  });
+
+  it("orders nested frames only inside the owning dataset's container slots", () => {
+    const frame = (dataset: string, role: "phase" | "lane" | "group"): DiagramNode => ({
+      id: `${dataset}:${role}:x`, kind: "section", x: 0, y: 0, w: 100, h: 100,
+      meta: { memberId: `${dataset}:${role}:x`, semanticContainer: role },
+    });
+    const nodes = [frame("other", "group"), frame("ds", "group"), frame("other", "phase"), frame("ds", "lane"), frame("ds", "phase")];
+    const ordered = orderSemanticContainers(nodes, "ds");
+    expect(ordered.map((node) => node.id)).toEqual(["other:group:x", "ds:phase:x", "other:phase:x", "ds:lane:x", "ds:group:x"]);
+    expect(ordered[0]).toBe(nodes[0]);
+    expect(ordered[2]).toBe(nodes[2]);
+  });
+
+  it("reports not-projected fields as informational diagnostics", () => {
+    const spec = fixture("workflow");
+    spec.mainPath = ["draft", "review", "merge"];
+    spec.semanticChecks = {};
+    const { diagnostics } = projectSemanticDataset(datasetOf("workflow", spec));
+    expect(diagnostics).toEqual(["mainPath", "semanticChecks"].map((field) => ({ key: "diagram.semantic.notProjected", params: { field } })));
   });
 });
 
