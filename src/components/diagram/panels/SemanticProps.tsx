@@ -103,6 +103,9 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
           ? member.entry.id
           : "-";
 
+  const participantLabel = typeof member.entry.participant === "string"
+    ? labelOf(specEntries(spec, "participants").find((entry) => entry.id === member.entry.participant), member.entry.participant)
+    : "";
   const membership: Array<{ labelKey: string; value: string }> = [];
   if (member.kind === "entity") {
     const lane = lanes.find((entry) => entry.id === member.entry.lane);
@@ -122,14 +125,18 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
     }
   } else if (member.kind === "container") {
     const entities = specEntries(spec, descriptor.entities);
-    const count =
-      member.role === "lane"
-        ? entities.filter((entry) => entry.lane === member.key).length
-        : member.role === "stage"
-          ? entities.filter((entry) => entry.stage === member.index).length
-          : Array.isArray(member.entry.wraps)
-            ? member.entry.wraps.length
-            : 0;
+    let count = 0;
+    if (member.role === "lane") count = entities.filter((entry) => entry.lane === member.key).length;
+    else if (member.role === "stage") count = entities.filter((entry) => entry.stage === member.index).length;
+    else if (member.role === "phase" || member.role === "group") {
+      count = entities.filter((entry) => typeof entry.col === "number" &&
+        entry.col >= Number(member.entry.fromCol) && entry.col <= Number(member.entry.toCol) &&
+        (member.role === "phase" || entry.lane === member.entry.lane)).length;
+    } else if (member.role === "segment" || member.role === "activation") {
+      count = specEntries(spec, "messages").filter((entry) => typeof entry.y === "number" &&
+        entry.y >= Number(member.entry.from) && entry.y <= Number(member.entry.to) &&
+        (member.role === "segment" || entry.from === member.entry.participant || entry.to === member.entry.participant)).length;
+    } else if (Array.isArray(member.entry.wraps)) count = member.entry.wraps.length;
     membership.push({ labelKey: "diagram.semantic.members", value: String(count) });
   }
 
@@ -151,7 +158,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
         <Row labelKey="diagram.semantic.dataset" value={dataset.name} />
         <Row labelKey="diagram.semantic.role" value={t(`diagram.semantic.role.${role}`)} />
         <Row labelKey="diagram.semantic.id" value={id} />
-        <Row labelKey="diagram.semantic.label" value={labelOf(member.entry, "")} testId="semantic-label" />
+        <Row labelKey="diagram.semantic.label" value={labelOf(member.entry, participantLabel)} testId="semantic-label" />
         {membership.map((row) => (
           <Row key={row.labelKey} labelKey={row.labelKey} value={row.value} />
         ))}

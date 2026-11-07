@@ -220,6 +220,22 @@ describe("semantic text write-through (issue #433 P2)", () => {
     expect(specOf(store).states![2]!.label).toBe("Done");
   });
 
+  it.each(["rename", "replace-all"] as const)("keeps derived activation captions in the participant %s undo step", (mode) => {
+    const spec = { ...structuredClone(SEMANTIC_FIXTURES.sequence), activations: [
+      { participant: "api", from: 180, to: 280 }, { participant: "web", from: 180, to: 230 },
+    ] };
+    const { dataset } = archifySpecToDataset("sequence", spec, { id: "seq" });
+    const doc = projectSemanticDocument(dataset).doc;
+    const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
+    store.setState(withSnapshot(mode === "rename" ? updateNode("api", { title: "Service" }) : replaceAllInDoc("API", "Service"), defaultCoalescer()));
+    expect(store.getState().doc.nodes.find((node) => node.id === "seq:activation:0")?.title).toBe("Service");
+    expect(store.getState().doc.nodes.find((node) => node.id === "seq:activation:1")?.title).toBe("Web");
+    expect((store.getState().doc.datasets![0] as SemanticSpecDataset).spec.activations).toEqual(spec.activations);
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    store.setState(undo());
+    expect(store.getState().doc).toEqual(doc);
+  });
+
   it("keeps freeform edits off the spec", () => {
     const store = semanticStore("lifecycle");
     store.setState(addNode("simple", 0, 0, { id: "note", title: "Note" }));
