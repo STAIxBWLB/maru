@@ -453,10 +453,12 @@ function usageLine(
   usage: RunUsageSummary | undefined,
   t: ReturnType<typeof useTranslation>["t"],
 ): string {
-  if (!usage || usage.receiptCount === 0) return t("skillRuns.summary.usageNone");
+  if (!usage || (usage.receiptCount === 0 && !usage.pendingCount)) {
+    return t("skillRuns.summary.usageNone");
+  }
   // A counter no receipt reported is unknown, not a measured zero.
   const tokens = (value: number, counted: number) => (counted > 0 ? value : "-");
-  return t("skillRuns.summary.usage", {
+  const line = t("skillRuns.summary.usage", {
     input: tokens(usage.inputTokens, usage.inputCounted),
     cached: tokens(usage.cachedReadTokens, usage.cachedReadCounted),
     cacheWrite: tokens(usage.cacheWriteTokens, usage.cacheWriteCounted),
@@ -470,4 +472,7 @@ function usageLine(
     unavailable: usage.unavailableCount,
     failed: usage.failedCount,
   });
+  return usage.pendingCount > 0
+    ? `${line} · ${t("skillRuns.summary.usageIncomplete", { pending: usage.pendingCount })}`
+    : line;
 }

@@ -195,6 +195,8 @@ export interface RunUsageSummary {
   outputCounted: number;
   confirmedMicros: number;
   estimateMicros: number;
+  /** Receipts the run could not persist; above 0 means totals are incomplete. */
+  pendingCount: number;
 }
 
 export function formatUsdMicros(micros: number): string {

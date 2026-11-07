@@ -22,6 +22,8 @@ use crate::agent_host::contracts::AgentRunEvent;
 
 pub const USAGE_RECEIPT_SCHEMA_VERSION: &str = "maru_usage_receipt_v1";
 pub const USAGE_RECORDED_EVENT: &str = "usage.recorded";
+/// Receipts that could not be persisted; payload `{"pending": n}` only.
+pub const USAGE_INCOMPLETE_EVENT: &str = "usage.incomplete";
 /// Source parser version for the Claude CLI `--output-format json` result.
 pub const CLAUDE_JSON_SOURCE: &str = "claude-cli-json-v1";
 
@@ -86,7 +88,7 @@ impl UsageReceipt {
     /// Amount fields must match the pricing status. A receipt that claims a
     /// price without amount and currency is not trusted as priced.
     pub fn amounts_consistent(&self) -> bool {
-        let currency = self.currency.as_deref().is_some_and(|c| !c.is_empty());
+        let currency = self.currency.as_deref() == Some("USD");
         match self.pricing_status {
             PricingStatus::Billed => {
                 currency
@@ -152,14 +154,38 @@ pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, 
         .map(str::to_string)
         .unwrap_or_else(|| stdout.to_string());
     let usage = object.get("usage").and_then(JsonValue::as_object);
-    let count = |key: &str| usage.and_then(|u| u.get(key)).and_then(JsonValue::as_u64);
-    let tokens = UsageTokens {
-        input: count("input_tokens"),
-        cached_read: count("cache_read_input_tokens"),
-        cache_write: count("cache_creation_input_tokens"),
-        output: count("output_tokens"),
-    };
     let model_usage = object.get("modelUsage").and_then(JsonValue::as_object);
+    // Top-level `usage` covers the main loop only; `modelUsage` also counts
+    // subagents and compaction. Prefer the per-model sum per field when any
+    // model entry reports it.
+    let count = |usage_key: &str, model_key: &str| {
+        let per_model: Vec<u64> = model_usage
+            .map(|m| {
+                m.values()
+                    .filter_map(|v| v.get(model_key).and_then(JsonValue::as_u64))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if per_model.is_empty() {
+            usage
+                .and_then(|u| u.get(usage_key))
+                .and_then(JsonValue::as_u64)
+        } else {
+            Some(per_model.iter().fold(0u64, |a, b| a.saturating_add(*b)))
+        }
+    };
+    let tokens = UsageTokens {
+        input: count("input_tokens", "inputTokens"),
+        cached_read: count("cache_read_input_tokens", "cacheReadInputTokens"),
+        cache_write: count("cache_creation_input_tokens", "cacheCreationInputTokens"),
+        output: count("output_tokens", "outputTokens"),
+    };
+    let has_counters = tokens
+        .input
+        .or(tokens.cached_read)
+        .or(tokens.cache_write)
+        .or(tokens.output)
+        .is_some();
     let mut models: Vec<String> = model_usage
         .map(|m| {
             m.keys()
@@ -186,7 +212,6 @@ pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, 
         .get("total_cost_usd")
         .and_then(JsonValue::as_f64)
         .and_then(usd_to_micros);
-    let has_counters = usage.is_some();
     let (pricing_status, billed_micros, estimate_micros) = match (cost, basis) {
         (_, Some("subscription" | "included")) => (PricingStatus::SubscriptionIncluded, None, None),
         (Some(0), Some("billed" | "actual")) => (PricingStatus::Zero, Some(0), None),
@@ -241,6 +266,9 @@ pub struct RunUsageSummary {
     pub confirmed_micros: i64,
     /// Sum of advisory estimates, never mixed into `confirmed_micros`.
     pub estimate_micros: i64,
+    /// Receipts the run could not persist (`usage.incomplete` events); when
+    /// above 0 the totals are known to be incomplete.
+    pub pending_count: u64,
 }
 
 /// Recompute the run's usage from its event log. Receipts are deduplicated by
@@ -294,6 +322,15 @@ pub fn summarize_usage(events: &[AgentRunEvent]) -> RunUsageSummary {
             }
             PricingStatus::Unpriced => summary.unpriced_count += 1,
             PricingStatus::Unavailable => summary.unavailable_count += 1,
+        }
+    }
+    for event in events
+        .iter()
+        .filter(|e| e.event_type == USAGE_INCOMPLETE_EVENT)
+    {
+        if seen.insert(format!("event:{}", event.id)) {
+            let pending = event.payload.get("pending").and_then(JsonValue::as_u64);
+            summary.pending_count = summary.pending_count.saturating_add(pending.unwrap_or(1));
         }
     }
     summary
@@ -430,6 +467,42 @@ mod tests {
             json!(1),
         );
         assert_eq!(all.pricing_status, PricingStatus::Billed);
+    }
+
+    #[test]
+    fn model_usage_totals_include_subagents_over_top_level_usage() {
+        let raw = r#"{"type":"result","result":"x","usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30},"modelUsage":{"main":{"inputTokens":10,"outputTokens":20,"cacheReadInputTokens":30,"costBasis":"list"},"sub":{"inputTokens":5,"outputTokens":7,"cacheReadInputTokens":0,"costBasis":"list"}}}"#;
+        let r = parse_claude_json_result(raw, "ok").unwrap().1;
+        assert_eq!(r.tokens.input, Some(15));
+        assert_eq!(r.tokens.output, Some(27));
+        assert_eq!(r.tokens.cached_read, Some(30));
+        // Neither source reported cache writes: still unknown.
+        assert_eq!(r.tokens.cache_write, None);
+    }
+
+    #[test]
+    fn non_usd_currency_is_unavailable() {
+        let mut r = parse_claude_json_result(&with_cost(json!(0.25), "billed"), "ok")
+            .unwrap()
+            .1;
+        r.currency = Some("EUR".into());
+        assert!(!r.amounts_consistent());
+        let s = summarize_usage(&[event(&r)]);
+        assert_eq!((s.unavailable_count, s.priced_count), (1, 0));
+    }
+
+    #[test]
+    fn incomplete_event_surfaces_pending_count_once() {
+        let mut e = new_run_event(
+            "run-1",
+            USAGE_INCOMPLETE_EVENT,
+            "m",
+            json!({"pending": 2}),
+            None,
+        );
+        e.id = "event-inc".into();
+        let s = summarize_usage(&[e.clone(), e]);
+        assert_eq!(s.pending_count, 2);
     }
 
     #[test]

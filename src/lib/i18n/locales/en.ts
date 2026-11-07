@@ -2637,6 +2637,7 @@ export const en: Record<string, string> = {
   "skillRuns.summary.counts": "events {events} · proposals {proposals} · claimed {claimed} · committed {committed} · conflicts {conflicts}",
   "skillRuns.summary.usage": "usage: in {input} · cached {cached} · cache write {cacheWrite} · out {output} · confirmed {confirmed} · estimate {estimate} · priced {priced}/{receipts} · unpriced {unpriced} · included {included} · unavailable {unavailable} · failed {failed}",
   "skillRuns.summary.usageNone": "usage: not recorded for this run",
+  "skillRuns.summary.usageIncomplete": "incomplete: {pending} not recorded",
   "skillRuns.export.title": "Export redacted summary",
   "skillRuns.export.done": "Saved summary to {path}.",
   "skillRuns.export.copied": "Copied summary to clipboard.",

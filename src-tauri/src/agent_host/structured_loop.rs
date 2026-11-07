@@ -195,8 +195,22 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
                     // failed, cancelled or interrupted run keeps it (maru#431).
                     .with_usage_sink(cwd_thread.clone(), run_id_thread.clone());
             let result = run_five_role_loop(&mut adapter, input);
-            // One retry for receipts whose append failed mid-run.
-            adapter.flush_pending_usage();
+            // One retry for receipts whose append failed mid-run; anything
+            // still pending marks the run's usage as incomplete.
+            let pending = adapter.flush_pending_usage();
+            if pending > 0 {
+                if let Err(err) = append_run_event_payload(
+                    &cwd_thread,
+                    &run_id_thread,
+                    crate::agent_host::usage::USAGE_INCOMPLETE_EVENT,
+                    "maru.structured_loop",
+                    json!({ "pending": pending }),
+                ) {
+                    eprintln!(
+                        "maru: usage incomplete marker not recorded for run {run_id_thread}: {pending} pending: {err}"
+                    );
+                }
+            }
             result
         })();
         match result {
