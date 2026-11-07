@@ -62,7 +62,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$RUNNER_TEMP/ci-files.json"
+          if ! gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$RUNNER_TEMP/ci-files.json"; then
+            echo "::error::PR changed-file lookup failed; check pull-requests read permission and rerun CI."
+            exit 1
+          fi
           node scripts/ci-policy.mjs classify "$RUNNER_TEMP/ci-files.json" "$GITHUB_EVENT_PATH"
 
       - name: Decide intended validation
@@ -168,8 +171,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "CI decision: $reason"
           if [ "$run_full" = "false" ]; then
-            echo "### CI deduplicated" >> "$GITHUB_STEP_SUMMARY"
-            echo "$reason. Jobs run only when their decision output requests them." >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo "### CI validation intent"
+              echo "$reason. Jobs run only when their decision output requests them."
+              echo "verify=$run_full e2e=$run_e2e native=$run_native compile=$run_native_compile"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   verify:
