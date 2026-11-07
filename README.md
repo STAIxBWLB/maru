@@ -841,15 +841,41 @@ Public macOS releases fail closed unless all signing secrets are configured:
 APPLE_CERTIFICATE
 APPLE_CERTIFICATE_PASSWORD
 KEYCHAIN_PASSWORD
-APPLE_ID
-APPLE_PASSWORD
-APPLE_TEAM_ID
+APPLE_API_ISSUER_ID
+APPLE_API_KEY
+APPLE_API_KEY_ID
 TAURI_SIGNING_PRIVATE_KEY
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 ```
 
 Developer ID signing and Tauri updater signing are separate. The normal release
 does not enable the browser-passkey provisioning overlay.
+
+Notarization uses an App Store Connect API key. `APPLE_API_KEY` stores the
+private `.p8` contents; the runner writes them to a mode-600 temporary file.
+Tauri receives that path as `APPLE_API_KEY_PATH`, the stored `APPLE_API_KEY_ID`
+as its `APPLE_API_KEY` environment variable, and `APPLE_API_ISSUER_ID` as
+`APPLE_API_ISSUER`, matching the
+[Tauri API-key configuration](https://v2.tauri.app/distribute/sign/macos/).
+The explicit DMG `notarytool submit` uses the same file, ID and issuer.
+Cleanup runs even when a release step fails. The legacy
+`APPLE_ID`/`APPLE_PASSWORD` secrets remain stored but are no longer used;
+`APPLE_TEAM_ID` is no longer a release requirement (local opt-in passkey
+provisioning still uses its team check).
+
+Release Preflight includes a ten-minute `notarytool history` credential probe
+on `macos-26`. It writes and removes its own restricted temporary key without
+submitting an app. A successful probe proves authentication, not acceptance
+of a release artifact; actual API-key notarization is verified at the next
+release through submit, staple and Gatekeeper checks.
+
+All macOS CI, native E2E, spike, nightly packaging, preflight and release jobs
+use `macos-26`. The
+[runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md)
+lists Xcode 26.6 and Rust tooling above Maru's 1.90 MSRV; Rust builds still use
+the repository's pinned toolchain. Image-bearing Rust cache keys use the same
+OS label, with separate Intel and Apple Silicon release caches. This pins the
+OS image family, not its rolling tool updates.
 
 Local Apple material belongs outside the repository:
 
