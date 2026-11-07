@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -13,6 +13,14 @@ import { downloadUpdaterSignatures, publishUpdaterManifest } from "./publish-upd
 const tag = "v1.2.3", sha = "a".repeat(40), repo = "fixture/maru", id = 77;
 const windowsArtifacts = ["Maru_1.2.3_x64_en-US.msi", "Maru_1.2.3_x64_en-US.msi.sig", "Maru_1.2.3_x64-setup.exe", "Maru_1.2.3_x64-setup.exe.sig"];
 const windowsNames = ["Maru_1.2.3_windows_x64_msi.msi", "Maru_1.2.3_windows_x64_msi.msi.sig", "Maru_1.2.3_windows_x64_nsis.exe", "Maru_1.2.3_windows_x64_nsis.exe.sig"];
+
+function completedWindowsBuild(folder: string) {
+  return windowsArtifacts.map((name) => {
+    const file = resolve(folder, name);
+    writeFileSync(file, `fixture:${name}`);
+    return file;
+  });
+}
 
 function fixture() {
   const contents = new Map<number, string>();
@@ -104,17 +112,45 @@ describe("checked Tauri bundle handoff", () => {
   });
 
   it("uploads nothing when the draft became public after build", () => {
-    const f = fixture();
-    const completedBuild = [...windowsArtifacts];
-    f.state.release.draft = false;
-    expect(() => uploadTauriArtifacts(completedBuild, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh })).toThrow("already public");
-    expect(f.calls).toEqual([{ method: "GET", route: `repos/${repo}/releases/${id}` }]);
+    const folder = mkdtempSync(resolve(tmpdir(), "maru-built-public-"));
+    try {
+      const f = fixture();
+      const completedBuild = completedWindowsBuild(folder);
+      f.state.release.draft = false;
+      expect(() => uploadTauriArtifacts(completedBuild, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh })).toThrow("already public");
+      expect(f.calls).toEqual([{ method: "GET", route: `repos/${repo}/releases/${id}` }]);
+    } finally { rmSync(folder, { recursive: true, force: true }); }
+  });
+
+  it.each(["missing", "empty", "directory"])("rejects a later %s file before any API call", (failure) => {
+    const folder = mkdtempSync(resolve(tmpdir(), "maru-invalid-batch-"));
+    try {
+      const files = completedWindowsBuild(folder);
+      // Planning succeeds: only the second file's actual filesystem state is bad.
+      expect(planTauriUploads(files, { tag, platform: "windows-latest", appVersion: "1.2.3" })).toHaveLength(4);
+      if (failure === "empty") writeFileSync(files[1], "");
+      else { unlinkSync(files[1]); if (failure === "directory") mkdirSync(files[1]); }
+      const f = fixture();
+      expect(() => uploadTauriArtifacts(files, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh })).toThrow(/rebuild.*retry Release Bundles/);
+      expect(f.calls).toEqual([]);
+    } finally { rmSync(folder, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("rejects a later unreadable file before any API call (POSIX permissions)", () => {
+    const folder = mkdtempSync(resolve(tmpdir(), "maru-unreadable-batch-"));
+    try {
+      const files = completedWindowsBuild(folder);
+      chmodSync(files[1], 0);
+      const f = fixture();
+      expect(() => uploadTauriArtifacts(files, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh })).toThrow("is unreadable; rebuild");
+      expect(f.calls).toEqual([]);
+    } finally { rmSync(folder, { recursive: true, force: true }); }
   });
 
   it("maps files without copying and reasserts before each write", () => {
     const folder = mkdtempSync(resolve(tmpdir(), "maru-checked-tauri-"));
     try {
-      const files = windowsArtifacts.map((name) => { const file = resolve(folder, name); writeFileSync(file, `fixture:${name}`); return file; });
+      const files = completedWindowsBuild(folder);
       const f = fixture();
       const uploaded = uploadTauriArtifacts(files, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh });
       expect(uploaded.map((item) => item.name)).toEqual(windowsNames);

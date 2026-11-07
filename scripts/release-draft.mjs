@@ -7,7 +7,7 @@ import { verifyReleaseWorkflowsForSha } from "./check-release-workflows.mjs";
 import { downloadUpdaterSignatures } from "./publish-updater-manifest.mjs";
 import { buildUpdaterManifest, validateReleaseAssets, UPDATER_ASSET_PAIRS } from "./lib/updaterManifest.mjs";
 import { assertDraft, assertReleaseTag, assetText, checkTagTarget, findRelease,
-  getRelease, ghJson, ghText, releaseMetadata, uploadDraftAsset } from "./lib/releaseApi.mjs";
+  getRelease, ghJson, ghText, releaseMetadata, uploadDraftAsset, validateReleaseAssetFile } from "./lib/releaseApi.mjs";
 
 export function parseDryRun(value = "false") {
   if (value !== "true" && value !== "false") {
@@ -70,6 +70,9 @@ export function planTauriUploads(paths, { tag, platform, target = "", appVersion
 export function uploadTauriArtifacts(paths, { tag, id, sha, repo, dryRun = false, runGh = ghText,
   platform, target = "", appVersion }) {
   const uploads = planTauriUploads(paths, { tag, platform, target, appVersion });
+  // Reject a bad later artifact before any earlier asset is replaced. Keep
+  // the shared per-file check too, since files can change after preflight.
+  for (const { file, name } of uploads) validateReleaseAssetFile(file, { tag, name });
   // The release may have changed while the action built. Every shared upload
   // re-fetches/asserts the ID immediately before any asset deletion or write.
   for (const { file, name } of uploads) {
