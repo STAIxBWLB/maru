@@ -158,6 +158,7 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     let run_id_thread = run_id.clone();
     let cwd_thread = cwd;
     thread::spawn(move || {
+        let mut receipts = Vec::new();
         let result = (|| {
             let mut input = input;
             // General agent calls have no skill binding. Only the explicit
@@ -191,8 +192,21 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
                 CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode)
                     .with_metadata(metadata)
                     .with_bundle_session(bundle_session);
-            run_five_role_loop(&mut adapter, input)
+            let result = run_five_role_loop(&mut adapter, input);
+            receipts = adapter.take_usage_receipts();
+            result
         })();
+        // Usage first, so a failed or cancelled run keeps what it consumed
+        // (maru#431). Each receipt is one event keyed by its receiptId.
+        for receipt in &receipts {
+            let _ = append_run_event_payload(
+                &cwd_thread,
+                &run_id_thread,
+                crate::agent_host::usage::USAGE_RECORDED_EVENT,
+                &receipt.provider,
+                json!({ "receipt": receipt }),
+            );
+        }
         match result {
             Ok(result) => {
                 for role_output in &result.role_outputs {
@@ -422,6 +436,7 @@ mod phase08_16 {
         };
         assert!(raw.contains("\"run.started\""));
         assert!(raw.contains("\"role.output\""));
+        assert!(raw.contains("\"usage.recorded\""));
         assert!(raw.contains("\"proposal.created\""));
         assert!(raw.contains("\"passed\""));
 

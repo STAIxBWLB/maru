@@ -9,6 +9,7 @@ pub mod roles;
 pub mod runtime_policy;
 pub mod status;
 pub mod structured_loop;
+pub mod usage;
 
 pub use cloud_dashboard::{agent_export_redacted_run_summary, agent_write_redacted_run_summary};
 pub use event_store::{agent_read_run_events, agent_replay_run_summary};

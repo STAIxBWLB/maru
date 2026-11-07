@@ -2633,6 +2633,8 @@ export const ko: Record<string, string> = {
   "skillRuns.applySummary": "스킬 proposal 적용: 파일 {files}개, 명령 {commands}개",
   "skillRuns.summary": "실행 요약",
   "skillRuns.summary.counts": "이벤트 {events} · proposal {proposals} · 쓰기청구 {claimed} · 커밋 {committed} · 충돌 {conflicts}",
+  "skillRuns.summary.usage": "사용량: 입력 {input} · 캐시 {cached} · 캐시쓰기 {cacheWrite} · 출력 {output} · 확정 {confirmed} · 추정 {estimate} · 가격 확인 {priced}/{receipts} · 가격 없음 {unpriced} · 구독 포함 {included} · 확인 불가 {unavailable} · 실패 {failed}",
+  "skillRuns.summary.usageNone": "사용량: 이 실행은 기록되지 않음",
   "skillRuns.export.title": "리덕션 요약 내보내기",
   "skillRuns.export.done": "요약을 {path}에 저장했습니다.",
   "skillRuns.export.copied": "요약을 클립보드에 복사했습니다.",

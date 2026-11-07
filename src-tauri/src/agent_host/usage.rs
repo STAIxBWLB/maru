@@ -1,0 +1,426 @@
+//! Per-run usage receipts (maru#431).
+//!
+//! A [`UsageReceipt`] is one provider call's normalized usage, recorded as a
+//! `usage.recorded` run event and keyed by `receiptId`. The read model in
+//! [`summarize_usage`] deduplicates by `receiptId`, so replaying the same
+//! receipt (a duplicated log line, a re-append after restart) is counted once.
+//!
+//! First slice: only the Claude CLI (`--output-format json`) yields a parsed
+//! receipt. Every other provider, and any Claude output that does not match the
+//! expected shape, records `pricingStatus: "unavailable"` with no counters,
+//! never a fabricated zero.
+//!
+//! A receipt carries counters, model ids and money only. It never stores
+//! prompts, response content, environment, credential paths or tokens.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use std::collections::HashSet;
+use uuid::Uuid;
+
+use crate::agent_host::contracts::AgentRunEvent;
+
+pub const USAGE_RECEIPT_SCHEMA_VERSION: &str = "maru_usage_receipt_v1";
+pub const USAGE_RECORDED_EVENT: &str = "usage.recorded";
+/// Source parser version for the Claude CLI `--output-format json` result.
+pub const CLAUDE_JSON_SOURCE: &str = "claude-cli-json-v1";
+
+/// How the money on a receipt is to be read. Each state stays distinct:
+/// a missing price is never shown as zero and an estimate never counts as
+/// billed spend.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PricingStatus {
+    /// The provider reported an actual billed amount.
+    Billed,
+    /// The provider explicitly reported zero cost.
+    Zero,
+    /// Covered by a subscription; no per-run charge.
+    SubscriptionIncluded,
+    /// Advisory estimate (e.g. list price); excluded from confirmed totals.
+    Estimate,
+    /// Usage was reported but no price.
+    Unpriced,
+    /// No machine-readable usage for this provider or output shape.
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageTokens {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_read: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageReceipt {
+    pub schema_version: String,
+    pub receipt_id: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+    pub source: String,
+    pub pricing_status: PricingStatus,
+    #[serde(default)]
+    pub tokens: UsageTokens,
+    /// Confirmed amount in millionths of `currency`; set only for `billed`/`zero`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billed_micros: Option<i64>,
+    /// Advisory amount in millionths of `currency`; set only for `estimate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_micros: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    /// `ok` or `failed`: failed calls keep their usage.
+    pub outcome: String,
+}
+
+impl UsageReceipt {
+    pub fn unavailable(provider: &str, outcome: &str) -> Self {
+        Self {
+            schema_version: USAGE_RECEIPT_SCHEMA_VERSION.to_string(),
+            receipt_id: new_receipt_id(),
+            provider: provider.to_string(),
+            models: Vec::new(),
+            source: "none".to_string(),
+            pricing_status: PricingStatus::Unavailable,
+            tokens: UsageTokens::default(),
+            billed_micros: None,
+            estimate_micros: None,
+            currency: None,
+            outcome: outcome.to_string(),
+        }
+    }
+}
+
+fn new_receipt_id() -> String {
+    format!("usage-{}", Uuid::new_v4())
+}
+
+fn usd_to_micros(value: f64) -> Option<i64> {
+    if !value.is_finite() || value < 0.0 || value > 1.0e9 {
+        return None;
+    }
+    Some((value * 1_000_000.0).round() as i64)
+}
+
+/// Parse the Claude CLI `--output-format json` result object.
+///
+/// Returns `None` when stdout is not that shape (older CLI, a wrapper script,
+/// schema drift). The caller then keeps raw stdout as content and records an
+/// `unavailable` receipt.
+pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, UsageReceipt)> {
+    let value: JsonValue = serde_json::from_str(stdout.trim()).ok()?;
+    let object = value.as_object()?;
+    if object.get("type").and_then(JsonValue::as_str) != Some("result") {
+        return None;
+    }
+    let content = object
+        .get("result")
+        .and_then(JsonValue::as_str)?
+        .to_string();
+    let usage = object.get("usage").and_then(JsonValue::as_object);
+    let count = |key: &str| usage.and_then(|u| u.get(key)).and_then(JsonValue::as_u64);
+    let tokens = UsageTokens {
+        input: count("input_tokens"),
+        cached_read: count("cache_read_input_tokens"),
+        cache_write: count("cache_creation_input_tokens"),
+        output: count("output_tokens"),
+    };
+    let model_usage = object.get("modelUsage").and_then(JsonValue::as_object);
+    let mut models: Vec<String> = model_usage
+        .map(|m| {
+            m.keys()
+                .take(8)
+                .map(|k| k.chars().take(80).collect())
+                .collect()
+        })
+        .unwrap_or_default();
+    models.sort();
+    let cost_bases: HashSet<&str> = model_usage
+        .map(|m| {
+            m.values()
+                .filter_map(|v| v.get("costBasis").and_then(JsonValue::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    let basis = if cost_bases.len() == 1 {
+        cost_bases.iter().next().copied()
+    } else {
+        None
+    };
+    let cost = object
+        .get("total_cost_usd")
+        .and_then(JsonValue::as_f64)
+        .and_then(usd_to_micros);
+    let has_counters = usage.is_some();
+    let (pricing_status, billed_micros, estimate_micros) = match (cost, basis) {
+        (_, Some("subscription" | "included")) => (PricingStatus::SubscriptionIncluded, None, None),
+        (Some(0), _) => (PricingStatus::Zero, Some(0), None),
+        (Some(micros), Some("billed" | "actual")) => (PricingStatus::Billed, Some(micros), None),
+        // `list` (and any unknown basis) is the CLI's own price computation, not
+        // an invoice: advisory only.
+        (Some(micros), _) => (PricingStatus::Estimate, None, Some(micros)),
+        (None, _) if has_counters => (PricingStatus::Unpriced, None, None),
+        (None, _) => (PricingStatus::Unavailable, None, None),
+    };
+    let currency =
+        (billed_micros.is_some() || estimate_micros.is_some()).then(|| "USD".to_string());
+    Some((
+        content,
+        UsageReceipt {
+            schema_version: USAGE_RECEIPT_SCHEMA_VERSION.to_string(),
+            receipt_id: new_receipt_id(),
+            provider: "claude".to_string(),
+            models,
+            source: CLAUDE_JSON_SOURCE.to_string(),
+            pricing_status,
+            tokens,
+            billed_micros,
+            estimate_micros,
+            currency,
+            outcome: outcome.to_string(),
+        },
+    ))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RunUsageSummary {
+    pub receipt_count: usize,
+    pub priced_count: usize,
+    pub unpriced_count: usize,
+    pub estimate_count: usize,
+    pub subscription_included_count: usize,
+    pub unavailable_count: usize,
+    pub failed_count: usize,
+    pub input_tokens: u64,
+    pub cached_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub output_tokens: u64,
+    /// Sum of `billed`/`zero` receipts only, in USD millionths.
+    pub confirmed_micros: i64,
+    /// Sum of advisory estimates, never mixed into `confirmed_micros`.
+    pub estimate_micros: i64,
+}
+
+/// Recompute the run's usage from its event log. Receipts are deduplicated by
+/// `receiptId`; malformed or unknown-schema payloads count as unavailable.
+pub fn summarize_usage(events: &[AgentRunEvent]) -> RunUsageSummary {
+    let mut seen = HashSet::new();
+    let mut summary = RunUsageSummary::default();
+    for event in events
+        .iter()
+        .filter(|e| e.event_type == USAGE_RECORDED_EVENT)
+    {
+        let receipt = event
+            .payload
+            .get("receipt")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<UsageReceipt>(value).ok())
+            .filter(|r| r.schema_version == USAGE_RECEIPT_SCHEMA_VERSION);
+        let Some(receipt) = receipt else {
+            // Dedupe drifted payloads by event id so a replayed line is still one.
+            if seen.insert(format!("event:{}", event.id)) {
+                summary.receipt_count += 1;
+                summary.unavailable_count += 1;
+            }
+            continue;
+        };
+        if !seen.insert(receipt.receipt_id.clone()) {
+            continue;
+        }
+        summary.receipt_count += 1;
+        if receipt.outcome != "ok" {
+            summary.failed_count += 1;
+        }
+        let t = &receipt.tokens;
+        summary.input_tokens += t.input.unwrap_or(0);
+        summary.cached_read_tokens += t.cached_read.unwrap_or(0);
+        summary.cache_write_tokens += t.cache_write.unwrap_or(0);
+        summary.output_tokens += t.output.unwrap_or(0);
+        match receipt.pricing_status {
+            PricingStatus::Billed | PricingStatus::Zero => {
+                summary.priced_count += 1;
+                summary.confirmed_micros += receipt.billed_micros.unwrap_or(0);
+            }
+            PricingStatus::SubscriptionIncluded => summary.subscription_included_count += 1,
+            PricingStatus::Estimate => {
+                summary.estimate_count += 1;
+                summary.estimate_micros += receipt.estimate_micros.unwrap_or(0);
+            }
+            PricingStatus::Unpriced => summary.unpriced_count += 1,
+            PricingStatus::Unavailable => summary.unavailable_count += 1,
+        }
+    }
+    summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_host::contracts::new_run_event;
+    use serde_json::json;
+
+    /// Captured from `claude -p ... --output-format json` (Claude Code CLI,
+    /// 2026-11-08), trimmed to the fields Maru reads plus some it must ignore.
+    /// Session id, uuid and credential expiry are replaced.
+    const CLAUDE_FIXTURE: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","stop_reason":"end_turn","session_id":"00000000-0000-0000-0000-000000000000","total_cost_usd":0.4407342,"usage":{"input_tokens":2,"cache_creation_input_tokens":54611,"cache_read_input_tokens":11491,"output_tokens":77,"service_tier":"standard"},"modelUsage":{"claude-opus-5-5":{"inputTokens":2,"outputTokens":77,"cacheReadInputTokens":11491,"cacheCreationInputTokens":54611,"costUSD":0.4407342,"provider":"firstParty","costBasis":"list"}},"credential_expires_at":"2000-01-01T00:00:00Z"}"#;
+
+    fn with_cost(cost: JsonValue, basis: &str) -> String {
+        let mut v: JsonValue = serde_json::from_str(CLAUDE_FIXTURE).unwrap();
+        match cost {
+            JsonValue::Null => {
+                v.as_object_mut().unwrap().remove("total_cost_usd");
+            }
+            other => v["total_cost_usd"] = other,
+        }
+        v["modelUsage"]["claude-opus-5-5"]["costBasis"] = json!(basis);
+        v.to_string()
+    }
+
+    fn event(receipt: &UsageReceipt) -> AgentRunEvent {
+        new_run_event(
+            "run-1",
+            USAGE_RECORDED_EVENT,
+            "claude",
+            json!({ "receipt": receipt }),
+            None,
+        )
+    }
+
+    #[test]
+    fn claude_fixture_parses_content_and_distinct_counters() {
+        let (content, r) = parse_claude_json_result(CLAUDE_FIXTURE, "ok").unwrap();
+        assert_eq!(content, "ok");
+        assert_eq!(r.tokens.input, Some(2));
+        assert_eq!(r.tokens.cached_read, Some(11491));
+        assert_eq!(r.tokens.cache_write, Some(54611));
+        assert_eq!(r.tokens.output, Some(77));
+        assert_eq!(r.models, vec!["claude-opus-5-5"]);
+        // List-price cost is advisory, never billed.
+        assert_eq!(r.pricing_status, PricingStatus::Estimate);
+        assert_eq!(r.estimate_micros, Some(440_734));
+        assert_eq!(r.billed_micros, None);
+    }
+
+    #[test]
+    fn ac1_missing_zero_and_included_stay_distinct() {
+        let missing = parse_claude_json_result(&with_cost(JsonValue::Null, "list"), "ok")
+            .unwrap()
+            .1;
+        let zero = parse_claude_json_result(&with_cost(json!(0), "list"), "ok")
+            .unwrap()
+            .1;
+        let included = parse_claude_json_result(&with_cost(json!(0.2), "subscription"), "ok")
+            .unwrap()
+            .1;
+        let billed = parse_claude_json_result(&with_cost(json!(0.25), "billed"), "ok")
+            .unwrap()
+            .1;
+        assert_eq!(missing.pricing_status, PricingStatus::Unpriced);
+        assert_eq!(zero.pricing_status, PricingStatus::Zero);
+        assert_eq!(zero.billed_micros, Some(0));
+        assert_eq!(included.pricing_status, PricingStatus::SubscriptionIncluded);
+        assert_eq!(billed.pricing_status, PricingStatus::Billed);
+        assert_eq!(billed.billed_micros, Some(250_000));
+    }
+
+    #[test]
+    fn ac2_replayed_receipt_counted_once_including_after_restart() {
+        let r = parse_claude_json_result(&with_cost(json!(0.25), "billed"), "ok")
+            .unwrap()
+            .1;
+        let line = serde_json::to_string(&event(&r)).unwrap();
+        // "Restart": reparse the persisted line twice, as a re-append would.
+        let replayed: Vec<AgentRunEvent> = (0..3)
+            .map(|_| serde_json::from_str(&line).unwrap())
+            .collect();
+        let s = summarize_usage(&replayed);
+        assert_eq!(s.receipt_count, 1);
+        assert_eq!(s.confirmed_micros, 250_000);
+        let mut drift = new_run_event(
+            "run-1",
+            USAGE_RECORDED_EVENT,
+            "x",
+            json!({"receipt": {"v": 9}}),
+            None,
+        );
+        drift.id = "event-fixed".into();
+        let s = summarize_usage(&[drift.clone(), drift]);
+        assert_eq!((s.receipt_count, s.unavailable_count), (1, 1));
+    }
+
+    #[test]
+    fn ac3_failed_usage_retained_with_distinct_counters() {
+        let r = parse_claude_json_result(CLAUDE_FIXTURE, "failed")
+            .unwrap()
+            .1;
+        let s = summarize_usage(&[event(&r)]);
+        assert_eq!(s.failed_count, 1);
+        assert_eq!(
+            (
+                s.input_tokens,
+                s.cached_read_tokens,
+                s.cache_write_tokens,
+                s.output_tokens
+            ),
+            (2, 11491, 54611, 77)
+        );
+    }
+
+    #[test]
+    fn ac4_unknown_shape_is_unavailable_and_receipt_has_no_secrets() {
+        assert!(parse_claude_json_result("plain text answer", "ok").is_none());
+        assert!(parse_claude_json_result(r#"{"type":"assistant"}"#, "ok").is_none());
+        let u = UsageReceipt::unavailable("kimi", "ok");
+        assert_eq!(u.pricing_status, PricingStatus::Unavailable);
+        assert_eq!(u.billed_micros, None);
+        let s = summarize_usage(&[event(&u)]);
+        assert_eq!((s.unavailable_count, s.confirmed_micros), (1, 0));
+        let r = parse_claude_json_result(CLAUDE_FIXTURE, "ok").unwrap().1;
+        let serialized = serde_json::to_string(&r).unwrap();
+        for leaked in ["session_id", "credential", "00000000", "\"ok\""] {
+            assert!(!serialized.contains(leaked), "{leaked} in {serialized}");
+        }
+    }
+
+    #[test]
+    fn ac5_totals_and_coverage_recompute_from_receipts() {
+        let receipts = [
+            parse_claude_json_result(&with_cost(json!(0.25), "billed"), "ok")
+                .unwrap()
+                .1,
+            parse_claude_json_result(&with_cost(json!(0), "list"), "ok")
+                .unwrap()
+                .1,
+            parse_claude_json_result(&with_cost(json!(1.5), "list"), "ok")
+                .unwrap()
+                .1,
+            parse_claude_json_result(&with_cost(JsonValue::Null, "list"), "ok")
+                .unwrap()
+                .1,
+            parse_claude_json_result(&with_cost(json!(0.1), "included"), "ok")
+                .unwrap()
+                .1,
+            UsageReceipt::unavailable("codex", "failed"),
+        ];
+        let events: Vec<_> = receipts.iter().map(event).collect();
+        let s = summarize_usage(&events);
+        assert_eq!(s.receipt_count, 6);
+        assert_eq!(s.priced_count, 2);
+        assert_eq!(s.estimate_count, 1);
+        assert_eq!(s.unpriced_count, 1);
+        assert_eq!(s.subscription_included_count, 1);
+        assert_eq!(s.unavailable_count, 1);
+        assert_eq!(s.confirmed_micros, 250_000);
+        assert_eq!(s.estimate_micros, 1_500_000);
+    }
+}

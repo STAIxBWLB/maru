@@ -20,6 +20,9 @@ pub struct RunReplaySummary {
     pub write_claimed_count: usize,
     pub write_committed_count: usize,
     pub write_conflict_count: usize,
+    /// Per-run usage recomputed from `usage.recorded` receipts (maru#431).
+    #[serde(default)]
+    pub usage: crate::agent_host::usage::RunUsageSummary,
 }
 
 pub fn run_events_path(cwd: &str, run_id: &str) -> Result<PathBuf, String> {
@@ -199,6 +202,7 @@ pub fn summarize_events(run_id: &str, events: &[AgentRunEvent]) -> RunReplaySumm
             .iter()
             .filter(|event| event.event_type == "write.conflict")
             .count(),
+        usage: crate::agent_host::usage::summarize_usage(events),
     }
 }
 
@@ -243,6 +247,32 @@ mod tests {
         let summary = replay_run_summary(&cwd, "ai-test").unwrap();
         assert_eq!(summary.proposal_count, 1);
         assert_eq!(summary.last_type.as_deref(), Some("proposal.created"));
+        assert_eq!(summary.usage.receipt_count, 0);
+    }
+
+    #[test]
+    fn usage_receipt_replay_is_idempotent_across_reread() {
+        use crate::agent_host::usage::{UsageReceipt, USAGE_RECORDED_EVENT};
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().to_string_lossy().to_string();
+        let receipt = UsageReceipt::unavailable("kimi", "failed");
+        // The same receipt appended twice (a replay) and read back from disk.
+        for _ in 0..2 {
+            append_run_event_payload(
+                &cwd,
+                "ai-u",
+                USAGE_RECORDED_EVENT,
+                "kimi",
+                json!({ "receipt": receipt }),
+            )
+            .unwrap();
+        }
+        let summary = replay_run_summary(&cwd, "ai-u").unwrap();
+        assert_eq!(summary.event_count, 2);
+        assert_eq!(summary.usage.receipt_count, 1);
+        assert_eq!(summary.usage.unavailable_count, 1);
+        assert_eq!(summary.usage.failed_count, 1);
+        assert_eq!(summary.usage.confirmed_micros, 0);
     }
 }
 
