@@ -217,7 +217,7 @@ describe("verifyReleaseWorkflows polling", () => {
     };
 
     await expect(verifyReleaseWorkflows(tag, repo, readJson, () => {}, waitOptions)).rejects.toThrow(
-      `native-e2e.yml: release wait deadline expired for ${sha}: https://github.com/${repo}/actions/runs/42. Finish or cancel the stuck run, run the workflow successfully on this tag, then retry Release Bundles`,
+      `native-e2e.yml: release wait deadline expired for ${sha}: https://github.com/${repo}/actions/runs/42. Finish or cancel the stuck run, run the workflow successfully at this exact SHA, then retry Release Bundles`,
     );
     expect(now).toBe(25);
   });

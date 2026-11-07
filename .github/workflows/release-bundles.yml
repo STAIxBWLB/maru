@@ -1,20 +1,22 @@
 name: Release Bundles
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to (re)build. Must already exist (e.g. v0.2.13)."
+        description: "Pending tag of an existing draft, targeted at a full verified SHA (vX.Y.Z)."
         required: true
         type: string
+      dry_run:
+        description: "Rehearsal: upload and verify draft assets, never publish or update Homebrew."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-bundles-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-bundles-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
@@ -34,37 +36,9 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       id: ${{ steps.release.outputs.id }}
-      sha: ${{ steps.verification.outputs.sha }}
+      sha: ${{ steps.release.outputs.sha }}
 
     steps:
-      - name: Resolve release
-        id: release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
-          EVENT_ID: ${{ github.event.release.id }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          if [ -n "$EVENT_TAG" ]; then
-            tag="$EVENT_TAG"
-          else
-            tag="$INPUT_TAG"
-          fi
-          case "$tag" in
-            v*) ;;
-            *) echo "::error::release tag must start with 'v' (got '$tag')"; exit 1 ;;
-          esac
-          if [ -n "$EVENT_ID" ]; then
-            id="$EVENT_ID"
-          else
-            id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq .id)
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "id=$id" >> "$GITHUB_OUTPUT"
-          echo "Resolved release: tag=$tag id=$id"
-
       # Read admission code from this workflow's revision, not an older tag
       # that may predate the gate. No dependencies or release assets are built.
       - name: Checkout release gate tooling
@@ -72,8 +46,7 @@ jobs:
         with:
           ref: ${{ github.workflow_sha }}
           path: .release-checks
-          sparse-checkout: scripts/check-release-workflows.mjs
-          sparse-checkout-cone-mode: false
+          sparse-checkout: scripts
           persist-credentials: false
 
       - name: Setup Node
@@ -82,17 +55,18 @@ jobs:
           node-version: 22.22.3
           package-manager-cache: false
 
-      - name: Require successful CI and native E2E on the release commit
-        id: verification
+      - name: Admit draft ID and immutable target through CI and native E2E
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        run: node .release-checks/scripts/check-release-workflows.mjs "$RELEASE_TAG"
+          RELEASE_TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node .release-checks/scripts/release-draft.mjs prepare "$RELEASE_TAG"
 
       - name: Checkout verified release commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ steps.verification.outputs.sha }}
+          ref: ${{ steps.release.outputs.sha }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -114,6 +88,7 @@ jobs:
           HAS_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
           HAS_TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
           HAS_HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           missing=()
@@ -131,7 +106,9 @@ jobs:
           check_secret APPLE_API_KEY_ID "$HAS_APPLE_API_KEY_ID"
           check_secret TAURI_SIGNING_PRIVATE_KEY "$HAS_TAURI_SIGNING_PRIVATE_KEY"
           check_secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$HAS_TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
-          check_secret HOMEBREW_TAP_TOKEN "$HAS_HOMEBREW_TAP_TOKEN"
+          if [ "$DRY_RUN" != "true" ]; then
+            check_secret HOMEBREW_TAP_TOKEN "$HAS_HOMEBREW_TAP_TOKEN"
+          fi
 
           if [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Missing release secret(s): %s. Configure them in repository Actions secrets and retry Release Bundles.\n' "${missing[*]}"
@@ -144,6 +121,11 @@ jobs:
     needs: prepare
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_ID: ${{ needs.prepare.outputs.id }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      DRY_RUN: ${{ inputs.dry_run }}
 
     strategy:
       fail-fast: true
@@ -185,14 +167,12 @@ jobs:
 
       # Credential tooling follows the workflow revision, so rebuilding a tag
       # that predates this helper still uses the current credential format.
-      - name: Checkout notarization tooling
-        if: matrix.platform == 'macos-26'
+      - name: Checkout release tooling
         uses: actions/checkout@v5
         with:
           ref: ${{ github.workflow_sha }}
           path: .release-tools
-          sparse-checkout: scripts/lib/notary-key.sh
-          sparse-checkout-cone-mode: false
+          sparse-checkout: scripts
           persist-credentials: false
 
       - name: Setup pnpm
@@ -280,6 +260,11 @@ jobs:
           write_notary_key "$key_file"
           echo "APPLE_API_KEY_PATH=$key_file" >> "$GITHUB_ENV"
 
+      - name: Confirm the admitted draft before bundle upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .release-tools/scripts/release-draft.mjs assert "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA"
+
       # Each leg uploads only its unique bundles and signatures. The finalizer
       # writes latest.json once after every platform succeeds.
       - name: Build and upload Tauri bundles
@@ -318,9 +303,7 @@ jobs:
           asset="maru-cli_${version}_darwin_${ASSET_ARCH}.tar.gz"
           tar -czf "$asset" -C "$staging" maru
           shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
-          gh release upload "$RELEASE_TAG" "$asset" "$asset.sha256" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+          node .release-tools/scripts/release-draft.mjs upload "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA" "$asset" "$asset.sha256"
 
       # tauri-action intentionally builds only the app updater archive on
       # macOS. Create and publish a DMG only after independent notarization,
@@ -366,9 +349,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           asset="$RUNNER_TEMP/Maru_${version}_darwin_${ASSET_ARCH}_dmg.dmg"
           cp "$dmg" "$asset"
-          gh release upload "$RELEASE_TAG" "$asset" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+          node .release-tools/scripts/release-draft.mjs upload "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA" "$asset"
 
       - name: Remove temporary App Store Connect API key
         if: always() && matrix.platform == 'macos-26'
@@ -380,10 +361,15 @@ jobs:
           fi
 
   finalize:
-    name: Publish updater manifest and Homebrew tap
+    name: Verify draft assets, publish, then update Homebrew
     needs: [prepare, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_ID: ${{ needs.prepare.outputs.id }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      DRY_RUN: ${{ inputs.dry_run }}
 
     steps:
       - name: Checkout verified Maru release commit
@@ -391,20 +377,38 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
+      - name: Checkout finalization tooling
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: |
+            scripts
+            packaging/homebrew
+          persist-credentials: false
+
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: 22.22.3
           package-manager-cache: false
 
-      - name: Publish updater manifest
+      - name: Upload draft updater manifest
+        working-directory: .release-tools
         env:
           GH_TOKEN: ${{ github.token }}
           MARU_RELEASE_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: node scripts/publish-updater-manifest.mjs "$RELEASE_TAG"
 
+      - name: Verify all 21 draft assets and publish unless rehearsing
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .release-tools/scripts/release-draft.mjs finalize "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA"
+
       - name: Checkout Homebrew tap
+        if: steps.publication.outputs.published == 'true'
         uses: actions/checkout@v5
         with:
           repository: STAIxBWLB/homebrew-cask
@@ -412,13 +416,16 @@ jobs:
           path: tap
 
       - name: Configure git identity
+        if: steps.publication.outputs.published == 'true'
         working-directory: tap
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Render and push tap update
+        if: steps.publication.outputs.published == 'true'
+        working-directory: .release-tools
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
-        run: node scripts/update-homebrew-tap.mjs "$TAG" tap --commit --push
+        run: node scripts/update-homebrew-tap.mjs "$TAG" ../tap --commit --push

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,7 +12,8 @@ import {
   validateReleaseAssets,
 } from "./lib/updaterManifest.mjs";
 
-const GH_COMMAND = "gh";
+import { assertDraft, assertRepository, assetText, findRelease, getRelease,
+  ghText, releaseMetadata, uploadDraftAsset } from "./lib/releaseApi.mjs";
 
 function repositoryFromEnvironment(environment = process.env) {
   return (
@@ -21,13 +21,6 @@ function repositoryFromEnvironment(environment = process.env) {
     environment.GITHUB_REPOSITORY ||
     DEFAULT_RELEASE_REPOSITORY
   );
-}
-
-function assertRepository(repo) {
-  if (typeof repo !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
-    throw new Error(`malformed GitHub repository: ${String(repo)}`);
-  }
-  return repo;
 }
 
 /**
@@ -57,109 +50,25 @@ export function parseCliArgs(argv = []) {
   return Object.freeze({ tag, dryRun });
 }
 
-function runGhJson(args) {
-  try {
-    return execFileSync(GH_COMMAND, args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch {
-    // Never echo gh's stderr: the CLI may include request details or an
-    // environment-specific credential hint. The command has no token in its
-    // argument vector, and gh reads GH_TOKEN from its private environment.
-    throw new Error("gh command failed while reading release metadata");
-  }
-}
-
-/**
- * Query only the release fields needed to construct latest.json. Keeping this
- * command centralized makes it difficult for a future caller to accidentally
- * use a token-bearing URL or a broad API response.
- */
-export function queryReleaseMetadata(tag, repo, runGh = runGhJson) {
+/** Draft-aware metadata: lookup uses listing, then a fixed ID, never a tag endpoint. */
+export function queryReleaseMetadata(tag, repo, releaseId, runGh = ghText) {
   parseReleaseTag(tag);
-  assertRepository(repo);
-  const output = runGh([
-    "release",
-    "view",
-    tag,
-    "--repo",
-    repo,
-    "--json",
-    "assets,body,publishedAt,tagName",
-  ]);
-  try {
-    const metadata = JSON.parse(output);
-    if (!metadata || typeof metadata !== "object" || !Array.isArray(metadata.assets)) {
-      throw new Error("release metadata does not contain an assets array");
-    }
-    return metadata;
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error("gh returned malformed release metadata JSON");
-    }
-    throw error;
-  }
+  const release = releaseId === undefined ? findRelease(tag, repo, runGh) : getRelease(releaseId, repo, runGh);
+  if (release.tag_name !== tag) throw new Error("release ID has a different tag; resolve the intended draft and retry Release Bundles");
+  return releaseMetadata(release);
 }
 
 function signatureAssetNames(version) {
   return UPDATER_ASSET_PAIRS.map(({ signature }) => signature(version));
 }
 
-function runGhDownload(args) {
-  try {
-    execFileSync(GH_COMMAND, args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch {
-    // Do not print the original error or stderr. In particular, do not expose
-    // GH_TOKEN through a verbose command failure path.
-    throw new Error("gh command failed while downloading release signatures");
-  }
-}
-
-/**
- * Download each signature directly into a caller-owned temporary path. `gh`
- * performs authenticated access using GH_TOKEN without the token appearing in
- * a URL, command argument, or log line.
- *
- * @param {{ tag?: string, repo?: string, version?: string, directory?: string, runGh?: (args: string[]) => void }} [options]
- */
-export function downloadUpdaterSignatures({
-  tag,
-  repo,
-  version = parseReleaseTag(tag).version,
-  directory,
-  runGh = runGhDownload,
-} = {}) {
-  parseReleaseTag(tag);
-  assertRepository(repo);
-  if (typeof directory !== "string" || directory.length === 0) {
-    throw new TypeError("signature download directory must be provided");
-  }
-
+/** Read signatures by immutable asset IDs, including private draft assets. */
+export function downloadUpdaterSignatures({ tag, repo, version = parseReleaseTag(tag).version, metadata, runGh = ghText }) {
+  const byName = validateReleaseAssets(metadata, version);
   const signatures = new Map();
   for (const name of signatureAssetNames(version)) {
-    const outputPath = resolve(directory, name);
-    runGh([
-      "release",
-      "download",
-      tag,
-      "--repo",
-      repo,
-      "--pattern",
-      name,
-      "--output",
-      outputPath,
-    ]);
-    if (!existsSync(outputPath)) {
-      throw new Error(`downloaded signature file is missing: ${name}`);
-    }
-    const content = readFileSync(outputPath, "utf8").trim();
-    if (content.length === 0) {
-      throw new Error(`downloaded signature file is empty: ${name}`);
-    }
+    const content = assetText(byName.get(name), repo, runGh).trim();
+    if (!content) throw new Error(`signature ${name} is empty; rebuild that platform and retry Release Bundles`);
     signatures.set(name, content);
   }
   return signatures;
@@ -171,16 +80,8 @@ function writeManifest(directory, manifest) {
   return outputPath;
 }
 
-function uploadLatestJson(tag, repo, manifestPath) {
-  try {
-    execFileSync(
-      GH_COMMAND,
-      ["release", "upload", tag, manifestPath, "--repo", repo, "--clobber"],
-      { stdio: "inherit" },
-    );
-  } catch {
-    throw new Error("gh command failed while uploading latest.json");
-  }
+function uploadLatestJson(tag, repo, manifestPath, { releaseId, sha, rehearsal }) {
+  uploadDraftAsset(manifestPath, { tag, repo, id: releaseId, sha, dryRun: rehearsal });
 }
 
 /**
@@ -192,6 +93,9 @@ export function publishUpdaterManifest(
   {
     repo = DEFAULT_RELEASE_REPOSITORY,
     dryRun = false,
+    releaseId = undefined,
+    sha = undefined,
+    rehearsal = false,
     runView = queryReleaseMetadata,
     runDownload = downloadUpdaterSignatures,
     runUpload = uploadLatestJson,
@@ -199,7 +103,11 @@ export function publishUpdaterManifest(
 ) {
   parseReleaseTag(tag);
   assertRepository(repo);
-  const metadata = runView(tag, repo);
+  if (!dryRun && (releaseId === undefined || sha === undefined)) {
+    throw new Error("manifest upload requires the admitted draft ID and SHA; run it through Release Bundles or use --dry-run for inspection");
+  }
+  const metadata = runView(tag, repo, releaseId);
+  if (!dryRun) assertDraft(metadata, { tag, id: releaseId, sha, dryRun: rehearsal });
   const version = parseReleaseTag(tag).version;
 
   // Validate all 20 pre-manifest assets before downloading any signatures or
@@ -208,7 +116,7 @@ export function publishUpdaterManifest(
 
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "maru-updater-manifest-"));
   try {
-    const signatures = runDownload({ tag, repo, version, directory: temporaryDirectory });
+    const signatures = runDownload({ tag, repo, version, metadata });
     const manifest = buildUpdaterManifest({
       tag,
       release: metadata,
@@ -222,7 +130,7 @@ export function publishUpdaterManifest(
     }
 
     const manifestPath = writeManifest(temporaryDirectory, manifest);
-    runUpload(tag, repo, manifestPath);
+    runUpload(tag, repo, manifestPath, { releaseId, sha, rehearsal });
     console.log(`uploaded latest.json for ${tag} to ${repo}`);
     return manifest;
   } finally {
@@ -233,7 +141,11 @@ export function publishUpdaterManifest(
 export function main(argv = process.argv.slice(2), environment = process.env) {
   const { tag, dryRun } = parseCliArgs(argv);
   const repo = repositoryFromEnvironment(environment);
-  return publishUpdaterManifest(tag, { repo, dryRun });
+  if (environment.DRY_RUN !== undefined && !["true", "false"].includes(environment.DRY_RUN)) {
+    throw new Error("DRY_RUN must be true or false; correct the dispatch input and retry Release Bundles");
+  }
+  return publishUpdaterManifest(tag, { repo, dryRun, releaseId: environment.RELEASE_ID,
+    sha: environment.RELEASE_SHA, rehearsal: environment.DRY_RUN === "true" });
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : null;

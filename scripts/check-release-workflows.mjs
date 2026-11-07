@@ -36,7 +36,7 @@ export function selectLatestEligibleRun(runs, context) {
 
 export function evaluateWorkflowRuns(workflow, runs, context) {
   const workflowUrl = `https://github.com/${context.repo}/actions/workflows/${workflow}`;
-  const next = "Run that workflow successfully on the release tag, then retry Release Bundles.";
+  const next = "Run that workflow successfully on a branch or tag at this exact SHA, then retry Release Bundles.";
   const outcome = (ok, message, flags = {}) => ({
     ok, pending: false, fatal: false, workflow, url: workflowUrl, message, ...flags,
   });
@@ -89,10 +89,6 @@ function githubJson(route, fields, paginate = false) {
  * @param {{now?: () => number, sleep?: (ms: number) => Promise<unknown>, waitMs?: number, pollMs?: number}} [waitOptions]
  */
 export async function verifyReleaseWorkflows(tag, repo, readJson = githubJson, report = console.log, waitOptions = {}) {
-  const { now = () => performance.now(), sleep = delay, waitMs = MAX_WAIT_MS, pollMs = POLL_INTERVAL_MS } = waitOptions;
-  if (!Number.isFinite(waitMs) || waitMs < 0 || !Number.isFinite(pollMs) || pollMs <= 0) {
-    throw new Error("release wait budget is invalid; restore the bounded gate configuration and retry Release Bundles");
-  }
   if (!tag?.startsWith("v") || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? "")) {
     throw new Error("release verification requires a v-prefixed tag and GITHUB_REPOSITORY=owner/repo; correct the inputs and retry Release Bundles");
   }
@@ -101,7 +97,24 @@ export async function verifyReleaseWorkflows(tag, repo, readJson = githubJson, r
   if (!/^[a-f0-9]{40}$/.test(sha ?? "")) {
     throw new Error("release tag did not resolve to a commit; confirm the tag exists and retry Release Bundles");
   }
-  report(`Release tag ${JSON.stringify(tag)} resolves to ${sha}`);
+  return verifyReleaseWorkflowsForSha(tag, repo, sha, readJson, report, waitOptions);
+}
+
+/** Exact-SHA admission for an untagged draft, with the same required receipts.
+ * @param {{now?: () => number, sleep?: (ms: number) => Promise<unknown>, waitMs?: number, pollMs?: number}} [waitOptions]
+ */
+export async function verifyReleaseWorkflowsForSha(tag, repo, sha, readJson = githubJson, report = console.log, waitOptions = {}) {
+  const { now = () => performance.now(), sleep = delay, waitMs = MAX_WAIT_MS, pollMs = POLL_INTERVAL_MS } = waitOptions;
+  if (!Number.isFinite(waitMs) || waitMs < 0 || !Number.isFinite(pollMs) || pollMs <= 0) {
+    throw new Error("release wait budget is invalid; restore the bounded gate configuration and retry Release Bundles");
+  }
+  if (!tag?.startsWith("v") || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? "")) {
+    throw new Error("release verification requires a v-prefixed tag and GITHUB_REPOSITORY=owner/repo; correct the inputs and retry Release Bundles");
+  }
+  if (!/^[a-f0-9]{40}(?![\s\S])/.test(sha ?? "")) {
+    throw new Error("release target is not an immutable commit SHA; create the draft with --target <full SHA> and retry Release Bundles");
+  }
+  report(`Release commit for ${JSON.stringify(tag)}: ${sha}`);
   const deadline = now() + waitMs;
   while (true) {
     const results = [];
@@ -128,7 +141,7 @@ export async function verifyReleaseWorkflows(tag, repo, readJson = githubJson, r
     }
     const remaining = deadline - now();
     if (remaining <= 0) {
-      throw new Error(`${pending.workflow}: release wait deadline expired for ${sha}: ${pending.url}. Finish or cancel the stuck run, run the workflow successfully on this tag, then retry Release Bundles`);
+      throw new Error(`${pending.workflow}: release wait deadline expired for ${sha}: ${pending.url}. Finish or cancel the stuck run, run the workflow successfully at this exact SHA, then retry Release Bundles`);
     }
     report(pending.message);
     await sleep(Math.min(pollMs, remaining));

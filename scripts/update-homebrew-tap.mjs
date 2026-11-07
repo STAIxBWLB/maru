@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertReleaseTag, findRelease } from "./lib/releaseApi.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const releaseRepo = process.env.MARU_RELEASE_REPO ?? "STAIxBWLB/maru";
@@ -21,11 +22,11 @@ if (!tag || !tapDirArg || unknownOptions.length > 0) {
 const version = tag.replace(/^v/, "");
 const tapDir = resolve(tapDirArg);
 
-const release = JSON.parse(
-  execFileSync("gh", ["release", "view", tag, "--repo", releaseRepo, "--json", "assets"], {
-    encoding: "utf8",
-  }),
-);
+assertReleaseTag(tag);
+const release = findRelease(tag, releaseRepo);
+if (release.draft !== false || release.prerelease !== false) {
+  throw new Error("Homebrew requires a published stable release; finish draft verification and publication before retrying the tap update");
+}
 
 function sha256For(name) {
   const asset = release.assets.find((candidate) => candidate.name === name);
@@ -90,8 +91,10 @@ if (shouldCommit || shouldPush) {
   });
 }
 
-if (shouldCommit) {
-  execFileSync("git", ["-C", tapDir, "commit", "-m", `maru: update to ${tag}`], {
+if (shouldCommit && execFileSync("git", ["-C", tapDir, "diff", "--cached", "--name-only", "--", ...removedLegacy,
+  "Casks/maru-workspace.rb", "Formula/maru-cli.rb"], { encoding: "utf8" }).trim()) {
+  execFileSync("git", ["-C", tapDir, "commit", "-m", `maru: update to ${tag}`, "--", ...removedLegacy,
+    "Casks/maru-workspace.rb", "Formula/maru-cli.rb"], {
     stdio: "inherit",
   });
 }
