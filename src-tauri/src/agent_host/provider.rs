@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 use crate::agent_host::contracts::{
     CompletionRequest, CompletionResponse, COMPLETION_RESPONSE_SCHEMA_VERSION,
 };
+use crate::agent_host::usage::{parse_claude_json_result, UsageReceipt};
 use crate::cli_path::{augmented_path, resolve_program};
 use crate::win_process::NoWindow;
 
@@ -367,6 +368,13 @@ pub struct CliProviderAdapter {
     permission_mode: String,
     metadata: Option<serde_json::Value>,
     bundle_session: Option<crate::skill_host::session::BundleSession>,
+    /// One usage receipt per `complete` call that reached the CLI, success or
+    /// failure (maru#431). Drained by the run owner into `usage.recorded` events.
+    usage_receipts: Vec<UsageReceipt>,
+    /// `(cwd, run_id)`: when set, each receipt is appended to that run's event
+    /// log as soon as its call ends, so a process stop mid-loop keeps the
+    /// usage of finished calls.
+    usage_sink: Option<(String, String)>,
 }
 
 impl CliProviderAdapter {
@@ -383,6 +391,8 @@ impl CliProviderAdapter {
             permission_mode,
             metadata: None,
             bundle_session: None,
+            usage_receipts: Vec::new(),
+            usage_sink: None,
         }
     }
 }
@@ -396,10 +406,62 @@ impl CliProviderAdapter {
         self
     }
 
+    /// Persist each receipt to `run_id`'s event log as soon as its call ends.
+    pub fn with_usage_sink(mut self, cwd: String, run_id: String) -> Self {
+        self.usage_sink = Some((cwd, run_id));
+        self
+    }
+
+    fn record_usage(&mut self, receipt: UsageReceipt) {
+        let Some((cwd, run_id)) = &self.usage_sink else {
+            self.usage_receipts.push(receipt);
+            return;
+        };
+        if let Err(err) = append_usage_receipt(cwd, run_id, &receipt) {
+            // Keep it for `flush_pending_usage`; the same receiptId makes a
+            // later double write harmless.
+            eprintln!("maru: usage receipt not recorded for run {run_id}: {err}");
+            self.usage_receipts.push(receipt);
+        }
+    }
+
+    /// Retry receipts whose sink append failed. Returns how many are still
+    /// unrecorded. No-op without a sink.
+    pub fn flush_pending_usage(&mut self) -> usize {
+        let Some((cwd, run_id)) = self.usage_sink.clone() else {
+            return 0;
+        };
+        let pending = std::mem::take(&mut self.usage_receipts);
+        for receipt in pending {
+            if let Err(err) = append_usage_receipt(&cwd, &run_id, &receipt) {
+                eprintln!("maru: usage receipt retry failed for run {run_id}: {err}");
+                self.usage_receipts.push(receipt);
+            }
+        }
+        self.usage_receipts.len()
+    }
+
+    /// Receipts not yet persisted, oldest first: every receipt without a sink,
+    /// or the ones whose sink append failed.
+    pub fn take_usage_receipts(&mut self) -> Vec<UsageReceipt> {
+        std::mem::take(&mut self.usage_receipts)
+    }
+
     pub fn with_metadata(mut self, metadata: Option<serde_json::Value>) -> Self {
         self.metadata = metadata;
         self
     }
+}
+
+fn append_usage_receipt(cwd: &str, run_id: &str, receipt: &UsageReceipt) -> Result<(), String> {
+    crate::agent_host::event_store::append_run_event_payload(
+        cwd,
+        run_id,
+        crate::agent_host::usage::USAGE_RECORDED_EVENT,
+        &receipt.provider,
+        serde_json::json!({ "receipt": receipt }),
+    )
+    .map(|_| ())
 }
 
 impl ProviderAdapter for CliProviderAdapter {
@@ -423,6 +485,12 @@ impl ProviderAdapter for CliProviderAdapter {
             &self.permission_mode,
             self.bundle_session.as_ref(),
         )?;
+        // First usage slice (maru#431): Claude prints one JSON result object
+        // carrying both the answer and its usage. Other providers stay plain.
+        let json_usage = self.provider == CliProviderKind::Claude;
+        if json_usage {
+            cmd.arg("--output-format").arg("json");
+        }
         cmd.current_dir(&request.cwd)
             .stdin(if stdin_payload.is_some() {
                 Stdio::piped()
@@ -443,6 +511,26 @@ impl ProviderAdapter for CliProviderAdapter {
         let output = child
             .wait_with_output()
             .map_err(|err| format!("wait_failed: {err}"))?;
+        let outcome = if output.status.success() {
+            "ok"
+        } else {
+            "failed"
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = if json_usage {
+            parse_claude_json_result(&stdout, outcome)
+        } else {
+            None
+        };
+        let (content, receipt) = match parsed {
+            Some((content, receipt)) => (content, receipt),
+            None => (
+                stdout.into_owned(),
+                UsageReceipt::unavailable(self.provider.id(), outcome),
+            ),
+        };
+        let usage = serde_json::to_value(&receipt).ok();
+        self.record_usage(receipt);
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let kind = classify_cli_error(&stderr);
@@ -459,9 +547,9 @@ impl ProviderAdapter for CliProviderAdapter {
                 .as_ref()
                 .map(|r| r.agent.clone())
                 .unwrap_or_else(|| self.provider.id().to_string()),
-            content: String::from_utf8_lossy(&output.stdout).into_owned(),
+            content,
             stop_reason: Some("cli".to_string()),
-            usage: None,
+            usage,
         })
     }
 
@@ -811,6 +899,121 @@ mod tests {
             .unwrap();
         assert_eq!(response.content.trim(), "{\"ok\":true}");
         assert_eq!(response.provider, "claude");
+        // Unknown output shape: content passes through, usage is unavailable.
+        let receipts = adapter.take_usage_receipts();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(
+            receipts[0].pricing_status,
+            crate::agent_host::usage::PricingStatus::Unavailable
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_adapter_claude_error_result_keeps_usage_and_sink_persists_per_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().to_str().unwrap().to_string();
+        // Shape of Claude's error_max_turns result: no `result`, is_error true.
+        let ok = r#"{"type":"result","subtype":"success","is_error":false,"result":"A","usage":{"input_tokens":1,"output_tokens":2}}"#;
+        let err = r#"{"type":"result","subtype":"error_max_turns","is_error":true,"total_cost_usd":0.3,"usage":{"input_tokens":7,"cache_read_input_tokens":8,"output_tokens":9},"modelUsage":{"m":{"costBasis":"list"}}}"#;
+        // Calls 1-2 succeed, call 3 is the error variant with exit 1.
+        let script = format!(
+            "#!/bin/sh\nN=$(cat '{c}' 2>/dev/null || echo 0)\nN=$((N+1))\necho \"$N\" > '{c}'\nif [ \"$N\" -ge 3 ]; then echo '{err}'; exit 1; fi\necho '{ok}'\n",
+            c = dir.path().join("count").display()
+        );
+        let cli = write_fake_cli(dir.path().join("fake-claude"), &script);
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Claude,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
+        )
+        .with_usage_sink(cwd.clone(), "ai-sink".into());
+        adapter.complete(completion_request("a", &cwd)).unwrap();
+        adapter.complete(completion_request("b", &cwd)).unwrap();
+        // The process "stops" here: nothing drains, yet both calls are on disk.
+        let read = || {
+            crate::agent_host::event_store::replay_run_summary(&cwd, "ai-sink")
+                .unwrap()
+                .usage
+        };
+        assert_eq!(read().receipt_count, 2);
+        adapter.complete(completion_request("c", &cwd)).unwrap_err();
+        let usage = read();
+        assert_eq!(usage.receipt_count, 3);
+        assert_eq!(usage.failed_count, 1);
+        assert_eq!(usage.input_tokens, 1 + 1 + 7);
+        assert_eq!(usage.cached_read_tokens, 8);
+        assert_eq!(usage.estimate_count, 1);
+        assert_eq!(usage.unavailable_count, 0);
+        assert!(adapter.take_usage_receipts().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_adapter_usage_sink_failure_keeps_receipt_for_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().to_str().unwrap().to_string();
+        let ok = r#"{"type":"result","result":"A","usage":{"input_tokens":1}}"#;
+        let cli = write_fake_cli(
+            dir.path().join("fake-claude"),
+            &format!("#!/bin/sh\necho '{ok}'\n"),
+        );
+        // A file where the run directory must go makes the append fail once.
+        let skills = dir.path().join(".maru/runs/skills");
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::write(skills.join("ai-retry"), "blocker").unwrap();
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Claude,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
+        )
+        .with_usage_sink(cwd.clone(), "ai-retry".into());
+        adapter.complete(completion_request("a", &cwd)).unwrap();
+        assert_eq!(adapter.flush_pending_usage(), 1);
+        std::fs::remove_file(skills.join("ai-retry")).unwrap();
+        assert_eq!(adapter.flush_pending_usage(), 0);
+        let usage = crate::agent_host::event_store::replay_run_summary(&cwd, "ai-retry")
+            .unwrap()
+            .usage;
+        assert_eq!((usage.receipt_count, usage.input_tokens), (1, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_adapter_claude_parses_json_result_and_keeps_failed_usage() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = r#"{"type":"result","result":"ANSWER","total_cost_usd":0.5,"usage":{"input_tokens":3,"cache_read_input_tokens":4,"cache_creation_input_tokens":5,"output_tokens":6},"modelUsage":{"m":{"costBasis":"list"}}}"#;
+        // Exits 0 only when Maru asked for JSON output; the second call fails
+        // after printing usage, as a CLI erroring mid-run does.
+        let script = format!(
+            "#!/bin/sh\ncase \"$*\" in *'--output-format json'*) ;; *) exit 9 ;; esac\necho '{fixture}'\n[ -f '{m}' ] && {{ echo boom >&2; exit 1; }}\ntouch '{m}'\n",
+            m = dir.path().join("marker").display()
+        );
+        let cli = write_fake_cli(dir.path().join("fake-claude"), &script);
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Claude,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
+        );
+        let cwd = dir.path().to_str().unwrap();
+        let response = adapter
+            .complete(completion_request("do work", cwd))
+            .unwrap();
+        assert_eq!(response.content, "ANSWER");
+        assert!(response.usage.is_some());
+        adapter
+            .complete(completion_request("do work", cwd))
+            .unwrap_err();
+        let receipts = adapter.take_usage_receipts();
+        assert_eq!(receipts.len(), 2);
+        assert_eq!(receipts[0].outcome, "ok");
+        assert_eq!(receipts[1].outcome, "failed");
+        assert_eq!(receipts[1].tokens.output, Some(6));
+        assert_ne!(receipts[0].receipt_id, receipts[1].receipt_id);
+        assert!(adapter.take_usage_receipts().is_empty());
     }
 
     #[cfg(unix)]

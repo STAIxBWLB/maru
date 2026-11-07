@@ -171,6 +171,36 @@ export interface RunReplaySummary {
   writeClaimedCount: number;
   writeCommittedCount: number;
   writeConflictCount: number;
+  /** Per-run usage from `usage.recorded` receipts; absent from older hosts. */
+  usage?: RunUsageSummary;
+}
+
+/** Mirrors `agent_host::usage::RunUsageSummary`. Money is USD millionths. */
+export interface RunUsageSummary {
+  receiptCount: number;
+  pricedCount: number;
+  unpricedCount: number;
+  estimateCount: number;
+  subscriptionIncludedCount: number;
+  unavailableCount: number;
+  failedCount: number;
+  inputTokens: number;
+  cachedReadTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  /** Receipts reporting each counter; 0 means unknown, not a measured zero. */
+  inputCounted: number;
+  cachedReadCounted: number;
+  cacheWriteCounted: number;
+  outputCounted: number;
+  confirmedMicros: number;
+  estimateMicros: number;
+  /** Receipts the run could not persist; above 0 means totals are incomplete. */
+  pendingCount: number;
+}
+
+export function formatUsdMicros(micros: number): string {
+  return `$${(micros / 1_000_000).toFixed(4)}`;
 }
 
 export interface RedactedRunSummary extends RunReplaySummary {

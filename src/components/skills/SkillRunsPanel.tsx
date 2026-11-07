@@ -23,7 +23,9 @@ import {
   agentReplayRunSummary,
   agentWriteRedactedRunSummary,
   skillsDispatchBackground,
+  formatUsdMicros,
   type RunReplaySummary,
+  type RunUsageSummary,
   type SkillDispatchRuntime,
   type SkillProposal,
 } from "../../lib/skills";
@@ -391,6 +393,8 @@ export function SkillRunsPanel({
                       committed: summaries[mission.id].writeCommittedCount,
                       conflicts: summaries[mission.id].writeConflictCount,
                     })}
+                    <br />
+                    {usageLine(summaries[mission.id].usage, t)}
                   </div>
                 ) : null}
                 {exportNotices[mission.id] ? (
@@ -438,4 +442,37 @@ function writeClearedRunIds(key: string, ids: Set<string>) {
   } catch {
     // Best-effort UI state only.
   }
+}
+
+/**
+ * Run usage beside the account quota bar (maru#431). Confirmed spend and the
+ * advisory estimate stay separate, and unpriced/unavailable receipts are
+ * counted, never shown as $0.
+ */
+function usageLine(
+  usage: RunUsageSummary | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (!usage || (usage.receiptCount === 0 && !usage.pendingCount)) {
+    return t("skillRuns.summary.usageNone");
+  }
+  // A counter no receipt reported is unknown, not a measured zero.
+  const tokens = (value: number, counted: number) => (counted > 0 ? value : "-");
+  const line = t("skillRuns.summary.usage", {
+    input: tokens(usage.inputTokens, usage.inputCounted),
+    cached: tokens(usage.cachedReadTokens, usage.cachedReadCounted),
+    cacheWrite: tokens(usage.cacheWriteTokens, usage.cacheWriteCounted),
+    output: tokens(usage.outputTokens, usage.outputCounted),
+    confirmed: usage.pricedCount > 0 ? formatUsdMicros(usage.confirmedMicros) : "-",
+    estimate: usage.estimateCount > 0 ? formatUsdMicros(usage.estimateMicros) : "-",
+    priced: usage.pricedCount,
+    receipts: usage.receiptCount,
+    unpriced: usage.unpricedCount,
+    included: usage.subscriptionIncludedCount,
+    unavailable: usage.unavailableCount,
+    failed: usage.failedCount,
+  });
+  return usage.pendingCount > 0
+    ? `${line} · ${t("skillRuns.summary.usageIncomplete", { pending: usage.pendingCount })}`
+    : line;
 }
