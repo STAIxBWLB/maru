@@ -844,9 +844,13 @@ spctl -a -vv -t exec Maru.app
 Homebrew verification:
 
 ```bash
-make homebrew-audit HOMEBREW_TAP_DIR=../homebrew-cask
-make homebrew-fetch HOMEBREW_TAP_DIR=../homebrew-cask
+make homebrew-audit
+make homebrew-fetch
 ```
+
+Both read the installed `staixbwlb/cask` tap and first trust only the
+`maru-workspace` cask and `maru-cli` formula, which Homebrew 6 requires for
+`audit` and `fetch`.
 
 The explicit `make homebrew-update*` targets are recovery tools. The release
 finalizer pushes the rendered cask and formula to `publish/maru-<tag>` in
