@@ -83,6 +83,28 @@ pub struct UsageReceipt {
 }
 
 impl UsageReceipt {
+    /// Amount fields must match the pricing status. A receipt that claims a
+    /// price without amount and currency is not trusted as priced.
+    pub fn amounts_consistent(&self) -> bool {
+        let currency = self.currency.as_deref().is_some_and(|c| !c.is_empty());
+        match self.pricing_status {
+            PricingStatus::Billed => {
+                currency
+                    && self.billed_micros.is_some_and(|m| m > 0)
+                    && self.estimate_micros.is_none()
+            }
+            PricingStatus::Zero => {
+                currency && self.billed_micros == Some(0) && self.estimate_micros.is_none()
+            }
+            PricingStatus::Estimate => {
+                currency
+                    && self.estimate_micros.is_some_and(|m| m >= 0)
+                    && self.billed_micros.is_none()
+            }
+            _ => self.billed_micros.is_none() && self.estimate_micros.is_none(),
+        }
+    }
+
     pub fn unavailable(provider: &str, outcome: &str) -> Self {
         Self {
             schema_version: USAGE_RECEIPT_SCHEMA_VERSION.to_string(),
@@ -122,10 +144,13 @@ pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, 
     if object.get("type").and_then(JsonValue::as_str) != Some("result") {
         return None;
     }
+    // Error variants (error_max_turns, error_during_execution) carry usage but
+    // no `result`: keep their usage and fall back to raw stdout as content.
     let content = object
         .get("result")
-        .and_then(JsonValue::as_str)?
-        .to_string();
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| stdout.to_string());
     let usage = object.get("usage").and_then(JsonValue::as_object);
     let count = |key: &str| usage.and_then(|u| u.get(key)).and_then(JsonValue::as_u64);
     let tokens = UsageTokens {
@@ -163,7 +188,7 @@ pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, 
     let has_counters = usage.is_some();
     let (pricing_status, billed_micros, estimate_micros) = match (cost, basis) {
         (_, Some("subscription" | "included")) => (PricingStatus::SubscriptionIncluded, None, None),
-        (Some(0), _) => (PricingStatus::Zero, Some(0), None),
+        (Some(0), Some("billed" | "actual")) => (PricingStatus::Zero, Some(0), None),
         (Some(micros), Some("billed" | "actual")) => (PricingStatus::Billed, Some(micros), None),
         // `list` (and any unknown basis) is the CLI's own price computation, not
         // an invoice: advisory only.
@@ -205,6 +230,9 @@ pub struct RunUsageSummary {
     pub cached_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub output_tokens: u64,
+    /// Receipts that reported token counters. 0 means tokens are unknown,
+    /// not a measured zero.
+    pub counted_count: usize,
     /// Sum of `billed`/`zero` receipts only, in USD millionths.
     pub confirmed_micros: i64,
     /// Sum of advisory estimates, never mixed into `confirmed_micros`.
@@ -225,7 +253,7 @@ pub fn summarize_usage(events: &[AgentRunEvent]) -> RunUsageSummary {
             .get("receipt")
             .cloned()
             .and_then(|value| serde_json::from_value::<UsageReceipt>(value).ok())
-            .filter(|r| r.schema_version == USAGE_RECEIPT_SCHEMA_VERSION);
+            .filter(|r| r.schema_version == USAGE_RECEIPT_SCHEMA_VERSION && r.amounts_consistent());
         let Some(receipt) = receipt else {
             // Dedupe drifted payloads by event id so a replayed line is still one.
             if seen.insert(format!("event:{}", event.id)) {
@@ -242,6 +270,14 @@ pub fn summarize_usage(events: &[AgentRunEvent]) -> RunUsageSummary {
             summary.failed_count += 1;
         }
         let t = &receipt.tokens;
+        if t.input
+            .or(t.cached_read)
+            .or(t.cache_write)
+            .or(t.output)
+            .is_some()
+        {
+            summary.counted_count += 1;
+        }
         summary.input_tokens += t.input.unwrap_or(0);
         summary.cached_read_tokens += t.cached_read.unwrap_or(0);
         summary.cache_write_tokens += t.cache_write.unwrap_or(0);
@@ -316,9 +352,15 @@ mod tests {
         let missing = parse_claude_json_result(&with_cost(JsonValue::Null, "list"), "ok")
             .unwrap()
             .1;
-        let zero = parse_claude_json_result(&with_cost(json!(0), "list"), "ok")
+        let zero = parse_claude_json_result(&with_cost(json!(0), "billed"), "ok")
             .unwrap()
             .1;
+        // A list-price computation of 0 is still an estimate, not confirmed zero.
+        let list_zero = parse_claude_json_result(&with_cost(json!(0), "list"), "ok")
+            .unwrap()
+            .1;
+        assert_eq!(list_zero.pricing_status, PricingStatus::Estimate);
+        assert_eq!(list_zero.estimate_micros, Some(0));
         let included = parse_claude_json_result(&with_cost(json!(0.2), "subscription"), "ok")
             .unwrap()
             .1;
@@ -359,6 +401,51 @@ mod tests {
     }
 
     #[test]
+    fn ac3_error_result_without_result_field_keeps_usage() {
+        let raw = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.2,"usage":{"input_tokens":5,"output_tokens":6},"modelUsage":{"m":{"costBasis":"list"}}}"#;
+        let (content, r) = parse_claude_json_result(raw, "failed").unwrap();
+        assert_eq!(content, raw);
+        assert_eq!(r.tokens.input, Some(5));
+        assert_eq!(r.pricing_status, PricingStatus::Estimate);
+        assert_eq!(r.outcome, "failed");
+    }
+
+    #[test]
+    fn ac5_receipts_with_inconsistent_amounts_are_unavailable() {
+        let base = parse_claude_json_result(&with_cost(json!(0.25), "billed"), "ok")
+            .unwrap()
+            .1;
+        assert!(base.amounts_consistent());
+        let mut no_amount = base.clone();
+        no_amount.billed_micros = None;
+        let mut no_currency = base.clone();
+        no_currency.currency = None;
+        let mut estimate_no_amount = base.clone();
+        estimate_no_amount.pricing_status = PricingStatus::Estimate;
+        estimate_no_amount.billed_micros = None;
+        let mut unpriced_with_amount = base.clone();
+        unpriced_with_amount.pricing_status = PricingStatus::Unpriced;
+        let events: Vec<_> = [
+            no_amount,
+            no_currency,
+            estimate_no_amount,
+            unpriced_with_amount,
+        ]
+        .into_iter()
+        .map(|mut r| {
+            r.receipt_id = new_receipt_id();
+            event(&r)
+        })
+        .collect();
+        let s = summarize_usage(&events);
+        assert_eq!((s.receipt_count, s.unavailable_count), (4, 4));
+        assert_eq!(
+            (s.priced_count, s.confirmed_micros, s.estimate_count),
+            (0, 0, 0)
+        );
+    }
+
+    #[test]
     fn ac3_failed_usage_retained_with_distinct_counters() {
         let r = parse_claude_json_result(CLAUDE_FIXTURE, "failed")
             .unwrap()
@@ -384,7 +471,10 @@ mod tests {
         assert_eq!(u.pricing_status, PricingStatus::Unavailable);
         assert_eq!(u.billed_micros, None);
         let s = summarize_usage(&[event(&u)]);
-        assert_eq!((s.unavailable_count, s.confirmed_micros), (1, 0));
+        assert_eq!(
+            (s.unavailable_count, s.confirmed_micros, s.counted_count),
+            (1, 0, 0)
+        );
         let r = parse_claude_json_result(CLAUDE_FIXTURE, "ok").unwrap().1;
         let serialized = serde_json::to_string(&r).unwrap();
         for leaked in ["session_id", "credential", "00000000", "\"ok\""] {
@@ -398,7 +488,7 @@ mod tests {
             parse_claude_json_result(&with_cost(json!(0.25), "billed"), "ok")
                 .unwrap()
                 .1,
-            parse_claude_json_result(&with_cost(json!(0), "list"), "ok")
+            parse_claude_json_result(&with_cost(json!(0), "billed"), "ok")
                 .unwrap()
                 .1,
             parse_claude_json_result(&with_cost(json!(1.5), "list"), "ok")

@@ -371,6 +371,10 @@ pub struct CliProviderAdapter {
     /// One usage receipt per `complete` call that reached the CLI, success or
     /// failure (maru#431). Drained by the run owner into `usage.recorded` events.
     usage_receipts: Vec<UsageReceipt>,
+    /// `(cwd, run_id)`: when set, each receipt is appended to that run's event
+    /// log as soon as its call ends, so a process stop mid-loop keeps the
+    /// usage of finished calls.
+    usage_sink: Option<(String, String)>,
 }
 
 impl CliProviderAdapter {
@@ -388,6 +392,7 @@ impl CliProviderAdapter {
             metadata: None,
             bundle_session: None,
             usage_receipts: Vec::new(),
+            usage_sink: None,
         }
     }
 }
@@ -401,7 +406,29 @@ impl CliProviderAdapter {
         self
     }
 
-    /// Receipts recorded since the last drain, oldest first.
+    /// Persist each receipt to `run_id`'s event log as soon as its call ends.
+    pub fn with_usage_sink(mut self, cwd: String, run_id: String) -> Self {
+        self.usage_sink = Some((cwd, run_id));
+        self
+    }
+
+    fn record_usage(&mut self, receipt: UsageReceipt) {
+        let Some((cwd, run_id)) = &self.usage_sink else {
+            self.usage_receipts.push(receipt);
+            return;
+        };
+        if let Err(err) = crate::agent_host::event_store::append_run_event_payload(
+            cwd,
+            run_id,
+            crate::agent_host::usage::USAGE_RECORDED_EVENT,
+            &receipt.provider,
+            serde_json::json!({ "receipt": receipt }),
+        ) {
+            eprintln!("maru: usage receipt not recorded for run {run_id}: {err}");
+        }
+    }
+
+    /// Receipts recorded since the last drain, oldest first (sink unset only).
     pub fn take_usage_receipts(&mut self) -> Vec<UsageReceipt> {
         std::mem::take(&mut self.usage_receipts)
     }
@@ -478,7 +505,7 @@ impl ProviderAdapter for CliProviderAdapter {
             ),
         };
         let usage = serde_json::to_value(&receipt).ok();
-        self.usage_receipts.push(receipt);
+        self.record_usage(receipt);
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let kind = classify_cli_error(&stderr);
@@ -854,6 +881,47 @@ mod tests {
             receipts[0].pricing_status,
             crate::agent_host::usage::PricingStatus::Unavailable
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_adapter_claude_error_result_keeps_usage_and_sink_persists_per_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().to_str().unwrap().to_string();
+        // Shape of Claude's error_max_turns result: no `result`, is_error true.
+        let ok = r#"{"type":"result","subtype":"success","is_error":false,"result":"A","usage":{"input_tokens":1,"output_tokens":2}}"#;
+        let err = r#"{"type":"result","subtype":"error_max_turns","is_error":true,"total_cost_usd":0.3,"usage":{"input_tokens":7,"cache_read_input_tokens":8,"output_tokens":9},"modelUsage":{"m":{"costBasis":"list"}}}"#;
+        // Calls 1-2 succeed, call 3 is the error variant with exit 1.
+        let script = format!(
+            "#!/bin/sh\nN=$(cat '{c}' 2>/dev/null || echo 0)\nN=$((N+1))\necho \"$N\" > '{c}'\nif [ \"$N\" -ge 3 ]; then echo '{err}'; exit 1; fi\necho '{ok}'\n",
+            c = dir.path().join("count").display()
+        );
+        let cli = write_fake_cli(dir.path().join("fake-claude"), &script);
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Claude,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".to_string(),
+        )
+        .with_usage_sink(cwd.clone(), "ai-sink".into());
+        adapter.complete(completion_request("a", &cwd)).unwrap();
+        adapter.complete(completion_request("b", &cwd)).unwrap();
+        // The process "stops" here: nothing drains, yet both calls are on disk.
+        let read = || {
+            crate::agent_host::event_store::replay_run_summary(&cwd, "ai-sink")
+                .unwrap()
+                .usage
+        };
+        assert_eq!(read().receipt_count, 2);
+        adapter.complete(completion_request("c", &cwd)).unwrap_err();
+        let usage = read();
+        assert_eq!(usage.receipt_count, 3);
+        assert_eq!(usage.failed_count, 1);
+        assert_eq!(usage.input_tokens, 1 + 1 + 7);
+        assert_eq!(usage.cached_read_tokens, 8);
+        assert_eq!(usage.estimate_count, 1);
+        assert_eq!(usage.unavailable_count, 0);
+        assert!(adapter.take_usage_receipts().is_empty());
     }
 
     #[cfg(unix)]

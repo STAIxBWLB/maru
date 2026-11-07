@@ -188,6 +188,8 @@ export interface RunUsageSummary {
   cachedReadTokens: number;
   cacheWriteTokens: number;
   outputTokens: number;
+  /** Receipts with token counters; 0 means tokens are unknown, not zero. */
+  countedCount: number;
   confirmedMicros: number;
   estimateMicros: number;
 }
