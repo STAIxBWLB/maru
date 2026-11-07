@@ -1,18 +1,21 @@
 name: Platform Bundle Build
 
-# Daily only: macOS runners are shared. This exercises packaging before
-# release day without signing, notarization, updater assets or publication.
+# macOS runners are shared: schedule daily, and validate PRs only when this
+# workflow itself changes. No signing, notarization, updater assets or publication.
 on:
   schedule:
     - cron: '23 19 * * *'
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/platform-build.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: platform-build
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('platform-build-pr-{0}', github.event.pull_request.number) || 'platform-build' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,7 +38,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_SHA: ${{ github.sha }}
+          EVENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           if ! main_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha); then
@@ -46,16 +49,16 @@ jobs:
             echo "::error::Main lookup did not return a commit SHA. Inspect main in the repository and retry Platform Bundle Build."
             exit 1
           fi
-          # Keep the checkout identical to the run's head_sha receipt, even
-          # when main advances while a scheduled run is queued.
+          # Build the PR head rather than GitHub's synthetic merge commit;
+          # schedule/dispatch stays at its event SHA if main advances in queue.
           sha="$EVENT_SHA"
           if [[ ! "$sha" =~ ^[a-f0-9]{40}$ ]]; then
             echo "::error::Platform build target is not a commit SHA. Inspect the selected branch and retry Platform Bundle Build."
             exit 1
           fi
           run_build=true
-          # Branch dispatches validate that branch even if main is already
-          # green. Only an exact main SHA may reuse a prior success.
+          # PR heads and branch dispatches validate their selected commit even
+          # if main is green. Only an exact main SHA may reuse prior success.
           if [ "$sha" = "$main_sha" ]; then
             if ! gh api --method GET --paginate --slurp \
               "repos/$GITHUB_REPOSITORY/actions/workflows/platform-build.yml/runs" \
