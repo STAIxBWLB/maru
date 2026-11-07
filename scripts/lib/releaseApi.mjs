@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { basename } from "node:path";
-import { statSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { RELEASE_TAG_PATTERN } from "./releaseVersion.mjs";
 import { requiredReleaseAssetNames } from "./updaterManifest.mjs";
 
@@ -132,10 +132,7 @@ export function assetText(asset, repo, runGh = ghText) {
     "-H", "Accept: application/octet-stream"]);
 }
 
-export function uploadDraftAsset(file, { tag, id, sha, repo, dryRun = false, runGh = ghText }) {
-  const release = getRelease(id, repo, runGh);
-  assertDraft(release, { tag, id, sha, dryRun });
-  const name = basename(file);
+export function validateReleaseAssetFile(file, { tag, name = basename(file) }) {
   let info;
   try { info = statSync(file); } catch {
     throw new Error(`release asset ${name} is unreadable; rebuild the required file and retry Release Bundles`);
@@ -143,6 +140,15 @@ export function uploadDraftAsset(file, { tag, id, sha, repo, dryRun = false, run
   if (![...requiredReleaseAssetNames(tag), "latest.json"].includes(name) || !info.isFile() || info.size <= 0) {
     throw new Error(`invalid or empty release asset ${name}; rebuild the required bundle/signature and retry Release Bundles`);
   }
+  try { accessSync(file, constants.R_OK); } catch {
+    throw new Error(`release asset ${name} is unreadable; rebuild the required file and retry Release Bundles`);
+  }
+}
+
+export function uploadDraftAsset(file, { tag, id, sha, repo, dryRun = false, name = basename(file), runGh = ghText }) {
+  const release = getRelease(id, repo, runGh);
+  assertDraft(release, { tag, id, sha, dryRun });
+  validateReleaseAssetFile(file, { tag, name });
   for (const existing of release.assets.filter((asset) => asset.name === name)) {
     runGh(["api", "--method", "DELETE", `repos/${repo}/releases/assets/${releaseId(existing.id)}`]);
   }

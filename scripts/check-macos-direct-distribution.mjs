@@ -325,7 +325,8 @@ function checkPasskeyPackaging() {
 for (const needle of [
   "Prepare macOS signing",
   "Developer ID Application",
-  "Build and upload Tauri bundles",
+  "Build Tauri bundles",
+  "Upload checked Tauri bundles",
   "includeUpdaterJson: false",
   "max-parallel: 4",
   "scripts/publish-updater-manifest.mjs",
@@ -358,7 +359,7 @@ if (disabledAutomaticNodeCaches.length === 2) {
   );
 }
 
-const tauriUploadStep = workflow.indexOf("- name: Build and upload Tauri bundles");
+const tauriUploadStep = workflow.indexOf("- name: Upload checked Tauri bundles");
 const dmgNotarizationStep = workflow.indexOf("- name: Build, notarize, staple, and upload macOS disk image");
 if (tauriUploadStep >= 0 && dmgNotarizationStep > tauriUploadStep) {
   ok("release workflow stages the DMG after the app and updater artifacts");

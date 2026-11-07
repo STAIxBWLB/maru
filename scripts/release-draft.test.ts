@@ -1,16 +1,26 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { prepareDraft, finalizeDraft, parseDryRun } from "./release-draft.mjs";
+import { prepareDraft, finalizeDraft, parseDryRun, planTauriUploads, uploadTauriArtifacts, main } from "./release-draft.mjs";
 import { verifyReleaseWorkflowsForSha } from "./check-release-workflows.mjs";
 import { findRelease, getRelease, releaseMetadata, uploadDraftAsset } from "./lib/releaseApi.mjs";
 import { buildUpdaterManifest, requiredReleaseAssetNames } from "./lib/updaterManifest.mjs";
 import { downloadUpdaterSignatures, publishUpdaterManifest } from "./publish-updater-manifest.mjs";
 
 const tag = "v1.2.3", sha = "a".repeat(40), repo = "fixture/maru", id = 77;
+const windowsArtifacts = ["Maru_1.2.3_x64_en-US.msi", "Maru_1.2.3_x64_en-US.msi.sig", "Maru_1.2.3_x64-setup.exe", "Maru_1.2.3_x64-setup.exe.sig"];
+const windowsNames = ["Maru_1.2.3_windows_x64_msi.msi", "Maru_1.2.3_windows_x64_msi.msi.sig", "Maru_1.2.3_windows_x64_nsis.exe", "Maru_1.2.3_windows_x64_nsis.exe.sig"];
+
+function completedWindowsBuild(folder: string) {
+  return windowsArtifacts.map((name) => {
+    const file = resolve(folder, name);
+    writeFileSync(file, `fixture:${name}`);
+    return file;
+  });
+}
 
 function fixture() {
   const contents = new Map<number, string>();
@@ -74,6 +84,104 @@ function fixture() {
   calls.length = 0;
   return { state, runGh, calls, contents, manifest };
 }
+
+describe("checked Tauri bundle handoff", () => {
+  it.each([
+    { platform: "windows-latest", target: "", paths: windowsArtifacts.map((name) => `D:\\a\\bundle\\${name}`), names: windowsNames },
+    { platform: "macos-26", target: "aarch64-apple-darwin", paths: ["/bundle/Maru.app", "/bundle/Maru.app.tar.gz", "/bundle/Maru.app.tar.gz.sig"],
+      names: ["Maru_1.2.3_darwin_aarch64_app.app.tar.gz", "Maru_1.2.3_darwin_aarch64_app.app.tar.gz.sig"] },
+    { platform: "macos-26", target: "x86_64-apple-darwin", paths: ["/bundle/Maru.app.tar.gz", "/bundle/Maru.app.tar.gz.sig"],
+      names: ["Maru_1.2.3_darwin_x64_app.app.tar.gz", "Maru_1.2.3_darwin_x64_app.app.tar.gz.sig"] },
+    { platform: "ubuntu-22.04", target: "", paths: ["/bundle/Maru_1.2.3_amd64.deb", "/bundle/Maru_1.2.3_amd64.deb.sig", "/bundle/Maru-1.2.3-1.x86_64.rpm", "/bundle/Maru-1.2.3-1.x86_64.rpm.sig", "/bundle/Maru_1.2.3_amd64.AppImage", "/bundle/Maru_1.2.3_amd64.AppImage.sig"],
+      names: ["Maru_1.2.3_linux_amd64_deb.deb", "Maru_1.2.3_linux_amd64_deb.deb.sig", "Maru_1.2.3_linux_x86_64_rpm.rpm", "Maru_1.2.3_linux_x86_64_rpm.rpm.sig", "Maru_1.2.3_linux_amd64_appimage.AppImage", "Maru_1.2.3_linux_amd64_appimage.AppImage.sig"] },
+  ])("preserves names for $platform $target", ({ platform, target, paths, names }) => {
+    const planned = planTauriUploads(paths, { tag, platform, target, appVersion: "1.2.3" });
+    expect(planned.map((item) => item.name)).toEqual(names);
+    expect(planned.every((item) => paths.includes(item.file))).toBe(true);
+  });
+
+  it("rejects missing, duplicate, foreign-version and unsupported outputs", async () => {
+    const context = { tag, platform: "windows-latest", target: "", appVersion: "1.2.3" };
+    for (const paths of [[], windowsArtifacts.slice(0, 3), [...windowsArtifacts, windowsArtifacts[0]], windowsArtifacts.map((file) => file.replace("1.2.3", "1.2.2")), [...windowsArtifacts, "extra.zip"]]) {
+      expect(() => planTauriUploads(paths, context)).toThrow();
+    }
+    expect(() => planTauriUploads(windowsArtifacts, { ...context, appVersion: "1.2.2" })).toThrow("version differs");
+    expect(() => planTauriUploads(windowsArtifacts, { ...context, platform: "unknown" })).toThrow("unsupported");
+    await expect(main(["upload", tag, String(id), sha, "--tauri-artifacts"], { GITHUB_REPOSITORY: repo, DRY_RUN: "true", TAURI_ARTIFACT_PATHS: "bad JSON" })).rejects.toThrow("artifactPaths output is not valid JSON");
+    await expect(main(["upload", tag, String(id), sha, "--tauri-typo"], { GITHUB_REPOSITORY: repo, DRY_RUN: "true" })).rejects.toThrow("unknown draft upload option");
+  });
+
+  it("uploads nothing when the draft became public after build", () => {
+    const folder = mkdtempSync(resolve(tmpdir(), "maru-built-public-"));
+    try {
+      const f = fixture();
+      const completedBuild = completedWindowsBuild(folder);
+      f.state.release.draft = false;
+      expect(() => uploadTauriArtifacts(completedBuild, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh })).toThrow("already public");
+      expect(f.calls).toEqual([{ method: "GET", route: `repos/${repo}/releases/${id}` }]);
+    } finally { rmSync(folder, { recursive: true, force: true }); }
+  });
+
+  it.each(["missing", "empty", "directory"])("rejects a later %s file before any API call", (failure) => {
+    const folder = mkdtempSync(resolve(tmpdir(), "maru-invalid-batch-"));
+    try {
+      const files = completedWindowsBuild(folder);
+      // Planning succeeds: only the second file's actual filesystem state is bad.
+      expect(planTauriUploads(files, { tag, platform: "windows-latest", appVersion: "1.2.3" })).toHaveLength(4);
+      if (failure === "empty") writeFileSync(files[1], "");
+      else { unlinkSync(files[1]); if (failure === "directory") mkdirSync(files[1]); }
+      const f = fixture();
+      expect(() => uploadTauriArtifacts(files, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh })).toThrow(/rebuild.*retry Release Bundles/);
+      expect(f.calls).toEqual([]);
+    } finally { rmSync(folder, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("rejects a later unreadable file before any API call (POSIX permissions)", () => {
+    const folder = mkdtempSync(resolve(tmpdir(), "maru-unreadable-batch-"));
+    try {
+      const files = completedWindowsBuild(folder);
+      chmodSync(files[1], 0);
+      const f = fixture();
+      expect(() => uploadTauriArtifacts(files, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh })).toThrow("is unreadable; rebuild");
+      expect(f.calls).toEqual([]);
+    } finally { rmSync(folder, { recursive: true, force: true }); }
+  });
+
+  it("maps files without copying and reasserts before each write", () => {
+    const folder = mkdtempSync(resolve(tmpdir(), "maru-checked-tauri-"));
+    try {
+      const files = completedWindowsBuild(folder);
+      const f = fixture();
+      const uploaded = uploadTauriArtifacts(files, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh: f.runGh });
+      expect(uploaded.map((item) => item.name)).toEqual(windowsNames);
+      expect(f.calls.filter((call) => call.method === "POST").map((call) => new URL(call.route).searchParams.get("name"))).toEqual(windowsNames);
+      expect(f.calls.filter((call) => call.route === `repos/${repo}/releases/${id}`)).toHaveLength(4);
+      const changed = fixture();
+      const runGh = (args: string[], options?: { input?: string }) => {
+        const result = changed.runGh(args, options);
+        if (args[2] === "POST") changed.state.release.draft = false;
+        return result;
+      };
+      expect(() => uploadTauriArtifacts(files, { tag, id, sha, repo, platform: "windows-latest", appVersion: "1.2.3", runGh })).toThrow("already public");
+      expect(changed.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+      expect(changed.calls.filter((call) => call.method === "DELETE")).toHaveLength(1);
+    } finally { rmSync(folder, { recursive: true, force: true }); }
+  });
+
+  it("leaves the action build-only and sends its output to the checked CLI", () => {
+    const source = readFileSync(resolve(process.cwd(), ".github/workflows/release-bundles.yml"), "utf8");
+    const build = source.split("      - name: Build Tauri bundles\n")[1]?.split(/^      - /m)[0];
+    expect(build).toContain("uses: tauri-apps/tauri-action@action-v0.6.2");
+    expect(build).not.toMatch(/^\s*(releaseId|tagName|releaseName|GITHUB_TOKEN):/m);
+    expect(build).toContain("includeUpdaterJson: false");
+    const upload = source.split("      - name: Upload checked Tauri bundles\n")[1]?.split(/^      - /m)[0];
+    expect(upload).toContain("shell: bash");
+    expect(upload).toContain("TAURI_ARTIFACT_PATHS: ${{ steps.tauri_build.outputs.artifactPaths }}");
+    expect(upload).toContain("TAURI_APP_VERSION: ${{ steps.tauri_build.outputs.appVersion }}");
+    expect(upload).toContain('release-draft.mjs upload "$RELEASE_TAG" "$RELEASE_ID" "$RELEASE_SHA" --tauri-artifacts');
+    expect(source.indexOf("- name: Build Tauri bundles")).toBeLessThan(source.indexOf("- name: Upload checked Tauri bundles"));
+  });
+});
 
 describe("draft release admission", () => {
   it("lists drafts, uses the selected ID and gates its immutable SHA without a tag", async () => {
