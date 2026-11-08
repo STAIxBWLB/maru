@@ -78,6 +78,25 @@ describe("validateSemanticContent", () => {
     expect(keys("workflow", workflow)).toContain("diagram.semantic.danglingReference");
   });
 
+  it("refuses reversed, overlapping and empty workflow ranges before applying edits", () => {
+    const spec = fixture("workflow");
+    spec.phases = [
+      { id: "one", label: "One", fromCol: 0, toCol: 2 },
+      { id: "two", label: "Two", fromCol: 1, toCol: 3 },
+      { id: "bad", label: "Bad", fromCol: 3, toCol: 2 },
+    ];
+    spec.groups = [{ id: "empty", label: "Empty", lane: "author", fromCol: 4, toCol: 5 }];
+    expect(keys("workflow", spec)).toEqual(expect.arrayContaining(["diagram.semantic.invalidRange", "diagram.semantic.phaseOverlap", "diagram.semantic.emptyGroup"]));
+  });
+
+  it("refuses empty/reversed timeline ranges and segments outside an authored canvas", () => {
+    const spec = fixture("sequence");
+    spec.meta = { ...(spec.meta as object), viewBox: [920, 760] };
+    spec.segments = [{ from: 60, to: 740, label: "Outside" }];
+    spec.activations = [{ participant: "api", from: 200, to: 200 }];
+    expect(keys("sequence", spec)).toEqual(expect.arrayContaining(["diagram.semantic.rangeOutsideCanvas", "diagram.semantic.invalidRange"]));
+  });
+
   it("reports duplicate relation ids", () => {
     const spec = fixture("dataflow");
     spec.flows = [
@@ -135,6 +154,23 @@ describe("projectSemanticDataset", () => {
       const b = projectSemanticDataset(datasetOf(type), { containers: true });
       expect(a).toEqual(b);
     }
+  });
+
+  it("projects authored architecture grid cells instead of array order", () => {
+    const spec = fixture("architecture");
+    spec.layout = { mode: "grid", cols: 4, origin: [70, 90], cellW: 130, cellH: 64, gapX: 30, gapY: 40 };
+    (spec.components as Record<string, unknown>[]).push({ id: "cache", type: "backend", label: "Cache", row: 1, col: 0 });
+    const dataset = datasetOf("architecture", spec);
+    expect(projectSemanticDataset(dataset).nodes.find((node) => node.id === "cache")).toMatchObject({ x: 70, y: 194 });
+    expect(projectSemanticDocument(dataset).doc.nodes.find((node) => node.id === "cache")).toMatchObject({ x: 70, y: 194 });
+  });
+
+  it("keeps authored free architecture positions on new documents", () => {
+    const spec = fixture("architecture");
+    delete spec.layout;
+    spec.components = (spec.components as Record<string, unknown>[]).map((entry, index) => ({ ...entry, pos: [100 + index * 200, 180], size: [160, 64] }));
+    const doc = projectSemanticDocument(datasetOf("architecture", spec)).doc;
+    expect(doc.nodes.filter((node) => node.meta?.semanticContainer === undefined).map((node) => [node.x, node.y])).toEqual([[100, 180], [300, 180], [500, 180]]);
   });
 
   it("orders sequence messages by y with strictly increasing midOff brackets", () => {

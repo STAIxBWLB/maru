@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { pinnedEngineHost } from "./helpers/diagramEngineHost";
 import { SEMANTIC_FIXTURES } from "../src/lib/diagram/__fixtures__/semantic";
 import type { SemanticDiagramType } from "../src/lib/diagram/reportTypes";
 
@@ -241,7 +242,22 @@ test("rejects a Unicode output segment exceeding the pinned UTF-8 budget in the 
 // Semantic types and semantic editing (issue #433 P2)
 // ---------------------------------------------------------------------------
 
+async function installSemanticValidationHost(page: Page) {
+  // Browser-only replacement of the generation host factory, not a production
+  // bypass. Structural apply uses the same host contract and pinned CLI.
+  await page.exposeFunction("diagramValidateFixture", pinnedEngineHost.validateCandidate);
+  await page.route("**/src/lib/diagram/generationHost.ts*", (route) => route.fulfill({
+    contentType: "application/javascript",
+    body: `export function createGenerationHost() { return {
+      runAgent: async () => { throw new Error("Diagram generation is only available inside the Tauri shell."); },
+      validateCandidate: (type, spec) => window.diagramValidateFixture(type, spec),
+      cancel() {}
+    }; }`,
+  }));
+}
+
 async function importSemanticSpec(page: Page, type: SemanticDiagramType) {
+  await installSemanticValidationHost(page);
   await page.goto("/");
   await page.getByRole("button", { name: "다이어그램", exact: true }).click();
   await page.getByRole("tab", { name: "파일" }).click();
@@ -348,7 +364,7 @@ test("asks before deleting a semantic member and keeps everything on cancel", as
     void dialog.dismiss();
   });
   await page.keyboard.press("Delete");
-  await expect.poll(() => message).toContain("자유 형식으로 분리한 뒤 삭제할까요?");
+  await expect.poll(() => message).toContain("다음 항목과 종속 연결·멤버십을 삭제할까요?");
   await expect(page.locator(".maru-diagram-node")).toHaveCount(4);
   await expect(page.getByTestId("semantic-props")).toBeVisible();
   expect(forbidden).toEqual([]);
@@ -372,5 +388,31 @@ test("lists five diagram types and routes pasted Mermaid sequences to generation
   await expect(diagnostics).toContainText("아무것도 가져오지 않았습니다");
   await expect(diagnostics).toContainText("다이어그램 생성에서 sequence 유형으로 변환하세요");
   await expect(dialog.getByTestId("gen-mermaid-apply")).toBeDisabled();
+  expect(forbidden).toEqual([]);
+});
+
+
+test("adds and removes a semantic state with one-step undo and a cascade preview", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await importSemanticSpec(page, "lifecycle");
+  await page.locator('.maru-diagram-node[data-node-id="running"]').click();
+  await page.getByTestId("semantic-add-label").fill("Retry");
+  await page.getByTestId("semantic-add-type").selectOption("waiting");
+  await page.getByTestId("semantic-add-col").fill("3");
+  await page.getByTestId("semantic-add-confirm").click();
+  await expect(page.locator(".maru-diagram-node")).toHaveCount(5);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".maru-diagram-node")).toHaveCount(4);
+  await page.locator('.maru-diagram-node[data-node-id="running"]').click();
+  let preview = "";
+  page.once("dialog", (dialog) => { preview = dialog.message(); void dialog.accept(); });
+  await page.getByTestId("semantic-remove").click();
+  await expect(page.locator(".maru-diagram-node")).toHaveCount(3);
+  expect(preview).toContain("Running");
+  expect(preview).toContain("상태 전이");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".maru-diagram-node")).toHaveCount(4);
+  await page.locator('.maru-diagram-node[data-node-id="running"]').click();
+  await expect(page.getByTestId("semantic-props")).toBeVisible();
   expect(forbidden).toEqual([]);
 });

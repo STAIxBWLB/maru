@@ -126,6 +126,7 @@ import {
   useDiagramCoalescer,
   useDiagramGestureCoalescers,
   useDiagramStore,
+  useDiagramValidationHost,
 } from "./DiagramStoreContext";
 import { CanvasSurface } from "./canvas/CanvasSurface";
 import { deleteSelection } from "./deleteSelection";
@@ -261,7 +262,7 @@ function writeLastDocumentFallback(workPath: string, lastDocument: string | null
 export function DiagramMode(props: DiagramModeProps) {
   const storeKey = props.workPath ?? "__no-workspace__";
   return (
-    <DiagramStoreProvider storeKey={storeKey}>
+    <DiagramStoreProvider storeKey={storeKey} workPath={props.workPath}>
       <DiagramShell key={storeKey} {...props} />
     </DiagramStoreProvider>
   );
@@ -277,6 +278,7 @@ function DiagramShell({
   const store = useDiagramStore();
   const coalescer = useDiagramCoalescer();
   const gestureCoalescers = useDiagramGestureCoalescers();
+  const validationHost = useDiagramValidationHost();
   const sessionKey = workPath ?? "__no-workspace__";
   const handoffOpening = useRef<string | null>(null);
   useEffect(() => {
@@ -1442,13 +1444,13 @@ function DiagramShell({
         if (hasSelection) {
           event.preventDefault();
           // Pattern-view and semantic-member prompts live in deleteSelection.
-          void deleteSelection(store, coalescer, t);
+          void deleteSelection(store, coalescer, t, validationHost);
         }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [cellEdit, coalescer, findOpen, gestureCoalescers, handleOsClipboardPaste, handleSave, hasSelection, openCellEditor, openInlineEditor, store, t]);
+  }, [cellEdit, coalescer, findOpen, gestureCoalescers, handleOsClipboardPaste, handleSave, hasSelection, openCellEditor, openInlineEditor, store, t, validationHost]);
 
   const statusLabel = saving
     ? t("diagram.status.saving")

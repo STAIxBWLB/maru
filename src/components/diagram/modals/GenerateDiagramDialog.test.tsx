@@ -82,6 +82,7 @@ interface RenderOpts {
   dirty?: boolean;
   selection?: string[];
   host?: StubHost;
+  sharedHost?: StubHost;
 }
 
 let keySeq = 0;
@@ -107,7 +108,7 @@ function renderDialog(opts: RenderOpts = {}): Harness {
           t: (key, vars) => translate("ko", key, vars),
         }}
       >
-        <DiagramStoreProvider initial={{ doc, ephemeral }} storeKey={`gen-dialog-test-${keySeq}`}>
+        <DiagramStoreProvider initial={{ doc, ephemeral }} hostOverride={opts.sharedHost ?? null} storeKey={`gen-dialog-test-${keySeq}`}>
           <StoreProbe />
           <GenerateDiagramDialog
             open
@@ -230,6 +231,14 @@ describe("GenerateDiagramDialog", () => {
     expect(query('[data-testid="gen-diff-added"]')!.textContent).toContain("Database");
     expect(query('[data-testid="gen-apply-new"]')).not.toBeNull();
     expect((query<HTMLButtonElement>('[data-testid="gen-apply-new"]')!).disabled).toBe(false);
+  });
+
+  it("uses the shared generation host override also supplied to structural edits", async () => {
+    const host = stubHost();
+    harness = renderDialog({ sharedHost: host });
+    await runGeneration();
+    await vi.waitFor(() => expect(query('[data-testid="gen-preview"]')).not.toBeNull());
+    expect(host.validateCandidate).toHaveBeenCalled();
   });
 
   it("surfaces engine validation failure as the failed state", async () => {

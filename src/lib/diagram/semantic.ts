@@ -1,3 +1,4 @@
+import { DEFAULT_GRID } from "../../../sidecars/archify/renderers/architecture/grid.mjs";
 import {
   architecture,
   dataflow,
@@ -245,7 +246,7 @@ export function sequenceOrder(spec: Record<string, unknown>): number[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Schema plus reference validation of a spec. Schema errors reuse
+ * Schema, reference and structural-range validation of a spec. Schema errors reuse
  * `diagram.validation.specMeta`; references, self-messages and duplicate ids
  * get `diagram.semantic.*` keys. Duplicate ids are checked across every
  * id-bearing collection because the id map must stay reversible.
@@ -303,6 +304,25 @@ export function validateSemanticContent(
     }
   }
   if (diagramType === "workflow") {
+    const phases = specEntries(spec, "phases");
+    for (const field of ["phases", "groups"]) {
+      specEntries(spec, field).forEach((entry, index) => {
+        if (isFiniteNumber(entry.fromCol) && isFiniteNumber(entry.toCol) && entry.toCol < entry.fromCol) {
+          diagnostics.push({ key: "diagram.semantic.invalidRange", params: { field: `${field}[${index}]` } });
+        }
+        if (field === "groups" && !specEntries(spec, "nodes").some((node) => node.lane === entry.lane &&
+          isFiniteNumber(node.col) && isFiniteNumber(entry.fromCol) && isFiniteNumber(entry.toCol) &&
+          node.col >= entry.fromCol && node.col <= entry.toCol)) {
+          diagnostics.push({ key: "diagram.semantic.emptyGroup", params: { field: `groups[${index}]` } });
+        }
+      });
+    }
+    phases.forEach((phase, index) => {
+      if (phases.slice(0, index).some((other) => isFiniteNumber(phase.fromCol) && isFiniteNumber(phase.toCol) &&
+        isFiniteNumber(other.fromCol) && isFiniteNumber(other.toCol) && phase.fromCol <= other.toCol && other.fromCol <= phase.toCol)) {
+        diagnostics.push({ key: "diagram.semantic.phaseOverlap", params: { field: `phases[${index}]` } });
+      }
+    });
     const mainPath = Array.isArray(spec.mainPath) ? spec.mainPath : [];
     mainPath.forEach((id, index) => dangling(`mainPath[${index}]`, id, entityIds));
     const checks = isRecord(spec.semanticChecks) ? spec.semanticChecks : {};
@@ -336,6 +356,18 @@ export function validateSemanticContent(
     });
   }
   if (diagramType === "sequence") {
+    for (const field of ["segments", "activations"]) {
+      specEntries(spec, field).forEach((entry, index) => {
+        if (isFiniteNumber(entry.from) && isFiniteNumber(entry.to) && entry.to <= entry.from) {
+          diagnostics.push({ key: "diagram.semantic.invalidRange", params: { field: `${field}[${index}]` } });
+        }
+        const viewBox = isRecord(spec.meta) && Array.isArray(spec.meta.viewBox) ? spec.meta.viewBox : [];
+        if (field === "segments" && isFiniteNumber(entry.from) && isFiniteNumber(entry.to) &&
+          (entry.from < 72 || (isFiniteNumber(viewBox[1]) && entry.to > viewBox[1] - 45))) {
+          diagnostics.push({ key: "diagram.semantic.rangeOutsideCanvas", params: { field: `${field}[${index}]` } });
+        }
+      });
+    }
     specEntries(spec, "activations").forEach((entry, index) => {
       dangling(`activations[${index}].participant`, entry.participant, entityIds);
     });
@@ -532,14 +564,23 @@ function rowPlacement(count: number): GridPlacement {
   return { entities: placed, containers: [] };
 }
 
-function architecturePlacement(entities: Record<string, unknown>[]): GridPlacement {
+function architecturePlacement(entities: Record<string, unknown>[], spec: Record<string, unknown>): GridPlacement {
+  const layout = isRecord(spec.layout) && spec.layout.mode === "grid" ? spec.layout : null;
+  const origin = layout && isPoint(layout.origin) ? layout.origin : DEFAULT_GRID.origin;
+  const cols = layout && isFiniteNumber(layout.cols) && layout.cols > 0 ? layout.cols : DEFAULT_GRID.cols;
+  const cellW = layout && isFiniteNumber(layout.cellW) ? layout.cellW : DEFAULT_GRID.cellW;
+  const cellH = layout && isFiniteNumber(layout.cellH) ? layout.cellH : DEFAULT_GRID.cellH;
+  const gapX = layout && isFiniteNumber(layout.gapX) ? layout.gapX : DEFAULT_GRID.gapX;
+  const gapY = layout && isFiniteNumber(layout.gapY) ? layout.gapY : DEFAULT_GRID.gapY;
   const placed = new Map<number, Rect>();
   entities.forEach((entry, index) => {
     const pos = isPoint(entry.pos) ? entry.pos : null;
     const size = isPoint(entry.size) && entry.size[0] > 0 && entry.size[1] > 0 ? entry.size : null;
+    const row = isFiniteNumber(entry.row) ? entry.row : Math.floor(index / cols);
+    const col = isFiniteNumber(entry.col) ? entry.col : index % cols;
     placed.set(index, {
-      x: pos ? pos[0] : ORIGIN.x + (index % ARCHITECTURE_GRID_COLS) * LAYOUT_STEP_X,
-      y: pos ? pos[1] : ORIGIN.y + Math.floor(index / ARCHITECTURE_GRID_COLS) * LAYOUT_STEP_Y,
+      x: pos ? pos[0] : layout ? origin[0] + col * (cellW + gapX) : ORIGIN.x + (index % ARCHITECTURE_GRID_COLS) * LAYOUT_STEP_X,
+      y: pos ? pos[1] : layout ? origin[1] + row * (cellH + gapY) : ORIGIN.y + Math.floor(index / ARCHITECTURE_GRID_COLS) * LAYOUT_STEP_Y,
       w: size ? size[0] : NODE_W,
       h: size ? size[1] : NODE_H,
     });
@@ -734,7 +775,7 @@ export function projectSemanticDataset(
         ? stageColumns(spec)
         : dataset.diagramType === "sequence"
           ? rowPlacement(entities.length)
-          : architecturePlacement(entities);
+          : architecturePlacement(entities, spec);
 
   const nodes: DiagramNode[] = [];
   const nodeIds = new Set<string>();
@@ -823,7 +864,9 @@ export function projectSemanticDocument(
     edges: members.edges,
     datasets: [dataset],
   };
-  if (dataset.diagramType === "architecture") doc = layoutDoc(doc).doc;
+  const authoredArchitecturePlacement = dataset.diagramType === "architecture" &&
+    specEntries(dataset.spec, "components").some((entry) => isPoint(entry.pos) || isFiniteNumber(entry.row) || isFiniteNumber(entry.col));
+  if (dataset.diagramType === "architecture" && !authoredArchitecturePlacement) doc = layoutDoc(doc).doc;
   const containers = projectSemanticDataset(dataset, { containers: true, doc }).nodes.filter(
     isSemanticContainerNode,
   );

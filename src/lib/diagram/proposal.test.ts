@@ -13,7 +13,7 @@ import {
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { validateCandidateDoc } from "./validation";
 import { matrixFromRowsCols, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
-import { projectSemanticDocument, semanticMemberNodeIds } from "./semantic";
+import { projectSemanticDataset, projectSemanticDocument, semanticContainerId, semanticMemberNodeIds } from "./semantic";
 import {
   createEmptyDoc,
   createInitialEphemeral,
@@ -409,6 +409,44 @@ describe("buildProposalFromCandidate with a previous dataset", () => {
     return datasetOf("lifecycle", spec);
   };
 
+  it("uses the surviving index container's geometry after an index identity remap", () => {
+    const spec = {
+      ...structuredClone(SEMANTIC_FIXTURES.architecture),
+      boundaries: [
+        { kind: "region", label: "A", wraps: ["web"] },
+        { kind: "region", label: "B", wraps: ["api", "db"] },
+      ],
+    };
+    const dataset = datasetOf("architecture", spec);
+    const base = projectSemanticDocument(dataset).doc;
+    const oldA = semanticContainerId(dataset.id, "boundary", "0");
+    const oldB = semanticContainerId(dataset.id, "boundary", "1");
+    const newB = semanticContainerId(dataset.id, "boundary", "0");
+    const tombstone = `${dataset.id}:boundary:tombstone:0`;
+    const remapped = {
+      ...base,
+      nodes: base.nodes.map((node) => node.id === oldA
+        ? { ...node, id: tombstone, meta: { ...node.meta, memberId: `${dataset.id}:boundary:tombstone:0` } }
+        : node.id === oldB
+          ? { ...node, id: newB, meta: { ...node.meta, memberId: `${dataset.id}:boundary:0` }, x: node.x + 17, y: node.y + 9 }
+          : node),
+    };
+    const candidateSpec = { ...spec, boundaries: [{ ...spec.boundaries[1], wraps: ["api"] }] };
+    const candidate = datasetOf("architecture", candidateSpec);
+    const previousNodeIdRemap = new Map([[oldA, tombstone], [oldB, newB]]);
+    const { proposal } = buildProposalFromCandidate(
+      memberMeta(remapped, dataset.id),
+      candidate,
+      remapped,
+      { previousNodeIdRemap },
+    );
+    const beforeB = projectSemanticDataset(dataset, { containers: true, doc: remapped }).nodes.find((node) => node.id === oldB)!;
+    const afterB = projectSemanticDataset(candidate, { containers: true, doc: remapped }).nodes.find((node) => node.id === newB)!;
+    const currentB = remapped.nodes.find((node) => node.id === newB)!;
+    expect(proposal.ops).toContainEqual({ kind: "updateNode", id: newB, patch: { w: currentB.w + afterB.w - beforeB.w } });
+    expect(proposal.ops).toContainEqual({ kind: "removeNode", id: tombstone });
+  });
+
   it("does not block on a locked member the candidate leaves unchanged", () => {
     const base = projectedDoc("lifecycle");
     const locked = { ...base, nodes: base.nodes.map((n) => (n.id === "queued" ? { ...n, locked: true } : n)) };
@@ -553,5 +591,22 @@ describe("buildProposalFromCandidate with a previous dataset", () => {
     );
     expect(proposal.ops.map((op) => op.kind)).toEqual(["updateNode", "upsertSemanticDataset"]);
     expect(proposal.ops[0]).toEqual({ kind: "updateNode", id: "wh", patch: { title: "Lake" } });
+  });
+
+  it("admits touched new members and relations while suppressing untouched additions", () => {
+    const original = structuredClone(SPEC);
+    const baseDataset = candidateOf(original, "manual-add");
+    const base = projectSemanticDocument(baseDataset).doc;
+    const candidateSpec = structuredClone(original);
+    (candidateSpec.components as Record<string, unknown>[]).push({ id: "c", type: "database", label: "Cache" });
+    (candidateSpec.connections as Record<string, unknown>[]).push({ id: "e2", from: "b", to: "c", label: "stores" });
+    const candidate = candidateOf(candidateSpec, "manual-add");
+    const meta = metaFor({ docId: base.id, scope: new Set(semanticMemberNodeIds(base, "manual-add")) });
+    const allowed = buildProposalFromCandidate(meta, candidate, base, { touched: new Set(["c", "e2"]) }).proposal;
+    expect(allowed.ops).toContainEqual(expect.objectContaining({ kind: "addNode", node: expect.objectContaining({ id: "c" }) }));
+    expect(allowed.ops).toContainEqual(expect.objectContaining({ kind: "addEdge", edge: expect.objectContaining({ id: "e2" }) }));
+
+    const suppressed = buildProposalFromCandidate(meta, candidate, base, { touched: new Set(["e2"]) }).proposal;
+    expect(suppressed.ops.some((op) => op.kind === "addNode" || op.kind === "addEdge")).toBe(false);
   });
 });

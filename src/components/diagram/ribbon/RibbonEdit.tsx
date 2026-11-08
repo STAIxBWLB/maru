@@ -18,12 +18,13 @@ import {
 } from "../../../lib/diagram/actions";
 import { useTranslation } from "../../../lib/i18n";
 import { deleteSelection } from "../deleteSelection";
-import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
+import { useDiagram, useDiagramStore, useDiagramValidationHost } from "../DiagramStoreContext";
 import { RibbonButton, RibbonGroup, RibbonSeparator } from "./ribbonPrimitives";
 
 export function RibbonEdit() {
   const { t } = useTranslation();
   const store = useDiagramStore();
+  const validationHost = useDiagramValidationHost();
   const history = useDiagram((s) => s.ephemeral.history);
   const selection = useDiagram((s) => s.ephemeral.selection);
   const nodes = useDiagram((s) => s.doc.nodes);
@@ -40,8 +41,8 @@ export function RibbonEdit() {
   const canDistribute = nodeCount >= 3;
   const canCopyStyle = nodeCount === 1;
 
-  // Same prompts as keyboard Delete (pattern-view detach, semantic detach).
-  const handleDelete = useCallback(() => void deleteSelection(store, defaultCoalescer(), t), [store, t]);
+  // Same prompts as keyboard Delete (pattern-view detach, semantic cascade preview).
+  const handleDelete = useCallback(() => void deleteSelection(store, defaultCoalescer(), t, validationHost), [store, t, validationHost]);
 
   const handleCopyStyle = useCallback(() => {
     const id = [...selection.nodes][0];

@@ -48,11 +48,13 @@
  *   containers resize the same way.
  * - Only edges of the previous projection's relations are removed; freeform
  *   annotation edges between members survive.
- * - Containers are added only for a dataset new to the doc or one that
- *   already has containers (P1 datasets stay container-less).
- * - `opts.touched` (manual semantic edits) keeps only update/remove ops for
- *   the touched ids plus the upsert, so canvas drift elsewhere is not
- *   silently reverted.
+ * - Containers are added for a new dataset, an already-containerized dataset,
+ *   or explicit regeneration with phases/groups/segments/activations. Plain
+ *   reopening does not project containers. Manual edits can opt in when
+ *   adding their first container; touched ids still bound the additions.
+ * - `opts.touched` (manual semantic edits) keeps updates/removals to touched
+ *   ids and admits additions only for touched new ids, so canvas drift
+ *   elsewhere is not silently reverted.
  */
 
 import { isSemanticSpecDataset, type SemanticSpecDataset } from "./reportTypes";
@@ -157,10 +159,19 @@ function nodeSemanticPatch(
 ): Partial<DiagramNode> | null {
   const patch: Partial<DiagramNode> = {};
   // A freeform node that shares a candidate id becomes that member (for
-  // example after a detach): it adopts the member marker, so write-through,
-  // scope expansion and the delete guard apply to it again.
-  if (typeof existing.meta?.memberId !== "string" && projected.meta?.memberId !== undefined) {
-    patch.meta = { ...existing.meta, ...projected.meta };
+  // example after a detach). Same-dataset entity markers also follow their
+  // new index after structural removals; unrelated metadata survives.
+  const projectedMemberId = projected.meta?.memberId;
+  const existingMemberId = existing.meta?.memberId;
+  if (typeof projectedMemberId === "string") {
+    if (typeof existingMemberId !== "string") {
+      patch.meta = { ...existing.meta, ...projected.meta };
+    } else {
+      const entityPrefix = projectedMemberId.slice(0, projectedMemberId.lastIndexOf(":m") + 1);
+      if (entityPrefix !== ":m" && existingMemberId.startsWith(entityPrefix) && /^m\d+$/.test(existingMemberId.slice(entityPrefix.length)) && existingMemberId !== projectedMemberId) {
+        patch.meta = { ...existing.meta, memberId: projectedMemberId };
+      }
+    }
   }
   if (existing.kind !== projected.kind) patch.kind = projected.kind;
   if (existing.title !== projected.title) patch.title = projected.title;
@@ -196,10 +207,14 @@ function semanticDatasetById(doc: DiagramDoc, id: string): SemanticSpecDataset |
 
 export interface BuildProposalOptions {
   /**
-   * Canvas ids a manual semantic edit touched: only update/remove ops for
-   * these ids (plus the dataset upsert) are kept, and nothing is added.
+   * Canvas ids a manual semantic edit touched: updates/removals are limited to
+   * these ids, and additions are allowed only when their new id is touched.
    */
   touched?: ReadonlySet<string>;
+  /** Explicitly project containers for an edit that adds the first one to a legacy dataset. */
+  containers?: boolean;
+  /** Transient old canvas container ids to their remapped identities during an index edit. */
+  previousNodeIdRemap?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -219,9 +234,18 @@ export function buildProposalFromCandidate(
   const hasRanges = descriptor !== null && semanticContainers(descriptor).some((container) =>
     ["phase", "group", "segment", "activation"].includes(container.role) && specEntries(candidate.spec, container.field).length > 0,
   );
-  const containers = previous === null || datasetHasContainers(currentDoc, candidate.id) || hasRanges;
+  const containers = opts.containers ?? (previous === null || datasetHasContainers(currentDoc, candidate.id) || hasRanges);
   const projection = projectSemanticDataset(candidate, { containers, doc: currentDoc });
-  const previousProjection = previous ? projectSemanticDataset(previous, { containers, doc: currentDoc }) : null;
+  const projectedPrevious = previous ? projectSemanticDataset(previous, { containers, doc: currentDoc }) : null;
+  const previousProjection = projectedPrevious && opts.previousNodeIdRemap
+    ? {
+        ...projectedPrevious,
+        nodes: projectedPrevious.nodes.map((node) => {
+          const id = opts.previousNodeIdRemap!.get(node.id);
+          return id ? { ...node, id } : node;
+        }),
+      }
+    : projectedPrevious;
   const diagnostics: ValidationDiagnostic[] = [...projection.diagnostics];
 
   const scope = meta.scope ?? null;
@@ -281,7 +305,7 @@ export function buildProposalFromCandidate(
   for (const projected of projection.nodes) {
     const existing = docNodes.get(projected.id);
     if (!existing) {
-      if (touched === null) ops.push({ kind: "addNode", node: projected });
+      if (touched === null || touched.has(projected.id)) ops.push({ kind: "addNode", node: projected });
       continue;
     }
     if (skip(projected.id)) continue;
@@ -341,7 +365,12 @@ export function buildProposalFromCandidate(
   // --- edges: additions and updates ---------------------------------------
   for (const projected of projection.edges) {
     const existing = docEdges.get(projected.id);
-    if (touched !== null && (!existing || skip(projected.id))) continue;
+    if (touched !== null && (existing ? skip(projected.id) : !touched.has(projected.id))) continue;
+    if (
+      touched !== null && !existing &&
+      ((!docNodes.has(projected.fromNode) && !touched.has(projected.fromNode)) ||
+        (!docNodes.has(projected.toNode) && !touched.has(projected.toNode)))
+    ) continue;
     const fromOk = candidateNodeIds.has(projected.fromNode) || docNodes.has(projected.fromNode);
     const toOk = candidateNodeIds.has(projected.toNode) || docNodes.has(projected.toNode);
     if (!fromOk || !toOk) {

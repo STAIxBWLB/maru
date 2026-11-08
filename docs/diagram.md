@@ -114,9 +114,10 @@ stripped, never re-emitted as if the engine supported them.
 
 Because canvas members are projections, the semantic spec stays the source
 of truth: text edits write through to it, structural edits are spec edits,
-and deleting members requires detaching the dataset first (see "Semantic
-editing"). v8→v9 is a version bump only — v8 documents migrate in memory on
-load with no content rewrites. Issue #433 P2 added sequence, dataflow and
+and deleting members previews a spec cascade before one undoable commit
+(see "Semantic editing"). Detach remains an explicit choice. v8→v9 is a
+version bump only — v8 documents migrate in memory on load with no content
+rewrites. Issue #433 P2 added sequence, dataflow and
 lifecycle without a schema bump: every new datum rides an existing optional
 slot (the dataset, node `meta`, edge `midOff`, the spec's optional relation
 `id`). Builds 1.1.17 to 1.1.19 load and save P2 documents losslessly but show
@@ -186,9 +187,11 @@ dataset id, so the result replaces the dataset in place. Members of several
 datasets cannot run. Regenerating an existing dataset blocks on a locked
 member only when it would change or be removed, moves grid members by their
 slot delta (user offsets survive), removes only that dataset's relation
-edges (freeform annotation edges survive), and adds containers only when the
-dataset already has them. The preview reports element, relation, container
-and message-order changes.
+edges (freeform annotation edges survive), and adds containers when the
+dataset already has them or the explicit regeneration contains workflow
+phases/groups or sequence segments/activations. Plain reopening never
+projects missing containers. The preview reports element, relation,
+container and message-order changes.
 
 Unavailability degrades honestly: a missing engine surfaces the typed
 `ENGINE_UNAVAILABLE` diagnostic, an unreachable agent host surfaces the
@@ -205,7 +208,10 @@ apply is disabled.
 <datasetId>:m<index>`; lifecycle `start`/`success`/`failure` are ovals,
 `decision` a diamond). Workflow and lifecycle entities sit on a lane grid
 (lane bands top-down, `col` columns), dataflow entities in stage columns
-(ordered by `row`), architecture members are reflowed by `layoutDoc`.
+(ordered by `row`). Architecture projection honors explicit pos coordinates
+and authored row/col cells using the pinned grid's origin and spacing;
+index-based placement is a fallback only. Fresh-document auto-layout is used
+only when no architecture member has authored placement.
 Lanes, stages, boundaries, workflow phases/groups and sequence segments become
 `section` containers; activations use simple transparent outlines so their
 captions have no opaque header over message endpoints. Managed containers
@@ -243,15 +249,59 @@ state type, dataflow classification, lane and stage) are spec edits:
 `planSemanticEdit` (`semanticEdit.ts`) validates the edited spec and routes
 it through `buildProposalFromCandidate` and `prepareProposalApply` with a
 touched filter, so each edit is one undo entry and canvas drift on
-untouched members survives. Manual edits never run the engine.
+untouched members survives. Preview stays synchronous; applying a structural
+edit runs the resulting spec through the pinned engine before committing.
+An engine refusal, unavailable engine or document change during validation
+leaves both the document and undo history untouched. Text write-through and
+explicit detach remain local operations.
 
 **Detach and delete.** "Detach to freeform..." drops the dataset and the
 member markers after a confirm listing what is lost (types, order,
 variants, classifications, notes, containers, not-projected and preserved
 fields, provenance); the canvas stays and the detach is undoable. Deleting
-semantic members (keyboard Delete or the Edit ribbon) asks to detach the
-dataset first; cancel changes nothing. Adding or removing semantic members
-by hand is not supported; regenerate or detach instead.
+semantic members (keyboard Delete or the Edit ribbon) previews a spec
+cascade instead of detaching. The inspector also offers a Remove button.
+Participant removal includes messages and activations; node/state removal
+includes incident relations, wraps memberships, main-path/check references
+and any group or boundary left empty. Container removals include their
+contained entities when those entities require the lane or stage. Schema
+minimum counts and locks can refuse the whole operation. The dialog lists
+the direct and dependent changes before confirmation. Cancel or a document
+change while the dialog is open leaves the document untouched. Multiple
+selected semantic datasets, pattern detaches and freeform removals are
+planned first and committed together in one undo snapshot. Selected freeform
+objects and admitted annotation bridges are removed in the isolated plan
+before semantic cascades; a bridge to an unselected external node still
+refuses the edit. The confirmation lists freeform annotation edges lost
+through the cascade as well as spec relationships.
+
+**Structure controls (issue #527).** The inspector's Add form selects an
+entity, relation or managed container collection and asks for typed labels,
+endpoints, lane/stage, column/range or boundary members as appropriate.
+Layout-less architecture specs use x/y position controls, defaulting to a
+free slot to the right of existing components, rather than grid columns.
+New IDs are minted without rewriting existing entity/relation IDs.
+Index-keyed containers remap canvas IDs, annotation endpoints and selection
+atomically with the spec edit. A surviving container keeps its own geometry
+offset rather than inheriting the removed entry's canvas slot; lost
+annotations belong to the removed entry and appear in the preview. Sequence
+insert/remove deterministically re-space message y coordinates and remap
+ranges with the nearest surviving anchor segment for interpolation and
+extrapolation. Dataflow stage insertion/removal shifts numeric node-stage
+memberships in the same transform; lane references remain ID-based. Boundary member checkboxes apply the entire wraps
+set in one edit; phase/group and segment/activation ranges have explicit
+Apply controls, with group lane and activation participant selectors.
+Every structural command runs `validateSemanticContent`, proposal validation
+and the existing `archify_validate_candidate` engine path before one
+undoable commit. Keyboard/ribbon Delete and inspector Remove share the same
+cascade/annotation preview and apply gate. Lifecycle's reserved main lane
+cannot be removed. Architecture column inputs respect layout.cols; other
+renderer limits, such as dataflow stage/canvas width, are enforced by the
+engine with its diagnostic. New range checks refuse reversed ranges,
+overlapping phases, empty groups and segments outside an authored canvas.
+Preview remains synchronous; apply is asynchronous. Per-type fixtures also
+run the pinned engine validator in the focused test suite. Browser tests
+inject the generation host contract; production never bypasses engine admission.
 
 ## Archify engine pin
 
