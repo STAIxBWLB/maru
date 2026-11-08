@@ -422,11 +422,12 @@ impl MissionState {
             output_log_path: Some(log_path.to_string_lossy().to_string()),
             metadata,
         };
+        // Failed persistence must not leave an owned PID without its record.
+        self.store_record_in_transaction(record.clone(), lease)?;
         self.pids
             .lock()
             .map_err(|_| "mission_state_poisoned".to_string())?
             .insert(id.to_string(), pid);
-        self.store_record_in_transaction(record.clone(), lease)?;
         Ok(record)
     }
 
@@ -1001,6 +1002,19 @@ fn kill_pid(pid: u32, force: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_pid_registration_does_not_leave_an_owned_pid() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let state = super::MissionState::default();
+        let id = "ai-persistence-fails";
+        state.start_logical(id, "test", None).unwrap();
+        let file = super::mission_json_path(id).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        // A harmless nonexistent PID, never the test process's identity.
+        assert!(state.start(id, "test", 999_999_999, None).is_err());
+        assert!(!state.pids.lock().unwrap().contains_key(id));
+    }
     use super::*;
     use tempfile::TempDir;
 

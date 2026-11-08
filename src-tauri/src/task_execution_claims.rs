@@ -754,6 +754,10 @@ fn read_claim(path: &Path, task_id: &str) -> Result<Option<TaskExecutionClaim>, 
     Ok(Some(claim))
 }
 
+#[cfg(test)]
+pub(crate) static CHILD_BIND_FAILURE_WORKSPACE: std::sync::Mutex<Option<PathBuf>> =
+    std::sync::Mutex::new(None);
+
 fn write_claim(
     roots: &WorkspaceRoots,
     lease: &PathTransactionLease,
@@ -762,6 +766,17 @@ fn write_claim(
 ) -> Result<(), String> {
     let path = claim_path(roots, &claim.task_id);
     lease.ensure_covered([path.clone(), task_lock_path(roots, &claim.task_id)])?;
+    #[cfg(test)]
+    if claim.receipt.child.is_some() && !claim.child_reaped {
+        let mut fault = CHILD_BIND_FAILURE_WORKSPACE.lock().unwrap();
+        if fault.as_ref() == Some(&roots.work) {
+            *fault = None;
+            return Err(
+                "Injected child binding write failure; review the mission claim before retrying"
+                    .into(),
+            );
+        }
+    }
     let bytes = serde_json::to_vec(claim).map_err(|error| {
         action_error(
             "task_execution_claim_serialize_failed",
@@ -814,7 +829,7 @@ fn write_claim(
             "task_execution_claim_write_failed",
             &path,
             &error,
-            "retry after repairing claim storage",
+            "repair claim storage, reread the task file (it may already carry its new taskId), and retry with its current sourceRevision",
         )
     })?;
     warn_parent_sync(&path);
@@ -1583,7 +1598,7 @@ fn with_claim_operation<T>(
     let claim_path = claim_path(&roots, task_id);
     let mut request = path_transaction_for_claim(&roots, &initial_snapshot.path, task_id, &[])?;
     request = request.require_parent_snapshot(&PathTransactionParent::capture(
-        &initial_snapshot.path.parent().unwrap_or(&roots.tasks),
+        initial_snapshot.path.parent().unwrap_or(&roots.tasks),
     )?)?;
     with_path_transactions(request, |lease| {
         verify_lock_identity(&lock, &lock_path)?;
@@ -1899,7 +1914,7 @@ pub(crate) fn acquire(
     let mut path_request =
         path_transaction_for_claim(&roots, &initial_snapshot.path, &task_id, &request_paths)?;
     path_request = path_request.require_parent_snapshot(&PathTransactionParent::capture(
-        &initial_snapshot.path.parent().unwrap_or(&roots.tasks),
+        initial_snapshot.path.parent().unwrap_or(&roots.tasks),
     )?)?;
 
     with_path_transactions(path_request, |lease| {
@@ -2172,15 +2187,33 @@ pub(crate) fn spawn_owned_child(
             claim.receipt.child = Some(child_identity);
             rebind_claim_path(roots, claim, snapshot)?;
             if let Err(error) = write_claim(roots, lease, claim, lock) {
-                let cleanup = match child.kill() {
-                Ok(()) => child.wait().map(|status| format!("owned child reaped with status {status}"))
-                    .unwrap_or_else(|wait_error| format!("owned child kill succeeded but wait failed: {wait_error}")),
-                Err(kill_error) => match child.try_wait() {
-                    Ok(Some(status)) => format!("owned child already exited with status {status}; kill returned {kill_error}"),
-                    Ok(None) => format!("kill failed and child may still be running: {kill_error}"),
-                    Err(wait_error) => format!("kill failed: {kill_error}; nonblocking wait failed: {wait_error}"),
-                },
-            };
+                let (cleanup, reaped) = match child.kill() {
+                    Ok(()) => match child.wait() {
+                        Ok(status) => (format!("owned child reaped with status {status}"), true),
+                        Err(wait_error) => (format!("owned child kill succeeded but wait failed: {wait_error}"), false),
+                    },
+                    Err(kill_error) => match child.try_wait() {
+                        Ok(Some(status)) => (format!("owned child already reaped with status {status}; kill returned {kill_error}"), true),
+                        Ok(None) => (format!("kill failed and child may still be running: {kill_error}"), false),
+                        Err(wait_error) => (format!("kill failed: {kill_error}; nonblocking wait failed: {wait_error}"), false),
+                    },
+                };
+                // Binding failed, but an owned wait is positive death proof.
+                // Persist it separately so the pre-registered mission can be
+                // reviewed and released without guessing from a missing PID.
+                let cleanup = if reaped {
+                    claim.receipt.child = None;
+                    claim.child_reaped = true;
+                    claim.lifecycle = TaskExecutionLifecycle::NeedsReview;
+                    match write_claim(roots, lease, claim, lock) {
+                        Ok(()) => format!("{cleanup}; wait proof recorded for reviewed stop"),
+                        Err(proof_error) => {
+                            format!("{cleanup}; wait proof could not be recorded: {proof_error}")
+                        }
+                    }
+                } else {
+                    cleanup
+                };
                 return Err(format!("task_execution_child_bind_failed: {error}; cleanup={cleanup}; review the task claim before retrying"));
             }
             Ok(child)

@@ -291,8 +291,25 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
     .stderr(Stdio::piped())
     .no_window();
 
+    // Persist a recoverable mission before the claim can record launch intent.
+    // If registration fails, admission cleanup still has proof that no spawn ran.
+    if let Some(session) = &mission.task_execution {
+        mission_state::register_mission_logical(
+            &app,
+            &invocation_id,
+            &mission.kind,
+            mission.metadata.clone(),
+        )
+        .inspect_err(|_| session.admission_failed())?;
+    }
     let mut child = if let Some(session) = &mission.task_execution {
-        session.spawn_child(|| cmd.spawn().map_err(|err| format_spawn_error(&err)))?
+        match session.spawn_child(|| cmd.spawn().map_err(|err| format_spawn_error(&err))) {
+            Ok(child) => child,
+            Err(error) => {
+                mission_state::fail_mission(&app, &invocation_id, &error);
+                return Err(error);
+            }
+        }
     } else {
         cmd.spawn().map_err(|err| format_spawn_error(&err))?
     };
@@ -332,6 +349,7 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
             let _ = session
                 .child_reaped(child_pid)
                 .and_then(|()| session.finish(false, None));
+            mission_state::fail_mission(&app, &invocation_id, &error);
         }
         return Err(format!("task_execution_mission_registration_failed: {error}; review the task claim and retry with a fresh requestId"));
     }
@@ -962,6 +980,86 @@ mod phase08_16 {
         changed["taskExecution"]["requestId"] = json!("request-2");
         assert!(invoke(changed).unwrap_err().contains("revision"));
         assert_eq!(fs::read_to_string(&calls).unwrap(), "x");
+    }
+
+    #[test]
+    fn child_binding_failure_keeps_a_reviewable_mission_and_allows_fresh_admission() {
+        let home = Home::new();
+        let application = app();
+        let handle = application.handle().clone();
+        let (work, cli) = fixture(&home);
+        fs::create_dir_all(work.join("tasks/active")).unwrap();
+        let task = work.join("tasks/active/example.md");
+        let original = "---\ntitle: Example\nstatus: active\n---\nWork\n";
+        fs::write(&task, original).unwrap();
+        let invoke = |request: &str, source: &str| {
+            start_agent_cli_invocation(
+                handle.clone(),
+                "claude".into(),
+                "work".into(),
+                Some(text(&work)),
+                None,
+                None,
+                Some(text(&cli)),
+                Some("plan".into()),
+                Some(
+                    json!({"taskExecution": {"requestId": request, "taskPath": "tasks/active/example.md", "sourceRevision": crate::document::revision_for(source)}}),
+                ),
+            )
+        };
+        *crate::task_execution_claims::CHILD_BIND_FAILURE_WORKSPACE
+            .lock()
+            .unwrap() = Some(fs::canonicalize(&work).unwrap());
+        let error = invoke("binding-fails", original).unwrap_err();
+        assert!(
+            error.contains("task_execution_child_bind_failed"),
+            "{error}"
+        );
+        assert!(error.contains("wait proof recorded"), "{error}");
+        let records = crate::mission_state::list_ai_missions(handle.clone()).unwrap();
+        assert_eq!(
+            records.len(),
+            1,
+            "a failed launch must retain a mission for reviewed stop"
+        );
+        let mission = &records[0];
+        assert_eq!(
+            mission.metadata.as_ref().unwrap()["taskExecution"]["requestId"],
+            "binding-fails"
+        );
+        let claim_files = work.join(".maru/task-execution");
+        let claim = fs::read_dir(&claim_files)
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+            .unwrap()
+            .path();
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&fs::read(&claim).unwrap()).unwrap();
+        assert_eq!(persisted["lifecycle"], "needsReview");
+        // Restore the mission from disk, as after a restart, with no owned PID.
+        let recovered = app();
+        let stopped =
+            crate::mission_state::stop_ai_mission(recovered.handle().clone(), mission.id.clone())
+                .unwrap();
+        assert_eq!(stopped.status, crate::mission_state::MissionStatus::Stopped);
+        let source = fs::read_to_string(&task).unwrap();
+        let next = invoke("fresh-after-review", &source).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let records = crate::mission_state::list_ai_missions(handle.clone()).unwrap();
+            if records
+                .iter()
+                .any(|record| record.id == next && record.exit_code == Some(0))
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fresh admission did not finish; inspect its mission and claim before retrying"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
