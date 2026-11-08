@@ -198,7 +198,7 @@ check-csp-blob: ## Static guard: the shipped CSP script-src carries no blob: (SE
 # the reconciled additions in docs/performance/phase08-registration-changes.json.
 # Hermetic - source and recorded evidence only, no binary or browser needed.
 .PHONY: check-command-isolation
-check-command-isolation: ## Phase 08 closure gate: 365+24 production commands carry final justified evidence
+check-command-isolation: ## Phase 08 closure gate: 386 production commands carry final justified evidence
 	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 386
 
 # The type scale is the single source of truth (PR #137). A raw px font-size in

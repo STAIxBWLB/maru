@@ -20,7 +20,7 @@
  *   1. RED LIST      — the entry chunk (index-*.css) must carry zero
  *                      markers and zero per-mode pane-root signatures: no
  *                      mode's pane CSS may leak back into the entry CSS.
- *   2. FULL INVENTORY — every registered mode id (hardcoded 19-mode list;
+ *   2. FULL INVENTORY — every registered mode id (hardcoded 18-mode list;
  *                      keep in sync with modeRegistry.getRegisteredModeIds())
  *                      either has a marker-bearing per-mode CSS file whose
  *                      ownership fingerprint is verified in exactly one
@@ -72,7 +72,7 @@ const MARKER_SCAN = /\/\*!\s*maru:mode:([a-z0-9-]+)\s*\*\//g;
 
 /**
  * Keep in sync with src/lib/modeRegistry.tsx getRegisteredModeIds().
- * The 19 registered production modes; the subset with a marker-bearing
+ * The 18 registered production modes; the subset with a marker-bearing
  * per-mode CSS file must pass FULL INVENTORY via that file's ownership
  * fingerprint.
  */
