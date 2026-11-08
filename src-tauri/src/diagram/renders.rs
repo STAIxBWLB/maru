@@ -1838,8 +1838,12 @@ mod tests {
     fn duplicate_document_ids_mark_only_the_ambiguous_group_and_keep_renders_usable() {
         let fixture = Fixture::new();
         fs::write(
-            fixture.work.join(DIAGRAMS_ROOT).join("z-duplicate.cmd.json"),
-            serde_json::json!({ "id": fixture.doc_id.as_str(), "docTitle": "Second title" }).to_string(),
+            fixture
+                .work
+                .join(DIAGRAMS_ROOT)
+                .join("z-duplicate.cmd.json"),
+            serde_json::json!({ "id": fixture.doc_id.as_str(), "docTitle": "Second title" })
+                .to_string(),
         )
         .unwrap();
         fs::write(
@@ -1859,7 +1863,10 @@ mod tests {
         fixture.store_context(RENDER_B, unrelated_context, "image/svg+xml", SVG);
 
         let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
-        let duplicate = groups.iter().find(|group| group.doc_id == fixture.doc_id).unwrap();
+        let duplicate = groups
+            .iter()
+            .find(|group| group.doc_id == fixture.doc_id)
+            .unwrap();
         assert!(duplicate.ambiguous);
         assert!(!duplicate.orphaned);
         assert_eq!(duplicate.document_name.as_deref(), Some("render-test"));

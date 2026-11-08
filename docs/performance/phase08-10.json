@@ -2262,7 +2262,7 @@
       "tests": [
         {
           "command": "node scripts/run-vitest.mjs src/lib/diagram/renders.test.ts src/components/diagram/modals/RendersDialog.test.tsx src/components/diagram/modals/ImportExportDialog.test.tsx src/lib/diagram/verifiedExport.test.ts src/lib/diagram/reportInsert.test.ts src/lib/diagram/engineSvg.test.ts scripts/check-main-iframes.test.ts",
-          "passed": 75,
+          "passed": 77,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0,
@@ -2280,6 +2280,18 @@
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
           "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
+        },
+        {
+          "command": "cargo test --lib renders -- --test-threads=2",
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0,
+          "filteredOut": 2162,
+          "exitCode": 0,
+          "workingDirectory": "src-tauri",
+          "buildJobs": 2,
+          "executionHost": "dgx02 container (Debian trixie)",
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
         }
       ],
       "processingCaller": {
@@ -2327,7 +2339,7 @@
           "optional_store_failure_keeps_a_valid_engine_artifact_and_returns_warning"
         ],
         "workerProof": "The whole render and optional immutable pair publication run inside the awaited blocking worker. Real archify-filtered tests include worker failure/first-poll proof and context-to-persisted-HTML/receipt readback.",
-        "platformScope": "Actual dgx02 Debian-trixie filtered run:20 passed/0 failed/0 ignored, including real pinned render with successful history and blocked-history nonfatal artifact/hash proof. Frontend focused tests cover copy/report warnings and legacy type matching. Final native fixture synchronization and release/Windows behavior require separate evidence.",
+        "platformScope": "Actual dgx02 Debian-trixie filtered run:20 passed/0 failed/0 ignored, including real pinned render with successful history and blocked-history nonfatal artifact/hash proof. Frontend focused tests cover copy/report warnings and legacy type matching. Final native fixture synchronization and release/Windows behavior require separate evidence. Current delegated store/list helpers also passed the renders selector19/0/0 at merged source bcc8e18a.",
         "deferredChecks": "Final-head hosted verify, Playwright and native suite remain required; no checker edits or invented counts."
       }
     },
@@ -2348,7 +2360,7 @@
       "tests": [
         {
           "command": "cargo test --lib renders -- --test-threads=2",
-          "passed": 17,
+          "passed": 19,
           "failed": 0,
           "ignored": 0,
           "filteredOut": 2162,
@@ -2356,7 +2368,7 @@
           "workingDirectory": "src-tauri",
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
         }
       ],
       "processingCaller": {
@@ -2378,10 +2390,12 @@
           "orphaned_renders_remain_listed_and_delete_removes_only_the_selected_folder",
           "list_command_yields_and_propagates_worker_failure",
           "unicode_document_ids_keep_logical_identity_and_long_titles_are_bounded_utf8",
-          "reserved_hash_prefix_ids_are_hashed_to_avoid_legacy_key_collisions"
+          "reserved_hash_prefix_ids_are_hashed_to_avoid_legacy_key_collisions",
+          "portable_reserved_names_and_trailing_dot_use_hashed_keys",
+          "duplicate_document_ids_mark_only_the_ambiguous_group_and_keep_renders_usable"
         ],
         "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
-        "platformScope": "Actual dgx02 Debian-trixie renders selector:17 passed/0 failed/0 ignored, including all13 store cases and4 related cases. No native/release behavior is inferred."
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:19 passed/0 failed/0 ignored, including portable names, duplicate-id groups, hash/grant integrity, deletion isolation and worker boundaries; no native/release execution inferred."
       },
       "mutationKey": {
         "readOnly": true,
@@ -2407,7 +2421,7 @@
       "tests": [
         {
           "command": "cargo test --lib renders -- --test-threads=2",
-          "passed": 17,
+          "passed": 19,
           "failed": 0,
           "ignored": 0,
           "filteredOut": 2162,
@@ -2415,7 +2429,7 @@
           "workingDirectory": "src-tauri",
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
         }
       ],
       "processingCaller": {
@@ -2439,7 +2453,7 @@
           "prepare_command_yields_and_propagates_worker_failure"
         ],
         "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
-        "platformScope": "Actual dgx02 Debian-trixie renders selector:17 passed/0 failed/0 ignored, including all13 store cases and4 related cases. No native/release behavior is inferred."
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:19 passed/0 failed/0 ignored, including portable names, duplicate-id groups, hash/grant integrity, deletion isolation and worker boundaries; no native/release execution inferred."
       },
       "mutationKey": {
         "readOnly": true,
@@ -2465,7 +2479,7 @@
       "tests": [
         {
           "command": "cargo test --lib renders -- --test-threads=2",
-          "passed": 17,
+          "passed": 19,
           "failed": 0,
           "ignored": 0,
           "filteredOut": 2162,
@@ -2473,7 +2487,7 @@
           "workingDirectory": "src-tauri",
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
         }
       ],
       "processingCaller": {
@@ -2496,7 +2510,7 @@
           "delete_command_yields_and_propagates_worker_failure"
         ],
         "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
-        "platformScope": "Actual dgx02 Debian-trixie renders selector:17 passed/0 failed/0 ignored, including all13 store cases and4 related cases. No native/release behavior is inferred."
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:19 passed/0 failed/0 ignored, including portable names, duplicate-id groups, hash/grant integrity, deletion isolation and worker boundaries; no native/release execution inferred."
       },
       "mutationKey": {
         "lexicalPaths": [

@@ -455,7 +455,9 @@ Chromium/jsdom checks alone do not prove WKWebView or a shipped release bundle.
 File > Renders lists disk artifacts from
 `attachments/diagrams/<storeKey>/renders/<renderId>/`. Compatible lowercase ASCII
 IDs retain their directory key; Unicode, uppercase, unsafe and reserved-prefix
-IDs use a hash key to prevent traversal and case-insensitive collisions. The
+IDs use a hash key to prevent traversal and case-insensitive collisions. Keys
+also pass the shared portable-name rules, so Windows device names and trailing
+dots are hashed rather than used as directories. The
 receipt retains the original logical `docId`; list entries return the safe key
 for prepare/delete and `originalDocId` for source matching. Each successful
 history write creates a fresh UUID folder with `index.html` and `receipt.json`;
@@ -470,7 +472,10 @@ to a user-selected path; that remains behind #528 T2's platform gates.
 The native commands scan receipts and join current `diagrams/*.cmd.json` files
 by `docId`, using the current filename for Re-render. Removing or renaming a
 source document does not delete its renders: a missing source is listed as
-orphaned. Copied render folders with valid receipts are listed; missing, malformed
+orphaned. When two saved diagrams share one ID, that group is marked ambiguous
+with a bounded recovery diagnostic. Listing, verified viewing and deletion
+remain available, while Re-render refuses to choose an arbitrary source until
+one file receives a distinct ID. Copied render folders with valid receipts are listed; missing, malformed
 or mismatched receipts/artifacts stay visible as unverified. Copied static
 `index.svg`/`index.png` artifacts use image previews instead of HTML frames.
 
