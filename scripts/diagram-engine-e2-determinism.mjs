@@ -1,4 +1,4 @@
-// Compare per-corpus foundation reports emitted by the pure SDK on each OS.
+// Compare whole-scene native reports on three OSes and the actual WASM build.
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -29,15 +29,15 @@ export function corpusContract(contents) {
 }
 
 function validateReport(report, expected, index) {
-  const label = `platform report ${index + 1}`;
-  if (!report || report.apiVersion !== 1 || !Array.isArray(report.cases)) {
+  const label = `scene report ${index + 1}`;
+  if (!report || report.apiVersion !== 1 || report.scope !== "whole-scene-geometry" || report.repeatCheck !== true || !Array.isArray(report.cases)) {
     throw new Error(`${label} is empty or incompatible; regenerate it with the pinned SDK harness.`);
   }
   if (report.corpusSha256 !== expected.corpusSha256) {
     throw new Error(`${label} corpus SHA-256 does not match the checked-in parity corpus; rerun all platform hashes from the same corpus revision.`);
   }
   if (report.corpusCaseCount !== expected.caseCount || report.cases.length !== expected.caseCount) {
-    throw new Error(`${label} has ${report.cases.length} case records but the corpus has ${expected.caseCount}; regenerate the complete foundation report.`);
+    throw new Error(`${label} has ${report.cases.length} case records but the corpus has ${expected.caseCount}; regenerate the complete whole-scene report.`);
   }
   for (let caseIndex = 0; caseIndex < expected.caseCount; caseIndex += 1) {
     if (!/^[a-f0-9]{64}$/.test(report.cases[caseIndex]?.hash ?? "")) {
@@ -49,9 +49,16 @@ function validateReport(report, expected, index) {
   }
 }
 
-export function compareManifests(manifests, expectedCorpus) {
-  if (!Array.isArray(manifests) || manifests.length !== 3) {
-    throw new Error(`Expected Linux/macOS/Windows receipts, found ${manifests?.length ?? 0}; inspect the matrix artifacts and rerun the missing platform.`);
+export const REQUIRED_RECEIPTS = ["native-linux", "native-macos", "native-windows", "wasm-linux"];
+
+export function compareManifests(manifests, expectedCorpus, receiptLabels) {
+  if (!Array.isArray(manifests) || manifests.length !== REQUIRED_RECEIPTS.length) {
+    throw new Error(`Expected Linux/macOS/Windows native and Linux WASM receipts, found ${manifests?.length ?? 0}; inspect the matrix artifacts and rerun the missing platform or WASM job.`);
+  }
+  if (!Array.isArray(receiptLabels) || receiptLabels.length !== REQUIRED_RECEIPTS.length
+      || new Set(receiptLabels).size !== REQUIRED_RECEIPTS.length
+      || REQUIRED_RECEIPTS.some((name) => !receiptLabels.includes(name))) {
+    throw new Error("Scene receipt provenance is incomplete; require native-linux, native-macos, native-windows and wasm-linux artifacts before comparing geometry.");
   }
   if (!expectedCorpus || !Number.isSafeInteger(expectedCorpus.caseCount) || expectedCorpus.caseCount <= 0 || !Array.isArray(expectedCorpus.caseIds) || expectedCorpus.caseIds.length !== expectedCorpus.caseCount) {
     throw new Error("Expected corpus identity is missing; load the checked-in parity corpus and rerun the comparison.");
@@ -64,7 +71,7 @@ export function compareManifests(manifests, expectedCorpus) {
         JSON.stringify(item) !== JSON.stringify(candidate.cases[itemIndex])
       ));
       const id = manifests[0].cases[caseIndex]?.id ?? "manifest metadata";
-      throw new Error(`Cross-platform engine hashes differ at ${id} (report ${index + 2}); compare fixed arithmetic, font tables and stable ordering, then regenerate all three receipts.`);
+      throw new Error(`Cross-platform engine hashes differ at ${id} (report ${index + 2}); compare fixed arithmetic, font tables and stable ordering, then regenerate all four native/WASM receipts.`);
     }
   }
   return expectedCorpus.caseCount;
@@ -91,8 +98,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     reportFiles = files(reportDirectory).sort();
   } catch (error) {
-    throw new Error(`Cannot read platform reports from ${reportDirectory}: ${error}; download all three matrix artifacts and retry.`);
+    throw new Error(`Cannot read platform reports from ${reportDirectory}: ${error}; download all three native and the WASM matrix artifacts and retry.`);
   }
+  const labels = reportFiles.map((filename) => filename.split(/[\\/]/).at(-1)?.replace(/\.json$/, ""));
   const reports = reportFiles.map((filename) => {
     try {
       return JSON.parse(readFileSync(filename, "utf8"));
@@ -100,6 +108,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       throw new Error(`Platform report ${filename} is unreadable or invalid JSON: ${error}; rerun the affected platform hash job.`);
     }
   });
-  const count = compareManifests(reports, expected);
-  console.log(`Engine foundation determinism PASS: ${count} corpus records and corpus SHA match across all three platforms; scene geometry is not covered in S1.`);
+  const count = compareManifests(reports, expected, labels);
+  console.log(`Engine scene determinism PASS: ${count} corpus scenes/rejections match across native Linux/macOS/Windows and the Linux WASM build, with identical corpus identity and repeat checks.`);
 }

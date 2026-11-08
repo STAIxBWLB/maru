@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "stage": "S2 placement/routing/determinism, not S3 renderer parity or performance acceptance",
+  "sdkTree": "c399848c591724542380bcee959f515cce537e90",
+  "executionScope": {
+    "environment": "remote Linux x64 container",
+    "rust": "1.98.0",
+    "cargoBuildJobs": 2,
+    "browserWorkers": 1,
+    "hostedCi": "pending"
+  },
+  "checks": {
+    "coreUnit": 82,
+    "differential": 2,
+    "clippy": "passed with -D warnings for geometry/typegen lib",
+    "defaultFeatureCompile": "passed",
+    "boundary": "passed",
+    "bindingDrift": "passed",
+    "browser": {
+      "startTime": "2026-11-08T21:11:00.902Z",
+      "duration": 8470.278,
+      "expected": 2,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "sceneAgreement": {
+    "corpusCases": 256,
+    "acceptedScenes": 37,
+    "structuredRefusals": 219,
+    "nativeWasmBytesEqual": true,
+    "reportSha256": "4c074077d8d79113a652e34c1295d3cf3fe85e64d90d41965c156686e45c487b",
+    "reportBytes": 57995,
+    "repeatEveryCase": true,
+    "hostedMacWindows": "pending"
+  },
+  "browserProof": {
+    "scope": "functional lazy WASM scene/pin/repeat proof, no performance claim",
+    "proof": [
+      {
+        "type": "architecture",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "workflow",
+        "version": 1,
+        "nodes": 3,
+        "routes": 2,
+        "orthogonal": true
+      },
+      {
+        "type": "sequence",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "dataflow",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "lifecycle",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "workflow",
+        "version": 2,
+        "nodes": 3,
+        "routes": 2,
+        "orthogonal": true
+      },
+      {
+        "type": "lifecycle",
+        "version": 2,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      }
+    ]
+  },
+  "payload": {
+    "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+    "buildMs": 44675.444533,
+    "platform": "linux",
+    "arch": "x64",
+    "sizes": [
+      {
+        "name": "engine-e0.js",
+        "bytes": 1307013,
+        "gzipBytes": 324219,
+        "path": "validation"
+      },
+      {
+        "name": "core-B2rNBH2e.js",
+        "bytes": 114,
+        "gzipBytes": 122,
+        "path": "lazy-transport"
+      },
+      {
+        "name": "engineGeometry-BJtjDuZ8.js",
+        "bytes": 4807862,
+        "gzipBytes": 1500551,
+        "path": "lazy-geometry-metrics"
+      }
+    ],
+    "gzipBytes": 324219,
+    "validationGzipBytes": 324219,
+    "lazyGeometryGzipBytes": 1500551,
+    "lazyTransportGzipBytes": 122,
+    "totalGzipBytes": 1824892
+  },
+  "layoutP95": {
+    "status": "deferred to S3",
+    "targetMs": 200
+  },
+  "lazyColdLoad": {
+    "status": "deferred to S3"
+  },
+  "rendererRuleParity": {
+    "status": "deferred to S3"
+  }
+}

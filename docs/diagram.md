@@ -956,3 +956,75 @@ ZWJ examples at both font weights. Its remote validation entry measured
 324,124 B gzip; lazy metrics measured 1,038,558 B. The 1,000-node validation
 p95 was 8.7 ms. This remains a remote reproduction; hosted CI, whole-scene geometry
 and lazy cold-load proof are separate gates.
+
+
+### E2 five-type scene layout (S2)
+
+The optional geometry feature now exposes `layout::layout_json`, accepting a
+serialized `LayoutRequest`. It runs the existing E1 document gate first, then
+uses the typed models for architecture grid/free placement, workflow and
+lifecycle lane/column placement, sequence participant headers and authored
+message times/ranges, and dataflow stage/row placement. The lazy TS facade is
+`loadGeometryEngine().layout(request)`. Production `layout.ts`, `edgeRouting.ts`
+and `semanticApply` remain on their existing paths; this is a test/SDK entry.
+
+Coordinates remain signed integers in 1/64-pixel units. Node pins take precedence
+over authored positions and automatic placement. Containers are measured around
+actual placed members, and a container pin holds that frame's own origin; it
+is not an implicit compound/group drag of its children. Membership constraints
+and incompatible pinned layouts need the S3 geometry diagnostic gate. Existing
+explicit IDs are preserved. Anonymous boundaries, stages, sequence ranges and
+cards use a hash of the typed record plus an occurrence among exact duplicates.
+Removing a different record does not shift that identity. Editing the anonymous
+record itself changes its identity and drops its prior pin with a notice. Exact
+duplicates have no durable source identity beyond their occurrence; an editing
+adapter must remap their pins when removing/reordering indistinguishable records.
+The source format is preserved verbatim rather than adding hidden IDs.
+
+Labels carry the pinned font identity, fixed-point font size, absolute glyph
+origins and ink boxes, including nonfatal .notdef replacements and ignored
+Unicode scalars. The S2 profile uses 13 px bold node labels, 11 px details and
+10 px tags; relationship/legend text is 12 px, frame titles 13 px and the document
+title 24 px. Multiline text, negative bearings, cards and legend overrides feed
+measured bounds. Page bounds include nodes, ranges, labels, routes, cards and
+legend extents. A passed S2 result does not claim the pinned renderer's full
+label-fit, viewBox or legend-clearance rules; those refusals remain S3 work.
+
+Routing uses deterministic port choices, obstacle visibility fast paths and an
+independently implemented sparse A* over compressed obstacle-edge coordinates.
+It never returns a diagonal or collision fallback. Node and label rectangles,
+plus opaque cards, are obstacles; search/axis/waypoint budgets refuse with a
+cause and next step. Explicit `via` points are retained; without them channel
+hints constrain the route. `labelAt` is a center anchor and takes precedence over
+relative offsets. Labels are allocated before final routing, so paths avoid the
+complete label set. A diagonal `straight` preference still lowers to an
+orthogonal obstacle-avoiding path in this stage. Variant, role and stroke width
+remain in route output. Renderer-specific aesthetics/refusal parity are not
+claimed by those basic safety checks.
+
+The previous foundation matrix now hashes the canonical `{ok, geometry,
+diagnostics}` result for every corpus case, including structured refusals.
+Each case is laid out twice and must be identical. The v1 receipt and build
+revision are excluded from this cross-runtime hash; successful receipts still
+bind the actual input and geometry hash. Three hosted native builds and a real
+Linux WASM build must produce byte-identical reports. The comparator requires
+all four artifact identities and checks the corpus SHA, count, IDs/order and
+hashes against the checked-in corpus. No case is silently skipped. This is a
+determinism gate, not the S3 differential renderer-rule verdict.
+
+S3 still adds the renderer-rule corpus cases and geometry refusal mappings,
+resolves the three E1-labelled geometry differences, connects the test-only
+canvas adapter, and records hosted 1,000-node layout/routing p95 plus lazy chunk
+cold load. No SVG/PNG renderer or production apply/canvas switch is included.
+
+The source-bound [S2 remote receipt](diagram-engine-e2-s2.json), SDK tree
+`c399848c`, records 82 core tests, two document differential tests, geometry
+clippy, default-feature compilation, boundary/type drift, and two Chromium
+probes passing. The native and real WASM scene reports are byte-identical for
+all 256 cases: 37 successful scenes and 219 structured refusals. The only
+E1-accepted case additionally refused at this stage is an authored dataflow row
+outside the fixed-point coordinate range. Those counts do not assert renderer
+rule parity. Hosted Linux/macOS/Windows plus WASM agreement remains pending.
+The validation graph measures 324,219 B gzip; separately lazy layout/metrics
+measures 1,500,551 B. No 1,000-node layout p95 or lazy cold-load acceptance is
+claimed by this functional proof; both remain S3 work.

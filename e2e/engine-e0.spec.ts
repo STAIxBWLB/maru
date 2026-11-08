@@ -5,6 +5,40 @@ import { readFileSync } from "node:fs";
 const enabled = process.env.MARU_ENGINE_E0 === "1";
 test.describe("independent engine WebAssembly spike", () => {
   test.skip(!enabled, "Build the isolated WASM spike with node scripts/diagram-engine-e0.mjs wasm and set MARU_ENGINE_E0=1.");
+  test("lays out all families repeatably and retains pins in actual lazy WASM", async ({ page }) => {
+    const specs = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"].map((kind) => JSON.parse(readFileSync(`src-tauri/crates/maru-diagram-engine/testdata/valid-${kind}.json`, "utf8")) as { diagram_type: string; schema_version: number; meta: { title: string } });
+    specs.push({ ...specs[1]!, schema_version: 2 }, { ...specs[4]!, schema_version: 2 });
+    await page.goto("/");
+    const proof = await page.evaluate(async (specs) => {
+      type Scene = { nodes: Array<{ id: string; bounds: { x: number; y: number }; positionSource: string }>; routes: Array<{ points: Array<{ x: number; y: number }> }>; labels: unknown[] };
+      type Report = { ok: boolean; geometry?: Scene; diagnostics: Array<{ message: string; fix: string }>; receipt: { inputSpecSha256: string } };
+      const modulePath = "/.engine-e0/browser/engine-e0.js";
+      const { loadGeometryEngine } = await import(/* @vite-ignore */ modulePath) as { loadGeometryEngine(): Promise<{ layout(input: unknown): Report }> };
+      const engine = await loadGeometryEngine();
+      const proof = [];
+      for (const spec of specs) {
+        const original = JSON.stringify(spec);
+        const first = engine.layout({ specJson: original });
+        if (!first.ok || !first.geometry) throw new Error(`Layout failed for ${spec.diagram_type}: ${JSON.stringify(first.diagnostics)}; inspect the SDK layout fixture.`);
+        const again = engine.layout({ specJson: original });
+        if (JSON.stringify(first.geometry) !== JSON.stringify(again.geometry)) throw new Error("Unchanged scene layout differed; inspect stable ordering and fixed arithmetic.");
+        const selected = first.geometry.nodes[0]!;
+        const edited = structuredClone(spec); edited.meta.title = "Unrelated title edit";
+        const retained = engine.layout({ specJson: JSON.stringify(edited), pinSet: { sourceSpecSha256: first.receipt.inputSpecSha256, pins: [{ targetId: selected.id, targetKind: "node", position: { x: selected.bounds.x, y: selected.bounds.y } }] } });
+        if (!retained.ok || !retained.geometry) throw new Error(`Pinned scene failed: ${JSON.stringify(retained.diagnostics)}; inspect pin resolution before changing the fixture.`);
+        const node = retained.geometry.nodes.find((node) => node.id === selected.id)!;
+        if (node.bounds.x !== selected.bounds.x || node.bounds.y !== selected.bounds.y || node.positionSource !== "plannedPin") throw new Error("A surviving member pin moved after an unrelated edit; repair pin precedence.");
+        const orthogonal = retained.geometry.routes.every((route) => route.points.every((point, index, points) => index === 0 || point.x === points[index - 1]!.x || point.y === points[index - 1]!.y));
+        proof.push({ type: spec.diagram_type, version: spec.schema_version, nodes: retained.geometry.nodes.length, routes: retained.geometry.routes.length, orthogonal });
+      }
+      const invalid = engine.layout({ specJson: "[]" });
+      if (invalid.ok || invalid.geometry) throw new Error("Invalid spec returned scene geometry; keep the E1 gate before placement.");
+      return proof;
+    }, specs);
+    expect(proof).toHaveLength(7);
+    expect(proof.every((item) => item.nodes > 0 && item.orthogonal)).toBe(true);
+    console.log(`ENGINE_E2_LAYOUT ${JSON.stringify({ scope: "functional lazy WASM scene/pin/repeat proof, no performance claim", proof })}`);
+  });
   test("loads cold and gates the 50/1000 component fixtures without Node IPC", async ({ page }) => {
     const fixtures = [50, 1000].map((count) => JSON.parse(readFileSync(`src-tauri/crates/maru-diagram-engine/testdata/bench-${count}.json`, "utf8")) as { components: unknown[] });
     const documents = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"].map((kind) =>

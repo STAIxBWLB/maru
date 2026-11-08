@@ -178,6 +178,23 @@ pub struct GeometryRoute {
     pub from: String,
     pub to: String,
     pub points: Vec<GeometryPoint>,
+    pub variant: Option<String>,
+    pub role: Option<String>,
+    pub width: Option<Coord>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryGlyph {
+    pub glyph_id: u16,
+    pub input: String,
+    pub position: GeometryPoint,
+    pub ink: GeometryBox,
+    pub advance: Coord,
+    pub ignored: bool,
+    pub replaced: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -192,6 +209,8 @@ pub struct GeometryLabel {
     pub text: String,
     pub bounds: GeometryBox,
     pub font: FontIdentity,
+    pub font_size: Coord,
+    pub glyphs: Vec<GeometryGlyph>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -461,6 +480,7 @@ pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
         GeometryNode::decl(cfg),
         GeometryContainer::decl(cfg),
         GeometryRoute::decl(cfg),
+        GeometryGlyph::decl(cfg),
         GeometryLabel::decl(cfg),
         GeometryLegendEntry::decl(cfg),
         GeometryLegend::decl(cfg),
