@@ -77,7 +77,7 @@ describe("native saved Diagram renders", () => {
     assert.equal(first.parent, "blocked", "Render can reach the app document; restore the sandbox without allow-same-origin");
     const frame = await currentFrame(true);
     assert.ok(frame, "Prepared viewer is missing; inspect prepare-render diagnostics and rerun the spec");
-    assert.ok(!frame.sandbox?.split(" ").includes("allow-same-origin"), "Viewer sandbox permits parent access; remove allow-same-origin");
+    assert.equal(frame.sandbox, "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox", "Viewer sandbox changed; restore the reviewed flags without allow-same-origin");
     assert.equal(frame.referrer, "no-referrer", "Viewer leaks referrers; restore referrerPolicy=no-referrer");
     const denied = await browser.execute(async (file) => {
       const internals = (window as unknown as { __TAURI_INTERNALS__?: { convertFileSrc: (file: string, protocol?: string) => string } }).__TAURI_INTERNALS__;
@@ -94,6 +94,6 @@ describe("native saved Diagram renders", () => {
     assert.ok(replacement?.replaced && replacement.previousDetached, "Theme did not replace the old iframe; inspect the key and recheck after its new probe");
     assert.ok(replacement.src.includes(`theme=${nextTheme}`), "Current frame has a stale theme; inspect the theme query and rerun the spec");
     assert.equal(replacement.referrer, "no-referrer");
-    assert.ok(!replacement.sandbox?.split(" ").includes("allow-same-origin"));
+    assert.equal(replacement.sandbox, frame.sandbox, "Theme replacement changed sandbox flags; restore the reviewed viewer contract");
   }).timeout(120_000);
 });

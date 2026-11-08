@@ -2252,7 +2252,8 @@
         "src-tauri/src/archify.rs::render_candidate_with_engine gates type/input bytes, resolves the pinned bundle engine and Node, stages a private candidate, validates its exact SHA-256, renders HTML and checks it before returning bytes plus separate receipt gates.",
         "src-tauri/src/archify.rs::bounded_engine_output reuses src-tauri/src/command_output.rs::run_command_with_timeout_and_limits for drained bounded pipes and owned-process-tree deadline termination; render staging shape and size are checked by the abort callback.",
         "src-tauri/src/archify.rs::stage_candidate uses shared path admission and atomic candidate publication; cleanup_job_dir rejects replaced symlink/unsafe parents and removes only the owned private staging directory.",
-        "src-tauri/src/diagram/renders.rs::store_render validates document context and the engine receipt hash, admits immutable artifact/receipt plus missing ancestor paths, and publishes the pair with no-clobber writes inside the same blocking command when context is supplied."
+        "src-tauri/src/diagram/renders.rs::store_render validates document context and the engine receipt hash, admits immutable artifact/receipt plus missing ancestor paths, and publishes the pair with no-clobber writes inside the same blocking command when context is supplied.",
+        "Optional history publication uses filesystem-safe document_directory_key values while preserving original logical IDs in receipts. Store errors become store_warning on the valid artifact; they never replace a successful engine result with a history error."
       ],
       "workerBoundary": "src-tauri/src/archify.rs::ipc::archify_render_candidate owns arguments and awaits spawn_blocking around bundled_engine_path and render_candidate_with_engine. The physical render_command_runs_in_worker_and_propagates_worker_failure case passed in the actual archify-filtered Cargo run recorded below.",
       "syncCallers": [
@@ -2260,25 +2261,25 @@
       ],
       "tests": [
         {
-          "command": "node scripts/run-vitest.mjs src/lib/diagram/renders.test.ts src/components/diagram/modals/RendersDialog.test.tsx src/components/diagram/modals/ImportExportDialog.test.tsx src/lib/diagram/verifiedExport.test.ts src/lib/diagram/engineSvg.test.ts scripts/check-main-iframes.test.ts",
-          "passed": 45,
+          "command": "node scripts/run-vitest.mjs src/lib/diagram/renders.test.ts src/components/diagram/modals/RendersDialog.test.tsx src/components/diagram/modals/ImportExportDialog.test.tsx src/lib/diagram/verifiedExport.test.ts src/lib/diagram/reportInsert.test.ts src/lib/diagram/engineSvg.test.ts scripts/check-main-iframes.test.ts",
+          "passed": 75,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0,
           "executionHost": "macOS",
-          "scope": "Focused Node/jsdom contract and conversion tests; not native viewer or release proof."
+          "scope": "Focused Node/jsdom contract and conversion tests; no native execution."
         },
         {
           "command": "cargo test --lib archify -- --test-threads=2",
-          "passed": 19,
+          "passed": 20,
           "failed": 0,
           "ignored": 0,
-          "filteredOut": 2156,
+          "filteredOut": 2159,
           "exitCode": 0,
           "workingDirectory": "src-tauri",
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "d9d473e2333c3fa6ab44e3201bbee50361c439b0"
+          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
         }
       ],
       "processingCaller": {
@@ -2292,7 +2293,7 @@
         "payload": "One selected stored semantic spec JSON and its type, never canvas/viewer state; engine HTML is converted to sanitized static SVG/PNG rather than exported as HTML in T1.",
         "classification": "n/a: one private rendering job, not a file-processing batch",
         "classifier": "n/a: one semantic candidate rendered through the pin",
-        "successRetention": "With document context, engine HTML plus its extended receipt is retained in a fresh UUID workspace render folder. SVG/PNG remain frontend-converted export copies, with final-byte hashes in their operation receipt. No sibling receipt is written next to an external copy.",
+        "successRetention": "With document context, engine HTML plus its extended receipt is retained in a fresh UUID workspace render folder. SVG/PNG remain frontend-converted export copies, with final-byte hashes in their operation receipt. No sibling receipt is written next to an external copy. Unicode/long-title compatibility is covered. A history failure leaves export/report success intact and is surfaced by the initiating UI as a store warning.",
         "failureReasons": "Typed backend IpcError and frontend explicit conversion/receipt/stale diagnostics. Missing engine/runtime/capability is an error, never a success or a canvas-renderer fallback.",
         "singleTerminalNoticeOwner": true,
         "terminalNoticeOwner": "The initiating Export dialog status or report-insert outcome owns its terminal notice; cancelled/stale requests never reach the save bridge."
@@ -2302,8 +2303,8 @@
           "<workspace>/.maru/diagram-gen/<jobId>/",
           "<workspace>/.maru/diagram-gen/<jobId>/candidate.json",
           "<workspace>/.maru/diagram-gen/<jobId>/rendered.html",
-          "<workspace>/attachments/diagrams/<docId>/renders/<renderId>/index.html",
-          "<workspace>/attachments/diagrams/<docId>/renders/<renderId>/receipt.json",
+          "<workspace>/attachments/diagrams/<storeKey>/renders/<renderId>/index.html",
+          "<workspace>/attachments/diagrams/<storeKey>/renders/<renderId>/receipt.json",
           "Missing ancestor directories only, admitted before their creation; existing parents are read-validated without reserving the whole attachments tree."
         ],
         "aliasPaths": [
@@ -2322,10 +2323,11 @@
           "render_kills_and_reaps_a_timed_out_engine",
           "render_timeout_stops_late_descendant_writes",
           "render_command_runs_in_worker_and_propagates_worker_failure",
-          "render_with_document_context_publishes_an_immutable_receipt_pair"
+          "render_with_document_context_publishes_an_immutable_receipt_pair",
+          "optional_store_failure_keeps_a_valid_engine_artifact_and_returns_warning"
         ],
         "workerProof": "The whole render and optional immutable pair publication run inside the awaited blocking worker. Real archify-filtered tests include worker failure/first-poll proof and context-to-persisted-HTML/receipt readback.",
-        "platformScope": "Actual dgx02 Debian-trixie filtered Cargo run:19 passed,0 failed,0 ignored, including pinned Node rendering and optional store publication. Frontend conversion/hash/cancellation tests run separately. Final native sandbox/save and Windows/release behavior are not claimed by this filtered Linux run.",
+        "platformScope": "Actual dgx02 Debian-trixie filtered run:20 passed/0 failed/0 ignored, including real pinned render with successful history and blocked-history nonfatal artifact/hash proof. Frontend focused tests cover copy/report warnings and legacy type matching. Final native fixture synchronization and release/Windows behavior require separate evidence.",
         "deferredChecks": "Final-head hosted verify, Playwright and native suite remain required; no checker edits or invented counts."
       }
     },
@@ -2346,27 +2348,15 @@
       "tests": [
         {
           "command": "cargo test --lib renders -- --test-threads=2",
-          "passed": 14,
+          "passed": 17,
           "failed": 0,
           "ignored": 0,
-          "filteredOut": 2161,
+          "filteredOut": 2162,
           "exitCode": 0,
           "workingDirectory": "src-tauri",
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "d9d473e2333c3fa6ab44e3201bbee50361c439b0"
-        },
-        {
-          "command": "cargo test --lib diagram::renders -- --test-threads=2",
-          "passed": 10,
-          "failed": 0,
-          "ignored": 0,
-          "filteredOut": 2165,
-          "exitCode": 0,
-          "workingDirectory": "src-tauri",
-          "buildJobs": 2,
-          "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "d9d473e2333c3fa6ab44e3201bbee50361c439b0"
+          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
         }
       ],
       "processingCaller": {
@@ -2386,10 +2376,12 @@
         "behaviorCases": [
           "copied_receipt_is_listed_and_missing_or_bad_receipts_are_unverified",
           "orphaned_renders_remain_listed_and_delete_removes_only_the_selected_folder",
-          "list_command_yields_and_propagates_worker_failure"
+          "list_command_yields_and_propagates_worker_failure",
+          "unicode_document_ids_keep_logical_identity_and_long_titles_are_bounded_utf8",
+          "reserved_hash_prefix_ids_are_hashed_to_avoid_legacy_key_collisions"
         ],
         "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
-        "platformScope": "Executed on dgx02 container (Debian trixie): the exact renders selector passed14/0/0, including all10 diagram::renders cases; the dedicated diagram::renders selector also passed10/0/0. Real WKWebView IPC/parent/theme/asset behavior requires the native spec; no Windows or release-bundle proof is claimed."
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:17 passed/0 failed/0 ignored, including all13 store cases and4 related cases. No native/release behavior is inferred."
       },
       "mutationKey": {
         "readOnly": true,
@@ -2415,27 +2407,15 @@
       "tests": [
         {
           "command": "cargo test --lib renders -- --test-threads=2",
-          "passed": 14,
+          "passed": 17,
           "failed": 0,
           "ignored": 0,
-          "filteredOut": 2161,
+          "filteredOut": 2162,
           "exitCode": 0,
           "workingDirectory": "src-tauri",
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "d9d473e2333c3fa6ab44e3201bbee50361c439b0"
-        },
-        {
-          "command": "cargo test --lib diagram::renders -- --test-threads=2",
-          "passed": 10,
-          "failed": 0,
-          "ignored": 0,
-          "filteredOut": 2165,
-          "exitCode": 0,
-          "workingDirectory": "src-tauri",
-          "buildJobs": 2,
-          "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "d9d473e2333c3fa6ab44e3201bbee50361c439b0"
+          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
         }
       ],
       "processingCaller": {
@@ -2459,7 +2439,7 @@
           "prepare_command_yields_and_propagates_worker_failure"
         ],
         "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
-        "platformScope": "Executed on dgx02 container (Debian trixie): the exact renders selector passed14/0/0, including all10 diagram::renders cases; the dedicated diagram::renders selector also passed10/0/0. Real WKWebView IPC/parent/theme/asset behavior requires the native spec; no Windows or release-bundle proof is claimed."
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:17 passed/0 failed/0 ignored, including all13 store cases and4 related cases. No native/release behavior is inferred."
       },
       "mutationKey": {
         "readOnly": true,
@@ -2485,27 +2465,15 @@
       "tests": [
         {
           "command": "cargo test --lib renders -- --test-threads=2",
-          "passed": 14,
+          "passed": 17,
           "failed": 0,
           "ignored": 0,
-          "filteredOut": 2161,
+          "filteredOut": 2162,
           "exitCode": 0,
           "workingDirectory": "src-tauri",
           "buildJobs": 2,
           "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "d9d473e2333c3fa6ab44e3201bbee50361c439b0"
-        },
-        {
-          "command": "cargo test --lib diagram::renders -- --test-threads=2",
-          "passed": 10,
-          "failed": 0,
-          "ignored": 0,
-          "filteredOut": 2165,
-          "exitCode": 0,
-          "workingDirectory": "src-tauri",
-          "buildJobs": 2,
-          "executionHost": "dgx02 container (Debian trixie)",
-          "sourceCommit": "d9d473e2333c3fa6ab44e3201bbee50361c439b0"
+          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
         }
       ],
       "processingCaller": {
@@ -2528,7 +2496,7 @@
           "delete_command_yields_and_propagates_worker_failure"
         ],
         "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
-        "platformScope": "Executed on dgx02 container (Debian trixie): the exact renders selector passed14/0/0, including all10 diagram::renders cases; the dedicated diagram::renders selector also passed10/0/0. Real WKWebView IPC/parent/theme/asset behavior requires the native spec; no Windows or release-bundle proof is claimed."
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:17 passed/0 failed/0 ignored, including all13 store cases and4 related cases. No native/release behavior is inferred."
       },
       "mutationKey": {
         "lexicalPaths": [

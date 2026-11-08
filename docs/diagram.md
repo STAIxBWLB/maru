@@ -389,11 +389,15 @@ Chromium/jsdom checks alone do not prove WKWebView or a shipped release bundle.
 ## Workspace Renders
 
 File > Renders lists disk artifacts from
-`attachments/diagrams/<docId>/renders/<renderId>/`. Each new backend render with
-document context creates a fresh UUID folder containing `index.html` and
-`receipt.json`; existing folders/files are never overwritten. The engine receipt
+`attachments/diagrams/<storeKey>/renders/<renderId>/`. Compatible lowercase ASCII
+IDs retain their directory key; Unicode, uppercase, unsafe and reserved-prefix
+IDs use a hash key to prevent traversal and case-insensitive collisions. The
+receipt retains the original logical `docId`; list entries return the safe key
+for prepare/delete and `originalDocId` for source matching. Each successful
+history write creates a fresh UUID folder with `index.html` and `receipt.json`;
+existing folders/files are never overwritten. The engine receipt
 adds `docId`, historical `documentName`, `documentRevision`, `renderedAt` and
-`diagramType`, plus the optional source `datasetId` for unambiguous re-rendering
+`diagramType` (display names are sanitized and capped at 256 UTF-8 bytes), plus the optional source `datasetId` for unambiguous re-rendering
 in multi-dataset documents. Older receipts without it require a unique matching
 source, or a new export with an explicit dataset choice. Its output hash belongs to the stored engine HTML, while a static
 export's final SVG/PNG hash belongs to the converted copy. This is not HTML export
@@ -419,9 +423,15 @@ checks this viewer's source, exact sandbox and referrer policy.
 
 Open in default app (the configured HTML handler, normally a browser) and Reveal
 recheck the file first. Re-render reads the current
-saved semantic spec rather than old render content. Confirmed Delete admits
+saved semantic spec rather than old render content. Legacy receipts without a
+dataset ID match the prior diagram type first and require a unique source of
+that type; a lone dataset of another type is refused. Confirmed Delete admits
 and removes only the selected render folder through the workspace Delete guard;
-source documents and other attachments remain. Browser builds show the desktop
+source documents and other attachments remain. History is optional: if storage
+fails after a valid engine render, export copies and report insertion still
+succeed and show a cause/recovery warning that the render was not kept. An
+action specifically requesting a stored re-render surfaces that warning as a
+failed history action. Browser builds show the desktop
 requirement and no invented render entries. The native `diagram-renders` spec
 probes parent/IPC isolation, theme remount and a denied neighboring file; a
 custom-protocol test build is not a shipped-release or manual visual check.
