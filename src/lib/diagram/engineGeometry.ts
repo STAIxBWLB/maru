@@ -1,10 +1,14 @@
 /** Lazy test-only E2 layout/metrics. This module alone owns geometry-WASM asset references. */
 import type { Diagnostic, TextMetrics, GeometryReport, LayoutRequest } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type { DiagramDoc } from "./types";
+import type { EngineCanvasPreview } from "./engineGeometryCanvasTestBridge";
 export interface GeometryFoundation {
   measureText(text: string, weight: 400 | 700, size: number): TextMetrics;
 }
 export interface GeometryEngine extends GeometryFoundation {
   layout(input: LayoutRequest): GeometryReport;
+  /** Available only in the separately built isolated test library. */
+  layoutCanvasForTest(doc: DiagramDoc, datasetId: string): Promise<EngineCanvasPreview>;
 }
 export async function loadGeometryEngine(): Promise<GeometryEngine> {
   const moduleUrl = new URL("./__generated__/engine-geometry/maru_diagram_engine.js", import.meta.url).href;
@@ -16,7 +20,13 @@ export async function loadGeometryEngine(): Promise<GeometryEngine> {
   await bindings.default({ module_or_path: wasmUrl });
   const measure = bindings.measure_text_json as (text: string, weight: number, size: number) => string;
   const layout = bindings.layout_json as (input: string) => string;
-  return { layout(input) {
+  const engine: GeometryEngine = { async layoutCanvasForTest(doc, datasetId) {
+    if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") {
+      throw new Error("Engine canvas preview is disabled in this build; build the isolated engine-e0 test library with VITE_ENGINE_GEOMETRY_TEST=1 and retry.");
+    }
+    const { previewEngineCanvasForTest } = await import("./engineGeometryCanvasTestBridge");
+    return previewEngineCanvasForTest(engine, doc, datasetId);
+  }, layout(input) {
     let encoded: string;
     try { encoded = JSON.stringify(input); }
     catch { throw new Error("Layout input cannot be serialized; provide an acyclic LayoutRequest with finite fixed-point pins and retry."); }
@@ -42,6 +52,7 @@ export async function loadGeometryEngine(): Promise<GeometryEngine> {
     if (!report.ok || !report.metrics) throw new Error(`${report.diagnostic?.message ?? "Font measurement failed"}; ${report.diagnostic?.fix ?? "rebuild the metric tables and retry"}.`);
     return report.metrics;
   } };
+  return engine;
 }
 
 /** S1 compatibility name; both calls share the same lazy geometry artifact. */

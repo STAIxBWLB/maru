@@ -992,7 +992,8 @@ work.
 Labels carry the pinned font identity, fixed-point font size, absolute glyph
 origins and ink boxes, including nonfatal .notdef replacements and ignored
 Unicode scalars. The S2 profile uses 13 px bold node labels, 11 px details and
-10 px tags; relationship/legend text is 12 px, frame titles 13 px and the document
+10 px tags; relationship/legend text is 12 px, frame titles 13 px (Sequence
+segment headings use 9 px on a separate rail above the time range), and the document
 title 24 px. Multiline text, negative bearings, cards and legend overrides feed
 measured bounds. Page bounds include nodes, ranges, labels, routes, cards and
 legend extents. A passed S2 result does not claim the pinned renderer's full
@@ -1179,3 +1180,83 @@ Chromium probes passed without a retry. Normal product exports still omit
 corpus tooling. Validation is 324,219 B gzip and the separate lazy geometry
 chunk is 1,455,867 B. These are source-bound remote reproductions; the new-head
 hosted matrix/native gates and S3 cold-load/layout budgets remain unverified.
+
+
+#### E2 geometry diagnostics and the test canvas
+
+S3 keeps document validity and geometry validity separate. The corpus retains
+its original and evidence-stripped oracle verdicts and the E1 document
+comparison. A second `geometryComparison` records the full renderer verdict,
+its equivalent geometry rules and whether placement must remain available.
+The three E1 geometry deferrals are checked here rather than waived. The
+synthetic unbounded-row probe now uses row 100 instead of a coordinate that
+cannot fit the fixed-point representation; E1 still accepts it, while the E2
+row-slot rule must reject it with a retained scene. Coordinate-overflow tests
+remain separate input/placement failures.
+
+Geometry rules operate after placement. A geometry or routing error sets
+`ok=false` and supplies the source path, cause and repair while retaining the
+scene, including every successfully routed edge. Input decoding, E1 validity
+and coordinate overflow can still prevent placement. Font replacement and pin
+notices remain nonfatal. No SVG or visual-review success is implied.
+
+Route-quality findings distinguish the offending geometry's provenance.
+Explicit `via` points, channel coordinates, label-position controls, endpoint
+pins and authored side assertions can produce blocking refusals. A wholly
+automatic route, label or port-placement defect is a nonfatal
+`<family>/geometry-route-quality-notice`, with the underlying rule and repair
+retained. Authorship is checked at the offending piece: an authored side fixes
+endpoint direction but does not turn every middle corridor or an engine-chosen
+coordinate along that side into user-authored geometry. A label pin constrains
+the label, not the whole route. A mixed pair refuses at and names the authored
+route. Node, text, frame, source-budget and input errors remain blocking.
+A routing failure with no path or an exhausted search budget still follows S2's
+per-edge error contract; a successfully generated low-quality path is the
+notice case. Unknown diagnostic codes do not acquire notice status. The engine keeps the
+scene in both quality outcomes. Corpus notices are recorded per case/rule in
+the same native/WASM determinism reports; no oracle-green document is waived
+into an expected engine refusal.
+
+The canvas adapter is an isolated test consumer, not the E4 product switch.
+Only an explicit `meta.pinned === true` or `locked === true` flag becomes a pin;
+moving an automatically projected node alone does not. `meta.memberId` selects
+the source member through the dataset identity map. Explicit-ID lanes, phases
+and groups are eligible; derived boundaries, stages, segments, activations and
+cards are excluded. Pixel coordinates are checked and quantized to 1/64 px,
+and the exact spec JSON is hashed for staleness reporting. The adapter neither
+edits the diagram nor writes undo history. A separate test-library build sets
+`VITE_ENGINE_GEOMETRY_TEST=1`; ordinary product builds remove its lazy import.
+The browser probe paints an isolated SVG canvas from actual engine geometry
+and checks pin retention across an unrelated source edit.
+
+Payload and timing scopes remain explicit. The normal emitted library graph
+is measured with the canvas test feature off and must contain no canvas bridge
+chunk. Its validator entry and static imports count toward 400,000 B gzip;
+geometry/metric tables stay in a separate lazy chunk. The test-enabled library
+is emitted separately. Chromium cold-load timing starts a fresh Chromium process, disables HTTP caching, serves the exact
+emitted artifact bytes without Vite rewriting, and includes the production lazy
+module fetch/parse, bindings import and WASM
+compile/instantiate, excluding the first layout's initialization. Warm layout
+timing includes request serialization, validation, placement, routing and scene
+JSON parsing. The 1,000-node case has 999 real relationships; missing or failed
+routes invalidate the measurement. A p95 above 200 ms is reported as a target
+miss with a proposed budget, never converted to a pass by retrying.
+
+
+Renderer compatibility includes source-format budgets, not just the auto-grown
+scene bounds: the fixed dataflow row slots and stage columns, lifecycle's main
+lane, authored page limits, and declared/default label budgets remain explicit
+rules. All text widths used by the new engine come from its pinned glyph
+metrics. The oracle's automatic growth is recorded as a positive control, so
+right/bottom growth is not confused with an authored-origin or reserved-region
+failure. Node/label/frame diagnostics retain source collection ordinals even
+when display route IDs were generated or reserved around authored names.
+
+
+Routing caches only immutable placement obstacles and reuses a first-pass path
+when no relationship label was added afterward. Dynamic labels invalidate that
+path reuse. Cache-on/off regressions compare complete reports for labels,
+failures, pins and more stroke widths than the cache admits. At most eight
+clearance variants and 65,536 first-pass points are retained; other requests
+use the original computation so width diversity cannot create an unbounded
+obstacle-cache amplification. No route or assertion is omitted for speed.

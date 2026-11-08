@@ -117,7 +117,7 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
         scene.add_container(
             &format!("segment:{index}"),
             "segment",
-            &segment.label,
+            "",
             range_box(
                 left - 24.0,
                 right - left + 48.0,
@@ -125,6 +125,20 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
                 segment.to,
                 &format!("/segments/{index}"),
             )?,
+        )?;
+        // Segment headings occupy a separate rail above their time range;
+        // a long heading must never cover the messages inside the frame.
+        let (_, title_height) = scene.text_size(&segment.label, 700, 9 * 64)?;
+        scene.label(
+            &format!("container:segment:{index}:label"),
+            &format!("segment:{index}"),
+            &segment.label,
+            point(
+                left - 12.0,
+                segment.from - f64::from(title_height) / 64.0 - 4.0,
+            )?,
+            700,
+            9 * 64,
         )?;
     }
     for (index, activation) in spec.activations.iter().enumerate() {

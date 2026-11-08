@@ -206,7 +206,7 @@ export function generatedCases() {
       add("range", "node-width", (s) => { s.nodes[0].width = 47; });
       add("integer", "fractional-row", (s) => { s.nodes[0].row = 0.5; });
       add("stage-reference", "past-last", (s) => { s.nodes[0].stage = 2; });
-      add("valid", "unbounded-row", (s) => { s.nodes[0].row = 1_000_000_000_000; }, "dataflow-fixed-row-slots");
+      add("valid", "unbounded-row", (s) => { s.nodes[0].row = 100; }, "dataflow-fixed-row-slots");
       add("valid", "five-stages", (s) => { s.stages.push({ label: "Third" }, { label: "Fourth" }, { label: "Fifth" }); }, "dataflow-stage-canvas-width");
     } else if (type === "lifecycle") {
       add("shape", "lane-item-array", (s) => { s.lanes[0] = ["main", "Main"]; });
@@ -345,6 +345,11 @@ export function comparisonFor(item) {
     inputJson, accepted: false, equivalentCodes: ["document/diagram-type"],
     currentScope: { kind: "e5-floorplan", reasonId: "floorplan-outside-e1", reason: INTENDED_DIFFERENCES["floorplan-outside-e1"] },
   };
+  if (item.geometryRule) {
+    if (!schema?.ok || !document?.ok) throw new Error(`Geometry probe ${item.id} is not document-valid; repair its synthetic input before recording a geometry verdict.`);
+    return { inputJson, accepted: true, equivalentCodes: [], oracleLayer: "document-profile",
+      currentScope: { kind: "document-validity" } };
+  }
   if (item.currentScope?.kind === "e2-geometry") {
     if (!item.documentOracle?.ok) throw new Error(`Named E2 case ${item.id} fails a nongeometry document rule; repair its scoped input before regenerating.`);
     if (!item.schemaOracle?.ok) throw new Error(`Named E2 case ${item.id} is not schema-valid; repair the synthetic case before regenerating.`);

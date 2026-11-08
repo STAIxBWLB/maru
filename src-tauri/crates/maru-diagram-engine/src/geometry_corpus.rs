@@ -146,7 +146,13 @@ pub fn scene_corpus_hashes(input: &str) -> Result<String, Diagnostic> {
         accepted += usize::from(first.ok);
         let codes: std::collections::BTreeSet<_> =
             first.diagnostics.iter().map(|d| d.code.as_str()).collect();
-        hashes.push(json!({ "id": id, "ok": first.ok, "diagnosticCodes":codes,"hash": crate::spec_hash(&first_bytes) }));
+        let notices: Vec<_> = first
+            .diagnostics
+            .iter()
+            .filter(|d| crate::layout::is_route_quality_notice(d))
+            .map(|d| json!({"code":d.code,"rule":d.rule,"path":d.path,"message":d.message}))
+            .collect();
+        hashes.push(json!({ "id": id, "ok": first.ok, "diagnosticCodes":codes,"routeQualityNotices":notices,"hash": crate::spec_hash(&first_bytes) }));
     }
     let report = json!({
         "apiVersion": crate::API_VERSION,

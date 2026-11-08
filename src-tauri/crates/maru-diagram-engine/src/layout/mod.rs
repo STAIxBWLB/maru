@@ -1,5 +1,11 @@
 //! Test-only deterministic layout; production apply/canvas paths do not call it.
 mod architecture;
+mod constraints;
+mod constraints_distance;
+mod constraints_frames;
+mod constraints_routes;
+pub(crate) use constraints_routes::is_route_quality_notice;
+mod constraints_sequence;
 mod dataflow;
 pub mod fixed;
 mod lifecycle;
@@ -94,6 +100,11 @@ pub(crate) struct SceneBuilder {
     request: LayoutRequest,
     kind: String,
     connections: Vec<RouteRequest>,
+    routing_nodes: BTreeMap<String, GeometryBox>,
+    routing_bounds: Option<Result<GeometryBox, Diagnostic>>,
+    routing_obstacles: BTreeMap<Coord, Result<Vec<GeometryBox>, Diagnostic>>,
+    routing_label_base: usize,
+    cache_enabled: bool,
     cards: Vec<(String, common::Card)>,
     kinds: BTreeMap<String, String>,
     pins: BTreeMap<String, GeometryPin>,
@@ -141,6 +152,11 @@ impl SceneBuilder {
             request,
             kind: kind.into(),
             connections: vec![],
+            routing_nodes: BTreeMap::new(),
+            routing_bounds: None,
+            routing_obstacles: BTreeMap::new(),
+            routing_label_base: 0,
+            cache_enabled: true,
             cards: vec![],
             kinds: BTreeMap::new(),
             pins,
@@ -150,11 +166,13 @@ impl SceneBuilder {
         self.pins.get(id).map(|p| p.position)
     }
     pub(crate) fn node_bounds(&self, id: &str) -> Option<GeometryBox> {
-        self.document
-            .nodes
-            .iter()
-            .find(|n| n.id == id)
-            .map(|n| n.bounds)
+        self.routing_nodes.get(id).copied().or_else(|| {
+            self.document
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .map(|n| n.bounds)
+        })
     }
     fn text_size(
         &self,
@@ -490,6 +508,59 @@ impl SceneBuilder {
         };
         Ok((p, p.checked_translate(dx, dy).map_err(arithmetic)?))
     }
+    /// Placement is complete before routing. Cache only immutable geometry;
+    /// relationship labels remain a separate append-only obstacle suffix.
+    fn prepare_routing(&mut self) {
+        if !self.cache_enabled {
+            return;
+        }
+        self.routing_nodes = self
+            .document
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.bounds))
+            .collect();
+        self.routing_label_base = self.document.labels.len();
+        if let Some(first) = self.document.nodes.first() {
+            self.routing_bounds = Some(
+                self.document
+                    .nodes
+                    .iter()
+                    .map(|node| node.bounds)
+                    .chain(self.document.containers.iter().map(|frame| frame.bounds))
+                    .try_fold(first.bounds, |extent, bounds| {
+                        extent.union(bounds).map_err(arithmetic)
+                    }),
+            );
+        }
+        for route in &self.connections {
+            let Ok(clearance) =
+                add(route.width.unwrap_or(2 * 64) / 2, 2 * 64).map(|value| value.max(4 * 64))
+            else {
+                continue;
+            };
+            if self.routing_obstacles.contains_key(&clearance) || self.routing_obstacles.len() >= 8
+            {
+                continue;
+            }
+            let obstacles = self
+                .document
+                .nodes
+                .iter()
+                .map(|node| node.bounds)
+                .chain(
+                    self.document
+                        .containers
+                        .iter()
+                        .filter(|frame| frame.kind == "card")
+                        .map(|frame| frame.bounds),
+                )
+                .chain(self.document.labels.iter().map(|label| label.bounds))
+                .map(|bounds| inflate(bounds, clearance))
+                .collect();
+            self.routing_obstacles.insert(clearance, obstacles);
+        }
+    }
     fn route_points(
         &self,
         r: &RouteRequest,
@@ -525,13 +596,18 @@ impl SceneBuilder {
             ("top", "bottom")
         };
         let clearance = add(r.width.unwrap_or(2 * 64) / 2, 2 * 64)?.max(4 * 64);
-        let scene_bounds = self
-            .document
-            .nodes
-            .iter()
-            .map(|n| n.bounds)
-            .chain(self.document.containers.iter().map(|c| c.bounds))
-            .try_fold(from, |extent, b| extent.union(b).map_err(arithmetic))?;
+        let scene_bounds = match &self.routing_bounds {
+            Some(bounds) => bounds.clone()?,
+            None => self
+                .document
+                .nodes
+                .iter()
+                .map(|node| node.bounds)
+                .chain(self.document.containers.iter().map(|frame| frame.bounds))
+                .try_fold(from, |extent, bounds| {
+                    extent.union(bounds).map_err(arithmetic)
+                })?,
+        };
         let preset = presets::resolve(&self.kind, r, from, to, scene_bounds, clearance)?;
         let auto_sides = if r.from == r.to {
             ("right", "bottom")
@@ -610,25 +686,35 @@ impl SceneBuilder {
         if waypoints.is_empty() {
             waypoints = channels;
         }
-        let mut obstacles: Vec<_> = self
-            .document
-            .nodes
-            .iter()
-            .map(|n| inflate(n.bounds, clearance))
-            .collect::<Result<_, _>>()?;
-        obstacles.extend(
-            self.document
-                .containers
+        let cached = self.routing_obstacles.get(&clearance);
+        let mut obstacles = match cached {
+            Some(value) => value.clone()?,
+            None => self
+                .document
+                .nodes
                 .iter()
-                .filter(|c| c.kind == "card")
-                .map(|c| inflate(c.bounds, clearance))
+                .map(|node| node.bounds)
+                .chain(
+                    self.document
+                        .containers
+                        .iter()
+                        .filter(|frame| frame.kind == "card")
+                        .map(|frame| frame.bounds),
+                )
+                .map(|bounds| inflate(bounds, clearance))
                 .collect::<Result<Vec<_>, _>>()?,
-        );
+        };
+        let first_label = if cached.is_some() {
+            self.routing_label_base
+        } else {
+            0
+        };
         obstacles.extend(
             self.document
                 .labels
                 .iter()
-                .map(|l| inflate(l.bounds, clearance))
+                .skip(first_label)
+                .map(|label| inflate(label.bounds, clearance))
                 .collect::<Result<Vec<_>, _>>()?,
         );
         #[cfg(test)]
@@ -645,7 +731,7 @@ impl SceneBuilder {
         points.push(z);
         Ok((points, obstacles))
     }
-    fn route_label(&mut self, r: &RouteRequest) -> Result<(), Diagnostic> {
+    fn route_label(&mut self, r: &RouteRequest) -> Result<Vec<GeometryPoint>, Diagnostic> {
         let (points, obstacles) = self.route_points(r)?;
         if let Some(text) = r.label.as_deref().filter(|s| !s.is_empty()) {
             let (w, h) = self.text_size(text, 400, 12 * 64)?;
@@ -730,7 +816,7 @@ impl SceneBuilder {
                 12 * 64,
             )?;
         }
-        Ok(())
+        Ok(points)
     }
     fn finish(
         mut self,
@@ -755,15 +841,26 @@ impl SceneBuilder {
         self.diagnostics
             .extend(resolve_pins(&self.request, members).diagnostics);
         self.connections.sort_by(|a, b| a.id.cmp(&b.id));
+        self.prepare_routing();
+        let mut first_routes = BTreeMap::new();
+        let mut cached_points = 0;
         let mut failed = BTreeSet::new();
         for r in self.connections.clone() {
             let label_count = self.document.labels.len();
             let diagnostic_count = self.diagnostics.len();
-            if let Err(diagnostic) = self.route_label(&r) {
-                self.document.labels.truncate(label_count);
-                self.diagnostics.truncate(diagnostic_count);
-                failed.insert(r.source_index);
-                self.route_error(&r, diagnostic);
+            match self.route_label(&r) {
+                Ok(points) => {
+                    if self.cache_enabled && points.len() <= 65_536 - cached_points {
+                        cached_points += points.len();
+                        first_routes.insert(r.source_index, (label_count, points));
+                    }
+                }
+                Err(diagnostic) => {
+                    self.document.labels.truncate(label_count);
+                    self.diagnostics.truncate(diagnostic_count);
+                    failed.insert(r.source_index);
+                    self.route_error(&r, diagnostic);
+                }
             }
         }
         let mut final_routes = Vec::new();
@@ -771,7 +868,14 @@ impl SceneBuilder {
             let points = if failed.contains(&r.source_index) {
                 Vec::new()
             } else {
-                let result = self.route_points(&r).and_then(|(points, _)| {
+                let reusable = first_routes.remove(&r.source_index).filter(|(labels, _)| {
+                    self.cache_enabled && *labels == self.document.labels.len()
+                });
+                let routed = match reusable {
+                    Some((_, points)) => Ok(points),
+                    None => self.route_points(&r).map(|(points, _)| points),
+                };
+                let result = routed.and_then(|points| {
                     if points.windows(2).any(|pair| {
                         self.document
                             .nodes
@@ -967,6 +1071,8 @@ fn typed<T: DeserializeOwned + Serialize>(v: &Value) -> Result<T, Diagnostic> {
 struct LayoutOptions {
     #[cfg(test)]
     route_budget: Option<usize>,
+    #[cfg(test)]
+    disable_routing_cache: bool,
 }
 pub fn layout_json(input: &str) -> GeometryReport {
     layout_with_options(input, LayoutOptions::default())
@@ -977,6 +1083,7 @@ fn layout_json_with_route_budget(input: &str, budget: usize) -> GeometryReport {
         input,
         LayoutOptions {
             route_budget: Some(budget),
+            ..LayoutOptions::default()
         },
     )
 }
@@ -1013,6 +1120,7 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
     #[cfg(test)]
     {
         scene.route_budget = options.route_budget;
+        scene.cache_enabled = !options.disable_routing_cache;
     }
     let result = (|| {
         let meta: Meta = typed(&spec["meta"])?;
@@ -1051,7 +1159,31 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
         scene.finish(&meta)
     })();
     match result {
-        Ok((geometry, diagnostics, ok)) => {
+        Ok((geometry, mut diagnostics, mut ok)) => {
+            let mut geometry_errors = constraints::geometry_diagnostics(&spec, &geometry);
+            if kind == "sequence" {
+                geometry_errors.extend(constraints_sequence::sequence_geometry_diagnostics(
+                    &spec, &geometry,
+                ));
+            }
+            if kind == "architecture" || kind == "workflow" {
+                geometry_errors.extend(constraints_frames::frame_geometry_diagnostics(
+                    &spec, &geometry,
+                ));
+            }
+            geometry_errors.extend(constraints_distance::source_distance_diagnostics(
+                &spec, &geometry,
+            ));
+            geometry_errors.extend(constraints_routes::route_geometry_diagnostics(
+                &spec, &geometry,
+            ));
+            if geometry_errors
+                .iter()
+                .any(|diagnostic| !constraints_routes::is_route_quality_notice(diagnostic))
+            {
+                ok = false;
+            }
+            diagnostics.extend(geometry_errors);
             let mut receipt = validity.receipt;
             receipt.engine_output_sha256 = Some(crate::spec_hash(
                 &serde_json::to_string(&geometry).expect("integer geometry serializes"),
@@ -1230,7 +1362,24 @@ mod tests {
 
     fn assert_partial_route(report: GeometryReport, code: &str) {
         assert!(!report.ok);
-        assert_eq!(report.diagnostics.len(), 1, "{:?}", report.diagnostics);
+        let expected_count = if code == "architecture/route-blocked" {
+            2
+        } else {
+            1
+        };
+        assert_eq!(
+            report.diagnostics.len(),
+            expected_count,
+            "{:?}",
+            report.diagnostics
+        );
+        if expected_count == 2 {
+            assert_eq!(
+                report.diagnostics[1].code,
+                "architecture/geometry-node-overlap"
+            );
+            assert_eq!(report.diagnostics[1].path, "/components/2");
+        }
         let diagnostic = &report.diagnostics[0];
         assert_eq!(diagnostic.code, code);
         assert_eq!(diagnostic.path, "/connections/0");
@@ -1457,6 +1606,45 @@ mod tests {
     }
 
     #[test]
+    fn routing_cache_matches_uncached_labels_routes_errors_and_pins() {
+        let mut inputs: Vec<_> = fixtures().into_iter().map(str::to_owned).collect();
+        inputs.push(include_str!("../../testdata/partial-route.json").to_owned());
+        let mut styled: Value = serde_json::from_str(fixtures()[0]).unwrap();
+        styled["connections"] = serde_json::json!([
+            {"id":"thin","from":"a","to":"b","label":"Thin","width":2,"labelAt":[450,360]},
+            {"id":"thick","from":"b","to":"a","label":"Thick","width":8,"labelAt":[450,420]}
+        ]);
+        for index in 0..10 {
+            styled["connections"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "id":format!("wide-{index}"),"from":"a","to":"b","width":10+index*2
+                }));
+        }
+        assert!(crate::validate_json(&styled.to_string()).ok);
+        inputs.push(styled.to_string());
+        for spec in inputs {
+            for pinned in [false, true] {
+                let mut request = serde_json::json!({"specJson":spec});
+                if pinned {
+                    request["pinSet"] = serde_json::json!({"sourceSpecSha256":"0".repeat(64),"pins":[{"targetId":"a","targetKind":"node","position":{"x":120*64,"y":180*64}}]});
+                }
+                let input = request.to_string();
+                let cached = layout_json(&input);
+                let uncached = layout_with_options(
+                    &input,
+                    LayoutOptions {
+                        disable_routing_cache: true,
+                        ..LayoutOptions::default()
+                    },
+                );
+                assert_eq!(cached, uncached, "{}", request["specJson"]);
+            }
+        }
+    }
+
+    #[test]
     fn generated_route_ids_reserve_authored_ids_even_when_they_appear_later() {
         let ids = allocate_route_ids(
             "connection",
@@ -1575,7 +1763,13 @@ mod tests {
         let mut spec: Value = serde_json::from_str(fixtures()[index]).unwrap();
         match kind {
             "architecture" => spec["components"][1]["row"] = 2.into(),
-            "workflow" => spec["nodes"][1]["yOffset"] = 220.into(),
+            "workflow" => {
+                spec["lanes"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(serde_json::json!({"id":"lower","label":"Lower"}));
+                spec["nodes"][1]["lane"] = "lower".into();
+            }
             "dataflow" => spec["nodes"][1]["row"] = 2.into(),
             _ => spec["states"][1]["yOffset"] = 220.into(),
         };
@@ -1812,7 +2006,20 @@ mod tests {
         let ids = ["lane:main", "group:workers", "phase:delivery"];
         let pins:Vec<_>=ids.iter().enumerate().map(|(i,id)|serde_json::json!({"targetId":id,"targetKind":"container","position":{"x":(800+i as i32*200)*64,"y":600*64}})).collect();
         let report=layout_json(&serde_json::json!({"specJson":source,"pinSet":{"sourceSpecSha256":crate::spec_hash(&source),"pins":pins}}).to_string());
-        assert!(report.ok, "{:?}", report.diagnostics);
+        // These explicit pins intentionally move frames away from their members.
+        // Geometry rules flag the mismatch but must retain every exact user pin.
+        assert!(!report.ok);
+        for code in [
+            "workflow/geometry-phase-range",
+            "workflow/geometry-group-containment",
+            "workflow/geometry-container-containment",
+        ] {
+            assert!(
+                report.diagnostics.iter().any(|d| d.code == code),
+                "{:?}",
+                report.diagnostics
+            );
+        }
         assert!(report
             .diagnostics
             .iter()

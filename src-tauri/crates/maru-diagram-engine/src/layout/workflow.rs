@@ -359,7 +359,7 @@ mod tests {
                 "pins": [{
                     "targetId": "pinned",
                     "targetKind": "node",
-                    "position": {"x": 17 * 64, "y": 29 * 64}
+                    "position": {"x": 120 * 64, "y": 180 * 64}
                 }]
             }
         });
@@ -376,6 +376,6 @@ mod tests {
             node.position_source,
             crate::geometry::GeometryPositionSource::PlannedPin
         );
-        assert_eq!((node.bounds.x, node.bounds.y), (17 * 64, 29 * 64));
+        assert_eq!((node.bounds.x, node.bounds.y), (120 * 64, 180 * 64));
     }
 }

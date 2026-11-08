@@ -39,7 +39,7 @@ if (action === "types") {
   // library pipeline. Its output is the artifact the browser measurement loads.
   const { build } = await import("vite");
   const browserOutput = join(scratch, "browser");
-  const built = await build({ configFile: false, root, logLevel: "warn", build: {
+  const built = await build({ configFile: false, root, logLevel: "warn", define: { "import.meta.env.VITE_ENGINE_GEOMETRY_TEST": JSON.stringify("0") }, build: {
     outDir: browserOutput, emptyOutDir: true, minify: true,
     lib: { entry: join(root, "src/lib/diagram/engine.ts"), formats: ["es"], fileName: () => "engine-e0.js" },
   } });
@@ -50,7 +50,16 @@ if (action === "types") {
   const payload = payloadReport(outputs.filter((item) => item.type === "chunk"));
   if (payload.validationGzipBytes > 400_000) throw new Error(`Validation payload is ${payload.validationGzipBytes} gzip bytes, above 400000; move geometry dependencies behind the lazy boundary before merging.`);
   if (!payload.lazyGeometryGzipBytes) throw new Error("Geometry metric chunk is missing; keep its WASM URLs inside the dynamic engineGeometry module and rebuild.");
-  const report = { scope: "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file", buildMs: performance.now() - before, platform: process.platform, arch: process.arch, ...payload };
+  if (outputs.some((chunk) => chunk.type === "chunk" && chunk.name.includes("engineGeometryCanvas"))) throw new Error("Test canvas bridge leaked into the normal product artifact; keep its feature guard false in production.");
+  const productBuildMs = performance.now() - before;
+  const testBuildStarted = performance.now();
+  // A separate isolated test artifact enables the adapter; its bytes are not
+  // silently included in or subtracted from the measured normal product graph.
+  await build({ configFile: false, root, logLevel: "warn", define: { "import.meta.env.VITE_ENGINE_GEOMETRY_TEST": JSON.stringify("1") }, build: {
+    outDir: join(scratch, "browser-test"), emptyOutDir: true, minify: true,
+    lib: { entry: join(root, "src/lib/diagram/engine.ts"), formats: ["es"], fileName: () => "engine-e0.js" },
+  } });
+  const report = { scope: "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file", buildMs: productBuildMs, testHarnessBuildMs: performance.now() - testBuildStarted, platform: process.platform, arch: process.arch, ...payload };
   writeFileSync(join(scratch, "wasm-build.json"), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`ENGINE_E0_BUILD ${JSON.stringify(report)}`);
 } else if (action === "needed") {
@@ -60,7 +69,7 @@ if (action === "types") {
   if (base && !/^0+$/.test(base)) {
     if (spawnSync("git", ["cat-file", "-e", `${base}^{commit}`]).status !== 0) run("git", ["fetch", "--no-tags", "--depth=1", "origin", base]);
     const paths = run("git", ["diff", "--name-only", base, "HEAD"]).trim().split("\n");
-    needed = paths.some((name) => /^(src-tauri\/crates\/|src-tauri\/src\/diagram_engine_e0\.rs|src\/lib\/nativeE2eBridge\.ts|rust-toolchain\.toml|scripts\/(?:check-diagram-engine|diagram-engine-e[02]|diagram-engine-payload)|src\/lib\/diagram\/engine(?:Geometry)?\.ts|e2e\/engine-e0|e2e-native\/specs\/diagram-engine-e0|\.github\/workflows\/ci.yml)/.test(name));
+    needed = paths.some((name) => /^(src-tauri\/crates\/|src-tauri\/src\/diagram_engine_e0\.rs|src\/lib\/nativeE2eBridge\.ts|rust-toolchain\.toml|scripts\/(?:check-diagram-engine|diagram-engine-e[02]|diagram-engine-payload)|src\/lib\/diagram\/engine(?:Geometry[^/]*)?\.ts|e2e\/engine-e0|e2e-native\/specs\/diagram-engine-e0|\.github\/workflows\/ci.yml)/.test(name));
   }
   if (process.env.GITHUB_OUTPUT) {
     const { appendFileSync } = await import("node:fs"); appendFileSync(process.env.GITHUB_OUTPUT, `needed=${needed}\n`);
