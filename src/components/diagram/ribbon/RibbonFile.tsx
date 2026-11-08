@@ -7,6 +7,7 @@ import {
   FolderOpen,
   ImportIcon,
   LayoutTemplate,
+  GalleryHorizontalEnd,
   Save,
   Share,
   Sparkles,
@@ -23,6 +24,7 @@ export interface RibbonFileProps {
   onTemplates: () => void;
   onGenerate: () => void;
   onHistory: () => void;
+  onRenders: () => void;
   onImport: () => void;
   onCopyPng: () => void;
   onCopySvg: () => void;
@@ -45,6 +47,7 @@ export function RibbonFile({
   onTemplates,
   onGenerate,
   onHistory,
+  onRenders,
   onImport,
   onCopyPng,
   onCopySvg,
@@ -91,6 +94,7 @@ export function RibbonFile({
         />
       </RibbonGroup>
       <RibbonGroup labelKey="diagram.ribbon.export">
+        <RibbonButton labelKey="diagram.renders.title" onClick={onRenders} icon={<GalleryHorizontalEnd size={14} />} />
         <RibbonButton
           labelKey="diagram.ribbon.export"
           onClick={onExport}

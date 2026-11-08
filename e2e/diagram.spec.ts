@@ -416,3 +416,42 @@ test("adds and removes a semantic state with one-step undo and a cascade preview
   await expect(page.getByTestId("semantic-props")).toBeVisible();
   expect(forbidden).toEqual([]);
 });
+
+test("Renders in the browser requires the desktop app and invents no entries", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "다이어그램", exact: true }).click();
+  await page.getByRole("tab", { name: "파일", exact: true }).click();
+  await page.getByRole("button", { name: "렌더", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("저장된 렌더는 데스크톱 앱에서 사용할 수 있습니다");
+  await expect(dialog.getByTestId("diagram-render-entry")).toHaveCount(0);
+  await expect(dialog.locator("iframe")).toHaveCount(0);
+});
+
+test("Renders lists orphaned receipts and shows the native refusal without mounting a frame", async ({ page }) => {
+  // Test-only module replacement exercises the native API contract in Chromium;
+  // Rust/native probes verify disk hashes, grants and the sandbox itself.
+  await page.route("**/src/lib/diagram/renders.ts*", (route) => route.fulfill({
+    contentType: "application/javascript",
+    body: `let removed = false;
+      export const rendersAvailable = () => true;
+      export const listRenders = async () => removed ? [] : [{docId:"copied",documentName:null,orphaned:true,renders:[{docId:"copied",renderId:"bad",verified:false,diagnostic:"receipt.json missing; re-render"}]}];
+      export const prepareRenderView = async () => { throw new Error("index.html hash mismatch; re-render the diagram"); };
+      export const deleteRender = async () => { removed = true; };
+      export const openRender = async () => { throw new Error("refused"); };
+      export const rerenderDocument = async () => { throw new Error("source missing; restore it"); };`,
+  }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "다이어그램", exact: true }).click();
+  await page.getByRole("tab", { name: "파일", exact: true }).click();
+  await page.getByRole("button", { name: "렌더", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("원본 문서 없음");
+  await dialog.getByTestId("diagram-render-entry").click();
+  await expect(dialog).toContainText("index.html hash mismatch; re-render the diagram");
+  await expect(dialog.locator("iframe")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "다시 렌더", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "렌더 삭제", exact: true }).click();
+  await dialog.getByRole("button", { name: "삭제 확인", exact: true }).click();
+  await expect(dialog.getByTestId("diagram-render-entry")).toHaveCount(0);
+});

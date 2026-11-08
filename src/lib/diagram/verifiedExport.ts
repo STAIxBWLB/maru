@@ -2,6 +2,7 @@ import { name, version, revision } from "../../../sidecars/archify/PIN.json";
 import { archifyRenderCandidate, type ArchifyRenderHost, type ArchifyRenderReceipt } from "../archify";
 import { canonicalSemanticExportInput, rasterise, blobToUint8Array } from "./export";
 import { extractEngineSvg, type StaticTheme } from "./engineSvg";
+import { serializeDoc } from "./persistence";
 import type { DiagramDoc } from "./types";
 
 export interface VerifiedStaticArtifact { bytes: Uint8Array; receipt: ArchifyRenderReceipt }
@@ -15,6 +16,7 @@ export async function bytesSha256(bytes: Uint8Array): Promise<string> {
 export async function exportVerifiedSemanticArtifact(input: {
   doc: DiagramDoc; datasetId?: string; workspace: string; format: "svg" | "png";
   theme?: StaticTheme; host?: ArchifyRenderHost; isCurrent?: () => boolean;
+  documentName?: string; documentRevision?: string;
 }): Promise<VerifiedStaticArtifact> {
   const current = () => {
     if (input.isCurrent?.() === false) throw new Error("The export was cancelled or its document changed; start a new export from the current diagram.");
@@ -23,7 +25,10 @@ export async function exportVerifiedSemanticArtifact(input: {
   const canonical = canonicalSemanticExportInput(input.doc, input.datasetId);
   const candidateHash = await bytesSha256(new TextEncoder().encode(canonical.candidateJson));
   current();
-  const rendered = await (input.host ?? ((type, json) => archifyRenderCandidate(input.workspace, type, json)))(canonical.diagramType, canonical.candidateJson);
+  const context = { docId: input.doc.id, documentName: input.documentName ?? (input.doc.docTitle || input.doc.id),
+    documentRevision: input.documentRevision ?? await bytesSha256(new TextEncoder().encode(serializeDoc(input.doc))), diagramType: canonical.diagramType };
+  current();
+  const rendered = await (input.host ?? ((type, json, renderContext) => archifyRenderCandidate(input.workspace, type, json, renderContext)))(canonical.diagramType, canonical.candidateJson, context);
   current();
   if (!rendered || !Array.isArray(rendered.bytes) || rendered.bytes.length > 8 * 1024 * 1024
       || rendered.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {

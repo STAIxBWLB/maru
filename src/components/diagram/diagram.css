@@ -1816,3 +1816,16 @@
 }
 
 .maru-diagram-ie-receipt dd { overflow-wrap: anywhere; margin-inline-start: 0; }
+
+.maru-diagram-renders { width: min(1100px, 96vw); max-height: 90vh; overflow: auto; }
+.maru-diagram-renders-columns { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 3fr); gap: 16px; }
+.maru-diagram-renders-list { max-height: 65vh; overflow: auto; }
+.maru-diagram-renders-list button { width: 100%; display: grid; text-align: left; gap: 4px; padding: 8px; }
+.maru-diagram-renders-list button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.maru-diagram-renders-detail { min-width: 0; }
+.maru-diagram-renders-detail iframe { width: 100%; height: 50vh; border: 1px solid var(--border); background: var(--surface); }
+.maru-diagram-renders-detail img { max-width: 100%; max-height: 50vh; object-fit: contain; }
+.maru-diagram-renders-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.maru-diagram-render-receipt { font-size: var(--type-xs); }
+.maru-diagram-render-receipt dd { overflow-wrap: anywhere; margin: 4px 0 10px; }
+@media (max-width: 700px) { .maru-diagram-renders-columns { grid-template-columns: 1fr; } .maru-diagram-renders-list { max-height: 20vh; } }

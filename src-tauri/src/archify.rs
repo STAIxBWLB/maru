@@ -991,6 +991,7 @@ pub mod ipc {
         workspace: String,
         diagram_type: String,
         candidate_json: String,
+        context: Option<crate::diagram::renders::RenderDocumentContext>,
     ) -> Result<ArchifyRenderArtifact, IpcError> {
         tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
@@ -1001,12 +1002,18 @@ pub mod ipc {
             let engine = super::bundled_engine_path(&app).map_err(|error| {
                 super::typed(&error.code, format!("{}; restore the bundled engine or fix MARU_ARCHIFY_ENGINE and retry the export", error.message))
             })?;
-            super::render_candidate_with_engine(
-                workspace,
-                diagram_type,
-                candidate_json,
-                Some(engine),
-            )
+            if context.as_ref().is_some_and(|context| context.diagram_type != diagram_type) {
+                return Err(super::render_error(super::ARCHIFY_RENDER_FAILED,
+                    "Render document context names a different diagram type"));
+            }
+            let artifact = super::render_candidate_with_engine(
+                workspace.clone(), diagram_type, candidate_json, Some(engine),
+            )?;
+            if let Some(context) = context {
+                crate::diagram::renders::store_render(&workspace, context, artifact.clone())
+                    .map_err(|error| super::render_error(super::ARCHIFY_RENDER_FAILED, error))?;
+            }
+            Ok(artifact)
         })
         .await
         .map_err(|err| IpcError::from(format!("archify_render_candidate_task_failed: {err}; retry the export and restart Maru if the worker failure repeats")))?
@@ -1475,10 +1482,51 @@ mod render_worker_boundary_tests {
                 workspace.to_string_lossy().into_owned(),
                 "architecture".into(),
                 "{}".into(),
+                None,
             )
             .await
             .map(|_| ())
             .map_err(|error| error.message)
         });
+    }
+    #[test]
+    fn render_with_document_context_publishes_an_immutable_receipt_pair() {
+        let _engine = super::ENGINE_ENV_LOCK.lock().unwrap();
+        let home = Home::new();
+        let workspace = home.root.path().join("stored-render-workspace");
+        fs::create_dir_all(workspace.join("diagrams")).unwrap();
+        fs::write(
+            workspace.join("diagrams/generated.cmd.json"),
+            r#"{"id":"stored-doc"}"#,
+        )
+        .unwrap();
+        let app = tauri::test::mock_app();
+        let spec = r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Stored fixture","output":"fixture.html"},"layout":{"mode":"grid"},"components":[{"id":"app","label":"App","type":"backend","row":0,"col":0}]}"#;
+        let artifact = crate::atomic_file::phase08_06::run(ipc::archify_render_candidate(
+            app.handle().clone(),
+            workspace.to_string_lossy().into_owned(),
+            "architecture".into(),
+            spec.into(),
+            Some(crate::diagram::renders::RenderDocumentContext {
+                doc_id: "stored-doc".into(),
+                document_name: "generated".into(),
+                document_revision: "d".repeat(64),
+                diagram_type: "architecture".into(),
+            }),
+        ))
+        .unwrap();
+        let groups = crate::diagram::renders::list_renders(workspace.to_str().unwrap()).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert!(!groups[0].orphaned);
+        let entry = &groups[0].renders[0];
+        let folder = workspace
+            .join("attachments/diagrams/stored-doc/renders")
+            .join(&entry.render_id);
+        assert_eq!(fs::read(folder.join("index.html")).unwrap(), artifact.bytes);
+        let receipt: crate::diagram::renders::DiagramRenderReceipt =
+            serde_json::from_slice(&fs::read(folder.join("receipt.json")).unwrap()).unwrap();
+        assert_eq!(receipt.render, artifact.receipt);
+        assert_eq!(receipt.doc_id, "stored-doc");
+        assert_eq!(receipt.document_revision, "d".repeat(64));
     }
 }

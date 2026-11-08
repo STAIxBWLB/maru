@@ -15,6 +15,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { RenderDocumentContext } from "./diagram/renders";
 import { normalizeIpcError } from "./ipcError";
 
 declare global {
@@ -120,12 +121,12 @@ export interface ArchifyRenderArtifact {
   receipt: ArchifyRenderReceipt;
 }
 
-export type ArchifyRenderHost = (diagramType: string, candidateJson: string) => Promise<ArchifyRenderArtifact>;
+export type ArchifyRenderHost = (diagramType: string, candidateJson: string, context?: RenderDocumentContext) => Promise<ArchifyRenderArtifact>;
 
-export async function archifyRenderCandidate(workspace: string, diagramType: string, candidateJson: string): Promise<ArchifyRenderArtifact> {
+export async function archifyRenderCandidate(workspace: string, diagramType: string, candidateJson: string, context?: RenderDocumentContext): Promise<ArchifyRenderArtifact> {
   if (!isTauri()) throw new ArchifyEngineError(ENGINE_UNAVAILABLE, "The pinned renderer requires the desktop app; open this workspace in Maru and retry the export.");
   try {
-    return await invoke<ArchifyRenderArtifact>("archify_render_candidate", { workspace, diagramType, candidateJson });
+    return await invoke<ArchifyRenderArtifact>("archify_render_candidate", { workspace, diagramType, candidateJson, ...(context ? { context } : {}) });
   } catch (error) {
     if (rawCode(error) === BACKEND_ENGINE_UNAVAILABLE || isUnknownCommand(error)) {
       throw new ArchifyEngineError(ENGINE_UNAVAILABLE, "The bundled renderer is unavailable; update or reinstall Maru and retry the export.");

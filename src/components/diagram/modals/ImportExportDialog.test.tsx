@@ -11,6 +11,7 @@ import { matrixFromRowsCols, type MatrixCell, type MatrixDataset } from "../../.
 import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
+import { serializeDoc } from "../../../lib/diagram/persistence";
 import { canonicalSemanticExportInput } from "../../../lib/diagram/export";
 import { extractEngineSvg } from "../../../lib/diagram/engineSvg";
 import { DiagramStoreProvider } from "../DiagramStoreContext";
@@ -273,7 +274,10 @@ describe("ImportExportDialog (export)", () => {
     await waitForCalls(diagramExportBlobToPathMock, 1);
     const receipt = query<HTMLElement>('[data-testid="engine-export-receipt"]')!;
     expect(host).toHaveBeenCalledTimes(1);
-    expect(host).toHaveBeenCalledWith("architecture", canonical.candidateJson);
+    expect(host).toHaveBeenCalledWith("architecture", canonical.candidateJson, {
+      docId: doc.id, documentName: doc.docTitle || doc.id,
+      documentRevision: hash(new TextEncoder().encode(serializeDoc(doc))), diagramType: "architecture",
+    });
     expect(receipt.textContent).toContain(`${name} ${version} (${revision})`);
     expect(receipt.textContent).toContain(expectedInputHash);
     expect(receipt.textContent).toContain(expectedOutputHash);

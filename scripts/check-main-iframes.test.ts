@@ -97,3 +97,13 @@ describe("main iframe source boundary", () => {
     ]) expect(iframeViolations(source, file).length).toBeGreaterThan(0);
   });
 });
+
+it("registers the render viewer with its opaque-origin sandbox and no-referrer contract", () => {
+  const filename = "src/components/diagram/modals/RendersDialog.tsx";
+  const source = `import { assetUrlForPath } from "../../../lib/binaryViewer";
+    const FRAME = "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox";
+    export const View = () => <iframe sandbox={FRAME} referrerPolicy="no-referrer" src={assetUrlForPath("/work/render.html")} />;`;
+  expect(iframeViolations(source, filename)).toEqual([]);
+  expect(iframeViolations(source.replace("allow-downloads", "allow-same-origin"), filename).join("\n")).toContain("opaque-origin sandbox");
+  expect(iframeViolations(source.replace('referrerPolicy="no-referrer"', ''), filename).join("\n")).toContain("suppress referrers");
+});
