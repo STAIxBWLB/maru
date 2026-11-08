@@ -1138,7 +1138,7 @@ function DiagramShell({
         }
       }
     },
-    [openDoc, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
+    [openDoc, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, t, workPath],
   );
 
   const handleDeleteFile = useCallback(
