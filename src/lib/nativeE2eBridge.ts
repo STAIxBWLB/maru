@@ -19,6 +19,7 @@
 // string in production bundles (T-06-01).
 
 import { invoke } from "@tauri-apps/api/core";
+import type { ArchifyRenderReceipt } from "./archify";
 
 /** Fixed read-only native fixture startup/diagnostic projection, no settings blobs. */
 export interface NativeAppState {
@@ -49,6 +50,13 @@ export type NativeE2eChannelEvalSample = Readonly<{
   fullFrame: boolean;
 }>;
 
+export interface NativeE2eDiagramStaticExportResult {
+  svgPath: "diagrams/native-static-export.svg";
+  pngPath: "diagrams/native-static-export.png";
+  svgReceipt: ArchifyRenderReceipt;
+  pngReceipt: ArchifyRenderReceipt;
+}
+
 export interface MaruNativeE2eBridge {
   /** Whole-screen text mirror for one terminal session, or null when the
    *  session id was never registered (a spec racing a session teardown gets
@@ -77,6 +85,8 @@ export interface MaruNativeE2eBridge {
   parseKoreanDate(input: string, nowIso: string): Promise<string | null>;
   recordChannelEval(sample: NativeE2eChannelEvalSample): void;
   channelEvals(): ReadonlyArray<NativeE2eChannelEvalSample>;
+  /** Fixed semantic export fixture, available only in native-e2e builds. */
+  diagramStaticExportFixture(): Promise<NativeE2eDiagramStaticExportResult>;
 }
 
 export interface NativeE2eProbeResult {
@@ -227,6 +237,53 @@ function bridgeNamespace(): MaruNativeE2eBridge {
         }
       },
       channelEvals: () => Object.freeze(channelEvalSamples.map((sample) => Object.freeze({ ...sample }))),
+      diagramStaticExportFixture: async () => {
+        if (import.meta.env.VITE_NATIVE_E2E !== "1") {
+          throw new Error("The diagram export fixture is available only in native-e2e builds.");
+        }
+        const state = appStateRegistration?.read();
+        const workspace = state?.workspacePath?.replace(/\\/g, "/").replace(/\/+$/, "") ?? "";
+        const segments = workspace.split("/");
+        if (
+          !/^(?:[A-Za-z]:)?\//.test(workspace)
+          || segments.includes(".") || segments.includes("..")
+          || !/(?:^|\/)maru-native-e2e-[^/]+\/workspace$/.test(workspace)
+        ) {
+          throw new Error("The native diagram export fixture requires the app's isolated maru-native-e2e workspace; restart the native fixture and retry.");
+        }
+
+        // Keep diagram/renderer modules out of ordinary frontend builds. The
+        // literal build gate above is folded away when VITE_NATIVE_E2E is unset.
+        const [{ createEmptyDoc }, { archifySpecToDataset }, { exportVerifiedSemanticArtifact }, { diagramExportBlobToPath }, { NATIVE_EXPORT_SPEC }] = await Promise.all([
+          import("./diagram/types"),
+          import("./diagram/archifyCodec"),
+          import("./diagram/verifiedExport"),
+          import("./diagram"),
+          import("./diagram/__fixtures__/nativeExport"),
+        ]);
+        const { dataset } = archifySpecToDataset("architecture", NATIVE_EXPORT_SPEC, { id: "native-static-export-dataset" });
+        const doc = { ...createEmptyDoc("native-static-export", Date.now()), datasets: [dataset] };
+        const svg = await exportVerifiedSemanticArtifact({
+          doc, datasetId: dataset.id, workspace, format: "svg", theme: "light",
+        });
+        const png = await exportVerifiedSemanticArtifact({
+          doc, datasetId: dataset.id, workspace, format: "png", theme: "dark",
+        });
+        const svgPath = `${workspace}/diagrams/native-static-export.svg`;
+        const pngPath = `${workspace}/diagrams/native-static-export.png`;
+        const savedSvgPath = await diagramExportBlobToPath(svgPath, "svg", svg.bytes);
+        const savedPngPath = await diagramExportBlobToPath(pngPath, "png", png.bytes);
+        const normalize = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "");
+        if (normalize(savedSvgPath) !== normalize(svgPath) || normalize(savedPngPath) !== normalize(pngPath)) {
+          throw new Error("The native diagram export bridge returned an unexpected destination; inspect the isolated fixture workspace and retry.");
+        }
+        return {
+          svgPath: "diagrams/native-static-export.svg",
+          pngPath: "diagrams/native-static-export.png",
+          svgReceipt: { ...svg.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } },
+          pngReceipt: { ...png.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } },
+        };
+      },
     };
   }
   return window.__MARU_NATIVE_E2E__;

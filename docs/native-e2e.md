@@ -459,3 +459,12 @@ unscriptable here. The fixed checklist lives in `## Human-attended checklist`
 above (items 1-3, plus item 7 for single-window `app.quit` and items 13-17
 for the skill-editor multi-window cases), folded in by plan 06-05, extended
 by plan 09-03, and extended again by the review finding #2 fix.
+
+## Verified diagram export fixture
+
+`diagram-export.spec.ts` uses a zero-argument, native-e2e-only bridge against the
+isolated fixture workspace. It renders a literal CJK architecture spec with the
+pinned engine, converts light SVG and dark PNG, writes fixed fixture paths
+through the native save bridge, and compares disk bytes with receipt hashes.
+It asserts conversion and readback gates separately from the unverified manual
+visual gate. This custom-protocol development build is not release-bundle proof.

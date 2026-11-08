@@ -14,7 +14,7 @@
  */
 
 import { startAgentCliInvocation, stopAiMission, type AgentProvider } from "../api";
-import { archifyValidateCandidate } from "../archify";
+import { archifyRenderCandidate, archifyValidateCandidate } from "../archify";
 import type { AdaptivePolicy } from "../settings";
 import type { GenerationHost } from "./generation";
 import type { SemanticDiagramType } from "./reportTypes";
@@ -148,6 +148,10 @@ export function createGenerationHost(options: GenerationHostOptions): DiagramGen
   return {
     runAgent,
     validateCandidate,
+    renderCandidate: (type, json) => {
+      if (!options.workPath) throw new Error("Engine export needs a workspace; open a workspace and retry.");
+      return archifyRenderCandidate(options.workPath, type, json);
+    },
     cancel: () => cancelCurrent?.(),
   };
 }

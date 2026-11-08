@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 import {
   REPORT_RENDER_OPTIONS,
@@ -10,6 +11,7 @@ import {
 import { IpcError } from "../ipcError";
 import { buildManagedBlock } from "./reportLink";
 import { createEmptyDoc, type DiagramDoc, type DiagramEdge, type DiagramNode } from "./types";
+import type { ArchifyRenderReceipt } from "../archify";
 
 function makeDoc(id: string = "doc-1") {
   return { ...createEmptyDoc(id, 0), docTitle: "Weekly chart" };
@@ -28,6 +30,40 @@ function fakeDigestHex(text: string): Promise<string> {
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   const hex = ((h2 >>> 0).toString(16).padStart(8, "0") + (h1 >>> 0).toString(16).padStart(8, "0"));
   return Promise.resolve(hex.repeat(4).slice(0, 64));
+}
+
+function realDigestHex(text: string): Promise<string> {
+  return Promise.resolve(createHash("sha256").update(text).digest("hex"));
+}
+
+function byteHash(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function verifiedAssets() {
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>검증된 다이어그램</text></svg>');
+  const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  const inputSpecSha256 = byteHash(new TextEncoder().encode('{"diagram_type":"architecture","fixture":true}'));
+  const enginePin = {
+    name: "archify",
+    version: "3.0.0",
+    revision: "9286c3b9c2cef359e98586b420d769d87bcb163f",
+  };
+  const receipt = (bytes: Uint8Array, outputMimeType: string): ArchifyRenderReceipt => ({
+    schemaVersion: 1,
+    inputSpecSha256,
+    enginePin,
+    outputSha256: byteHash(bytes),
+    outputMimeType,
+    engineOutputSha256: byteHash(new TextEncoder().encode("pinned engine html bytes")),
+    gates: {
+      schema: { status: "passed", scope: "pinned-engine-validation" },
+      artifact: { status: "passed", scope: "pinned-engine-rendered-html" },
+      browser: { status: "passed", scope: "verified-static-conversion" },
+      visualReview: { status: "not-run", scope: "manual-visual-review" },
+    },
+  });
+  return { svg, png, receipts: { svg: receipt(svg, "image/svg+xml"), png: receipt(png, "image/png") } };
 }
 
 interface Harness {
@@ -195,6 +231,89 @@ describe("insertDiagramIntoReport", () => {
     expect((outcome as { message: string }).message).toContain("document_conflict");
     // Assets were written (hash-named orphans are harmless) but no retry save.
     expect(harness.writes).toHaveLength(2);
+  });
+
+  it("stops after an async render becomes stale, before writing either asset or target", async () => {
+    const harness = makeHarness();
+    const assets = verifiedAssets();
+    let current = true;
+    harness.deps.digestHex = realDigestHex;
+    harness.deps.renderAssets = async () => {
+      await Promise.resolve();
+      current = false;
+      return assets;
+    };
+    const outcome = await insertDiagramIntoReport(
+      makeRequest({ isCurrent: () => current }),
+      harness.deps,
+    );
+    expect(outcome.status).toBe("error");
+    expect((outcome as { message: string }).message).toMatch(/source diagram changed/i);
+    expect(harness.writes).toHaveLength(0);
+    expect(harness.saves).toHaveLength(0);
+  });
+
+  it("rejects verified receipts whose output hash does not match bytes", async () => {
+    const harness = makeHarness();
+    const assets = verifiedAssets();
+    harness.deps.digestHex = realDigestHex;
+    harness.deps.renderAssets = async () => ({
+      ...assets,
+      receipts: {
+        ...assets.receipts,
+        svg: { ...assets.receipts.svg, outputSha256: "0".repeat(64) },
+      },
+    });
+    const outcome = await insertDiagramIntoReport(makeRequest(), harness.deps);
+    expect(outcome.status).toBe("error");
+    expect((outcome as { message: string }).message).toMatch(/receipts do not match/i);
+    expect(harness.writes).toHaveLength(0);
+    expect(harness.saves).toHaveLength(0);
+  });
+
+  it("uses full verified byte hashes in stable managed blocks and preserves exact asset bytes", async () => {
+    const assets = verifiedAssets();
+    const first = makeHarness({ content: "# Report\n\nbody\n", revision: "rev-1" });
+    first.deps.digestHex = realDigestHex;
+    first.deps.renderAssets = async () => assets;
+    const firstOutcome = await insertDiagramIntoReport(makeRequest(), first.deps);
+    expect(firstOutcome).toEqual({ status: "inserted", targetPath: "reports/weekly.md" });
+    expect(first.saves[0]!.content.startsWith("# Report\n\nbody\n")).toBe(true);
+    expect(first.writes.map((write) => [...write.bytes])).toEqual([[...assets.svg], [...assets.png]]);
+    expect(first.writes[0]!.fileName).toMatch(/^doc-[0-9a-f]{64}\.svg$/);
+    expect(first.writes[1]!.fileName).toMatch(/^doc-[0-9a-f]{64}\.png$/);
+    const expectedRenderHash = await realDigestHex(JSON.stringify({
+      svg: assets.receipts.svg.outputSha256,
+      png: assets.receipts.png.outputSha256,
+      input: assets.receipts.svg.inputSpecSha256,
+      engine: assets.receipts.svg.enginePin,
+    }));
+    expect(first.saves[0]!.content).toContain(`"renderHash":"sha256:${expectedRenderHash}"`);
+
+    const second = makeHarness({ content: first.saves[0]!.content, revision: "rev-2" });
+    second.deps.digestHex = realDigestHex;
+    second.deps.renderAssets = async () => assets;
+    const secondOutcome = await insertDiagramIntoReport(makeRequest(), second.deps);
+    expect(secondOutcome).toEqual({ status: "updated", targetPath: "reports/weekly.md" });
+    expect(second.writes.map((write) => write.fileName)).toEqual(first.writes.map((write) => write.fileName));
+    expect(second.saves[0]!.content).toBe(first.saves[0]!.content);
+    expect(second.saves[0]!.revision).toBe("rev-2");
+  });
+
+  it("keeps verified report insertion revision conflicts visible without retry", async () => {
+    const harness = makeHarness({ content: "# Report\n", revision: "rev-expected" });
+    const assets = verifiedAssets();
+    harness.deps.digestHex = realDigestHex;
+    harness.deps.renderAssets = async () => assets;
+    harness.deps.saveTarget = (_path, _content, expectedRevision) => {
+      expect(expectedRevision).toBe("rev-expected");
+      return Promise.reject(new IpcError({ code: "document_conflict", message: "expected rev-expected, found rev-new" }));
+    };
+    const outcome = await insertDiagramIntoReport(makeRequest(), harness.deps);
+    expect(outcome.status).toBe("conflict");
+    expect((outcome as { message: string }).message).toContain("document_conflict");
+    expect(harness.writes.map((write) => [...write.bytes])).toEqual([[...assets.svg], [...assets.png]]);
+    expect(harness.saves).toHaveLength(0);
   });
 
   it("surfaces asset write denial and never touches the document", async () => {

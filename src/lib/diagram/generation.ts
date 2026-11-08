@@ -92,6 +92,8 @@ export interface GenerationJob {
 }
 
 export interface GenerationHost {
+  /** Static export uses the same injected host seam as generation. */
+  renderCandidate?: import("../archify").ArchifyRenderHost;
   /** Run the configured agent host; resolves with raw stdout text. Must reject on cancel/timeout. */
   runAgent(promptText: string): Promise<string>;
   /** Validate via the pinned engine adapter (Rust command). Injected so tests can stub. */

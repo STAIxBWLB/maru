@@ -270,17 +270,36 @@ pub fn rename_workspace_entry(
     validate_entry_name(&new_name)?;
     let source = resolve_inside_vault(&vault.to_string_lossy(), &source_path)?;
     let parent = source.parent().ok_or("Source path has no parent")?;
-    let paths = vec![
+    // Coordinate Markdown renames with the first opt-in identity assignment.
+    // A lock-only guard leaves ordinary note content and task defaults unchanged.
+    let mut claim = if source.is_file() && source.extension().is_some_and(|value| value == "md") {
+        crate::task_execution_claims::guard_task_mutation(&vault, &source)?
+    } else {
+        None
+    };
+    let mut paths = vec![
         source.clone(),
         parent.join(&new_name),
         transaction_dir(&vault),
         vault.join(".maru/binder"),
     ];
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
     let request = PathTransactionRequest::new(paths)?
         .with_workspace_registry()?
         .require_parent(&vault)?;
     with_path_transactions(request, |lease| {
-        rename_workspace_entry_in_transaction(lease, vault_path, source_path, new_name)
+        if let Some(guard) = &claim {
+            guard.check(lease, &source)?;
+            guard.check_rename_target(&parent.join(&new_name))?;
+        }
+        let result =
+            rename_workspace_entry_in_transaction(lease, vault_path, source_path, new_name)?;
+        if let (Some(guard), Some(target)) = (&mut claim, &result.target_path) {
+            guard.after_mutation(lease, Path::new(target))?;
+        }
+        Ok(result)
     })
 }
 

@@ -73,6 +73,8 @@ mod sites;
 mod skill_host;
 mod studio;
 mod system_jobs;
+mod task_execution_claims;
+mod task_execution_runtime;
 mod tasks;
 mod telegram_config;
 mod telegram_io;
@@ -317,6 +319,7 @@ pub fn run() {
             git::ipc::git_diff,
             git::ipc::list_workspace_submodules,
             archify::ipc::archify_validate_candidate,
+            archify::ipc::archify_render_candidate,
             file_manager::ipc::open_in_file_manager,
             file_manager::ipc::reveal_in_file_manager,
             inbox::ipc::scan_inbox_drop,

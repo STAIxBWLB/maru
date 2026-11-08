@@ -417,19 +417,52 @@ imports a projected canvas (members and containers) and exports the spec
 verbatim. Floorplan JSON (`floorplan-json`, see "Floorplan") does the same
 for `floorplan/architecture@1` maps.
 
+### Verified static semantic export (T1)
+
+The `archify-svg` and `archify-png` choices render one selected stored semantic
+spec through the pinned bundled Archify engine. Architecture, workflow,
+sequence, dataflow and lifecycle are supported. Canvas annotations, selection,
+zoom and editor state are not renderer inputs. Missing engines and rejected
+specs are errors; these choices never fall back to the canvas renderer.
+
+The native worker validates and renders into private staging, checks the engine
+HTML artifact, and returns bytes plus a versioned receipt. The frontend parses
+that HTML without mounting it, requires exactly one SVG, inlines the supported
+static CSS, and sanitizes SVG with DOMPurify. Scripts, event handlers, external
+URLs and `foreignObject` are removed. Light/dark conversion is explicit; PNG
+uses the existing SVG-to-Canvas rasterizer at pixel ratio 1. Interactive engine
+HTML remains gated for T2 and is not an export choice here.
+
+Export shows the spec hash, engine pin, final artifact hash and separate schema,
+artifact, browser-conversion, visual-review and saved-byte-readback gates.
+Conversion success does not mark visual review as passed. Only a native save
+acknowledgement after byte comparison marks readback passed. The save bridge
+atomically replaces the selected file under its existing lease, preserving the
+previous file on a failed replacement. The receipt is shown for this operation;
+no sibling receipt or workspace render-store entry is written. Durable paired
+receipts belong to the subsequent render-store work.
+
+A changed document, workspace or closed dialog invalidates an in-flight render
+before save. Once a native file copy has begun it completes atomically; the UI
+keeps that operation busy until its acknowledgement. The native-only
+`diagram-export` spec exercises real SVG/PNG conversion and saved-file hashes;
+Chromium/jsdom checks alone do not prove WKWebView or a shipped release bundle.
+
 ## Insert/Update in report
 
 The File ribbon's "Insert/Update in report" action links the saved diagram
 into a Markdown report:
 
 1. Requires a saved, clean diagram (you are asked to save first otherwise).
-2. Renders a standalone SVG and a 2x PNG from the document model, computes
-   `renderHash = sha256(serializeDoc(doc) + renderOptions)`, and writes both
-   to `attachments/diagrams/<docId>/<fileScope>-<hash8>.svg` / `.png` via
-   `diagram_write_report_asset`, where `fileScope` is the scope with
-   non-`[A-Za-z0-9._-]` runs replaced by `-` (the raw scope contains `:`,
-   which NTFS treats as an alternate-data-stream separator). Hash-named files
-   make re-renders idempotent (same content → same name → atomic overwrite).
+2. Semantic datasets use the verified pinned-engine SVG/PNG path above and
+   verify both receipts against their bytes before any write. Their asset names
+   contain the full SHA-256 of the rendered pair; existing full-hash assets must
+   contain identical bytes and are never replaced with different content.
+   Non-semantic documents keep the model SVG/2x PNG path and the legacy
+   `sha256(serializeDoc(doc) + renderOptions)` hash8 names. Both write through
+   `diagram_write_report_asset` to
+   `attachments/diagrams/<docId>/<fileScope>-<hash>.svg` / `.png`, where
+   non-`[A-Za-z0-9._-]` runs in the scope become `-` for NTFS compatibility.
 3. The scope is `pattern:<viewId>` when exactly one pattern view is selected,
    otherwise `doc`. A pattern scope renders only that view's member
    nodes/edges (the asset shows the selected view, not the whole canvas);
