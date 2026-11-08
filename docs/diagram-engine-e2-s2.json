@@ -250,5 +250,76 @@
       "totalGzipBytes": 1813470
     },
     "hostedCi": "pending"
+  },
+  "presetDenseFeatureFollowUp": {
+    "sdkTree": "97d4822bf22dd8d6029673e27a44139189aba34e",
+    "checks": {
+      "coreUnit": 97,
+      "differential": 2,
+      "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T21:49:13.828Z",
+        "duration": 7592.561,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "denseAstar": "passed all three scenes: production finds a route that fails with route-budget at0; visible adjacent paths remain",
+      "productIsolation": "normal JS and actual WASM exports omit scene_corpus_hashes"
+    },
+    "denseFixtures": {
+      "synthetic": true,
+      "seed": 5502026,
+      "scenes": 3,
+      "nodesPerScene": 200,
+      "relationshipsPerScene": 48,
+      "combinedCases": 259,
+      "generatorDrift": "passed"
+    },
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "a6e0df1fd8e9a4470d9da05015b32cc335f6fd7a54334206b56fd0be56ab8906",
+      "reportBytes": 58637,
+      "corpusSha256": "5f547a61ae57b679fb6ff6504639f0bcdea8405ae1f4c8adcc590242325754ab",
+      "corpusCases": 259,
+      "successfulReports": 38,
+      "nonSuccessReports": 221,
+      "note": "Dense non-success reports retain placement geometry and any completed routes; the unit proof checks200nodes and actual successful A* detours in each scene."
+    },
+    "productPayload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 16952.153394,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324220,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-B0rq_c8v.js",
+          "bytes": 4355565,
+          "gzipBytes": 1434912,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324220,
+      "validationGzipBytes": 324220,
+      "lazyGeometryGzipBytes": 1434912,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1759254
+    },
+    "testFeature": "geometry-corpus; separate wasm-test bindings only",
+    "hostedCi": "pending"
   }
 }

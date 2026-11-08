@@ -35,9 +35,12 @@ Optional features:
   and pinned Noto Sans CJK KR metrics for all five document families. Coordinate
   units are 1/64 pixel; runtime font tables are integer-only and separately OFL
   licensed under `src/metrics/data/`.
-- `wasm-layout` exports layout, text metrics and the whole-corpus determinism
-  harness as a separate lazy WASM binary;
-  default `wasm` validation excludes both geometry and metric tables.
+- `wasm-layout` exports layout and text metrics as the normal lazy WASM binary;
+  it excludes corpus tooling. Default `wasm` validation excludes geometry and
+  metric tables.
+- `geometry-corpus` is an explicit test/CI feature for the native corpus runner;
+  combined with `wasm-layout` it exposes corpus hashing in a separate test
+  artifact. The product JS and WASM export guard rejects that symbol.
 - `font-tools` enables the host-only pinned-font generator. It is never a
   dependency of the runtime geometry or validation path.
 - `typegen` enables `export-types`, which prints a deterministic TypeScript

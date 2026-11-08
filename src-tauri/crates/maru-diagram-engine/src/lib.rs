@@ -11,7 +11,7 @@ mod common;
 pub mod dataflow;
 #[cfg(feature = "geometry")]
 pub mod geometry;
-#[cfg(feature = "geometry")]
+#[cfg(feature = "geometry-corpus")]
 pub mod geometry_corpus;
 #[cfg(feature = "geometry")]
 pub mod layout;
@@ -378,7 +378,7 @@ pub fn layout_json_wasm(input: &str) -> String {
     serde_json::to_string(&layout::layout_json(input)).expect("integer geometry report serializes")
 }
 
-#[cfg(feature = "wasm-layout")]
+#[cfg(all(feature = "wasm-layout", feature = "geometry-corpus"))]
 #[wasm_bindgen(js_name = scene_corpus_hashes)]
 pub fn scene_corpus_hashes_wasm(input: &str) -> String {
     match geometry_corpus::scene_corpus_hashes(input) {

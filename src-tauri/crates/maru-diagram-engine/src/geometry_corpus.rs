@@ -206,6 +206,30 @@ mod tests {
     }
 
     #[test]
+    fn every_seeded_dense_scene_passes_e1_document_validity() {
+        let dense: Value =
+            serde_json::from_str(include_str!("../testdata/dense-scenes.json")).unwrap();
+        let cases = dense["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 3);
+        for case in cases {
+            let spec = &case["spec"];
+            let report = crate::validate_json(&spec.to_string());
+            assert!(
+                report.ok,
+                "dense case {:?}: {:?}",
+                case["id"], report.diagnostics
+            );
+            let nodes = spec
+                .get("components")
+                .or_else(|| spec.get("nodes"))
+                .unwrap()
+                .as_array()
+                .unwrap();
+            assert_eq!(nodes.len(), 200);
+        }
+    }
+
+    #[test]
     fn platform_and_build_receipt_identity_do_not_enter_scene_hashes() {
         let request = json!({"specJson":VALID}).to_string();
         let original = crate::layout::layout_json(&request);

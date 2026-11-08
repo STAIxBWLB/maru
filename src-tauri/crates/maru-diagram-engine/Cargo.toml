@@ -14,6 +14,8 @@ default = []
 wasm = ["dep:wasm-bindgen"]
 typegen = ["dep:ts-rs"]
 geometry = []
+# Test/CI corpus tooling is never linked by the normal lazy geometry build.
+geometry-corpus = ["geometry"]
 wasm-layout = ["geometry", "dep:wasm-bindgen"]
 font-tools = ["dep:ttf-parser"]
 bindgen-web = ["wasm", "dep:wasm-bindgen-cli-support"]
@@ -46,4 +48,4 @@ required-features = ["font-tools"]
 [[bin]]
 name = "geometry-foundation-hashes"
 path = "src/bin/geometry_foundation_hashes.rs"
-required-features = ["geometry"]
+required-features = ["geometry-corpus"]

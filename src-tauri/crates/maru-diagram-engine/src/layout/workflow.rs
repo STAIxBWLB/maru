@@ -99,10 +99,14 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
         })?;
         let width = node.width.unwrap_or(NODE_WIDTH);
         let height = node.height.unwrap_or(NODE_HEIGHT);
-        let auto = point(
-            LAYOUT_X + f64::from(node.col) * COLUMN_STEP,
-            LAYOUT_Y + lane as f64 * LANE_STEP + node.y_offset.unwrap_or(0.0),
-        )?;
+        let auto = if let Some(position) = scene.pinned_position(&node.id) {
+            position
+        } else {
+            point(
+                LAYOUT_X + f64::from(node.col) * COLUMN_STEP,
+                LAYOUT_Y + lane as f64 * LANE_STEP + node.y_offset.unwrap_or(0.0),
+            )?
+        };
         let size = (node.width.is_some() || node.height.is_some()).then_some([width, height]);
         scene.add_node(
             &node.id,
@@ -333,5 +337,40 @@ mod tests {
     fn rejects_lane_coordinate_overflow_without_narrowing() {
         let error = crate::layout::point(1e30, 0.0);
         assert!(error.is_err());
+    }
+
+    #[test]
+    fn a_valid_pin_skips_unrepresentable_automatic_offset() {
+        let spec = r#"{"schema_version":1,"diagram_type":"workflow","meta":{"title":"Pinned workflow","output":"pinned-workflow.html"},"lanes":[{"id":"main","label":"Main"}],"nodes":[{"id":"pinned","lane":"main","col":0,"type":"backend","label":"Pinned","yOffset":1e30}],"edges":[]}"#;
+        assert!(crate::validate_json(spec).ok);
+        assert!(
+            !layout(spec).ok,
+            "un-pinned automatic placement must reject overflow"
+        );
+        let request = serde_json::json!({
+            "specJson": spec,
+            "pinSet": {
+                "sourceSpecSha256": crate::spec_hash(spec),
+                "pins": [{
+                    "targetId": "pinned",
+                    "targetKind": "node",
+                    "position": {"x": 17 * 64, "y": 29 * 64}
+                }]
+            }
+        });
+        let report = crate::layout::layout_json(&request.to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        let node = report
+            .geometry
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| node.id == "pinned")
+            .unwrap();
+        assert_eq!(
+            node.position_source,
+            crate::geometry::GeometryPositionSource::PlannedPin
+        );
+        assert_eq!((node.bounds.x, node.bounds.y), (17 * 64, 29 * 64));
     }
 }

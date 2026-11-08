@@ -1063,3 +1063,38 @@ binding drift and both Chromium probes, including the actual-WASM partial scene.
 All 256 native/WASM corpus reports remain byte-identical. Validation is
 324,219 B gzip and the lazy layout/metrics chunk is 1,489,129 B. New-head hosted
 checks and the S3 renderer/performance gates remain pending.
+
+
+The routing-preset follow-up resolves workflow `outside-right`, `return-left`
+and `up-channel` to their corresponding port families and explicit outer
+channels; dataflow `vertical-channel` uses horizontal ports and a vertical
+corridor. Authored channel coordinates override generated ones. A preset is
+not silently treated as `auto`. Tests cover each family and an explicit channel
+coordinate. Automatic vertical-segment labels are placed to a side of the
+corridor, so final routing need not replace the channel just to avoid its label.
+Workflow/lifecycle pin selection also precedes automatic yOffset conversion.
+
+The determinism input now combines the 256 document-parity cases with three
+checked-in, seeded synthetic stress scenes: 200 nodes and 48 relationships each
+for architecture, workflow and dataflow. The generator has no host/random/time
+input and is drift-checked. The same combined file is generated in all native,
+WASM and compare jobs; its SHA/count/order are the comparison contract. These
+are determinism stress fixtures, not additional renderer-oracle verdicts.
+The unit proof checks that a production route succeeds where budget 0 reports
+A* exhaustion for that same edge, while visible adjacent edges still complete.
+
+Corpus tooling is gated by the explicit `geometry-corpus` test feature. Normal
+`wasm-layout` links neither the corpus module nor its export. A guard checks
+both JS and actual WASM exports for absence of `scene_corpus_hashes` after the
+normal build. CI builds `wasm-layout,geometry-corpus` separately into a test-only
+directory, leaving measured product bytes free of the corpus harness. Standalone
+subtree tests enable that feature explicitly to retain test coverage.
+
+The preset/dense-feature follow-up, SDK tree `97d4822b`, passed 97 core tests,
+two differential tests, clippy/type drift and both Chromium probes. The combined
+259-case native and separate test-WASM reports are byte-identical. Each dense
+fixture retains all 200 nodes, proves a successful production A* detour and a
+budget-0 failure for the same edge, and still routes adjacent clear edges.
+The normal product export guard passed for JS and WASM. Validation measures
+324,220 B gzip; normal lazy layout/metrics measures 1,434,912 B, excluding the
+harness. These are remote checks; new-head hosted and S3 gates remain pending.

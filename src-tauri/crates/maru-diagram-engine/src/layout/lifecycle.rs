@@ -77,10 +77,14 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
         })?;
         let width = state.width.unwrap_or(NODE_WIDTH);
         let height = state.height.unwrap_or(NODE_HEIGHT);
-        let auto = point(
-            LAYOUT_X + f64::from(state.col) * COLUMN_STEP,
-            LAYOUT_Y + lane as f64 * LANE_STEP + state.y_offset.unwrap_or(0.0),
-        )?;
+        let auto = if let Some(position) = scene.pinned_position(&state.id) {
+            position
+        } else {
+            point(
+                LAYOUT_X + f64::from(state.col) * COLUMN_STEP,
+                LAYOUT_Y + lane as f64 * LANE_STEP + state.y_offset.unwrap_or(0.0),
+            )?
+        };
         let size = (state.width.is_some() || state.height.is_some()).then_some([width, height]);
         let detail = match (state.sublabel.as_deref(), state.step.as_deref()) {
             (Some(sublabel), Some(step)) if sublabel != step => Some(format!("{sublabel}\n{step}")),
@@ -229,5 +233,41 @@ mod tests {
     #[test]
     fn rejects_nonrepresentable_fixed_point_positions() {
         assert!(super::point(0.0, 1e30).is_err());
+    }
+
+    #[test]
+    fn a_valid_pin_skips_unrepresentable_automatic_offset() {
+        let spec = r#"{"schema_version":1,"diagram_type":"lifecycle","meta":{"title":"Pinned lifecycle","output":"pinned-lifecycle.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"pinned","type":"start","label":"Pinned","lane":"main","col":0,"yOffset":1e30},{"id":"done","type":"success","label":"Done","lane":"main","col":1}],"transitions":[]}"#;
+        assert!(crate::validate_json(spec).ok);
+        let unpinned = serde_json::json!({ "specJson": spec });
+        assert!(
+            !crate::layout::layout_json(&unpinned.to_string()).ok,
+            "un-pinned automatic placement must reject overflow"
+        );
+        let request = serde_json::json!({
+            "specJson": spec,
+            "pinSet": {
+                "sourceSpecSha256": crate::spec_hash(spec),
+                "pins": [{
+                    "targetId": "pinned",
+                    "targetKind": "node",
+                    "position": {"x": 17 * 64, "y": 29 * 64}
+                }]
+            }
+        });
+        let report = crate::layout::layout_json(&request.to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        let node = report
+            .geometry
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| node.id == "pinned")
+            .unwrap();
+        assert_eq!(
+            node.position_source,
+            crate::geometry::GeometryPositionSource::PlannedPin
+        );
+        assert_eq!((node.bounds.x, node.bounds.y), (17 * 64, 29 * 64));
     }
 }

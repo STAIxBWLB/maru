@@ -503,30 +503,35 @@ impl SceneBuilder {
         } else {
             ("top", "bottom")
         };
-        let default_sides = if r.from == r.to {
-            ("right", "bottom")
-        } else if r.from_y.is_some() {
-            horizontal
-        } else {
-            match r.route.as_deref() {
-                Some("bottom-channel") => ("bottom", "bottom"),
-                Some("top-channel") => ("top", "top"),
-                Some("right-channel") => ("right", "right"),
-                Some("left-channel") => ("left", "left"),
-                Some("orthogonal-v" | "drop") => vertical,
-                Some("orthogonal-h") => horizontal,
-                _ => {
-                    if dy.abs() > dx.abs() {
-                        vertical
-                    } else {
-                        horizontal
-                    }
-                }
+        let preset_sides = match r.route.as_deref() {
+            Some("bottom-channel") => Some(("bottom", "bottom")),
+            Some("top-channel" | "up-channel") => Some(("top", "top")),
+            Some("right-channel" | "outside-right") => Some(("right", "right")),
+            Some("left-channel" | "return-left") => Some(("left", "left")),
+            Some("orthogonal-v" | "drop") => Some(vertical),
+            Some("orthogonal-h" | "vertical-channel") => Some(horizontal),
+            _ => None,
+        };
+        let default_sides = if r.from_y.is_some() {
+            if r.from == r.to {
+                ("right", "bottom")
+            } else {
+                horizontal
             }
+        } else {
+            preset_sides.unwrap_or_else(|| {
+                if r.from == r.to {
+                    ("right", "bottom")
+                } else if dy.abs() > dx.abs() {
+                    vertical
+                } else {
+                    horizontal
+                }
+            })
         };
         let clearance = add(r.width.unwrap_or(2 * 64) / 2, 2 * 64)?.max(4 * 64);
         let escape = add(clearance, 6 * 64)?;
-        let (a, start) = self.port(
+        let (mut a, mut start) = self.port(
             from,
             r.from_side.as_deref().unwrap_or(default_sides.0),
             r.from_y,
@@ -536,14 +541,65 @@ impl SceneBuilder {
             (true, Some(from), Some(to)) if from == to => Some(add(from, 32 * 64)?),
             _ => r.to_y,
         };
-        let (z, end) = self.port(
+        let (mut z, mut end) = self.port(
             to,
             r.to_side.as_deref().unwrap_or(default_sides.1),
             to_y,
             escape,
         )?;
+        if r.from == r.to && r.from_y.is_none() && a == z {
+            let side = r.from_side.as_deref().unwrap_or(default_sides.0);
+            let horizontal_side = side == "left" || side == "right";
+            let spread = (if horizontal_side {
+                from.height
+            } else {
+                from.width
+            }) / 4;
+            let spread = spread.min(12 * 64);
+            let (sx, sy) = if horizontal_side {
+                (0, spread)
+            } else {
+                (spread, 0)
+            };
+            a = a.checked_translate(-sx, -sy).map_err(arithmetic)?;
+            start = start.checked_translate(-sx, -sy).map_err(arithmetic)?;
+            z = z.checked_translate(sx, sy).map_err(arithmetic)?;
+            end = end.checked_translate(sx, sy).map_err(arithmetic)?;
+        }
         let mut waypoints = r.waypoints.clone();
-        let channels = match (r.channel_x, r.channel_y) {
+        let mut channel_x = r.channel_x;
+        let mut channel_y = r.channel_y;
+        if waypoints.is_empty() {
+            let padding = add(clearance, 32 * 64)?;
+            match r.route.as_deref() {
+                Some("outside-right") if channel_x.is_none() => {
+                    let right = self
+                        .document
+                        .nodes
+                        .iter()
+                        .map(|n| n.bounds)
+                        .chain(self.document.containers.iter().map(|c| c.bounds))
+                        .try_fold(from.right().map_err(arithmetic)?, |value, b| {
+                            Ok::<_, Diagnostic>(value.max(b.right().map_err(arithmetic)?))
+                        })?;
+                    channel_x = Some(add(right, padding)?);
+                }
+                Some("return-left") if channel_x.is_none() => {
+                    channel_x = Some(add(from.x.min(to.x), -padding)?)
+                }
+                Some("up-channel") if channel_y.is_none() => {
+                    channel_y = Some(add(from.y.min(to.y), -padding)?)
+                }
+                Some("vertical-channel") if channel_x.is_none() => {
+                    channel_x = Some(add(
+                        start.x,
+                        if end.x >= start.x { 44 * 64 } else { -44 * 64 },
+                    )?)
+                }
+                _ => {}
+            }
+        }
+        let channels = match (channel_x, channel_y) {
             (Some(x), Some(y)) => vec![
                 GeometryPoint { x, y: start.y },
                 GeometryPoint { x, y },
@@ -627,8 +683,13 @@ impl SceneBuilder {
                         x: fixed::checked_midpoint(p[0].x, p[1].x).map_err(arithmetic)?,
                         y: fixed::checked_midpoint(p[0].y, p[1].y).map_err(arithmetic)?,
                     };
-                    for offset in [-h - 6 * 64, 6 * 64] {
-                        let candidate = rect(add(center.x, -w / 2)?, add(center.y, offset)?, w, h)?;
+                    let offsets = if p[0].x == p[1].x {
+                        [(-w - 6 * 64, -h / 2), (6 * 64, -h / 2)]
+                    } else {
+                        [(-w / 2, -h - 6 * 64), (-w / 2, 6 * 64)]
+                    };
+                    for (dx, dy) in offsets {
+                        let candidate = rect(add(center.x, dx)?, add(center.y, dy)?, w, h)?;
                         if !obstacles.iter().any(|o| intersects(candidate, *o))
                             && !points
                                 .iter()
@@ -1213,6 +1274,179 @@ mod tests {
         let first = layout_json_with_route_budget(&request, 1);
         assert_eq!(first, layout_json_with_route_budget(&request, 1));
         assert_partial_route(first, "architecture/route-budget");
+    }
+
+    fn preset_scene(preset: &str) -> GeometryDocument {
+        let mut spec: Value = serde_json::from_str(if preset == "vertical-channel" {
+            fixtures()[3]
+        } else {
+            fixtures()[1]
+        })
+        .unwrap();
+        let collection = if preset == "vertical-channel" {
+            "flows"
+        } else {
+            "edges"
+        };
+        spec[collection][0]["route"] = preset.into();
+        if preset != "vertical-channel" {
+            spec[collection][0].as_object_mut().unwrap().remove("label");
+        }
+        if preset == "vertical-channel" {
+            spec["nodes"][1]["row"] = 2.into();
+        }
+        let report = layout(&spec.to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        report.geometry.unwrap()
+    }
+    #[test]
+    fn outside_right_preset_uses_right_ports_and_an_outer_channel() {
+        let scene = preset_scene("outside-right");
+        let edge = &scene.routes[0];
+        let from = scene
+            .nodes
+            .iter()
+            .find(|n| n.id == edge.from)
+            .unwrap()
+            .bounds;
+        let to = scene.nodes.iter().find(|n| n.id == edge.to).unwrap().bounds;
+        let right = scene
+            .nodes
+            .iter()
+            .map(|n| n.bounds.right().unwrap())
+            .max()
+            .unwrap();
+        assert_eq!(edge.points.first().unwrap().x, from.right().unwrap());
+        assert_eq!(edge.points.last().unwrap().x, to.right().unwrap());
+        assert!(edge.points.iter().any(|p| p.x > right));
+    }
+    #[test]
+    fn return_left_preset_uses_left_ports_and_a_left_channel() {
+        let scene = preset_scene("return-left");
+        let edge = &scene.routes[0];
+        let from = scene
+            .nodes
+            .iter()
+            .find(|n| n.id == edge.from)
+            .unwrap()
+            .bounds;
+        let to = scene.nodes.iter().find(|n| n.id == edge.to).unwrap().bounds;
+        assert_eq!(edge.points.first().unwrap().x, from.x);
+        assert_eq!(edge.points.last().unwrap().x, to.x);
+        assert!(edge.points.iter().any(|p| p.x < from.x.min(to.x)));
+    }
+    #[test]
+    fn up_channel_preset_uses_top_ports_and_an_upper_channel() {
+        let scene = preset_scene("up-channel");
+        let edge = &scene.routes[0];
+        let from = scene
+            .nodes
+            .iter()
+            .find(|n| n.id == edge.from)
+            .unwrap()
+            .bounds;
+        let to = scene.nodes.iter().find(|n| n.id == edge.to).unwrap().bounds;
+        assert_eq!(edge.points.first().unwrap().y, from.y);
+        assert_eq!(edge.points.last().unwrap().y, to.y);
+        assert!(edge.points.iter().any(|p| p.y < from.y.min(to.y)));
+    }
+    #[test]
+    fn vertical_channel_preset_uses_horizontal_ports_and_an_explicit_vertical_corridor() {
+        let scene = preset_scene("vertical-channel");
+        let edge = &scene.routes[0];
+        let from = scene
+            .nodes
+            .iter()
+            .find(|n| n.id == edge.from)
+            .unwrap()
+            .bounds;
+        let to = scene.nodes.iter().find(|n| n.id == edge.to).unwrap().bounds;
+        assert_eq!(edge.points.first().unwrap().x, from.right().unwrap());
+        assert_eq!(edge.points.last().unwrap().x, to.x);
+        let channel = from.right().unwrap() + 10 * 64 + 44 * 64;
+        assert!(edge
+            .points
+            .windows(2)
+            .any(|p| p[0].x == channel && p[1].x == channel && p[0].y != p[1].y));
+    }
+
+    #[test]
+    fn authored_preset_channels_are_not_replaced_by_automatic_channels() {
+        let mut spec: Value = serde_json::from_str(fixtures()[1]).unwrap();
+        spec["edges"][0]["route"] = "outside-right".into();
+        spec["edges"][0]["channelX"] = 1500.into();
+        spec["edges"][0].as_object_mut().unwrap().remove("label");
+        let report = layout(&spec.to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        assert!(report.geometry.unwrap().routes[0]
+            .points
+            .iter()
+            .any(|p| p.x == 1500 * 64));
+    }
+
+    #[test]
+    fn seeded_dense_scenes_exercise_real_astar_and_keep_clear_edges_on_budget_exhaustion() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../../testdata/dense-scenes.json")).unwrap();
+        for case in corpus["cases"].as_array().unwrap() {
+            let source = case["spec"].to_string();
+            assert!(crate::validate_json(&source).ok, "{}", case["id"]);
+            let normal = layout(&source);
+            let scene = normal.geometry.expect("dense placement retained");
+            assert_eq!(scene.nodes.len(), 200);
+            assert!(
+                scene.routes.iter().any(|r| r
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("long-"))
+                    && r.points.len() >= 4),
+                "{} no long edge routed",
+                case["id"]
+            );
+            let routed_ids: BTreeSet<_> = scene
+                .routes
+                .iter()
+                .filter(|r| !r.points.is_empty())
+                .filter_map(|r| r.id.clone())
+                .collect();
+            let request = serde_json::json!({"specJson":source}).to_string();
+            let small = layout_json_with_route_budget(&request, 0);
+            assert!(!small.ok, "{} did not exercise A*", case["id"]);
+            assert!(
+                small
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code.ends_with("/route-budget")),
+                "{} no A* budget failure",
+                case["id"]
+            );
+            let budget_ids: BTreeSet<_> = small
+                .diagnostics
+                .iter()
+                .filter(|d| d.code.ends_with("/route-budget"))
+                .map(|d| d.message.clone())
+                .collect();
+            let scene = small.geometry.unwrap();
+            assert_eq!(scene.nodes.len(), 200);
+            assert!(
+                scene.routes.iter().any(|r| r.points.is_empty()
+                    && r.id.as_deref().is_some_and(|id| routed_ids.contains(id)
+                        && budget_ids
+                            .iter()
+                            .any(|message| message.starts_with(&format!("edge {id:?}:"))))),
+                "{} no successful production A* detour proven",
+                case["id"]
+            );
+            assert!(
+                scene.routes.iter().any(|r| r
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("adjacent-"))
+                    && !r.points.is_empty()),
+                "{} no visible adjacent path",
+                case["id"]
+            );
+        }
     }
 
     #[test]
