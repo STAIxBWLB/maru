@@ -8,7 +8,7 @@ import { confirmDialog, messageDialog } from "../../lib/confirmDialog";
 import { SEMANTIC_FIXTURES } from "../../lib/diagram/__fixtures__/semantic";
 import { defaultCoalescer, undo } from "../../lib/diagram/actions";
 import { archifySpecToDataset } from "../../lib/diagram/archifyCodec";
-import { projectSemanticDataset, projectSemanticDocument, semanticContainerId } from "../../lib/diagram/semantic";
+import { projectSemanticDataset, projectSemanticDocument, semanticContainerId, semanticDatasetsOf } from "../../lib/diagram/semantic";
 import { createDiagramStore, type DiagramStore } from "../../lib/diagram/state";
 import { createInitialEphemeral, type DiagramDoc } from "../../lib/diagram/types";
 import { LocaleContext, t as translate } from "../../lib/i18n";
@@ -165,7 +165,7 @@ describe("deleteSelection", () => {
     const newB = semanticContainerId("ds", "boundary", "0");
     const store = storeWith(doc, [oldA]);
     const before = JSON.stringify(doc);
-    const dataset = doc.datasets!.find((item) => item.id === "ds")!;
+    const dataset = semanticDatasetsOf(doc).find((item) => item.id === "ds")!;
     const oldBProjection = projectSemanticDataset(dataset, { containers: true, doc }).nodes.find((node) => node.id === oldB)!;
     const nextSpec = { ...dataset.spec, boundaries: (dataset.spec.boundaries as unknown[]).slice(1) };
     const newBProjection = projectSemanticDataset({ ...dataset, spec: nextSpec }, { containers: true, doc }).nodes.find((node) => node.id === newB)!;

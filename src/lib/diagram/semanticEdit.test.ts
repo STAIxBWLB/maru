@@ -367,6 +367,45 @@ describe("semantic structural edits", () => {
     validateWithPinnedArchify("sequence", source);
   });
 
+  it("uses nearest surviving anchor segments below, between, and above the timeline", () => {
+    const source = { ...structuredClone(SEMANTIC_FIXTURES.sequence),
+      activations: [
+        { participant: "api", from: 100, to: 140 },
+        { participant: "api", from: 200, to: 220 },
+        { participant: "api", from: 400, to: 450 },
+      ],
+      segments: [{ from: 400, to: 450, label: "Tail" }],
+    };
+    validateWithPinnedArchify("sequence", source);
+    const next = removeSemanticEntries("sequence", source, [{ field: "messages", index: 1 }]).transform(source)!.spec;
+    const activations = next.activations as Array<{ from: number; to: number }>;
+    expect(activations.map(({ from, to }) => [from, to])).toEqual([[140, 160], [190, 200], [350, 400]]);
+    expect(activations[2]!.to - activations[2]!.from).toBe(50);
+    expect(next.segments).toEqual([{ from: 350, to: 400, label: "Tail" }]);
+    validateWithPinnedArchify("sequence", next);
+  });
+
+  it("shifts stage references on index insertion and keeps both old stage memberships", () => {
+    const store = storeOf("dataflow");
+    const before = JSON.stringify(store.getState().doc);
+    const oldStageA = semanticContainerId("ds", "stage", "0");
+    store.setState((state) => ({ ...state, doc: { ...state.doc, edges: [...state.doc.edges,
+      { id: "stage-note", fromNode: oldStageA, fromPort: "e", toNode: "app", toPort: "w", label: "Stage A" },
+    ] } }));
+    const annotated = JSON.stringify(store.getState().doc);
+    const result = apply(store, addSemanticEntry("dataflow", "stages", { label: "Before collect" }, 0));
+    expect(result.status).toBe("applied");
+    const next = specOf(store.getState());
+    expect(next.nodes!.map((node) => [node.id, node.stage])).toEqual([["app", 1], ["wh", 2]]);
+    expect(next.stages!.map((stage) => stage.label)).toEqual(["Before collect", "Collect", "Store"]);
+    expect(store.getState().doc.edges.find((edge) => edge.id === "stage-note")?.fromNode).toBe(semanticContainerId("ds", "stage", "1"));
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    validateWithPinnedArchify("dataflow", next);
+    store.setState(undo());
+    expect(JSON.stringify(store.getState().doc)).toBe(annotated);
+    expect(before).not.toBe(annotated);
+  });
+
   it("keeps a surviving segment within engine bounds after removing a leading message block", () => {
     const source = { ...structuredClone(SEMANTIC_FIXTURES.sequence), segments: [{ from: 170, to: 340, label: "Exchange" }] };
     const store = storeOf("sequence", source);

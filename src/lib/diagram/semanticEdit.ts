@@ -350,7 +350,7 @@ function remapSequenceRanges(
   const mapY = (y: unknown): unknown => {
     if (typeof y !== "number" || !Number.isFinite(y)) return y;
     if (anchors.length === 1) return y + (anchors[0]!.next - anchors[0]!.old);
-    let left = anchors[0]!;
+    let left = anchors[anchors.length - 2]!;
     let right = anchors[anchors.length - 1]!;
     for (let i = 1; i < anchors.length; i++) {
       if (y <= anchors[i]!.old) { left = anchors[i - 1]!; right = anchors[i]!; break; }
@@ -437,6 +437,12 @@ export function addSemanticEntry(
     }
     const nextEntries = [...entries.slice(0, at), added, ...entries.slice(at)];
     let next: Record<string, unknown> = { ...spec, [field]: nextEntries };
+    if (type === "dataflow" && field === "stages") {
+      next.nodes = specEntries(spec, "nodes").map((node) => {
+        const stage = node.stage;
+        return typeof stage === "number" && stage >= at ? { ...node, stage: stage + 1 } : node;
+      });
+    }
     if (type === "sequence" && field === "messages") {
       const oldOrder = sequenceOrder(spec);
       const foundInsertionPosition = oldOrder.findIndex((oldIndex) => oldIndex >= at);

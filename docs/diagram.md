@@ -285,8 +285,10 @@ Index-keyed containers remap canvas IDs, annotation endpoints and selection
 atomically with the spec edit. A surviving container keeps its own geometry
 offset rather than inheriting the removed entry's canvas slot; lost
 annotations belong to the removed entry and appear in the preview. Sequence
-insert/remove deterministically re-space message y coordinates and retain
-valid timeline ranges. Boundary member checkboxes apply the entire wraps
+insert/remove deterministically re-space message y coordinates and remap
+ranges with the nearest surviving anchor segment for interpolation and
+extrapolation. Dataflow stage insertion/removal shifts numeric node-stage
+memberships in the same transform; lane references remain ID-based. Boundary member checkboxes apply the entire wraps
 set in one edit; phase/group and segment/activation ranges have explicit
 Apply controls, with group lane and activation participant selectors.
 Every structural command runs `validateSemanticContent`, proposal validation
