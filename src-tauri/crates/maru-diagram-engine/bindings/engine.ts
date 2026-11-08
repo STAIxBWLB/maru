@@ -83,3 +83,74 @@ export type LifecycleLane = { id: string, label: string, };
 export type LifecycleState = { id: string, type: string, label: string, sublabel?: string | null, tag?: string | null, icon?: string | null, brand?: Brand | null, sources?: Array<SourceReference> | null, step?: string | null, lane: string, col: number, width?: number | null, height?: number | null, yOffset?: number | null, };
 
 export type LifecycleTransition = { id?: string | null, from: string, to: string, label?: string | null, note?: string | null, variant?: string | null, route?: string | null, fromSide?: string | null, toSide?: string | null, channelX?: number | null, channelY?: number | null, cornerRadius?: number | null, labelAt?: [number, number] | null, labelDx?: number | null, labelDy?: number | null, labelSegment?: number | null, via?: Array<[number, number]> | null, width?: number | null, };
+
+export type GeometryTargetKind = "node" | "container";
+
+export type GeometryPositionSource = "plannedPin" | "authoredPosition" | "automatic";
+
+export type GeometryPoint = { x: number, y: number, };
+
+export type GeometryBox = { x: number, y: number, width: number, height: number, };
+
+export type FontIdentity = { id: string, revision: string, fontSha256: string, weight: number, unitsPerEm: number, license: string, };
+
+export type GeometryNode = { id: string, bounds: GeometryBox,
+/**
+ * Future placement resolution order is planned pin, authored position,
+ * then automatic placement.
+ */
+positionSource: GeometryPositionSource, };
+
+export type GeometryContainer = { id: string, kind: string, bounds: GeometryBox, };
+
+export type GeometryRoute = { id?: string | null, from: string, to: string, points: Array<GeometryPoint>, };
+
+export type GeometryLabel = { id?: string | null, targetId: string, text: string, bounds: GeometryBox, font: FontIdentity, };
+
+export type GeometryLegendEntry = { key: string, label: string, bounds: GeometryBox, };
+
+export type GeometryLegend = { bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
+
+export type GeometryPage = { bounds: GeometryBox, };
+
+export type GeometryDocument = { nodes: Array<GeometryNode>, containers: Array<GeometryContainer>, routes: Array<GeometryRoute>, labels: Array<GeometryLabel>, legend: GeometryLegend, page: GeometryPage, };
+
+export type GeometryReport = { apiVersion: number, ok: boolean, geometry?: GeometryDocument | null, diagnostics: Array<Diagnostic>, receipt: EngineReceipt, };
+
+export type LayoutRequest = { specJson: string, pinSet?: PinSet | null, };
+
+export type PinSet = { sourceSpecSha256: string, pins?: Array<GeometryPin>, };
+
+export type GeometryPin = { targetId: string, targetKind: GeometryTargetKind, position: GeometryPoint, role?: string | null, };
+
+export type GlyphPosition = {
+/**
+ * Original scalar, retained for attribution when replacement was needed.
+ */
+input: string,
+/**
+ * The scalar mapped to glyph_id, never an OS fallback glyph.
+ */
+rendered: string, glyphId: number, position: GeometryPoint,
+/**
+ * Difference of rounded prefix advances, avoiding per-glyph drift.
+ */
+advance: number, leftSideBearing: number,
+/**
+ * Ink relative to the run baseline, with outward-rounded bounds.
+ */
+ink: GeometryBox, replaced: boolean, };
+
+export type TextMetrics = { font: FontIdentity,
+/**
+ * Requested size in 1/64 pixel units.
+ */
+size: number, advance: number,
+/**
+ * Empty runs and inkless runs have a zero box at the baseline origin.
+ */
+ink: GeometryBox, ascender: number,
+/**
+ * Signed, normally negative below the baseline.
+ */
+descender: number, lineGap: number, glyphs: Array<GlyphPosition>, replacements: number, };

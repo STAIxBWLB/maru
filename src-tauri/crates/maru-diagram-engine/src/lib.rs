@@ -1,7 +1,7 @@
 //! Independent document validity engine for the Maru diagram engine.
 //!
-//! This crate validates typed JSON only. It intentionally does not perform
-//! layout, routing, rendering, filesystem access, or Tauri integration.
+//! The default feature validates typed JSON only. Opt-in geometry foundations
+//! add fixed-point contracts and pinned font metrics, with no rendering or app access.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -9,7 +9,13 @@ use sha2::{Digest, Sha256};
 pub mod architecture;
 mod common;
 pub mod dataflow;
+#[cfg(feature = "geometry")]
+pub mod geometry;
+#[cfg(feature = "geometry")]
+pub mod layout;
 pub mod lifecycle;
+#[cfg(feature = "geometry")]
+pub mod metrics;
 pub mod rules;
 pub mod sequence;
 pub mod workflow;
@@ -18,7 +24,7 @@ pub use architecture::{
     ArchitectureMeta, ArchitectureSpec,
 };
 
-#[cfg(feature = "wasm")]
+#[cfg(any(feature = "wasm", feature = "wasm-layout"))]
 use wasm_bindgen::prelude::*;
 
 pub const API_VERSION: u32 = 1;
@@ -352,6 +358,16 @@ pub fn parse_receipt_json_for_wasm(input: &str) -> String {
     }
 }
 
+/// S1 exposes real text metrics only; the scene-layout API is added after placement/routing.
+#[cfg(feature = "wasm-layout")]
+#[wasm_bindgen]
+pub fn measure_text_json(text: &str, weight: u16, size: i32) -> String {
+    match metrics::measure_text(text, weight, size) {
+        Ok(metrics) => serde_json::json!({ "ok": true, "metrics": metrics }).to_string(),
+        Err(diagnostic) => serde_json::json!({ "ok": false, "diagnostic": diagnostic }).to_string(),
+    }
+}
+
 #[cfg(feature = "typegen")]
 pub fn typescript_declarations() -> String {
     use ts_rs::{Config, TS};
@@ -371,9 +387,19 @@ pub fn typescript_declarations() -> String {
     declarations.extend(sequence::declarations(&cfg));
     declarations.extend(dataflow::declarations(&cfg));
     declarations.extend(lifecycle::declarations(&cfg));
+    #[cfg(feature = "geometry")]
+    {
+        declarations.extend(geometry::declarations(&cfg));
+        declarations.extend(metrics::declarations(&cfg));
+    }
     declarations
         .into_iter()
-        .map(|s| format!("export {s}"))
+        .map(|s| {
+            format!(
+                "export {}",
+                s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }

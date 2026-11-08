@@ -20,6 +20,12 @@ export const NATIVE_FILES = [
   ".github/workflows/native-e2e.yml", "scripts/ci-policy.mjs",
 ];
 
+export function needsGeometryDeterminism(paths) {
+  return paths.some((name) => name.startsWith("src-tauri/crates/")
+    || name.startsWith("scripts/diagram-engine-e2")
+    || ["rust-toolchain.toml", "src/lib/diagram/engineGeometry.ts", ".github/workflows/diagram-determinism.yml", ".github/workflows/ci.yml", "scripts/ci-policy.mjs"].includes(name));
+}
+
 export function isDocsOnlyPath(name) {
   // Performance JSON is gate input, even though it lives under docs/.
   if (name.startsWith("docs/performance/") && name.endsWith(".json")) return false;
@@ -42,6 +48,7 @@ export function classifyPrChanges(paths, labels = []) {
     run_e2e: !docsOnly,
     run_native: runNative,
     run_native_compile: !docsOnly && !runNative,
+    run_geometry: !docsOnly && needsGeometryDeterminism(paths),
   };
 }
 
@@ -50,12 +57,12 @@ export function evaluateCiJobs(needs) {
     return { ok: false, message: "CI decision did not succeed; inspect its logs and rerun CI" };
   }
   const outputs = needs.decision.outputs ?? {};
-  for (const flag of ["run_full", "run_e2e", "run_native", "run_native_compile"]) {
+  for (const flag of ["run_full", "run_e2e", "run_native", "run_native_compile", "run_geometry"]) {
     if (!["true", "false"].includes(outputs[flag])) {
       return { ok: false, message: `CI decision output ${flag} is invalid; inspect the decision and rerun CI` };
     }
   }
-  const gates = { verify: "run_full", e2e: "run_e2e", "native-e2e-compile": "run_native_compile", "native-e2e": "run_native" };
+  const gates = { verify: "run_full", e2e: "run_e2e", "native-e2e-compile": "run_native_compile", "native-e2e": "run_native", "geometry-determinism": "run_geometry" };
   for (const [job, flag] of Object.entries(gates)) {
     const result = needs[job]?.result;
     if (result === "success" || (result === "skipped" && outputs[flag] === "false")) continue;

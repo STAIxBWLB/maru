@@ -33,7 +33,7 @@ describe("native-e2e CI placement (T-06-11)", () => {
     expect(compileJob).toMatch(/^ {4}needs: decision$/m);
     expect(compileJob).toMatch(/^ {4}if: needs\.decision\.outputs\.run_native_compile == 'true'$/m);
     const decision = jobBlock(ciYml, "decision");
-    for (const output of ["run_full", "run_e2e", "run_native", "run_native_compile"]) {
+    for (const output of ["run_full", "run_e2e", "run_native", "run_native_compile", "run_geometry"]) {
       expect(decision).toContain(output + ": " + '${{ steps.dedupe.outputs.' + output + ' }}');
     }
     expect(decision).toContain('node scripts/ci-policy.mjs classify');
@@ -45,7 +45,7 @@ describe("native-e2e CI placement (T-06-11)", () => {
   it("always aggregates every gate and admits only intentional skips", () => {
     const aggregate = jobBlock(ciYml, "ci-ok");
     expect(aggregate).toMatch(/^ {4}if: always\(\)$/m);
-    expect(aggregate).toContain("needs: [decision, verify, e2e, native-e2e-compile, native-e2e]");
+    expect(aggregate).toContain("needs: [decision, verify, e2e, native-e2e-compile, native-e2e, geometry-determinism]");
     const jobs = Array.from(ciYml.slice(ciYml.indexOf("\njobs:")).matchAll(/^ {2}([A-Za-z0-9_-]+):$/gm), (match) => match[1]);
     const needs = aggregate.match(/^ {4}needs: \[(.*)\]$/m)?.[1].split(", ") ?? [];
     expect(new Set(needs)).toEqual(new Set(jobs.filter((job) => job !== "ci-ok")));

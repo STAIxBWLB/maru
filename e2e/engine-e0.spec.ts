@@ -10,6 +10,8 @@ test.describe("independent engine WebAssembly spike", () => {
     const documents = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"].map((kind) =>
       JSON.parse(readFileSync(`src-tauri/crates/maru-diagram-engine/testdata/valid-${kind}.json`, "utf8")) as { diagram_type: string; schema_version: number });
     documents.push({ ...documents[1]!, schema_version: 2 }, { ...documents[4]!, schema_version: 2 });
+    const loadedChunks: string[] = [];
+    page.on("request", (request) => { if (request.url().includes("/.engine-e0/browser/")) loadedChunks.push(request.url()); });
     await page.goto("/");
     const result = await page.evaluate(async ({ inputs, documents }) => {
       const modulePath = "/.engine-e0/browser/engine-e0.js";
@@ -51,7 +53,25 @@ test.describe("independent engine WebAssembly spike", () => {
     for (const sample of result.samples) {
       expect(sample.durationsMs).toHaveLength(30);
       expect(sample.durationsMs.every((value) => Number.isFinite(value) && value >= 0)).toBe(true);
+      const ordered = [...sample.durationsMs].sort((a, b) => a - b);
+      expect(ordered[Math.ceil(ordered.length * 0.95) - 1], "Validation p95 exceeded 50 ms; inspect the static payload and decoder before adding geometry dependencies").toBeLessThan(50);
     }
+    expect(loadedChunks.some((url) => url.includes("engineGeometry"))).toBe(false);
+    const foundation = await page.evaluate(async () => {
+      const modulePath = "/.engine-e0/browser/engine-e0.js";
+      const { loadGeometryFoundation } = await import(/* @vite-ignore */ modulePath) as {
+        loadGeometryFoundation(): Promise<{ measureText(text: string, weight: 400 | 700, size: number): {
+          advance: number; replacements: number; font: { weight: number }; glyphs: unknown[];
+        } }>;
+      };
+      const metrics = await loadGeometryFoundation();
+      const text = "Latin 한글 日本語 漢字";
+      return [400, 700].map((weight) => metrics.measureText(text, weight as 400 | 700, 14 * 64));
+    });
+    expect(loadedChunks.some((url) => url.includes("engineGeometry"))).toBe(true);
+    expect(foundation.map((item) => item.font.weight)).toEqual([400, 700]);
+    expect(foundation.every((item) => item.advance > 0 && item.replacements === 0 && item.glyphs.length > 0)).toBe(true);
+    console.log(`ENGINE_E2_FOUNDATION ${JSON.stringify({ scope: "lazy text metrics only, not scene layout", foundation })}`);
     console.log(`ENGINE_E0_WASM ${JSON.stringify(result)}`);
     await test.info().attach("engine-e0-wasm.json", { body: JSON.stringify(result, null, 2), contentType: "application/json" });
   });

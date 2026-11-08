@@ -872,3 +872,58 @@ The W1 source-only split `246b7c38` (tree `14ee8f01`) passed 29 core unit tests,
 two differential tests over all 256 cases and three plugin tests with Node
 removed from PATH. The app's default/native feature checks, boundary and type
 drift checks also passed remotely; the final-head hosted gate remains pending.
+
+### E2 staged geometry foundations
+
+E2 is delivered in three stages: fixed-point/pin/font contracts and the lazy
+payload boundary, five-type placement and routing, then geometry diagnostic
+parity and the test-only canvas/performance proof. The first stage exposes real
+text measurement, not a placeholder layout or a passed geometry receipt. The
+production canvas and `semanticApply` continue using their existing paths.
+
+Geometry coordinates are signed 32-bit integers in 1/64-pixel units, with
+checked 64-bit intermediate arithmetic. Pixel inputs quantize once, rounding
+halves away from zero. A pin set binds the exact serialized spec SHA-256 and
+semantic member IDs; later placement gives pins precedence over authored
+positions, then automatic placement. The planned test adapter takes explicitly
+pinned current canvas x/y values and `meta.memberId`, rather than treating every
+projected canvas position as a pin. A source mismatch is refused before layout. Generic request/font failures use
+`document/...`; renderer-specific geometry refusals use the diagram-type namespace.
+
+Text uses Noto Sans CJK KR Regular 400 and Bold 700, pinned to the upstream
+[`f8d157532fbfaeda587e826d4cd5b21a49186f7c` source](https://github.com/notofonts/noto-cjk/tree/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/Korean),
+under [SIL OFL 1.1](https://github.com/notofonts/noto-cjk/blob/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/LICENSE).
+The SDK carries derived cmap, horizontal advance and ink-box tables plus font
+hashes and the complete licence. Font parsing/download happens only in the
+host-side generator; runtime never queries system fonts. Prefix advances use
+integer scaling and ink boxes round outward. Unsupported scalars use the pinned
+replacement glyph and are counted. E3 must render these same original-font glyph
+IDs, weights and positions, with kerning, ligatures and localized substitutions
+disabled; a system-font fallback would violate this contract.
+
+The default `wasm` validation build excludes geometry and metric tables. A
+separate `wasm-layout` build is referenced only by the dynamic `engineGeometry`
+module. Payload receipts classify the actual emitted entry/static graph and
+lazy metric/transport chunks separately, including Vite-inlined WASM bytes.
+The validation entry is gated at 400,000 gzip bytes; lazy bytes are reported
+separately, not hidden in the validation total. The browser probe verifies that
+validation does not fetch the metric chunk before explicit text measurement.
+
+The first cross-platform matrix hashes fixed arithmetic and both fonts' text
+metrics for every parity-corpus record on Linux, macOS and Windows. It is a
+foundation check, **not AC2's final whole-scene determinism proof**. Placement,
+routes, legend/page boxes and pin preservation join that hash in the next stage.
+The three E1 geometry divergences remain open until that implementation; no new
+Archify validity agreement or 1,000-node layout latency is claimed here.
+
+S1's [remote reproduction](diagram-engine-e2.json), SDK tree `e9eac907`, measured
+**324,126 B gzip** for validation (81% of the 400,000 B budget),
+**1,043,487 B** for the separately lazy metric chunk and 122 B for optional
+IPC transport. The two font tables occupy 1,948,208 raw bytes; original OTF
+binaries are not bundled here. The incremental build step took 16.80 s with warm
+registry/check/WASM caches, not a hosted CI timing. Chromium confirmed no metric
+chunk request before explicit load, then measured both CJK-covered weights
+without replacement glyphs. Validation cold initialization was 471.2 ms;
+30 warm samples at 1,000 nodes measured median 7.3 / p95 8.1 ms (max 11.6 ms).
+These are validation numbers, **not layout/routing latency**. Hosted payload,
+latency and the three-OS foundation matrix remain pending at submission.

@@ -30,3 +30,8 @@ export async function loadWasmEngine(): Promise<DiagramEngine> {
   const validate = bindings.validate_diagram_json as (input: string) => string;
   return { transport: "wasm", async validate(input) { return checkedReport(JSON.parse(validate(input))); } };
 }
+
+/** Loading validation never imports the geometry/metric asset module. */
+export async function loadGeometryFoundation() {
+  return (await import("./engineGeometry")).loadGeometryFoundation();
+}

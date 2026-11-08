@@ -1,0 +1,58 @@
+name: diagram-determinism
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: SDK foundation hashes (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-26, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+      - name: Cache pure SDK
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/crates -> target
+          shared-key: diagram-fixed-metrics-${{ matrix.os }}
+      - name: Hash foundation metrics for the whole corpus
+        shell: bash
+        run: |
+          mkdir -p .engine-e2/determinism
+          cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry --bin geometry-foundation-hashes -- src-tauri/crates/maru-diagram-engine/testdata/parity.json .engine-e2/determinism/foundation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diagram-foundation-${{ matrix.os }}
+          path: .engine-e2/determinism/foundation.json
+          if-no-files-found: error
+          retention-days: 3
+  compare:
+    name: cross-platform SDK hash agreement
+    needs: matrix
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/diagram-engine-e2-determinism.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: diagram-foundation-*
+          path: .engine-e2/determinism
+      - name: Require all three identical foundation reports
+        run: node scripts/diagram-engine-e2-determinism.mjs .engine-e2/determinism

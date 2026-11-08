@@ -19,8 +19,9 @@ This is document validity only. It does not compute layout, route relationships,
 check geometry or label/legend fit, or render artifacts. A passed schema gate
 does not imply those checks passed. Generated TypeScript declarations describe
 the Serde model, including optional fields; they do not validate runtime JSON.
-The validator rejects explicit `null` where a field is optional, and applies
-the same scalar and document rules regardless of the TypeScript shape. Use
+Defaulted Option inputs accept omission and null; defaulted Vec inputs accept
+omission but reject null. Runtime applies the same scalar and document rules
+regardless of the TypeScript shape. Use
 `validate_json` for runtime validation.
 
 Optional features:
@@ -28,6 +29,14 @@ Optional features:
 - `wasm` exports the multi-type `validate_diagram_json` dispatcher and
   `parse_receipt_json` through wasm-bindgen. `validate_architecture_json`
   remains as a compatibility alias to the dispatcher.
+- `geometry` enables S1 fixed-point DTOs, pin preflight and pinned Noto Sans CJK
+  KR metrics. This stage exposes no scene-layout success function. Coordinate
+  units are 1/64 pixel; runtime font tables are integer-only and separately OFL
+  licensed under `src/metrics/data/`.
+- `wasm-layout` exports actual text metrics as a separate lazy WASM binary;
+  default `wasm` validation excludes both geometry and metric tables.
+- `font-tools` enables the host-only pinned-font generator. It is never a
+  dependency of the runtime geometry or validation path.
 - `typegen` enables `export-types`, which prints a deterministic TypeScript
   declaration module to stdout.
 - `bindgen-web` enables the `bindgen-web <input.wasm> <output-dir>` tooling bin;

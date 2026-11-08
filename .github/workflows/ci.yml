@@ -38,6 +38,7 @@ jobs:
       run_e2e: ${{ steps.dedupe.outputs.run_e2e }}
       run_native: ${{ steps.dedupe.outputs.run_native }}
       run_native_compile: ${{ steps.dedupe.outputs.run_native_compile }}
+      run_geometry: ${{ steps.dedupe.outputs.run_geometry }}
 
     steps:
       - name: Checkout CI policy
@@ -77,6 +78,7 @@ jobs:
           PR_RUN_E2E: ${{ steps.classify.outputs.run_e2e }}
           PR_RUN_NATIVE: ${{ steps.classify.outputs.run_native }}
           PR_RUN_COMPILE: ${{ steps.classify.outputs.run_native_compile }}
+          PR_RUN_GEOMETRY: ${{ steps.classify.outputs.run_geometry }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_ACTION: ${{ github.event.action }}
@@ -88,6 +90,7 @@ jobs:
           run_e2e=false
           run_native=false
           run_native_compile=false
+          run_geometry=true
           reason="this event requires verify; main avoids repeating PR-only checks"
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             run_e2e=true
@@ -98,12 +101,14 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             if { [ "$PR_ACTION" = "labeled" ] || [ "$PR_ACTION" = "unlabeled" ]; } && [ "$PR_LABEL" != "native-e2e" ]; then
               run_full=false
+              run_geometry=false
               reason="unrelated label event; existing required CI check is unchanged"
             else
               run_full="$PR_RUN_FULL"
               run_e2e="$PR_RUN_E2E"
               run_native="$PR_RUN_NATIVE"
               run_native_compile="$PR_RUN_COMPILE"
+              run_geometry="$PR_RUN_GEOMETRY"
               reason="PR path/label policy selected validation"
               # A native label requests the suite, not another copy of already
               # successful verify/browser/compile work on this identical SHA.
@@ -118,6 +123,7 @@ jobs:
                     run_full=false
                     run_e2e=false
                     run_native_compile=false
+                    run_geometry=false
                     reason="native label event reused successful CI on $PR_HEAD_SHA; current native intent is still enforced"
                   fi
                 fi
@@ -163,11 +169,15 @@ jobs:
             fi
           fi
 
+          if [ "$run_full" = "false" ]; then
+            run_geometry=false
+          fi
           {
             echo "run_full=$run_full"
             echo "run_e2e=$run_e2e"
             echo "run_native=$run_native"
             echo "run_native_compile=$run_native_compile"
+            echo "run_geometry=$run_geometry"
           } >> "$GITHUB_OUTPUT"
           echo "CI decision: $reason"
           if [ "$run_full" = "false" ]; then
@@ -408,10 +418,19 @@ jobs:
       contents: read
     uses: ./.github/workflows/native-e2e.yml
 
+  # Pure SDK checks only. S1 hashes fixed arithmetic/font metrics; the next
+  # stacked phase upgrades the same matrix to whole-scene geometry hashes.
+  geometry-determinism:
+    needs: decision
+    if: needs.decision.outputs.run_geometry == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/diagram-determinism.yml
+
   ci-ok:
     name: ${{ (github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'native-e2e') && 'ci-label-ignored' || 'ci-ok' }}
     if: always()
-    needs: [decision, verify, e2e, native-e2e-compile, native-e2e]
+    needs: [decision, verify, e2e, native-e2e-compile, native-e2e, geometry-determinism]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
