@@ -10,6 +10,7 @@ export interface RenderDocumentContext {
   documentName: string;
   documentRevision: string;
   diagramType: string;
+  datasetId?: string | null;
 }
 export interface RenderReceipt extends ArchifyRenderReceipt, RenderDocumentContext {
   renderedAt: string;
@@ -55,14 +56,19 @@ export async function openRender(workspace: string, render: StoredRender, reveal
 }
 
 /** Rerender the current saved spec, never an old render's embedded input. */
-export async function rerenderDocument(workspace: string, group: RenderGroup): Promise<void> {
+export async function rerenderDocument(workspace: string, group: RenderGroup, render?: StoredRender): Promise<void> {
   requireDesktop();
   if (group.orphaned || !group.documentName) throw new Error("The source document is missing; restore its diagram file before re-rendering.");
   const current = await readDiagramDetailed(workspace, group.documentName);
   if (current.doc.id !== group.docId) throw new Error("The source document identity changed; refresh the render list before re-rendering.");
-  const canonical = canonicalSemanticExportInput(current.doc);
+  const datasets = (current.doc.datasets ?? []).filter((dataset) => dataset.kind === "semanticSpec");
+  const requestedId = render?.receipt?.datasetId;
+  const matchingType = datasets.filter((dataset) => dataset.diagramType === render?.receipt?.diagramType);
+  const datasetId = requestedId ?? (datasets.length === 1 ? datasets[0].id : matchingType.length === 1 ? matchingType[0].id : undefined);
+  if (!datasetId) throw new Error("This render has no unique source dataset; open the diagram, select a semantic dataset in Export and create a new render.");
+  const canonical = canonicalSemanticExportInput(current.doc, datasetId);
   await archifyRenderCandidate(workspace, canonical.diagramType, canonical.candidateJson, {
     docId: current.doc.id, documentName: group.documentName,
-    documentRevision: current.fileRevision, diagramType: canonical.diagramType,
+    documentRevision: current.fileRevision, diagramType: canonical.diagramType, datasetId: canonical.datasetId,
   });
 }

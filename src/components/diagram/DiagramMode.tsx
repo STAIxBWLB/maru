@@ -1797,7 +1797,7 @@ function DiagramShell({
         />
       ) : null}
       {rendersOpen && <RendersDialog open workspace={workPath} theme={theme}
-        onRerender={(group) => workPath ? rerenderDocument(workPath, group) : Promise.reject(new Error("Open a workspace before re-rendering."))}
+        onRerender={(group, render) => workPath ? rerenderDocument(workPath, group, render) : Promise.reject(new Error("Open a workspace before re-rendering."))}
         onClose={() => setRendersOpen(false)} />}
       <ImportExportDialog
         open={ioDialog !== null}

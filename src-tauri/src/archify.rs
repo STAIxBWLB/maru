@@ -1512,6 +1512,7 @@ mod render_worker_boundary_tests {
                 document_name: "generated".into(),
                 document_revision: "d".repeat(64),
                 diagram_type: "architecture".into(),
+                dataset_id: Some("source-dataset".into()),
             }),
         ))
         .unwrap();
@@ -1528,5 +1529,6 @@ mod render_worker_boundary_tests {
         assert_eq!(receipt.render, artifact.receipt);
         assert_eq!(receipt.doc_id, "stored-doc");
         assert_eq!(receipt.document_revision, "d".repeat(64));
+        assert_eq!(receipt.dataset_id.as_deref(), Some("source-dataset"));
     }
 }

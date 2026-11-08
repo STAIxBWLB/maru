@@ -43,6 +43,8 @@ pub struct RenderDocumentContext {
     pub(crate) document_name: String,
     pub(crate) document_revision: String,
     pub(crate) diagram_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dataset_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -55,6 +57,8 @@ pub struct DiagramRenderReceipt {
     pub document_revision: String,
     pub rendered_at: String,
     pub diagram_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -213,6 +217,13 @@ fn validate_extended_receipt(receipt: &DiagramRenderReceipt) -> Result<&'static 
     validate_doc_id(&receipt.doc_id)?;
     validate_display_name(&receipt.document_name)?;
     validate_diagram_type(&receipt.diagram_type)?;
+    if receipt
+        .dataset_id
+        .as_ref()
+        .is_some_and(|id| id.is_empty() || id.len() > 256 || id.chars().any(char::is_control))
+    {
+        return Err("Render source dataset ID is invalid; select a semantic dataset in Export and render again".into());
+    }
     if !valid_sha256(&receipt.document_revision) {
         return Err(
             "Render receipt document revision is invalid; reload the saved diagram and rerender it"
@@ -250,6 +261,7 @@ fn extended_receipt(
         document_revision: context.document_revision.clone(),
         rendered_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
         diagram_type: context.diagram_type.clone(),
+        dataset_id: context.dataset_id.clone(),
     };
     validate_extended_receipt(&extended)?;
     Ok(extended)
@@ -1487,6 +1499,7 @@ mod tests {
                 document_name: "Native render fixture".into(),
                 document_revision: sha256(b"saved document revision"),
                 diagram_type: "architecture".into(),
+                dataset_id: None,
             }
         }
 

@@ -10,7 +10,7 @@ export interface RendersDialogProps {
   open: boolean;
   workspace: string | null;
   theme: "light" | "dark";
-  onRerender: (group: RenderGroup) => Promise<void>;
+  onRerender: (group: RenderGroup, render: StoredRender) => Promise<void>;
   onClose: () => void;
 }
 
@@ -81,7 +81,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
           {selected && <div className="maru-diagram-renders-actions">
             <button disabled={busy || !view} onClick={() => void action(() => openRender(workspace, selected))}>{t("diagram.renders.open")}</button>
             <button disabled={busy || !view} onClick={() => void action(() => openRender(workspace, selected, true))}>{t("diagram.renders.reveal")}</button>
-            <button disabled={busy || !group || group.orphaned} onClick={() => group && void action(() => onRerender(group), true)}>{t("diagram.renders.rerender")}</button>
+            <button disabled={busy || !group || group.orphaned} onClick={() => group && void action(() => onRerender(group, selected), true)}>{t("diagram.renders.rerender")}</button>
             <button disabled={busy} onClick={() => setPendingDelete(true)}>{t("diagram.renders.delete")}</button>
             {pendingDelete && <div role="alert"><p>{t("diagram.renders.deleteConfirm")}</p><button disabled={busy} onClick={() => void action(() => deleteRender(workspace, selected.docId, selected.renderId), true)}>{t("diagram.renders.confirmDelete")}</button><button disabled={busy} onClick={() => setPendingDelete(false)}>{t("diagram.renders.cancel")}</button></div>}
           </div>}

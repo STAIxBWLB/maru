@@ -275,7 +275,7 @@ describe("ImportExportDialog (export)", () => {
     const receipt = query<HTMLElement>('[data-testid="engine-export-receipt"]')!;
     expect(host).toHaveBeenCalledTimes(1);
     expect(host).toHaveBeenCalledWith("architecture", canonical.candidateJson, {
-      docId: doc.id, documentName: doc.docTitle || doc.id,
+      docId: doc.id, documentName: doc.docTitle || doc.id, datasetId: dataset.id,
       documentRevision: hash(new TextEncoder().encode(serializeDoc(doc))), diagramType: "architecture",
     });
     expect(receipt.textContent).toContain(`${name} ${version} (${revision})`);

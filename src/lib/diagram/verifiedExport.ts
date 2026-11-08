@@ -26,6 +26,7 @@ export async function exportVerifiedSemanticArtifact(input: {
   const candidateHash = await bytesSha256(new TextEncoder().encode(canonical.candidateJson));
   current();
   const context = { docId: input.doc.id, documentName: input.documentName ?? (input.doc.docTitle || input.doc.id),
+    datasetId: canonical.datasetId,
     documentRevision: input.documentRevision ?? await bytesSha256(new TextEncoder().encode(serializeDoc(input.doc))), diagramType: canonical.diagramType };
   current();
   const rendered = await (input.host ?? ((type, json, renderContext) => archifyRenderCandidate(input.workspace, type, json, renderContext)))(canonical.diagramType, canonical.candidateJson, context);
