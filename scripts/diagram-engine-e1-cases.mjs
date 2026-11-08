@@ -1,5 +1,6 @@
 // Spec-owned synthetic inputs and rule mappings. No engine implementation is
 // imported here: the pinned CLI is an external oracle in the host generator.
+/** @typedef {Record<string, any>} RawSpec */
 export const TYPES = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"];
 export const PRIMARY = { architecture: "components", workflow: "nodes", sequence: "participants", dataflow: "nodes", lifecycle: "states" };
 export const RELATIONS = { architecture: "connections", workflow: "edges", sequence: "messages", dataflow: "flows", lifecycle: "transitions" };
@@ -27,7 +28,7 @@ const sharedRules = {
   "repository": "Repository metadata contains a complete commit hash",
 };
 const specificRules = {
-  architecture: { "reference": "Connections and boundary members name existing components", "grid-column": "A grid column lies below the authored layout.cols", "ownership": "Deployment-ownership memberships do not partially overlap", "placement-input": "Free/grid placement has the fields needed to locate a component", "grid-cell": "Declared grid cells are not assigned to two unpositioned components" },
+  architecture: { "reference": "Connections and boundary members name existing components", "grid-column": "A grid column lies below the authored layout.cols", "ownership": "Deployment-ownership memberships do not partially overlap", "deployment-boundary-kind": "The deployment profile declares both required boundary kinds", "deployment-owner-missing": "Every nonexternal component names an owner", "deployment-region-scope": "Every nonexternal component belongs to a region", "deployment-region-ambiguous": "Every nonexternal component belongs to exactly one region", "deployment-private-state": "Database components belong to a private security group", "deployment-private-region-consistency": "Each private group belongs to one common region", "deployment-crossing-mechanism": "Cross-boundary connections name their mechanism", "placement-input": "Free/grid placement has the fields needed to locate a component", "grid-cell": "Declared grid cells are not assigned to two unpositioned components" },
   workflow: { "lane-reference": "Nodes/groups name existing lanes", "phase-range": "Phase column bounds are ordered", "group-range": "Group column bounds are ordered", "phase-overlap": "Workflow phases do not share columns", "empty-group": "A group contains a node in its lane/range", "edge-endpoint": "Edges name existing workflow nodes", "main-path-node": "Main-path steps name existing nodes", "main-path-edge": "Adjacent main-path steps have a direct edge", "main-path-order": "Main-path edges move forward in column order", "semantic-checks-empty": "A semanticChecks object declares at least one check", "semantic-node-reference": "Semantic checks name existing nodes", "unexpected-root": "Graph roots belong to allowedRoots when declared", "unexpected-terminal": "Graph terminals belong to allowedTerminals when declared", "required-edge": "Every required direct edge exists", "required-path": "Every required reachability path exists" },
   sequence: { "participant-reference": "Messages and activations name participants", "range-order": "Segment and activation ends follow their starts" },
   dataflow: { "reference": "Flows name existing nodes", "stage-reference": "A node stage is an existing zero-based index" },
@@ -39,6 +40,7 @@ export const RULE_TABLE = Object.fromEntries(TYPES.map((type) => [type,
   })),
 ]));
 
+/** @param {string} type @returns {RawSpec} */
 export function seedFor(type) {
   const meta = { title: `${type} fixture`, output: "fixture.html" };
   const header = { schema_version: 1, diagram_type: type, meta };
@@ -49,6 +51,24 @@ export function seedFor(type) {
   if (type === "lifecycle") return { ...header, lanes: [{ id: "main", label: "Main" }], states: [{ id: "a", type: "start", label: "A", lane: "main", col: 0 }, { id: "b", type: "active", label: "B", lane: "main", col: 1 }], transitions: [{ from: "a", to: "b", label: "Start" }] };
   throw new Error(`Unknown synthetic diagram type ${type}; add a documented seed before generating cases.`);
 }
+
+/** @returns {RawSpec} */
+export function deploymentSeed() {
+  const spec = seedFor("architecture");
+  spec.meta.engineering_profile = "deployment-ownership";
+  spec.components[0].tag = "Application";
+  spec.components[1].tag = "Service";
+  spec.components.push({ id: "c", type: "database", label: "DB", tag: "Storage", row: 0, col: 2 });
+  spec.boundaries = [
+    { kind: "region", label: "Deployment", wraps: ["a", "b", "c"] },
+    { kind: "security-group", label: "Private", wraps: ["b", "c"] },
+  ];
+  spec.connections = [{ from: "a", to: "b", label: "HTTPS" }, { from: "b", to: "c", label: "SQL" }];
+  return spec;
+}
+export const MAPPING_NOTES = {
+  "architecture-placement-input": "For synthetic missing-position/grid-cell input only, the pinned renderer dereferences an absent coordinate and reports internal/unclassified. E1 rejects the same missing authored placement with an actionable placement-input diagnostic; no other internal error is mapped this way.",
+};
 
 export const INTENDED_DIFFERENCES = {
   "floorplan-outside-e1": "Floorplan has no E1 validator and remains an E5 input; its unsupported-type receipt is not a document-validity verdict.",
@@ -94,6 +114,7 @@ export function generatedCases() {
     add("locale", "invalid", (s) => { s.meta.locale = "not a locale"; });
     add("output-path", "traversal", (s) => { s.meta.output = "../unsafe.html"; });
     add("output-path", "device-name", (s) => { s.meta.output = "con.html"; });
+    add("output-path", "utf8-component-limit", (s) => { s.meta.output = `${"가".repeat(100)}.html`; });
     add("translations", "key", (s) => { s.meta.translations = { "Bad Key": "Text" }; });
     add("brand", "hash", (s) => { s[PRIMARY[type]][0].brand = { url: "https://example.test/logo.svg", sha256: "invalid" }; });
     add("sources", "too-many", (s) => { s[PRIMARY[type]][0].sources = Array.from({ length: 4 }, (_, i) => ({ path: `file-${i}.ts` })); });
@@ -114,10 +135,25 @@ export function generatedCases() {
         s.components[0].col = 99; s.components[1].col = 99;
       });
 
-      add("ownership", "partial-membership", (s) => {
-        s.meta.engineering_profile = "deployment-ownership";
-        s.components.push({ id: "c", type: "backend", label: "C", row: 0, col: 2 });
-        s.boundaries = [{ kind: "region", label: "Left", wraps: ["a", "b"] }, { kind: "region", label: "Right", wraps: ["b", "c"] }];
+      const profile = (rule, suffix, mutate) => add(rule, suffix, (s) => {
+        Object.assign(s, deploymentSeed());
+        mutate(s);
+      });
+      profile("valid", "deployment-profile", () => {});
+      profile("deployment-boundary-kind", "missing-private-kind", (s) => { s.components[2].type = "backend"; s.boundaries = s.boundaries.filter((boundary) => boundary.kind === "region"); });
+      profile("deployment-owner-missing", "untagged", (s) => { delete s.components[1].tag; });
+      profile("deployment-region-scope", "unassigned", (s) => { s.boundaries[0].wraps = ["b", "c"]; });
+      profile("deployment-region-ambiguous", "two-regions", (s) => { s.boundaries.push({ kind: "region", label: "Other", wraps: ["a"] }); });
+      profile("deployment-private-state", "database-outside-private", (s) => { s.boundaries[1].wraps = ["b"]; });
+      profile("deployment-private-region-consistency", "mixed-regions", (s) => { s.boundaries[0].wraps = ["a", "b"]; s.boundaries.push({ kind: "region", label: "Other", wraps: ["c"] }); });
+      profile("deployment-crossing-mechanism", "unlabelled-crossing", (s) => { delete s.connections[0].label; });
+      profile("ownership", "partial-membership", (s) => {
+        s.components[2].type = "backend";
+        s.boundaries = [
+          { kind: "region", label: "Deployment", wraps: ["a", "b", "c"] },
+          { kind: "security-group", label: "Left", wraps: ["a", "b"] },
+          { kind: "security-group", label: "Right", wraps: ["b", "c"] },
+        ];
       });
     } else if (type === "workflow") {
       add("range", "column", (s) => { s.nodes[0].col = 6; });
@@ -157,35 +193,110 @@ export function generatedCases() {
   return result;
 }
 
-// Original E0 negative cases have no generated expectedEngineCode. Keep this
-// strict mapping small: an unknown oracle refusal stops generation for review.
+// Map only observed oracle causes. An expectedEngineCode is a checked hint:
+// it may narrow an independently derived set, never create a candidate itself.
+const PORTABLE_OUTPUT_REASONS = new Set([
+  "type", "empty", "absolute", "drive-relative", "uri", "backslash", "empty-segment", "dot-segment",
+  "control", "unpaired-surrogate", "windows-ads", "windows-invalid-character", "windows-trailing-dot-space",
+  "windows-reserved-name", "windows-short-name", "component-too-long",
+]);
+const SEMANTIC_CODES = {
+  "relationship/duplicate-id": "duplicate-id",
+  "workflow/duplicate-lane-id": "duplicate-id",
+  "workflow/duplicate-node-id": "duplicate-id",
+  "workflow/unknown-edge-endpoint": "edge-endpoint",
+  "workflow/unknown-node-lane": "lane-reference",
+  "workflow/invalid-node-column": "range",
+  "workflow/semantic-node-reference": "semantic-node-reference",
+  "workflow/unexpected-root": "unexpected-root",
+  "workflow/unexpected-terminal": "unexpected-terminal",
+  "workflow/required-edge": "required-edge",
+  "workflow/required-path": "required-path",
+};
+/** @type {Array<[RegExp, string]>} */
+const SEMANTIC_MESSAGES = [
+  [/ids must be unique|node id .* is duplicated|lane id .* is duplicated/i, "duplicate-id"],
+  [/col .* exceeds layout[.]cols/, "grid-column"],
+  [/references unknown (source|target)/, "endpoint"],
+  [/uses unknown lane|references unknown lane/, "lane-reference"],
+  [/uses invalid stage/, "stage-reference"],
+  [/Activation references unknown participant/, "participant-reference"],
+  [/Segment .* has invalid y range|Activation .* has invalid time range/, "range-order"],
+  [/Phase .* uses invalid columns/, "phase-range"],
+  [/Group .* uses invalid columns/, "group-range"],
+  [/Phase .* overlaps phase/, "phase-overlap"],
+  [/Group .* does not contain any nodes/, "empty-group"],
+  [/mainPath references unknown node/, "main-path-node"],
+  [/mainPath step .* has no matching edge/, "main-path-edge"],
+  [/mainPath step .* moves backward/, "main-path-order"],
+  [/Boundary .* memberships partially overlap|Boundary .* crosses boundary .*memberships partially overlap/, "ownership"],
+  [/already assigned.*cell|share grid cell row|same grid cell|duplicate.*grid cell|grid cell .*already|same row.*col/i, "grid-cell"],
+  [/must include pos .*when layout[.]mode is omitted|needs pos .*or grid row\/col when layout[.]mode/, "placement-input"],
+];
+function schemaRule(diagnostic, type) {
+  const code = diagnostic.code ?? "";
+  const path = diagnostic.subject?.path ?? "";
+  const keyword = code.slice("schema/".length);
+  if (["required", "type"].includes(keyword)) return ["shape"];
+  if (keyword === "additionalProperties") return ["unknown-field", "shape"];
+  if (path === "/schema_version") return ["schema-version"];
+  if (path === "/diagram_type") return ["document/diagram-type"];
+  if (path.includes("/meta/output")) return ["output-path"];
+  if (path.includes("/meta/locale")) return ["locale"];
+  if (path.includes("/meta/translations")) return ["translations"];
+  if (path.includes("/meta/repository/revision")) return ["repository"];
+  if (path.includes("/brand")) return ["brand", "shape"];
+  if (path.endsWith("/id") || path.includes("/wraps/") || path.includes("/focus/")) return ["id"];
+  if (path.includes("/sources") && ["minItems", "maxItems"].includes(keyword)) return ["sources"];
+  if (path === "/meta/views" && keyword === "maxItems") return ["views"];
+  if (path.includes("/meta/legend/entries") && keyword === "minProperties") return ["legend"];
+  if (path === "/semanticChecks" && keyword === "minProperties") return ["semantic-checks-empty"];
+  if (type === "lifecycle" && path === "/lanes" && keyword === "maxItems") return ["lane-count"];
+  if (["minimum", "maximum"].includes(keyword)) return ["range"];
+  if (["minItems", "maxItems"].includes(keyword)) return ["cardinality"];
+  if (["minLength", "maxLength"].includes(keyword)) return ["text"];
+  if (["enum", "const"].includes(keyword)) return ["enum"];
+  return [];
+}
+function missingArchitecturePlacement(item) {
+  if (item.diagramType !== "architecture" || item.origin?.kind !== "synthetic-generated" || item.rule !== "placement-input") return false;
+  const spec = JSON.parse(item.inputJson);
+  return spec.components?.some((component) => !Array.isArray(component.pos)
+    && (!spec.layout || component.row === undefined || component.col === undefined));
+}
 export function equivalentCodes(item, report) {
-  if (item.expectedEngineCode) return [item.expectedEngineCode];
   const type = item.diagramType;
   const result = new Set();
   for (const diagnostic of report.diagnostics ?? []) {
     const code = diagnostic.code ?? "";
-    const path = diagnostic.subject?.path ?? "";
     const message = diagnostic.message ?? "";
-    if (code === "relationship/duplicate-id" || /ids must be unique/i.test(message)) result.add(`${type}/duplicate-id`);
-    else if (code === "schema/required" || code === "schema/type") result.add(`${type}/shape`);
-    else if (code === "schema/additionalProperties") { result.add(`${type}/unknown-field`); result.add(`${type}/shape`); }
-    else if (code.startsWith("schema/")) {
-      if (path.includes("/meta/output")) result.add(`${type}/output-path`);
-      else if (path.includes("/meta/locale")) result.add(`${type}/locale`);
-      else if (path.includes("/meta/translations")) result.add(`${type}/translations`);
-      else if (path.includes("/meta/repository/revision")) result.add(`${type}/repository`);
-      else if (path.includes("/brand")) result.add(`${type}/brand`);
-      else if (path.endsWith("/id") || path.includes("/wraps/")) result.add(`${type}/id`);
-      else if (["schema/minimum", "schema/maximum"].includes(code)) result.add(`${type}/range`);
-      else if (["schema/minItems", "schema/maxItems"].includes(code)) result.add(`${type}/cardinality`);
-      else if (["schema/minLength", "schema/maxLength"].includes(code)) result.add(`${type}/text`);
-      else if (["schema/enum", "schema/const"].includes(code)) result.add(`${type}/enum`);
-    } else if (/col .* exceeds layout.cols/.test(message)) result.add(`${type}/grid-column`);
-    else if (/references unknown (source|target)/.test(message)) result.add(`${type}/${REFERENCE_RULE[type]}`);
+    const add = (suffix) => result.add(suffix.includes("/") ? suffix : `${type}/${suffix}`);
+    const portableReason = diagnostic.evidence?.reason;
+    if (typeof portableReason === "string" && PORTABLE_OUTPUT_REASONS.has(portableReason)
+        && diagnostic.subject?.path === "/meta/output"
+        && (code === `portable-path/${portableReason}` || ["output/meta-path-syntax", "output/meta-absolute"].includes(code))) {
+      add("output-path");
+    } else if (code.startsWith("schema/")) {
+      for (const suffix of schemaRule(diagnostic, type)) add(suffix);
+      // Fractional schema integers may be decoded by a bounded integer model
+      // or reach the shared integer validator; both reject the same property.
+      if (code === "schema/type" && diagnostic.evidence?.type === "integer") { add("integer"); add("shape"); }
+    } else if (code.startsWith("engineering/deployment-") && Object.hasOwn(specificRules.architecture, code.slice("engineering/".length))) {
+      add(code.slice("engineering/".length));
+    } else if (SEMANTIC_CODES[code]) add(SEMANTIC_CODES[code]);
+    else {
+      for (const [pattern, suffix] of SEMANTIC_MESSAGES) if (pattern.test(message)) add(suffix === "endpoint" ? REFERENCE_RULE[type] : suffix);
+      if (code === "internal/unclassified" && missingArchitecturePlacement(item)
+          && /Cannot read properties of undefined.*reading ["']0["']/.test(message)) add("placement-input");
+    }
   }
-  if (!result.size) throw new Error(`Unmapped oracle refusal for ${item.id}: ${report.codes.join(", ")}; add a specific equivalent rule or a named scope decision.`);
-  return [...result];
+  const mapped = [...result];
+  if (item.expectedEngineCode) {
+    if (!result.has(item.expectedEngineCode)) throw new Error(`Oracle cause for ${item.id} does not map to expected rule ${item.expectedEngineCode}; observed ${report.codes.join(", ")} -> ${mapped.join(", ")}. Inspect the actual diagnostic before changing a rule.`);
+    return [item.expectedEngineCode];
+  }
+  if (!mapped.length) throw new Error(`Unmapped oracle refusal for ${item.id}: ${report.codes.join(", ")}; add a specific equivalent rule or a named scope decision.`);
+  return mapped;
 }
 
 const GEOMETRY_SIGNATURES = {
@@ -196,17 +307,20 @@ const GEOMETRY_SIGNATURES = {
 export function comparisonFor(item) {
   const full = item.validityOracle ?? item.oracle;
   const schema = item.validitySchemaOracle ?? item.schemaOracle;
+  const document = item.validityDocumentOracle ?? item.documentOracle;
+  if (full.ok && document && !document.ok) throw new Error(`Oracle document/CLI layers disagree for ${item.id}; inspect the pinned profile contract before regenerating.`);
   if (full.ok && schema && !schema.ok) throw new Error(`Oracle layers disagree for ${item.id}; inspect the pinned schema/CLI before regenerating.`);
   // A schema refusal is the document-validity reason even if a later CLI
   // boundary would also require repository evidence. Do not attribute it to
   // layout or filesystem verification.
-  const selected = schema && !schema.ok ? schema : full;
+  const selected = schema && !schema.ok ? schema : document && !document.ok ? document : full;
   const inputJson = item.validityInputJson ?? item.inputJson;
   if (item.diagramType === "floorplan") return {
     inputJson, accepted: false, equivalentCodes: ["document/diagram-type"],
     currentScope: { kind: "e5-floorplan", reasonId: "floorplan-outside-e1", reason: INTENDED_DIFFERENCES["floorplan-outside-e1"] },
   };
   if (item.currentScope?.kind === "e2-geometry") {
+    if (!item.documentOracle?.ok) throw new Error(`Named E2 case ${item.id} fails a nongeometry document rule; repair its scoped input before regenerating.`);
     if (!item.schemaOracle?.ok) throw new Error(`Named E2 case ${item.id} is not schema-valid; repair the synthetic case before regenerating.`);
     if (selected.ok) throw new Error(`Named E2 case ${item.id} was accepted by the oracle; remove the unnecessary difference before regenerating.`);
     const signature = GEOMETRY_SIGNATURES[item.currentScope.reasonId];
@@ -215,7 +329,8 @@ export function comparisonFor(item) {
     return { inputJson, accepted: true, equivalentCodes: [], currentScope: item.currentScope };
   }
   return { inputJson, accepted: selected.ok, equivalentCodes: selected.ok ? [] : equivalentCodes(item, selected),
-    oracleLayer: schema && !schema.ok ? "schema" : item.validityOracle ? "evidence-stripped-full" : "full",
+    oracleLayer: schema && !schema.ok ? "schema" : document && !document.ok ? "document-profile" : item.validityOracle ? "evidence-stripped-full" : "full",
+    ...(item.rule === "placement-input" && selected.codes.includes("internal/unclassified") ? { oracleMapping: { reasonId: "architecture-placement-input", reason: MAPPING_NOTES["architecture-placement-input"] } } : {}),
     currentScope: item.validityOracle ? { kind: "document-validity", reasonId: "repository-evidence-stripped", reason: INTENDED_DIFFERENCES["repository-evidence-stripped"] } : { kind: "document-validity" },
   };
 }

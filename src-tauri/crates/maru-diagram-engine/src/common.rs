@@ -415,7 +415,8 @@ fn portable_output(path: &str) -> bool {
                 || part == "."
                 || part == ".."
                 || part.ends_with(['.', ' '])
-                || part.chars().count() > 255
+                || part.len() > 255
+                || part.encode_utf16().count() > 255
             {
                 return false;
             }
@@ -775,6 +776,7 @@ mod tests {
     use super::*;
     #[test]
     fn portable_outputs_keep_schema_segment_rules() {
+        assert!(!portable_output(&format!("{}.html", "가".repeat(90))));
         for value in ["map.html", "nested/map.HTML", "한글.html"] {
             assert!(portable_output(value), "{value}");
         }

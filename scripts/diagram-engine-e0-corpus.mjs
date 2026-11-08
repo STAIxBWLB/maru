@@ -12,9 +12,11 @@ import { generatedCases, comparisonFor, seedFor, TYPES, RULE_TABLE, INTENDED_DIF
 /** @typedef {{code:string, message?:string, subject?:{path?:string}, [key:string]:unknown}} OracleDiagnostic */
 /** @typedef {{ok:boolean, codes:string[], diagnostics:OracleDiagnostic[], scope?:string, error?:string, inputSha256?:string, strippedFields?:string[]}} OracleReport */
 /** @typedef {{kind:string, reasonId?:string, reason?:string}} CurrentScope */
-/** @typedef {{inputJson:string, accepted:boolean, equivalentCodes:string[], currentScope:CurrentScope, oracleLayer?:string}} Comparison */
-/** @typedef {{id:string, diagramType:string, rule:string, inputJson:string, inputSha256:string, origin:Record<string,any>, expectedCoreOk?:boolean, expectedEngineCode?:string, oracle?:OracleReport, schemaOracle?:OracleReport, validityInputJson?:string, validityOracle?:OracleReport, validitySchemaOracle?:OracleReport, comparison?:Comparison, currentScope?:CurrentScope}} CorpusCase */
+/** @typedef {{inputJson:string, accepted:boolean, equivalentCodes:string[], currentScope:CurrentScope, oracleLayer?:string, oracleMapping?:{reasonId:string,reason:string}}} Comparison */
+/** @typedef {{id:string, diagramType:string, rule:string, inputJson:string, inputSha256:string, origin:Record<string,any>, expectedCoreOk?:boolean, expectedEngineCode?:string, oracle?:OracleReport, schemaOracle?:OracleReport, documentOracle?:OracleReport, validityInputJson?:string, validityOracle?:OracleReport, validitySchemaOracle?:OracleReport, validityDocumentOracle?:OracleReport, comparison?:Comparison, currentScope?:CurrentScope}} CorpusCase */
 /** @typedef {{validateSchema:(type:string,input:RawSpec)=>void}} SchemaFacade */
+/** @typedef {{validateEngineeringProfile:(type:string,input:RawSpec)=>void}} EngineeringFacade */
+/** @typedef {{validatePortablePath:(value:string,options:{profile:string})=>string}} PortableFacade */
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 // Runtime-only foreign test-oracle import. Its source must not become part of
 // tsconfig.scripts; the SDK itself imports no oracle or application module.
@@ -23,6 +25,16 @@ const schemaModuleUrl = pathToFileURL(join(root, "sidecars/archify/renderers/sha
 const schemaFacade = await import(schemaModuleUrl);
 const validateSchema = schemaFacade.validateSchema;
 if (typeof validateSchema !== "function") throw new Error("Pinned schema oracle API is unavailable; check the engine pin and restore validateSchema before retrying.");
+const engineeringModuleUrl = pathToFileURL(join(root, "sidecars/archify/renderers/shared/engineering-profiles.mjs")).href;
+/** @type {EngineeringFacade} */
+const engineeringFacade = await import(engineeringModuleUrl);
+const validateEngineeringProfile = engineeringFacade.validateEngineeringProfile;
+if (typeof validateEngineeringProfile !== "function") throw new Error("Pinned engineering oracle API is unavailable; check the engine pin and restore validateEngineeringProfile before retrying.");
+const portableModuleUrl = pathToFileURL(join(root, "sidecars/archify/renderers/shared/portable-path.mjs")).href;
+/** @type {PortableFacade} */
+const portableFacade = await import(portableModuleUrl);
+const validatePortablePath = portableFacade.validatePortablePath;
+if (typeof validatePortablePath !== "function") throw new Error("Pinned portable-path oracle API is unavailable; check the engine pin and restore validatePortablePath before retrying.");
 const output = join(root, "src-tauri/crates/maru-diagram-engine/testdata");
 const digest = (text) => createHash("sha256").update(text).digest("hex");
 const privateText = /(?:(?:^|[\s"'(=])\/(?:Users|home|raid|private|tmp)\/|(?:^|[\s"'(])[A-Za-z]:[\\/]|~[\\/]|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/i;
@@ -162,6 +174,37 @@ function schemaOracle(corpusCase) {
     return { ok: false, codes: diagnostics.map((item) => item.code), diagnostics };
   }
 }
+/** @param {CorpusCase} corpusCase @param {OracleReport} schemaReport @returns {OracleReport} */
+function documentOracle(corpusCase, schemaReport) {
+  if (!schemaReport.ok) return schemaReport;
+  const input = JSON.parse(corpusCase.inputJson);
+  try {
+    // The pure helper checks the authored string only; unlike the output
+    // launcher it does not resolve paths or follow filesystem symlinks.
+    validatePortablePath(input.meta.output, { profile: "output" });
+  } catch (error) {
+    if (!error || typeof error !== "object" || !("reason" in error) || typeof error.reason !== "string"
+        || !("code" in error) || error.code !== `portable-path/${error.reason}`) {
+      throw new Error(`Portable output oracle failed unexpectedly for ${corpusCase.id}; inspect the pinned pure path validator before retrying.`);
+    }
+    const message = error instanceof Error ? error.message : "Portable output path was refused";
+    return { ok: false, codes: [String(error.code)], diagnostics: [{ code: String(error.code), message,
+      subject: { path: "/meta/output" }, evidence: { reason: error.reason, profile: "output",
+        ...("utf8Bytes" in error ? { utf8Bytes: error.utf8Bytes } : {}),
+        ...("utf16CodeUnits" in error ? { utf16CodeUnits: error.utf16CodeUnits } : {}),
+      }, supportedFixes: ["use a portable relative HTML path whose segments fit 255 UTF-8 bytes and 255 UTF-16 code units"] }],
+      scope: "pure authored output-path validity without filesystem resolution" };
+  }
+  try {
+    validateEngineeringProfile(corpusCase.diagramType, input);
+    return { ok: true, codes: [], diagnostics: [], scope: "schema and nongeometry engineering-profile validity" };
+  } catch (error) {
+    const diagnostics = error && typeof error === "object" && "archifyDiagnostics" in error
+      ? error.archifyDiagnostics : null;
+    if (!Array.isArray(diagnostics)) throw new Error(`Document oracle failed for ${corpusCase.id}; inspect the pinned engineering contract before retrying.`);
+    return { ok: false, codes: diagnostics.map((item) => item.code), diagnostics, scope: "schema and nongeometry engineering-profile validity" };
+  }
+}
 async function main() {
   const source = process.argv[2];
   const descriptors = source ? JSON.parse(readFileSync(source, "utf8")) : [];
@@ -195,10 +238,12 @@ async function main() {
   for (const item of cases) {
     item.oracle ??= oracle(item);
     item.schemaOracle = schemaOracle(item);
+    item.documentOracle = documentOracle(item, item.schemaOracle);
     if (item.origin.kind === "public") {
       const input = withoutRepositoryEvidence(JSON.parse(item.inputJson), item.diagramType);
       item.validityInputJson = JSON.stringify(input);
       item.validitySchemaOracle = schemaOracle({ ...item, inputJson: item.validityInputJson });
+      item.validityDocumentOracle = documentOracle({ ...item, inputJson: item.validityInputJson }, item.validitySchemaOracle);
       item.validityOracle = {
         scope: "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
         inputSha256: digest(JSON.stringify(input)),

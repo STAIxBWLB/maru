@@ -269,6 +269,7 @@ pub(crate) fn validate(value: Value) -> Vec<Diagnostic> {
         }
     }
     if spec.meta.engineering_profile.as_deref() == Some("deployment-ownership") {
+        validate_deployment_ownership(&spec, &mut ctx);
         for (i, left) in spec.boundaries.iter().enumerate() {
             let a: HashSet<_> = left.wraps.iter().collect();
             for (j, right) in spec.boundaries.iter().enumerate().skip(i + 1) {
@@ -315,6 +316,147 @@ pub(crate) fn validate(value: Value) -> Vec<Diagnostic> {
     common::validate_meta_refs(&spec.meta, &ids, &mut ctx);
     ctx.finish()
 }
+
+fn boundary_memberships(
+    boundaries: &[ArchitectureBoundary],
+    component_id: &str,
+    kind: &str,
+) -> Vec<usize> {
+    boundaries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, boundary)| {
+            (boundary.kind == kind && boundary.wraps.iter().any(|member| member == component_id))
+                .then_some(index)
+        })
+        .collect()
+}
+
+fn validate_deployment_ownership(spec: &ArchitectureSpec, ctx: &mut common::Context) {
+    for kind in ["region", "security-group"] {
+        if !spec.boundaries.iter().any(|boundary| boundary.kind == kind) {
+            ctx.error(
+                "deployment-boundary-kind",
+                "/boundaries",
+                format!("deployment ownership requires at least one {kind} boundary"),
+                format!("add a {kind} boundary with an explicit wraps list"),
+            );
+        }
+    }
+
+    for (index, component) in spec.components.iter().enumerate() {
+        if component.component_type == "external" {
+            continue;
+        }
+        let path = format!("/components/{index}");
+        if component
+            .decoration
+            .tag
+            .as_deref()
+            .is_none_or(|owner| owner.trim().is_empty())
+        {
+            ctx.error(
+                "deployment-owner-missing",
+                &format!("{path}/tag"),
+                format!("component {:?} does not name an owner in tag", component.id),
+                "set tag to the responsible team or owner",
+            );
+        }
+
+        let regions = boundary_memberships(&spec.boundaries, &component.id, "region");
+        match regions.len() {
+            0 => ctx.error(
+                "deployment-region-scope",
+                &path,
+                format!(
+                    "component {:?} is not assigned to a region boundary",
+                    component.id
+                ),
+                "add the component id to its real region boundary wraps list",
+            ),
+            1 => {}
+            count => ctx.error(
+                "deployment-region-ambiguous",
+                &path,
+                format!(
+                    "component {:?} belongs to {count} region boundaries",
+                    component.id
+                ),
+                "keep the component id in exactly one region boundary wraps list",
+            ),
+        }
+
+        if component.component_type == "database"
+            && boundary_memberships(&spec.boundaries, &component.id, "security-group").is_empty()
+        {
+            ctx.error(
+                "deployment-private-state",
+                &path,
+                format!(
+                    "database component {:?} is not inside a security-group boundary",
+                    component.id
+                ),
+                "add the database id to its real security-group boundary wraps list",
+            );
+        }
+    }
+
+    for (index, boundary) in spec.boundaries.iter().enumerate() {
+        if boundary.kind != "security-group" {
+            continue;
+        }
+        let mut shared_region = None;
+        let mut consistent = !boundary.wraps.is_empty();
+        for component_id in &boundary.wraps {
+            let regions = boundary_memberships(&spec.boundaries, component_id, "region");
+            if regions.len() != 1 {
+                consistent = false;
+                continue;
+            }
+            match shared_region {
+                Some(region) if region != regions[0] => consistent = false,
+                None => shared_region = Some(regions[0]),
+                _ => {}
+            }
+        }
+        if !consistent {
+            ctx.error(
+                "deployment-private-region-consistency",
+                &format!("/boundaries/{index}/wraps"),
+                format!(
+                    "security-group {:?} must contain members from exactly one shared region",
+                    boundary.label
+                ),
+                "assign every security-group member to exactly one shared region boundary",
+            );
+        }
+    }
+
+    for (index, connection) in spec.connections.iter().enumerate() {
+        let crosses_boundary = spec.boundaries.iter().any(|boundary| {
+            matches!(boundary.kind.as_str(), "region" | "security-group")
+                && boundary
+                    .wraps
+                    .iter()
+                    .any(|member| member == &connection.from)
+                    != boundary.wraps.iter().any(|member| member == &connection.to)
+        });
+        if crosses_boundary
+            && connection
+                .label
+                .as_deref()
+                .is_none_or(|label| label.trim().is_empty())
+        {
+            ctx.error(
+                "deployment-crossing-mechanism",
+                &format!("/connections/{index}/label"),
+                "cross-boundary connection does not name its mechanism",
+                "set label to the real mechanism that crosses the boundary",
+            );
+        }
+    }
+}
+
 #[cfg(feature = "typegen")]
 pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
     use ts_rs::TS;
@@ -329,6 +471,37 @@ pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn valid_deployment_profile() -> Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "diagram_type": "architecture",
+            "meta": {
+                "title": "Deployment",
+                "output": "deployment.html",
+                "engineering_profile": "deployment-ownership"
+            },
+            "components": [
+                {"id": "web", "type": "frontend", "label": "Web", "tag": "team-web", "pos": [50, 100]},
+                {"id": "db", "type": "database", "label": "DB", "tag": "team-data", "pos": [250, 100]},
+                {"id": "external", "type": "external", "label": "User", "pos": [450, 100]}
+            ],
+            "boundaries": [
+                {"kind": "region", "label": "West", "wraps": ["web", "db"]},
+                {"kind": "security-group", "label": "Private", "wraps": ["db"]}
+            ],
+            "connections": [
+                {"from": "web", "to": "db", "label": "TLS"}
+            ]
+        })
+    }
+
+    fn has_profile_rule(value: Value, rule: &str) -> bool {
+        validate(value)
+            .iter()
+            .any(|diagnostic| diagnostic.code == format!("architecture/{rule}"))
+    }
+
     #[test]
     fn validates_free_and_grid_document_fields_without_layout_geometry() {
         let value = serde_json::json!({"schema_version":1,"diagram_type":"architecture","meta":{"title":"A","output":"a.html"},"components":[{"id":"a","type":"backend","label":"A","pos":[50,160]}]});
@@ -336,5 +509,113 @@ mod tests {
         let mut bad = value;
         bad["components"][0]["type"] = Value::from("other");
         assert!(validate(bad).iter().any(|d| d.code == "architecture/enum"));
+    }
+
+    #[test]
+    fn accepts_a_complete_deployment_ownership_profile() {
+        assert!(validate(valid_deployment_profile()).is_empty());
+    }
+
+    #[test]
+    fn deployment_profile_requires_both_boundary_kinds() {
+        let mut missing_region = valid_deployment_profile();
+        missing_region["boundaries"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        assert!(has_profile_rule(missing_region, "deployment-boundary-kind"));
+
+        let mut missing_security_group = valid_deployment_profile();
+        missing_security_group["boundaries"]
+            .as_array_mut()
+            .unwrap()
+            .remove(1);
+        assert!(has_profile_rule(
+            missing_security_group,
+            "deployment-boundary-kind"
+        ));
+    }
+
+    #[test]
+    fn deployment_profile_requires_nonblank_owner_tags_for_nonexternal_components() {
+        let mut missing_owner = valid_deployment_profile();
+        missing_owner["components"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("tag");
+        assert!(has_profile_rule(missing_owner, "deployment-owner-missing"));
+
+        let mut blank_owner = valid_deployment_profile();
+        blank_owner["components"][0]["tag"] = Value::from("   ");
+        assert!(has_profile_rule(blank_owner, "deployment-owner-missing"));
+    }
+
+    #[test]
+    fn deployment_profile_requires_exactly_one_region_per_nonexternal_component() {
+        let mut missing_region = valid_deployment_profile();
+        missing_region["boundaries"][0]["wraps"] = serde_json::json!(["db"]);
+        assert!(has_profile_rule(missing_region, "deployment-region-scope"));
+
+        let mut multiple_regions = valid_deployment_profile();
+        multiple_regions["boundaries"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "kind": "region", "label": "Also West", "wraps": ["web"]
+            }));
+        assert!(has_profile_rule(
+            multiple_regions,
+            "deployment-region-ambiguous"
+        ));
+    }
+
+    #[test]
+    fn deployment_profile_requires_databases_inside_security_groups() {
+        let mut outside_private = valid_deployment_profile();
+        outside_private["boundaries"][1]["wraps"] = serde_json::json!(["web"]);
+        assert!(has_profile_rule(
+            outside_private,
+            "deployment-private-state"
+        ));
+    }
+
+    #[test]
+    fn deployment_profile_requires_each_security_group_to_share_one_region() {
+        let mut mixed_regions = serde_json::json!({
+            "schema_version": 1,
+            "diagram_type": "architecture",
+            "meta": {
+                "title": "Deployment",
+                "output": "deployment.html",
+                "engineering_profile": "deployment-ownership"
+            },
+            "components": [
+                {"id": "db-a", "type": "database", "label": "A", "tag": "team-data", "pos": [50, 100]},
+                {"id": "db-b", "type": "database", "label": "B", "tag": "team-data", "pos": [250, 100]}
+            ],
+            "boundaries": [
+                {"kind": "region", "label": "West", "wraps": ["db-a"]},
+                {"kind": "region", "label": "East", "wraps": ["db-b"]},
+                {"kind": "security-group", "label": "Private", "wraps": ["db-a", "db-b"]}
+            ],
+            "connections": []
+        });
+        assert!(has_profile_rule(
+            mixed_regions,
+            "deployment-private-region-consistency"
+        ));
+    }
+
+    #[test]
+    fn deployment_profile_requires_labels_on_cross_boundary_connections() {
+        let mut unlabeled_crossing = valid_deployment_profile();
+        unlabeled_crossing["connections"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("label");
+        assert!(has_profile_rule(
+            unlabeled_crossing,
+            "deployment-crossing-mechanism"
+        ));
     }
 }
