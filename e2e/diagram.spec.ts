@@ -370,7 +370,7 @@ test("asks before deleting a semantic member and keeps everything on cancel", as
   expect(forbidden).toEqual([]);
 });
 
-test("lists five diagram types and routes pasted Mermaid sequences to generation", async ({ page }) => {
+test("lists six diagram types and routes pasted Mermaid sequences to generation", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
   await page.goto("/");
   await page.getByRole("button", { name: "다이어그램", exact: true }).click();
@@ -378,7 +378,7 @@ test("lists five diagram types and routes pasted Mermaid sequences to generation
   await page.getByRole("button", { name: "다이어그램 생성" }).click();
   const dialog = page.locator(".dialog-content", { hasText: "다이어그램 생성" });
 
-  await expect(dialog.getByTestId("gen-type-select").locator("option")).toHaveCount(5);
+  await expect(dialog.getByTestId("gen-type-select").locator("option")).toHaveCount(6);
   await dialog.getByTestId("gen-mermaid").fill("sequenceDiagram\n  participant Alice\n  Alice->>Bob: hi");
   await expect(dialog.getByTestId("gen-type-select")).toHaveValue("sequence");
 
@@ -414,5 +414,40 @@ test("adds and removes a semantic state with one-step undo and a cascade preview
   await expect(page.locator(".maru-diagram-node")).toHaveCount(4);
   await page.locator('.maru-diagram-node[data-node-id="running"]').click();
   await expect(page.getByTestId("semantic-props")).toBeVisible();
+  expect(forbidden).toEqual([]);
+});
+
+test("imports a floorplan map, edits a node kind, undoes, saves and reloads (issue #535)", async ({ page }) => {
+  const forbidden = watchForbiddenRequests(page);
+  await importSemanticSpec(page, "floorplan");
+  // 21 nodes: parents as nested sections, leaves as members.
+  await expect(page.locator(".maru-diagram-node")).toHaveCount(21);
+  await expect(page.locator(".maru-diagram-edge")).toHaveCount(6);
+
+  const cli = page.locator('.maru-diagram-node[data-node-id="ahub.cli"]');
+  await cli.click();
+  await expect(page.getByTestId("semantic-props")).toBeVisible();
+  const kind = page.getByTestId("semantic-floorplan-kind");
+  await expect(kind).toHaveValue("ui");
+  await kind.selectOption("script");
+  await expect(kind).toHaveValue("script");
+  await page.keyboard.press("ControlOrMeta+z");
+  await cli.click();
+  await expect(page.getByTestId("semantic-floorplan-kind")).toHaveValue("ui");
+
+  await page.getByTestId("semantic-floorplan-kind").selectOption("worker");
+  await expect(page.getByTestId("semantic-floorplan-kind")).toHaveValue("worker");
+  await page.getByRole("tab", { name: "파일" }).click();
+  await page.getByRole("button", { name: "저장" }).click();
+  const saveDialog = page.locator(".dialog-content", { hasText: "다이어그램 저장" });
+  await saveDialog.getByLabel("파일 이름").fill("e2e-floorplan");
+  await saveDialog.getByRole("button", { name: "저장" }).click();
+  await expect(page.locator(".maru-diagram-status", { hasText: "저장됨" })).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "다이어그램", exact: true }).click();
+  await expect(page.locator(".maru-diagram-node")).toHaveCount(21);
+  await page.locator('.maru-diagram-node[data-node-id="ahub.cli"]').click();
+  await expect(page.getByTestId("semantic-floorplan-kind")).toHaveValue("worker");
   expect(forbidden).toEqual([]);
 });

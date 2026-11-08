@@ -12,11 +12,13 @@
  */
 
 import type { StateTransformer } from "./actions";
+import { floorplanDescendants } from "./floorplan";
 import { buildProposalFromCandidate, prepareProposalApply, type ProposalMeta } from "./proposal";
 import {
   SEMANTIC_TYPES,
   datasetHasContainers,
   detachSemanticDataset,
+  floorplanRefNode,
   projectSemanticDataset,
   semanticContainerId,
   semanticDatasetsOf,
@@ -34,7 +36,53 @@ import type { SemanticDiagramType } from "./reportTypes";
 /** A spec edit: the next spec plus warnings, or null when nothing changes. */
 export type SpecTransform = (
   spec: Record<string, unknown>,
-) => { spec: Record<string, unknown>; warnings?: ValidationDiagnostic[]; containerIndexRemaps?: readonly SemanticContainerIndexRemap[] } | null;
+) => {
+  spec: Record<string, unknown>;
+  warnings?: ValidationDiagnostic[];
+  containerIndexRemaps?: readonly SemanticContainerIndexRemap[];
+  /** Index-keyed relation edges (floorplan): where each old edge index moved. */
+  edgeIndexRemaps?: readonly SemanticEdgeIndexRemap[];
+} | null;
+
+/** Canvas identity remap for an index-keyed relation collection (`<datasetId>-e<index>`). */
+export interface SemanticEdgeIndexRemap {
+  oldIndex: number;
+  newIndex: number | null;
+}
+
+/**
+ * Rename surviving canvas edges to their new index ids and drop removed
+ * ones, so a survivor keeps its own style and routing instead of inheriting
+ * the removed edge's.
+ */
+function remapEdgeIndexCanvas(
+  state: DiagramStateRoot,
+  datasetId: string,
+  remaps: readonly SemanticEdgeIndexRemap[],
+): DiagramStateRoot {
+  const byOld = new Map(remaps.map((remap) => [`${datasetId}-e${remap.oldIndex}`, remap.newIndex]));
+  const edges = state.doc.edges.flatMap((edge) => {
+    if (!byOld.has(edge.id)) return [edge];
+    const next = byOld.get(edge.id);
+    return next === null || next === undefined ? [] : [{ ...edge, id: `${datasetId}-e${next}` }];
+  });
+  const selection = state.ephemeral.selection;
+  return {
+    ...state,
+    doc: { ...state.doc, edges },
+    ephemeral: {
+      ...state.ephemeral,
+      selection: {
+        nodes: selection.nodes,
+        edges: new Set([...selection.edges].flatMap((id) => {
+          if (!byOld.has(id)) return [id];
+          const next = byOld.get(id);
+          return next === null || next === undefined ? [] : [`${datasetId}-e${next}`];
+        })),
+      },
+    },
+  };
+}
 
 /** Transient canvas identity remap for an index-keyed semantic container collection. */
 export interface SemanticContainerIndexRemap {
@@ -202,9 +250,10 @@ export function planSemanticEdit(
   const content = validateSemanticContent(dataset.diagramType, result.spec);
   if (content.length > 0) return { status: "invalid", diagnostics: content };
 
+  const edgeRemapped = result.edgeIndexRemaps?.length ? remapEdgeIndexCanvas(state, datasetId, result.edgeIndexRemaps) : state;
   const preparedRemap = result.containerIndexRemaps?.length
-    ? remapIndexContainerCanvas(state, datasetId, result.containerIndexRemaps)
-    : { state, nodeIdRemap: new Map<string, string>() };
+    ? remapIndexContainerCanvas(edgeRemapped, datasetId, result.containerIndexRemaps)
+    : { state: edgeRemapped, nodeIdRemap: new Map<string, string>() };
   if ("diagnostics" in preparedRemap) return { status: "invalid", diagnostics: preparedRemap.diagnostics };
   const planningState = preparedRemap.state;
   const previousNodeIdRemap = preparedRemap.nodeIdRemap;
@@ -234,6 +283,7 @@ export function planSemanticEdit(
     const applyProposal = outcome.transformer;
     const transformer: StateTransformer = (current) => {
       if (current.doc !== state.doc) return current;
+      if (result.edgeIndexRemaps?.length) current = remapEdgeIndexCanvas(current, datasetId, result.edgeIndexRemaps);
       if (result.containerIndexRemaps?.length) {
         const remapped = remapIndexContainerCanvas(current, datasetId, result.containerIndexRemaps, previousNodeIdRemap);
         if ("diagnostics" in remapped) return current;
@@ -431,7 +481,7 @@ export function addSemanticEntry(
     const added = { ...entry };
     const idKeyedContainer = [descriptor.container, ...(descriptor.additionalContainers ?? [])]
       .some((container) => container?.field === field && container.keyedBy === "id");
-    const requiresId = field === descriptor.entities || field === descriptor.relations || idKeyedContainer;
+    const requiresId = field === descriptor.entities || (field === descriptor.relations && !descriptor.noRelationIds) || idKeyedContainer;
     if (requiresId && (typeof added.id !== "string" || added.id.length === 0)) {
       added.id = mintSpecId(type, field, spec);
     }
@@ -472,7 +522,14 @@ export function addSemanticEntry(
           newIndex: oldIndex >= at ? oldIndex + 1 : oldIndex,
         })).filter((remap) => remap.newIndex !== remap.oldIndex)
       : [];
-    return { spec: next, ...(containerIndexRemaps.length > 0 ? { containerIndexRemaps } : {}) };
+    const edgeIndexRemaps: SemanticEdgeIndexRemap[] = type === "floorplan" && field === "edges"
+      ? entries.flatMap((_, oldIndex) => oldIndex >= at ? [{ oldIndex, newIndex: oldIndex + 1 }] : [])
+      : [];
+    return {
+      spec: next,
+      ...(containerIndexRemaps.length > 0 ? { containerIndexRemaps } : {}),
+      ...(edgeIndexRemaps.length > 0 ? { edgeIndexRemaps } : {}),
+    };
   };
 }
 
@@ -482,6 +539,7 @@ export function removeSemanticEntries(
   spec: Record<string, unknown>,
   targets: readonly SemanticEntryTarget[],
 ): { transform: SpecTransform; effects: SemanticCascadeEffect[] } {
+  if (type === "floorplan") return removeFloorplanEntries(spec, targets);
   const descriptor = SEMANTIC_TYPES[type];
   const supported = new Set([descriptor.entities, descriptor.relations, descriptor.container?.field,
     ...(descriptor.additionalContainers ?? []).map((item) => item.field)].filter((field): field is string => Boolean(field)));
@@ -694,6 +752,103 @@ export function removeSemanticEntries(
       next = growSequenceViewBox(remapSequenceRanges(spec, next, oldToNew));
     }
     return { spec: next, ...(containerIndexRemaps.length > 0 ? { containerIndexRemaps } : {}) };
+  };
+  return { transform, effects };
+}
+
+/**
+ * Floorplan removal (issue #535). Removing a node removes its descendants,
+ * every edge, flow step and tour stop that names a removed node, and the
+ * annotations whose file only a removed node claimed. A flow left with fewer
+ * than two steps is removed whole. Refs are resolved on the spec before the
+ * edit: a file path counts as removed when it resolved to a removed node and
+ * resolves to nothing afterwards.
+ */
+function removeFloorplanEntries(
+  spec: Record<string, unknown>,
+  targets: readonly SemanticEntryTarget[],
+): { transform: SpecTransform; effects: SemanticCascadeEffect[] } {
+  const nodes = specEntries(spec, "nodes");
+  const edges = specEntries(spec, "edges");
+  const effects: SemanticCascadeEffect[] = [];
+  const removedNodes = new Set<number>();
+  const removedEdges = new Set<number>();
+  const direct = new Set<string>();
+  for (const target of targets) {
+    if (target.field === "nodes" && nodes[target.index]) {
+      removedNodes.add(target.index);
+      const id = nodes[target.index]!.id;
+      if (typeof id === "string") direct.add(id);
+    } else if (target.field === "edges" && edges[target.index]) removedEdges.add(target.index);
+  }
+  if (removedNodes.size === 0 && removedEdges.size === 0) return { transform: () => null, effects };
+  const descendants = floorplanDescendants(spec, direct);
+  nodes.forEach((node, index) => {
+    if (typeof node.id === "string" && descendants.has(node.id)) removedNodes.add(index);
+  });
+  const removedIds = new Set([...removedNodes].map((index) => nodes[index]!.id).filter((id): id is string => typeof id === "string"));
+  const keptNodes = nodes.filter((_, index) => !removedNodes.has(index));
+  const after = { ...spec, nodes: keptNodes };
+  const gone = (ref: unknown): boolean => {
+    if (typeof ref !== "string") return false;
+    if (removedIds.has(ref)) return true;
+    const before = floorplanRefNode(spec, ref);
+    return before !== null && removedIds.has(before) && floorplanRefNode(after, ref) === null;
+  };
+  [...removedNodes].sort((a, b) => a - b).forEach((index) =>
+    effects.push({ field: "nodes", index, label: entryLabel(nodes[index]!, String(nodes[index]!.id ?? "node")), action: "remove" }));
+  edges.forEach((edge, index) => {
+    if (!removedEdges.has(index) && (gone(edge.from) || gone(edge.to))) removedEdges.add(index);
+  });
+  [...removedEdges].sort((a, b) => a - b).forEach((index) => {
+    const edge = edges[index]!;
+    effects.push({ field: "edges", index, label: entryLabel(edge, `${String(edge.from)} -> ${String(edge.to)}`), action: "remove" });
+  });
+  const flows = specEntries(spec, "flows");
+  const nextFlows: Record<string, unknown>[] = [];
+  let flowsChanged = false;
+  flows.forEach((flow, index) => {
+    const steps = Array.isArray(flow.steps) ? flow.steps : [];
+    const kept = steps.filter((step) => !(typeof step === "object" && step !== null && gone((step as Record<string, unknown>).node)));
+    if (kept.length === steps.length) return void nextFlows.push(flow);
+    flowsChanged = true;
+    const label = typeof flow.title === "string" ? flow.title : String(flow.id ?? "flow");
+    if (kept.length < 2) effects.push({ field: "flows", index, label, action: "remove" });
+    else {
+      effects.push({ field: "flows", index, label, action: "unlink" });
+      nextFlows.push({ ...flow, steps: kept });
+    }
+  });
+  const tour = Array.isArray(spec.tour) ? spec.tour as unknown[] : [];
+  const removedStops = new Set<number>();
+  tour.forEach((stop, index) => {
+    if (typeof stop !== "object" || stop === null || !gone((stop as Record<string, unknown>).node)) return;
+    removedStops.add(index);
+    const record = stop as Record<string, unknown>;
+    effects.push({ field: "tour", index, label: typeof record.title === "string" ? record.title : String(record.node), action: "remove" });
+  });
+  const annotations = Array.isArray(spec.annotations) ? spec.annotations as unknown[] : [];
+  const removedAnnotations = new Set<number>();
+  annotations.forEach((annotation, index) => {
+    if (typeof annotation !== "object" || annotation === null || !gone((annotation as Record<string, unknown>).path)) return;
+    removedAnnotations.add(index);
+    effects.push({ field: "annotations", index, label: String((annotation as Record<string, unknown>).path), action: "remove" });
+  });
+
+  const transform: SpecTransform = (current) => {
+    if (current !== spec) return null;
+    const next: Record<string, unknown> = { ...spec, nodes: keptNodes };
+    if (Array.isArray(spec.edges)) next.edges = edges.filter((_, index) => !removedEdges.has(index));
+    if (flowsChanged) next.flows = nextFlows;
+    if (removedStops.size > 0) next.tour = tour.filter((_, index) => !removedStops.has(index));
+    if (removedAnnotations.size > 0) next.annotations = annotations.filter((_, index) => !removedAnnotations.has(index));
+    const edgeIndexRemaps: SemanticEdgeIndexRemap[] = [];
+    let kept = 0;
+    edges.forEach((_, oldIndex) => {
+      const newIndex = removedEdges.has(oldIndex) ? null : kept++;
+      if (newIndex !== oldIndex) edgeIndexRemaps.push({ oldIndex, newIndex });
+    });
+    return { spec: next, ...(edgeIndexRemaps.length > 0 ? { edgeIndexRemaps } : {}) };
   };
   return { transform, effects };
 }
