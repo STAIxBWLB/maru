@@ -8,6 +8,7 @@ import { floorplanGlobMatches, floorplanOwner, isFloorplanRef, validateFloorplan
 import { floorplanSpecToDataset, isFloorplanFile, parseFloorplanSpec } from "./floorplanCodec";
 import { buildGenerationPrompt, createGenerationJob, runGenerationJob, type GenerationHost } from "./generation";
 import { deserializeDoc, serializeDoc } from "./persistence";
+import { prepareProposalApply } from "./proposal";
 import { validateSemanticSpec, type SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDataset, projectSemanticDocument, resolveSemanticMember, semanticLosses, writeThroughText } from "./semantic";
 import { applyValidatedSemanticEdit, validateSemanticDraft } from "./semanticApply";
@@ -138,6 +139,33 @@ describe("floorplan structural edge cases", () => {
     const dataset = store.getState().doc.datasets![0] as SemanticSpecDataset;
     expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(projectSemanticDataset(dataset).nodes.map((n) => n.id));
     expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(["b", "a"]);
+  });
+
+  it("orders nodes parent-first when a regeneration proposal reparents (generation apply path)", async () => {
+    const base = { project: { name: "x" }, nodes: [
+      { id: "a", label: "A", kind: "service" },
+      { id: "b", label: "B", kind: "service" },
+    ] };
+    const store = storeOf(base);
+    const regenerated = { ...base, nodes: [{ ...base.nodes[0], parent: "b" }, base.nodes[1]] };
+    const job = createGenerationJob({
+      id: "regen",
+      diagramType: "floorplan",
+      prompt: { requirements: "regroup", locale: "en" },
+      doc: store.getState().doc,
+      baseMemoryRevision: "",
+      target: { datasetId: "fp", spec: base },
+      scope: new Set(store.getState().doc.nodes.map((n) => n.id)),
+    });
+    const done = await runGenerationJob(job, { runAgent: async () => JSON.stringify(regenerated), validateCandidate: refusingHost.validateCandidate });
+    expect(done.state).toBe("ready");
+    const outcome = prepareProposalApply(store.getState(), done.proposal!, "");
+    expect(outcome.status).toBe("applied");
+    if (outcome.status !== "applied") return;
+    const next = outcome.transformer(store.getState());
+    expect(next.doc.nodes.map((n) => n.id)).toEqual(["b", "a"]);
+    const dataset = next.doc.datasets![0] as SemanticSpecDataset;
+    expect(next.doc.nodes.map((n) => n.id)).toEqual(projectSemanticDataset(dataset).nodes.map((n) => n.id));
   });
 
   it("handles a __proto__ node id without turning ids into objects", () => {

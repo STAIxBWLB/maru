@@ -635,6 +635,21 @@ export function isSemanticContainerNode(node: DiagramNode): boolean {
 
 /** Keep outer frames behind lane frames and inner frames, without moving
  * non-container slots or changing the relative order within one role. */
+/**
+ * Keep a floorplan dataset's canvas nodes parent-first like a fresh
+ * projection, so a reparented node is not painted under its new (opaque)
+ * parent section. The dataset's nodes keep their slots among freeform nodes.
+ * Applied wherever proposals are applied, so manual edits and regeneration
+ * share it.
+ */
+export function orderFloorplanNodes(nodes: readonly DiagramNode[], dataset: SemanticSpecDataset): DiagramNode[] {
+  const order = new Map(projectSemanticDataset(dataset).nodes.map((node, index) => [node.id, index]));
+  const owned = (node: DiagramNode) => isMemberOf(node, dataset.id) && order.has(node.id);
+  const sorted = nodes.filter(owned).sort((a, b) => order.get(a.id)! - order.get(b.id)!);
+  let slot = 0;
+  return nodes.map((node) => owned(node) ? sorted[slot++]! : node);
+}
+
 export function orderSemanticContainers(nodes: readonly DiagramNode[], datasetId: string): DiagramNode[] {
   const ownedContainer = (node: DiagramNode) => isSemanticContainerNode(node) && isMemberOf(node, datasetId);
   const depth = (node: DiagramNode) => node.meta?.semanticContainer === "phase" ? -1

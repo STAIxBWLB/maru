@@ -62,6 +62,7 @@ import {
   SEMANTIC_TYPES,
   datasetHasContainers,
   descriptorFor,
+  orderFloorplanNodes,
   isSemanticContainerNode,
   orderSemanticContainers,
   semanticContainers,
@@ -498,6 +499,9 @@ function applyProposalOps(doc: DiagramDoc, ops: readonly ProposalOp[]): DiagramD
     for (const op of ops) {
       if (op.kind === "upsertSemanticDataset") nodes = orderSemanticContainers(nodes, op.dataset.id);
     }
+  }
+  for (const op of ops) {
+    if (op.kind === "upsertSemanticDataset" && op.dataset.diagramType === "floorplan") nodes = orderFloorplanNodes(nodes, op.dataset);
   }
   return { ...doc, nodes, edges, ...(datasets !== undefined ? { datasets } : {}) };
 }
