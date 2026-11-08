@@ -10,7 +10,7 @@ use crate::atomic_file::{
     PathTransactionParent, PathTransactionRequest,
 };
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
-use crate::job_receipts::{
+use crate::jobs::receipts::{
     identity, process_ownership, verify_lock_identity, JobRunReceipt, NativeProcessIdentity,
     ProcessOwnership,
 };
@@ -754,7 +754,7 @@ fn acquire_file_lock(roots: &WorkspaceRoots, path: &Path) -> Result<File, String
                 "repair claim-lock permissions and retry",
             )
         })?;
-    verify_lock_identity(&file, path).map_err(|error| {
+    verify_lock_identity(&file, path).map_err(|error: String| {
         action_error(
             "task_execution_lock_changed",
             path,
@@ -770,7 +770,7 @@ fn acquire_file_lock(roots: &WorkspaceRoots, path: &Path) -> Result<File, String
             "retry after the other task operation finishes",
         )
     })?;
-    verify_lock_identity(&file, path).map_err(|error| {
+    verify_lock_identity(&file, path).map_err(|error: String| {
         action_error(
             "task_execution_lock_changed",
             path,
@@ -1611,30 +1611,6 @@ fn new_receipt(request: &TaskExecutionRequest, run_id: &str) -> JobRunReceipt {
     }
 }
 
-fn pending_identity_content(
-    snapshot: &TaskSnapshot,
-    claim: &TaskExecutionClaim,
-) -> Result<String, String> {
-    if snapshot.revision != claim.receipt.job_revision {
-        return Err(action_error(
-            "task_execution_source_changed",
-            &snapshot.path,
-            "task changed after execution claim preparation",
-            "review the task and submit a fresh execution request",
-        ));
-    }
-    let next = task_note_with_id(snapshot, &claim.task_id)?;
-    if crate::document::revision_for(&next) != claim.source_revision {
-        return Err(action_error(
-            "task_execution_identity_recovery_conflict",
-            &snapshot.path,
-            "prepared task identity differs from the durable claim",
-            "review the claim and task frontmatter before retrying",
-        ));
-    }
-    Ok(next)
-}
-
 fn active_claim_for_other_request(
     roots: &WorkspaceRoots,
     lease: &PathTransactionLease,
@@ -1648,7 +1624,7 @@ fn active_claim_for_other_request(
                 "task_execution_needs_review",
                 &snapshot.path,
                 "previous execution requires human review",
-                "review the task and explicitly release the claim before retrying",
+                "review native ownership and invoke stop_ai_mission for the recorded run before retrying",
             ));
         }
         return Ok(());
@@ -1841,24 +1817,76 @@ pub(crate) fn acquire(
     let bootstrap_path = bootstrap_lock_path(&roots, &requested_path);
     let bootstrap_lock = acquire_file_lock(&roots, &bootstrap_path)?;
 
+    let pending = find_request_claim(&roots, request, &request_path)?;
+    if let Some(recorded) = &pending {
+        let id = &recorded.task_id;
+        let replay_lock_path = task_lock_path(&roots, id);
+        let replay_lock = acquire_file_lock(&roots, &replay_lock_path)?;
+        let file = claim_path(&roots, id);
+        let admission = PathTransactionRequest::new([
+            file.clone(),
+            replay_lock_path.clone(),
+            bootstrap_path.clone(),
+        ])?
+        .require_parent(&roots.work)?;
+        return with_path_transactions(admission, |_lease| {
+            verify_lock_identity(&bootstrap_lock, &bootstrap_path)?;
+            verify_lock_identity(&replay_lock, &replay_lock_path)?;
+            let current = read_claim(&file, id)?.ok_or_else(|| {
+                action_error(
+                    "task_execution_claim_missing",
+                    &file,
+                    "recorded request disappeared",
+                    "refresh task execution history before retrying",
+                )
+            })?;
+            if current.workspace != roots.identity || current.tasks_root != display(&roots.tasks) {
+                return Err(action_error(
+                    "task_execution_workspace_mismatch",
+                    &file,
+                    "replay receipt belongs to a different workspace or task root",
+                    "open the original workspace and retry the recorded request",
+                ));
+            }
+            let matching = if current.request_id == request.request_id
+                && current.receipt.job_revision == request.source_revision
+            {
+                Some(current.clone())
+            } else {
+                current
+                    .request_history
+                    .iter()
+                    .find(|row| {
+                        row.request_id == request.request_id
+                            && row.receipt.job_revision == request.source_revision
+                    })
+                    .map(|row| current.historical(row))
+            };
+            matching
+                .map(|claim| Admission {
+                    claim,
+                    replayed: true,
+                })
+                .ok_or_else(|| {
+                    action_error(
+                        "task_execution_request_conflict",
+                        &file,
+                        "request history changed while replaying",
+                        "refresh the recorded run before retrying",
+                    )
+                })
+        });
+    }
     if requested_path.exists() {
         if let Some(owned) = unfinished_claim_at_path(&roots, &requested_path, true)? {
             let current = task_id_from_path_bounded(&requested_path);
-            if current.as_deref() != Some(owned.task_id.as_str())
-                && !(owned.request_id == request.request_id
-                    && owned.receipt.job_revision == request.source_revision)
-            {
-                return Err(action_error("task_execution_identity_changed", &requested_path, "an unfinished execution still owns this path after its taskId changed", "restore the original taskId, then review and explicitly release that claim before requesting a new identity"));
+            if current.as_deref() != Some(owned.task_id.as_str()) {
+                return Err(action_error("task_execution_identity_changed", &requested_path, "an unfinished execution still owns this path after its taskId changed", "restore the original taskId, then review and release that run with stop_ai_mission before requesting a new identity"));
             }
         }
     }
-    let pending = find_request_claim(&roots, request, &request_path)?;
-    let initial_snapshot = if let Some(claim) = pending.as_ref() {
-        snapshot_from_claim(&roots, claim)?
-    } else {
-        let path = resolve_task_path(&roots, &request.task_path)?;
-        task_snapshot(&roots, &path)?
-    };
+    let path = resolve_task_path(&roots, &request.task_path)?;
+    let initial_snapshot = task_snapshot(&roots, &path)?;
     if requested_path.exists() {
         let requested_current = resolve_task_path(&roots, &display(&requested_path))?;
         if requested_current != initial_snapshot.path {
@@ -1873,7 +1901,6 @@ pub(crate) fn acquire(
     let task_id = initial_snapshot
         .task_id
         .clone()
-        .or_else(|| pending.as_ref().map(|claim| claim.task_id.clone()))
         .unwrap_or_else(task_id_candidate);
     if !valid_task_id(&task_id) {
         return Err(action_error(
@@ -1975,40 +2002,8 @@ pub(crate) fn acquire(
             if existing.request_id == request.request_id
                 && existing.receipt.job_revision == request.source_revision
             {
-                refuse_terminal(&snapshot)?;
-                if snapshot.task_id.is_none() && snapshot.revision == existing.receipt.job_revision
-                {
-                    let next_content = pending_identity_content(&snapshot, existing)?;
-                    write_claim(&roots, lease, existing, &task_lock)?;
-                    write_task_note(&roots, lease, &snapshot.path, &next_content)?;
-                    let verified = task_snapshot(&roots, &snapshot.path)?;
-                    if verified.task_id.as_deref() != Some(task_id.as_str())
-                        || verified.revision != existing.source_revision
-                    {
-                        existing.lifecycle = TaskExecutionLifecycle::NeedsReview;
-                        write_claim(&roots, lease, existing, &task_lock)?;
-                        return Err(action_error(
-                            "task_execution_identity_recovery_conflict",
-                            &snapshot.path,
-                            "task identity did not commit to the claimed bytes",
-                            "review the claim and task manually",
-                        ));
-                    }
-                    return Ok(Admission {
-                        claim: existing.clone(),
-                        replayed: true,
-                    });
-                }
-                if snapshot.task_id.as_deref() != Some(task_id.as_str())
-                    || snapshot.revision != existing.source_revision
-                {
-                    return Err(action_error(
-                        "task_execution_source_changed",
-                        &snapshot.path,
-                        "task bytes differ from the active claim",
-                        "review the task and submit a fresh execution request",
-                    ));
-                }
+                // Exact replays return a recorded run; they never resume a
+                // worker or adopt its result, even if the note changed later.
                 return Ok(Admission {
                     claim: existing.clone(),
                     replayed: true,
@@ -2027,7 +2022,7 @@ pub(crate) fn acquire(
                     "task_execution_needs_review",
                     &snapshot.path,
                     "previous execution requires human review",
-                    "review the task and explicitly release the claim before retrying",
+                    "review native ownership and invoke stop_ai_mission for the recorded run before retrying",
                 ));
             }
             if existing.lifecycle == TaskExecutionLifecycle::Active {
@@ -2376,6 +2371,12 @@ pub(crate) fn finish(
         |roots, claim, snapshot, lease, lock| {
             validate_claim_token(claim, token)?;
             let requested_outcome = if success { "succeeded" } else { "failed" };
+            if claim.lifecycle == TaskExecutionLifecycle::Released
+                && !success
+                && exit_code.is_none()
+            {
+                return Ok(claim.clone());
+            }
             if claim.lifecycle == TaskExecutionLifecycle::Finished {
                 if claim.receipt.process_outcome == requested_outcome
                     && claim.receipt.exit_code == exit_code
@@ -2451,6 +2452,9 @@ pub(crate) fn cancel_admission(work: &Path, token: &TaskExecutionToken) -> Resul
         &token.task_id,
         |roots, claim, snapshot, lease, lock| {
             validate_claim_token(claim, token)?;
+            if claim.lifecycle == TaskExecutionLifecycle::Released {
+                return Ok(());
+            }
             if claim.lifecycle != TaskExecutionLifecycle::Active || claim.receipt.child.is_some() {
                 return Err(action_error(
                     "task_execution_cleanup_held",
@@ -2480,13 +2484,6 @@ pub(crate) fn cancel_admission(work: &Path, token: &TaskExecutionToken) -> Resul
 
 /// Explicitly release a pre-spawn or cancelled execution. A child must be
 /// absent or proven dead; this never edits the task note.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Explicit reviewed-release domain seam; automatic admission cleanup is deliberately narrower"
-    )
-)]
 pub(crate) fn release(
     work: &Path,
     token: &TaskExecutionToken,
@@ -2522,14 +2519,6 @@ pub(crate) fn release(
                         &snapshot.path,
                         "worker child is live or unverified",
                         "stop and reap only the owned child before releasing",
-                    ));
-                }
-                if !claim.child_reaped {
-                    return Err(action_error(
-                        "task_execution_child_reap_unconfirmed",
-                        &snapshot.path,
-                        "child death has no owner wait proof",
-                        "reap the owned child or reconcile its native identity before releasing",
                     ));
                 }
             }

@@ -311,7 +311,10 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   Ordinary invocations do not create task identities or claims. Managed task
   note APIs and Markdown renames share a short per-path lock with first admission
   to prevent an identity assignment race; that coordination lock does not opt a
-  task in.
+  task in. For a recovered task mission with no in-memory owned process, an
+  explicit `stop_ai_mission` performs reviewed conditional release after positive
+  native death proof. It never signals recovered PIDs or releases uncertain
+  ownership. Exact request replay remains read-only after edits or completion.
 - Adaptive runtime policy is opt-in under Settings > AI (`ai.adaptivePolicy`).
   Each invocation asks `dot ai policy resolve --json` for an eligible runtime,
   model, reasoning effort, and native automatic-review permission. Missing or

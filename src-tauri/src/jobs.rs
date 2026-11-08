@@ -14,7 +14,7 @@ use crate::atomic_file::{
 use crate::win_process::NoWindow;
 
 #[path = "job_receipts.rs"]
-mod receipts;
+pub(crate) mod receipts;
 
 pub const JOBS_SCHEMA: u32 = 1;
 pub const JOB_LABEL_PREFIX: &str = "com.maru.job.";

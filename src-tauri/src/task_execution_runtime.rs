@@ -96,6 +96,21 @@ pub(crate) fn reconcile_mission(
         "task_execution_recovery_token_missing: the recorded mission token is absent from claim history; review the task claim and mission before retrying".to_string())
 }
 
+pub(crate) fn release_mission_claim(metadata: &serde_json::Value) -> Result<(), String> {
+    let token: TaskExecutionToken = serde_json::from_value(
+        metadata
+            .get("taskExecution")
+            .cloned()
+            .ok_or("Task claim metadata is missing; refresh mission history")?,
+    )
+    .map_err(|error| format!("Task claim metadata is invalid: {error}; refresh mission history"))?;
+    let workspace = metadata
+        .get("workspacePath")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("Task claim workspace is missing; inspect the mission record before retrying")?;
+    claims::release(Path::new(workspace), &token).map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

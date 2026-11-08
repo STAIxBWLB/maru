@@ -387,20 +387,19 @@ fn ordinary_rename_and_custom_task_roots_keep_their_existing_defaults() {
 }
 
 #[test]
-fn pending_identity_recovery_and_duplicate_request_path_checks_are_fail_closed() {
+fn pending_identity_replay_is_read_only_and_duplicate_request_path_checks_are_fail_closed() {
     let f = Fixture::new();
     let original = fs::read_to_string(&f.path).unwrap();
     let request = f.request("pending");
     let claim = acquire(&f.work, &request, "pending-run").unwrap().claim;
+    let bound = fs::read_to_string(&f.path).unwrap();
     // Simulate interruption after sidecar admission but before identity bytes.
     fs::write(&f.path, &original).unwrap();
     let replay = acquire(&f.work, &request, "must-not-run").unwrap();
     assert!(replay.replayed);
     assert_eq!(replay.claim.token(), claim.token());
-    assert_eq!(
-        task_id_from_content(&fs::read_to_string(&f.path).unwrap()).as_deref(),
-        Some(claim.task_id.as_str())
-    );
+    assert_eq!(fs::read_to_string(&f.path).unwrap(), original);
+    fs::write(&f.path, bound).unwrap();
     let other = f.work.join("tasks/active/other.md");
     fs::write(&other, original).unwrap();
     let mut redirected = request;
@@ -544,4 +543,98 @@ fn a_symlinked_claim_namespace_never_writes_outside_the_workspace() {
     assert!(error.contains("directory_invalid"), "{error}");
     assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
     assert_eq!(fs::read(&f.path).unwrap(), before);
+}
+
+#[test]
+fn exact_finished_request_replays_after_archive_and_edit_without_any_write() {
+    let f = Fixture::new();
+    let request = f.request("exact-replay");
+    let claim = acquire(&f.work, &request, "exact-run").unwrap().claim;
+    wait_owned(&f.work, &claim.token());
+    finish(&f.work, &claim.token(), true, Some(0)).unwrap();
+    let bound = fs::read_to_string(&f.path).unwrap();
+    crate::today_lifecycle::task_transition(
+        display(&f.work),
+        crate::today::TaskTransitionRequest {
+            task_id: claim.task_id.clone(),
+            task_path: request.task_path.clone(),
+            kind: crate::today::TaskTransitionKind::Complete,
+            expected_task_hash: crate::document::revision_for(&bound),
+            defer_date: None,
+            date: Some("2026-11-08".into()),
+            now_iso: Some("2026-11-08T09:00:00+09:00".into()),
+            web_action_id: None,
+            payload: serde_json::json!({}),
+        },
+    )
+    .unwrap();
+    let roots = workspace_roots(&f.work, None).unwrap();
+    let archived = find_task_by_id(&roots, &roots.tasks, &claim.task_id)
+        .unwrap()
+        .path;
+    for edit in [false, true] {
+        if edit {
+            let raw = fs::read_to_string(&archived).unwrap();
+            fs::write(&archived, format!("{raw}Edited after completion\n")).unwrap();
+        }
+        let note = fs::read(&archived).unwrap();
+        let receipt = fs::read(f.file(&claim.task_id)).unwrap();
+        let replay = acquire(&f.work, &request, "must-not-spawn").unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.claim.token(), claim.token());
+        assert_eq!(fs::read(&archived).unwrap(), note);
+        assert_eq!(fs::read(f.file(&claim.task_id)).unwrap(), receipt);
+    }
+}
+
+#[test]
+fn reviewed_stop_releases_dead_unreaped_drift_after_restart_without_signalling_a_pid() {
+    use tauri::Manager;
+    let f = Fixture::new();
+    let claim = acquire(&f.work, &f.request("reviewed-stop"), "reviewed-stop-run")
+        .unwrap()
+        .claim;
+    let raw = fs::read_to_string(&f.path).unwrap();
+    fs::write(&f.path, format!("{raw}Manual edit\n")).unwrap();
+    f.edit(&claim.task_id, |row| {
+        row.receipt.owner = Some(stopped_identity());
+        row.receipt.child = Some(stopped_identity());
+        row.child_reaped = false;
+    });
+    let dir = crate::mission_state::mission_dir().unwrap();
+    fs::create_dir_all(&dir).unwrap();
+    let now = chrono::Utc::now().to_rfc3339();
+    let old_record = crate::mission_state::MissionRecord {
+        id: claim.run_id.clone(),
+        kind: "claude".into(),
+        started_at: now.clone(),
+        last_output_at: now,
+        status: crate::mission_state::MissionStatus::Running,
+        exit_code: None,
+        output_log_path: None,
+        metadata: Some(
+            serde_json::json!({"workspacePath": display(&f.work), "taskExecution": claim.token()}),
+        ),
+    };
+    fs::write(
+        dir.join(format!("{}.json", claim.run_id)),
+        serde_json::to_vec(&old_record).unwrap(),
+    )
+    .unwrap();
+    let restarted = tauri::test::mock_app();
+    restarted.manage(crate::mission_state::MissionState::default());
+    let before = fs::read(&f.path).unwrap();
+    let stopped =
+        crate::mission_state::stop_ai_mission(restarted.handle().clone(), claim.run_id.clone())
+            .unwrap();
+    assert_eq!(stopped.status, crate::mission_state::MissionStatus::Stopped);
+    let stored = read_claim(&f.file(&claim.task_id), &claim.task_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.lifecycle, TaskExecutionLifecycle::Released);
+    assert!(stored.child_reaped);
+    assert_eq!(fs::read(&f.path).unwrap(), before);
+    let next = acquire(&f.work, &f.request("after-review"), "after-review-run").unwrap();
+    assert!(!next.replayed);
+    assert_eq!(next.claim.generation, claim.generation + 1);
 }

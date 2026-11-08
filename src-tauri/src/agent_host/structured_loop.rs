@@ -181,6 +181,7 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
     let run_id_thread = run_id.clone();
     let cwd_thread = cwd;
     thread::spawn(move || {
+        let mut provider_started = false;
         let result = (|| {
             let mut input = input;
             // General agent calls have no skill binding. Only the explicit
@@ -218,6 +219,7 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
                     // Each call's usage is appended when the call ends, so a
                     // failed, cancelled or interrupted run keeps it (maru#431).
                     .with_usage_sink(cwd_thread.clone(), run_id_thread.clone());
+            provider_started = true;
             let result = run_five_role_loop(&mut adapter, input);
             // One retry for receipts whose append failed mid-run; anything
             // still pending marks the run's usage as incomplete.
@@ -293,6 +295,9 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
             }
             Err(err) => {
                 if let Some(session) = &task_execution {
+                    if !provider_started {
+                        session.admission_failed();
+                    }
                     if let Err(error) = session.finish(false, None) {
                         eprintln!(
                             "maru: task execution {} needs review: {error}",
@@ -378,6 +383,66 @@ mod tests {
     fn write_fake_cli(path: std::path::PathBuf, script: &str) -> std::path::PathBuf {
         crate::test_support::write_executable_fixture(&path, script, 0o755).unwrap();
         path
+    }
+
+    #[test]
+    fn composition_failure_before_spawn_releases_ownership_for_a_fresh_request() {
+        use tauri::Manager;
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let work = home.root.path().join("precompose");
+        std::fs::create_dir_all(work.join("tasks/active")).unwrap();
+        let path = work.join("tasks/active/task.md");
+        std::fs::write(&path, "---\nstatus: active\n---\nTask\n").unwrap();
+        let app = tauri::test::mock_app();
+        app.manage(crate::mission_state::MissionState::default());
+        for index in 0..2 {
+            let run_id = format!("precompose-{index}");
+            let request = serde_json::json!({"requestId": format!("composition-{index}"), "taskPath": "tasks/active/task.md", "sourceRevision": crate::document::revision_for(&std::fs::read_to_string(&path).unwrap())});
+            let mut metadata =
+                serde_json::json!({"taskExecution": request, "skillId": "fixture-only"});
+            if index == 1 {
+                metadata["skillPrompt"] = serde_json::json!("work");
+                metadata["skillContext"] = serde_json::json!({"invalid":"context"});
+            }
+            super::agent_run_structured_loop(
+                app.handle().clone(),
+                "claude".into(),
+                "work".into(),
+                work.to_string_lossy().into_owned(),
+                None,
+                None,
+                None,
+                Some(run_id.clone()),
+                None,
+                None,
+                Some(metadata),
+            )
+            .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let rows = crate::mission_state::list_ai_missions(app.handle().clone()).unwrap();
+                if rows.iter().any(|row| {
+                    row.id == run_id && row.status == crate::mission_state::MissionStatus::Failed
+                }) {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "pre-spawn failure did not settle; inspect mission and claim fixtures"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let fresh = serde_json::json!({"taskExecution": {"requestId": format!("fresh-{index}"), "taskPath": "tasks/active/task.md", "sourceRevision": crate::document::revision_for(&std::fs::read_to_string(&path).unwrap())}});
+            let (session, replayed) = crate::task_execution_runtime::TaskExecutionSession::admit(
+                work.to_str().unwrap(),
+                Some(&fresh),
+                &format!("fresh-run-{index}"),
+            )
+            .unwrap()
+            .unwrap();
+            assert!(!replayed);
+            session.admission_failed();
+        }
     }
 
     // Proves the real CLI adapter composes with the five-role loop end-to-end: a

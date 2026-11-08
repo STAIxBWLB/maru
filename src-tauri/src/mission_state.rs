@@ -144,6 +144,66 @@ pub fn stop_ai_mission<R: tauri::Runtime>(
     invocation_id: String,
 ) -> Result<MissionRecord, String> {
     let state = app.state::<MissionState>();
+    let owned_pid = state
+        .pids
+        .lock()
+        .map_err(|_| "mission_state_poisoned".to_string())?
+        .contains_key(&invocation_id);
+    let known = state
+        .missions
+        .lock()
+        .map_err(|_| "mission_state_poisoned".to_string())?
+        .contains_key(&invocation_id);
+    if !owned_pid && !known {
+        state.hydrate_from_disk().map_err(|error| {
+            format!(
+                "Cannot load mission history: {error}; inspect the mission state files and retry"
+            )
+        })?;
+    }
+    let metadata = state
+        .missions
+        .lock()
+        .map_err(|_| "mission_state_poisoned".to_string())?
+        .get(&invocation_id)
+        .and_then(|record| record.metadata.clone());
+    if !owned_pid {
+        if let Some(metadata) = metadata.filter(|value| {
+            value
+                .get("taskExecution")
+                .is_some_and(|token| !token.is_null())
+        }) {
+            // Release claim locks before acquiring the mission path lease.
+            // Recovered PIDs are never signalled by this reviewed operation.
+            crate::task_execution_runtime::release_mission_claim(&metadata)?;
+            let record = mission_transaction(&invocation_id, |lease| {
+                let mut missions = state
+                    .missions
+                    .lock()
+                    .map_err(|_| "mission_state_poisoned".to_string())?;
+                let record = missions
+                    .get_mut(&invocation_id)
+                    .ok_or("Mission disappeared; refresh history before retrying")?;
+                if record
+                    .metadata
+                    .as_ref()
+                    .and_then(|value| value.get("taskExecution"))
+                    != metadata.get("taskExecution")
+                {
+                    return Err("Mission execution changed during reviewed release; refresh history and review the current run".into());
+                }
+                record.status = MissionStatus::Stopped;
+                if let Some(metadata) = record.metadata.as_mut().and_then(JsonValue::as_object_mut)
+                {
+                    metadata.remove("taskExecutionNeedsReview");
+                }
+                persist_record_in_transaction(record, lease)?;
+                Ok(record.clone())
+            })?;
+            emit_update(&app, &record);
+            return Ok(record);
+        }
+    }
     let record = state.stop(app.clone(), &invocation_id)?;
     emit_update(&app, &record);
     Ok(record)

@@ -494,7 +494,12 @@ impl ProviderAdapter for CliProviderAdapter {
             self.command_override.as_deref(),
             &self.permission_mode,
             self.bundle_session.as_ref(),
-        )?;
+        )
+        .inspect_err(|_| {
+            if let Some(session) = &self.task_execution {
+                session.admission_failed();
+            }
+        })?;
         // First usage slice (maru#431): Claude prints one JSON result object
         // carrying both the answer and its usage. Other providers stay plain.
         let json_usage = self.provider == CliProviderKind::Claude;
