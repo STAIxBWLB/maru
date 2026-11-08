@@ -149,6 +149,11 @@ export const setStage = (index: number, stage: number) => setSpecField("nodes", 
 const entryLabel = (entry: Record<string, unknown>, fallback: string) =>
   typeof entry.label === "string" && entry.label.length > 0 ? entry.label : fallback;
 
+function isValidWorkflowMainPath(path: readonly unknown[], edges: readonly Record<string, unknown>[]): boolean {
+  return path.length >= 2 && path.every((id) => typeof id === "string") &&
+    path.slice(1).every((to, index) => edges.some((edge) => edge.from === path[index] && edge.to === to));
+}
+
 function mintSpecId(type: SemanticDiagramType, field: string, spec: Record<string, unknown>): string {
   const used = new Set(
     Object.values(spec).flatMap((value) =>
@@ -216,12 +221,29 @@ function growSequenceViewBox(spec: Record<string, unknown>): Record<string, unkn
   const authored = (meta as Record<string, unknown>).viewBox;
   const viewBox = Array.isArray(authored) ? [...authored] : [920, 760];
   if (typeof viewBox[0] !== "number" || typeof viewBox[1] !== "number") return spec;
+  const messages = specEntries(spec, "messages");
+  const activations = specEntries(spec, "activations");
+  const segments = specEntries(spec, "segments");
   const participantCount = specEntries(spec, "participants").length;
   const spread = (meta as Record<string, unknown>).column_fit === "spread";
   const requiredWidth = (spread ? 188 : 145) + Math.max(0, participantCount - 1) * 108;
+  const contentBottom = Math.max(
+    0,
+    ...messages.map((message) => typeof message.y === "number" ? message.y + (message.note ? 22 : 6) : 0),
+    ...activations.map((activation) => typeof activation.to === "number" ? activation.to : 0),
+    ...segments.map((segment) => typeof segment.to === "number" ? segment.to : 0),
+  );
+  // There are at most five sequence legend entries. A legal 80-character
+  // override can force each entry onto its own row at the default width.
+  const legendIsHidden =
+    typeof (meta as Record<string, unknown>).legend === "object" &&
+    (meta as { legend?: { mode?: unknown } }).legend?.mode === "hidden";
+  const legendClearance = legendIsHidden ? 0 : 12 + 86 + 4 * 22;
   const requiredHeight = Math.max(
-    ...specEntries(spec, "messages").map((item) => typeof item.y === "number" ? item.y + 83 : 0),
-    ...specEntries(spec, "segments").map((item) => typeof item.to === "number" ? item.to + 45 : 0),
+    ...messages.map((message) => typeof message.y === "number" ? message.y + 83 : 0),
+    ...segments.map((segment) => typeof segment.to === "number" ? segment.to + 45 : 0),
+    ...activations.map((activation) => typeof activation.to === "number" ? activation.to + 45 : 0),
+    legendClearance > 0 ? contentBottom + legendClearance : 0,
     760,
   );
   if (requiredWidth <= viewBox[0] && requiredHeight <= viewBox[1]) return spec;
@@ -356,7 +378,8 @@ export function removeSemanticEntries(
     const deletedStages = removals.get("stages")!;
     specEntries(spec, "nodes").forEach((node, index) => {
       if (removals.get("nodes")?.has(index)) return;
-      if (typeof node.stage === "number" && [...deletedStages].some((stage) => stage < node.stage)) {
+      const nodeStage = node.stage;
+      if (typeof nodeStage === "number" && [...deletedStages].some((stage) => stage < nodeStage)) {
         effects.push({ field: "nodes", index, label: entryLabel(node, "Node"), action: "unlink" });
       }
     });
@@ -367,16 +390,24 @@ export function removeSemanticEntries(
       effects.push({ field, index, label: entryLabel(range, field), action: "unlink" });
     });
   }
-  if (type === "workflow" && removedEntityIds.size > 0) {
+  if (type === "workflow") {
     const mainPath = Array.isArray(spec.mainPath) ? spec.mainPath : [];
     const remainingMainPath = mainPath.filter((id) => !removedEntityIds.has(String(id)));
-    if (mainPath.length !== remainingMainPath.length && remainingMainPath.length < 2) {
+    const remainingEdges = specEntries(spec, "edges").filter((_, index) => !removals.get("edges")?.has(index));
+    const pathIsAffected = mainPath.length !== remainingMainPath.length ||
+      [...(removals.get("edges") ?? [])].some((index) => {
+        const removedEdge = specEntries(spec, "edges")[index];
+        return mainPath.some((from, pathIndex) => pathIndex < mainPath.length - 1 && from === removedEdge?.from && mainPath[pathIndex + 1] === removedEdge?.to);
+      });
+    if (Array.isArray(spec.mainPath) && !isValidWorkflowMainPath(remainingMainPath, remainingEdges)) {
       effects.push({ field: "mainPath", index: -1, label: "mainPath", action: "remove" });
-    } else {
+    } else if (pathIsAffected) {
       mainPath.forEach((id, index) => {
         if (removedEntityIds.has(String(id))) effects.push({ field: "mainPath", index, label: "mainPath", action: "unlink" });
       });
     }
+  }
+  if (type === "workflow" && removedEntityIds.size > 0) {
     const checks = spec.semanticChecks as Record<string, unknown> | undefined;
     if (checks) for (const key of ["allowedRoots", "allowedTerminals", "requiredEdges", "requiredPaths"]) {
       (Array.isArray(checks[key]) ? checks[key] as unknown[] : []).forEach((value, index) => {
@@ -399,10 +430,12 @@ export function removeSemanticEntries(
         wraps: Array.isArray(boundary.wraps) ? boundary.wraps.filter((id) => !removedEntityIds.has(String(id))) : [],
       })).filter((boundary) => (boundary.wraps as unknown[]).length > 0);
     }
-    if (type === "workflow" && removedEntityIds.size > 0) {
-      const mainPath = Array.isArray(spec.mainPath) ? spec.mainPath.filter((id) => !removedEntityIds.has(String(id))) : spec.mainPath;
-      if (Array.isArray(mainPath) && mainPath.length < 2) delete next.mainPath;
+    if (type === "workflow" && Array.isArray(spec.mainPath)) {
+      const mainPath = spec.mainPath.filter((id) => !removedEntityIds.has(String(id)));
+      if (mainPath.length === 0 || !isValidWorkflowMainPath(mainPath, specEntries(next, "edges"))) delete next.mainPath;
       else next.mainPath = mainPath;
+    }
+    if (type === "workflow" && removedEntityIds.size > 0) {
       const checks = spec.semanticChecks as Record<string, unknown> | undefined;
       if (checks) {
         const clean = { ...checks };
@@ -413,7 +446,12 @@ export function removeSemanticEntries(
     }
     if (type === "dataflow" && removals.has("stages")) {
       const removed = removals.get("stages")!;
-      next.nodes = specEntries(next, "nodes").map((node) => ({ ...node, stage: typeof node.stage === "number" ? node.stage - [...removed].filter((index) => index < node.stage!).length : node.stage }));
+      next.nodes = specEntries(next, "nodes").map((node) => {
+        const stage = node.stage;
+        if (typeof stage !== "number") return { ...node };
+        const removedBefore = [...removed].filter((removedIndex) => removedIndex < stage).length;
+        return { ...node, stage: stage - removedBefore };
+      });
     }
     if (type === "sequence" && removals.has("messages")) {
       const oldMessages = specEntries(spec, "messages");

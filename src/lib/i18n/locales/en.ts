@@ -3813,6 +3813,7 @@ export const en: Record<string, string> = {
   "diagram.semantic.rangeOutsideCanvas": "Range at {field} exceeds the authored canvas. Move the segment within the canvas or enlarge the canvas first.",
   "diagram.semantic.add": "Add item",
   "diagram.semantic.remove": "Remove selected item",
+  "diagram.semantic.annotationRemoved": "Remove freeform connection: {name}",
   "diagram.semantic.removeConfirm": "Remove these items and their dependent links and memberships?",
   "diagram.semantic.editStale": "The diagram changed while confirmation was open. Review the current selection and try again.",
   "diagram.semantic.editRefused": "The edit would leave invalid or protected diagram data. Review the fields, dependencies and locks, then try again.",

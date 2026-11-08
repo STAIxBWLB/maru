@@ -112,6 +112,64 @@ describe("deleteSelection", () => {
     expect(store.getState().doc).toEqual(before);
   });
 
+  it.each(["node", "edge"] as const)("deletes a connected mixed selection with its selected freeform %s in one undo", async (selection) => {
+    const base = lifecycleDoc();
+    const bridge = { id: "bridge", fromNode: "running", fromPort: "e" as const, toNode: "note", toPort: "w" as const, label: "Annotation" };
+    const doc = { ...base, edges: [...base.edges, bridge] };
+    const store = storeWith(doc, selection === "node" ? ["running", "note"] : ["running"]);
+    if (selection === "edge") store.setState((state) => ({ ...state, ephemeral: { ...state.ephemeral, selection: { ...state.ephemeral.selection, edges: new Set(["bridge"]) } } }));
+    await deleteSelection(store, defaultCoalescer(), ko);
+    expect(messageDialog).not.toHaveBeenCalled();
+    expect(store.getState().doc.nodes.some((node) => node.id === "running")).toBe(false);
+    expect(store.getState().doc.nodes.some((node) => node.id === "note")).toBe(selection === "edge");
+    expect(store.getState().doc.edges.some((edge) => edge.id === "bridge")).toBe(false);
+    expect(vi.mocked(confirmDialog).mock.calls[0]![0]).toContain(ko("diagram.semantic.annotationRemoved", { name: "Annotation (bridge)" }));
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    store.setState(undo());
+    expect(store.getState().doc).toEqual(doc);
+  });
+
+  it("plans two semantic datasets joined by a freeform bridge as one deletion", async () => {
+    const first = lifecycleDoc();
+    const second = archifySpecToDataset("lifecycle", SEMANTIC_FIXTURES.lifecycle, { id: "other" }).dataset;
+    second.idMap = Object.fromEntries(["queued", "running", "done", "tr1", "tr2"].map((id) => [id, `other-${id}`]));
+    const projected = projectSemanticDocument(second).doc;
+    const doc = { ...first, nodes: [...first.nodes, ...projected.nodes], datasets: [...first.datasets!, second], edges: [...first.edges, ...projected.edges,
+      { id: "joined", fromNode: "running", fromPort: "e" as const, toNode: "other-running", toPort: "w" as const, label: "Shared annotation" },
+    ] };
+    const store = storeWith(doc, ["running", "other-running"]);
+    await deleteSelection(store, defaultCoalescer(), ko);
+    expect(messageDialog).not.toHaveBeenCalled();
+    expect(store.getState().doc.nodes.some((node) => ["running", "other-running"].includes(node.id))).toBe(false);
+    expect(store.getState().doc.edges).toHaveLength(0);
+    expect(vi.mocked(confirmDialog).mock.calls[0]![0]).toContain("Shared annotation (joined)");
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    store.setState(undo());
+    expect(store.getState().doc).toEqual(doc);
+  });
+
+  it("lists an internal annotation lost to a cascade and cancel retains it", async () => {
+    const base = lifecycleDoc();
+    const doc = { ...base, edges: [...base.edges, { id: "internal", fromNode: "running", fromPort: "e" as const, toNode: "done", toPort: "w" as const, label: "Keep track" }] };
+    const store = storeWith(doc, ["running"]);
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await deleteSelection(store, defaultCoalescer(), ko);
+    expect(vi.mocked(confirmDialog).mock.calls[0]![0]).toContain(ko("diagram.semantic.annotationRemoved", { name: "Keep track (internal)" }));
+    expect(store.getState().doc).toBe(doc);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("still refuses an unselected external bridge without losing any objects", async () => {
+    const base = lifecycleDoc();
+    const doc = { ...base, edges: [...base.edges, { id: "external", fromNode: "running", fromPort: "e" as const, toNode: "note", toPort: "w" as const }] };
+    const store = storeWith(doc, ["running"]);
+    await deleteSelection(store, defaultCoalescer(), ko);
+    expect(store.getState().doc).toBe(doc);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    expect(messageDialog).toHaveBeenCalled();
+    expect(confirmDialog).not.toHaveBeenCalled();
+  });
+
   it("removes a selected semantic relation without detaching its endpoints", async () => {
     const store = storeWith(lifecycleDoc(), []);
     store.setState((state) => ({ ...state, ephemeral: { ...state.ephemeral, selection: { nodes: new Set(), edges: new Set(["tr1"]) } } }));

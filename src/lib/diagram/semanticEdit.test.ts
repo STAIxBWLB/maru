@@ -257,6 +257,27 @@ describe("semantic structural edits", () => {
     expect(stageRemoval.effects).not.toContainEqual(expect.objectContaining({ field: "nodes", index: 0, action: "unlink" }));
   });
 
+  it("drops invalid workflow main paths after node or relation removal", () => {
+    const source = {
+      ...structuredClone(SEMANTIC_FIXTURES.workflow),
+      mainPath: ["draft", "review", "merge"],
+    };
+    validateWithPinnedArchify("workflow", source);
+
+    for (const target of [
+      { field: "nodes", index: 1 },
+      { field: "edges", index: 0 },
+    ]) {
+      const store = storeOf("workflow", source);
+      const removal = removeSemanticEntries("workflow", specOf(store.getState()), [target]);
+      expect(removal.effects).toContainEqual({ field: "mainPath", index: -1, label: "mainPath", action: "remove" });
+      expect(apply(store, removal.transform).status).toBe("applied");
+      const next = specOf(store.getState()) as Record<string, unknown>;
+      expect(next).not.toHaveProperty("mainPath");
+      validateWithPinnedArchify("workflow", next);
+    }
+  });
+
   it("remaps sequence ranges when a message is inserted and prevents applying a stale capture", () => {
     const source = { ...structuredClone(SEMANTIC_FIXTURES.sequence), segments: [{ from: 170, to: 250, label: "request" }] };
     const transform = addSemanticEntry("sequence", "messages", { from: "web", to: "db", label: "cache lookup" }, 1);
@@ -273,6 +294,39 @@ describe("semantic structural edits", () => {
     }
     expect((spec.meta.viewBox as number[])[0]).toBeGreaterThanOrEqual(188 + 8 * 108);
     validateWithPinnedArchify("sequence", spec);
+  });
+
+  it("grows a valid ten-message showcase canvas before adding the eleventh message", () => {
+    const source = {
+      ...structuredClone(SEMANTIC_FIXTURES.sequence),
+      meta: { title: "Calls", output: "calls.html", locale: "en", quality_profile: "showcase", viewBox: [920, 760] },
+      messages: Array.from({ length: 10 }, (_, index) => ({ from: "web", to: "api", y: 180 + index * 50, label: `Call ${index + 1}` })),
+    };
+    validateWithPinnedArchify("sequence", source);
+    const next = addSemanticEntry("sequence", "messages", { from: "web", to: "api", label: "Call 11" })(source)!.spec;
+    expect(((next.meta as Record<string, unknown>).viewBox as number[])[1]).toBeGreaterThanOrEqual(784);
+    expect((next.messages as Record<string, unknown>[]).at(-1)!.y).toBe(680);
+    validateWithPinnedArchify("sequence", next);
+  });
+
+  it("leaves renderer clearance for showcase legends, late activations, and wrapped labels", () => {
+    let source = {
+      ...structuredClone(SEMANTIC_FIXTURES.sequence),
+      meta: {
+        title: "Login", output: "login.html", locale: "en", quality_profile: "showcase", viewBox: [920, 760],
+        legend: { mode: "all", entries: Object.fromEntries(["default", "return", "emphasis", "security", "dashed"].map((kind) => [kind, { label: "Long custom legend label ".repeat(3).slice(0, 80), visible: true }])) },
+      },
+      messages: [...(structuredClone(SEMANTIC_FIXTURES.sequence).messages as Record<string, unknown>[])],
+    };
+    while (source.messages.length < 10) {
+      const y = 180 + source.messages.length * 50;
+      source = addSemanticEntry("sequence", "messages", { from: "web", to: "api", y, label: `Call ${source.messages.length}` })(source)!.spec as typeof source;
+    }
+    source = addSemanticEntry("sequence", "messages", { from: "web", to: "api", label: "Late call" })(source)!.spec as typeof source;
+    expect(source.messages.at(-1)!.y).toBe(680);
+    source = addSemanticEntry("sequence", "activations", { participant: "api", from: 730, to: 770 })(source)!.spec as typeof source;
+    expect(source.meta.viewBox[1]).toBeGreaterThanOrEqual(956);
+    validateWithPinnedArchify("sequence", source);
   });
 
   it("keeps a surviving segment within engine bounds after removing a leading message block", () => {

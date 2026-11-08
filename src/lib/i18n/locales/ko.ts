@@ -3808,6 +3808,7 @@ export const ko: Record<string, string> = {
   "diagram.semantic.rangeOutsideCanvas": "{field} 범위가 지정된 캔버스를 벗어납니다. 구간을 캔버스 안으로 옮기거나 먼저 캔버스를 늘리세요.",
   "diagram.semantic.add": "항목 추가",
   "diagram.semantic.remove": "선택 항목 삭제",
+  "diagram.semantic.annotationRemoved": "자유 형식 연결 삭제: {name}",
   "diagram.semantic.removeConfirm": "다음 항목과 종속 연결·멤버십을 삭제할까요?",
   "diagram.semantic.editStale": "확인 중 다이어그램이 변경되었습니다. 현재 선택을 확인하고 다시 시도하세요.",
   "diagram.semantic.editRefused": "편집 결과가 유효하지 않거나 보호된 항목에 영향을 줍니다. 입력값·종속 항목·잠금을 확인하고 다시 시도하세요.",

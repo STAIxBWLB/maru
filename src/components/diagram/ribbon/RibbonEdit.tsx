@@ -40,7 +40,7 @@ export function RibbonEdit() {
   const canDistribute = nodeCount >= 3;
   const canCopyStyle = nodeCount === 1;
 
-  // Same prompts as keyboard Delete (pattern-view detach, semantic detach).
+  // Same prompts as keyboard Delete (pattern-view detach, semantic cascade preview).
   const handleDelete = useCallback(() => void deleteSelection(store, defaultCoalescer(), t), [store, t]);
 
   const handleCopyStyle = useCallback(() => {

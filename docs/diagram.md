@@ -114,9 +114,10 @@ stripped, never re-emitted as if the engine supported them.
 
 Because canvas members are projections, the semantic spec stays the source
 of truth: text edits write through to it, structural edits are spec edits,
-and deleting members requires detaching the dataset first (see "Semantic
-editing"). v8→v9 is a version bump only — v8 documents migrate in memory on
-load with no content rewrites. Issue #433 P2 added sequence, dataflow and
+and deleting members previews a spec cascade before one undoable commit
+(see "Semantic editing"). Detach remains an explicit choice. v8→v9 is a
+version bump only — v8 documents migrate in memory on load with no content
+rewrites. Issue #433 P2 added sequence, dataflow and
 lifecycle without a schema bump: every new datum rides an existing optional
 slot (the dataset, node `meta`, edge `midOff`, the spec's optional relation
 `id`). Builds 1.1.17 to 1.1.19 load and save P2 documents losslessly but show
@@ -261,7 +262,11 @@ minimum counts and locks can refuse the whole operation. The dialog lists
 the direct and dependent changes before confirmation. Cancel or a document
 change while the dialog is open leaves the document untouched. Multiple
 selected semantic datasets, pattern detaches and freeform removals are
-planned first and committed together in one undo snapshot.
+planned first and committed together in one undo snapshot. Selected freeform
+objects and admitted annotation bridges are removed in the isolated plan
+before semantic cascades; a bridge to an unselected external node still
+refuses the edit. The confirmation lists freeform annotation edges lost
+through the cascade as well as spec relationships.
 
 **Structure controls (issue #527).** The inspector's Add form selects an
 entity, relation or managed container collection and asks for typed labels,
