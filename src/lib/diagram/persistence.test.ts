@@ -300,6 +300,18 @@ describe("diagram persistence v9 (typed semantic datasets, issue #433)", () => {
     expect(roundTripped.datasets?.[0]).toEqual(dataset);
   });
 
+  it("keeps gallery-copy provenance and spec through load and save after gallery retirement", () => {
+    const { dataset } = archifySpecToDataset("architecture", SEMANTIC_FIXTURES.architecture, {
+      id: "gallery-copy", provenance: { origin: "gallery-copy", sourcePath: "docs/architecture/maru.architecture.json", repository: "public-fixture", revision: "fixture" },
+    });
+    const original = { ...createEmptyDoc("gallery-doc", 1), datasets: [dataset] };
+    const loaded = deserializeDoc(serializeDoc(original));
+    const saved = deserializeDoc(serializeDoc(loaded));
+    expect(saved.datasets).toEqual([dataset]);
+    expect((saved.datasets![0] as SemanticSpecDataset).provenance?.origin).toBe("gallery-copy");
+    expect((saved.datasets![0] as SemanticSpecDataset).spec).toEqual(dataset.spec);
+  });
+
   it("validateSemanticSpec enforces structure, budgets and reversible id maps", () => {
     const base = {
       id: "ds-1",

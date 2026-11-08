@@ -40,7 +40,6 @@ export type MaruAppMode =
   | "studio"
   | "e2e"
   | "diagram"
-  | "architecture"
   | "sites"
   | "graph"
   | "drafts"
@@ -1960,10 +1959,11 @@ function parseBrowserMode(value: unknown): DocumentBrowserMode | null {
   return value === "list" || value === "tree" ? value : null;
 }
 
-function parseMaruAppMode(value: unknown): MaruAppMode | null {
+export function parseMaruAppMode(value: unknown): MaruAppMode | null {
+  if (value === "architecture") return "diagram";
   return value === "pkm" || value === "scratchpad" || value === "files" || value === "inbox" || value === "comms" || value === "meetings"
     || value === "today" || value === "tasks" || value === "dashboard" || value === "catalog" || value === "studio" || value === "e2e"
-    || value === "diagram" || value === "architecture" || value === "sites" || value === "graph" || value === "drafts"
+    || value === "diagram" || value === "sites" || value === "graph" || value === "drafts"
     || value === "gap" || value === "agents"
     ? value
     : null;

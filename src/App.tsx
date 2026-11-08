@@ -1,4 +1,3 @@
-import { requestDiagramHandoff } from "./lib/diagram/handoff";
 import { hasDirtyMeetingSourceDrafts } from "./lib/meetingSourceEditorStore";
 import {
   lazy,
@@ -20,7 +19,6 @@ import {
   Clock3,
   Command,
   Diff,
-  DraftingCompass,
   FileText,
   FolderOpen,
   Globe,
@@ -798,7 +796,6 @@ const ActivityRail = memo(function ActivityRail({
         ["catalog", LayoutGrid],
         ["studio", Workflow],
         ["sites", Globe],
-        ["architecture", DraftingCompass],
       ] as const).map(([mode, Icon]) => (
         <ActivityModeButton
           key={mode}
@@ -8599,13 +8596,6 @@ export function MainApp() {
               openGraphEntry: (entry) => {
                 setPersistedAppMode("pkm");
                 void selectEntry(entry as VaultEntry, "left");
-              },
-              openDiagramDocument: (documentName) => {
-                if (!diagramEnabled) return;
-                const workspace = inboxWorkspacePath ?? settingsWorkPath;
-                if (!workspace) return;
-                requestDiagramHandoff(workspace, documentName);
-                setPersistedAppMode("diagram");
               },
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,

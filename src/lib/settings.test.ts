@@ -9,6 +9,7 @@ import {
   applyWorkspaceMeetingsOverrides,
   applyWorkspaceTasksOverrides,
   normalizeMaruSettings,
+  parseMaruAppMode,
   parseBinaryFileIncludePatternsText,
   readWorkspaceM365AuthConfig,
   resolveClassifierRuntime,
@@ -118,6 +119,16 @@ describe("normalizeMaruSettings", () => {
     ]);
     expect(normalized.ui.layout.scratchpadTreeOpen).toBe(false);
     expect(normalized.ui.layout.scratchpadTreeWidth).toBe(SCRATCHPAD_TREE_WIDTH.max);
+  });
+
+  it("migrates retired Architecture app and right surfaces to Diagram", () => {
+    expect(parseMaruAppMode("architecture")).toBe("diagram");
+    expect(parseMaruAppMode("diagram")).toBe("diagram");
+    expect(parseMaruAppMode("unknown")).toBeNull();
+    const normalized = normalizeMaruSettings({ ui: { activeAppMode: "architecture", rightWorkbenchSurface: "architecture" } });
+    expect(normalized.ui.activeAppMode).toBe("diagram");
+    expect(normalized.ui.rightWorkbenchSurface).toBe("diagram");
+    expect(normalizeMaruSettings(normalized).ui).toEqual(normalized.ui);
   });
 
   it("normalizes the persisted right workbench surface without consuming legacy graph split input", () => {

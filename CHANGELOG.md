@@ -9,6 +9,10 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## Unreleased
+
+- Retired the read-only Architecture gallery. Existing Architecture mode preferences open Diagram, where blueprint JSON files can be imported; copied gallery documents and repository architecture documentation remain available (#533).
+
 ## v1.1.26 - Clear Frames (2026-11-05)
 
 - The Kakao relay console now opens in your system browser instead of inside the Maru window, and the Maru window no longer hosts any remote frame. If the browser cannot be launched, Communications shows the cause and how to open the console manually. Updating is recommended (#505, #508).

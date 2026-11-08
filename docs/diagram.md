@@ -326,20 +326,12 @@ node -e 'const{createHash}=require("node:crypto"),{readdirSync,readFileSync,stat
 `pinnedAt`, review the diff, and keep the MIT notices (LICENSE,
 THIRD_PARTY_NOTICES.md) intact.
 
-## Architecture gallery handoff
+## Architecture documents
 
-The Architecture gallery's "Diagram으로 복사해 편집" action copies a
-blueprint's `<slug>.architecture.json` spec into Diagram mode as a NEW
-workspace diagram. The read goes through `architecture_read_sibling_spec`,
-a guarded sibling read: the spec must live in the same submodule as the
-viewer (own containment check with `..`/symlink resolution, symlinks
-escaping the submodule root refused), under a 1 MiB size cap, and it must
-parse against the Archify schema — a missing or unsupported spec simply
-leaves the action unavailable. The copy lands as a `semanticSpec` dataset
-with `provenance.origin = "gallery-copy"` and the workspace-relative source
-path, gets projected and laid out, and is saved under a never-overwriting
-name; the source repo's files and the gallery's per-file asset-protocol
-grants are untouched.
+The retired Architecture gallery is replaced by Diagram's Import dialog.
+Repository documentation under `docs/architecture/` stays on disk; import
+its typed JSON through `archify-json`. Existing copied documents retain
+`provenance.origin = "gallery-copy"` and load/save without migration.
 
 ## Export / import
 

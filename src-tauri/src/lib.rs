@@ -5,7 +5,6 @@ mod ai_router;
 mod app_menu;
 mod approval;
 mod archify;
-mod architecture;
 mod artifact_checks;
 mod atomic_file;
 mod binary_viewer;
@@ -317,9 +316,6 @@ pub fn run() {
             git::ipc::git_changes,
             git::ipc::git_diff,
             git::ipc::list_workspace_submodules,
-            architecture::ipc::list_architecture_blueprints,
-            architecture::ipc::prepare_architecture_blueprint,
-            architecture::ipc::architecture_read_sibling_spec,
             archify::ipc::archify_validate_candidate,
             file_manager::ipc::open_in_file_manager,
             file_manager::ipc::reveal_in_file_manager,

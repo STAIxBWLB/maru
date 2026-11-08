@@ -13,7 +13,7 @@ export type RegisteredModeId = MaruAppMode;
 
 const registeredModeIds = [
   "pkm", "scratchpad", "files", "inbox", "comms", "meetings", "today", "tasks", "dashboard",
-  "catalog", "studio", "e2e", "diagram", "architecture", "sites", "graph", "drafts", "gap", "agents",
+  "catalog", "studio", "e2e", "diagram", "sites", "graph", "drafts", "gap", "agents",
 ] as const satisfies readonly RegisteredModeId[];
 
 /** Identifiers only: adapters subscribe to their own data instead of receiving shell snapshots. */
@@ -28,8 +28,6 @@ export interface ModeHostCommands {
   revealPath?(path: string): void;
   revealInFiles?(workspacePath: string, visibility: WorkspaceVisibility, targetPath: string): void;
   saveDocument?(path: string, content: string, expectedRevision: string | null): Promise<unknown>;
-  /** Switch to Diagram mode and open a saved workspace diagram by name. */
-  openDiagramDocument?(documentName: string): void;
   openGraphEntry?(entry: unknown): void;
   createGraphNote?(target: string): void;
   isGraphFavorite?(kind: FavoriteKind, relPath: string): boolean;
@@ -81,13 +79,6 @@ const modeRegistry: Record<RegisteredModeId, ModeDescriptor> = {
     load: () => import("./modeAdapters/DiagramModeAdapter").then((module) => ({ default: module.DiagramModeAdapter })),
     placements: ["primary", "right"],
     isAvailable: isDiagramEnabled,
-    fallback: "mode-loading",
-  },
-  architecture: {
-    id: "architecture",
-    load: () => import("./modeAdapters/ArchitectureModeAdapter").then((module) => ({ default: module.ArchitectureModeAdapter })),
-    placements: ["primary", "right"],
-    isAvailable: () => true,
     fallback: "mode-loading",
   },
   graph: {
@@ -201,7 +192,6 @@ const lazyAdapters: Record<RegisteredModeId, ReturnType<typeof lazy<ComponentTyp
   pkm: lazy(modeRegistry.pkm.load),
   e2e: lazy(modeRegistry.e2e.load),
   diagram: lazy(modeRegistry.diagram.load),
-  architecture: lazy(modeRegistry.architecture.load),
   graph: lazy(modeRegistry.graph.load),
   sites: lazy(modeRegistry.sites.load),
   agents: lazy(modeRegistry.agents.load),

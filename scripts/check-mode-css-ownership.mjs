@@ -4,7 +4,7 @@
  * (PERF-05, phase 10 plan 02).
  *
  * Every mode's pane CSS moved out of src/styles.css into per-mode files
- * (src/components/{today,meetings,tasks,calendar,drafts,gap,agents,architecture}) and
+ * (src/components/{today,meetings,tasks,calendar,drafts,gap,agents}) and
  * rides that mode's lazy chunk: the component imports its CSS, and Vite
  * 7.3.2 (default cssCodeSplit) hoists the import into that mode's lazy CSS
  * chunk. styles.css keeps only entry-side shared chrome (shell grid-area
@@ -80,7 +80,6 @@ const REGISTERED_MODE_IDS = [
   "pkm",
   "e2e",
   "diagram",
-  "architecture",
   "graph",
   "sites",
   "agents",
@@ -134,7 +133,6 @@ const PER_MODE_FINGERPRINTS = [
   { id: "drafts", file: "src/components/drafts/drafts.css", selector: ".drafts-pane" },
   { id: "gap", file: "src/components/gap/gap.css", selector: ".gap-pane" },
   { id: "agents", file: "src/components/agents/agents.css", selector: ".agents-pane" },
-  { id: "architecture", file: "src/components/architecture/architecture.css", selector: ".architecture-pane" },
 ];
 
 /**
@@ -155,7 +153,6 @@ const PANE_ROOT_BODY_PREFIX = {
   ".drafts-pane": "display:flex",
   ".gap-pane": "display:flex",
   ".agents-pane": "display:flex",
-  ".architecture-pane": "display:flex",
 };
 
 /**
