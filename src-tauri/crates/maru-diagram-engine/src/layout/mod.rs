@@ -58,6 +58,10 @@ fn inflate(b: GeometryBox, p: Coord) -> Result<GeometryBox, Diagnostic> {
 pub(crate) struct SceneBuilder {
     pub(crate) document: GeometryDocument,
     pub(crate) diagnostics: Vec<Diagnostic>,
+    has_errors: bool,
+    route_paths: BTreeMap<String, String>,
+    #[cfg(test)]
+    route_budget: Option<usize>,
     request: LayoutRequest,
     kind: String,
     connections: Vec<RouteRequest>,
@@ -102,6 +106,10 @@ impl SceneBuilder {
                 },
             },
             diagnostics: vec![],
+            has_errors: false,
+            route_paths: BTreeMap::new(),
+            #[cfg(test)]
+            route_budget: None,
             request,
             kind: kind.into(),
             connections: vec![],
@@ -387,7 +395,43 @@ impl SceneBuilder {
         Ok(())
     }
     pub(crate) fn connection(&mut self, request: RouteRequest) {
+        let collection = match self.kind.as_str() {
+            "architecture" => "connections",
+            "workflow" => "edges",
+            "sequence" => "messages",
+            "dataflow" => "flows",
+            "lifecycle" => "transitions",
+            _ => "routes",
+        };
+        self.route_paths.insert(
+            request.id.clone(),
+            format!("/{collection}/{}", self.connections.len()),
+        );
         self.connections.push(request);
+    }
+    fn route_error(&mut self, route: &RouteRequest, mut diagnostic: Diagnostic) {
+        if let Some(suffix) = diagnostic.code.strip_prefix("document/") {
+            diagnostic.code = format!("{}/{suffix}", self.kind);
+        }
+        diagnostic.path = self
+            .route_paths
+            .get(&route.id)
+            .cloned()
+            .unwrap_or_else(|| "/routes".into());
+        diagnostic.message = format!("edge {:?}: {}", route.id, diagnostic.message);
+        self.has_errors = true;
+        self.diagnostics.push(diagnostic);
+    }
+    fn route_record(route: &RouteRequest, points: Vec<GeometryPoint>) -> GeometryRoute {
+        GeometryRoute {
+            id: Some(route.id.clone()),
+            from: route.from.clone(),
+            to: route.to.clone(),
+            points,
+            variant: route.variant.clone(),
+            role: route.role.clone(),
+            width: route.width,
+        }
     }
     fn port(
         &self,
@@ -539,12 +583,106 @@ impl SceneBuilder {
                 .map(|l| inflate(l.bounds, clearance))
                 .collect::<Result<Vec<_>, _>>()?,
         );
-        let mut points = crate::routing::route_orthogonal(start, end, &obstacles, &waypoints)?;
+        #[cfg(test)]
+        let routed = match self.route_budget {
+            Some(budget) => crate::routing::route_orthogonal_with_budget(
+                start, end, &obstacles, &waypoints, budget,
+            ),
+            None => crate::routing::route_orthogonal(start, end, &obstacles, &waypoints),
+        };
+        #[cfg(not(test))]
+        let routed = crate::routing::route_orthogonal(start, end, &obstacles, &waypoints);
+        let mut points = routed?;
         points.insert(0, a);
         points.push(z);
         Ok((points, obstacles))
     }
-    fn finish(mut self, meta: &Meta) -> Result<(GeometryDocument, Vec<Diagnostic>), Diagnostic> {
+    fn route_label(&mut self, r: &RouteRequest) -> Result<(), Diagnostic> {
+        let (points, obstacles) = self.route_points(r)?;
+        if let Some(text) = r.label.as_deref().filter(|s| !s.is_empty()) {
+            let (w, h) = self.text_size(text, 400, 12 * 64)?;
+            let position = if let Some(p) = r.label_at {
+                // Authored labelAt is the label center, not its top-left.
+                p.checked_translate(-w / 2, -h / 2).map_err(arithmetic)?
+            } else {
+                let mut candidates: Vec<_> = points
+                    .windows(2)
+                    .enumerate()
+                    .map(|(i, p)| {
+                        (
+                            i,
+                            (i64::from(p[0].x) - i64::from(p[1].x)).abs()
+                                + (i64::from(p[0].y) - i64::from(p[1].y)).abs(),
+                        )
+                    })
+                    .collect();
+                if let Some(selected) = r.label_segment {
+                    candidates.retain(|(i, _)| *i == selected);
+                }
+                candidates.sort_by_key(|(i, length)| (std::cmp::Reverse(*length), *i));
+                let mut found = None;
+                for (i, _) in candidates {
+                    let p = &points[i..=i + 1];
+                    let center = GeometryPoint {
+                        x: fixed::checked_midpoint(p[0].x, p[1].x).map_err(arithmetic)?,
+                        y: fixed::checked_midpoint(p[0].y, p[1].y).map_err(arithmetic)?,
+                    };
+                    for offset in [-h - 6 * 64, 6 * 64] {
+                        let candidate = rect(add(center.x, -w / 2)?, add(center.y, offset)?, w, h)?;
+                        if !obstacles.iter().any(|o| intersects(candidate, *o))
+                            && !points
+                                .iter()
+                                .any(|p| candidate.contains(*p).unwrap_or(true))
+                        {
+                            found = Some(GeometryPoint {
+                                x: candidate.x,
+                                y: candidate.y,
+                            });
+                            break;
+                        }
+                    }
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                found.ok_or_else(|| {
+                    failure(
+                        "route-label-space",
+                        "no unobstructed route label box is available",
+                        "move nodes apart or provide a clear labelAt position",
+                    )
+                })?
+            };
+            let position = if r.label_at.is_some() {
+                position
+            } else {
+                position
+                    .checked_translate(r.label_dx.unwrap_or(0), r.label_dy.unwrap_or(0))
+                    .map_err(arithmetic)?
+            };
+            let b = rect(position.x, position.y, w, h)?;
+            if obstacles.iter().any(|o| intersects(b, *o)) {
+                return Err(failure(
+                    "route-label-space",
+                    "authored route label overlaps a node or label",
+                    "move labelAt or remove the label offset override",
+                ));
+            }
+            self.label(
+                &format!("edge:{}:label", r.id),
+                &r.id,
+                text,
+                position,
+                400,
+                12 * 64,
+            )?;
+        }
+        Ok(())
+    }
+    fn finish(
+        mut self,
+        meta: &Meta,
+    ) -> Result<(GeometryDocument, Vec<Diagnostic>, bool), Diagnostic> {
         let members = self
             .document
             .nodes
@@ -564,125 +702,49 @@ impl SceneBuilder {
         self.diagnostics
             .extend(resolve_pins(&self.request, members).diagnostics);
         self.connections.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut failed = BTreeSet::new();
         for r in self.connections.clone() {
-            let (points, obstacles) = self.route_points(&r)?;
-            if let Some(text) = r.label.as_deref().filter(|s| !s.is_empty()) {
-                let (w, h) = self.text_size(text, 400, 12 * 64)?;
-                let position = if let Some(p) = r.label_at {
-                    // Authored labelAt is the label center, not its top-left.
-                    p.checked_translate(-w / 2, -h / 2).map_err(arithmetic)?
-                } else {
-                    let mut candidates: Vec<_> = points
-                        .windows(2)
-                        .enumerate()
-                        .map(|(i, p)| {
-                            (
-                                i,
-                                (i64::from(p[0].x) - i64::from(p[1].x)).abs()
-                                    + (i64::from(p[0].y) - i64::from(p[1].y)).abs(),
-                            )
-                        })
-                        .collect();
-                    if let Some(selected) = r.label_segment {
-                        candidates.retain(|(i, _)| *i == selected);
-                    }
-                    candidates.sort_by_key(|(i, length)| (std::cmp::Reverse(*length), *i));
-                    let mut found = None;
-                    for (i, _) in candidates {
-                        let p = &points[i..=i + 1];
-                        let center = GeometryPoint {
-                            x: fixed::checked_midpoint(p[0].x, p[1].x).map_err(arithmetic)?,
-                            y: fixed::checked_midpoint(p[0].y, p[1].y).map_err(arithmetic)?,
-                        };
-                        for offset in [-h - 6 * 64, 6 * 64] {
-                            let candidate =
-                                rect(add(center.x, -w / 2)?, add(center.y, offset)?, w, h)?;
-                            if !obstacles.iter().any(|o| intersects(candidate, *o))
-                                && !points
-                                    .iter()
-                                    .any(|p| candidate.contains(*p).unwrap_or(true))
-                            {
-                                found = Some(GeometryPoint {
-                                    x: candidate.x,
-                                    y: candidate.y,
-                                });
-                                break;
-                            }
-                        }
-                        if found.is_some() {
-                            break;
-                        }
-                    }
-                    found.ok_or_else(|| {
-                        failure(
-                            "route-label-space",
-                            "no unobstructed route label box is available",
-                            "move nodes apart or provide a clear labelAt position",
-                        )
-                    })?
-                };
-                let position = if r.label_at.is_some() {
-                    position
-                } else {
-                    position
-                        .checked_translate(r.label_dx.unwrap_or(0), r.label_dy.unwrap_or(0))
-                        .map_err(arithmetic)?
-                };
-                let b = rect(position.x, position.y, w, h)?;
-                if obstacles.iter().any(|o| intersects(b, *o)) {
-                    return Err(failure(
-                        "route-label-space",
-                        "authored route label overlaps a node or label",
-                        "move labelAt or remove the label offset override",
-                    ));
-                }
-                self.label(
-                    &format!("edge:{}:label", r.id),
-                    &r.id,
-                    text,
-                    position,
-                    400,
-                    12 * 64,
-                )?;
+            let label_count = self.document.labels.len();
+            let diagnostic_count = self.diagnostics.len();
+            if let Err(diagnostic) = self.route_label(&r) {
+                self.document.labels.truncate(label_count);
+                self.diagnostics.truncate(diagnostic_count);
+                failed.insert(r.id.clone());
+                self.route_error(&r, diagnostic);
             }
-            self.document.routes.push(GeometryRoute {
-                id: Some(r.id),
-                from: r.from,
-                to: r.to,
-                points,
-                variant: r.variant,
-                role: r.role,
-                width: r.width,
-            });
         }
         let mut final_routes = Vec::new();
-        for r in &self.connections {
-            let (points, _) = self.route_points(r)?;
-            for segment in points.windows(2) {
-                if self
-                    .document
-                    .nodes
-                    .iter()
-                    .map(|n| n.bounds)
-                    .chain(self.document.labels.iter().map(|l| l.bounds))
-                    .any(|b| segment_hits_box(segment[0], segment[1], b))
-                {
-                    return Err(failure(
-                        "route-port-blocked",
-                        "an endpoint escape crosses a node or label",
-                        "move overlapping nodes/labels or choose a clear endpoint side",
-                    ));
+        for r in self.connections.clone() {
+            let points = if failed.contains(&r.id) {
+                Vec::new()
+            } else {
+                let result = self.route_points(&r).and_then(|(points, _)| {
+                    if points.windows(2).any(|pair| {
+                        self.document
+                            .nodes
+                            .iter()
+                            .map(|n| n.bounds)
+                            .chain(self.document.labels.iter().map(|l| l.bounds))
+                            .any(|b| segment_hits_box(pair[0], pair[1], b))
+                    }) {
+                        Err(failure(
+                            "route-port-blocked",
+                            "an endpoint escape crosses a node or label",
+                            "move overlapping nodes/labels or choose a clear endpoint side",
+                        ))
+                    } else {
+                        Ok(points)
+                    }
+                });
+                match result {
+                    Ok(points) => points,
+                    Err(diagnostic) => {
+                        self.route_error(&r, diagnostic);
+                        Vec::new()
+                    }
                 }
-            }
-            final_routes.push(GeometryRoute {
-                id: Some(r.id.clone()),
-                from: r.from.clone(),
-                to: r.to.clone(),
-                points,
-                variant: r.variant.clone(),
-                role: r.role.clone(),
-                width: r.width,
-            });
+            };
+            final_routes.push(Self::route_record(&r, points));
         }
         self.document.routes = final_routes;
         for (id, card) in self.cards.clone() {
@@ -795,7 +857,7 @@ impl SceneBuilder {
         self.document.nodes.sort_by(|a, b| a.id.cmp(&b.id));
         self.document.containers.sort_by(|a, b| a.id.cmp(&b.id));
         self.document.labels.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok((self.document, self.diagnostics))
+        Ok((self.document, self.diagnostics, !self.has_errors))
     }
 }
 fn segment_hits_box(a: GeometryPoint, b: GeometryPoint, r: GeometryBox) -> bool {
@@ -833,7 +895,25 @@ fn typed<T: DeserializeOwned + Serialize>(v: &Value) -> Result<T, Diagnostic> {
         })
     })
 }
+#[derive(Clone, Copy, Default)]
+struct LayoutOptions {
+    #[cfg(test)]
+    route_budget: Option<usize>,
+}
 pub fn layout_json(input: &str) -> GeometryReport {
+    layout_with_options(input, LayoutOptions::default())
+}
+#[cfg(test)]
+fn layout_json_with_route_budget(input: &str, budget: usize) -> GeometryReport {
+    layout_with_options(
+        input,
+        LayoutOptions {
+            route_budget: Some(budget),
+        },
+    )
+}
+fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
+    let _ = options;
     let request = match parse_layout_request(input) {
         Ok(r) => r,
         Err(diagnostics) => {
@@ -862,6 +942,10 @@ pub fn layout_json(input: &str) -> GeometryReport {
         .unwrap_or("document")
         .to_string();
     let mut scene = SceneBuilder::new(request, &kind);
+    #[cfg(test)]
+    {
+        scene.route_budget = options.route_budget;
+    }
     let result = (|| {
         let meta: Meta = typed(&spec["meta"])?;
         scene.label(
@@ -899,14 +983,14 @@ pub fn layout_json(input: &str) -> GeometryReport {
         scene.finish(&meta)
     })();
     match result {
-        Ok((geometry, diagnostics)) => {
+        Ok((geometry, diagnostics, ok)) => {
             let mut receipt = validity.receipt;
             receipt.engine_output_sha256 = Some(crate::spec_hash(
                 &serde_json::to_string(&geometry).expect("integer geometry serializes"),
             ));
             GeometryReport {
                 api_version: 1,
-                ok: true,
+                ok,
                 geometry: Some(geometry),
                 diagnostics,
                 receipt,
@@ -1074,6 +1158,61 @@ mod tests {
             assert!(hidden.ok, "{:?}", hidden.diagnostics);
             assert!(hidden.geometry.unwrap().legend.entries.is_empty());
         }
+    }
+
+    fn assert_partial_route(report: GeometryReport, code: &str) {
+        assert!(!report.ok);
+        assert_eq!(report.diagnostics.len(), 1, "{:?}", report.diagnostics);
+        let diagnostic = &report.diagnostics[0];
+        assert_eq!(diagnostic.code, code);
+        assert_eq!(diagnostic.path, "/connections/0");
+        assert!(diagnostic.message.contains("blocked"));
+        assert!(!diagnostic.fix.is_empty());
+        let geometry = report
+            .geometry
+            .expect("placed geometry is never erased by a route error");
+        assert_eq!(geometry.nodes.len(), 5);
+        assert_eq!(geometry.routes.len(), 2);
+        assert!(geometry
+            .routes
+            .iter()
+            .find(|r| r.id.as_deref() == Some("blocked"))
+            .unwrap()
+            .points
+            .is_empty());
+        assert!(
+            geometry
+                .routes
+                .iter()
+                .find(|r| r.id.as_deref() == Some("clear"))
+                .unwrap()
+                .points
+                .len()
+                >= 2
+        );
+        assert!(!geometry.labels.is_empty());
+        assert!(geometry.page.bounds.width > 0);
+    }
+    #[test]
+    fn enclosed_endpoint_keeps_nodes_and_other_routes_with_one_unrouted_edge() {
+        let input = include_str!("../../testdata/partial-route.json");
+        assert!(crate::validate_json(input).ok);
+        let first = layout(input);
+        assert_eq!(first, layout(input));
+        assert_partial_route(first, "architecture/route-blocked");
+    }
+    #[test]
+    fn exhausted_test_budget_keeps_geometry_and_does_not_stop_a_clear_route() {
+        let mut spec: Value =
+            serde_json::from_str(include_str!("../../testdata/partial-route.json")).unwrap();
+        spec["components"][2]["pos"] = serde_json::json!([260, 170]);
+        spec["components"][2]["size"] = serde_json::json!([80, 120]);
+        let source = spec.to_string();
+        assert!(layout(&source).ok, "production budget can find the detour");
+        let request = serde_json::json!({"specJson":source}).to_string();
+        let first = layout_json_with_route_budget(&request, 1);
+        assert_eq!(first, layout_json_with_route_budget(&request, 1));
+        assert_partial_route(first, "architecture/route-budget");
     }
 
     #[test]

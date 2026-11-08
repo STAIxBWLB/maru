@@ -187,5 +187,68 @@
       "totalGzipBytes": 1807323
     },
     "hostedCi": "pending"
+  },
+  "partialSceneFollowUp": {
+    "sdkTree": "5f8d81a9752d44e637373c28701532661e86564b",
+    "contract": "After placement, routing errors retain geometry with ok=false and empty points on the affected edge; other routes continue. Placement/input errors can still omit geometry.",
+    "checks": {
+      "coreUnit": 88,
+      "differential": 2,
+      "clippy": "passed geometry/typegen lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T21:32:54.266Z",
+        "duration": 7617.785000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "regressions": [
+        "enclosed endpoint retains all five nodes, clear second route, one unrouted edge and one source-edge diagnostic",
+        "per-call test-only budget exhaustion retains the same scene and clear second route; production caps unchanged",
+        "actual WASM enclosed-endpoint partial scene"
+      ]
+    },
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "f35fb2b70099a53f1b9fe692d12ddaa4fd62f5cef31662b54db4dfa8d595a961",
+      "reportBytes": 57995,
+      "corpusCases": 256,
+      "acceptedScenes": 37,
+      "structuredRefusals": 219
+    },
+    "payload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 16920.325819,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324219,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-CAKFbQMJ.js",
+          "bytes": 4726285,
+          "gzipBytes": 1489129,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324219,
+      "validationGzipBytes": 324219,
+      "lazyGeometryGzipBytes": 1489129,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1813470
+    },
+    "hostedCi": "pending"
   }
 }

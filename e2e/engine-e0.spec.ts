@@ -8,10 +8,11 @@ test.describe("independent engine WebAssembly spike", () => {
   test("lays out all families repeatably and retains pins in actual lazy WASM", async ({ page }) => {
     const specs = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"].map((kind) => JSON.parse(readFileSync(`src-tauri/crates/maru-diagram-engine/testdata/valid-${kind}.json`, "utf8")) as { diagram_type: string; schema_version: number; meta: { title: string } });
     specs.push({ ...specs[1]!, schema_version: 2 }, { ...specs[4]!, schema_version: 2 });
+    const blockedSpec = JSON.parse(readFileSync("src-tauri/crates/maru-diagram-engine/testdata/partial-route.json", "utf8"));
     await page.goto("/");
-    const proof = await page.evaluate(async (specs) => {
-      type Scene = { nodes: Array<{ id: string; bounds: { x: number; y: number }; positionSource: string }>; routes: Array<{ points: Array<{ x: number; y: number }> }>; labels: unknown[] };
-      type Report = { ok: boolean; geometry?: Scene; diagnostics: Array<{ message: string; fix: string }>; receipt: { inputSpecSha256: string } };
+    const proof = await page.evaluate(async ({ specs, blockedSpec }) => {
+      type Scene = { nodes: Array<{ id: string; bounds: { x: number; y: number }; positionSource: string }>; routes: Array<{ id?: string; points: Array<{ x: number; y: number }> }>; labels: unknown[] };
+      type Report = { ok: boolean; geometry?: Scene; diagnostics: Array<{ code: string; path: string; message: string; fix: string }>; receipt: { inputSpecSha256: string } };
       const modulePath = "/.engine-e0/browser/engine-e0.js";
       const { loadGeometryEngine } = await import(/* @vite-ignore */ modulePath) as { loadGeometryEngine(): Promise<{ layout(input: unknown): Report }> };
       const engine = await loadGeometryEngine();
@@ -33,8 +34,15 @@ test.describe("independent engine WebAssembly spike", () => {
       }
       const invalid = engine.layout({ specJson: "[]" });
       if (invalid.ok || invalid.geometry) throw new Error("Invalid spec returned scene geometry; keep the E1 gate before placement.");
+      const partial = engine.layout({ specJson: JSON.stringify(blockedSpec) });
+      if (partial.ok || !partial.geometry || partial.geometry.nodes.length !== 5 || partial.diagnostics.length !== 1
+          || partial.diagnostics[0]!.path !== "/connections/0"
+          || partial.geometry.routes.find((edge) => edge.id === "blocked")?.points.length !== 0
+          || (partial.geometry.routes.find((edge) => edge.id === "clear")?.points.length ?? 0) < 2) {
+        throw new Error("An unroutable edge erased placed geometry or stopped a clear edge; preserve partial scenes and return one edge diagnostic.");
+      }
       return proof;
-    }, specs);
+    }, { specs, blockedSpec });
     expect(proof).toHaveLength(7);
     expect(proof.every((item) => item.nodes > 0 && item.orthogonal)).toBe(true);
     console.log(`ENGINE_E2_LAYOUT ${JSON.stringify({ scope: "functional lazy WASM scene/pin/repeat proof, no performance claim", proof })}`);

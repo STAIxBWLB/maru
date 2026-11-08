@@ -189,6 +189,7 @@ fn search_leg(
     start: GeometryPoint,
     end: GeometryPoint,
     obstacles: &[Rect],
+    max_search_states: usize,
 ) -> Result<Vec<GeometryPoint>, Diagnostic> {
     if start == end {
         return Ok(vec![start]);
@@ -218,6 +219,15 @@ fn search_leg(
         }
     }
 
+    // Explicit local budgets are a test seam only; production always passes
+    // MAX_SEARCH_STATES. Fast visible paths above consume no A* states.
+    let max_search_states = max_search_states.min(MAX_SEARCH_STATES);
+    if max_search_states == 0 {
+        return Err(budget());
+    }
+    let max_queued_states = max_search_states
+        .saturating_mul(4)
+        .clamp(1, MAX_QUEUED_STATES);
     let mut xs = vec![start.x, end.x];
     let mut ys = vec![start.y, end.y];
     let capacity = obstacles
@@ -318,10 +328,10 @@ fn search_leg(
             {
                 continue;
             }
-            if !visits.contains_key(&next) && visits.len() >= MAX_SEARCH_STATES {
+            if !visits.contains_key(&next) && visits.len() >= max_search_states {
                 return Err(budget());
             }
-            if queue.len() >= MAX_QUEUED_STATES {
+            if queue.len() >= max_queued_states {
                 return Err(budget());
             }
             visits.try_reserve(1).map_err(|_| budget())?;
@@ -356,6 +366,29 @@ pub fn route_orthogonal(
     obstacles: &[GeometryBox],
     waypoints: &[GeometryPoint],
 ) -> Result<Vec<GeometryPoint>, Diagnostic> {
+    route_with_budget(start, end, obstacles, waypoints, MAX_SEARCH_STATES)
+}
+
+/// Local deterministic failure injection, without a process-global setting or
+/// a production request field. A* and its queue use the same implementation.
+#[cfg(test)]
+pub(crate) fn route_orthogonal_with_budget(
+    start: GeometryPoint,
+    end: GeometryPoint,
+    obstacles: &[GeometryBox],
+    waypoints: &[GeometryPoint],
+    max_search_states: usize,
+) -> Result<Vec<GeometryPoint>, Diagnostic> {
+    route_with_budget(start, end, obstacles, waypoints, max_search_states)
+}
+
+fn route_with_budget(
+    start: GeometryPoint,
+    end: GeometryPoint,
+    obstacles: &[GeometryBox],
+    waypoints: &[GeometryPoint],
+    max_search_states: usize,
+) -> Result<Vec<GeometryPoint>, Diagnostic> {
     if waypoints.len() > MAX_WAYPOINTS {
         return Err(budget());
     }
@@ -376,7 +409,7 @@ pub fn route_orthogonal(
     let mut route = Vec::new();
     let mut previous = start;
     for target in waypoints.iter().copied().chain(std::iter::once(end)) {
-        let leg = search_leg(previous, target, &obstacles)?;
+        let leg = search_leg(previous, target, &obstacles, max_search_states)?;
         for point in leg {
             if route.last() != Some(&point) {
                 route.push(point);
@@ -493,6 +526,36 @@ mod tests {
         assert_eq!(
             first,
             route_orthogonal(p(0, 0), p(100, 0), &reversed, &[]).unwrap()
+        );
+    }
+
+    #[test]
+    fn explicit_search_budget_refuses_the_same_astar_detour_deterministically() {
+        // A horizontal obstacle blocks the direct segment and both degenerate
+        // one-bend candidates; the valid detour must enter the A* grid.
+        let obstacles = [rect(20, -10, 60, 20)];
+        let first =
+            route_orthogonal_with_budget(p(0, 0), p(100, 0), &obstacles, &[], 1).unwrap_err();
+        let second =
+            route_orthogonal_with_budget(p(0, 0), p(100, 0), &obstacles, &[], 1).unwrap_err();
+        assert_eq!(first, second);
+        assert_eq!(first.code, "document/route-budget");
+        assert!(!first.message.is_empty() && !first.fix.is_empty());
+        assert_clear(
+            &route_orthogonal(p(0, 0), p(100, 0), &obstacles, &[]).unwrap(),
+            &obstacles,
+        );
+    }
+
+    #[test]
+    fn visible_fast_paths_do_not_spend_the_astar_budget() {
+        assert_eq!(
+            route_orthogonal_with_budget(p(0, 0), p(100, 0), &[], &[], 0).unwrap(),
+            [p(0, 0), p(100, 0)]
+        );
+        assert_eq!(
+            route_orthogonal_with_budget(p(0, 0), p(100, 50), &[], &[], 0).unwrap(),
+            [p(0, 0), p(0, 50), p(100, 50)]
         );
     }
 

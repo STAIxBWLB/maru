@@ -1000,7 +1000,14 @@ label-fit, viewBox or legend-clearance rules; those refusals remain S3 work.
 
 Routing uses deterministic port choices, obstacle visibility fast paths and an
 independently implemented sparse A* over compressed obstacle-edge coordinates.
-It never returns a diagonal or collision fallback. Node and label rectangles are routing obstacles; derived cards are placed
+It never returns a diagonal or collision fallback. Once placement succeeds,
+a route failure does not erase the scene: that edge remains in `routes` with
+its ID and empty `points`, and a source edge-path diagnostic names the cause
+and next step. Other routes continue independently. `ok` is false while an
+error exists, but `geometry` remains present for inspection. Nonfatal font and
+pin notices do not make the report fail. Input/placement failures, including
+unrepresentable coordinates, can still return no geometry. S3 geometry-rule
+diagnostics must likewise flag the existing geometry rather than clear it. Node and label rectangles are routing obstacles; derived cards are placed
 below the completed relationship extents. Search/axis/waypoint budgets refuse
 with a cause and next step. Explicit `via` points are retained; without them channel
 hints constrain the route. `labelAt` is a center anchor and takes precedence over
@@ -1043,3 +1050,16 @@ clippy/type drift and both Chromium tests. The updated 256-case native/WASM
 reports remain byte-identical. Validation remains 324,219 B gzip; the lazy
 layout/metrics chunk is 1,482,982 B. These are remote checks; new-head hosted CI
 and the remaining S3 gates are still pending.
+
+The partial-scene contract is tested with an enclosed endpoint and a forced
+small, per-call test-only A* budget. Both retain all nodes and a clear second
+route, emit one unrouted edge and one error, and repeat deterministically.
+The production search limits are unchanged. The browser probe also checks this
+behavior through the actual WASM layout facade.
+
+The partial-scene follow-up is separately anchored to SDK tree `5f8d81a9` in
+that receipt. It passed 88 core tests, two differential tests, geometry clippy,
+binding drift and both Chromium probes, including the actual-WASM partial scene.
+All 256 native/WASM corpus reports remain byte-identical. Validation is
+324,219 B gzip and the lazy layout/metrics chunk is 1,489,129 B. New-head hosted
+checks and the S3 renderer/performance gates remain pending.

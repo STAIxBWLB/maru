@@ -27,7 +27,7 @@ export async function loadGeometryEngine(): Promise<GeometryEngine> {
     if (!value || typeof value !== "object" || !("apiVersion" in value) || value.apiVersion !== 1
         || !("ok" in value) || typeof value.ok !== "boolean" || !("diagnostics" in value) || !Array.isArray(value.diagnostics)
         || !("receipt" in value) || !value.receipt || typeof value.receipt !== "object"
-        || (value.ok && (!("geometry" in value) || !value.geometry || typeof value.geometry !== "object"
+        || ((value.ok || ("geometry" in value && value.geometry != null)) && (!("geometry" in value) || !value.geometry || typeof value.geometry !== "object"
           || !("nodes" in value.geometry) || !Array.isArray(value.geometry.nodes)
           || !("routes" in value.geometry) || !Array.isArray(value.geometry.routes)))) {
       throw new Error("Geometry engine returned an incompatible scene report; regenerate bindings and rebuild the same SDK revision.");
