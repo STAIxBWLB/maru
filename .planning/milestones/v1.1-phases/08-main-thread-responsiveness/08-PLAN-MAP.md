@@ -152,6 +152,7 @@ Early shards 01/02/03/04/05 record `integrationRequired: "08-29"` and final modu
 | 08-19 | `src-tauri/src/ops_catalog/watcher.rs` | `catalog_watcher_start`, `catalog_watcher_stop` |
 | 08-20 | `src-tauri/src/studio/mod.rs` | `studio_state_list`, `studio_state_read`, `studio_state_save`, `studio_state_delete`, `studio_apply_body` |
 | 08-20 | `src-tauri/src/diagram/mod.rs` | `diagram_save_document`, `diagram_load_document`, `diagram_list_documents`, `diagram_delete_document`, `diagram_export_blob`, `diagram_export_blob_to_path`, `diagram_backup_document`, `diagram_save_snapshot`, `diagram_list_snapshots`, `diagram_restore_snapshot`, `diagram_write_report_asset`, `diagram_pattern_save`, `diagram_pattern_list`, `diagram_pattern_delete` |
+| 08-10 | `src-tauri/src/diagram/renders.rs` | `diagram_list_renders`, `diagram_prepare_render_view`, `diagram_delete_render` |
 | 08-21 | `src-tauri/src/export/dispatch.rs` | `export_dispatch` |
 | 08-21 | `src-tauri/src/export/mod.rs` | `export_plan`, `export_validate` |
 | 08-21 | `src-tauri/src/hwped.rs` | `hwped_read`, `hwped_render`, `hwped_edit`, `hwped_compose`, `hwped_validate`, `hwped_capabilities` |

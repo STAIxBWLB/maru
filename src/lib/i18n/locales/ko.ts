@@ -4195,7 +4195,7 @@ export const ko: Record<string, string> = {
   "diagram.renders.empty": "저장된 렌더가 없습니다. 먼저 시맨틱 다이어그램을 렌더하세요.",
   "diagram.renders.orphaned": "원본 문서 없음",
   "diagram.renders.unverified": "미검증",
-  "diagram.renders.open": "브라우저에서 열기",
+  "diagram.renders.open": "기본 앱에서 열기",
   "diagram.renders.reveal": "파일 위치 열기",
   "diagram.renders.rerender": "다시 렌더",
   "diagram.renders.delete": "렌더 삭제",

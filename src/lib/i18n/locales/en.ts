@@ -4200,7 +4200,7 @@ export const en: Record<string, string> = {
   "diagram.renders.empty": "No saved renders. Render a semantic diagram first.",
   "diagram.renders.orphaned": "Document missing",
   "diagram.renders.unverified": "Unverified",
-  "diagram.renders.open": "Open in browser",
+  "diagram.renders.open": "Open in default app",
   "diagram.renders.reveal": "Reveal in Files",
   "diagram.renders.rerender": "Re-render",
   "diagram.renders.delete": "Delete render",
