@@ -41,7 +41,13 @@ impl TaskExecutionSession {
         &self,
         spawn: impl FnOnce() -> Result<std::process::Child, String>,
     ) -> Result<std::process::Child, String> {
-        claims::spawn_owned_child(&self.work, &self.token, spawn)
+        let result = claims::spawn_owned_child(&self.work, &self.token, spawn);
+        if result.is_err() {
+            // Identity-only cleanup succeeds for a verified pre-spawn failure;
+            // a persisted launch intent or live/unknown child remains held.
+            self.admission_failed();
+        }
+        result
     }
 
     /// Called only after successfully waiting on the Child handle owned here.

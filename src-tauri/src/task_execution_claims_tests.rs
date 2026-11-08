@@ -169,11 +169,11 @@ fn cross_process_contenders_have_one_owner_and_same_request_replays_after_restar
     assert!(replay.replayed);
     assert_eq!(replay.claim.token(), current.token());
     assert_eq!(fs::read(f.file(&task_id)).unwrap(), before);
-    // Both contender processes exited without a child binding. That uncertainty
-    // cannot become a time-based takeover, even though their native owners died.
+    // Both owners exited before the durable launch intent. This is positive
+    // no-spawn evidence, not an elapsed-time takeover or a missing-child guess.
     assert_eq!(
         reconcile(&f.work, &task_id).unwrap().lifecycle,
-        TaskExecutionLifecycle::Active
+        TaskExecutionLifecycle::Reconciled
     );
 }
 
@@ -259,29 +259,39 @@ fn native_ownership_and_prior_wait_proof_never_cover_a_new_spawn_window() {
     assert!(!ownership_proves_stopped(
         ProcessOwnership::Live,
         Some(ProcessOwnership::Dead),
-        true
+        true,
+        false
     ));
     assert!(!ownership_proves_stopped(
         ProcessOwnership::Unverified,
         Some(ProcessOwnership::Dead),
-        true
+        true,
+        false
     ));
     assert!(!ownership_proves_stopped(
         ProcessOwnership::Dead,
         Some(ProcessOwnership::Unverified),
+        false,
         false
     ));
     assert!(!ownership_proves_stopped(
         ProcessOwnership::Dead,
         None,
+        false,
         false
     ));
     assert!(ownership_proves_stopped(
         ProcessOwnership::Dead,
         Some(ProcessOwnership::Dead),
+        false,
         false
     ));
-    assert!(ownership_proves_stopped(ProcessOwnership::Dead, None, true));
+    assert!(ownership_proves_stopped(
+        ProcessOwnership::Dead,
+        None,
+        true,
+        false
+    ));
     let f = Fixture::new();
     let claim = acquire(&f.work, &f.request("wait-proof"), "run-proof")
         .unwrap()
@@ -291,7 +301,7 @@ fn native_ownership_and_prior_wait_proof_never_cover_a_new_spawn_window() {
     let result = spawn_owned_child(&f.work, &claim.token(), || {
         let on_disk = read_claim(&file, &claim.task_id).unwrap().unwrap();
         assert!(
-            !on_disk.child_reaped,
+            !on_disk.child_reaped && on_disk.spawn_attempted,
             "prior wait proof must be cleared before the next spawn effect"
         );
         Err("fixture spawn failure".into())
@@ -351,17 +361,7 @@ fn ordinary_rename_and_custom_task_roots_keep_their_existing_defaults() {
     .unwrap();
     assert_eq!(fs::read(work.join("renamed.md")).unwrap(), [255, 0, 1]);
     assert!(!work.join("tasks").exists());
-    assert_eq!(
-        fs::read_dir(work.join(CLAIM_DIR))
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|entry| entry
-                .path()
-                .extension()
-                .is_some_and(|value| value == "json"))
-            .count(),
-        0
-    );
+    assert!(!work.join(CLAIM_DIR).exists());
     let path = work.join("work-items/active/custom.md");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let source = "---\nstatus: active\n---\nCustom\n";
@@ -404,9 +404,9 @@ fn pending_identity_replay_is_read_only_and_duplicate_request_path_checks_are_fa
     fs::write(&other, original).unwrap();
     let mut redirected = request;
     redirected.task_path = "tasks/active/other.md".into();
-    assert!(acquire(&f.work, &redirected, "wrong-task")
-        .unwrap_err()
-        .contains("request_conflict"));
+    let different_task = acquire(&f.work, &redirected, "different-task-run").unwrap();
+    assert!(!different_task.replayed);
+    assert_ne!(different_task.claim.task_id, claim.task_id);
     fs::copy(&f.path, &other).unwrap();
     assert!(check(&f.work, &claim.token())
         .unwrap_err()
@@ -448,11 +448,12 @@ fn bounded_history_and_corrupt_claims_cannot_enable_replay_or_replacement() {
 }
 
 #[test]
-fn removed_identity_remains_owned_across_rename_and_automatic_cleanup_cannot_release_review() {
+fn removed_identity_after_completed_child_is_released_without_task_resolution() {
     let f = Fixture::new();
     let claim = acquire(&f.work, &f.request("identity"), "identity-run")
         .unwrap()
         .claim;
+    wait_owned(&f.work, &claim.token());
     let bound = fs::read_to_string(&f.path).unwrap();
     let edited = update_frontmatter_content(&bound, "taskId", None).unwrap();
     fs::write(&f.path, &edited).unwrap();
@@ -465,25 +466,18 @@ fn removed_identity_remains_owned_across_rename_and_automatic_cleanup_cannot_rel
         "without-id.md".into(),
     )
     .unwrap();
-    let stored = read_claim(&f.file(&claim.task_id), &claim.task_id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored.lifecycle, TaskExecutionLifecycle::NeedsReview);
+    let target = PathBuf::from(renamed.target_path.unwrap());
+    let before = fs::read(&target).unwrap();
+    assert!(check(&f.work, &claim.token()).is_err());
+    cancel_admission(&f.work, &claim.token()).unwrap();
     assert_eq!(
-        f.work.join(&stored.task_path),
-        PathBuf::from(renamed.target_path.unwrap())
+        read_claim(&f.file(&claim.task_id), &claim.task_id)
+            .unwrap()
+            .unwrap()
+            .lifecycle,
+        TaskExecutionLifecycle::Released
     );
-    assert_eq!(stored.source_revision, claim.source_revision);
-    let before = fs::read(f.file(&claim.task_id)).unwrap();
-    assert!(cancel_admission(&f.work, &claim.token()).is_err());
-    assert_eq!(fs::read(f.file(&claim.task_id)).unwrap(), before);
-    let next = TaskExecutionRequest {
-        request_id: "cannot-evade".into(),
-        task_path: stored.task_path,
-        source_revision: crate::document::revision_for(&edited),
-        tasks_root: None,
-    };
-    assert!(acquire(&f.work, &next, "forbidden-again").is_err());
+    assert_eq!(fs::read(target).unwrap(), before);
 }
 
 #[test]
@@ -637,4 +631,226 @@ fn reviewed_stop_releases_dead_unreaped_drift_after_restart_without_signalling_a
     let next = acquire(&f.work, &f.request("after-review"), "after-review-run").unwrap();
     assert!(!next.replayed);
     assert_eq!(next.claim.generation, claim.generation + 1);
+}
+
+#[test]
+fn ordinary_modify_only_schedule_edits_create_no_claim_infrastructure() {
+    use crate::vault_list::{
+        ProviderPermissionSummary, WorkspaceCapabilities, WorkspaceRootEntry, WorkspaceWriteAction,
+    };
+    let f = Fixture::new();
+    crate::vault_list::add_workspace_root(WorkspaceRootEntry {
+        label: "Modify only".into(),
+        path: display(&f.work),
+        visibility: "public".into(),
+        provider: "nextcloud".into(),
+        provider_id: None,
+        external_writer: None,
+        write_policy: "direct".into(),
+        permission_summary: Some(ProviderPermissionSummary {
+            role: Some("3".into()),
+            source: "manual".into(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        }),
+    })
+    .unwrap();
+    assert!(crate::vault_list::assert_maru_can_write(
+        &display(&f.work),
+        WorkspaceWriteAction::Modify
+    )
+    .is_ok());
+    assert!(crate::vault_list::assert_maru_can_write(
+        &display(&f.work),
+        WorkspaceWriteAction::Create
+    )
+    .is_err());
+    let row = crate::tasks::update_task_schedule_fields(
+        display(&f.work),
+        "tasks/active/task.md".into(),
+        crate::tasks::UpdateTaskScheduleFields {
+            project: Some(Some("Fixture project".into())),
+            priority: None,
+            due: None,
+            calendar_start: None,
+            calendar_end: None,
+            estimate_minutes: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(row.frontmatter["project"], "Fixture project");
+    assert!(!f.work.join(CLAIM_DIR).exists());
+    assert!(task_id_from_content(&fs::read_to_string(&f.path).unwrap()).is_none());
+}
+
+#[test]
+fn identity_only_release_and_cleanup_survive_old_snapshot_overwrite_and_move() {
+    let f = Fixture::new();
+    let old = fs::read_to_string(&f.path).unwrap();
+    for (index, cleanup) in [(0, false), (1, true), (2, false)] {
+        let source = if index == 0 {
+            f.path.clone()
+        } else {
+            f.work.join("tasks/active/second.md")
+        };
+        fs::write(&source, &old).unwrap();
+        let request = TaskExecutionRequest {
+            request_id: format!("before-move-{index}"),
+            task_path: relative_task_path(&workspace_roots(&f.work, None).unwrap(), &source)
+                .unwrap(),
+            source_revision: crate::document::revision_for(&old),
+            tasks_root: None,
+        };
+        let claim = acquire(&f.work, &request, &format!("move-run-{index}"))
+            .unwrap()
+            .claim;
+        let child = if index == 2 {
+            Some(
+                spawn_owned_child(&f.work, &claim.token(), || {
+                    Command::new(std::env::current_exe().unwrap())
+                        .arg("--list")
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .map_err(|error| error.to_string())
+                })
+                .unwrap(),
+            )
+        } else {
+            None
+        };
+        fs::write(&source, &old).unwrap();
+        let target = f.work.join(format!("tasks/backlog/moved-{index}.md"));
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::rename(source, &target).unwrap();
+        let before = fs::read(&target).unwrap();
+        if let Some(mut child) = child {
+            let pid = child.id();
+            assert!(child.wait().unwrap().success());
+            record_reaped_child(&f.work, &claim.token(), pid).unwrap();
+        }
+        if cleanup {
+            cancel_admission(&f.work, &claim.token()).unwrap();
+        } else {
+            release(&f.work, &claim.token()).unwrap();
+        }
+        assert_eq!(fs::read(&target).unwrap(), before);
+        let fresh = TaskExecutionRequest {
+            request_id: format!("after-move-{index}"),
+            task_path: target
+                .strip_prefix(&f.work)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            source_revision: crate::document::revision_for(&old),
+            tasks_root: None,
+        };
+        let next = acquire(&f.work, &fresh, &format!("fresh-run-{index}")).unwrap();
+        assert!(!next.replayed);
+        assert_ne!(next.claim.task_id, claim.task_id);
+    }
+}
+
+#[test]
+fn request_ids_are_task_scoped_even_for_simultaneous_first_admissions() {
+    let f = Fixture::new();
+    let first = f.request("shared-request");
+    let mut second = first.clone();
+    second.task_path = "tasks/active/second.md".into();
+    fs::copy(&f.path, f.work.join(&second.task_path)).unwrap();
+    let (a_work, b_work) = (f.work.clone(), f.work.clone());
+    let (a_request, b_request) = (first.clone(), second.clone());
+    let a = std::thread::spawn(move || acquire(&a_work, &a_request, "shared-a"));
+    let b = std::thread::spawn(move || acquire(&b_work, &b_request, "shared-b"));
+    let a = a.join().unwrap().unwrap().claim;
+    let b = b.join().unwrap().unwrap().claim;
+    assert_ne!(a.task_id, b.task_id);
+    assert_eq!(
+        acquire(&f.work, &first, "no-rerun-a")
+            .unwrap()
+            .claim
+            .token(),
+        a.token()
+    );
+    assert_eq!(
+        acquire(&f.work, &second, "no-rerun-b")
+            .unwrap()
+            .claim
+            .token(),
+        b.token()
+    );
+}
+
+#[test]
+fn post_rename_sync_failure_returns_a_usable_admission_session() {
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            *SYNC_FAILURE_PARENT
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = None;
+        }
+    }
+    let f = Fixture::new();
+    let before = SYNC_FAILURES.load(std::sync::atomic::Ordering::SeqCst);
+    *SYNC_FAILURE_PARENT.lock().unwrap() = Some(f.work.join(CLAIM_DIR));
+    let restore = Restore;
+    let request = serde_json::json!({"taskExecution": f.request("sync-written")});
+    let (session, replayed) = crate::task_execution_runtime::TaskExecutionSession::admit(
+        f.work.to_str().unwrap(),
+        Some(&request),
+        "sync-run",
+    )
+    .unwrap()
+    .unwrap();
+    assert!(!replayed);
+    assert!(SYNC_FAILURES.load(std::sync::atomic::Ordering::SeqCst) > before);
+    assert!(f.file(&session.token.task_id).is_file());
+    session.check().unwrap();
+    drop(restore);
+    session.admission_failed();
+    assert_eq!(
+        read_claim(&f.file(&session.token.task_id), &session.token.task_id)
+            .unwrap()
+            .unwrap()
+            .lifecycle,
+        TaskExecutionLifecycle::Released
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_initial_identity_write_publishes_no_active_claim() {
+    let f = Fixture::new();
+    let path = f
+        .work
+        .join("tasks/active")
+        .join(format!("{}.md", "a".repeat(238)));
+    let original = "---\nstatus: active\n---\nTask\n";
+    fs::write(&path, original).unwrap();
+    let request = TaskExecutionRequest {
+        request_id: "identity-write-failed".into(),
+        task_path: path
+            .strip_prefix(&f.work)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        source_revision: crate::document::revision_for(original),
+        tasks_root: None,
+    };
+    let error = acquire(&f.work, &request, "must-not-start").unwrap_err();
+    assert!(error.contains("identity_write_failed"), "{error}");
+    assert_eq!(fs::read_to_string(path).unwrap(), original);
+    assert_eq!(
+        fs::read_dir(f.work.join(CLAIM_DIR))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry
+                .path()
+                .extension()
+                .is_some_and(|value| value == "json"))
+            .count(),
+        0
+    );
 }

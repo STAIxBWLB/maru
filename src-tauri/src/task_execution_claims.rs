@@ -73,6 +73,8 @@ pub(crate) struct TaskExecutionClaim {
     pub(crate) receipt: JobRunReceipt,
     #[serde(default)]
     child_reaped: bool,
+    #[serde(default = "conservative_spawn_attempted")]
+    spawn_attempted: bool,
     #[serde(default)]
     request_history: Vec<TaskExecutionRequestRecord>,
 }
@@ -90,6 +92,12 @@ struct TaskExecutionRequestRecord {
     receipt: JobRunReceipt,
     #[serde(default)]
     child_reaped: bool,
+    #[serde(default = "conservative_spawn_attempted")]
+    spawn_attempted: bool,
+}
+
+fn conservative_spawn_attempted() -> bool {
+    true
 }
 
 impl TaskExecutionRequestRecord {
@@ -104,6 +112,7 @@ impl TaskExecutionRequestRecord {
             lifecycle: claim.lifecycle,
             receipt: claim.receipt.clone(),
             child_reaped: claim.child_reaped,
+            spawn_attempted: claim.spawn_attempted,
         }
     }
 }
@@ -132,6 +141,7 @@ impl TaskExecutionClaim {
             lifecycle: record.lifecycle,
             receipt: record.receipt.clone(),
             child_reaped: record.child_reaped,
+            spawn_attempted: record.spawn_attempted,
             request_history: Vec::new(),
         }
     }
@@ -157,93 +167,39 @@ pub(crate) struct Admission {
     pub(crate) replayed: bool,
 }
 
-/// Holds the bootstrap/task claim locks while a caller performs one already-
-/// admitted task mutation under its own PathTransactionLease. A guard without
-/// a claim is lock-only and preserves ordinary markdown behavior.
+/// Holds an existing opt-in claim lock across one managed task mutation.
+/// Ordinary tasks receive no guard and create no claim infrastructure.
 pub(crate) struct TaskMutationGuard {
     work: PathBuf,
-    task_id: Option<String>,
-    claim: Option<TaskExecutionClaim>,
-    claim_path: Option<PathBuf>,
-    bootstrap_path: PathBuf,
-    bootstrap_lock: File,
-    task_lock_path: Option<PathBuf>,
-    task_lock: Option<File>,
+    claim: TaskExecutionClaim,
+    claim_path: PathBuf,
+    task_lock_path: PathBuf,
+    task_lock: File,
 }
 
 impl TaskMutationGuard {
     pub(crate) fn paths(&self) -> Vec<PathBuf> {
-        let mut paths = vec![self.bootstrap_path.clone()];
-        if let Some(path) = &self.task_lock_path {
-            paths.push(path.clone());
-        }
-        if let Some(path) = &self.claim_path {
-            paths.push(path.clone());
-        }
-        paths
+        vec![self.claim_path.clone(), self.task_lock_path.clone()]
     }
 
-    pub(crate) fn check(
-        &self,
-        lease: &PathTransactionLease,
-        source_path: &Path,
-    ) -> Result<(), String> {
+    pub(crate) fn check(&self, lease: &PathTransactionLease, source: &Path) -> Result<(), String> {
         lease.ensure_covered(self.paths())?;
-        lease.ensure_covered([source_path.to_path_buf()])?;
-        verify_lock_identity(&self.bootstrap_lock, &self.bootstrap_path)?;
-        if let (Some(path), Some(lock)) = (&self.task_lock_path, &self.task_lock) {
-            verify_lock_identity(lock, path)?;
-        }
-        let Some(expected) = self.claim.as_ref() else {
-            return Ok(());
-        };
-        let id = self
-            .task_id
-            .as_deref()
-            .ok_or("task_execution_guard_invalid: claim has no taskId")?;
-        let claim_path = self
-            .claim_path
-            .as_ref()
-            .ok_or("task_execution_guard_invalid: claim path is missing")?;
-        let current = read_claim(claim_path, id)?.ok_or_else(|| {
+        lease.ensure_covered([source.to_path_buf()])?;
+        verify_lock_identity(&self.task_lock, &self.task_lock_path)?;
+        let current = read_claim(&self.claim_path, &self.claim.task_id)?.ok_or_else(|| {
             action_error(
                 "task_execution_claim_missing",
-                claim_path,
-                "claim disappeared during task mutation",
+                &self.claim_path,
+                "claim disappeared during mutation",
                 "refresh the task and retry",
             )
         })?;
-        if current.token() != expected.token() || current.lifecycle != expected.lifecycle {
+        if current.token() != self.claim.token() || current.lifecycle != self.claim.lifecycle {
             return Err(action_error(
                 "task_execution_token_stale",
-                claim_path,
-                "claim generation changed during task mutation",
-                "refresh the task execution and retry",
-            ));
-        }
-        if !matches!(
-            current.lifecycle,
-            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
-        ) {
-            return Err(action_error(
-                "task_execution_claim_not_active",
-                source_path,
-                &format!("claim lifecycle is {:?}", current.lifecycle),
-                "refresh the task before editing",
-            ));
-        }
-        let roots = workspace_roots(&self.work, Some(&current.tasks_root))?;
-        let path = resolve_task_path(&roots, &display(source_path))?;
-        let snapshot = task_snapshot(&roots, &path)?;
-        if snapshot.task_id.as_deref() != Some(id)
-            && request_path_key(&roots, &current.task_path)?
-                != request_path_key(&roots, &display(&path))?
-        {
-            return Err(action_error(
-                "task_execution_identity_changed",
-                &path,
-                "task path and taskId no longer match the guarded claim",
-                "refresh the task path before editing",
+                &self.claim_path,
+                "execution changed during mutation",
+                "refresh the task and retry",
             ));
         }
         Ok(())
@@ -252,84 +208,45 @@ impl TaskMutationGuard {
     pub(crate) fn after_mutation(
         &mut self,
         lease: &PathTransactionLease,
-        new_path: &Path,
+        path: &Path,
     ) -> Result<(), String> {
         lease.ensure_covered(self.paths())?;
-        if self.claim.is_none() {
-            return Ok(());
-        }
-        lease.ensure_covered([new_path.to_path_buf()])?;
-        let task_id = self
-            .task_id
-            .as_deref()
-            .ok_or("task_execution_guard_invalid: claim has no taskId")?;
-        let claim_path = self
-            .claim_path
-            .as_ref()
-            .ok_or("task_execution_guard_invalid: claim path is missing")?;
-        let lock_path = self
-            .task_lock_path
-            .as_ref()
-            .ok_or("task_execution_guard_invalid: task lock is missing")?;
-        let lock = self
-            .task_lock
-            .as_ref()
-            .ok_or("task_execution_guard_invalid: task lock handle is missing")?;
-        verify_lock_identity(lock, lock_path)?;
-        verify_lock_identity(&self.bootstrap_lock, &self.bootstrap_path)?;
-        let mut claim = read_claim(claim_path, task_id)?.ok_or_else(|| {
+        lease.ensure_covered([path.to_path_buf()])?;
+        verify_lock_identity(&self.task_lock, &self.task_lock_path)?;
+        let roots = WorkspaceRoots {
+            work: self.work.clone(),
+            tasks: PathBuf::from(&self.claim.tasks_root),
+            identity: display(&self.work),
+        };
+        let mut current = read_claim(&self.claim_path, &self.claim.task_id)?.ok_or_else(|| {
             action_error(
                 "task_execution_claim_missing",
-                claim_path,
-                "claim disappeared after task mutation",
-                "review the task and claim manually",
+                &self.claim_path,
+                "claim disappeared after mutation",
+                "review the task and retry",
             )
         })?;
-        let expected = self.claim.as_ref().expect("claim checked above");
-        if !token_matches(&claim, &expected.token()) || claim.lifecycle != expected.lifecycle {
-            return Err(action_error(
-                "task_execution_token_stale",
-                claim_path,
-                "claim generation changed during task mutation",
-                "refresh the task execution and retry",
-            ));
+        validate_claim_token(&current, &self.claim.token())?;
+        let new_path = relative_task_path(&roots, path)?;
+        let snapshot = task_snapshot(&roots, path).ok();
+        if matches!(
+            current.lifecycle,
+            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
+        ) && snapshot.as_ref().is_none_or(|note| {
+            note.task_id.as_deref() != Some(current.task_id.as_str())
+                || note.revision != current.source_revision
+                || note.archived
+                || matches!(note.status.as_deref(), Some("done" | "cancelled"))
+        }) {
+            current.lifecycle = TaskExecutionLifecycle::NeedsReview;
+            current.receipt.process_outcome = "needsReview".into();
         }
-        let roots = workspace_roots(&self.work, Some(&claim.tasks_root))?;
-        let path = resolve_task_path(&roots, &display(new_path))?;
-        let snapshot = task_snapshot(&roots, &path)?;
-        let identity_changed = snapshot.task_id.as_deref() != Some(task_id);
-        let previous_path = claim.task_path.clone();
-        claim.task_path = relative_task_path(&roots, &path)?;
-        if identity_changed
-            || snapshot.revision != claim.source_revision
-            || snapshot.archived
-            || matches!(snapshot.status.as_deref(), Some("done" | "cancelled"))
-        {
-            claim.lifecycle = TaskExecutionLifecycle::NeedsReview;
-            claim.receipt.process_outcome = "needsReview".into();
+        if current.task_path != new_path || current.lifecycle != self.claim.lifecycle {
+            current.task_path = new_path;
+            write_claim(&roots, lease, &current, &self.task_lock)?;
         }
-        if claim.task_path != previous_path || claim.lifecycle != expected.lifecycle {
-            write_claim(&roots, lease, &claim, lock)?;
-            self.claim = Some(claim);
-        }
+        self.claim = current;
         Ok(())
-    }
-}
-
-fn lock_only_mutation_guard(
-    work: PathBuf,
-    bootstrap_path: PathBuf,
-    bootstrap_lock: File,
-) -> TaskMutationGuard {
-    TaskMutationGuard {
-        work,
-        task_id: None,
-        claim: None,
-        claim_path: None,
-        bootstrap_path,
-        bootstrap_lock,
-        task_lock_path: None,
-        task_lock: None,
     }
 }
 
@@ -837,21 +754,6 @@ fn read_claim(path: &Path, task_id: &str) -> Result<Option<TaskExecutionClaim>, 
     Ok(Some(claim))
 }
 
-fn request_path_matches_claim(
-    roots: &WorkspaceRoots,
-    request_path: &str,
-    claim: &TaskExecutionClaim,
-) -> bool {
-    if request_path == claim.request_path || request_path == claim.task_path {
-        return true;
-    }
-    let candidate = roots.work.join(request_path);
-    resolve_task_path(roots, &display(&candidate))
-        .ok()
-        .and_then(|path| task_snapshot(roots, &path).ok())
-        .is_some_and(|snapshot| snapshot.task_id.as_deref() == Some(claim.task_id.as_str()))
-}
-
 fn write_claim(
     roots: &WorkspaceRoots,
     lease: &PathTransactionLease,
@@ -915,10 +817,32 @@ fn write_claim(
             "retry after repairing claim storage",
         )
     })?;
-    sync_parent(&path)
+    warn_parent_sync(&path);
+    Ok(())
+}
+
+#[cfg(test)]
+static SYNC_FAILURE_PARENT: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+#[cfg(test)]
+static SYNC_FAILURES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn warn_parent_sync(path: &Path) {
+    if let Err(error) = sync_parent(path) {
+        eprintln!("maru: task data was atomically written but directory sync failed: {error}; inspect storage health before restarting");
+    }
 }
 
 fn sync_parent(path: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if SYNC_FAILURE_PARENT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .as_deref()
+        == path.parent()
+    {
+        SYNC_FAILURES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        return Err("injected directory sync failure after atomic rename".into());
+    }
     #[cfg(unix)]
     {
         let parent = path.parent().ok_or_else(|| {
@@ -1098,7 +1022,7 @@ fn find_task_by_id(
                 "task_execution_recovery_scan_failed",
                 entry.path(),
                 &error.to_string(),
-                "repair task permissions and retry",
+                "shorten the task filename or repair storage permissions, then refresh and retry",
             )
         })?;
         if metadata.file_type().is_symlink() || metadata.len() > MAX_TASK_BYTES {
@@ -1230,106 +1154,111 @@ fn unfinished_claim_at_path(
     Ok(found)
 }
 
-fn find_request_claim(
+fn recorded_request_at_path(
     roots: &WorkspaceRoots,
     request: &TaskExecutionRequest,
-    request_path: &str,
+    path: &str,
 ) -> Result<Option<TaskExecutionClaim>, String> {
-    let dir = claim_root(roots);
-    let entries = match fs::read_dir(&dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(action_error(
-                "task_execution_claim_scan_failed",
-                &dir,
-                &error.to_string(),
-                "repair task claim storage and retry",
-            ))
-        }
-    };
-    let mut found = None;
+    let mut found: Option<TaskExecutionClaim> = None;
+    let entries = fs::read_dir(claim_root(roots)).map_err(|error| {
+        action_error(
+            "task_execution_claim_scan_failed",
+            &claim_root(roots),
+            &error.to_string(),
+            "repair claim storage and retry",
+        )
+    })?;
     for (index, entry) in entries.enumerate() {
         if index >= MAX_CLAIM_FILES {
             return Err(action_error(
                 "task_execution_claim_scan_bounded",
-                &dir,
-                "claim directory exceeded its entry limit",
-                "review stale claims before retrying",
+                &claim_root(roots),
+                "too many claims for path recovery",
+                "restore the taskId and retry",
             ));
         }
-        let entry = entry.map_err(|error| {
-            action_error(
-                "task_execution_claim_scan_failed",
-                &dir,
-                &error.to_string(),
-                "repair task claim storage and retry",
-            )
-        })?;
-        if entry.path().extension().and_then(|value| value.to_str()) != Some("json") {
+        let file = entry
+            .map_err(|error| {
+                action_error(
+                    "task_execution_claim_scan_failed",
+                    &claim_root(roots),
+                    &error.to_string(),
+                    "repair claim storage and retry",
+                )
+            })?
+            .path();
+        if file.extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
-        let path = entry.path();
-        let Some(task_id) = path.file_stem().and_then(|value| value.to_str()) else {
+        let Some(id) = file
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .filter(|id| valid_task_id(id))
+        else {
             continue;
         };
-        if !valid_task_id(task_id) {
+        let Some(claim) = read_claim(&file, id)? else {
+            continue;
+        };
+        if claim.workspace != roots.identity || claim.tasks_root != display(&roots.tasks) {
             continue;
         }
-        if let Some(claim) = read_claim(&path, task_id)? {
-            if claim.workspace != roots.identity || claim.tasks_root != display(&roots.tasks) {
-                continue;
-            }
-            if claim.request_id == request.request_id {
-                if !request_path_matches_claim(roots, request_path, &claim)
-                    || claim.receipt.job_revision != request.source_revision
-                {
-                    return Err(action_error(
-                        "task_execution_request_conflict",
-                        &path,
-                        "requestId was already used for another task path or source revision",
-                        "refresh the task and use a new requestId",
-                    ));
-                }
-                if found.is_some() {
-                    return Err(action_error(
-                        "task_execution_request_duplicate",
-                        &path,
-                        "requestId appears in multiple task claims",
-                        "review duplicate claims before retrying",
-                    ));
-                }
-                found = Some(claim);
-                continue;
-            }
-            if let Some(record) = claim
+        let record = if claim.request_id == request.request_id {
+            Some(claim.clone())
+        } else {
+            claim
                 .request_history
                 .iter()
-                .find(|record| record.request_id == request.request_id)
-            {
-                let path_matches = record.request_path == request_path
-                    || request_path_matches_claim(roots, request_path, &claim);
-                if !path_matches || record.receipt.job_revision != request.source_revision {
-                    return Err(action_error(
-                        "task_execution_request_conflict",
-                        &path,
-                        "requestId was already used for another task path or source revision",
-                        "refresh the task and use a new requestId",
-                    ));
-                }
-                if found.is_some() {
-                    return Err(action_error(
-                        "task_execution_request_duplicate",
-                        &path,
-                        "requestId appears in multiple task claims",
-                        "review duplicate claims before retrying",
-                    ));
-                }
-                found = Some(claim);
-            }
+                .find(|row| row.request_id == request.request_id)
+                .map(|row| claim.historical(row))
+        };
+        let Some(record) = record else {
+            continue;
+        };
+        if record.request_path != path && record.task_path != path && claim.task_path != path {
+            continue;
         }
+        if record.receipt.job_revision != request.source_revision {
+            return Err(action_error(
+                "task_execution_request_conflict",
+                &file,
+                "this task request used another source revision",
+                "use a new requestId for this task",
+            ));
+        }
+        if found
+            .as_ref()
+            .is_some_and(|prior| prior.task_id != claim.task_id)
+        {
+            return Err(action_error(
+                "task_execution_path_ambiguous",
+                &file,
+                "several task identities match this missing path",
+                "restore the original taskId before replaying",
+            ));
+        }
+        found = Some(claim);
     }
     Ok(found)
+}
+
+fn validate_task_request(
+    claim: &TaskExecutionClaim,
+    request: &TaskExecutionRequest,
+) -> Result<(), String> {
+    let revision = if claim.request_id == request.request_id {
+        Some(&claim.receipt.job_revision)
+    } else {
+        claim
+            .request_history
+            .iter()
+            .find(|row| row.request_id == request.request_id)
+            .map(|row| &row.receipt.job_revision)
+    };
+    if revision.is_some_and(|value| value != &request.source_revision) {
+        return Err("task_execution_request_conflict: this task request used another source revision; use a new requestId for this task".into());
+    }
+    Ok(())
 }
 
 fn ensure_request(request: &TaskExecutionRequest, run_id: &str) -> Result<(), String> {
@@ -1394,12 +1323,13 @@ fn ownership_proves_stopped(
     owner: ProcessOwnership,
     child: Option<ProcessOwnership>,
     child_reaped: bool,
+    never_spawned: bool,
 ) -> bool {
     owner == ProcessOwnership::Dead
         && match child {
             Some(ProcessOwnership::Dead) => true,
             Some(ProcessOwnership::Live | ProcessOwnership::Unverified) => false,
-            None => child_reaped,
+            None => child_reaped || never_spawned,
         }
 }
 
@@ -1462,7 +1392,8 @@ fn write_task_note(
             "repair task permissions and retry",
         )
     })?;
-    sync_parent(path)
+    warn_parent_sync(path);
+    Ok(())
 }
 
 fn task_id_candidate() -> String {
@@ -1494,6 +1425,101 @@ fn validate_claim_token(
         return Err(format!("task_execution_token_stale: taskId={} requestId={} generation={}; refresh the active task execution", token.task_id, token.request_id, token.generation));
     }
     Ok(())
+}
+
+fn open_existing_claim_lock(path: &Path) -> Result<File, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        action_error(
+            "task_execution_lock_missing",
+            path,
+            &error.to_string(),
+            "restore the original claim lock before retrying",
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(action_error(
+            "task_execution_lock_invalid",
+            path,
+            "lock is not a regular file",
+            "restore the original claim lock before retrying",
+        ));
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| {
+            action_error(
+                "task_execution_lock_failed",
+                path,
+                &error.to_string(),
+                "repair claim lock permissions and retry",
+            )
+        })?;
+    verify_lock_identity(&file, path)?;
+    file.lock().map_err(|error| {
+        action_error(
+            "task_execution_lock_failed",
+            path,
+            &error.to_string(),
+            "retry after the current claim operation settles",
+        )
+    })?;
+    verify_lock_identity(&file, path)?;
+    Ok(file)
+}
+
+fn with_claim_identity<T>(
+    work: &Path,
+    token: &TaskExecutionToken,
+    operation: impl FnOnce(
+        &WorkspaceRoots,
+        &mut TaskExecutionClaim,
+        &PathTransactionLease,
+        &File,
+    ) -> Result<T, String>,
+) -> Result<T, String> {
+    if !valid_task_id(&token.task_id) {
+        return Err(
+            "task_execution_id_invalid: unsupported taskId; refresh the recorded task identity"
+                .into(),
+        );
+    }
+    let work = normalize_existing_dir(&display(work))?;
+    let roots = WorkspaceRoots {
+        work: work.clone(),
+        tasks: work.clone(),
+        identity: display(&work),
+    };
+    inspect_claim_directory(&roots)?;
+    let file = claim_path(&roots, &token.task_id);
+    let lock_path = task_lock_path(&roots, &token.task_id);
+    let lock = open_existing_claim_lock(&lock_path)?;
+    let request = PathTransactionRequest::new([file.clone(), lock_path.clone()])?
+        .require_parent(&work)?
+        .require_parent(&claim_root(&roots))?
+        .require_parent(&lock_root(&roots))?;
+    with_path_transactions(request, |lease| {
+        verify_lock_identity(&lock, &lock_path)?;
+        let mut claim = read_claim(&file, &token.task_id)?.ok_or_else(|| {
+            action_error(
+                "task_execution_claim_missing",
+                &file,
+                "recorded claim is missing",
+                "refresh mission history before retrying",
+            )
+        })?;
+        if claim.workspace != roots.identity {
+            return Err(action_error(
+                "task_execution_workspace_mismatch",
+                &file,
+                "claim belongs to another workspace",
+                "open the original workspace and retry",
+            ));
+        }
+        validate_claim_token(&claim, token)?;
+        operation(&roots, &mut claim, lease, &lock)
+    })
 }
 
 fn claim_task_context(
@@ -1636,8 +1662,8 @@ fn active_claim_for_other_request(
         .map(process_ownership)
         .unwrap_or(ProcessOwnership::Unverified);
     let child = claim.receipt.child.as_ref().map(process_ownership);
-    if !ownership_proves_stopped(owner, child, claim.child_reaped) {
-        return Err(action_error("task_execution_claim_held_for_review", &snapshot.path, "owner or child process ownership is live or unverified", "wait for the current execution or review/reconcile its process evidence; elapsed time never releases a claim"));
+    if !ownership_proves_stopped(owner, child, claim.child_reaped, !claim.spawn_attempted) {
+        return Err(action_error("task_execution_claim_held_for_review", &snapshot.path, "owner or child is live or unverified; an exited but unreaped process may remain unverified", "retry after the original launcher exits, or restart Maru and review ownership; elapsed time never releases a claim"));
     }
     if let Err(error) = task_is_current(claim, snapshot) {
         claim.lifecycle = TaskExecutionLifecycle::NeedsReview;
@@ -1657,138 +1683,69 @@ fn active_claim_for_other_request(
 /// no taskId or claim is written for an ordinary note.
 pub(crate) fn guard_task_mutation(
     work: &Path,
-    source_path: &Path,
+    source: &Path,
 ) -> Result<Option<TaskMutationGuard>, String> {
-    let work = normalize_existing_dir(&display(work)).map_err(|error| {
-        action_error(
-            "task_execution_workspace_invalid",
-            work,
-            &error,
-            "open the registered workspace and retry",
-        )
-    })?;
-    let lexical =
-        resolve_inside_vault(&display(&work), &display(source_path)).map_err(|error| {
-            action_error(
-                "task_execution_path_invalid",
-                source_path,
-                &error,
-                "select a markdown file inside this workspace",
-            )
-        })?;
-    let lexical_metadata = match fs::symlink_metadata(&lexical) {
-        Ok(metadata) if metadata.file_type().is_symlink() => return Ok(None),
-        Ok(metadata) if metadata.is_file() => metadata,
-        Ok(_) => return Ok(None),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(action_error(
-                "task_execution_task_invalid",
-                &lexical,
-                &error.to_string(),
-                "refresh the document path and retry",
-            ))
-        }
-    };
-    let _ = lexical_metadata;
-    if lexical.extension().and_then(|value| value.to_str()) != Some("md") {
-        return Ok(None);
-    }
-    let path = lexical.canonicalize().map_err(|error| {
-        action_error(
-            "task_execution_task_missing",
-            &lexical,
-            &error.to_string(),
-            "refresh the document path and retry",
-        )
-    })?;
-    if !path.starts_with(&work) {
-        return Ok(None);
-    }
-    let metadata = fs::symlink_metadata(&path).map_err(|error| {
-        action_error(
-            "task_execution_task_invalid",
-            &path,
-            &error.to_string(),
-            "refresh the document path and retry",
-        )
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(action_error(
-            "task_execution_task_symlink_rejected",
-            &path,
-            "Markdown leaf is a symlink or non-file",
-            "select a regular Markdown file",
-        ));
-    }
-    // A lock-only roots value intentionally avoids requiring a default `tasks`
-    // directory for ordinary workspace notes.
+    let work = normalize_existing_dir(&display(work))?;
     let roots = WorkspaceRoots {
         work: work.clone(),
         tasks: work.clone(),
         identity: display(&work),
     };
-    ensure_claim_layout(&roots)?;
-    let bootstrap_path = bootstrap_lock_path(&roots, &path);
-    let bootstrap_lock = acquire_file_lock(&roots, &bootstrap_path)?;
-    let path_claim = unfinished_claim_at_path(&roots, &path, false)?;
-    let task_id = path_claim
-        .map(|claim| claim.task_id)
-        .or_else(|| task_id_from_path_bounded(&path));
-    let Some(task_id) = task_id else {
-        return Ok(Some(lock_only_mutation_guard(
-            work,
-            bootstrap_path,
-            bootstrap_lock,
-        )));
+    // Ordinary mutations never create or repair claim infrastructure, and
+    // never read a foreign namespace through a symlink.
+    for dir in [work.join(".maru"), claim_root(&roots)] {
+        if !fs::symlink_metadata(&dir)
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        {
+            return Ok(None);
+        }
+    }
+    let source = resolve_inside_vault(&display(&work), &display(source))?;
+    if source.extension().and_then(|value| value.to_str()) != Some("md")
+        || !fs::symlink_metadata(&source)
+            .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+    {
+        return Ok(None);
+    }
+    let path = source.canonicalize().map_err(|error| {
+        action_error(
+            "task_execution_path_invalid",
+            &source,
+            &error.to_string(),
+            "refresh the task path and retry",
+        )
+    })?;
+    let Some(id) = task_id_from_path_bounded(&path).filter(|id| valid_task_id(id)) else {
+        return Ok(None);
     };
-    if !valid_task_id(&task_id) {
-        return Ok(Some(lock_only_mutation_guard(
-            work,
-            bootstrap_path,
-            bootstrap_lock,
-        )));
+    let Some(claim) = read_claim(&claim_path(&roots, &id), &id)? else {
+        return Ok(None);
+    };
+    if claim.workspace != roots.identity {
+        return Err(action_error(
+            "task_execution_workspace_mismatch",
+            &path,
+            "claim belongs to another workspace",
+            "open the original workspace and retry",
+        ));
     }
-    let task_lock_path = task_lock_path(&roots, &task_id);
-    let task_lock = acquire_file_lock(&roots, &task_lock_path)?;
-    let claim_path = claim_path(&roots, &task_id);
-    let claim = read_claim(&claim_path, &task_id)?;
-    if let Some(claim) = claim.as_ref() {
-        if claim.workspace != display(&work) {
-            return Err(action_error(
-                "task_execution_workspace_mismatch",
-                &claim_path,
-                "claim belongs to another workspace identity",
-                "open the original workspace and retry",
-            ));
-        }
-        if matches!(
-            claim.lifecycle,
-            TaskExecutionLifecycle::Finished
-                | TaskExecutionLifecycle::Released
-                | TaskExecutionLifecycle::Reconciled
-        ) {
-            return Ok(Some(TaskMutationGuard {
-                work,
-                task_id: Some(task_id),
-                claim: None,
-                claim_path: Some(claim_path),
-                bootstrap_path,
-                bootstrap_lock,
-                task_lock_path: Some(task_lock_path),
-                task_lock: Some(task_lock),
-            }));
-        }
-    }
+    let task_lock_path = task_lock_path(&roots, &claim.task_id);
+    let task_lock = open_existing_claim_lock(&task_lock_path)?;
+    let file = claim_path(&roots, &claim.task_id);
+    let current = read_claim(&file, &claim.task_id)?.ok_or_else(|| {
+        action_error(
+            "task_execution_claim_missing",
+            &file,
+            "claim disappeared while locking",
+            "refresh the task and retry",
+        )
+    })?;
     Ok(Some(TaskMutationGuard {
         work,
-        task_id: Some(task_id),
-        claim,
-        claim_path: Some(claim_path),
-        bootstrap_path,
-        bootstrap_lock,
-        task_lock_path: Some(task_lock_path),
-        task_lock: Some(task_lock),
+        claim: current,
+        claim_path: file,
+        task_lock_path,
+        task_lock,
     }))
 }
 
@@ -1817,8 +1774,21 @@ pub(crate) fn acquire(
     let bootstrap_path = bootstrap_lock_path(&roots, &requested_path);
     let bootstrap_lock = acquire_file_lock(&roots, &bootstrap_path)?;
 
-    let pending = find_request_claim(&roots, request, &request_path)?;
+    let pending = match task_id_from_path_bounded(&requested_path).filter(|id| valid_task_id(id)) {
+        Some(id) => read_claim(&claim_path(&roots, &id), &id)?.filter(|claim| {
+            claim.workspace == roots.identity && claim.tasks_root == display(&roots.tasks)
+        }),
+        None => recorded_request_at_path(&roots, request, &request_path)?,
+    };
+    let pending = pending.filter(|claim| {
+        claim.request_id == request.request_id
+            || claim
+                .request_history
+                .iter()
+                .any(|row| row.request_id == request.request_id)
+    });
     if let Some(recorded) = &pending {
+        validate_task_request(recorded, request)?;
         let id = &recorded.task_id;
         let replay_lock_path = task_lock_path(&roots, id);
         let replay_lock = acquire_file_lock(&roots, &replay_lock_path)?;
@@ -2092,28 +2062,27 @@ pub(crate) fn acquire(
             lifecycle: TaskExecutionLifecycle::Active,
             receipt: new_receipt(request, run_id),
             child_reaped: false,
+            spawn_attempted: false,
             request_history,
         };
-        // Persist the pending identity claim first. A crash before the markdown
-        // update is retried by matching requestId + frozen jobRevision.
-        write_claim(&roots, lease, &claim, &task_lock)?;
+        // Bind identity before publishing ownership. If the note write fails,
+        // no Active claim/session is stranded. No child can start before this
+        // complete admission returns to the invocation owner.
         if let Some(content) = updated_content.as_deref() {
             write_task_note(&roots, lease, &snapshot.path, content)?;
             let verified = task_snapshot(&roots, &snapshot.path)?;
             if verified.task_id.as_deref() != Some(task_id.as_str())
                 || verified.revision != claim.source_revision
             {
-                let mut needs_review = claim.clone();
-                needs_review.lifecycle = TaskExecutionLifecycle::NeedsReview;
-                write_claim(&roots, lease, &needs_review, &task_lock)?;
                 return Err(action_error(
                     "task_execution_identity_write_conflict",
                     &snapshot.path,
-                    "task bytes changed during identity binding",
-                    "review the task and claim manually",
+                    "task changed during identity binding",
+                    "refresh the task revision before retrying",
                 ));
             }
         }
+        write_claim(&roots, lease, &claim, &task_lock)?;
         Ok(Admission {
             claim,
             replayed: false,
@@ -2180,6 +2149,7 @@ pub(crate) fn spawn_owned_child(
             // Clear the prior role's wait proof before entering the spawn window.
             // A crash after spawn but before PID persistence must remain uncertain.
             claim.child_reaped = false;
+            claim.spawn_attempted = true;
             rebind_claim_path(roots, claim, snapshot)?;
             write_claim(roots, lease, claim, lock)?;
             let mut child = match spawn.take().expect("spawn closure is called once")() {
@@ -2264,6 +2234,7 @@ pub(crate) fn record_child(
                 }
                 claim.receipt.child = Some(new_child);
                 claim.child_reaped = false;
+                claim.spawn_attempted = true;
             } else if let Some(existing) = claim.receipt.child.as_ref() {
                 if process_ownership(existing) != ProcessOwnership::Dead {
                     return Err(action_error(
@@ -2293,69 +2264,65 @@ pub(crate) fn record_reaped_child(
     token: &TaskExecutionToken,
     pid: u32,
 ) -> Result<TaskExecutionClaim, String> {
-    with_claim_operation(
-        work,
-        &token.task_id,
-        |roots, claim, snapshot, lease, lock| {
-            validate_claim_token(claim, token)?;
-            if !matches!(
-                claim.lifecycle,
-                TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
-            ) {
-                return Err(action_error(
-                    "task_execution_claim_not_active",
-                    &snapshot.path,
-                    &format!("claim lifecycle is {:?}", claim.lifecycle),
-                    "refresh the task execution",
-                ));
-            }
-            let current_owner = identity(std::process::id()).ok_or_else(|| {
-                action_error(
-                    "task_execution_launcher_unverified",
-                    &snapshot.path,
-                    "native launcher start time is unavailable",
-                    "retain the claim for review instead of clearing child ownership",
-                )
-            })?;
-            let owner = claim.receipt.owner.as_ref().ok_or_else(|| {
-                action_error(
-                    "task_execution_launcher_unverified",
-                    &snapshot.path,
-                    "claim has no native owner identity",
-                    "retain the claim for review instead of clearing child ownership",
-                )
-            })?;
-            if owner != &current_owner || process_ownership(owner) != ProcessOwnership::Live {
-                return Err(action_error(
-                    "task_execution_launcher_changed",
-                    &snapshot.path,
-                    "current launcher does not match the recorded owner",
-                    "retain the claim for review",
-                ));
-            }
-            let child = claim.receipt.child.as_ref().ok_or_else(|| {
-                action_error(
-                    "task_execution_child_binding_missing",
-                    &snapshot.path,
-                    "no child identity is recorded",
-                    "bind the owned child before acknowledging its wait result",
-                )
-            })?;
-            if child.pid != pid {
-                return Err(action_error(
-                    "task_execution_child_binding_mismatch",
-                    &snapshot.path,
-                    "wait result PID differs from the claimed child",
-                    "retain the claim for review; do not clear another process",
-                ));
-            }
-            claim.receipt.child = None;
-            claim.child_reaped = true;
-            rebind_claim_path(roots, claim, snapshot)?;
-            write_claim(roots, lease, claim, lock)?;
-            Ok(claim.clone())
-        },
-    )
+    with_claim_identity(work, token, |roots, claim, lease, lock| {
+        let label = roots.work.join(&claim.task_path);
+        validate_claim_token(claim, token)?;
+        if !matches!(
+            claim.lifecycle,
+            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
+        ) {
+            return Err(action_error(
+                "task_execution_claim_not_active",
+                &label,
+                &format!("claim lifecycle is {:?}", claim.lifecycle),
+                "refresh the task execution",
+            ));
+        }
+        let current_owner = identity(std::process::id()).ok_or_else(|| {
+            action_error(
+                "task_execution_launcher_unverified",
+                &label,
+                "native launcher start time is unavailable",
+                "retain the claim for review instead of clearing child ownership",
+            )
+        })?;
+        let owner = claim.receipt.owner.as_ref().ok_or_else(|| {
+            action_error(
+                "task_execution_launcher_unverified",
+                &label,
+                "claim has no native owner identity",
+                "retain the claim for review instead of clearing child ownership",
+            )
+        })?;
+        if owner != &current_owner || process_ownership(owner) != ProcessOwnership::Live {
+            return Err(action_error(
+                "task_execution_launcher_changed",
+                &label,
+                "current launcher does not match the recorded owner",
+                "retain the claim for review",
+            ));
+        }
+        let child = claim.receipt.child.as_ref().ok_or_else(|| {
+            action_error(
+                "task_execution_child_binding_missing",
+                &label,
+                "no child identity is recorded",
+                "bind the owned child before acknowledging its wait result",
+            )
+        })?;
+        if child.pid != pid {
+            return Err(action_error(
+                "task_execution_child_binding_mismatch",
+                &label,
+                "wait result PID differs from the claimed child",
+                "retain the claim for review; do not clear another process",
+            ));
+        }
+        claim.receipt.child = None;
+        claim.child_reaped = true;
+        write_claim(roots, lease, claim, lock)?;
+        Ok(claim.clone())
+    })
 }
 
 /// Record process completion only; task status remains owned by task APIs.
@@ -2444,108 +2411,101 @@ pub(crate) fn finish(
     )
 }
 
-/// Automatic admission cleanup is narrower than an explicit human-reviewed
-/// release: it must never clear a source-conflicted or review-held claim.
+/// Cleanup requires the same verified launcher and no live or uncertain
+/// launch. It reads claim identity only, so a vanished note cannot strand it.
 pub(crate) fn cancel_admission(work: &Path, token: &TaskExecutionToken) -> Result<(), String> {
-    with_claim_operation(
-        work,
-        &token.task_id,
-        |roots, claim, snapshot, lease, lock| {
-            validate_claim_token(claim, token)?;
-            if claim.lifecycle == TaskExecutionLifecycle::Released {
-                return Ok(());
-            }
-            if claim.lifecycle != TaskExecutionLifecycle::Active || claim.receipt.child.is_some() {
-                return Err(action_error(
-                    "task_execution_cleanup_held",
-                    &snapshot.path,
-                    "admission has changed or a child is already bound",
-                    "review the claim before releasing ownership",
-                ));
-            }
-            task_is_current(claim, snapshot)?;
-            if identity(std::process::id()).as_ref() != claim.receipt.owner.as_ref()
-                || claim.receipt.owner.is_none()
-            {
-                return Err(action_error(
-                    "task_execution_cleanup_unverified",
-                    &snapshot.path,
-                    "the launcher identity cannot be verified",
-                    "retain the claim for review",
-                ));
-            }
-            claim.lifecycle = TaskExecutionLifecycle::Released;
-            claim.receipt.process_outcome = "released".into();
-            claim.receipt.finished_at = Some(now_seconds());
-            write_claim(roots, lease, claim, lock)
-        },
-    )
+    with_claim_identity(work, token, |roots, claim, lease, lock| {
+        if matches!(
+            claim.lifecycle,
+            TaskExecutionLifecycle::Released
+                | TaskExecutionLifecycle::Finished
+                | TaskExecutionLifecycle::Reconciled
+        ) {
+            return Ok(());
+        }
+        let label = roots.work.join(&claim.task_path);
+        let before_first_spawn = !claim.spawn_attempted;
+        if !(claim.lifecycle == TaskExecutionLifecycle::Active
+            || claim.lifecycle == TaskExecutionLifecycle::NeedsReview && before_first_spawn)
+            || claim.receipt.child.is_some()
+            || !before_first_spawn && !claim.child_reaped
+        {
+            return Err(action_error(
+                "task_execution_cleanup_held",
+                &label,
+                "a child or uncertain launch history requires review",
+                "review ownership and use stop_ai_mission after the launcher settles",
+            ));
+        }
+        let owner = identity(std::process::id());
+        if owner.is_none() || owner.as_ref() != claim.receipt.owner.as_ref() {
+            return Err(action_error(
+                "task_execution_cleanup_unverified",
+                &label,
+                "current launcher identity is not verified",
+                "retain the claim for review",
+            ));
+        }
+        claim.lifecycle = TaskExecutionLifecycle::Released;
+        claim.receipt.process_outcome = "released".into();
+        claim.receipt.finished_at = Some(now_seconds());
+        write_claim(roots, lease, claim, lock)
+    })
 }
 
-/// Explicitly release a pre-spawn or cancelled execution. A child must be
-/// absent or proven dead; this never edits the task note.
+/// Reviewed release changes only the exact claim identity, never task bytes.
 pub(crate) fn release(
     work: &Path,
     token: &TaskExecutionToken,
 ) -> Result<TaskExecutionClaim, String> {
-    with_claim_operation(
-        work,
-        &token.task_id,
-        |roots, claim, snapshot, lease, lock| {
-            validate_claim_token(claim, token)?;
-            if claim.lifecycle == TaskExecutionLifecycle::Released {
-                return Ok(claim.clone());
+    with_claim_identity(work, token, |roots, claim, lease, lock| {
+        if claim.lifecycle == TaskExecutionLifecycle::Released {
+            return Ok(claim.clone());
+        }
+        let label = roots.work.join(&claim.task_path);
+        if !matches!(
+            claim.lifecycle,
+            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
+        ) {
+            return Err(action_error(
+                "task_execution_claim_not_active",
+                &label,
+                "claim is already terminal",
+                "refresh mission history before retrying",
+            ));
+        }
+        if let Some(child) = &claim.receipt.child {
+            if process_ownership(child) != ProcessOwnership::Dead {
+                return Err(action_error("task_execution_child_not_reaped", &label,
+                    "child is live or unverified; an exited but unreaped process can remain unverified",
+                    "retry after the original launcher exits, or restart Maru and review ownership again"));
             }
-            if !matches!(
-                claim.lifecycle,
-                TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
-            ) {
-                return Err(action_error(
-                    "task_execution_claim_not_active",
-                    &snapshot.path,
-                    &format!("claim lifecycle is {:?}", claim.lifecycle),
-                    "refresh the task execution",
-                ));
+        } else if !claim.child_reaped {
+            let owner = identity(std::process::id());
+            let current_owner = owner.is_some() && owner.as_ref() == claim.receipt.owner.as_ref();
+            let owner_dead = claim
+                .receipt
+                .owner
+                .as_ref()
+                .is_some_and(|owner| process_ownership(owner) == ProcessOwnership::Dead);
+            if claim.spawn_attempted || !(current_owner || owner_dead) {
+                return Err(action_error("task_execution_release_unverified", &label, "launch or owner proof is incomplete",
+                    "retry after the original launcher exits, or restart Maru and retain uncertain ownership for review"));
             }
-            let current_owner = identity(std::process::id());
-            let owner_is_current = current_owner.as_ref().is_some_and(|owner| {
-                claim.receipt.owner.as_ref() == Some(owner)
-                    && process_ownership(owner) == ProcessOwnership::Live
-            });
-            if let Some(child) = claim.receipt.child.as_ref() {
-                if process_ownership(child) != ProcessOwnership::Dead {
-                    return Err(action_error(
-                        "task_execution_child_not_reaped",
-                        &snapshot.path,
-                        "worker child is live or unverified",
-                        "stop and reap only the owned child before releasing",
-                    ));
-                }
-            }
-            if claim.receipt.child.is_none() && !claim.child_reaped && !owner_is_current {
-                return Err(action_error(
-                    "task_execution_release_unverified",
-                    &snapshot.path,
-                    "no child is recorded and the current launcher does not match the claim owner",
-                    "retain the claim for review; time or missing child data cannot release it",
-                ));
-            }
-            if claim.receipt.child.is_some() {
-                claim.receipt.child = None;
-                claim.child_reaped = true;
-            }
-            claim.lifecycle = TaskExecutionLifecycle::Released;
-            claim.receipt.process_outcome = "released".into();
-            claim.receipt.finished_at = Some(now_seconds());
-            rebind_claim_path(roots, claim, snapshot)?;
-            write_claim(roots, lease, claim, lock)?;
-            Ok(claim.clone())
-        },
-    )
+        }
+        claim.receipt.child = None;
+        claim.child_reaped = true;
+        claim.lifecycle = TaskExecutionLifecycle::Released;
+        claim.receipt.process_outcome = "released".into();
+        claim.receipt.finished_at = Some(now_seconds());
+        write_claim(roots, lease, claim, lock)?;
+        Ok(claim.clone())
+    })
 }
 
 /// Reconcile only when both recorded process identities positively prove
-/// death. Missing or empty child evidence is uncertainty, never a timeout.
+/// death, or a durable wait/no-launch proof. A missing child after launch
+/// remains uncertainty; elapsed time never supplies ownership evidence.
 pub(crate) fn reconcile(work: &Path, task_id: &str) -> Result<TaskExecutionClaim, String> {
     with_claim_operation(work, task_id, |roots, claim, snapshot, lease, lock| {
         if claim.lifecycle != TaskExecutionLifecycle::Active {
@@ -2558,7 +2518,12 @@ pub(crate) fn reconcile(work: &Path, task_id: &str) -> Result<TaskExecutionClaim
             .map(process_ownership)
             .unwrap_or(ProcessOwnership::Unverified);
         let child_proof = claim.receipt.child.as_ref().map(process_ownership);
-        if !ownership_proves_stopped(owner_proof, child_proof, claim.child_reaped) {
+        if !ownership_proves_stopped(
+            owner_proof,
+            child_proof,
+            claim.child_reaped,
+            !claim.spawn_attempted,
+        ) {
             return Ok(claim.clone());
         }
         if task_is_current(claim, snapshot).is_err() {

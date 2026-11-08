@@ -1030,12 +1030,7 @@ mod tests {
         let metadata = serde_json::json!({"workspacePath": work.to_str().unwrap(), "taskExecution": session.metadata()});
         let original = MissionState::default();
         original
-            .start(
-                "ai-hydrate-task",
-                "test",
-                std::process::id(),
-                Some(metadata),
-            )
+            .start_logical("ai-hydrate-task", "test", Some(metadata))
             .unwrap();
         drop(original);
         let restarted = MissionState::default();
