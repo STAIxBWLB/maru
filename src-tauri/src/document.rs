@@ -172,7 +172,10 @@ pub(crate) fn revision_for(content: &str) -> String {
     format!("{:x}", Sha256::digest(content.as_bytes()))
 }
 
-fn assert_expected_revision(current: &str, expected: Option<&str>) -> Result<(), IpcError> {
+pub(crate) fn assert_expected_revision(
+    current: &str,
+    expected: Option<&str>,
+) -> Result<(), IpcError> {
     if let Some(expected) = expected {
         let actual = revision_for(current);
         if actual != expected {

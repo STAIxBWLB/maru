@@ -1369,6 +1369,7 @@ fn write_task_note(
     lease: &PathTransactionLease,
     path: &Path,
     content: &str,
+    expected_revision: &str,
 ) -> Result<(), String> {
     lease.ensure_covered([path.to_path_buf()])?;
     assert_maru_can_write(&display(&roots.work), WorkspaceWriteAction::Modify).map_err(
@@ -1399,6 +1400,22 @@ fn write_task_note(
         ));
     }
     lease.before_effect()?;
+    #[cfg(test)]
+    PathTransactionLease::test_stage(&[path.to_path_buf()], "task-identity-before-revision-check");
+    // Match document save's final expected-revision check before replacement.
+    // The snapshot may predate a write from another process that does not share
+    // this process's path admission. Never apply precomputed taskId bytes to it.
+    let current = task_snapshot(roots, path)?;
+    crate::document::assert_expected_revision(&current.content, Some(expected_revision)).map_err(
+        |error| {
+            action_error(
+                "task_execution_source_changed",
+                path,
+                &format!("task changed while starting: {}", error.message),
+                "reread the task and retry with its current sourceRevision",
+            )
+        },
+    )?;
     write_atomic(path, content.as_bytes()).map_err(|error| {
         action_error(
             "task_execution_identity_write_failed",
@@ -2084,7 +2101,7 @@ pub(crate) fn acquire(
         // no Active claim/session is stranded. No child can start before this
         // complete admission returns to the invocation owner.
         if let Some(content) = updated_content.as_deref() {
-            write_task_note(&roots, lease, &snapshot.path, content)?;
+            write_task_note(&roots, lease, &snapshot.path, content, &snapshot.revision)?;
             let verified = task_snapshot(&roots, &snapshot.path)?;
             if verified.task_id.as_deref() != Some(task_id.as_str())
                 || verified.revision != claim.source_revision

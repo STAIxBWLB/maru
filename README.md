@@ -316,6 +316,9 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   explicit `stop_ai_mission` performs reviewed conditional release after positive
   native death proof. It never signals recovered PIDs or releases uncertain
   ownership. Exact request replay remains read-only after edits or completion.
+  Cross-process document/frontmatter and Today/web-action writers do not yet share
+  the claim lock, so a source edit between the final check and process spawn can
+  still race; this known limit is tracked in #541.
 - Adaptive runtime policy is opt-in under Settings > AI (`ai.adaptivePolicy`).
   Each invocation asks `dot ai policy resolve --json` for an eligible runtime,
   model, reasoning effort, and native automatic-review permission. Missing or

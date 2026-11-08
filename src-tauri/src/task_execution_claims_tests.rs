@@ -854,3 +854,39 @@ fn failed_initial_identity_write_publishes_no_active_claim() {
         0
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn first_identity_write_preserves_a_concurrent_process_edit_and_publishes_no_claim() {
+    let f = Fixture::new();
+    let request = f.request("identity-race");
+    let concurrent = "---\ntitle: Concurrent edit\nstatus: active\n---\nKeep this body\n";
+    let target = f.path.clone();
+    let _hook = crate::atomic_file::PathTransactionTestHook::new(
+        f.path.clone(),
+        "task-identity-before-revision-check",
+        move || {
+            // An independent writer does not share in-process path admission.
+            let status = Command::new("sh")
+                .arg("-c")
+                .arg("printf '%s' \"$1\" > \"$2\"")
+                .arg("task-co-writer")
+                .arg(concurrent)
+                .arg(&target)
+                .status()
+                .unwrap();
+            assert!(
+                status.success(),
+                "co-writer fixture failed; inspect the temporary task permissions"
+            );
+        },
+    );
+    let error = acquire(&f.work, &request, "must-not-start").unwrap_err();
+    assert!(error.contains("task changed while starting"), "{error}");
+    assert!(error.contains("reread the task"), "{error}");
+    assert_eq!(fs::read_to_string(&f.path).unwrap(), concurrent);
+    assert!(fs::read_dir(f.work.join(CLAIM_DIR))
+        .unwrap()
+        .filter_map(Result::ok)
+        .all(|entry| entry.path().extension().is_none_or(|ext| ext != "json")));
+}
