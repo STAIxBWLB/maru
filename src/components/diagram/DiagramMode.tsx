@@ -922,6 +922,12 @@ function DiagramShell({
   const handleImportDoc = useCallback(
     (next: Parameters<typeof replaceDoc>[0]) => {
       store.setState(replaceDoc(next));
+      // A nested Floorplan map is far larger than the default viewport, and
+      // off-screen nodes are culled: fit it so the whole map is on screen.
+      if ((next.datasets ?? []).some((dataset) => dataset.kind === "semanticSpec" && dataset.diagramType === "floorplan")) {
+        const rect = viewportRef.current?.getBoundingClientRect();
+        store.setState(setViewport(fitView({ nodes: next.nodes, viewportW: rect?.width ?? 800, viewportH: rect?.height ?? 600 })));
+      }
       setActiveName(null);
       setLastSavedBody(null);
       setDiagramSession({ fileRevision: null }, sessionKey);

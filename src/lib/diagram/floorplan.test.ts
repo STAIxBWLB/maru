@@ -4,12 +4,12 @@ import { defaultCoalescer, undo, withSnapshot } from "./actions";
 import { FLOORPLAN_FIXTURE } from "./__fixtures__/floorplan";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { codecForFilename, getCodec } from "./codecs";
-import { floorplanGlobMatches, isFloorplanRef, validateFloorplanSpec } from "./floorplan";
+import { floorplanGlobMatches, floorplanOwner, isFloorplanRef, validateFloorplanSpec } from "./floorplan";
 import { floorplanSpecToDataset, isFloorplanFile, parseFloorplanSpec } from "./floorplanCodec";
 import { buildGenerationPrompt, createGenerationJob, runGenerationJob, type GenerationHost } from "./generation";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import { validateSemanticSpec, type SemanticSpecDataset } from "./reportTypes";
-import { projectSemanticDataset, projectSemanticDocument, semanticLosses, writeThroughText } from "./semantic";
+import { projectSemanticDataset, projectSemanticDocument, resolveSemanticMember, semanticLosses, writeThroughText } from "./semantic";
 import { applyValidatedSemanticEdit, validateSemanticDraft } from "./semanticApply";
 import { addSemanticEntry, planSemanticEdit, removeSemanticEntries, setSpecField } from "./semanticEdit";
 import { createDiagramStore } from "./state";
@@ -76,6 +76,84 @@ describe("floorplan validation", () => {
     expect(floorplanGlobMatches("shop-api/app", "shop-api/app/routes/x.py")).toBe(true);
     expect(floorplanGlobMatches("src/{a,b}.ts", "src/b.ts")).toBe(true);
     expect(floorplanGlobMatches("src/*.ts", "src/x/y.ts")).toBe(false);
+  });
+});
+
+describe("floorplan file ownership (upstream assignment rule)", () => {
+  const base = (nodes: Record<string, unknown>[]) => ({ project: { name: "x" }, nodes });
+  it("inherits ancestors' exclude into descendants", () => {
+    const spec = base([
+      { id: "web", label: "Web", kind: "ui", paths: ["web/**"], exclude: ["**/*.test.tsx"] },
+      { id: "web.child", label: "Child", kind: "feature", parent: "web", paths: ["web/child/**"] },
+      { id: "tests", label: "Tests", kind: "test", paths: ["web/**/*.test.tsx"] },
+    ]);
+    expect(floorplanOwner(spec, "web/child/a.test.tsx")).toBe("tests");
+    expect(floorplanOwner(spec, "web/child/a.tsx")).toBe("web.child");
+    expect(floorplanOwner(spec, "web/other.test.tsx")).toBe("tests");
+  });
+
+  it("prefers the longer literal prefix at equal depth, the deeper node over both", () => {
+    const spec = base([
+      { id: "broad", label: "Broad", kind: "service", paths: ["src/**"] },
+      { id: "specific", label: "Specific", kind: "service", paths: ["src/api/**"] },
+      { id: "deep", label: "Deep", kind: "feature", parent: "broad", paths: ["src/**"] },
+    ]);
+    expect(floorplanOwner(base(spec.nodes.slice(0, 2)), "src/api/routes.ts")).toBe("specific");
+    expect(floorplanOwner(base(spec.nodes.slice(0, 2)), "src/other.ts")).toBe("broad");
+    expect(floorplanOwner(spec, "src/api/routes.ts")).toBe("deep");
+    expect(floorplanOwner(spec, "docs/readme.md")).toBeNull();
+  });
+});
+
+describe("floorplan edge identity", () => {
+  const withEdges = () => {
+    const spec = fixture();
+    spec.nodes = [
+      { id: "a", label: "A", kind: "service" },
+      { id: "b", label: "B", kind: "service" },
+      { id: "c", label: "C", kind: "service" },
+    ];
+    spec.edges = [
+      { id: "ext-1", from: "a", to: "b", kind: "event", label: "ab" },
+      { from: "b", to: "c", kind: "call", label: "bc" },
+    ];
+    spec.flows = [];
+    spec.tour = [];
+    return spec;
+  };
+
+  it("resolves an edge carrying an id extension by its index id", () => {
+    const store = storeOf(withEdges());
+    const member = resolveSemanticMember(store.getState().doc, { edgeId: "fp-e0" });
+    expect(member).toMatchObject({ kind: "relation", index: 0 });
+  });
+
+  it("removing an earlier edge keeps each survivor's own canvas style", () => {
+    const store = storeOf(withEdges());
+    store.setState((state) => ({
+      ...state,
+      doc: { ...state.doc, edges: state.doc.edges.map((edge) => edge.id === "fp-e1" ? { ...edge, color: "#0000ff" } : { ...edge, color: "#ff0000" }) },
+    }));
+    const spec = specOf(store);
+    const removal = removeSemanticEntries("floorplan", spec, [{ field: "edges", index: 0 }]);
+    const plan = planSemanticEdit(store.getState(), "fp", removal.transform);
+    expect(plan.status).toBe("applied");
+    if (plan.status !== "applied") return;
+    store.setState(withSnapshot(plan.transformer, defaultCoalescer()));
+    const edges = store.getState().doc.edges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({ id: "fp-e0", fromNode: "b", toNode: "c", color: "#0000ff" });
+    store.setState(undo());
+    expect(store.getState().doc.edges.map((e) => `${e.id}:${e.color}`)).toEqual(["fp-e0:#ff0000", "fp-e1:#0000ff"]);
+  });
+
+  it("changing an edge kind from event to http clears the dash", async () => {
+    const store = storeOf(withEdges());
+    expect(store.getState().doc.edges[0]!.dash).toBe("dashed");
+    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "http"), refusingHost)).status).toBe("applied");
+    expect(store.getState().doc.edges[0]!.dash).toBe("solid");
+    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "queue"), refusingHost)).status).toBe("applied");
+    expect(store.getState().doc.edges[0]!.dash).toBe("dashed");
   });
 });
 

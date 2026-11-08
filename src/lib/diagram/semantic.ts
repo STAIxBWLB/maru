@@ -39,7 +39,7 @@ import {
 import {
   FLOORPLAN_NODE_NOT_PROJECTED,
   FLOORPLAN_TOP_FIELDS,
-  floorplanClaims,
+  floorplanOwner,
   floorplanNodeIds,
   layoutFloorplan,
   validateFloorplanSpec,
@@ -786,30 +786,12 @@ const FLOORPLAN_DASHED_EDGE_KINDS = new Set(["event", "queue"]);
 
 /**
  * Resolve a Floorplan ref (node id or file path) to the node that draws it:
- * the node itself, or the deepest node whose `paths` claim the file.
+ * the node itself, or the file's owner under the upstream assignment rule.
  */
 export function floorplanRefNode(spec: Record<string, unknown>, ref: unknown): string | null {
   if (typeof ref !== "string") return null;
-  const nodes = specEntries(spec, "nodes");
   if (floorplanNodeIds(spec).has(ref)) return ref;
-  const depth = (node: Record<string, unknown>) => {
-    let d = 0;
-    let parent = node.parent;
-    const seen = new Set<unknown>();
-    while (typeof parent === "string" && !seen.has(parent) && d < nodes.length) {
-      seen.add(parent);
-      d += 1;
-      parent = nodes.find((candidate) => candidate.id === parent)?.parent;
-    }
-    return d;
-  };
-  let best: { id: string; depth: number } | null = null;
-  for (const node of nodes) {
-    if (typeof node.id !== "string" || !floorplanClaims(node, ref)) continue;
-    const d = depth(node);
-    if (!best || d > best.depth) best = { id: node.id, depth: d };
-  }
-  return best?.id ?? null;
+  return floorplanOwner(spec, ref);
 }
 
 function projectFloorplan(dataset: SemanticSpecDataset, diagnostics: ValidationDiagnostic[]): ProjectedMembers {
@@ -861,7 +843,8 @@ function projectFloorplan(dataset: SemanticSpecDataset, diagnostics: ValidationD
       toNode: maruIdFor(dataset, to),
       toPort: "w",
       arrowEnd: "filled",
-      ...(kind && FLOORPLAN_DASHED_EDGE_KINDS.has(kind) ? { dash: "dashed" as const } : {}),
+      // Explicit for every kind so a kind change back to synchronous clears the dash.
+      dash: kind && FLOORPLAN_DASHED_EDGE_KINDS.has(kind) ? "dashed" as const : "solid" as const,
       label: typeof entry.label === "string" ? entry.label : kind,
     });
   });
@@ -1101,7 +1084,8 @@ export function resolveSemanticMember(
     const entries = specEntries(dataset.spec, descriptor.relations);
     const index = entries.findIndex((entry, i) => {
       const specId = idOf(entry);
-      return specId !== null ? maruIdFor(dataset, specId) === target.edgeId : `${dataset.id}-e${i}` === target.edgeId;
+      // Floorplan edges are index-keyed even when an `id` extension is present.
+      return specId !== null && !descriptor.noRelationIds ? maruIdFor(dataset, specId) === target.edgeId : `${dataset.id}-e${i}` === target.edgeId;
     });
     if (index >= 0) {
       return { kind: "relation", dataset, field: descriptor.relations, index, entry: entries[index]! };

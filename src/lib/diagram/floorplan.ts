@@ -150,11 +150,51 @@ export function floorplanGlobMatches(pattern: string, path: string): boolean {
   return regex.test(path);
 }
 
-/** Whether node `node` claims file `path` through its own `paths`/`exclude`. */
-export function floorplanClaims(node: Record<string, unknown>, path: string): boolean {
-  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  return strings(node.paths).some((glob) => floorplanGlobMatches(glob, path)) &&
-    !strings(node.exclude).some((glob) => floorplanGlobMatches(glob, path));
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/** Chars of `glob` before its first wildcard: the upstream tie-break at equal depth. */
+function literalPrefixLength(glob: string): number {
+  const at = glob.search(/[*?{]/);
+  return at < 0 ? glob.length : at;
+}
+
+/**
+ * The node that owns file `path` under the upstream assignment rule
+ * (schema.md "How files get assigned"): candidates are nodes whose `paths`
+ * match and whose `exclude` (own and inherited from every ancestor) does not;
+ * the deepest wins, and at equal depth the longer literal glob prefix wins.
+ * Real ties keep document order. Returns null when no node claims the file.
+ */
+export function floorplanOwner(spec: Record<string, unknown>, path: string): string | null {
+  const nodes = records(spec, "nodes");
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const node of nodes) if (typeof node.id === "string" && !byId.has(node.id)) byId.set(node.id, node);
+  let best: { id: string; depth: number; prefix: number } | null = null;
+  for (const node of nodes) {
+    if (typeof node.id !== "string") continue;
+    const matching = stringList(node.paths).filter((glob) => floorplanGlobMatches(glob, path));
+    if (matching.length === 0) continue;
+    let depth = 0;
+    let excluded = false;
+    const seen = new Set<string>();
+    let current: Record<string, unknown> | undefined = node;
+    while (current) {
+      if (stringList(current.exclude).some((glob) => floorplanGlobMatches(glob, path))) excluded = true;
+      const parent: unknown = current.parent;
+      if (typeof parent !== "string" || seen.has(parent)) break;
+      seen.add(parent);
+      depth += 1;
+      current = byId.get(parent);
+    }
+    if (excluded) continue;
+    const prefix = Math.max(...matching.map(literalPrefixLength));
+    if (!best || depth > best.depth || (depth === best.depth && prefix > best.prefix)) {
+      best = { id: node.id, depth, prefix };
+    }
+  }
+  return best?.id ?? null;
 }
 
 // ---------------------------------------------------------------------------

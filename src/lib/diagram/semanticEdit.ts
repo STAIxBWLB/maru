@@ -36,7 +36,53 @@ import type { SemanticDiagramType } from "./reportTypes";
 /** A spec edit: the next spec plus warnings, or null when nothing changes. */
 export type SpecTransform = (
   spec: Record<string, unknown>,
-) => { spec: Record<string, unknown>; warnings?: ValidationDiagnostic[]; containerIndexRemaps?: readonly SemanticContainerIndexRemap[] } | null;
+) => {
+  spec: Record<string, unknown>;
+  warnings?: ValidationDiagnostic[];
+  containerIndexRemaps?: readonly SemanticContainerIndexRemap[];
+  /** Index-keyed relation edges (floorplan): where each old edge index moved. */
+  edgeIndexRemaps?: readonly SemanticEdgeIndexRemap[];
+} | null;
+
+/** Canvas identity remap for an index-keyed relation collection (`<datasetId>-e<index>`). */
+export interface SemanticEdgeIndexRemap {
+  oldIndex: number;
+  newIndex: number | null;
+}
+
+/**
+ * Rename surviving canvas edges to their new index ids and drop removed
+ * ones, so a survivor keeps its own style and routing instead of inheriting
+ * the removed edge's.
+ */
+function remapEdgeIndexCanvas(
+  state: DiagramStateRoot,
+  datasetId: string,
+  remaps: readonly SemanticEdgeIndexRemap[],
+): DiagramStateRoot {
+  const byOld = new Map(remaps.map((remap) => [`${datasetId}-e${remap.oldIndex}`, remap.newIndex]));
+  const edges = state.doc.edges.flatMap((edge) => {
+    if (!byOld.has(edge.id)) return [edge];
+    const next = byOld.get(edge.id);
+    return next === null || next === undefined ? [] : [{ ...edge, id: `${datasetId}-e${next}` }];
+  });
+  const selection = state.ephemeral.selection;
+  return {
+    ...state,
+    doc: { ...state.doc, edges },
+    ephemeral: {
+      ...state.ephemeral,
+      selection: {
+        nodes: selection.nodes,
+        edges: new Set([...selection.edges].flatMap((id) => {
+          if (!byOld.has(id)) return [id];
+          const next = byOld.get(id);
+          return next === null || next === undefined ? [] : [`${datasetId}-e${next}`];
+        })),
+      },
+    },
+  };
+}
 
 /** Transient canvas identity remap for an index-keyed semantic container collection. */
 export interface SemanticContainerIndexRemap {
@@ -204,9 +250,10 @@ export function planSemanticEdit(
   const content = validateSemanticContent(dataset.diagramType, result.spec);
   if (content.length > 0) return { status: "invalid", diagnostics: content };
 
+  const edgeRemapped = result.edgeIndexRemaps?.length ? remapEdgeIndexCanvas(state, datasetId, result.edgeIndexRemaps) : state;
   const preparedRemap = result.containerIndexRemaps?.length
-    ? remapIndexContainerCanvas(state, datasetId, result.containerIndexRemaps)
-    : { state, nodeIdRemap: new Map<string, string>() };
+    ? remapIndexContainerCanvas(edgeRemapped, datasetId, result.containerIndexRemaps)
+    : { state: edgeRemapped, nodeIdRemap: new Map<string, string>() };
   if ("diagnostics" in preparedRemap) return { status: "invalid", diagnostics: preparedRemap.diagnostics };
   const planningState = preparedRemap.state;
   const previousNodeIdRemap = preparedRemap.nodeIdRemap;
@@ -236,6 +283,7 @@ export function planSemanticEdit(
     const applyProposal = outcome.transformer;
     const transformer: StateTransformer = (current) => {
       if (current.doc !== state.doc) return current;
+      if (result.edgeIndexRemaps?.length) current = remapEdgeIndexCanvas(current, datasetId, result.edgeIndexRemaps);
       if (result.containerIndexRemaps?.length) {
         const remapped = remapIndexContainerCanvas(current, datasetId, result.containerIndexRemaps, previousNodeIdRemap);
         if ("diagnostics" in remapped) return current;
@@ -474,7 +522,14 @@ export function addSemanticEntry(
           newIndex: oldIndex >= at ? oldIndex + 1 : oldIndex,
         })).filter((remap) => remap.newIndex !== remap.oldIndex)
       : [];
-    return { spec: next, ...(containerIndexRemaps.length > 0 ? { containerIndexRemaps } : {}) };
+    const edgeIndexRemaps: SemanticEdgeIndexRemap[] = type === "floorplan" && field === "edges"
+      ? entries.flatMap((_, oldIndex) => oldIndex >= at ? [{ oldIndex, newIndex: oldIndex + 1 }] : [])
+      : [];
+    return {
+      spec: next,
+      ...(containerIndexRemaps.length > 0 ? { containerIndexRemaps } : {}),
+      ...(edgeIndexRemaps.length > 0 ? { edgeIndexRemaps } : {}),
+    };
   };
 }
 
@@ -787,7 +842,13 @@ function removeFloorplanEntries(
     if (flowsChanged) next.flows = nextFlows;
     if (removedStops.size > 0) next.tour = tour.filter((_, index) => !removedStops.has(index));
     if (removedAnnotations.size > 0) next.annotations = annotations.filter((_, index) => !removedAnnotations.has(index));
-    return { spec: next };
+    const edgeIndexRemaps: SemanticEdgeIndexRemap[] = [];
+    let kept = 0;
+    edges.forEach((_, oldIndex) => {
+      const newIndex = removedEdges.has(oldIndex) ? null : kept++;
+      if (newIndex !== oldIndex) edgeIndexRemaps.push({ oldIndex, newIndex });
+    });
+    return { spec: next, ...(edgeIndexRemaps.length > 0 ? { edgeIndexRemaps } : {}) };
   };
   return { transform, effects };
 }
