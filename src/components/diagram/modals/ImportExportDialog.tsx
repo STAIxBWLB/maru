@@ -193,14 +193,22 @@ export function ImportExportDialog({
 
   const handleFile = async (file: File) => {
     setStatus({ kind: "idle" });
-    const resolved = codecForFilename(file.name);
+    // The text decides `architecture.json` (Floorplan by `$schema`, issue #535).
+    let text: string;
+    try {
+      text = await file.text();
+    } catch (err) {
+      setImportState(null);
+      setStatus({ kind: "error", message: t("diagram.dialog.ie.parseFailed", { message: (err as Error).message ?? "unknown" }) });
+      return;
+    }
+    const resolved = codecForFilename(file.name, text);
     if (!resolved?.parse) {
       setImportState(null);
       setStatus({ kind: "error", message: t("diagram.dialog.ie.unsupportedFile") });
       return;
     }
     try {
-      const text = await file.text();
       const outcome = resolved.parse(text, file.name);
       setCodecId(resolved.id);
       setImportState({ filename: file.name, outcome });

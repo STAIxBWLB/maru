@@ -30,8 +30,10 @@ import {
   setLane,
   setStage,
   setStateType,
+  setSpecField,
   type SpecTransform,
 } from "../../../lib/diagram/semanticEdit";
+import { FLOORPLAN_EDGE_KINDS, FLOORPLAN_NODE_KINDS, floorplanDescendants } from "../../../lib/diagram/floorplan";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { applyValidatedSemanticEdit } from "../../../lib/diagram/semanticApply";
 import { deleteSelection } from "../deleteSelection";
@@ -51,6 +53,64 @@ function Row({ labelKey, value, testId }: { labelKey: string; value: string; tes
 
 function labelOf(entry: Record<string, unknown> | undefined, fallback: string): string {
   return typeof entry?.label === "string" ? entry.label : fallback;
+}
+
+/** Floorplan node inspector (issue #535): summary, kind and parent, one undo step each. */
+function FloorplanNodeFields({ entry, index, spec, run }: {
+  entry: Record<string, unknown>;
+  index: number;
+  spec: Record<string, unknown>;
+  run: (transform: SpecTransform) => Promise<boolean>;
+}) {
+  const { t } = useTranslation();
+  const [summaryDraft, setSummaryDraft] = useState<string | null>(null);
+  const summary = typeof entry.summary === "string" ? entry.summary : "";
+  const id = String(entry.id ?? "");
+  // A node cannot move under itself or its own descendants.
+  const blocked = new Set([id, ...floorplanDescendants(spec, [id])]);
+  const parents = specEntries(spec, "nodes").filter((node) => typeof node.id === "string" && !blocked.has(node.id));
+  const commitSummary = () => {
+    if (summaryDraft === null) return;
+    const text = summaryDraft.trim();
+    setSummaryDraft(null);
+    if (text !== summary) void run(setSpecField("nodes", index, "summary", text.length > 0 ? text : undefined));
+  };
+  return (
+    <>
+      <label className="maru-diagram-prop">
+        <span>{t("diagram.semantic.summary")}</span>
+        <textarea
+          value={summaryDraft ?? summary}
+          onChange={(e) => setSummaryDraft(e.target.value)}
+          onBlur={commitSummary}
+          data-testid="semantic-floorplan-summary"
+        />
+      </label>
+      <label className="maru-diagram-prop">
+        <span>{t("diagram.semantic.floorplanKind")}</span>
+        <select
+          value={typeof entry.kind === "string" ? entry.kind : ""}
+          onChange={(e) => void run(setSpecField("nodes", index, "kind", e.target.value))}
+          data-testid="semantic-floorplan-kind"
+        >
+          {FLOORPLAN_NODE_KINDS.map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+      </label>
+      <label className="maru-diagram-prop">
+        <span>{t("diagram.semantic.parent")}</span>
+        <select
+          value={typeof entry.parent === "string" ? entry.parent : ""}
+          onChange={(e) => void run(setSpecField("nodes", index, "parent", e.target.value || undefined))}
+          data-testid="semantic-floorplan-parent"
+        >
+          <option value="">{t("diagram.semantic.parentNone")}</option>
+          {parents.map((node) => (
+            <option key={String(node.id)} value={String(node.id)}>{labelOf(node, String(node.id))}</option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
 }
 
 export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: string }) {
@@ -256,6 +316,24 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
               }}
               data-testid="semantic-classification"
             />
+          </label>
+        ) : null}
+
+        {type === "floorplan" && member.kind === "entity" ? (
+          <FloorplanNodeFields key={`${dataset.id}:${member.index}:${String(member.entry.summary ?? "")}`} entry={member.entry} index={member.index} spec={spec} run={run} />
+        ) : null}
+
+        {type === "floorplan" && member.kind === "relation" ? (
+          <label className="maru-diagram-prop">
+            <span>{t("diagram.semantic.floorplanKind")}</span>
+            <select
+              value={typeof member.entry.kind === "string" ? member.entry.kind : ""}
+              onChange={(e) => void run(setSpecField("edges", member.index, "kind", e.target.value || undefined))}
+              data-testid="semantic-floorplan-edge-kind"
+            >
+              <option value="">-</option>
+              {FLOORPLAN_EDGE_KINDS.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
           </label>
         ) : null}
 

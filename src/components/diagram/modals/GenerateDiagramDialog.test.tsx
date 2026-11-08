@@ -192,6 +192,7 @@ describe("GenerateDiagramDialog", () => {
       "sequence",
       "dataflow",
       "lifecycle",
+      "floorplan",
     ]);
     expect(query('[data-testid="gen-requirements"]')).not.toBeNull();
     expect(query('[data-testid="gen-mermaid"]')).not.toBeNull();

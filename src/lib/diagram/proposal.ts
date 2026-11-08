@@ -598,7 +598,7 @@ function specEntityEntries(dataset: SemanticSpecDataset): SpecEntry[] {
       id: entry.id as string,
       label: typeof entry.label === "string" ? entry.label : (entry.id as string),
       fingerprint: JSON.stringify(
-        ["label", "sublabel", "type", "lane", "col", "stage", "row"].map((key) => entry[key] ?? null),
+        ["label", "sublabel", "type", "lane", "col", "stage", "row", "kind", "parent", "summary"].map((key) => entry[key] ?? null),
       ),
     }));
 }

@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { defaultCoalescer, undo, withSnapshot } from "./actions";
 import { archifySpecToDataset } from "./archifyCodec";
-import type { SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
+import type { ArchifyDiagramType, SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDataset, projectSemanticDocument, semanticContainerId, sequenceOrder, validateSemanticContent } from "./semantic";
 import {
   detachSemanticDatasetAction,
@@ -159,7 +159,7 @@ describe("detachSemanticDatasetAction", () => {
   });
 });
 
-const additions: Record<SemanticDiagramType, { field: string; entry: Record<string, unknown> }> = {
+const additions: Record<ArchifyDiagramType, { field: string; entry: Record<string, unknown> }> = {
   architecture: { field: "components", entry: { type: "backend", label: "Cache", row: 1, col: 0 } },
   workflow: { field: "nodes", entry: { lane: "author", col: 3, type: "backend", label: "Deploy" } },
   sequence: { field: "participants", entry: { type: "backend", label: "Cache" } },
@@ -167,7 +167,7 @@ const additions: Record<SemanticDiagramType, { field: string; entry: Record<stri
   lifecycle: { field: "states", entry: { type: "active", label: "Paused", lane: "main", col: 3 } },
 };
 
-const removalTarget: Record<SemanticDiagramType, { field: string; index: number }> = {
+const removalTarget: Record<ArchifyDiagramType, { field: string; index: number }> = {
   architecture: { field: "components", index: 0 },
   workflow: { field: "nodes", index: 0 },
   sequence: { field: "participants", index: 0 },
@@ -193,7 +193,7 @@ function validateWithPinnedArchify(type: SemanticDiagramType, spec: Record<strin
 }
 
 describe("semantic structural edits", () => {
-  it.each(Object.keys(additions) as SemanticDiagramType[])("adds and removes valid %s entries through one undo", (type) => {
+  it.each(Object.keys(additions) as ArchifyDiagramType[])("adds and removes valid %s entries through one undo", (type) => {
     const store = storeOf(type);
     const before = JSON.stringify(store.getState().doc);
     const { field, entry } = additions[type];

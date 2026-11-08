@@ -28,7 +28,7 @@ import { validatePortablePath } from "../../../sidecars/archify/renderers/shared
  */
 
 import {
-  SEMANTIC_DIAGRAM_TYPES,
+  ARCHIFY_DIAGRAM_TYPES,
   SEMANTIC_SPEC_MAX_BYTES,
   validateMatrix,
   validateSemanticSpec,
@@ -304,7 +304,8 @@ export function validateArchifySpecPreCheck(
 ): ValidationResult {
   const diagnostics: ValidationDiagnostic[] = [];
 
-  if (!(SEMANTIC_DIAGRAM_TYPES as readonly string[]).includes(diagramType)) {
+  // Floorplan has its own floor (`floorplanPreCheck`); this gate is Archify-only.
+  if (!(ARCHIFY_DIAGRAM_TYPES as readonly string[]).includes(diagramType)) {
     diagnostics.push({
       key: "diagram.validation.specType",
       params: { diagramType },

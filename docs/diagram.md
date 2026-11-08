@@ -133,6 +133,9 @@ and the projection live in `src/lib/diagram/semantic.ts`:
 | sequence | `participants` | `messages` (`msg`) | `segments`, `activations` (by index) | `cards` |
 | dataflow | `nodes` | `flows` (`flow`) | `stages` (by index) | `cards` |
 | lifecycle | `states` | `transitions` (`tr`) | `lanes` (by id) | `cards` |
+| floorplan | `nodes` | `edges` (no ids; `<datasetId>-e<index>`) | nested from `parent` | node `details`, `paths`, `exclude`, `packages`, `hosts`, `tags`; `include`, `ignore`, `annotations`, `flows`, `tour` |
+
+See "Floorplan" below for the sixth type, which is not an Archify type.
 
 Every path that skips the engine (import, gallery copy, manual edits) runs
 `validateSemanticContent`: the generated schema validator plus the reference
@@ -302,6 +305,66 @@ Preview remains synchronous; apply is asynchronous. Per-type fixtures also
 run the pinned engine validator in the focused test suite. Browser tests
 inject the generation host contract; production never bypasses engine admission.
 
+## Floorplan (issue #535)
+
+`floorplan` is the sixth `SemanticDiagramType`. Its dataset spec is the
+upstream `floorplan/architecture@1` JSON verbatim (haydenschmitty/floorplan
+0.6.3, `skills/floorplan/references/schema.md`), with `engine.name =
+"floorplan"`. Schema constants, the validation floor and the nested layout
+live in `src/lib/diagram/floorplan.ts`, interchange in `floorplanCodec.ts`.
+`ARCHIFY_DIAGRAM_TYPES` lists the five engine types; Archify-only paths
+(pre-check, pinned-engine validation, `archify-json`) never see floorplan.
+
+**Projection.** A node with children is a `section` sized around its
+children (rows of three, header band on top); a leaf is a member. Parents
+paint before children. The `kind` maps to a node style token: `data` is a
+cylinder, `external` a hexagon, everything else a plain box. Edges are drawn
+between the nodes their endpoints name; a file-path endpoint is drawn on the
+deepest node whose `paths` claim the file (`exclude` honored). The edge label
+is `label`, else `kind`; `event`/`queue` edges are dashed. Every node is an
+entity (`<datasetId>:m<index>`); there are no role containers. Canvas body
+edits write to `summary`. Flows and the tour are kept, not drawn.
+
+**Fidelity.** Every field, known or not, survives import, save and export
+unchanged. Present not-projected fields report `diagram.semantic.notProjected`;
+fields the upstream schema does not define (top level, node, edge) report
+`diagram.floorplan.unknownField`. Edges keep the upstream shape: no ids are
+minted.
+
+**Validation and the apply gate (temporary exception).** There is no pinned
+Floorplan engine yet. Until #536 adds it, `validateFloorplanSpec` is the whole
+gate for import, generation and every structural apply
+(`validateSemanticDraft` in `semanticApply.ts` skips the engine call for
+floorplan only): required `project.name`, node `id`/`label`/`kind` with the
+11 kinds, unique ids, parents that exist and do not cycle
+(`diagram.semantic.parentCycle`), edge endpoints and kinds, flows with at
+least two steps (`diagram.semantic.flowTooShort`) whose refs exist, and tour
+refs. A ref is a node id or a file path: it contains `/`, or is dotted with a
+first segment that is not a node id (`app.py`); `api.ghost` under an existing
+`api` is dangling. Every problem names its field. The five Archify types keep
+the pinned-engine gate unchanged. #536 removes this exception.
+
+**Editing.** The inspector edits label (canvas title), summary, kind and
+parent (a node cannot move under its own descendants), and an edge's kind;
+the structure editor adds a node (kind, optional parent) or an edge. Removing
+a node removes its descendants and every edge, flow step, tour stop and
+annotation that names a removed node; a file-path ref counts as removed when
+it resolved to a removed node and no surviving node claims it. A flow left
+with fewer than two steps is removed whole. The cascade is listed before the
+confirm and commits as one undo step through `planSemanticEdit`.
+
+**Generation.** The Generate dialog offers Floorplan. The prompt carries the
+schema summary and the selected source file paths, as for the other types;
+the candidate gets `$schema` if missing and is refused on local validation
+with the field named. Scanning a repository belongs to #536.
+
+**Interchange.** `floorplan-json` imports `<name>.floorplan.json`, and a file
+named exactly `architecture.json` whose `$schema` is
+`floorplan/architecture@1` (the dialog reads the text before choosing the
+codec). The Archify `architecture` type is told apart by `diagram_type` and
+`<name>.architecture.json`, never by the bare name. Export emits the spec
+verbatim; Mermaid does not apply.
+
 ## Archify engine pin
 
 The validation/render engine is the vendored, hash-pinned copy at
@@ -340,7 +403,7 @@ capabilities and export fidelity up front:
 - **lossless** — `maru-json` (canonical document) and `maru-svg` (SVG with the
   canonical JSON embedded as metadata; re-import restores the full document).
 - **structural** — csv / tsv / markdown-table / html-table / mermaid /
-  archify-json: the data or topology survives, styling does not.
+  archify-json / floorplan-json: the data or topology survives, styling does not.
 - **visual** — svg-image / png / png-transparent / jpg / pdf: a rendering only.
 
 Exports run through the unified Import/Export dialog or the selected-path
@@ -351,7 +414,8 @@ semantic dataset warns that its semantics are lost
 (`diagram.mermaid.semanticLoss`). Archify JSON (`<name>.architecture.json`,
 `.workflow.json`, `.sequence.json`, `.dataflow.json`, `.lifecycle.json`)
 imports a projected canvas (members and containers) and exports the spec
-verbatim.
+verbatim. Floorplan JSON (`floorplan-json`, see "Floorplan") does the same
+for `floorplan/architecture@1` maps.
 
 ## Insert/Update in report
 

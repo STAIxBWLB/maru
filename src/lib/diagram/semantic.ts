@@ -36,6 +36,14 @@ import {
  * Pure and never throws on malformed specs: unresolvable entries are skipped.
  */
 
+import {
+  FLOORPLAN_NODE_NOT_PROJECTED,
+  FLOORPLAN_TOP_FIELDS,
+  floorplanClaims,
+  floorplanNodeIds,
+  layoutFloorplan,
+  validateFloorplanSpec,
+} from "./floorplan";
 import { LAYOUT_DEFAULT_ORIGIN, LAYOUT_STEP_X, LAYOUT_STEP_Y, layoutDoc } from "./layout";
 import { isSemanticSpecDataset, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
 import {
@@ -82,6 +90,10 @@ export interface SemanticTypeDescriptor {
   idFields: readonly string[];
   /** Fields kept in the spec but not drawn on the canvas. */
   notProjected: readonly string[];
+  /** Entity field a canvas body edit writes to (default `sublabel`). */
+  bodyField?: string;
+  /** Relations keep the upstream shape: no minted `id` (edges use `<datasetId>-e<index>`). */
+  noRelationIds?: boolean;
 }
 
 export const SEMANTIC_TYPES: Record<SemanticDiagramType, SemanticTypeDescriptor> = {
@@ -147,6 +159,21 @@ export const SEMANTIC_TYPES: Record<SemanticDiagramType, SemanticTypeDescriptor>
     knownFields: ["schema_version", "diagram_type", "meta", "lanes", "states", "transitions", "cards"],
     idFields: ["lanes", "states", "transitions"],
     notProjected: ["cards"],
+  },
+  floorplan: {
+    entities: "nodes",
+    relations: "edges",
+    relationPrefix: "edge",
+    relationLabelRequired: false,
+    // Nesting comes from `parent`: a node with children is drawn as a
+    // section around its children, but stays an entity of `nodes`.
+    container: null,
+    grid: true,
+    knownFields: FLOORPLAN_TOP_FIELDS,
+    idFields: ["nodes"],
+    notProjected: [...FLOORPLAN_NODE_NOT_PROJECTED, "include", "ignore", "annotations", "flows", "tour"],
+    bodyField: "summary",
+    noRelationIds: true,
   },
 };
 
@@ -255,6 +282,7 @@ export function validateSemanticContent(
   diagramType: SemanticDiagramType,
   spec: Record<string, unknown>,
 ): ValidationDiagnostic[] {
+  if (diagramType === "floorplan") return validateFloorplanSpec(spec);
   const descriptor = SEMANTIC_TYPES[diagramType];
   const diagnostics: ValidationDiagnostic[] = [];
   const validator = VALIDATORS[diagramType];
@@ -392,6 +420,7 @@ export function mintRelationIds(
   reserved: Iterable<string> = [],
 ): { spec: Record<string, unknown>; minted: number } {
   const descriptor = SEMANTIC_TYPES[diagramType];
+  if (descriptor.noRelationIds) return { spec, minted: 0 };
   const relations = spec[descriptor.relations];
   if (!Array.isArray(relations) || !relations.some((entry) => isRecord(entry) && idOf(entry) === null)) {
     return { spec, minted: 0 };
@@ -589,6 +618,7 @@ function architecturePlacement(entities: Record<string, unknown>[], spec: Record
 }
 
 function entityKind(diagramType: SemanticDiagramType, entry: Record<string, unknown>): NodeKind {
+  if (diagramType === "floorplan") return entry.kind === "data" ? "cylinder" : entry.kind === "external" ? "hexagon" : "simple";
   if (diagramType !== "lifecycle") return "simple";
   if (entry.type === "start" || entry.type === "success" || entry.type === "failure") return "oval";
   if (entry.type === "decision") return "diamond";
@@ -751,6 +781,100 @@ function sequenceRangeRects(
   });
 }
 
+/** Edge dash per Floorplan edge kind: asynchronous kinds are dashed. */
+const FLOORPLAN_DASHED_EDGE_KINDS = new Set(["event", "queue"]);
+
+/**
+ * Resolve a Floorplan ref (node id or file path) to the node that draws it:
+ * the node itself, or the deepest node whose `paths` claim the file.
+ */
+export function floorplanRefNode(spec: Record<string, unknown>, ref: unknown): string | null {
+  if (typeof ref !== "string") return null;
+  const nodes = specEntries(spec, "nodes");
+  if (floorplanNodeIds(spec).has(ref)) return ref;
+  const depth = (node: Record<string, unknown>) => {
+    let d = 0;
+    let parent = node.parent;
+    const seen = new Set<unknown>();
+    while (typeof parent === "string" && !seen.has(parent) && d < nodes.length) {
+      seen.add(parent);
+      d += 1;
+      parent = nodes.find((candidate) => candidate.id === parent)?.parent;
+    }
+    return d;
+  };
+  let best: { id: string; depth: number } | null = null;
+  for (const node of nodes) {
+    if (typeof node.id !== "string" || !floorplanClaims(node, ref)) continue;
+    const d = depth(node);
+    if (!best || d > best.depth) best = { id: node.id, depth: d };
+  }
+  return best?.id ?? null;
+}
+
+function projectFloorplan(dataset: SemanticSpecDataset, diagnostics: ValidationDiagnostic[]): ProjectedMembers {
+  const spec = dataset.spec;
+  const rects = layoutFloorplan(spec, {
+    originX: ORIGIN.x,
+    originY: ORIGIN.y,
+    nodeW: NODE_W,
+    nodeH: NODE_H,
+    gap: GAP,
+    header: HEADER,
+    inset: INSET,
+  });
+  const entries = specEntries(spec, "nodes");
+  // Parents before children so a section paints behind its members.
+  const order = [...rects.keys()].sort((a, b) => rects.get(a)!.depth - rects.get(b)!.depth || a - b);
+  const nodes: DiagramNode[] = [];
+  const nodeIds = new Set<string>();
+  for (const index of order) {
+    const entry = entries[index]!;
+    const rect = rects.get(index)!;
+    const specId = idOf(entry);
+    if (specId === null) continue;
+    const id = maruIdFor(dataset, specId);
+    if (nodeIds.has(id)) continue;
+    nodeIds.add(id);
+    nodes.push({
+      id,
+      kind: rect.container ? "section" : entityKind("floorplan", entry),
+      x: rect.x,
+      y: rect.y,
+      w: rect.w,
+      h: rect.h,
+      title: labelOf(entry, specId),
+      body: !rect.container && typeof entry.summary === "string" ? entry.summary : undefined,
+      meta: { memberId: `${dataset.id}:m${index}` },
+    });
+  }
+  const edges: DiagramEdge[] = [];
+  specEntries(spec, "edges").forEach((entry, index) => {
+    const from = floorplanRefNode(spec, entry.from);
+    const to = floorplanRefNode(spec, entry.to);
+    if (from === null || to === null) return;
+    const kind = typeof entry.kind === "string" ? entry.kind : undefined;
+    edges.push({
+      id: `${dataset.id}-e${index}`,
+      fromNode: maruIdFor(dataset, from),
+      fromPort: "e",
+      toNode: maruIdFor(dataset, to),
+      toPort: "w",
+      arrowEnd: "filled",
+      ...(kind && FLOORPLAN_DASHED_EDGE_KINDS.has(kind) ? { dash: "dashed" as const } : {}),
+      label: typeof entry.label === "string" ? entry.label : kind,
+    });
+  });
+  return { nodes, edges, diagnostics };
+}
+
+/** Not-projected fields present in the spec (top level, or on any entity for floorplan). */
+function notProjectedPresent(dataset: SemanticSpecDataset, descriptor: SemanticTypeDescriptor): string[] {
+  const spec = dataset.spec;
+  return descriptor.notProjected.filter((field) => spec[field] !== undefined ||
+    (dataset.diagramType === "floorplan" && specEntries(spec, descriptor.entities).some((entry) => entry[field] !== undefined)));
+}
+
 /**
  * Project a semantic dataset to canvas members, and optionally its
  * containers. Pure and deterministic; not-projected fields that are present
@@ -763,6 +887,10 @@ export function projectSemanticDataset(
   const descriptor = descriptorFor(dataset);
   if (!descriptor) return { nodes: [], edges: [], diagnostics: [] };
   const spec = dataset.spec;
+  if (dataset.diagramType === "floorplan") {
+    return projectFloorplan(dataset, notProjectedPresent(dataset, descriptor)
+      .map((field) => ({ key: "diagram.semantic.notProjected", params: { field } })));
+  }
   const diagnostics: ValidationDiagnostic[] = descriptor.notProjected
     .filter((field) => spec[field] !== undefined)
     .map((field) => ({ key: "diagram.semantic.notProjected", params: { field } }));
@@ -1052,8 +1180,9 @@ export function writeThroughText(
     }
     if ("body" in values) {
       if (member.kind === "container") return null;
-      if (nonEmpty(values.body)) next.sublabel = values.body;
-      else delete next.sublabel;
+      const bodyField = descriptorFor(member.dataset)?.bodyField ?? "sublabel";
+      if (nonEmpty(values.body)) next[bodyField] = values.body;
+      else delete next[bodyField];
     }
   }
   const written = replaceSpecEntry(doc, member.dataset, member.field, member.entry, next);
@@ -1092,7 +1221,7 @@ export function semanticLosses(dataset: SemanticSpecDataset): ValidationDiagnost
   count("notes", relations.filter((entry) => typeof entry.note === "string").length);
   for (const container of semanticContainers(descriptor)) count(container.field, specEntries(spec, container.field).length);
   count("sources", entities.filter((entry) => entry.sources !== undefined).length);
-  const notProjected = descriptor.notProjected.filter((field) => spec[field] !== undefined);
+  const notProjected = notProjectedPresent(dataset, descriptor);
   if (notProjected.length > 0) {
     losses.push({ key: "diagram.semantic.loss.notProjected", params: { fields: notProjected.join(", ") } });
   }
