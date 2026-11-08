@@ -12,14 +12,14 @@ export type Diagnostic = { code: string, path: string, rule: string, message: st
 
 export type ValidationReport = { apiVersion: number, ok: boolean, diagnostics: Array<Diagnostic>, receipt: EngineReceipt, };
 
-export type ArchitectureMeta = { title: string, output: string, locale: string | null, };
+export type ArchitectureMeta = { title: string, output: string, locale?: string | null, };
 
-export type ArchitectureLayout = { mode: string, cols: number | null, };
+export type ArchitectureLayout = { mode: string, cols?: number | null, };
 
-export type ArchitectureComponent = { id: string, type: string, label: string, row: number | null, col: number | null, };
+export type ArchitectureComponent = { id: string, type: string, label: string, row?: number | null, col?: number | null, };
 
-export type ArchitectureConnection = { id: string | null, from: string, to: string, label: string | null, };
+export type ArchitectureConnection = { id?: string | null, from: string, to: string, label?: string | null, };
 
 export type ArchitectureBoundary = { kind: string, label: string, wraps: Array<string>, };
 
-export type ArchitectureSpec = { schema_version: number, diagram_type: string, meta: ArchitectureMeta, layout: ArchitectureLayout | null, components: Array<ArchitectureComponent>, connections: Array<ArchitectureConnection>, boundaries: Array<ArchitectureBoundary>, };
+export type ArchitectureSpec = { schema_version: number, diagram_type: string, meta: ArchitectureMeta, layout?: ArchitectureLayout | null, components: Array<ArchitectureComponent>, connections?: Array<ArchitectureConnection>, boundaries?: Array<ArchitectureBoundary>, };

@@ -127,11 +127,14 @@ pub struct ArchitectureSpec {
     pub diagram_type: String,
     pub meta: ArchitectureMeta,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub layout: Option<ArchitectureLayout>,
     pub components: Vec<ArchitectureComponent>,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(as = "Option<_>", optional))]
     pub connections: Vec<ArchitectureConnection>,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(as = "Option<_>", optional))]
     pub boundaries: Vec<ArchitectureBoundary>,
 }
 
@@ -141,6 +144,7 @@ pub struct ArchitectureMeta {
     pub title: String,
     pub output: String,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub locale: Option<String>,
 }
 
@@ -149,6 +153,7 @@ pub struct ArchitectureMeta {
 pub struct ArchitectureLayout {
     pub mode: String,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub cols: Option<u32>,
 }
 
@@ -161,8 +166,10 @@ pub struct ArchitectureComponent {
     pub component_type: String,
     pub label: String,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub row: Option<u32>,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub col: Option<u32>,
 }
 
@@ -170,10 +177,12 @@ pub struct ArchitectureComponent {
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct ArchitectureConnection {
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub id: Option<String>,
     pub from: String,
     pub to: String,
     #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub label: Option<String>,
 }
 
