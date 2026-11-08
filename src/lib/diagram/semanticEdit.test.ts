@@ -8,7 +8,7 @@ import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { defaultCoalescer, undo, withSnapshot } from "./actions";
 import { archifySpecToDataset } from "./archifyCodec";
 import type { SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
-import { projectSemanticDocument, sequenceOrder, validateSemanticContent } from "./semantic";
+import { projectSemanticDataset, projectSemanticDocument, semanticContainerId, sequenceOrder, validateSemanticContent } from "./semantic";
 import {
   detachSemanticDatasetAction,
   addSemanticEntry,
@@ -443,5 +443,187 @@ describe("semantic structural edits", () => {
       expect(remove.effects).toContainEqual(expect.objectContaining({ field, action: "remove" }));
       expect(remove.transform(added.spec)!.spec[field]).toHaveLength(oldEntries.length);
     }
+  });
+
+  it("deleting index container zero preserves the next container, its annotation, drift, selection, and one undo", () => {
+    const source = {
+      ...structuredClone(SEMANTIC_FIXTURES.architecture),
+      boundaries: [
+        { kind: "region", label: "Boundary A", wraps: ["web"] },
+        { kind: "region", label: "Boundary B", wraps: ["api", "db"] },
+      ],
+    };
+    const store = storeOf("architecture", source);
+    const oldA = semanticContainerId("ds", "boundary", "0");
+    const oldB = semanticContainerId("ds", "boundary", "1");
+    const newB = semanticContainerId("ds", "boundary", "0");
+    store.setState((state) => ({
+      ...state,
+      doc: {
+        ...state.doc,
+        nodes: state.doc.nodes.map((node) => node.id === oldB ? { ...node, x: node.x + 17, y: node.y + 9 } : node),
+        edges: [
+          ...state.doc.edges,
+          { id: "annotation-a", fromNode: oldA, fromPort: "e" as const, toNode: "web", toPort: "w" as const, label: "A annotation" },
+          { id: "annotation-b", fromNode: oldB, fromPort: "e" as const, toNode: "api", toPort: "w" as const, label: "B annotation" },
+        ],
+      },
+      ephemeral: { ...state.ephemeral, selection: { nodes: new Set([oldA, oldB]), edges: new Set() } },
+    }));
+    const before = JSON.stringify(store.getState().doc);
+    const dataset = store.getState().doc.datasets!.find((item) => item.id === "ds") as SemanticSpecDataset;
+    const oldProjection = projectSemanticDataset(dataset, { containers: true, doc: store.getState().doc });
+    const removal = removeSemanticEntries("architecture", dataset.spec, [{ field: "boundaries", index: 0 }]);
+    const transformed = removal.transform(dataset.spec)!;
+    expect(transformed.containerIndexRemaps).toContainEqual({ field: "boundaries", role: "boundary", oldIndex: 0, newIndex: null });
+    expect(transformed.containerIndexRemaps).toContainEqual({ field: "boundaries", role: "boundary", oldIndex: 1, newIndex: 0 });
+    const nextDataset = { ...dataset, spec: transformed.spec };
+    const newProjection = projectSemanticDataset(nextDataset, { containers: true, doc: store.getState().doc });
+    const priorB = oldProjection.nodes.find((node) => node.id === oldB)!;
+    const nextB = newProjection.nodes.find((node) => node.id === newB)!;
+    const currentB = store.getState().doc.nodes.find((node) => node.id === oldB)!;
+    const outcome = planSemanticEdit(store.getState(), "ds", removal.transform);
+    expect(outcome.status).toBe("applied");
+    if (outcome.status !== "applied") return;
+    store.setState(withSnapshot(outcome.transformer, defaultCoalescer()));
+    const after = store.getState();
+    const survivor = after.doc.nodes.find((node) => node.id === newB)!;
+    expect(survivor.title).toBe("Boundary B");
+    expect([survivor.x, survivor.y, survivor.w, survivor.h]).toEqual([
+      currentB.x + nextB.x - priorB.x,
+      currentB.y + nextB.y - priorB.y,
+      currentB.w + nextB.w - priorB.w,
+      currentB.h + nextB.h - priorB.h,
+    ]);
+    expect(after.doc.nodes.find((node) => node.id === oldA)?.title).toBe("Boundary B");
+    expect(after.doc.edges.some((edge) => edge.id === "annotation-a")).toBe(false);
+    expect(after.doc.edges.find((edge) => edge.id === "annotation-b")?.fromNode).toBe(newB);
+    expect(after.ephemeral.selection.nodes).toEqual(new Set([newB]));
+    expect(after.ephemeral.history.past).toHaveLength(1);
+    store.setState(undo());
+    expect(JSON.stringify(store.getState().doc)).toBe(before);
+  });
+
+  it("refuses an index-container rekey that would overwrite a foreign target id", () => {
+    const source = {
+      ...structuredClone(SEMANTIC_FIXTURES.architecture),
+      boundaries: [
+        { kind: "region", label: "Boundary A", wraps: ["web"] },
+        { kind: "region", label: "Boundary B", wraps: ["api", "db"] },
+      ],
+    };
+    const { dataset } = archifySpecToDataset("architecture", source, { id: "ds" });
+    const projected = projectSemanticDocument(dataset).doc;
+    const doc = {
+      ...projected,
+      nodes: [
+        ...projected.nodes.filter((node) => node.meta?.semanticContainer === undefined),
+        { id: semanticContainerId("ds", "boundary", "0"), kind: "text" as const, x: 20, y: 20, w: 40, h: 20, title: "Foreign" },
+      ],
+    };
+    const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
+    const outcome = apply(store, removeSemanticEntries("architecture", dataset.spec, [{ field: "boundaries", index: 0 }]).transform);
+    expect(outcome).toEqual({ status: "invalid", diagnostics: [{ key: "diagram.proposal.idCollision", params: { id: semanticContainerId("ds", "boundary", "0") } }] });
+    expect(store.getState().doc).toBe(doc);
+  });
+
+  it("keeps lock checks on a deleted-container tombstone and reports the original id", () => {
+    const source = {
+      ...structuredClone(SEMANTIC_FIXTURES.architecture),
+      boundaries: [
+        { kind: "region", label: "Boundary A", wraps: ["web"] },
+        { kind: "region", label: "Boundary B", wraps: ["api", "db"] },
+      ],
+    };
+    const store = storeOf("architecture", source);
+    const oldA = semanticContainerId("ds", "boundary", "0");
+    store.setState((state) => ({ ...state, doc: { ...state.doc, nodes: state.doc.nodes.map((node) => node.id === oldA ? { ...node, locked: true } : node) } }));
+    const before = store.getState().doc;
+    const outcome = apply(store, removeSemanticEntries("architecture", specOf(store.getState()) as Record<string, unknown>, [{ field: "boundaries", index: 0 }]).transform);
+    expect(outcome).toEqual({ status: "invalid", diagnostics: [{ key: "diagram.proposal.lockedNode", params: { id: oldA } }] });
+    expect(store.getState().doc).toBe(before);
+  });
+
+  it("remaps index-keyed container ids when inserting before existing entries", () => {
+    const source = {
+      ...structuredClone(SEMANTIC_FIXTURES.architecture),
+      boundaries: [
+        { kind: "region", label: "Boundary A", wraps: ["web"] },
+        { kind: "region", label: "Boundary B", wraps: ["api", "db"] },
+      ],
+    };
+    const store = storeOf("architecture", source);
+    const oldA = semanticContainerId("ds", "boundary", "0");
+    const oldB = semanticContainerId("ds", "boundary", "1");
+    const inserted = apply(store, addSemanticEntry("architecture", "boundaries", { kind: "region", label: "Inserted", wraps: ["api"] }, 0));
+    expect(inserted.status).toBe("applied");
+    expect(store.getState().doc.nodes.find((node) => node.id === semanticContainerId("ds", "boundary", "1"))?.title).toBe("Boundary A");
+    expect(store.getState().doc.nodes.find((node) => node.id === semanticContainerId("ds", "boundary", "2"))?.title).toBe("Boundary B");
+    expect(store.getState().doc.nodes.find((node) => node.id === semanticContainerId("ds", "boundary", "0"))?.title).toBe("Inserted");
+  });
+
+  it.each([
+    {
+      type: "dataflow" as const,
+      field: "stages",
+      role: "stage" as const,
+      spec: {
+        ...structuredClone(SEMANTIC_FIXTURES.dataflow),
+        stages: [{ label: "Stage A" }, { label: "Stage B" }, { label: "Stage C" }],
+        nodes: [
+          ...(structuredClone(SEMANTIC_FIXTURES.dataflow).nodes as Record<string, unknown>[]),
+          { id: "queue", type: "backend", label: "Queue", stage: 2, row: 0 },
+        ],
+        flows: [
+          ...(structuredClone(SEMANTIC_FIXTURES.dataflow).flows as Record<string, unknown>[]),
+          { from: "wh", to: "queue", label: "publish" },
+        ],
+      },
+      survivor: "Stage B",
+      annotationEnd: "wh",
+    },
+    {
+      type: "sequence" as const,
+      field: "segments",
+      role: "segment" as const,
+      spec: {
+        ...structuredClone(SEMANTIC_FIXTURES.sequence),
+        segments: [{ from: 160, to: 210, label: "Segment A" }, { from: 220, to: 270, label: "Segment B" }],
+      },
+      survivor: "Segment B",
+      annotationEnd: "api",
+    },
+    {
+      type: "sequence" as const,
+      field: "activations",
+      role: "activation" as const,
+      spec: {
+        ...structuredClone(SEMANTIC_FIXTURES.sequence),
+        activations: [{ participant: "web", from: 170, to: 200 }, { participant: "api", from: 230, to: 260 }],
+      },
+      survivor: "API",
+      annotationEnd: "api",
+    },
+  ])("rekeys surviving $field containers and their annotations", ({ type, field, role, spec, survivor, annotationEnd }) => {
+    const store = storeOf(type, spec);
+    const oldA = semanticContainerId("ds", role, "0");
+    const oldB = semanticContainerId("ds", role, "1");
+    const newB = semanticContainerId("ds", role, "0");
+    store.setState((state) => ({
+      ...state,
+      doc: {
+        ...state.doc,
+        edges: [
+          ...state.doc.edges,
+          { id: "annotation-a", fromNode: oldA, fromPort: "e" as const, toNode: type === "dataflow" ? "app" : "web", toPort: "w" as const },
+          { id: "annotation-b", fromNode: oldB, fromPort: "e" as const, toNode: annotationEnd, toPort: "w" as const },
+        ],
+      },
+    }));
+    const result = apply(store, removeSemanticEntries(type, specOf(store.getState()), [{ field, index: 0 }]).transform);
+    expect(result.status, JSON.stringify(result)).toBe("applied");
+    expect(store.getState().doc.nodes.find((node) => node.id === newB)?.title).toBe(survivor);
+    expect(store.getState().doc.edges.some((edge) => edge.id === "annotation-a")).toBe(false);
+    expect(store.getState().doc.edges.find((edge) => edge.id === "annotation-b")?.fromNode).toBe(newB);
   });
 });

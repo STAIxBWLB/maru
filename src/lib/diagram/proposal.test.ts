@@ -13,7 +13,7 @@ import {
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { validateCandidateDoc } from "./validation";
 import { matrixFromRowsCols, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
-import { projectSemanticDocument, semanticMemberNodeIds } from "./semantic";
+import { projectSemanticDataset, projectSemanticDocument, semanticContainerId, semanticMemberNodeIds } from "./semantic";
 import {
   createEmptyDoc,
   createInitialEphemeral,
@@ -408,6 +408,44 @@ describe("buildProposalFromCandidate with a previous dataset", () => {
     mutate(spec.states as Record<string, unknown>[]);
     return datasetOf("lifecycle", spec);
   };
+
+  it("uses the surviving index container's geometry after an index identity remap", () => {
+    const spec = {
+      ...structuredClone(SEMANTIC_FIXTURES.architecture),
+      boundaries: [
+        { kind: "region", label: "A", wraps: ["web"] },
+        { kind: "region", label: "B", wraps: ["api", "db"] },
+      ],
+    };
+    const dataset = datasetOf("architecture", spec);
+    const base = projectSemanticDocument(dataset).doc;
+    const oldA = semanticContainerId(dataset.id, "boundary", "0");
+    const oldB = semanticContainerId(dataset.id, "boundary", "1");
+    const newB = semanticContainerId(dataset.id, "boundary", "0");
+    const tombstone = `${dataset.id}:boundary:tombstone:0`;
+    const remapped = {
+      ...base,
+      nodes: base.nodes.map((node) => node.id === oldA
+        ? { ...node, id: tombstone, meta: { ...node.meta, memberId: `${dataset.id}:boundary:tombstone:0` } }
+        : node.id === oldB
+          ? { ...node, id: newB, meta: { ...node.meta, memberId: `${dataset.id}:boundary:0` }, x: node.x + 17, y: node.y + 9 }
+          : node),
+    };
+    const candidateSpec = { ...spec, boundaries: [{ ...spec.boundaries[1], wraps: ["api"] }] };
+    const candidate = datasetOf("architecture", candidateSpec);
+    const previousNodeIdRemap = new Map([[oldA, tombstone], [oldB, newB]]);
+    const { proposal } = buildProposalFromCandidate(
+      memberMeta(remapped, dataset.id),
+      candidate,
+      remapped,
+      { previousNodeIdRemap },
+    );
+    const beforeB = projectSemanticDataset(dataset, { containers: true, doc: remapped }).nodes.find((node) => node.id === oldB)!;
+    const afterB = projectSemanticDataset(candidate, { containers: true, doc: remapped }).nodes.find((node) => node.id === newB)!;
+    const currentB = remapped.nodes.find((node) => node.id === newB)!;
+    expect(proposal.ops).toContainEqual({ kind: "updateNode", id: newB, patch: { w: currentB.w + afterB.w - beforeB.w } });
+    expect(proposal.ops).toContainEqual({ kind: "removeNode", id: tombstone });
+  });
 
   it("does not block on a locked member the candidate leaves unchanged", () => {
     const base = projectedDoc("lifecycle");

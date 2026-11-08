@@ -156,6 +156,23 @@ describe("projectSemanticDataset", () => {
     }
   });
 
+  it("projects authored architecture grid cells instead of array order", () => {
+    const spec = fixture("architecture");
+    spec.layout = { mode: "grid", cols: 4, origin: [70, 90], cellW: 130, cellH: 64, gapX: 30, gapY: 40 };
+    (spec.components as Record<string, unknown>[]).push({ id: "cache", type: "backend", label: "Cache", row: 1, col: 0 });
+    const dataset = datasetOf("architecture", spec);
+    expect(projectSemanticDataset(dataset).nodes.find((node) => node.id === "cache")).toMatchObject({ x: 70, y: 194 });
+    expect(projectSemanticDocument(dataset).doc.nodes.find((node) => node.id === "cache")).toMatchObject({ x: 70, y: 194 });
+  });
+
+  it("keeps authored free architecture positions on new documents", () => {
+    const spec = fixture("architecture");
+    delete spec.layout;
+    spec.components = (spec.components as Record<string, unknown>[]).map((entry, index) => ({ ...entry, pos: [100 + index * 200, 180], size: [160, 64] }));
+    const doc = projectSemanticDocument(datasetOf("architecture", spec)).doc;
+    expect(doc.nodes.filter((node) => node.meta?.semanticContainer === undefined).map((node) => [node.x, node.y])).toEqual([[100, 180], [300, 180], [500, 180]]);
+  });
+
   it("orders sequence messages by y with strictly increasing midOff brackets", () => {
     const spec = fixture("sequence");
     const messages = spec.messages as Record<string, unknown>[];

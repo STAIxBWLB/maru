@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import {
-  LIFECYCLE_STATE_TYPES, SEMANTIC_TYPES, semanticContainers, specEntries, type SemanticMember,
+  LIFECYCLE_STATE_TYPES, SEMANTIC_TYPES, projectSemanticDataset, semanticContainers, specEntries, type SemanticMember,
 } from "../../../lib/diagram/semantic";
 import {
   addSemanticEntry, setBoundaryMembership, setSpecField, type SpecTransform,
@@ -36,6 +36,7 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
   const [lane, setLane] = useState("");
   const [stage, setStage] = useState(0);
   const [col, setCol] = useState(0);
+  const [position, setPosition] = useState<[number, number] | null>(null);
   const [toCol, setToCol] = useState(1);
   const [fromY, setFromY] = useState(170);
   const [toY, setToY] = useState(290);
@@ -62,6 +63,10 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
       onChange={(event) => change(event.target.checked ? [...selected, id] : selected.filter((item) => item !== id))} />{entryLabel(entry)}</label>;
   });
   const layout = typeof spec.layout === "object" && spec.layout !== null ? spec.layout as Record<string, unknown> : {};
+  const freePlacement = type === "architecture" && layout.mode !== "grid";
+  const placed = freePlacement ? projectSemanticDataset(dataset).nodes : [];
+  const rightmost = placed.reduce((right, node) => node.x + node.w > right.x + right.w ? node : right, placed[0] ?? { x: 40, y: 40, w: 160 });
+  const pos = position ?? [rightmost.x + rightmost.w + 30, rightmost.y];
   const maxCol = type === "architecture" ? Math.max(0, (typeof layout.cols === "number" ? layout.cols : 4) - 1) : 5;
   const reservedMain = type === "lifecycle" && member.kind === "container" && member.role === "lane" && member.entry.id === "main";
   const add = async () => {
@@ -70,7 +75,9 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
       entry.type = entityType;
       if (type === "workflow" || type === "lifecycle") Object.assign(entry, { lane: laneId, col });
       if (type === "dataflow") Object.assign(entry, { stage, row: Math.max(-1, ...entities.filter((item) => item.stage === stage).map((item) => Number(item.row) || 0)) + 1 });
-      if (type === "architecture") Object.assign(entry, { col, row: Math.max(-1, ...entities.filter((item) => item.col === col).map((item) => Number(item.row) || 0)) + 1 });
+      if (type === "architecture") Object.assign(entry, freePlacement
+        ? { pos, size: [160, 64] }
+        : { col, row: Math.max(-1, ...entities.filter((item) => item.col === col).map((item) => Number(item.row) || 0)) + 1 });
     } else if (isRelation) Object.assign(entry, { from, to });
     else if (field === "boundaries") Object.assign(entry, { kind: "region", wraps });
     else if (isRange) Object.assign(entry, { fromCol: col, toCol, ...(field === "groups" ? { lane: laneId } : {}) });
@@ -152,16 +159,20 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
       {isEntity && type === "dataflow" ? <Field label={t("diagram.semantic.stage")}><select data-testid="semantic-add-stage" value={stage} onChange={(event) => setStage(Number(event.target.value))}>
         {stages.map((entry, index) => <option key={index} value={index}>{entryLabel(entry)}</option>)}
       </select></Field> : null}
-      {(isEntity && ["architecture", "workflow", "lifecycle"].includes(type)) || isRange ? <Field label={t("diagram.semantic.column")}>
+      {(isEntity && !freePlacement && ["architecture", "workflow", "lifecycle"].includes(type)) || isRange ? <Field label={t("diagram.semantic.column")}>
         <input type="number" min={0} max={maxCol} value={col} data-testid="semantic-add-col" onChange={(event) => setCol(Number(event.target.value))} />
       </Field> : null}
+      {isEntity && freePlacement ? <>
+        <Field label={t("diagram.semantic.positionX")}><input type="number" value={pos[0]} data-testid="semantic-add-x" onChange={(event) => setPosition([Number(event.target.value), pos[1]!])} /></Field>
+        <Field label={t("diagram.semantic.positionY")}><input type="number" value={pos[1]} data-testid="semantic-add-y" onChange={(event) => setPosition([pos[0]!, Number(event.target.value)])} /></Field>
+      </> : null}
       {isRange ? <Field label={t("diagram.semantic.rangeTo")}><input type="number" min={0} max={5} value={toCol} data-testid="semantic-add-to-col" onChange={(event) => setToCol(Number(event.target.value))} /></Field> : null}
       {isTimeline ? <>
         <Field label={t("diagram.semantic.rangeFrom")}><input type="number" min={72} value={fromY} data-testid="semantic-add-from-y" onChange={(event) => setFromY(Number(event.target.value))} /></Field>
         <Field label={t("diagram.semantic.rangeTo")}><input type="number" min={72} value={toY} data-testid="semantic-add-to-y" onChange={(event) => setToY(Number(event.target.value))} /></Field>
       </> : null}
       {field === "boundaries" ? <fieldset><legend>{t("diagram.semantic.members")}</legend>{checkboxList(wraps, setWraps)}</fieldset> : null}
-      <button type="button" data-testid="semantic-add-confirm" disabled={(field !== "activations" && label.trim().length === 0) || (isEntity && type === "architecture" && (col < 0 || col > maxCol || !Number.isInteger(col)))}
+      <button type="button" data-testid="semantic-add-confirm" disabled={(field !== "activations" && label.trim().length === 0) || (isEntity && type === "architecture" && !freePlacement && (col < 0 || col > maxCol || !Number.isInteger(col)))}
         onClick={() => void add()}>{t("diagram.semantic.add")}</button>
     </fieldset>
   </div>;

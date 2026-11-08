@@ -7,8 +7,8 @@ import { confirmDialog, messageDialog } from "../../lib/confirmDialog";
 import { removeEdges, removeNodes, withSnapshot } from "../../lib/diagram/actions";
 import type { Coalescer } from "../../lib/diagram/history";
 import { analyzeViewDrag, detachViewMembersSnippetAction } from "../../lib/diagram/patternStudio";
-import { projectSemanticDataset, resolveSemanticMember, semanticDatasetsIn, semanticMemberNodeIds } from "../../lib/diagram/semantic";
-import { planSemanticEdit, removeSemanticEntries } from "../../lib/diagram/semanticEdit";
+import { projectSemanticDataset, resolveSemanticMember, semanticContainerId, semanticDatasetsIn, semanticMemberNodeIds } from "../../lib/diagram/semantic";
+import { planSemanticEdit, removeSemanticEntries, type SemanticContainerIndexRemap } from "../../lib/diagram/semanticEdit";
 import type { DiagramStore } from "../../lib/diagram/state";
 import { semanticCascadeLines, type SemanticTranslate } from "./semanticCascade";
 
@@ -32,12 +32,26 @@ export async function deleteSelection(store: DiagramStore, coalescer: Coalescer,
   const freeNodes = nodeIds.filter((nodeId) => resolveSemanticMember(state.doc, { nodeId }) === null);
   const freeEdges = edgeIds.filter((edgeId) => resolveSemanticMember(state.doc, { edgeId }) === null);
   const removing = new Set(freeNodes);
+  const remappedContainerId = (nodeId: string, datasetId: string, remaps: readonly SemanticContainerIndexRemap[]): string | null => {
+    const node = state.doc.nodes.find((candidate) => candidate.id === nodeId);
+    const role = node?.meta?.semanticContainer;
+    const memberId = node?.meta?.memberId;
+    if (typeof role !== "string" || typeof memberId !== "string") return nodeId;
+    const prefix = `${datasetId}:${role}:`;
+    const key = memberId.startsWith(prefix) ? memberId.slice(prefix.length) : "";
+    if (!/^\d+$/.test(key)) return nodeId;
+    const remap = remaps.find((entry) => entry.role === role && entry.oldIndex === Number(key));
+    return remap ? (remap.newIndex === null ? null : semanticContainerId(datasetId, remap.role, String(remap.newIndex))) : nodeId;
+  };
   const scopes = plans.map(({ dataset, removal }) => {
     const owned = new Set(semanticMemberNodeIds(state.doc, dataset.id));
     const candidate = removal.transform(dataset.spec);
     if (candidate) {
       const retained = new Set(projectSemanticDataset({ ...dataset, spec: candidate.spec }, { containers: true }).nodes.map((node) => node.id));
-      for (const id of owned) if (!retained.has(id)) removing.add(id);
+      for (const id of owned) {
+        const mapped = remappedContainerId(id, dataset.id, candidate.containerIndexRemaps ?? []);
+        if (mapped === null || !retained.has(mapped)) removing.add(id);
+      }
     }
     return owned;
   });

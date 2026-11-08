@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { confirmDialog, messageDialog } from "../../../lib/confirmDialog";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
+import { pinnedEngineHost } from "../../../../e2e/helpers/diagramEngineHost";
 import type { GenerationHost } from "../../../lib/diagram/generation";
 import { undo } from "../../../lib/diagram/actions";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
@@ -214,6 +215,26 @@ describe("SemanticProps", () => {
     await click("semantic-remove");
     expect(vi.mocked(confirmDialog).mock.calls[0]![0]).toContain("Shared note (annotation)");
     expect(probe!.getState().doc).toBe(doc);
+  });
+
+  it("adds a free-placement architecture component at a free position through the engine gate", async () => {
+    const spec = structuredClone(SEMANTIC_FIXTURES.architecture);
+    delete spec.layout;
+    spec.components = (spec.components as Record<string, unknown>[]).map((entry, index) => ({ id: entry.id, type: entry.type, label: entry.label, pos: [40 + index * 200, 200], size: [160, 64] }));
+    expect((await pinnedEngineHost.validateCandidate("architecture", spec)).ok).toBe(true);
+    validateCandidate.mockImplementation(pinnedEngineHost.validateCandidate);
+    const doc = projectSemanticDocument(archifySpecToDataset("architecture", spec, { id: "ds" }).dataset).doc;
+    render(doc, { nodes: ["api"] });
+    expect(q("semantic-add-col")).toBeNull();
+    expect(q<HTMLInputElement>("semantic-add-x")!.value).toBe("630");
+    expect(q<HTMLInputElement>("semantic-add-y")!.value).toBe("200");
+    await typeInto(q<HTMLInputElement>("semantic-add-label")!, "Cache");
+    await click("semantic-add-confirm");
+    expect(specOf().components!.at(-1)).toMatchObject({ pos: [630, 200], size: [160, 64] });
+    expect(probe!.getState().doc.nodes.find((node) => node.title === "Cache")).toMatchObject({ x: 630, y: 200 });
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(1);
+    act(() => probe!.setState(undo()));
+    expect(probe!.getState().doc).toEqual(doc);
   });
 
   it("previews a remove cascade and keeps the dataset through apply and undo", async () => {

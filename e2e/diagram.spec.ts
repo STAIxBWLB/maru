@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { pinnedEngineHost } from "../src/lib/diagram/__fixtures__/engineHost";
+import { pinnedEngineHost } from "./helpers/diagramEngineHost";
 import { SEMANTIC_FIXTURES } from "../src/lib/diagram/__fixtures__/semantic";
 import type { SemanticDiagramType } from "../src/lib/diagram/reportTypes";
 

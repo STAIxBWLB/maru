@@ -3823,6 +3823,8 @@ export const en: Record<string, string> = {
   "diagram.semantic.reservedMainLane": "The main lifecycle lane is required. Keep it and move or remove individual states instead.",
   "diagram.semantic.editRefused": "The edit would leave invalid or protected diagram data. Review the fields, dependencies and locks, then try again.",
   "diagram.semantic.collection": "Item kind",
+  "diagram.semantic.positionX": "X position",
+  "diagram.semantic.positionY": "Y position",
   "diagram.semantic.column": "Column",
   "diagram.semantic.from": "From",
   "diagram.semantic.to": "To",

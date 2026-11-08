@@ -18,12 +18,14 @@ import {
   datasetHasContainers,
   detachSemanticDataset,
   projectSemanticDataset,
+  semanticContainerId,
   semanticDatasetsOf,
   semanticMemberNodeIds,
   sequenceOrder,
   semanticContainers,
   specEntries,
   validateSemanticContent,
+  type SemanticContainerRole,
 } from "./semantic";
 import { createDiagramId, DIAGRAM_SCHEMA_VERSION, type DiagramStateRoot } from "./types";
 import type { ValidationDiagnostic } from "./validation";
@@ -32,7 +34,15 @@ import type { SemanticDiagramType } from "./reportTypes";
 /** A spec edit: the next spec plus warnings, or null when nothing changes. */
 export type SpecTransform = (
   spec: Record<string, unknown>,
-) => { spec: Record<string, unknown>; warnings?: ValidationDiagnostic[] } | null;
+) => { spec: Record<string, unknown>; warnings?: ValidationDiagnostic[]; containerIndexRemaps?: readonly SemanticContainerIndexRemap[] } | null;
+
+/** Transient canvas identity remap for an index-keyed semantic container collection. */
+export interface SemanticContainerIndexRemap {
+  field: string;
+  role: SemanticContainerRole;
+  oldIndex: number;
+  newIndex: number | null;
+}
 
 export interface SemanticEntryTarget { field: string; index: number }
 export interface SemanticCascadeEffect {
@@ -53,9 +63,17 @@ function changedProjectionIds(
   before: Parameters<typeof projectSemanticDataset>[0],
   after: Parameters<typeof projectSemanticDataset>[0],
   forceContainers = false,
+  previousNodeIdRemap: ReadonlyMap<string, string> = new Map(),
 ): Set<string> {
   const opts = { containers: forceContainers || datasetHasContainers(state.doc, before.id), doc: state.doc };
-  const a = projectSemanticDataset(before, opts);
+  const previous = projectSemanticDataset(before, opts);
+  const a = {
+    ...previous,
+    nodes: previous.nodes.map((node) => {
+      const id = previousNodeIdRemap.get(node.id);
+      return id ? { ...node, id } : node;
+    }),
+  };
   const b = projectSemanticDataset(after, opts);
   const touched = new Set<string>();
   for (const [left, right] of [
@@ -70,6 +88,94 @@ function changedProjectionIds(
     for (const id of index.keys()) touched.add(id);
   }
   return touched;
+}
+
+interface RemappedPlanningState {
+  state: DiagramStateRoot;
+  nodeIdRemap: ReadonlyMap<string, string>;
+}
+
+function remapIndexContainerCanvas(
+  state: DiagramStateRoot,
+  datasetId: string,
+  remaps: readonly SemanticContainerIndexRemap[],
+  capturedNodeIdRemap?: ReadonlyMap<string, string>,
+): RemappedPlanningState | { diagnostics: ValidationDiagnostic[] } {
+  const nodeIdRemap = new Map(capturedNodeIdRemap ?? []);
+  const removedNodeMarkers = new Map<string, string>();
+  const sourceIds = new Set<string>();
+  const occupied = new Set(state.doc.nodes.map((node) => node.id));
+
+  for (const remap of capturedNodeIdRemap ? [] : remaps) {
+    const oldId = semanticContainerId(datasetId, remap.role, String(remap.oldIndex));
+    const existing = state.doc.nodes.find((node) => node.id === oldId);
+    if (existing) {
+      const expectedMemberId = `${datasetId}:${remap.role}:${remap.oldIndex}`;
+      if (existing.meta?.semanticContainer !== remap.role || existing.meta?.memberId !== expectedMemberId) {
+        return { diagnostics: [{ key: "diagram.proposal.idCollision", params: { id: oldId } }] };
+      }
+      sourceIds.add(oldId);
+    }
+    let newId: string;
+    if (remap.newIndex === null) {
+      do {
+        newId = createDiagramId("semantic-remap");
+      } while (occupied.has(newId) || [...nodeIdRemap.values()].includes(newId));
+      removedNodeMarkers.set(newId, `${datasetId}:${remap.role}:tombstone:${remap.oldIndex}`);
+    } else {
+      newId = semanticContainerId(datasetId, remap.role, String(remap.newIndex));
+    }
+    nodeIdRemap.set(oldId, newId);
+  }
+
+  for (const [oldId, newId] of nodeIdRemap) {
+    const source = state.doc.nodes.find((node) => node.id === oldId);
+    if (source) {
+      const match = remaps.find((entry) => semanticContainerId(datasetId, entry.role, String(entry.oldIndex)) === oldId);
+      const expectedMemberId = match ? `${datasetId}:${match.role}:${match.oldIndex}` : null;
+      if (!expectedMemberId || source.meta?.semanticContainer !== match?.role || source.meta?.memberId !== expectedMemberId) {
+        return { diagnostics: [{ key: "diagram.proposal.idCollision", params: { id: oldId } }] };
+      }
+      sourceIds.add(oldId);
+      if (match?.newIndex === null) removedNodeMarkers.set(newId, `${datasetId}:${match.role}:tombstone:${match.oldIndex}`);
+    }
+  }
+  for (const [oldId, newId] of nodeIdRemap) {
+    if (oldId === newId) continue;
+    const owner = state.doc.nodes.find((node) => node.id === newId);
+    if (owner && !sourceIds.has(newId)) {
+      return { diagnostics: [{ key: "diagram.proposal.idCollision", params: { id: newId } }] };
+    }
+  }
+
+  const nodes = state.doc.nodes.map((node) => {
+    const id = nodeIdRemap.get(node.id);
+    if (!id) return node;
+    const marker = removedNodeMarkers.get(id);
+    const match = remaps.find((entry) => semanticContainerId(datasetId, entry.role, String(entry.oldIndex)) === node.id);
+    const memberId = marker ?? (match?.newIndex === null
+      ? node.meta?.memberId
+      : `${datasetId}:${match?.role}:${match?.newIndex}`);
+    return { ...node, id, meta: { ...node.meta, ...(memberId ? { memberId } : {}) } };
+  });
+  const edges = state.doc.edges.map((edge) => {
+    const fromNode = nodeIdRemap.get(edge.fromNode) ?? edge.fromNode;
+    const toNode = nodeIdRemap.get(edge.toNode) ?? edge.toNode;
+    return fromNode === edge.fromNode && toNode === edge.toNode ? edge : { ...edge, fromNode, toNode };
+  });
+  const selection = state.ephemeral.selection;
+  const remappedState: DiagramStateRoot = {
+    ...state,
+    doc: { ...state.doc, nodes, edges },
+    ephemeral: {
+      ...state.ephemeral,
+      selection: {
+        nodes: new Set([...selection.nodes].map((id) => nodeIdRemap.get(id) ?? id)),
+        edges: selection.edges,
+      },
+    },
+  };
+  return { state: remappedState, nodeIdRemap };
 }
 
 /**
@@ -96,30 +202,58 @@ export function planSemanticEdit(
   const content = validateSemanticContent(dataset.diagramType, result.spec);
   if (content.length > 0) return { status: "invalid", diagnostics: content };
 
+  const preparedRemap = result.containerIndexRemaps?.length
+    ? remapIndexContainerCanvas(state, datasetId, result.containerIndexRemaps)
+    : { state, nodeIdRemap: new Map<string, string>() };
+  if ("diagnostics" in preparedRemap) return { status: "invalid", diagnostics: preparedRemap.diagnostics };
+  const planningState = preparedRemap.state;
+  const previousNodeIdRemap = preparedRemap.nodeIdRemap;
+
   const next = { ...dataset, spec: result.spec };
   const descriptor = SEMANTIC_TYPES[dataset.diagramType];
   const addsFirstContainer = semanticContainers(descriptor).some(({ field }) =>
     specEntries(result.spec, field).length > specEntries(dataset.spec, field).length &&
-    !datasetHasContainers(state.doc, dataset.id),
+    !datasetHasContainers(planningState.doc, dataset.id),
   );
   const meta: ProposalMeta = {
     jobId: "semantic-edit",
-    docId: state.doc.id,
+    docId: planningState.doc.id,
     schemaVersion: DIAGRAM_SCHEMA_VERSION,
     baseMemoryRevision: "",
     baseStorageRevision: null,
-    scope: new Set(semanticMemberNodeIds(state.doc, datasetId)),
-    lockedNodeIds: state.doc.nodes.filter((node) => node.locked === true).map((node) => node.id),
+    scope: new Set(semanticMemberNodeIds(planningState.doc, datasetId)),
+    lockedNodeIds: planningState.doc.nodes.filter((node) => node.locked === true).map((node) => node.id),
   };
-  const { proposal } = buildProposalFromCandidate(meta, next, state.doc, {
-    touched: changedProjectionIds(state, dataset, next, addsFirstContainer),
+  const { proposal } = buildProposalFromCandidate(meta, next, planningState.doc, {
+    touched: changedProjectionIds(planningState, dataset, next, addsFirstContainer, previousNodeIdRemap),
+    previousNodeIdRemap,
     ...(addsFirstContainer ? { containers: true } : {}),
   });
-  const outcome = prepareProposalApply(state, proposal, "");
+  const outcome = prepareProposalApply(planningState, proposal, "");
   if (outcome.status === "applied") {
-    return { status: "applied", transformer: outcome.transformer, warnings: result.warnings ?? [] };
+    const applyProposal = outcome.transformer;
+    const transformer: StateTransformer = (current) => {
+      if (current.doc !== state.doc) return current;
+      if (result.containerIndexRemaps?.length) {
+        const remapped = remapIndexContainerCanvas(current, datasetId, result.containerIndexRemaps, previousNodeIdRemap);
+        if ("diagnostics" in remapped) return current;
+        return applyProposal(remapped.state);
+      }
+      return applyProposal(current);
+    };
+    return { status: "applied", transformer, warnings: result.warnings ?? [] };
   }
-  return { status: "invalid", diagnostics: outcome.status === "invalid" ? outcome.diagnostics : [] };
+  const diagnostics = outcome.status === "invalid" ? outcome.diagnostics : [];
+  if (previousNodeIdRemap.size === 0) return { status: "invalid", diagnostics };
+  const originalIdByRemappedId = new Map([...previousNodeIdRemap].map(([originalId, remappedId]) => [remappedId, originalId]));
+  return {
+    status: "invalid",
+    diagnostics: diagnostics.map((diagnostic) => {
+      const id = diagnostic.params?.id;
+      const originalId = typeof id === "string" ? originalIdByRemappedId.get(id) : undefined;
+      return originalId ? { ...diagnostic, params: { ...diagnostic.params, id: originalId } } : diagnostic;
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +457,16 @@ export function addSemanticEntry(
       next = growSequenceViewBox(remapSequenceRanges(spec, { ...next, messages: nextMessages }, oldToNew));
     }
     if (type === "sequence") next = growSequenceViewBox(next);
-    return { spec: next };
+    const indexedContainer = semanticContainers(descriptor).find((container) => container.field === field && container.keyedBy === "index");
+    const containerIndexRemaps = indexedContainer
+      ? entries.map((_, oldIndex) => ({
+          field,
+          role: indexedContainer.role,
+          oldIndex,
+          newIndex: oldIndex >= at ? oldIndex + 1 : oldIndex,
+        })).filter((remap) => remap.newIndex !== remap.oldIndex)
+      : [];
+    return { spec: next, ...(containerIndexRemaps.length > 0 ? { containerIndexRemaps } : {}) };
   };
 }
 
@@ -479,6 +622,19 @@ export function removeSemanticEntries(
     }
   }
 
+  const containerIndexRemaps: SemanticContainerIndexRemap[] = [];
+  for (const container of semanticContainers(descriptor)) {
+    if (container.keyedBy !== "index") continue;
+    const removedIndexes = removals.get(container.field);
+    if (!removedIndexes?.size) continue;
+    specEntries(spec, container.field).forEach((_, oldIndex) => {
+      const newIndex = removedIndexes.has(oldIndex)
+        ? null
+        : oldIndex - [...removedIndexes].filter((removedIndex) => removedIndex < oldIndex).length;
+      if (newIndex !== oldIndex) containerIndexRemaps.push({ field: container.field, role: container.role, oldIndex, newIndex });
+    });
+  }
+
   const transform: SpecTransform = (current) => {
     if (current !== spec || effects.length === 0) return null;
     let next: Record<string, unknown> = { ...spec };
@@ -531,7 +687,7 @@ export function removeSemanticEntries(
       next.messages = kept.map((message, index) => ({ ...message, y: oldToNew.get(keptOriginalIndexes[index]!) }));
       next = growSequenceViewBox(remapSequenceRanges(spec, next, oldToNew));
     }
-    return { spec: next };
+    return { spec: next, ...(containerIndexRemaps.length > 0 ? { containerIndexRemaps } : {}) };
   };
   return { transform, effects };
 }

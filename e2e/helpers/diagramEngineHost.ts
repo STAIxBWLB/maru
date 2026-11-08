@@ -3,9 +3,17 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { GenerationHost } from "../generation";
+interface ValidationReceipt {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  candidateSha256?: string;
+}
+interface EngineHost {
+  validateCandidate(type: string, spec: unknown): Promise<ValidationReceipt>;
+}
 
-export const pinnedEngineHost: Pick<GenerationHost, "validateCandidate"> = {
+export const pinnedEngineHost: EngineHost = {
   validateCandidate: async (type, spec) => {
     const dir = mkdtempSync(join(tmpdir(), "maru-engine-host-"));
     try {

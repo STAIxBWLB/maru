@@ -8,7 +8,7 @@ import { confirmDialog, messageDialog } from "../../lib/confirmDialog";
 import { SEMANTIC_FIXTURES } from "../../lib/diagram/__fixtures__/semantic";
 import { defaultCoalescer, undo } from "../../lib/diagram/actions";
 import { archifySpecToDataset } from "../../lib/diagram/archifyCodec";
-import { projectSemanticDocument } from "../../lib/diagram/semantic";
+import { projectSemanticDataset, projectSemanticDocument, semanticContainerId } from "../../lib/diagram/semantic";
 import { createDiagramStore, type DiagramStore } from "../../lib/diagram/state";
 import { createInitialEphemeral, type DiagramDoc } from "../../lib/diagram/types";
 import { LocaleContext, t as translate } from "../../lib/i18n";
@@ -34,6 +34,28 @@ function lifecycleDoc(): DiagramDoc {
     archifySpecToDataset("lifecycle", SEMANTIC_FIXTURES.lifecycle, { id: "ds" }).dataset,
   ).doc;
   return { ...doc, nodes: [...doc.nodes, { id: "note", kind: "text", x: 0, y: 400, w: 40, h: 20 }] };
+}
+
+function architectureBoundaryDoc(): DiagramDoc {
+  const spec = {
+    ...structuredClone(SEMANTIC_FIXTURES.architecture),
+    boundaries: [
+      { kind: "region", label: "Boundary A", wraps: ["web"] },
+      { kind: "region", label: "Boundary B", wraps: ["api", "db"] },
+    ],
+  };
+  const dataset = archifySpecToDataset("architecture", spec, { id: "ds" }).dataset;
+  const base = projectSemanticDocument(dataset).doc;
+  const idB = semanticContainerId("ds", "boundary", "1");
+  return {
+    ...base,
+    nodes: base.nodes.map((node) => node.id === idB ? { ...node, x: node.x + 17, y: node.y + 9 } : node),
+    edges: [
+      ...base.edges,
+      { id: "annotation-a", fromNode: semanticContainerId("ds", "boundary", "0"), fromPort: "e" as const, toNode: "web", toPort: "w" as const, label: "A annotation" },
+      { id: "annotation-b", fromNode: idB, fromPort: "e" as const, toNode: "api", toPort: "w" as const, label: "B annotation" },
+    ],
+  };
 }
 
 function storeWith(doc: DiagramDoc, nodes: string[]): DiagramStore {
@@ -134,6 +156,58 @@ describe("deleteSelection", () => {
     expect(store.getState().ephemeral.history.past).toHaveLength(1);
     store.setState(undo());
     expect(store.getState().doc).toEqual(doc);
+  });
+
+  it("previews boundary A removal while preserving boundary B identity, drift, annotation, and one undo", async () => {
+    const doc = architectureBoundaryDoc();
+    const oldA = semanticContainerId("ds", "boundary", "0");
+    const oldB = semanticContainerId("ds", "boundary", "1");
+    const newB = semanticContainerId("ds", "boundary", "0");
+    const store = storeWith(doc, [oldA]);
+    const before = JSON.stringify(doc);
+    const dataset = doc.datasets!.find((item) => item.id === "ds")!;
+    const oldBProjection = projectSemanticDataset(dataset, { containers: true, doc }).nodes.find((node) => node.id === oldB)!;
+    const nextSpec = { ...dataset.spec, boundaries: (dataset.spec.boundaries as unknown[]).slice(1) };
+    const newBProjection = projectSemanticDataset({ ...dataset, spec: nextSpec }, { containers: true, doc }).nodes.find((node) => node.id === newB)!;
+    const currentB = doc.nodes.find((node) => node.id === oldB)!;
+
+    await deleteSelection(store, defaultCoalescer(), ko);
+
+    const confirmation = vi.mocked(confirmDialog).mock.calls[0]![0];
+    expect(confirmation).toContain(ko("diagram.semantic.annotationRemoved", { name: "A annotation (annotation-a)" }));
+    expect(confirmation).not.toContain("B annotation");
+    const result = store.getState();
+    const survivor = result.doc.nodes.find((node) => node.id === newB)!;
+    expect(survivor.title).toBe("Boundary B");
+    expect([survivor.x, survivor.y, survivor.w, survivor.h]).toEqual([
+      currentB.x + newBProjection.x - oldBProjection.x,
+      currentB.y + newBProjection.y - oldBProjection.y,
+      currentB.w + newBProjection.w - oldBProjection.w,
+      currentB.h + newBProjection.h - oldBProjection.h,
+    ]);
+    expect(result.doc.nodes.find((node) => node.id === oldA)?.title).toBe("Boundary B");
+    expect(result.doc.nodes.some((node) => node.id === oldB)).toBe(false);
+    expect(result.doc.edges.some((edge) => edge.id === "annotation-a")).toBe(false);
+    expect(result.doc.edges.find((edge) => edge.id === "annotation-b")?.fromNode).toBe(newB);
+    expect(result.ephemeral.history.past).toHaveLength(1);
+    store.setState(undo());
+    expect(JSON.stringify(store.getState().doc)).toBe(before);
+  });
+
+  it("refuses an external annotation bridge from a deleted index container", async () => {
+    const base = architectureBoundaryDoc();
+    const oldA = semanticContainerId("ds", "boundary", "0");
+    const doc = {
+      ...base,
+      nodes: [...base.nodes, { id: "note", kind: "text" as const, x: 500, y: 500, w: 80, h: 32, title: "External note" }],
+      edges: [...base.edges, { id: "external-boundary-note", fromNode: oldA, fromPort: "e" as const, toNode: "note", toPort: "w" as const }],
+    };
+    const store = storeWith(doc, [oldA]);
+    await deleteSelection(store, defaultCoalescer(), ko);
+    expect(store.getState().doc).toBe(doc);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    expect(confirmDialog).not.toHaveBeenCalled();
+    expect(messageDialog).toHaveBeenCalled();
   });
 
   it("plans two semantic datasets joined by a freeform bridge as one deletion", async () => {

@@ -213,6 +213,8 @@ export interface BuildProposalOptions {
   touched?: ReadonlySet<string>;
   /** Explicitly project containers for an edit that adds the first one to a legacy dataset. */
   containers?: boolean;
+  /** Transient old canvas container ids to their remapped identities during an index edit. */
+  previousNodeIdRemap?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -234,7 +236,16 @@ export function buildProposalFromCandidate(
   );
   const containers = opts.containers ?? (previous === null || datasetHasContainers(currentDoc, candidate.id) || hasRanges);
   const projection = projectSemanticDataset(candidate, { containers, doc: currentDoc });
-  const previousProjection = previous ? projectSemanticDataset(previous, { containers, doc: currentDoc }) : null;
+  const projectedPrevious = previous ? projectSemanticDataset(previous, { containers, doc: currentDoc }) : null;
+  const previousProjection = projectedPrevious && opts.previousNodeIdRemap
+    ? {
+        ...projectedPrevious,
+        nodes: projectedPrevious.nodes.map((node) => {
+          const id = opts.previousNodeIdRemap!.get(node.id);
+          return id ? { ...node, id } : node;
+        }),
+      }
+    : projectedPrevious;
   const diagnostics: ValidationDiagnostic[] = [...projection.diagnostics];
 
   const scope = meta.scope ?? null;

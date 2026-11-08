@@ -208,7 +208,10 @@ apply is disabled.
 <datasetId>:m<index>`; lifecycle `start`/`success`/`failure` are ovals,
 `decision` a diamond). Workflow and lifecycle entities sit on a lane grid
 (lane bands top-down, `col` columns), dataflow entities in stage columns
-(ordered by `row`), architecture members are reflowed by `layoutDoc`.
+(ordered by `row`). Architecture projection honors explicit pos coordinates
+and authored row/col cells using the pinned grid's origin and spacing;
+index-based placement is a fallback only. Fresh-document auto-layout is used
+only when no architecture member has authored placement.
 Lanes, stages, boundaries, workflow phases/groups and sequence segments become
 `section` containers; activations use simple transparent outlines so their
 captions have no opaque header over message endpoints. Managed containers
@@ -275,7 +278,13 @@ through the cascade as well as spec relationships.
 **Structure controls (issue #527).** The inspector's Add form selects an
 entity, relation or managed container collection and asks for typed labels,
 endpoints, lane/stage, column/range or boundary members as appropriate.
-New IDs are minted without rewriting existing entity/relation IDs. Sequence
+Layout-less architecture specs use x/y position controls, defaulting to a
+free slot to the right of existing components, rather than grid columns.
+New IDs are minted without rewriting existing entity/relation IDs.
+Index-keyed containers remap canvas IDs, annotation endpoints and selection
+atomically with the spec edit. A surviving container keeps its own geometry
+offset rather than inheriting the removed entry's canvas slot; lost
+annotations belong to the removed entry and appear in the preview. Sequence
 insert/remove deterministically re-space message y coordinates and retain
 valid timeline ranges. Boundary member checkboxes apply the entire wraps
 set in one edit; phase/group and segment/activation ranges have explicit

@@ -3818,6 +3818,8 @@ export const ko: Record<string, string> = {
   "diagram.semantic.reservedMainLane": "라이프사이클의 main 레인은 필수입니다. 레인을 유지하고 개별 상태를 이동하거나 삭제하세요.",
   "diagram.semantic.editRefused": "편집 결과가 유효하지 않거나 보호된 항목에 영향을 줍니다. 입력값·종속 항목·잠금을 확인하고 다시 시도하세요.",
   "diagram.semantic.collection": "항목 종류",
+  "diagram.semantic.positionX": "X 위치",
+  "diagram.semantic.positionY": "Y 위치",
   "diagram.semantic.column": "열",
   "diagram.semantic.from": "시작 항목",
   "diagram.semantic.to": "도착 항목",
