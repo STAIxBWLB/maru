@@ -592,8 +592,6 @@ describe("semantic structural edits", () => {
       ],
     };
     const store = storeOf("architecture", source);
-    const oldA = semanticContainerId("ds", "boundary", "0");
-    const oldB = semanticContainerId("ds", "boundary", "1");
     const inserted = apply(store, addSemanticEntry("architecture", "boundaries", { kind: "region", label: "Inserted", wraps: ["api"] }, 0));
     expect(inserted.status).toBe("applied");
     expect(store.getState().doc.nodes.find((node) => node.id === semanticContainerId("ds", "boundary", "1"))?.title).toBe("Boundary A");

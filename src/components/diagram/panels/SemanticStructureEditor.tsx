@@ -67,7 +67,7 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
   const placed = freePlacement ? projectSemanticDataset(dataset).nodes : [];
   const rightmost = placed.reduce((right, node) => node.x + node.w > right.x + right.w ? node : right, placed[0] ?? { x: 40, y: 40, w: 160 });
   const pos = position ?? [rightmost.x + rightmost.w + 30, rightmost.y];
-  const maxCol = type === "architecture" ? Math.max(0, (typeof layout.cols === "number" ? layout.cols : 4) - 1) : 5;
+  const maxCol = type === "architecture" ? Math.max(0, (typeof layout.cols === "number" ? layout.cols : 4) - 1) : type === "lifecycle" ? 4 : 5;
   const reservedMain = type === "lifecycle" && member.kind === "container" && member.role === "lane" && member.entry.id === "main";
   const add = async () => {
     let entry: Record<string, unknown> = { label: label.trim() };
