@@ -86,11 +86,10 @@ pub(crate) fn place(spec: &ArchitectureSpec, scene: &mut SceneBuilder) -> Result
         )?;
     }
 
-    // Anonymous identity survives removals before this boundary.
-    let boundary_ids = super::anonymous_ids("boundary", &spec.boundaries)?;
-    for (boundary, id) in spec.boundaries.iter().zip(boundary_ids) {
+    // Boundary frames derive from members and are not independent pin targets.
+    for (index, boundary) in spec.boundaries.iter().enumerate() {
         scene.container_for_members(
-            &id,
+            &format!("boundary:{index}"),
             &boundary.kind,
             &boundary.label,
             &boundary.wraps,
@@ -167,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn authored_positions_override_grid_and_boundary_keys_are_stable() {
+    fn authored_positions_override_grid_and_boundary_ordinals_are_deterministic() {
         let report = layout(
             r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Architecture","output":"architecture.html"},"layout":{"mode":"grid","cols":2,"origin":[30,50],"cellW":100,"cellH":80,"gapX":20,"gapY":15},"components":[{"id":"authored","type":"backend","label":"Authored","pos":[400,80]},{"id":"grid","type":"database","label":"Grid","row":0,"col":1}],"boundaries":[{"kind":"region","label":"Region","wraps":["authored","grid"]}],"connections":[{"id":"connect","from":"grid","to":"authored","fromSide":"right","toSide":"left","route":"orthogonal-h"}]}"#,
         );
@@ -190,13 +189,7 @@ mod tests {
         assert_eq!((authored.bounds.x, authored.bounds.y), (400 * 64, 80 * 64));
         assert_eq!(grid.position_source, GeometryPositionSource::Automatic);
         assert_eq!((grid.bounds.x, grid.bounds.y), (150 * 64, 50 * 64));
-        let typed: ArchitectureSpec = serde_json::from_str(
-            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Architecture","output":"architecture.html"},"layout":{"mode":"grid","cols":2,"origin":[30,50],"cellW":100,"cellH":80,"gapX":20,"gapY":15},"components":[{"id":"authored","type":"backend","label":"Authored","pos":[400,80]},{"id":"grid","type":"database","label":"Grid","row":0,"col":1}],"boundaries":[{"kind":"region","label":"Region","wraps":["authored","grid"]}],"connections":[]}"#,
-        )
-        .unwrap();
-        let boundary_id = super::super::anonymous_ids("boundary", &typed.boundaries)
-            .unwrap()
-            .remove(0);
+        let boundary_id = "boundary:0";
         assert_eq!(geometry.routes.len(), 1);
         assert_eq!(geometry.routes[0].id.as_deref(), Some("connect"));
         assert!(geometry
@@ -219,46 +212,31 @@ mod tests {
     }
 
     #[test]
-    fn removing_an_earlier_boundary_preserves_survivor_identity_and_pin() {
-        let full: ArchitectureSpec = serde_json::from_str(
-            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Boundaries","output":"boundaries.html"},"components":[{"id":"a","type":"backend","label":"A","pos":[80,100]},{"id":"b","type":"database","label":"B","pos":[300,100]}],"boundaries":[{"kind":"region","label":"First","wraps":["a"]},{"kind":"security-group","label":"Second","wraps":["b"]}],"connections":[]}"#,
-        )
-        .unwrap();
-        let original_ids = super::super::anonymous_ids("boundary", &full.boundaries).unwrap();
-        let survivor_id = original_ids[1].clone();
-        let mut remaining = full.clone();
-        remaining.boundaries.remove(0);
-        let remaining_ids = super::super::anonymous_ids("boundary", &remaining.boundaries).unwrap();
-        assert_eq!(remaining_ids[0], survivor_id);
-
-        // Keep source omission semantics; serializing the Rust model would
-        // introduce explicit nulls that document validation correctly refuses.
+    fn boundary_pin_is_ignored_even_after_membership_changes() {
         let mut source = serde_json::json!({"schema_version":1,"diagram_type":"architecture","meta":{"title":"Boundaries","output":"boundaries.html"},"components":[{"id":"a","type":"backend","label":"A","pos":[80,100]},{"id":"b","type":"database","label":"B","pos":[300,100]}],"boundaries":[{"kind":"region","label":"First","wraps":["a"]},{"kind":"security-group","label":"Second","wraps":["b"]}],"connections":[]});
-        source["boundaries"].as_array_mut().unwrap().remove(0);
-        let spec_json = source.to_string();
-        let request = serde_json::json!({
-            "specJson": spec_json,
-            "pinSet": {
-                "sourceSpecSha256": crate::spec_hash(&spec_json),
-                "pins": [{
-                    "targetId": survivor_id,
-                    "targetKind": "container",
-                    "position": {"x": 600 * 64, "y": 400 * 64}
-                }]
+        let old_hash = crate::spec_hash(&source.to_string());
+        for iteration in 0..2 {
+            if iteration == 1 {
+                source["boundaries"][1]["wraps"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push("a".into());
             }
-        });
-        let report = crate::layout::layout_json(&request.to_string());
-        assert!(report.ok, "{:?}", report.diagnostics);
-        let container = report
-            .geometry
-            .unwrap()
-            .containers
-            .into_iter()
-            .find(|container| container.id == survivor_id)
-            .unwrap();
-        assert_eq!(
-            (container.bounds.x, container.bounds.y),
-            (600 * 64, 400 * 64)
-        );
+            let spec_json = source.to_string();
+            let baseline = layout(&spec_json);
+            assert!(baseline.ok, "{:?}", baseline.diagnostics);
+            let report=crate::layout::layout_json(&serde_json::json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":old_hash,"pins":[{"targetId":"boundary:1","targetKind":"container","position":{"x":600*64,"y":400*64}}]}}).to_string());
+            assert!(report.ok, "{:?}", report.diagnostics);
+            assert_eq!(report.geometry, baseline.geometry);
+            let dropped: Vec<_> = report
+                .diagnostics
+                .iter()
+                .filter(|d| d.code == "document/pin-member-removed")
+                .collect();
+            assert_eq!(dropped.len(), 1);
+            assert!(dropped[0]
+                .message
+                .contains("this container's position derives from its members"));
+        }
     }
 }

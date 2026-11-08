@@ -108,7 +108,6 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
             Some([width, height]),
         )?;
     }
-    let stage_ids = super::anonymous_ids("stage", &spec.stages)?;
     for (index, stage) in spec.stages.iter().enumerate() {
         let members: Vec<String> = spec
             .nodes
@@ -116,10 +115,10 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
             .filter(|node| usize::try_from(node.stage).ok() == Some(index))
             .map(|node| node.id.clone())
             .collect();
-        let id = &stage_ids[index];
+        let id = format!("stage:{index}");
         if members.is_empty() {
             scene.add_container(
-                id,
+                &id,
                 "stage",
                 &stage.label,
                 GeometryBox {
@@ -130,7 +129,7 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
                 },
             )?;
         } else {
-            scene.container_for_members(id, "stage", &stage.label, &members, PADDING)?;
+            scene.container_for_members(&id, "stage", &stage.label, &members, PADDING)?;
         }
     }
     for (index, flow) in spec.flows.iter().enumerate() {
@@ -203,16 +202,7 @@ mod tests {
         let stage = geometry
             .containers
             .iter()
-            .find(|container| {
-                container.kind == "stage"
-                    && container
-                        .bounds
-                        .contains(GeometryPoint {
-                            x: node.bounds.x,
-                            y: node.bounds.y,
-                        })
-                        .unwrap()
-            })
+            .find(|container| container.id == "stage:1")
             .unwrap();
         assert!(stage
             .bounds
@@ -257,16 +247,7 @@ mod tests {
         let stage = after
             .containers
             .iter()
-            .find(|container| {
-                container.kind == "stage"
-                    && container
-                        .bounds
-                        .contains(GeometryPoint {
-                            x: bounds(&after).x,
-                            y: bounds(&after).y,
-                        })
-                        .unwrap()
-            })
+            .find(|container| container.id == "stage:0")
             .unwrap();
         assert!(stage
             .bounds

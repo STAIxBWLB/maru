@@ -55,32 +55,6 @@ fn inflate(b: GeometryBox, p: Coord) -> Result<GeometryBox, Diagnostic> {
     )
 }
 
-/// Anonymous source records have no durable authored ID. Content plus an
-/// occurrence among exact duplicates avoids aliasing after another removal.
-pub(crate) fn anonymous_ids<T: Serialize>(
-    role: &str,
-    members: &[T],
-) -> Result<Vec<String>, Diagnostic> {
-    let mut occurrences = BTreeMap::<String, usize>::new();
-    members
-        .iter()
-        .map(|member| {
-            let json = serde_json::to_string(member).map_err(|e| {
-                failure(
-                    "member-identity",
-                    format!("anonymous member cannot be serialized: {e}"),
-                    "repair the member's finite source fields",
-                )
-            })?;
-            let digest = crate::spec_hash(&json);
-            let occurrence = occurrences.entry(digest.clone()).or_default();
-            let id = format!("{role}:{digest}:{occurrence}");
-            *occurrence += 1;
-            Ok(id)
-        })
-        .collect()
-}
-
 pub(crate) struct SceneBuilder {
     pub(crate) document: GeometryDocument,
     pub(crate) diagnostics: Vec<Diagnostic>,
@@ -316,9 +290,11 @@ impl SceneBuilder {
         label: &str,
         mut bounds: GeometryBox,
     ) -> Result<GeometryBox, Diagnostic> {
-        if let Some(pin) = self.pins.get(id) {
-            bounds.x = pin.position.x;
-            bounds.y = pin.position.y;
+        if !is_derived_container_id(id) {
+            if let Some(pin) = self.pins.get(id) {
+                bounds.x = pin.position.x;
+                bounds.y = pin.position.y;
+            }
         }
         bounds.right().map_err(arithmetic)?;
         bounds.bottom().map_err(arithmetic)?;
@@ -579,6 +555,11 @@ impl SceneBuilder {
                     .containers
                     .iter()
                     .map(|c| (GeometryTargetKind::Container, c.id.as_str())),
+            )
+            .chain(
+                self.cards
+                    .iter()
+                    .map(|(id, _)| (GeometryTargetKind::Container, id.as_str())),
             );
         self.diagnostics
             .extend(resolve_pins(&self.request, members).diagnostics);
@@ -704,48 +685,8 @@ impl SceneBuilder {
             });
         }
         self.document.routes = final_routes;
-        let pinned_card = self.cards.iter().any(|(id, _)| self.pins.contains_key(id));
         for (id, card) in self.cards.clone() {
             self.card(&id, &card)?;
-        }
-        if pinned_card {
-            let mut routes = Vec::new();
-            for r in &self.connections {
-                let (points, _) = self.route_points(r)?;
-                for pair in points.windows(2) {
-                    if self
-                        .document
-                        .nodes
-                        .iter()
-                        .map(|n| n.bounds)
-                        .chain(self.document.labels.iter().map(|l| l.bounds))
-                        .chain(
-                            self.document
-                                .containers
-                                .iter()
-                                .filter(|c| c.kind == "card")
-                                .map(|c| c.bounds),
-                        )
-                        .any(|b| segment_hits_box(pair[0], pair[1], b))
-                    {
-                        return Err(failure(
-                            "route-port-blocked",
-                            "a pinned card or label covers an endpoint escape",
-                            "move the pinned card or change the endpoint side",
-                        ));
-                    }
-                }
-                routes.push(GeometryRoute {
-                    id: Some(r.id.clone()),
-                    from: r.from.clone(),
-                    to: r.to.clone(),
-                    points,
-                    variant: r.variant.clone(),
-                    role: r.role.clone(),
-                    width: r.width,
-                });
-            }
-            self.document.routes = routes;
         }
         let mut extent = rect(0, 0, 64, 64)?;
         for b in self
@@ -951,9 +892,8 @@ pub fn layout_json(input: &str) -> GeometryReport {
         };
         if let Some(raw) = spec.get("cards").filter(|v| !v.is_null()) {
             let cards: Vec<common::Card> = typed(raw)?;
-            let ids = anonymous_ids("card", &cards)?;
-            for (id, card) in ids.iter().zip(&cards) {
-                scene.queue_card(id, card);
+            for (index, card) in cards.iter().enumerate() {
+                scene.queue_card(&format!("card:{index}"), card);
             }
         }
         scene.finish(&meta)
@@ -1145,13 +1085,75 @@ mod tests {
         assert_eq!(report.receipt.input_spec_sha256, crate::spec_hash(input));
     }
     #[test]
-    fn anonymous_member_identity_does_not_shift_after_another_removal() {
-        let a = serde_json::json!({"label":"A"});
-        let b = serde_json::json!({"label":"B"});
-        let before = anonymous_ids("group", &[a, b.clone()]).unwrap();
-        let after = anonymous_ids("group", &[b]).unwrap();
-        assert_eq!(before[1], after[0]);
+    fn derived_frames_ignore_pins_and_report_each_target_without_changing_geometry() {
+        for input in fixtures() {
+            let mut spec: Value = serde_json::from_str(input).unwrap();
+            let kind = spec["diagram_type"].as_str().unwrap().to_string();
+            if kind == "architecture" {
+                spec["boundaries"] =
+                    serde_json::json!([{"kind":"region","label":"Region","wraps":["a","b"]}]);
+            }
+            if kind == "sequence" {
+                spec["segments"] = serde_json::json!([{"from":160,"to":350,"label":"Segment"}]);
+                spec["activations"] = serde_json::json!([{"participant":"a","from":170,"to":270}]);
+            }
+            spec["cards"] = serde_json::json!([{"dot":"cyan","title":"Note","items":["Content"]}]);
+            let source = spec.to_string();
+            let baseline = layout(&source);
+            assert!(baseline.ok, "{:?}", baseline.diagnostics);
+            let targets: Vec<_> = baseline
+                .geometry
+                .as_ref()
+                .unwrap()
+                .containers
+                .iter()
+                .filter(|c| is_derived_container_id(&c.id))
+                .map(|c| c.id.clone())
+                .collect();
+            assert!(!targets.is_empty());
+            let pins:Vec<_>=targets.iter().map(|id|serde_json::json!({"targetId":id,"targetKind":"container","position":{"x":900000,"y":800000}})).collect();
+            let report=layout_json(&serde_json::json!({"specJson":source,"pinSet":{"sourceSpecSha256":crate::spec_hash(&source),"pins":pins}}).to_string());
+            assert!(report.ok, "{:?}", report.diagnostics);
+            assert_eq!(report.geometry, baseline.geometry);
+            assert_eq!(
+                report
+                    .diagnostics
+                    .iter()
+                    .filter(|d| d.code == "document/pin-member-removed"
+                        && d.message
+                            .contains("this container's position derives from its members"))
+                    .count(),
+                targets.len()
+            );
+        }
     }
+
+    #[test]
+    fn authored_lane_group_and_phase_frames_keep_their_pins() {
+        let mut spec: Value = serde_json::from_str(fixtures()[1]).unwrap();
+        spec["edges"] = serde_json::json!([]);
+        spec["phases"] =
+            serde_json::json!([{"id":"delivery","label":"Delivery","fromCol":0,"toCol":2}]);
+        spec["groups"] = serde_json::json!([{"id":"workers","label":"Workers","lane":"main","fromCol":0,"toCol":2}]);
+        let source = spec.to_string();
+        let ids = ["lane:main", "group:workers", "phase:delivery"];
+        let pins:Vec<_>=ids.iter().enumerate().map(|(i,id)|serde_json::json!({"targetId":id,"targetKind":"container","position":{"x":(800+i as i32*200)*64,"y":600*64}})).collect();
+        let report=layout_json(&serde_json::json!({"specJson":source,"pinSet":{"sourceSpecSha256":crate::spec_hash(&source),"pins":pins}}).to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        assert!(report
+            .diagnostics
+            .iter()
+            .all(|d| d.code != "document/pin-member-removed"));
+        let geometry = report.geometry.unwrap();
+        for (index, id) in ids.iter().enumerate() {
+            let frame = geometry.containers.iter().find(|c| c.id == *id).unwrap();
+            assert_eq!(
+                (frame.bounds.x, frame.bounds.y),
+                ((800 + index as i32 * 200) * 64, 600 * 64)
+            );
+        }
+    }
+
     #[test]
     fn a_pin_wins_over_authored_position_without_evaluating_unused_grid_overflow() {
         let mut spec: Value = serde_json::from_str(fixtures()[0]).unwrap();

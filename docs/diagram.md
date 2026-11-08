@@ -968,18 +968,26 @@ message times/ranges, and dataflow stage/row placement. The lazy TS facade is
 `loadGeometryEngine().layout(request)`. Production `layout.ts`, `edgeRouting.ts`
 and `semanticApply` remain on their existing paths; this is a test/SDK entry.
 
-Coordinates remain signed integers in 1/64-pixel units. Node pins take precedence
-over authored positions and automatic placement. Containers are measured around
-actual placed members, and a container pin holds that frame's own origin; it
-is not an implicit compound/group drag of its children. Membership constraints
-and incompatible pinned layouts need the S3 geometry diagnostic gate. Existing
-explicit IDs are preserved. Anonymous boundaries, stages, sequence ranges and
-cards use a hash of the typed record plus an occurrence among exact duplicates.
-Removing a different record does not shift that identity. Editing the anonymous
-record itself changes its identity and drops its prior pin with a notice. Exact
-duplicates have no durable source identity beyond their occurrence; an editing
-adapter must remap their pins when removing/reordering indistinguishable records.
-The source format is preserved verbatim rather than adding hidden IDs.
+Coordinates remain signed integers in 1/64-pixel units. Explicit-ID entities,
+lanes, groups and phases are pinnable: pins take precedence over authored
+positions and automatic placement, and surviving authored-ID keys retain their
+exact positions after unrelated edits. Lane/group/phase keys retain their role
+namespace (for example `lane:main`). A frame pin holds that frame's own origin;
+it is not an implicit compound/group drag of its children.
+
+Architecture boundaries, dataflow stages, sequence segments and activations
+are derived geometry, not independent pin targets. Their output IDs are a
+role plus ordinal (`boundary:0`, `stage:0`, `segment:0`, `activation:0`), matching
+the source array order. Placement ignores pins aimed at them. `resolve_pins`
+drops each such pin using the existing per-pin diagnostic, with the cause
+"this container's position derives from its members" and a next step to edit
+or pin the members or timeline. Anonymous cards are likewise derived annotations;
+`semantic.ts` does not project them as independently movable canvas members.
+Their `card:<ordinal>` IDs are also not pin targets. No content-hash identity or
+hidden source IDs are introduced. Adding/removing a member changes the derived
+frame naturally, without a stale pin moving it independently of its contents.
+Membership constraints and incompatible authored pins remain S3 geometry-gate
+work.
 
 Labels carry the pinned font identity, fixed-point font size, absolute glyph
 origins and ink boxes, including nonfatal .notdef replacements and ignored
@@ -992,9 +1000,9 @@ label-fit, viewBox or legend-clearance rules; those refusals remain S3 work.
 
 Routing uses deterministic port choices, obstacle visibility fast paths and an
 independently implemented sparse A* over compressed obstacle-edge coordinates.
-It never returns a diagonal or collision fallback. Node and label rectangles,
-plus opaque cards, are obstacles; search/axis/waypoint budgets refuse with a
-cause and next step. Explicit `via` points are retained; without them channel
+It never returns a diagonal or collision fallback. Node and label rectangles are routing obstacles; derived cards are placed
+below the completed relationship extents. Search/axis/waypoint budgets refuse
+with a cause and next step. Explicit `via` points are retained; without them channel
 hints constrain the route. `labelAt` is a center anchor and takes precedence over
 relative offsets. Labels are allocated before final routing, so paths avoid the
 complete label set. A diagonal `straight` preference still lowers to an
@@ -1028,3 +1036,10 @@ rule parity. Hosted Linux/macOS/Windows plus WASM agreement remains pending.
 The validation graph measures 324,219 B gzip; separately lazy layout/metrics
 measures 1,500,551 B. No 1,000-node layout p95 or lazy cold-load acceptance is
 claimed by this functional proof; both remain S3 work.
+
+The derived-frame pin-policy follow-up is recorded separately in that receipt,
+SDK tree `2862495c`. It passed 84 core tests, two differential tests, geometry
+clippy/type drift and both Chromium tests. The updated 256-case native/WASM
+reports remain byte-identical. Validation remains 324,219 B gzip; the lazy
+layout/metrics chunk is 1,482,982 B. These are remote checks; new-head hosted CI
+and the remaining S3 gates are still pending.

@@ -129,5 +129,63 @@
   },
   "rendererRuleParity": {
     "status": "deferred to S3"
+  },
+  "pinPolicyFollowUp": {
+    "sdkTree": "2862495c02840e10ef7c2c03ea125c3bdaf0e96c",
+    "policy": "Derived boundary/stage/segment/activation/card frames use role:ordinal output IDs, ignore independent pins and drop them with a per-pin diagnostic; explicit authored-ID entities/lanes/groups/phases remain pinnable.",
+    "checks": {
+      "coreUnit": 84,
+      "differential": 2,
+      "clippy": "passed geometry/typegen lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T21:22:31.841Z",
+        "duration": 7585.11,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "f35fb2b70099a53f1b9fe692d12ddaa4fd62f5cef31662b54db4dfa8d595a961",
+      "reportBytes": 57995,
+      "corpusCases": 256,
+      "acceptedScenes": 37,
+      "structuredRefusals": 219
+    },
+    "payload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 16901.39933,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324219,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-Ds8yLhO2.js",
+          "bytes": 4724034,
+          "gzipBytes": 1482982,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324219,
+      "validationGzipBytes": 324219,
+      "lazyGeometryGzipBytes": 1482982,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1807323
+    },
+    "hostedCi": "pending"
   }
 }

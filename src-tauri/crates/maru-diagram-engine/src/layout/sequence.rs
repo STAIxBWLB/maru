@@ -112,10 +112,9 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
             ..Default::default()
         });
     }
-    let segment_ids = super::anonymous_ids("segment", &spec.segments)?;
     for (index, segment) in spec.segments.iter().enumerate() {
         scene.add_container(
-            &segment_ids[index],
+            &format!("segment:{index}"),
             "segment",
             &segment.label,
             range_box(
@@ -127,7 +126,6 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
             )?,
         )?;
     }
-    let activation_ids = super::anonymous_ids("activation", &spec.activations)?;
     for (index, activation) in spec.activations.iter().enumerate() {
         let bounds = scene.node_bounds(&activation.participant).ok_or_else(|| {
             geometry_error(
@@ -137,7 +135,7 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
         })?;
         let midpoint = center(bounds)?;
         scene.add_container(
-            &activation_ids[index],
+            &format!("activation:{index}"),
             "activation",
             "",
             range_box(
@@ -212,12 +210,12 @@ mod tests {
         let segment = geometry
             .containers
             .iter()
-            .find(|container| container.kind == "segment")
+            .find(|container| container.id == "segment:0")
             .unwrap();
         let activation = geometry
             .containers
             .iter()
-            .find(|container| container.kind == "activation")
+            .find(|container| container.id == "activation:0")
             .unwrap();
         assert_eq!(segment.bounds.y, px(150.0).unwrap());
         assert_eq!(segment.bounds.bottom().unwrap(), px(700.0).unwrap());
@@ -247,7 +245,7 @@ mod tests {
         let activation = after
             .containers
             .iter()
-            .find(|container| container.kind == "activation")
+            .find(|container| container.id == "activation:0")
             .unwrap();
         assert_eq!(
             activation.bounds.x + activation.bounds.width / 2,
