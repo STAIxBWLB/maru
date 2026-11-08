@@ -18,8 +18,10 @@
  */
 
 import { serializeDoc } from "./persistence";
+import { validateArchifySpecPreCheck } from "./validation";
 import { renderDocToSvg, type RenderedDiagramSvg } from "./renderSvg";
 import type { DiagramDoc } from "./types";
+import type { SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
 
 export type ExportFormat = "png" | "png-transparent" | "jpg" | "svg" | "json" | "pdf";
 
@@ -213,4 +215,30 @@ export async function exportPdf(
       /* ignore — user can use the menu */
     }
   }, 250);
+}
+
+/** The engine consumes one stored semantic spec, never canvas/editor state. */
+export interface CanonicalSemanticExportInput {
+  datasetId: string;
+  diagramType: SemanticDiagramType;
+  candidateJson: string;
+}
+
+export function canonicalSemanticExportInput(
+  doc: DiagramDoc,
+  datasetId?: string,
+): CanonicalSemanticExportInput {
+  const datasets = (doc.datasets ?? []).filter(
+    (dataset): dataset is SemanticSpecDataset => dataset.kind === "semanticSpec",
+  );
+  const dataset = datasetId ? datasets.find((item) => item.id === datasetId)
+    : datasets.length === 1 ? datasets[0] : undefined;
+  if (!dataset) {
+    throw new Error("A semantic dataset was not selected; select the diagram's semantic dataset and retry the engine export.");
+  }
+  const validation = validateArchifySpecPreCheck(dataset.diagramType, dataset.spec);
+  if (!validation.ok) {
+    throw new Error(`The semantic spec cannot be exported (${validation.diagnostics.map((item) => item.key).join(", ")}); repair or regenerate the semantic dataset and retry.`);
+  }
+  return { datasetId: dataset.id, diagramType: dataset.diagramType, candidateJson: JSON.stringify(dataset.spec) };
 }
