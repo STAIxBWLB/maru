@@ -598,10 +598,13 @@ path dependencies and source inclusion, and refuses Tauri in the pure core.
 CI dry-runs `git subtree split --prefix=src-tauri/crates`, extracts the result,
 and runs each crate's tests there without the app or a Node engine host.
 
-The parity corpus currently has 30 sanitized cases: architecture 22 and two
-each for workflow, sequence, dataflow and lifecycle. Rule groups are 12 existing
-fixtures, eight public specs, four ID cases, two reference cases and four grid
-bounds cases. Existing app/native fixtures and synthetic rule cases retain
+The parity corpus currently has 31 sanitized cases: architecture 22, two
+each for workflow, sequence, dataflow and lifecycle, plus one synthetic
+Floorplan substitute. Rule groups are 12 existing fixtures, eight public specs,
+four ID cases, two reference cases, four grid bounds cases and one privacy
+substitute. The existing Floorplan fixture's original source was not verified
+PUBLIC at intake, so its content is not copied here. Archify's unsupported-type
+response for the substitute is labelled as such, not a validity rejection. Existing app/native fixtures and synthetic rule cases retain
 pinned Archify verdicts/diagnostics. The eight immutable public blobs had
 PUBLIC visibility verified before intake. Private/unverified repository
 candidates were excluded without copying their content. Local machine paths

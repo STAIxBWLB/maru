@@ -88,6 +88,48 @@
       }
     },
     {
+      "id": "app-floorplan-substitute",
+      "diagramType": "floorplan",
+      "rule": "privacy-substitute",
+      "inputJson": "{\"$schema\":\"floorplan/architecture@1\",\"project\":{\"name\":\"Synthetic E0 fixture\"},\"nodes\":[{\"id\":\"root\",\"name\":\"System\",\"kind\":\"system\"},{\"id\":\"service\",\"name\":\"Service\",\"kind\":\"service\",\"parent\":\"root\"}],\"edges\":[],\"flows\":[],\"tours\":[]}",
+      "inputSha256": "8ace9f3b3d43f605c506f63f4aef2c7c3da01316019ce3378ee69250cbe47c01",
+      "origin": {
+        "kind": "synthetic-generated",
+        "source": "privacy substitute for the existing Floorplan fixture"
+      },
+      "oracle": {
+        "scope": "unsupported-type, not a document validity verdict",
+        "ok": false,
+        "codes": [
+          "cli/unknown-diagram-type"
+        ],
+        "diagnostics": [
+          {
+            "code": "cli/unknown-diagram-type",
+            "severity": "error",
+            "message": "Unknown diagram type \"floorplan\". Expected one of: architecture, workflow, sequence, dataflow, lifecycle",
+            "subject": {
+              "command": "validate",
+              "type": "floorplan"
+            },
+            "evidence": {
+              "supportedTypes": [
+                "architecture",
+                "workflow",
+                "sequence",
+                "dataflow",
+                "lifecycle"
+              ]
+            },
+            "supportedFixes": [
+              "use one of: architecture, workflow, sequence, dataflow, lifecycle"
+            ]
+          }
+        ],
+        "error": "Unknown diagram type \"floorplan\". Expected one of: architecture, workflow, sequence, dataflow, lifecycle"
+      }
+    },
+    {
       "id": "app-native-export",
       "diagramType": "architecture",
       "rule": "existing-fixture",

@@ -39,7 +39,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     let mut bindgen = wasm_bindgen_cli_support::Bindgen::new();
     bindgen.input_path(&wasm);
-    bindgen.web(true);
+    bindgen.web(true).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot select wasm-bindgen web output: {error}; check the wasm target settings and retry"
+            ),
+        )
+    })?;
     bindgen.generate(&output).map_err(|error| {
         format!(
             "wasm-bindgen generation failed: {error}; check the wasm artifact and rerun bindgen-web"

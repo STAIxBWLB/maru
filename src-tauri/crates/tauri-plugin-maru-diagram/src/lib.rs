@@ -96,7 +96,10 @@ impl SourceQuery {
         if self.max_depth > MAX_SOURCE_DEPTH {
             return Err(SourceError::new(
                 "diagram_source_depth_invalid",
-                format!("maxDepth {} exceeds the bound {MAX_SOURCE_DEPTH}", self.max_depth),
+                format!(
+                    "maxDepth {} exceeds the bound {MAX_SOURCE_DEPTH}",
+                    self.max_depth
+                ),
                 "use a shallower source query and retry",
             ));
         }
@@ -107,11 +110,9 @@ impl SourceQuery {
                 "use a bounded maxNodes value and retry",
             ));
         }
-        if self
-            .anchor
-            .as_ref()
-            .is_some_and(|anchor| anchor.is_empty() || anchor.len() > 512 || anchor.chars().any(char::is_control))
-        {
+        if self.anchor.as_ref().is_some_and(|anchor| {
+            anchor.is_empty() || anchor.len() > 512 || anchor.chars().any(char::is_control)
+        }) {
             return Err(SourceError::new(
                 "diagram_source_anchor_invalid",
                 "anchor is empty, too long, or contains control characters",
@@ -357,8 +358,16 @@ mod tests {
             Ok(self.root.clone())
         }
 
-        fn ensure_write(&self, relative_path: &Path, _action: WriteAction) -> Result<(), HostError> {
-            if relative_path.is_absolute() || relative_path.components().any(|part| part == std::path::Component::ParentDir) {
+        fn ensure_write(
+            &self,
+            relative_path: &Path,
+            _action: WriteAction,
+        ) -> Result<(), HostError> {
+            if relative_path.is_absolute()
+                || relative_path
+                    .components()
+                    .any(|part| part == std::path::Component::ParentDir)
+            {
                 return Err(HostError::new(
                     "fixture_path_refused",
                     "fixture host only accepts workspace-relative paths",
@@ -375,14 +384,23 @@ mod tests {
             root: PathBuf::from("/fixture/workspace"),
         });
         let sources = Arc::new(FixtureSources);
-        let plugin = Builder::new(host.clone(), sources.clone()).build::<tauri::test::MockRuntime>();
+        let plugin =
+            Builder::new(host.clone(), sources.clone()).build::<tauri::test::MockRuntime>();
         let app = tauri::test::mock_builder()
             .plugin(plugin)
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock runtime plugin should build without a real workspace");
         let state = app.state::<PluginState>();
         assert_eq!(state.host.workspace_root().unwrap(), host.root);
-        assert_eq!(state.sources.document_relations(&SourceQuery::default()).unwrap().nodes.len(), 2);
+        assert_eq!(
+            state
+                .sources
+                .document_relations(&SourceQuery::default())
+                .unwrap()
+                .nodes
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -403,7 +421,9 @@ mod tests {
             tauri::utils::acl::ExecutionContext::Local,
         );
         let app = tauri::test::mock_builder()
-            .plugin(Builder::new(host, Arc::new(FixtureSources)).build::<tauri::test::MockRuntime>())
+            .plugin(
+                Builder::new(host, Arc::new(FixtureSources)).build::<tauri::test::MockRuntime>(),
+            )
             .build(context)
             .expect("mock runtime plugin should build");
         let view = WebviewWindowBuilder::new(&app, "main", Default::default())

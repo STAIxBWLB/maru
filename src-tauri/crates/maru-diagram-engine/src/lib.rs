@@ -232,7 +232,9 @@ fn engine_identity() -> EngineIdentity {
     EngineIdentity {
         id: ENGINE_ID.into(),
         version: env!("CARGO_PKG_VERSION").into(),
-        revision: option_env!("MARU_DIAGRAM_ENGINE_REVISION").unwrap_or(ENGINE_REVISION).into(),
+        revision: option_env!("MARU_DIAGRAM_ENGINE_REVISION")
+            .unwrap_or(ENGINE_REVISION)
+            .into(),
     }
 }
 
@@ -278,7 +280,10 @@ fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
             "schema/version",
             "/schema_version",
             "architecture-v1/schema-version",
-            format!("architecture schema version {} is unsupported", spec.schema_version),
+            format!(
+                "architecture schema version {} is unsupported",
+                spec.schema_version
+            ),
             "set schema_version to 1 or migrate the document before validating",
         ));
     }
@@ -287,7 +292,10 @@ fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
             "schema/diagram-type",
             "/diagram_type",
             "architecture-v1/type",
-            format!("diagram_type must be architecture, found {}", spec.diagram_type),
+            format!(
+                "diagram_type must be architecture, found {}",
+                spec.diagram_type
+            ),
             "submit an architecture spec or select the matching engine type",
         ));
     }
@@ -330,7 +338,10 @@ fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
                 "set layout.mode to grid",
             ));
         }
-        if layout.cols.is_some_and(|cols| cols == 0 || cols > MAX_GRID_COLUMNS) {
+        if layout
+            .cols
+            .is_some_and(|cols| cols == 0 || cols > MAX_GRID_COLUMNS)
+        {
             diagnostics.push(diagnostic(
                 "layout/columns",
                 "/layout/cols",
@@ -349,7 +360,10 @@ fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
                 "component/id-syntax",
                 &format!("{path}/id"),
                 "architecture-v1/component-id",
-                format!("component ID {:?} is empty or has unsupported characters", component.id),
+                format!(
+                    "component ID {:?} is empty or has unsupported characters",
+                    component.id
+                ),
                 "use an ASCII letter followed by letters, digits, underscores, or hyphens",
             ));
         }
@@ -379,7 +393,10 @@ fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
                 "component/type",
                 &format!("{path}/type"),
                 "architecture-v1/component-type",
-                format!("component type {:?} is unsupported", component.component_type),
+                format!(
+                    "component type {:?} is unsupported",
+                    component.component_type
+                ),
                 "select a supported architecture component type",
             ));
         }
@@ -405,7 +422,10 @@ fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
         ));
     }
     for (index, connection) in spec.connections.iter().enumerate() {
-        for (field, id) in [("from", connection.from.as_str()), ("to", connection.to.as_str())] {
+        for (field, id) in [
+            ("from", connection.from.as_str()),
+            ("to", connection.to.as_str()),
+        ] {
             if !component_ids.contains(id) {
                 diagnostics.push(diagnostic(
                     "connection/endpoint-missing",
@@ -466,7 +486,10 @@ fn make_report(input: &str, diagnostics: Vec<Diagnostic>) -> ValidationReport {
             output_sha256: None,
             output_mime_type: None,
             gates: ReceiptGates {
-                schema: gate(if ok { "passed" } else { "failed" }, "architecture-v1-validation-slice"),
+                schema: gate(
+                    if ok { "passed" } else { "failed" },
+                    "architecture-v1-validation-slice",
+                ),
                 artifact: gate("not-run", "none"),
                 browser: gate("not-run", "none"),
                 visual_review: gate("not-run", "manual"),
@@ -494,7 +517,11 @@ pub fn validate_json(input: &str) -> ValidationReport {
                     "json/parse",
                     "$",
                     "architecture-v1/json",
-                    format!("input is not valid JSON at line {}, column {}: {error}", error.line(), error.column()),
+                    format!(
+                        "input is not valid JSON at line {}, column {}: {error}",
+                        error.line(),
+                        error.column()
+                    ),
                     "repair JSON syntax and submit the architecture spec again",
                 )],
             );
@@ -519,14 +546,18 @@ pub fn validate_json(input: &str) -> ValidationReport {
 /// `enginePin.name` and `engine.name` identities are canonicalized to
 /// `engine.id` on output.
 pub fn parse_receipt_json(input: &str) -> Result<EngineReceipt, String> {
-    let raw: ReceiptInput = serde_json::from_str(input)
-        .map_err(|error| format!("receipt JSON is invalid: {error}; inspect the receipt and retry"))?;
+    let raw: ReceiptInput = serde_json::from_str(input).map_err(|error| {
+        format!("receipt JSON is invalid: {error}; inspect the receipt and retry")
+    })?;
     let engine_input = match (raw.engine, raw.engine_pin) {
         (Some(engine), Some(legacy)) if engine != legacy => {
             return Err("receipt has conflicting engine and enginePin identities; keep one engine identity and retry".into());
         }
         (Some(engine), _) | (None, Some(engine)) => engine,
-        (None, None) => return Err("receipt is missing its engine identity; include engine.id or legacy enginePin.name".into()),
+        (None, None) => return Err(
+            "receipt is missing its engine identity; include engine.id or legacy enginePin.name"
+                .into(),
+        ),
     };
     Ok(EngineReceipt {
         schema_version: raw.schema_version,
@@ -630,7 +661,10 @@ mod tests {
         assert_eq!(report.receipt.engine.id, ENGINE_ID);
         assert_eq!(report.receipt.engine.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(report.receipt.input_spec_sha256, spec_hash(VALID));
-        assert_eq!(report.receipt.gates.schema.scope, "architecture-v1-validation-slice");
+        assert_eq!(
+            report.receipt.gates.schema.scope,
+            "architecture-v1-validation-slice"
+        );
         assert_eq!(report.receipt.gates.artifact.status, "not-run");
     }
 
@@ -649,12 +683,19 @@ mod tests {
         }"#;
         let report = validate_json(invalid);
         assert!(!report.ok);
-        let codes: Vec<_> = report.diagnostics.iter().map(|item| item.code.as_str()).collect();
+        let codes: Vec<_> = report
+            .diagnostics
+            .iter()
+            .map(|item| item.code.as_str())
+            .collect();
         assert!(codes.contains(&"component/id-syntax"));
         assert!(codes.contains(&"component/id-duplicate"));
         assert!(codes.contains(&"grid/column-out-of-bounds"));
         assert!(codes.contains(&"connection/endpoint-missing"));
-        assert!(report.diagnostics.iter().all(|item| !item.message.is_empty() && !item.fix.is_empty()));
+        assert!(report
+            .diagnostics
+            .iter()
+            .all(|item| !item.message.is_empty() && !item.fix.is_empty()));
     }
 
     #[test]
@@ -681,14 +722,23 @@ mod tests {
         let receipt = parse_receipt_json(legacy).unwrap();
         assert_eq!(receipt.engine.id, "archify");
         assert_eq!(receipt.engine.version, "3.0.0");
-        assert_eq!(receipt.engine_output_sha256.as_deref(), Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"));
+        assert_eq!(
+            receipt.engine_output_sha256.as_deref(),
+            Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+        );
         assert_eq!(receipt.conversion.as_ref().unwrap().format, "png");
         assert_eq!(receipt.conversion.as_ref().unwrap().theme, "dark");
         assert_eq!(receipt.conversion.as_ref().unwrap().pixel_ratio, 2);
-        assert_eq!(receipt.readback.as_ref().unwrap().scope, "native-file-readback");
+        assert_eq!(
+            receipt.readback.as_ref().unwrap().scope,
+            "native-file-readback"
+        );
         let canonical = serde_json::to_value(receipt).unwrap();
         assert_eq!(canonical["engine"]["id"], "archify");
-        assert_eq!(canonical["engineOutputSha256"], "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        assert_eq!(
+            canonical["engineOutputSha256"],
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        );
         assert_eq!(canonical["conversion"]["pixelRatio"], 2);
         assert_eq!(canonical["readback"]["status"], "passed");
         assert!(canonical.get("enginePin").is_none());
@@ -712,11 +762,9 @@ mod tests {
                 continue;
             };
             assert_eq!(
-                report.ok,
-                expected,
+                report.ok, expected,
                 "parity case {}: {:?}",
-                case.id,
-                report.diagnostics
+                case.id, report.diagnostics
             );
             expected_subset += 1;
         }

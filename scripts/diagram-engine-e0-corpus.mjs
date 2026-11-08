@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { stripTypeScriptTypes } from "node:module";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const output = join(root, "src-tauri/crates/maru-diagram-engine/testdata");
 const digest = (text) => createHash("sha256").update(text).digest("hex");
@@ -34,11 +35,22 @@ export async function collectCases(publicCandidates = []) {
     if (privateText.test(inputJson)) throw new Error(`Private content remains in ${id}; synthesize a fixture before adding it`);
     cases.push({ id, diagramType: type, rule, inputJson, inputSha256: digest(inputJson), origin: { ...origin, ...(changes.length ? { sanitizedFields: changes } : {}) }, ...(expectedCoreOk === undefined ? {} : { expectedCoreOk }) });
   };
-  const { SEMANTIC_FIXTURES } = await import(pathToFileURL(join(root, "src/lib/diagram/__fixtures__/semantic.ts")).href);
+  // This existing fixture has one extensionless app import. Do not resolve the
+  // Floorplan source: its provenance is unverified; use the synthetic substitute below.
+  const fixtureSource = readFileSync(join(root, "src/lib/diagram/__fixtures__/semantic.ts"), "utf8")
+    .replace(/^import .*FLOORPLAN_FIXTURE.*;$/m, "")
+    .replace("floorplan: FLOORPLAN_FIXTURE", "floorplan: {}");
+  const fixtureJs = stripTypeScriptTypes(fixtureSource);
+  const { SEMANTIC_FIXTURES } = await import(`data:text/javascript;base64,${Buffer.from(fixtureJs).toString("base64")}`);
   for (const [type, spec] of Object.entries(SEMANTIC_FIXTURES)) {
-    // Floorplan has a separate oracle, outside this E0 architecture contract.
-    if (type === "floorplan") continue;
-    add(`app-${type}`, type, "existing-fixture", spec, { kind: "synthetic-existing", source: "src/lib/diagram/__fixtures__/semantic.ts" }, type === "architecture" ? true : undefined);
+    if (type === "floorplan") {
+      // Original provenance is not currently verified PUBLIC; synthesize instead.
+      add("app-floorplan-substitute", type, "privacy-substitute", {
+        $schema: "floorplan/architecture@1", project: { name: "Synthetic E0 fixture" },
+        nodes: [{ id: "root", name: "System", kind: "system" }, { id: "service", name: "Service", kind: "service", parent: "root" }],
+        edges: [], flows: [], tours: [],
+      }, { kind: "synthetic-generated", source: "privacy substitute for the existing Floorplan fixture" });
+    } else add(`app-${type}`, type, "existing-fixture", spec, { kind: "synthetic-existing", source: "src/lib/diagram/__fixtures__/semantic.ts" }, type === "architecture" ? true : undefined);
   }
   const { NATIVE_EXPORT_SPEC } = await import(pathToFileURL(join(root, "src/lib/diagram/__fixtures__/nativeExport.ts")).href);
   add("app-native-export", "architecture", "existing-fixture", NATIVE_EXPORT_SPEC, { kind: "synthetic-existing", source: "src/lib/diagram/__fixtures__/nativeExport.ts" }, true);
@@ -72,7 +84,7 @@ function oracle(corpusCase) {
   const result = spawnSync(process.execPath, [join(root, "sidecars/archify/bin/archify.mjs"), "validate", corpusCase.diagramType, temp, "--json"], { encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024 });
   if (result.error) throw new Error(`Oracle failed for ${corpusCase.id}: ${result.error.message}; check the pinned Node engine`);
   let report; try { report = JSON.parse(result.stdout); } catch { throw new Error(`Oracle returned no JSON for ${corpusCase.id}; inspect the pinned engine`); }
-  return { ok: report.ok === true, codes: (report.diagnostics ?? []).map((d) => d.code ?? "diagnostic"), diagnostics: report.diagnostics ?? [], ...(report.error ? { error: report.error } : {}) };
+  return { ...(corpusCase.diagramType === "floorplan" ? { scope: "unsupported-type, not a document validity verdict" } : {}), ok: report.ok === true, codes: (report.diagnostics ?? []).map((d) => d.code ?? "diagnostic"), diagnostics: report.diagnostics ?? [], ...(report.error ? { error: report.error } : {}) };
 }
 async function main() {
   const source = process.argv[2];
