@@ -292,6 +292,7 @@ pub fn rename_workspace_entry(
     with_path_transactions(request, |lease| {
         if let Some(guard) = &claim {
             guard.check(lease, &source)?;
+            guard.check_rename_target(&parent.join(&new_name))?;
         }
         let result =
             rename_workspace_entry_in_transaction(lease, vault_path, source_path, new_name)?;

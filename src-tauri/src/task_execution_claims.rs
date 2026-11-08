@@ -205,6 +205,18 @@ impl TaskMutationGuard {
         Ok(())
     }
 
+    pub(crate) fn check_rename_target(&self, target: &Path) -> Result<(), String> {
+        if !is_markdown_task_path(target) {
+            return Err(action_error(
+                "task_execution_rename_invalid",
+                target,
+                "an opted-in task must keep a .md file name",
+                "keep the .md extension when renaming this task",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn after_mutation(
         &mut self,
         lease: &PathTransactionLease,
@@ -379,6 +391,10 @@ fn workspace_roots(work: &Path, raw_tasks_root: Option<&str>) -> Result<Workspac
     })
 }
 
+fn is_markdown_task_path(path: &Path) -> bool {
+    path.extension().and_then(|value| value.to_str()) == Some("md")
+}
+
 fn resolve_task_path(roots: &WorkspaceRoots, raw_path: &str) -> Result<PathBuf, String> {
     let path = resolve_inside_vault(&display(&roots.work), raw_path).map_err(|error| {
         action_error(
@@ -404,7 +420,7 @@ fn resolve_task_path(roots: &WorkspaceRoots, raw_path: &str) -> Result<PathBuf, 
             "select a regular markdown task file",
         ));
     }
-    if path.extension().and_then(|value| value.to_str()) != Some("md") {
+    if !is_markdown_task_path(&path) {
         return Err(action_error(
             "task_execution_task_invalid",
             &path,

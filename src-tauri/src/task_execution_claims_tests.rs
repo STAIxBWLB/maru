@@ -890,3 +890,31 @@ fn first_identity_write_preserves_a_concurrent_process_edit_and_publishes_no_cla
         .filter_map(Result::ok)
         .all(|entry| entry.path().extension().is_none_or(|ext| ext != "json")));
 }
+
+#[test]
+fn claimed_rename_to_non_markdown_is_refused_before_effects() {
+    let f = Fixture::new();
+    let claim = acquire(&f.work, &f.request("rename-extension"), "rename-run")
+        .unwrap()
+        .claim;
+    let original = fs::read(&f.path).unwrap();
+    let sidecar = fs::read(f.file(&claim.task_id)).unwrap();
+    for target in ["task.txt", "task.MD", "task"] {
+        let error = crate::workspace_files::rename_workspace_entry(
+            display(&f.work),
+            "tasks/active/task.md".into(),
+            target.into(),
+        )
+        .unwrap_err();
+        assert!(error.contains("must keep a .md"), "{error}");
+        assert!(error.contains("keep the .md extension"), "{error}");
+        assert_eq!(fs::read(&f.path).unwrap(), original);
+        // Directory-entry spelling also catches case-only targets on macOS.
+        assert!(fs::read_dir(f.path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| entry.file_name() != target));
+        assert_eq!(fs::read(f.file(&claim.task_id)).unwrap(), sidecar);
+    }
+    check(&f.work, &claim.token()).unwrap();
+}
