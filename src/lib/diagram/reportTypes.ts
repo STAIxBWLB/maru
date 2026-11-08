@@ -207,13 +207,16 @@ export interface ScorecardDataset {
 
 /**
  * Diagram types whose semantics a semantic dataset can own: the five Archify
- * engine types. Architecture and workflow shipped in issue #433 P1; sequence,
- * dataflow and lifecycle joined in P2. Per-type collections live in the
- * descriptor table in `semantic.ts`.
+ * engine types plus Floorplan (`floorplan/architecture@1`, issue #535).
+ * Architecture and workflow shipped in issue #433 P1; sequence, dataflow and
+ * lifecycle joined in P2. Per-type collections live in the descriptor table
+ * in `semantic.ts`.
  */
-export type SemanticDiagramType = "architecture" | "workflow" | "sequence" | "dataflow" | "lifecycle";
+export type ArchifyDiagramType = "architecture" | "workflow" | "sequence" | "dataflow" | "lifecycle";
+export type SemanticDiagramType = ArchifyDiagramType | "floorplan";
 
-export const SEMANTIC_DIAGRAM_TYPES: readonly SemanticDiagramType[] = [
+/** The types the pinned Archify engine validates and renders. */
+export const ARCHIFY_DIAGRAM_TYPES: readonly ArchifyDiagramType[] = [
   "architecture",
   "workflow",
   "sequence",
@@ -221,10 +224,17 @@ export const SEMANTIC_DIAGRAM_TYPES: readonly SemanticDiagramType[] = [
   "lifecycle",
 ];
 
-/** The pinned engine a semantic spec round-trips through. */
+export const SEMANTIC_DIAGRAM_TYPES: readonly SemanticDiagramType[] = [...ARCHIFY_DIAGRAM_TYPES, "floorplan"];
+
+export function isArchifyDiagramType(type: string): type is ArchifyDiagramType {
+  return (ARCHIFY_DIAGRAM_TYPES as readonly string[]).includes(type);
+}
+
+/** The engine (or schema owner) a semantic spec round-trips through. */
 export interface SemanticEngineRef {
-  name: "archify";
-  /** Pinned engine version (see `sidecars/archify/PIN.json`). */
+  /** `archify` for the five Archify types, `floorplan` for floorplan specs. */
+  name: "archify" | "floorplan";
+  /** Pinned engine version (see `sidecars/archify/PIN.json`), or the Floorplan schema release. */
   version: string;
 }
 
@@ -622,7 +632,8 @@ export function validateSemanticSpec(dataset: SemanticSpecDataset): MatrixValida
   if (!dataset.spec || typeof dataset.spec !== "object" || Array.isArray(dataset.spec)) {
     errors.push("spec must be an object");
   }
-  if (dataset.engine?.name !== "archify") {
+  const expectedEngine = dataset.diagramType === "floorplan" ? "floorplan" : "archify";
+  if (dataset.engine?.name !== expectedEngine) {
     errors.push(`unknown engine: ${String(dataset.engine?.name)}`);
   } else if (typeof dataset.engine.version !== "string" || dataset.engine.version.length === 0) {
     errors.push("engine.version missing");

@@ -341,6 +341,22 @@ function DiagramShell({
   const focusMode = useDiagram((s) => s.ephemeral.ui.focusMode);
   const [panels, setPanels] = useState<PersistedPanelState>(() => readPanelState());
   const viewportRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Replace the document. The viewport is not saved, and a nested Floorplan
+   * map is far wider than the default view (off-screen nodes are culled), so
+   * a floorplan document opens fitted.
+   */
+  const openDoc = useCallback(
+    (next: Parameters<typeof replaceDoc>[0]) => {
+      store.setState(replaceDoc(next));
+      if ((next.datasets ?? []).some((dataset) => dataset.kind === "semanticSpec" && dataset.diagramType === "floorplan")) {
+        const rect = viewportRef.current?.getBoundingClientRect();
+        store.setState(setViewport(fitView({ nodes: next.nodes, viewportW: rect?.width ?? 800, viewportH: rect?.height ?? 600 })));
+      }
+    },
+    [store],
+  );
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const insertOffsetRef = useRef(0);
   /** Last canvas-space pointer position — the gallery's "insert at pointer" target. */
@@ -460,7 +476,7 @@ function DiagramShell({
         if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
         const { doc: restored, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, lastDocument);
         if (cancelled) return;
-        store.setState(replaceDoc(restored));
+        openDoc(restored);
         setActiveName(lastDocument);
         setLastSavedBody(serializeDoc(restored));
         setDiagramSession({ migratedFromLegacy, legacySourceVersion: sourceVersion, fileRevision, legacyBackupAttempted: false }, sessionKey);
@@ -471,7 +487,7 @@ function DiagramShell({
     return () => {
       cancelled = true;
     };
-  }, [sessionKey, setActiveName, setLastSavedBody, store, workPath]);
+  }, [openDoc, sessionKey, setActiveName, setLastSavedBody, store, workPath]);
 
   // --- Pattern gallery (Phase 2b) ------------------------------------------
   // Favorites + recents persist in DiagramSettings (.maru/settings.json).
@@ -925,7 +941,7 @@ function DiagramShell({
 
   const handleImportDoc = useCallback(
     (next: Parameters<typeof replaceDoc>[0]) => {
-      store.setState(replaceDoc(next));
+      openDoc(next);
       setActiveName(null);
       setLastSavedBody(null);
       setDiagramSession({ fileRevision: null }, sessionKey);
@@ -933,7 +949,7 @@ function DiagramShell({
       setIoDialog(null);
       reportError(null);
     },
-    [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store],
+    [openDoc, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody],
   );
 
   const refreshList = useCallback(async () => {
@@ -1106,7 +1122,7 @@ function DiagramShell({
       if (!workPath) return;
       try {
         const { doc, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, name);
-        store.setState(replaceDoc(doc));
+        openDoc(doc);
         setActiveName(name);
         setLastSavedBody(serializeDoc(doc));
         setDiagramSession({ migratedFromLegacy, legacySourceVersion: sourceVersion, fileRevision, legacyBackupAttempted: false }, sessionKey);
@@ -1126,7 +1142,7 @@ function DiagramShell({
         }
       }
     },
-    [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
+    [openDoc, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, t, workPath],
   );
 
   const handleDeleteFile = useCallback(

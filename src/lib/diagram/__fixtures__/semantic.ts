@@ -7,6 +7,7 @@
  */
 
 import type { SemanticDiagramType } from "../reportTypes";
+import { FLOORPLAN_FIXTURE } from "./floorplan";
 
 export const SEMANTIC_FIXTURES: Record<SemanticDiagramType, Record<string, unknown>> = {
   architecture: {
@@ -85,4 +86,5 @@ export const SEMANTIC_FIXTURES: Record<SemanticDiagramType, Record<string, unkno
       { from: "running", to: "done", label: "finish" },
     ],
   },
+  floorplan: FLOORPLAN_FIXTURE,
 };
