@@ -2240,6 +2240,86 @@
         "workerProof": "The registered wrapper awaits spawn_blocking around the whole body; the domain function stages, spawns the engine and cleans up inside the blocking worker.",
         "platformScope": "Executed on macOS against temporary workspaces and the real vendored engine; the timeout path uses a fake node script via MARU_NODE_PATH and the missing-engine path uses the MARU_ARCHIFY_ENGINE override seam. No Windows run claimed."
       }
+    },
+    {
+      "name": "archify_render_candidate",
+      "module": "src-tauri/src/archify.rs",
+      "registrationPath": "src-tauri/src/lib.rs::archify::ipc::archify_render_candidate",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/archify.rs::ipc::archify_render_candidate owns its arguments and awaits spawn_blocking around render_candidate_with_engine.",
+        "src-tauri/src/archify.rs::render_candidate_with_engine gates type/input bytes, resolves the pinned bundle engine and Node, stages a private candidate, validates its exact SHA-256, renders HTML and checks it before returning bytes plus separate receipt gates.",
+        "src-tauri/src/archify.rs::bounded_engine_output reuses src-tauri/src/command_output.rs::run_command_with_timeout_and_limits for drained bounded pipes and owned-process-tree deadline termination; render staging shape and size are checked by the abort callback.",
+        "src-tauri/src/archify.rs::stage_candidate uses shared path admission and atomic candidate publication; cleanup_job_dir rejects replaced symlink/unsafe parents and removes only the owned private staging directory."
+      ],
+      "workerBoundary": "src-tauri/src/archify.rs::ipc::archify_render_candidate owns arguments and awaits spawn_blocking around bundled_engine_path and render_candidate_with_engine. The physical render_command_runs_in_worker_and_propagates_worker_failure case passed in the actual archify-filtered Cargo run recorded below.",
+      "syncCallers": [
+        "src-tauri/src/archify.rs::archify_render_candidate is the cfg(test) source-engine adapter; production enters render_candidate_with_engine only through the blocking IPC wrapper."
+      ],
+      "tests": [
+        {
+          "command": "node scripts/run-vitest.mjs src/lib/diagram/verifiedExport.test.ts src/lib/diagram/engineSvg.test.ts",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        },
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib archify -- --test-threads=2",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0,
+          "filteredOut": 2123,
+          "buildJobs": 2,
+          "executionHost": "macOS",
+          "sourceCommit": "83263020fe589c574a867b5047016f185057dc49",
+          "executionNote": "Actual local filtered run under the owner command-isolation-only exception (2026-11-08); no whole-lib local test run."
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/archify.ts",
+          "src/lib/diagram/verifiedExport.ts",
+          "src/components/diagram/modals/ImportExportDialog.tsx",
+          "src/lib/diagram/reportInsert.ts"
+        ],
+        "payload": "One selected stored semantic spec JSON and its type, never canvas/viewer state; engine HTML is converted to sanitized static SVG/PNG rather than exported as HTML in T1.",
+        "classification": "n/a: one private rendering job, not a file-processing batch",
+        "classifier": "n/a: one semantic candidate rendered through the pin",
+        "successRetention": "Artifact bytes and spec/pin/engine-output/final-output hashes are returned to the caller. Export displays separate schema, artifact, browser-conversion, visual-unverified and readback gates. No render-store or sibling receipt is written.",
+        "failureReasons": "Typed backend IpcError and frontend explicit conversion/receipt/stale diagnostics. Missing engine/runtime/capability is an error, never a success or a canvas-renderer fallback.",
+        "singleTerminalNoticeOwner": true,
+        "terminalNoticeOwner": "The initiating Export dialog status or report-insert outcome owns its terminal notice; cancelled/stale requests never reach the save bridge."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "<workspace>/.maru/diagram-gen/<jobId>/",
+          "<workspace>/.maru/diagram-gen/<jobId>/candidate.json",
+          "<workspace>/.maru/diagram-gen/<jobId>/rendered.html"
+        ],
+        "aliasPaths": [
+          "Physical identity keys/parent snapshots captured by PathTransactionRequest; render output and its staging parents are rechecked around engine execution and bounded reads."
+        ],
+        "postAdmissionPreconditions": "stage_candidate rechecks workspace registry, declared staging paths and workspace create permission after admission, refuses pre-existing job paths, then atomically writes candidate.json. The forced render target stays inside that job directory.",
+        "domainLockOrder": "Shared admission before the workspace write-allow guard and any domain locks; staging is atomic under its path lease. No domain lock or path lease is held across the engine subprocess; UUID job staging is private, monitored and removed after settlement.",
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions admits the private staging candidate before effects; the caller uses the existing admitted native save bridge for the final copy."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "renders_actual_pinned_html_for_all_five_diagram_types",
+          "render_refuses_invalid_or_oversize_input",
+          "render_rejects_unsafe_authored_output_without_writing_outside_staging",
+          "render_rejects_staging_symlink_without_removing_its_target",
+          "render_kills_and_reaps_a_timed_out_engine",
+          "render_timeout_stops_late_descendant_writes",
+          "render_command_runs_in_worker_and_propagates_worker_failure"
+        ],
+        "workerProof": "Owned IPC arguments enter the awaited blocking worker before engine/path/process work. The physical render worker boundary and failure-propagation case passed in the recorded real filtered Cargo run.",
+        "platformScope": "Local macOS: actual archify-filtered Cargo run passed 18/0/0, including the worker boundary, five-type pinned render, symlink refusal and process-tree timeout cases. Node/jsdom checks cover CJK, both themes, receipt lineage and cancellation; PNG is mocked only in those focused tests. Hosted run42451907498 on prior source head4f424356 passed the real native diagram-export SVG/PNG/save/readback spec and all15 spec files. Final-head hosted CI is still required; no Windows, shipped-release-bundle or manual visual-review execution claimed.",
+        "deferredChecks": "The pending selector was replaced only after an actual local filtered Cargo result under the owner exception. Final-head hosted verify, Playwright and native suite remain the merge gates; the isolation checker is unchanged."
+      }
     }
   ]
 }

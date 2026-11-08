@@ -126,6 +126,7 @@ import {
   useDiagramGestureCoalescers,
   useDiagramStore,
   useDiagramValidationHost,
+  useDiagramHostOverride,
 } from "./DiagramStoreContext";
 import { CanvasSurface } from "./canvas/CanvasSurface";
 import { deleteSelection } from "./deleteSelection";
@@ -278,6 +279,7 @@ function DiagramShell({
   const coalescer = useDiagramCoalescer();
   const gestureCoalescers = useDiagramGestureCoalescers();
   const validationHost = useDiagramValidationHost();
+  const exportHostOverride = useDiagramHostOverride();
   const sessionKey = workPath ?? "__no-workspace__";
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
@@ -865,15 +867,17 @@ function DiagramShell({
       }
       setReportBusy(true);
       try {
+        const reportDoc = store.getState().doc;
         const outcome = await insertDiagramIntoReport(
           {
             diagramName: activeName,
             dirty,
-            doc: store.getState().doc,
+            doc: reportDoc,
+            isCurrent: () => store.getState().doc === reportDoc,
             scope: reportScope,
             target: targetPath ? { path: targetPath } : null,
           },
-          defaultReportInsertDeps(workPath, onSaveDocument),
+          defaultReportInsertDeps(workPath, onSaveDocument, exportHostOverride?.renderCandidate),
         );
         switch (outcome.status) {
           case "needs-save":
@@ -901,7 +905,7 @@ function DiagramShell({
         setReportBusy(false);
       }
     },
-    [activeName, dirty, onSaveDocument, reportError, reportScope, store, t, workPath],
+    [activeName, dirty, exportHostOverride, onSaveDocument, reportError, reportScope, store, t, workPath],
   );
 
   const handleInsertInReport = useCallback(() => {
