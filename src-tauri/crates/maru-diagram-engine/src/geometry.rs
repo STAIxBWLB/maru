@@ -9,7 +9,7 @@ use crate::layout::fixed::{self, FixedPointError};
 use crate::{Diagnostic, EngineReceipt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub const GEOMETRY_API_VERSION: u32 = 1;
 
@@ -280,6 +280,59 @@ pub struct GeometryPin {
     pub role: Option<String>,
 }
 
+/// Nonfatal pin reconciliation, separate from request/scene validity errors.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct PinResolution {
+    pub pins: Vec<GeometryPin>,
+    pub source_changed: bool,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Resolve against current semantic members, never against array slots or an
+/// exact source hash. Placement supplies its current node/container identity set.
+/// Retained pins keep their input order and exact fixed-point positions.
+pub fn resolve_pins<'a>(
+    request: &LayoutRequest,
+    members: impl IntoIterator<Item = (GeometryTargetKind, &'a str)>,
+) -> PinResolution {
+    let mut result = PinResolution {
+        pins: Vec::new(),
+        source_changed: false,
+        diagnostics: Vec::new(),
+    };
+    let Some(pin_set) = &request.pin_set else {
+        return result;
+    };
+    result.source_changed = pin_set.source_spec_sha256 != crate::spec_hash(&request.spec_json);
+    if result.source_changed {
+        result.diagnostics.push(Diagnostic {
+            code: "document/pin-source-stale".into(), path: "/pinSet/sourceSpecSha256".into(),
+            rule: "pin-v1/source-staleness".into(),
+            message: "the source spec changed; pins for surviving semantic members are retained".into(),
+            fix: "review retained positions after the edit and update the pin set source hash when saving".into(),
+        });
+    }
+    let members: HashMap<_, _> = members.into_iter().map(|(kind, id)| (id, kind)).collect();
+    for (index, pin) in pin_set.pins.iter().enumerate() {
+        if let Some(kind) = members.get(pin.target_id.as_str()) {
+            let mut retained = pin.clone();
+            retained.target_kind = *kind;
+            result.pins.push(retained);
+        } else {
+            result.diagnostics.push(Diagnostic {
+                code: "document/pin-member-removed".into(), path: format!("/pinSet/pins/{index}"),
+                rule: "pin-v1/member-existence".into(),
+                message: format!("pin {:?} was dropped because its semantic member no longer exists", pin.target_id),
+                fix: "remove this pin from the saved pin set, or restore that member before pinning it again".into(),
+            });
+        }
+    }
+    result
+}
+
 fn lowercase_sha256(value: &str) -> bool {
     value.len() == 64
         && value
@@ -287,7 +340,7 @@ fn lowercase_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-/// Parse and bind a layout request to the exact source spec bytes. This is an
+/// Parse layout request shape. A prior source hash reports staleness only. This is an
 /// input-preflight API only; it does not produce a geometry report.
 pub fn parse_layout_request(input: &str) -> Result<LayoutRequest, Vec<Diagnostic>> {
     let mut ctx = Context::new("document");
@@ -364,13 +417,6 @@ pub fn parse_layout_request(input: &str) -> Result<LayoutRequest, Vec<Diagnostic
                 "sourceSpecSha256 must be a lowercase 64-character SHA-256 value",
                 "hash the exact specJson UTF-8 bytes with SHA-256 and use lowercase hexadecimal",
             );
-        } else if pin_set.source_spec_sha256 != crate::spec_hash(&request.spec_json) {
-            ctx.error(
-                "pin-source-mismatch",
-                "/pinSet/sourceSpecSha256",
-                "pin set source hash does not match specJson",
-                "regenerate pins from this exact source spec or restore the matching specJson",
-            );
         }
 
         let mut seen = HashSet::new();
@@ -424,6 +470,7 @@ pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
         LayoutRequest::decl(cfg),
         PinSet::decl(cfg),
         GeometryPin::decl(cfg),
+        PinResolution::decl(cfg),
     ]
 }
 
@@ -480,13 +527,13 @@ mod tests {
     }
 
     #[test]
-    fn layout_request_rejects_hash_mismatch_duplicate_targets_and_array_points() {
+    fn layout_request_rejects_malformed_hash_duplicate_targets_and_array_points() {
         let spec_json = source_json();
-        let mismatched = serde_json::json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":"0".repeat(64),"pins":[]}}).to_string();
+        let mismatched = serde_json::json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":"not-a-sha256","pins":[]}}).to_string();
         assert!(parse_layout_request(&mismatched)
             .unwrap_err()
             .iter()
-            .any(|d| d.code == "document/pin-source-mismatch"));
+            .any(|d| d.code == "document/pin-source-hash"));
 
         let duplicate = request_json(serde_json::json!([
             {"targetKind":"node","targetId":"node-a","position":{"x":64,"y":128}},
@@ -501,6 +548,99 @@ mod tests {
             {"targetKind":"node","targetId":"node-a","position":[64,128]}
         ]));
         assert!(parse_layout_request(&array_point).is_err());
+    }
+
+    #[test]
+    fn only_missing_members_are_dropped_with_individual_diagnostics() {
+        let original = serde_json::json!({"schema_version":1,"diagram_type":"architecture","meta":{"title":"Before"}}).to_string();
+        let edited = serde_json::json!({"schema_version":1,"diagram_type":"architecture","meta":{"title":"After"}}).to_string();
+        let request = serde_json::json!({"specJson":edited,"pinSet":{
+            "sourceSpecSha256": crate::spec_hash(&original), "pins":[
+                {"targetKind":"node","targetId":"kept","position":{"x":-64,"y":128}},
+                {"targetKind":"container","targetId":"gone-a","position":{"x":192,"y":256}},
+                {"targetKind":"node","targetId":"gone-b","position":{"x":320,"y":384}}
+            ]
+        }})
+        .to_string();
+        let request = parse_layout_request(&request).unwrap();
+        let resolved = resolve_pins(&request, [(GeometryTargetKind::Node, "kept")]);
+        assert!(resolved.source_changed);
+        assert_eq!(resolved.pins, request.pin_set.as_ref().unwrap().pins[..1]);
+        assert_eq!(resolved.pins[0].position, GeometryPoint { x: -64, y: 128 });
+        let removed: Vec<_> = resolved
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "document/pin-member-removed")
+            .collect();
+        assert_eq!(removed.len(), 2);
+        assert_eq!(removed[0].path, "/pinSet/pins/1");
+        assert_eq!(removed[1].path, "/pinSet/pins/2");
+        assert!(resolved
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "document/pin-source-stale"));
+    }
+
+    #[test]
+    fn editing_an_unrelated_valid_spec_field_keeps_every_existing_pin() {
+        let original = include_str!("../testdata/valid-architecture.json");
+        let mut edited: Value = serde_json::from_str(original).unwrap();
+        edited["meta"]["title"] = Value::String("Renamed diagram".into());
+        let edited = edited.to_string();
+        assert!(crate::validate_json(original).ok);
+        assert!(crate::validate_json(&edited).ok);
+        let request = serde_json::json!({"specJson":edited,"pinSet":{
+            "sourceSpecSha256":crate::spec_hash(original),"pins":[
+                {"targetKind":"node","targetId":"a","position":{"x":64,"y":128}},
+                {"targetKind":"node","targetId":"b","position":{"x":192,"y":256}}
+            ]
+        }})
+        .to_string();
+        let request = parse_layout_request(&request).unwrap();
+        let resolved = resolve_pins(
+            &request,
+            [
+                (GeometryTargetKind::Node, "a"),
+                (GeometryTargetKind::Node, "b"),
+            ],
+        );
+        assert_eq!(resolved.pins, request.pin_set.as_ref().unwrap().pins);
+        assert!(resolved.source_changed);
+        assert_eq!(resolved.diagnostics.len(), 1);
+        assert_eq!(resolved.diagnostics[0].code, "document/pin-source-stale");
+    }
+
+    #[test]
+    fn a_surviving_member_id_keeps_its_position_when_its_kind_changes() {
+        let request = parse_layout_request(&request_json(serde_json::json!([
+            {"targetKind":"node","targetId":"kept","position":{"x":64,"y":128}}
+        ])))
+        .unwrap();
+        let resolved = resolve_pins(&request, [(GeometryTargetKind::Container, "kept")]);
+        assert_eq!(resolved.pins.len(), 1);
+        assert_eq!(
+            resolved.pins[0].position,
+            request.pin_set.unwrap().pins[0].position
+        );
+        assert_eq!(resolved.pins[0].target_kind, GeometryTargetKind::Container);
+        assert!(resolved.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn unchanged_source_and_absent_pins_have_no_staleness_notice() {
+        let request = parse_layout_request(&request_json(serde_json::json!([
+            {"targetKind":"node","targetId":"kept","position":{"x":64,"y":128}}
+        ])))
+        .unwrap();
+        let resolved = resolve_pins(&request, [(GeometryTargetKind::Node, "kept")]);
+        assert!(!resolved.source_changed);
+        assert!(resolved.diagnostics.is_empty());
+        assert_eq!(resolved.pins, request.pin_set.unwrap().pins);
+        let request = LayoutRequest {
+            spec_json: source_json(),
+            pin_set: None,
+        };
+        assert!(resolve_pins(&request, []).pins.is_empty());
     }
 
     #[test]

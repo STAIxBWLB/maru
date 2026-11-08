@@ -185,5 +185,12 @@
     "appNativeFeatureCompile": "passed after production frontend build",
     "sdkBoundary": "passed",
     "fontRegenerationDrift": "passed: exact derived tables, licence and manifest match pinned source generation"
+  },
+  "pinContractFollowUp": {
+    "scope": "Later S1 source revision than the measured SDK tree; benchmark numbers remain attributed only to that baseline.",
+    "coreUnit": 47,
+    "differential": 2,
+    "pinBehavior": "Source hash changes are nonfatal; retain existing members, report each removed member.",
+    "hostedCi": "pending"
   }
 }

@@ -883,11 +883,15 @@ production canvas and `semanticApply` continue using their existing paths.
 
 Geometry coordinates are signed 32-bit integers in 1/64-pixel units, with
 checked 64-bit intermediate arithmetic. Pixel inputs quantize once, rounding
-halves away from zero. A pin set binds the exact serialized spec SHA-256 and
-semantic member IDs; later placement gives pins precedence over authored
+halves away from zero. A pin set records its source spec SHA-256 for staleness reporting and targets
+stable semantic member IDs; later placement gives pins precedence over authored
 positions, then automatic placement. The planned test adapter takes explicitly
 pinned current canvas x/y values and `meta.memberId`, rather than treating every
-projected canvas position as a pin. A source mismatch is refused before layout. Generic request/font failures use
+projected canvas position as a pin. An unrelated spec edit retains every pin
+whose semantic member still exists, at the exact prior position. Source hash
+changes produce a nonfatal notice; only missing members lose their pins, with
+one diagnostic per dropped pin. `resolve_pins` takes the current placement
+member identities rather than guessing membership from a hash. Generic request/font failures use
 `document/...`; renderer-specific geometry refusals use the diagram-type namespace.
 
 Text uses Noto Sans CJK KR Regular 400 and Bold 700, pinned to the upstream
@@ -913,6 +917,9 @@ The first cross-platform matrix hashes fixed arithmetic and both fonts' text
 metrics for every parity-corpus record on Linux, macOS and Windows. It is a
 foundation check, **not AC2's final whole-scene determinism proof**. Placement,
 routes, legend/page boxes and pin preservation join that hash in the next stage.
+S2 also runs the WASM build on at least one platform and compares its whole-corpus
+geometry hashes with native output, covering the product runtime as well as the
+three native targets.
 The three E1 geometry divergences remain open until that implementation; no new
 Archify validity agreement or 1,000-node layout latency is claimed here.
 
@@ -927,3 +934,8 @@ without replacement glyphs. Validation cold initialization was 471.2 ms;
 30 warm samples at 1,000 nodes measured median 7.3 / p95 8.1 ms (max 11.6 ms).
 These are validation numbers, **not layout/routing latency**. Hosted payload,
 latency and the three-OS foundation matrix remain pending at submission.
+
+The later S1 pin-contract follow-up passed 47 core tests and two differential
+tests. Its unrelated-field edit retains all existing pins, and each missing
+member gets a separate nonfatal removal diagnostic. The source-bound benchmark
+above predates this follow-up; new-head hosted CI remains the gate.

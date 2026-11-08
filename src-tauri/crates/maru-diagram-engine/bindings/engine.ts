@@ -123,6 +123,8 @@ export type PinSet = { sourceSpecSha256: string, pins?: Array<GeometryPin>, };
 
 export type GeometryPin = { targetId: string, targetKind: GeometryTargetKind, position: GeometryPoint, role?: string | null, };
 
+export type PinResolution = { pins: Array<GeometryPin>, sourceChanged: boolean, diagnostics: Array<Diagnostic>, };
+
 export type GlyphPosition = {
 /**
  * Original scalar, retained for attribution when replacement was needed.
