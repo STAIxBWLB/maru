@@ -1,4 +1,4 @@
-/** E0 measurement facade only. Product apply/render paths do not import this. */
+/** Independent engine measurement facade. Product apply/render paths do not import this. */
 import type { ValidationReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 export type { ValidationReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 export interface DiagramEngine {
@@ -23,10 +23,10 @@ export async function loadWasmEngine(): Promise<DiagramEngine> {
   const moduleUrl = new URL("./__generated__/engine-e0/maru_diagram_engine.js", import.meta.url).href;
   const wasmUrl = new URL("./__generated__/engine-e0/maru_diagram_engine_bg.wasm", import.meta.url);
   const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
-  if (typeof bindings.default !== "function" || typeof bindings.validate_architecture_json !== "function") {
+  if (typeof bindings.default !== "function" || typeof bindings.validate_diagram_json !== "function") {
     throw new Error("E0 WebAssembly bindings are missing; run the engine-e0 build script before the browser spike.");
   }
   await bindings.default({ module_or_path: wasmUrl });
-  const validate = bindings.validate_architecture_json as (input: string) => string;
+  const validate = bindings.validate_diagram_json as (input: string) => string;
   return { transport: "wasm", async validate(input) { return checkedReport(JSON.parse(validate(input))); } };
 }

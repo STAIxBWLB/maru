@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "lifecycle fixture",
+    "output": "fixture.html"
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Main"
+    }
+  ],
+  "states": [
+    {
+      "id": "a",
+      "type": "start",
+      "label": "A",
+      "lane": "main",
+      "col": 0
+    },
+    {
+      "id": "b",
+      "type": "active",
+      "label": "B",
+      "lane": "main",
+      "col": 1
+    }
+  ],
+  "transitions": [
+    {
+      "from": "a",
+      "to": "b",
+      "label": "Start"
+    }
+  ]
+}

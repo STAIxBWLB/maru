@@ -694,7 +694,7 @@ its source-only archive passed core 5/5 and plugin 3/3 tests on dgx02 with Node
 removed from PATH. The baseline SDK's typegen-enabled suite passed 6/6; the N4 receipt
 follow-up passed 7/7 plus plugin 3/3 on dgx02.
 
-The parity corpus currently has 31 sanitized cases: architecture 22, two
+The E0 baseline corpus had 31 sanitized cases: architecture 22, two
 each for workflow, sequence, dataflow and lifecycle, plus one synthetic
 Floorplan substitute. Rule groups are 12 existing fixtures, eight public specs,
 four ID cases, two reference cases, four grid bounds cases and one privacy
@@ -718,3 +718,157 @@ hardcoded in the source.
 Only the explicitly labelled architecture slice expectations are asserted by
 E0. Complete five-type differential parity, renderer constraints and screenshots
 belong to later phases; this corpus is not a claim of achieved product parity.
+
+
+### E1 document validity
+
+E1 (#549) extends the pure engine to architecture, workflow, sequence, dataflow
+and lifecycle. `validate_json` dispatches by the input `diagram_type`; native
+plugin `validate` and WebAssembly `validate_diagram_json` call that same entry.
+The E0 `validate_architecture_json` export remains a compatibility alias.
+Architecture/sequence/dataflow admit schema version 1; workflow/lifecycle admit
+1 and 2, matching the pinned schemas and existing generation output. The v2
+readable-layout calculation is outside E1; authored fields are not prohibited
+merely because their version is 2.
+
+Each family owns typed input models and document rules. Shared metadata,
+decorations and scalar contracts live in `common.rs`. Input defaults retain the
+Rust-to-TS omission/null contract; compile fixtures cover all five families.
+Those types describe deserialization structure, not a proof of valid content:
+null, bad IDs, unknown fields, enum/range errors and graph contracts still need
+runtime validation. Output diagnostics and receipts keep the API-v1 shape.
+Diagnostic codes are `<type>/<constraint>` with JSON pointer paths, a cause and
+a fix. Malformed/unsupported envelopes use `document/<constraint>`; `-v1` in a
+rule identifier versions that diagnostic contract, independently of the input
+schema version. Receipt schema gates name document validity; artifact, browser
+and visual gates remain not-run. Product `semanticApply.ts`, generation and
+rendering continue to use the pinned engine until E4.
+
+The corpus contains 256 cases, including the 31 retained E0 records, 225
+synthetic cases and the unsupported synthetic Floorplan record already among
+the retained records. Eight recorded public immutable blobs retain their
+input hashes and provenance; no new external intake was added. Original,
+schema, non-geometry document (portable path/profile), and evidence-stripped
+oracle layers remain separate. Machine-local
+oracle staging paths are replaced with portable markers, and privacy checks
+still run before the corpus is written.
+
+| Family | Cases | Declared rules with negative generated coverage |
+| --- | --- | --- |
+| architecture | 73 | 31 |
+| workflow | 55 | 34 |
+| sequence | 43 | 21 |
+| dataflow | 42 | 21 |
+| lifecycle | 42 | 22 |
+
+The remaining one case is Floorplan, outside E1. All 129 declared per-family
+rules have a generated rejection with an equivalent namespaced engine code.
+The differential test checks all 256 acceptance results and rejection mappings,
+not just the E0 architecture subset. Diagnostic cause/fix/path/rule fields are
+asserted nonempty. Positive seeds must first pass the actual pinned CLI;
+unknown refusals cannot become automatic geometry waivers. A generated rule
+hint must match an independently observed oracle cause, never merely an
+unrelated rejection. The host oracle
+cache is keyed by engine pin, type and full input, and is not SDK runtime code.
+
+Shared rule classes cover shapes/known fields, versions/types, IDs/duplicates,
+text/cardinality, scalar bounds/integers/enums, locale, portable output paths,
+translations, brands, sources, guided views, legends and repository metadata.
+Family-specific rules cover:
+
+- Architecture: component/boundary/connection references, required position or
+  complete grid inputs, unique declared cells, declared column limits, and
+  laminar membership for the opt-in deployment-ownership profile. That profile
+  also requires both boundary kinds, nonblank owners for nonexternal components,
+  exactly one region per such component, private database membership, one shared
+  region per private group, and labelled cross-boundary mechanisms. Authored
+  positions override grid hints.
+- Workflow: lane/end-point references, ordered and disjoint phase ranges,
+  group ranges and membership, main-path nodes/edges/order, semantic-check
+  references, allowed roots/terminals and required edges/reachable paths.
+- Sequence: participant references and positive segment/activation ranges.
+- Dataflow: stage references and flow end-points, with schema bounds on stages,
+  dimensions and other authored scalar fields.
+- Lifecycle: lane/state references and schema lane limits. A reserved lane name
+  is a layout convention, handled below rather than added to E1.
+
+The complete per-type rule/code/description table and generated-case inventory
+are in `testdata/parity.json` and the host
+`scripts/diagram-engine-e1-cases.mjs` generator. No Archify implementation code
+or runtime dependency is imported into either SDK crate.
+
+Intended differences are limited and named:
+
+| Case | E1 result and reason |
+| --- | --- |
+| Dataflow unbounded authored row | Accepted: schema permits it; the pinned renderer's fixed row slots are an E2 geometry limitation. |
+| Five dataflow stages on a narrow authored canvas | Accepted: stage count is schema-valid; computed canvas clearance is E2. |
+| Lifecycle without the reserved `main` lane name | Accepted: IDs/references are valid; reserved-lane layout is explicitly E2. |
+| Synthetic Floorplan input | Refused as unsupported: Floorplan is E5, with no E1 validity claim. |
+
+Repository checkout/source evidence verification is excluded from the pure
+validator comparison by an explicitly stored evidence-stripped input; its
+original verdict remains available. Workflow/lifecycle v2 is compared directly
+against the oracle, not listed as a difference. No label-fit, overlap, route,
+legend-clearance or other computed geometry gate is claimed by E1.
+
+The pre-W1 E1 remote Linux/Chromium measurements are recorded in
+[diagram-engine-e1.json](diagram-engine-e1.json), separately from the E0
+baseline. The actual ES library is 307,718 bytes gzip. Across 30 warm samples,
+50 components measured median 0.4 / p95 0.8 ms; 1,000 components measured median
+4.2 / p95 5.1 ms (maximum 6.9 ms). Cold initialization plus first validation was
+476.4 ms; the build step took 6.77 s with warm registry/check/release caches (incremental). This is a
+remote reproduction, not hosted CI build-time evidence. The source identity is
+SDK tree `a5c859a1`, with raw samples and execution scope in the receipt.
+
+The harness checks all five families plus workflow/lifecycle v2 without a Node
+host override and refuses an invalid connection. Remote app checks, SDK
+boundary/type drift and the full differential suite passed. Hosted Chromium
+remains the final 400 KB gzip / 50 ms p95 gate; no final-head hosted result is
+claimed from these remote tests.
+
+The final SDK subtree split `f7858382` (tree `a5c859a1`) passed 28 core unit
+and two differential tests plus three plugin tests from its source-only archive
+with Node removed from PATH. This is separate from the browser's Node-free
+validation proof and from the pending hosted final-head gate.
+
+
+### E1 hosted baseline and object-shape follow-up
+
+[Hosted run 42490489186](https://github.com/STAIxBWLB/maru/actions/runs/42490489186)
+passed ci-ok, verify, browser and real-app native gates at `aae304cd` before
+the object-shape follow-up. Its ES library measured 307,536 bytes gzip, a
+37.81 s build step and 585.3 ms cold WASM initialization. Across 30 warm samples,
+50 nodes measured median 0.7 / p95 1.2 ms; 1,000 nodes measured median 5.2 / p95
+7.1 ms (maximum 10.6 ms). Those records are retained separately under
+`hostedBaseline` in the E1 measurement receipt; they are not attributed to later
+code.
+
+The 307 KB hosted baseline already consumes about **77% of the 400 KB budget**.
+E2 (#550 AC5) must plan the lazy-chunk split before adding geometry rather than
+waiting for the combined payload to exceed the limit. Subsequent object-shape
+inspection has its own payload/latency reproduction and a separate hosted gate.
+
+The common decoder now verifies object positions from the decoded model's
+serialized shape. Serde's positional struct arrays are refused with their JSON
+path, an expected-object/found-array cause and a named-fields fix. Real Vec and
+coordinate tuple arrays remain valid. The shape representation comes from the
+same Rust model, avoiding another manually maintained per-field schema table.
+
+Array-for-object regressions now cover each family at metadata, brand and
+primary-item boundaries, plus shared source/card/view/repository/legend shapes
+and type-specific layout/lane/stage/segment/activation/semantic-relation objects.
+They retain schema refusals and cause mappings; no shape case is a geometry
+waiver. The coordinate-tuple positive control remains accepted.
+
+The W1 follow-up (SDK tree `14ee8f01`) has a separate remote reproduction in
+`objectShapeFollowUp`: 324,182 bytes gzip, 1,000-node median 7.6 / p95 8.2 ms,
+maximum 11.4 ms, and cold initialization 495.8 ms. Its incremental
+build took 7.23 s. All limits passed in that remote container;
+new-head hosted CI is still required. Serialization-based shape inspection adds
+work but keeps this reproduction below the 400 KB / 50 ms limits.
+
+The W1 source-only split `246b7c38` (tree `14ee8f01`) passed 29 core unit tests,
+two differential tests over all 256 cases and three plugin tests with Node
+removed from PATH. The app's default/native feature checks, boundary and type
+drift checks also passed remotely; the final-head hosted gate remains pending.

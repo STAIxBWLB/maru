@@ -7,7 +7,7 @@ const minimal: ArchitectureSpec = {
   schema_version: 1,
   diagram_type: "architecture",
   meta: { title: "Test", output: "test.html" },
-  components: [{ id: "api", type: "backend", label: "API" }],
+  components: [{ id: "api", type: "backend", label: "API", pos: [50, 160] }],
 };
 
 // Also exercise defaults below an explicitly present layout/connection. The
@@ -36,4 +36,37 @@ describe("generated engine input compile fixtures", () => {
     expect(nestedDefaults.connections).toEqual([{ from: "api", to: "api" }]);
     expect(nullableInputs.components[0]?.row).toBeNull();
   });
+});
+
+// Each document family has an omission fixture; tsc includes this file in the
+// ordinary gate, independently of runtime fixture assertions.
+import type {
+  WorkflowSpec, SequenceSpec, DataflowSpec, LifecycleSpec,
+} from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+
+const workflow: WorkflowSpec = {
+  schema_version: 1, diagram_type: "workflow", meta: { title: "Workflow", output: "workflow.html" },
+  lanes: [{ id: "main", label: "Main" }],
+  nodes: [{ id: "a", lane: "main", col: 0, type: "backend", label: "A" }], edges: [],
+};
+const sequence: SequenceSpec = {
+  schema_version: 1, diagram_type: "sequence", meta: { title: "Sequence", output: "sequence.html" },
+  participants: [{ id: "client", type: "frontend", label: "Client" }, { id: "api", type: "backend", label: "API" }],
+  messages: [{ from: "client", to: "api", y: 180, label: "Call" }],
+};
+const dataflow: DataflowSpec = {
+  schema_version: 1, diagram_type: "dataflow", meta: { title: "Dataflow", output: "dataflow.html" },
+  stages: [{ label: "Input" }, { label: "Output" }],
+  nodes: [{ id: "input", type: "frontend", label: "Input", stage: 0, row: 0 }, { id: "output", type: "backend", label: "Output", stage: 1, row: 0 }],
+  flows: [{ from: "input", to: "output", label: "Data" }],
+};
+const lifecycle: LifecycleSpec = {
+  schema_version: 1, diagram_type: "lifecycle", meta: { title: "Lifecycle", output: "lifecycle.html" },
+  lanes: [{ id: "main", label: "Main" }],
+  states: [{ id: "a", type: "start", label: "Start", lane: "main", col: 0 }, { id: "b", type: "success", label: "Done", lane: "main", col: 1 }],
+  transitions: [{ from: "a", to: "b" }],
+};
+it("keeps a typed minimal fixture for every dispatched family", () => {
+  expect([minimal, workflow, sequence, dataflow, lifecycle].map((spec) => spec.diagram_type))
+    .toEqual(["architecture", "workflow", "sequence", "dataflow", "lifecycle"]);
 });

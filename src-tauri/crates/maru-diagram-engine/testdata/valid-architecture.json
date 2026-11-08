@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "architecture fixture",
+    "output": "fixture.html"
+  },
+  "layout": {
+    "mode": "grid",
+    "cols": 4
+  },
+  "components": [
+    {
+      "id": "a",
+      "type": "frontend",
+      "label": "A",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "b",
+      "type": "backend",
+      "label": "B",
+      "row": 0,
+      "col": 1
+    }
+  ],
+  "connections": [
+    {
+      "from": "a",
+      "to": "b",
+      "label": "Call"
+    }
+  ]
+}

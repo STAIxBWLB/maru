@@ -1,20 +1,30 @@
-//! Independent E0 architecture validation slice for the Maru diagram engine.
+//! Independent document validity engine for the Maru diagram engine.
 //!
 //! This crate validates typed JSON only. It intentionally does not perform
 //! layout, routing, rendering, filesystem access, or Tauri integration.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+
+pub mod architecture;
+mod common;
+pub mod dataflow;
+pub mod lifecycle;
+pub mod rules;
+pub mod sequence;
+pub mod workflow;
+pub use architecture::{
+    ArchitectureBoundary, ArchitectureComponent, ArchitectureConnection, ArchitectureLayout,
+    ArchitectureMeta, ArchitectureSpec,
+};
 
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
 
 pub const API_VERSION: u32 = 1;
 pub const ENGINE_ID: &str = "maru-diagram-engine";
-pub const ENGINE_REVISION: &str = "e0-architecture-v1";
+pub const ENGINE_REVISION: &str = "e1-document-validity-v1";
 pub const ARCHITECTURE_SCHEMA_VERSION: u32 = 1;
-const MAX_GRID_COLUMNS: u32 = 12;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -114,86 +124,6 @@ pub struct ValidationReport {
     pub receipt: EngineReceipt,
 }
 
-/// Typed input for the E0 architecture slice. Unknown renderer/layout
-/// extensions are ignored and are outside this receipt's validation scope.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub struct ArchitectureSpec {
-    #[serde(rename = "schema_version")]
-    #[cfg_attr(feature = "typegen", ts(rename = "schema_version"))]
-    pub schema_version: u32,
-    #[serde(rename = "diagram_type")]
-    #[cfg_attr(feature = "typegen", ts(rename = "diagram_type"))]
-    pub diagram_type: String,
-    pub meta: ArchitectureMeta,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
-    pub layout: Option<ArchitectureLayout>,
-    pub components: Vec<ArchitectureComponent>,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(as = "Option<_>", optional))]
-    pub connections: Vec<ArchitectureConnection>,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(as = "Option<_>", optional))]
-    pub boundaries: Vec<ArchitectureBoundary>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub struct ArchitectureMeta {
-    pub title: String,
-    pub output: String,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
-    pub locale: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub struct ArchitectureLayout {
-    pub mode: String,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
-    pub cols: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub struct ArchitectureComponent {
-    pub id: String,
-    #[serde(rename = "type")]
-    #[cfg_attr(feature = "typegen", ts(rename = "type"))]
-    pub component_type: String,
-    pub label: String,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
-    pub row: Option<u32>,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
-    pub col: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub struct ArchitectureConnection {
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
-    pub id: Option<String>,
-    pub from: String,
-    pub to: String,
-    #[serde(default)]
-    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
-    pub label: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
-pub struct ArchitectureBoundary {
-    pub kind: String,
-    pub label: String,
-    pub wraps: Vec<String>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReceiptInput {
@@ -274,212 +204,6 @@ fn diagnostic(
     }
 }
 
-fn valid_id(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    bytes
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-}
-
-fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    if spec.schema_version != ARCHITECTURE_SCHEMA_VERSION {
-        diagnostics.push(diagnostic(
-            "schema/version",
-            "/schema_version",
-            "architecture-v1/schema-version",
-            format!(
-                "architecture schema version {} is unsupported",
-                spec.schema_version
-            ),
-            "set schema_version to 1 or migrate the document before validating",
-        ));
-    }
-    if spec.diagram_type != "architecture" {
-        diagnostics.push(diagnostic(
-            "schema/diagram-type",
-            "/diagram_type",
-            "architecture-v1/type",
-            format!(
-                "diagram_type must be architecture, found {}",
-                spec.diagram_type
-            ),
-            "submit an architecture spec or select the matching engine type",
-        ));
-    }
-    if spec.meta.title.trim().is_empty() {
-        diagnostics.push(diagnostic(
-            "schema/title-required",
-            "/meta/title",
-            "architecture-v1/title",
-            "diagram title is empty",
-            "add a nonempty title to meta.title",
-        ));
-    }
-    if spec.meta.output.trim().is_empty() {
-        diagnostics.push(diagnostic(
-            "schema/output-required",
-            "/meta/output",
-            "architecture-v1/output",
-            "diagram output name is empty",
-            "add an output filename to meta.output",
-        ));
-    }
-    if let Some(locale) = spec.meta.locale.as_deref() {
-        if locale.trim().is_empty() {
-            diagnostics.push(diagnostic(
-                "schema/locale-empty",
-                "/meta/locale",
-                "architecture-v1/locale",
-                "locale is present but empty",
-                "remove meta.locale or provide a locale tag",
-            ));
-        }
-    }
-    if let Some(layout) = &spec.layout {
-        if layout.mode != "grid" {
-            diagnostics.push(diagnostic(
-                "layout/mode",
-                "/layout/mode",
-                "architecture-v1/grid-mode",
-                format!("architecture E0 supports grid mode, found {}", layout.mode),
-                "set layout.mode to grid",
-            ));
-        }
-        if layout
-            .cols
-            .is_some_and(|cols| cols == 0 || cols > MAX_GRID_COLUMNS)
-        {
-            diagnostics.push(diagnostic(
-                "layout/columns",
-                "/layout/cols",
-                "architecture-v1/grid-columns",
-                format!("declared grid columns must be between 1 and {MAX_GRID_COLUMNS}"),
-                format!("set layout.cols to an integer from 1 through {MAX_GRID_COLUMNS}"),
-            ));
-        }
-    }
-
-    let mut component_ids = HashSet::new();
-    for (index, component) in spec.components.iter().enumerate() {
-        let path = format!("/components/{index}");
-        if !valid_id(&component.id) {
-            diagnostics.push(diagnostic(
-                "component/id-syntax",
-                &format!("{path}/id"),
-                "architecture-v1/component-id",
-                format!(
-                    "component ID {:?} is empty or has unsupported characters",
-                    component.id
-                ),
-                "use an ASCII letter followed by letters, digits, underscores, or hyphens",
-            ));
-        }
-        if !component_ids.insert(component.id.as_str()) {
-            diagnostics.push(diagnostic(
-                "component/id-duplicate",
-                &format!("{path}/id"),
-                "architecture-v1/component-id-unique",
-                format!("component ID {:?} is duplicated", component.id),
-                "assign a unique component ID",
-            ));
-        }
-        if component.label.trim().is_empty() {
-            diagnostics.push(diagnostic(
-                "component/label-required",
-                &format!("{path}/label"),
-                "architecture-v1/component-label",
-                "component label is empty",
-                "add a nonempty label",
-            ));
-        }
-        if !matches!(
-            component.component_type.as_str(),
-            "frontend" | "backend" | "database" | "cloud" | "security" | "messagebus" | "external"
-        ) {
-            diagnostics.push(diagnostic(
-                "component/type",
-                &format!("{path}/type"),
-                "architecture-v1/component-type",
-                format!(
-                    "component type {:?} is unsupported",
-                    component.component_type
-                ),
-                "select a supported architecture component type",
-            ));
-        }
-        if let (Some(col), Some(layout)) = (component.col, spec.layout.as_ref()) {
-            if layout.cols.is_some_and(|columns| col >= columns) {
-                diagnostics.push(diagnostic(
-                    "grid/column-out-of-bounds",
-                    &format!("{path}/col"),
-                    "architecture-v1/declared-grid-bounds",
-                    format!("component column {col} is outside the declared grid"),
-                    "increase layout.cols or move the component into the declared columns",
-                ));
-            }
-        }
-    }
-    if spec.components.is_empty() {
-        diagnostics.push(diagnostic(
-            "component/empty",
-            "/components",
-            "architecture-v1/components-required",
-            "architecture requires at least one component",
-            "add a component before validating the diagram",
-        ));
-    }
-    for (index, connection) in spec.connections.iter().enumerate() {
-        for (field, id) in [
-            ("from", connection.from.as_str()),
-            ("to", connection.to.as_str()),
-        ] {
-            if !component_ids.contains(id) {
-                diagnostics.push(diagnostic(
-                    "connection/endpoint-missing",
-                    &format!("/connections/{index}/{field}"),
-                    "architecture-v1/connection-reference",
-                    format!("connection endpoint {id:?} does not name a component"),
-                    "use the ID of an existing component or add the missing component",
-                ));
-            }
-        }
-        if connection.id.as_deref().is_some_and(|id| !valid_id(id)) {
-            diagnostics.push(diagnostic(
-                "connection/id-syntax",
-                &format!("/connections/{index}/id"),
-                "architecture-v1/connection-id",
-                "connection ID has unsupported characters",
-                "use an ASCII letter followed by letters, digits, underscores, or hyphens",
-            ));
-        }
-    }
-    for (index, boundary) in spec.boundaries.iter().enumerate() {
-        if boundary.label.trim().is_empty() {
-            diagnostics.push(diagnostic(
-                "boundary/label-required",
-                &format!("/boundaries/{index}/label"),
-                "architecture-v1/boundary-label",
-                "boundary label is empty",
-                "add a nonempty boundary label",
-            ));
-        }
-        for (wrap_index, id) in boundary.wraps.iter().enumerate() {
-            if !component_ids.contains(id.as_str()) {
-                diagnostics.push(diagnostic(
-                    "boundary/wrap-reference-missing",
-                    &format!("/boundaries/{index}/wraps/{wrap_index}"),
-                    "architecture-v1/boundary-reference",
-                    format!("boundary member {id:?} does not name a component"),
-                    "use the ID of an existing component",
-                ));
-            }
-        }
-    }
-    diagnostics
-}
-
 fn make_report(
     input: &str,
     diagram_type: Option<String>,
@@ -501,7 +225,13 @@ fn make_report(
             gates: ReceiptGates {
                 schema: gate(
                     if ok { "passed" } else { "failed" },
-                    "architecture-v1-validation-slice",
+                    &format!(
+                        "{}-document-validity",
+                        diagram_type
+                            .as_deref()
+                            .filter(|kind| rules::DOCUMENT_TYPES.contains(kind))
+                            .unwrap_or("document")
+                    ),
                 ),
                 artifact: gate("not-run", "none"),
                 browser: gate("not-run", "none"),
@@ -518,8 +248,8 @@ fn make_report(
     }
 }
 
-/// Validate only the declared E0 architecture slice. A passing report means
-/// these rules passed; it is not a full-schema, layout, or render proof.
+/// Dispatch document validation by diagram_type. A passing report covers the
+/// declared document rules, not layout geometry, rendering or artifact gates.
 pub fn validate_json(input: &str) -> ValidationReport {
     let value: serde_json::Value = match serde_json::from_str(input) {
         Ok(value) => value,
@@ -528,37 +258,34 @@ pub fn validate_json(input: &str) -> ValidationReport {
                 input,
                 None,
                 vec![diagnostic(
-                    "json/parse",
-                    "$",
-                    "architecture-v1/json",
-                    format!(
-                        "input is not valid JSON at line {}, column {}: {error}",
-                        error.line(),
-                        error.column()
-                    ),
-                    "repair JSON syntax and submit the architecture spec again",
+                    "document/json",
+                    "/",
+                    "document-v1/json",
+                    format!("input is not valid JSON: {error}"),
+                    "repair the JSON syntax and retry",
                 )],
-            );
+            )
         }
     };
-    let diagram_type = value
+    let kind = value
         .get("diagram_type")
         .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    match serde_json::from_value::<ArchitectureSpec>(value) {
-        Ok(spec) => make_report(input, diagram_type, validate_architecture(spec)),
-        Err(error) => make_report(
-            input,
-            diagram_type,
-            vec![diagnostic(
-                "schema/type",
-                "$",
-                "architecture-v1/typed-structure",
-                format!("architecture JSON does not match the supported typed fields: {error}"),
-                "use the architecture v1 typed fields and retry",
-            )],
-        ),
-    }
+        .map(str::to_owned);
+    let diagnostics = match kind.as_deref() {
+        Some("architecture") => architecture::validate(value),
+        Some("workflow") => workflow::validate(value),
+        Some("sequence") => sequence::validate(value),
+        Some("dataflow") => dataflow::validate(value),
+        Some("lifecycle") => lifecycle::validate(value),
+        _ => vec![diagnostic(
+            "document/diagram-type",
+            "/diagram_type",
+            "document-v1/diagram-type",
+            "diagram_type is missing or unsupported",
+            "choose architecture, workflow, sequence, dataflow or lifecycle",
+        )],
+    };
+    make_report(input, kind, diagnostics)
 }
 
 /// Parse a receipt without claiming renderer parity. Archify-era
@@ -603,9 +330,16 @@ pub fn parse_receipt_json(input: &str) -> Result<EngineReceipt, String> {
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
-pub fn validate_architecture_json(input: &str) -> String {
+pub fn validate_diagram_json(input: &str) -> String {
     serde_json::to_string(&validate_json(input))
         .unwrap_or_else(|error| format!("{{\"error\":\"serialization failed: {error}\"}}"))
+}
+
+// Compatibility alias for E0 callers; both transports use the dispatcher.
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn validate_architecture_json(input: &str) -> String {
+    validate_diagram_json(input)
 }
 
 #[cfg(feature = "wasm")]
@@ -621,46 +355,32 @@ pub fn parse_receipt_json_for_wasm(input: &str) -> String {
 #[cfg(feature = "typegen")]
 pub fn typescript_declarations() -> String {
     use ts_rs::{Config, TS};
-    let config = Config::default();
-    [
-        EngineIdentity::decl(&config),
-        ReceiptGate::decl(&config),
-        ReceiptGates::decl(&config),
-        ReceiptConversion::decl(&config),
-        EngineReceipt::decl(&config),
-        Diagnostic::decl(&config),
-        ValidationReport::decl(&config),
-        ArchitectureMeta::decl(&config),
-        ArchitectureLayout::decl(&config),
-        ArchitectureComponent::decl(&config),
-        ArchitectureConnection::decl(&config),
-        ArchitectureBoundary::decl(&config),
-        ArchitectureSpec::decl(&config),
-    ]
-    .into_iter()
-    .map(|declaration| format!("export {declaration}"))
-    .collect::<Vec<_>>()
-    .join("\n\n")
+    let cfg = Config::default();
+    let mut declarations = vec![
+        EngineIdentity::decl(&cfg),
+        ReceiptGate::decl(&cfg),
+        ReceiptGates::decl(&cfg),
+        ReceiptConversion::decl(&cfg),
+        EngineReceipt::decl(&cfg),
+        Diagnostic::decl(&cfg),
+        ValidationReport::decl(&cfg),
+    ];
+    declarations.extend(common::declarations(&cfg));
+    declarations.extend(architecture::declarations(&cfg));
+    declarations.extend(workflow::declarations(&cfg));
+    declarations.extend(sequence::declarations(&cfg));
+    declarations.extend(dataflow::declarations(&cfg));
+    declarations.extend(lifecycle::declarations(&cfg));
+    declarations
+        .into_iter()
+        .map(|s| format!("export {s}"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ParityCorpus {
-        cases: Vec<ParityCase>,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ParityCase {
-        id: String,
-        diagram_type: String,
-        input_json: String,
-        expected_core_ok: Option<bool>,
-    }
 
     const VALID: &str = r#"{
       "schema_version":1,
@@ -685,7 +405,7 @@ mod tests {
         assert_eq!(report.receipt.input_spec_sha256, spec_hash(VALID));
         assert_eq!(
             report.receipt.gates.schema.scope,
-            "architecture-v1-validation-slice"
+            "architecture-document-validity"
         );
         assert_eq!(report.receipt.gates.artifact.status, "not-run");
     }
@@ -710,10 +430,10 @@ mod tests {
             .iter()
             .map(|item| item.code.as_str())
             .collect();
-        assert!(codes.contains(&"component/id-syntax"));
-        assert!(codes.contains(&"component/id-duplicate"));
-        assert!(codes.contains(&"grid/column-out-of-bounds"));
-        assert!(codes.contains(&"connection/endpoint-missing"));
+        assert!(codes.contains(&"architecture/id"));
+        assert!(codes.contains(&"architecture/duplicate-id"));
+        assert!(codes.contains(&"architecture/grid-column"));
+        assert!(codes.contains(&"architecture/reference"));
         assert!(report
             .diagnostics
             .iter()
@@ -724,7 +444,7 @@ mod tests {
     fn malformed_input_has_a_cause_and_next_step() {
         let report = validate_json("{");
         assert!(!report.ok);
-        assert_eq!(report.diagnostics[0].code, "json/parse");
+        assert_eq!(report.diagnostics[0].code, "document/json");
         assert_eq!(report.receipt.diagram_type, None);
         assert!(!report.diagnostics[0].message.is_empty());
         assert!(!report.diagnostics[0].fix.is_empty());
@@ -743,7 +463,7 @@ mod tests {
         assert!(report
             .diagnostics
             .iter()
-            .any(|item| item.code == "schema/diagram-type"));
+            .any(|item| item.code == "workflow/shape"));
     }
 
     #[test]
@@ -783,33 +503,7 @@ mod tests {
         assert!(canonical.get("enginePin").is_none());
     }
 
-    #[test]
-    fn parses_thirty_case_parity_corpus_and_checks_declared_architecture_slice() {
-        let corpus: ParityCorpus =
-            serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
-        assert!(corpus.cases.len() >= 30);
-
-        let mut architecture_inputs = 0;
-        let mut expected_subset = 0;
-        for case in corpus.cases {
-            if case.diagram_type != "architecture" {
-                continue;
-            }
-            architecture_inputs += 1;
-            let report = validate_json(&case.input_json);
-            let Some(expected) = case.expected_core_ok else {
-                continue;
-            };
-            assert_eq!(
-                report.ok, expected,
-                "parity case {}: {:?}",
-                case.id, report.diagnostics
-            );
-            expected_subset += 1;
-        }
-        assert!(architecture_inputs >= 22);
-        assert_eq!(expected_subset, 12);
-    }
+    // Full corpus equivalence and rule coverage are asserted in tests/differential.rs.
 
     #[cfg(feature = "typegen")]
     #[test]
