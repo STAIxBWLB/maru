@@ -18,6 +18,13 @@ pub struct NativeProcessIdentity {
     pub start: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessOwnership {
+    Live,
+    Dead,
+    Unverified,
+}
+
 // A PID by itself is not ownership evidence: compare native creation time.
 #[cfg(target_os = "macos")]
 fn native_start(pid: u32) -> Option<String> {
@@ -147,23 +154,39 @@ fn native_definitely_dead(pid: u32) -> bool {
     unsafe { CloseHandle(process) };
     exited
 }
+fn classify_process_ownership(
+    process: &NativeProcessIdentity,
+    observed_start: Option<&str>,
+    definitely_dead: bool,
+) -> ProcessOwnership {
+    if process.start.is_empty() {
+        return ProcessOwnership::Unverified;
+    }
+    match observed_start {
+        Some(start) if start == process.start => ProcessOwnership::Live,
+        Some(_) => ProcessOwnership::Dead,
+        None if definitely_dead => ProcessOwnership::Dead,
+        None => ProcessOwnership::Unverified,
+    }
+}
+
+pub(crate) fn process_ownership(process: &NativeProcessIdentity) -> ProcessOwnership {
+    let observed_start = native_start(process.pid);
+    let definitely_dead = observed_start.is_none() && {
+        #[cfg(any(unix, windows))]
+        {
+            native_definitely_dead(process.pid)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            false
+        }
+    };
+    classify_process_ownership(process, observed_start.as_deref(), definitely_dead)
+}
+
 fn alive(process: &NativeProcessIdentity) -> bool {
-    native_start(process.pid)
-        .map(|start| start == process.start)
-        .unwrap_or_else(|| {
-            #[cfg(unix)]
-            {
-                !native_definitely_dead(process.pid)
-            }
-            #[cfg(windows)]
-            {
-                !native_definitely_dead(process.pid)
-            }
-            #[cfg(not(any(unix, windows)))]
-            {
-                true
-            }
-        })
+    process_ownership(process) != ProcessOwnership::Dead
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -192,7 +215,7 @@ fn paths(work: &Path, id: &str) -> (PathBuf, PathBuf) {
         dir.join(format!("{id}.receipts.lock")),
     )
 }
-fn verify_lock_identity(file: &fs::File, path: &Path) -> Result<(), String> {
+pub(crate) fn verify_lock_identity(file: &fs::File, path: &Path) -> Result<(), String> {
     let metadata =
         fs::symlink_metadata(path).map_err(|e| format!("job_receipt_lock_changed: {e}"))?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
@@ -419,6 +442,43 @@ pub fn uncertain_active(work: &Path, id: &str) -> Result<Option<String>, String>
 mod tests {
     use super::*;
     use crate::atomic_file::phase08_06::Home;
+
+    #[test]
+    fn process_ownership_classifier_covers_native_observation_branches() {
+        let process = NativeProcessIdentity {
+            pid: 123,
+            start: "start-a".into(),
+        };
+        assert_eq!(
+            classify_process_ownership(&process, Some("start-a"), false),
+            ProcessOwnership::Live
+        );
+        assert_eq!(
+            classify_process_ownership(&process, Some("start-b"), false),
+            ProcessOwnership::Dead
+        );
+        assert_eq!(
+            classify_process_ownership(&process, None, true),
+            ProcessOwnership::Dead
+        );
+        assert_eq!(
+            classify_process_ownership(&process, None, false),
+            ProcessOwnership::Unverified
+        );
+        let unknown = NativeProcessIdentity {
+            pid: 123,
+            start: String::new(),
+        };
+        assert_eq!(
+            classify_process_ownership(&unknown, Some("start-a"), false),
+            ProcessOwnership::Unverified
+        );
+        assert_eq!(
+            classify_process_ownership(&unknown, None, true),
+            ProcessOwnership::Unverified
+        );
+    }
+
     fn receipt(id: &str) -> JobRunReceipt {
         JobRunReceipt {
             request_id: id.into(),

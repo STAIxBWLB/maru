@@ -375,6 +375,7 @@ pub struct CliProviderAdapter {
     /// log as soon as its call ends, so a process stop mid-loop keeps the
     /// usage of finished calls.
     usage_sink: Option<(String, String)>,
+    task_execution: Option<crate::task_execution_runtime::TaskExecutionSession>,
 }
 
 impl CliProviderAdapter {
@@ -393,6 +394,7 @@ impl CliProviderAdapter {
             bundle_session: None,
             usage_receipts: Vec::new(),
             usage_sink: None,
+            task_execution: None,
         }
     }
 }
@@ -403,6 +405,14 @@ impl CliProviderAdapter {
         session: Option<crate::skill_host::session::BundleSession>,
     ) -> Self {
         self.bundle_session = session;
+        self
+    }
+
+    pub(crate) fn with_task_execution(
+        mut self,
+        session: Option<crate::task_execution_runtime::TaskExecutionSession>,
+    ) -> Self {
+        self.task_execution = session;
         self
     }
 
@@ -484,7 +494,12 @@ impl ProviderAdapter for CliProviderAdapter {
             self.command_override.as_deref(),
             &self.permission_mode,
             self.bundle_session.as_ref(),
-        )?;
+        )
+        .inspect_err(|_| {
+            if let Some(session) = &self.task_execution {
+                session.admission_failed();
+            }
+        })?;
         // First usage slice (maru#431): Claude prints one JSON result object
         // carrying both the answer and its usage. Other providers stay plain.
         let json_usage = self.provider == CliProviderKind::Claude;
@@ -500,7 +515,12 @@ impl ProviderAdapter for CliProviderAdapter {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .no_window();
-        let mut child = spawn_with_retry(&mut cmd).map_err(|err| spawn_error_kind(&err))?;
+        let mut child = if let Some(session) = &self.task_execution {
+            session
+                .spawn_child(|| spawn_with_retry(&mut cmd).map_err(|err| spawn_error_kind(&err)))?
+        } else {
+            spawn_with_retry(&mut cmd).map_err(|err| spawn_error_kind(&err))?
+        };
         if let Some(payload) = stdin_payload {
             if let Some(mut stdin) = child.stdin.take() {
                 use std::io::Write;
@@ -508,6 +528,7 @@ impl ProviderAdapter for CliProviderAdapter {
                 // `stdin` drops here, closing the pipe so the child sees EOF.
             }
         }
+        let child_pid = child.id();
         let output = child
             .wait_with_output()
             .map_err(|err| format!("wait_failed: {err}"))?;
@@ -531,6 +552,10 @@ impl ProviderAdapter for CliProviderAdapter {
         };
         let usage = serde_json::to_value(&receipt).ok();
         self.record_usage(receipt);
+        if let Some(session) = &self.task_execution {
+            session.child_reaped(child_pid)?;
+            session.check()?;
+        }
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let kind = classify_cli_error(&stderr);
@@ -878,6 +903,54 @@ mod tests {
             mode: "autonomous-loop".to_string(),
             metadata: None,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claimed_provider_stops_before_the_next_role_when_task_source_changes() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let work = home.root.path().join("claimed-work");
+        std::fs::create_dir_all(work.join("tasks/active")).unwrap();
+        let task = work.join("tasks/active/task.md");
+        let source = "---\nstatus: active\n---\nTask\n";
+        std::fs::write(&task, source).unwrap();
+        let metadata = serde_json::json!({"taskExecution": {
+            "requestId": "provider-request", "taskPath": "tasks/active/task.md",
+            "sourceRevision": crate::document::revision_for(source)
+        }});
+        let (session, _) = crate::task_execution_runtime::TaskExecutionSession::admit(
+            work.to_str().unwrap(),
+            Some(&metadata),
+            "provider-run",
+        )
+        .unwrap()
+        .unwrap();
+        let calls = work.join("calls");
+        let cli = write_fake_cli(
+            work.join("fake-provider"),
+            &format!(
+                "#!/bin/sh\nprintf x >> '{}'\necho answer\n",
+                calls.display()
+            ),
+        );
+        let mut adapter = CliProviderAdapter::new(
+            CliProviderKind::Claude,
+            vec![],
+            Some(cli.to_string_lossy().into_owned()),
+            "plan".into(),
+        )
+        .with_task_execution(Some(session));
+        let request = completion_request("role", work.to_str().unwrap());
+        assert_eq!(
+            adapter.complete(request.clone()).unwrap().content.trim(),
+            "answer"
+        );
+        let bound = std::fs::read_to_string(&task).unwrap();
+        std::fs::write(&task, format!("{bound}Changed\n")).unwrap();
+        let error = adapter.complete(request).unwrap_err();
+        assert!(error.contains("source_changed"), "{error}");
+        assert_eq!(std::fs::read_to_string(calls).unwrap(), "x");
+        assert_eq!(adapter.usage_receipts.len(), 1);
     }
 
     #[cfg(unix)]

@@ -295,6 +295,30 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   themes and remembered layout.
 - Claude Code, Codex, Kimi, and Kiro are first-class runtimes. Each named agent
   binds a skill, runtime, permission mode, and optional schedule.
+- Task execution ownership is opt-in on existing CLI/structured invocation metadata:
+  `taskExecution: {requestId, taskPath, sourceRevision, tasksRoot?}`. The revision is
+  the task document revision read before admission; `tasksRoot` defaults to `tasks`.
+  Admission assigns a stable `taskId` through managed frontmatter and records a
+  generation-bound run receipt under `.maru/task-execution/`. Reusing a request ID
+  returns its recorded run without spawning again. A bounded history retains 100
+  earlier requests; reaching the bound refuses another generation instead of
+  forgetting an old request and spawning it again. Results validate the current
+  source revision; claim updates and release require the full task/run/generation
+  token. Completion never marks the Markdown task Done automatically. Task moves
+  retain the ID, and renamed files are resolved by that ID. Source changes and terminal/archived
+  tasks prevent result adoption. Recovery holds live or unverified native owners
+  for review, never elapsed-time takeover.
+  Ordinary invocations and task mutations do not create task identities, claim
+  layouts or locks. Only existing opt-in claims take a task lock before the
+  mutation path lease. Request IDs are scoped to each task, not the workspace.
+  Source-independent cleanup/reviewed release remains available after a legacy
+  writer overwrites or moves the note. For a recovered task mission, an
+  explicit `stop_ai_mission` performs reviewed conditional release after positive
+  native death proof. It never signals recovered PIDs or releases uncertain
+  ownership. Exact request replay remains read-only after edits or completion.
+  Cross-process document/frontmatter and Today/web-action writers do not yet share
+  the claim lock, so a source edit between the final check and process spawn can
+  still race; this known limit is tracked in #541.
 - Adaptive runtime policy is opt-in under Settings > AI (`ai.adaptivePolicy`).
   Each invocation asks `dot ai policy resolve --json` for an eligible runtime,
   model, reasoning effort, and native automatic-review permission. Missing or

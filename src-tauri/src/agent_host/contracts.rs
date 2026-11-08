@@ -12,6 +12,44 @@ pub const PROTECTED_WRITE_CLAIM_SCHEMA_VERSION: &str = "maru_protected_write_cla
 pub const TODAY_CAPTURE_SCHEMA_VERSION: &str = "maru_today_capture_v1";
 pub const TODAY_PLAN_SCHEMA_VERSION: &str = "maru_today_plan_v1";
 
+/// Explicit opt-in only; ordinary invocations never create task identities or claims.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskExecutionRequest {
+    pub request_id: String,
+    pub task_path: String,
+    pub source_revision: String,
+    #[serde(default)]
+    pub tasks_root: Option<String>,
+}
+
+impl TaskExecutionRequest {
+    pub(crate) fn from_metadata(metadata: Option<&JsonValue>) -> Result<Option<Self>, String> {
+        let Some(value) = metadata.and_then(|value| value.get("taskExecution")) else {
+            return Ok(None);
+        };
+        if value.is_null() {
+            return Ok(None);
+        }
+        let request: Self = serde_json::from_value(value.clone()).map_err(|error| format!(
+            "task_execution_request_invalid: {error}; provide requestId, taskPath and the current sourceRevision, then retry"
+        ))?;
+        if request.request_id.is_empty()
+            || request.request_id.len() > 128
+            || !request
+                .request_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            || request.task_path.trim().is_empty()
+            || request.source_revision.is_empty()
+            || request.source_revision.len() > 256
+        {
+            return Err("task_execution_request_invalid: missing or invalid task identity/revision; refresh the task and provide a bounded requestId before retrying".into());
+        }
+        Ok(Some(request))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunContextItem {
