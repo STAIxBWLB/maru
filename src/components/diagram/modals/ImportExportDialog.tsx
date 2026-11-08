@@ -128,6 +128,7 @@ export function ImportExportDialog({
   const hostOverride = useDiagramHostOverride();
   const [theme, setTheme] = useState<StaticTheme>("light");
   const [saving, setSaving] = useState(false);
+  const [storeWarning, setStoreWarning] = useState<string | null>(null);
   const [renderReceipt, setRenderReceipt] = useState<ArchifyRenderReceipt | null>(null);
   const epoch = useRef(0);
   const latestDoc = useRef(doc);
@@ -142,7 +143,7 @@ export function ImportExportDialog({
   useLayoutEffect(() => {
     latestDoc.current = doc;
     epoch.current += 1;
-    setRenderReceipt(null);
+    setRenderReceipt(null); setStoreWarning(null);
     if (copyOperation.current === null) { setStatus({ kind: "idle" }); setSaving(false); }
     return () => { epoch.current += 1; };
   }, [doc, open, workspace, mode]);
@@ -176,7 +177,7 @@ export function ImportExportDialog({
     setStatus({ kind: "idle" });
     setImportState(null);
     setRange(null);
-    setRenderReceipt(null);
+    setRenderReceipt(null); setStoreWarning(null);
     setSaving(false);
     setDatasetId(matrices[0]?.id ?? null);
     setCodecId(mode === "export" ? "maru-svg" : "maru-json");
@@ -243,7 +244,7 @@ export function ImportExportDialog({
   const handleExport = async () => {
     if (!codec) return;
     setStatus({ kind: "busy" });
-    setRenderReceipt(null);
+    setRenderReceipt(null); setStoreWarning(null);
     const operation = ++epoch.current;
     const isCurrent = () => epoch.current === operation && latestDoc.current === doc;
     try {
@@ -262,6 +263,7 @@ export function ImportExportDialog({
       });
       if (!isCurrent()) return;
       if (outcome.receipt) setRenderReceipt(outcome.receipt);
+      setStoreWarning(outcome.storeWarning ?? null);
       const ext = codec.id === "archify-json" && semanticDataset
         ? `${semanticDataset.diagramType}.json`
         : codec.extensions[0]!.replace(/^\./, "");
@@ -380,7 +382,7 @@ export function ImportExportDialog({
               aria-selected={direction === "import"}
               className={direction === "import" ? "is-active" : ""}
               disabled={status.kind === "busy"}
-              onClick={() => { epoch.current += 1; setStatus({ kind: "idle" }); setRenderReceipt(null); setDirection("import"); }}
+              onClick={() => { epoch.current += 1; setStatus({ kind: "idle" }); setRenderReceipt(null); setStoreWarning(null); setDirection("import"); }}
             >
               {t("diagram.dialog.ie.direction.import")}
             </button>
@@ -390,7 +392,7 @@ export function ImportExportDialog({
               aria-selected={direction === "export"}
               className={direction === "export" ? "is-active" : ""}
               disabled={status.kind === "busy"}
-              onClick={() => { epoch.current += 1; setStatus({ kind: "idle" }); setRenderReceipt(null); setDirection("export"); }}
+              onClick={() => { epoch.current += 1; setStatus({ kind: "idle" }); setRenderReceipt(null); setStoreWarning(null); setDirection("export"); }}
             >
               {t("diagram.dialog.ie.direction.export")}
             </button>
@@ -403,7 +405,7 @@ export function ImportExportDialog({
                 <select
                   value={codecId}
                   disabled={status.kind === "busy"}
-                  onChange={(e) => { epoch.current += 1; setRenderReceipt(null); setCodecId(e.target.value); }}
+                  onChange={(e) => { epoch.current += 1; setRenderReceipt(null); setStoreWarning(null); setCodecId(e.target.value); }}
                   data-testid="ie-format-select"
                 >
                   {exportCodecs.map((fmt) => (
@@ -415,7 +417,7 @@ export function ImportExportDialog({
               </label>
               {codec?.dataKind === "semantic" ? <label className="maru-diagram-ie-field">
                 <span>{t("diagram.dialog.ie.engineTheme")}</span>
-                <select value={theme} disabled={status.kind === "busy"} onChange={(event) => { epoch.current += 1; setRenderReceipt(null); setTheme(event.target.value === "dark" ? "dark" : "light"); }}>
+                <select value={theme} disabled={status.kind === "busy"} onChange={(event) => { epoch.current += 1; setRenderReceipt(null); setStoreWarning(null); setTheme(event.target.value === "dark" ? "dark" : "light"); }}>
                   <option value="light">{t("diagram.dialog.ie.themeLight")}</option><option value="dark">{t("diagram.dialog.ie.themeDark")}</option>
                 </select>
                 <p>{t("diagram.codec.warn.engineSemanticOnly")}</p>
@@ -426,7 +428,7 @@ export function ImportExportDialog({
                   <select
                     value={effectiveDatasetId ?? ""}
                     disabled={status.kind === "busy"}
-                    onChange={(e) => { epoch.current += 1; setRenderReceipt(null); setDatasetId(e.target.value); }}
+                    onChange={(e) => { epoch.current += 1; setRenderReceipt(null); setStoreWarning(null); setDatasetId(e.target.value); }}
                     data-testid="ie-dataset-select"
                   >
                     {selectableDatasets.map((matrix) => (
@@ -574,6 +576,7 @@ export function ImportExportDialog({
               {t("diagram.dialog.export.done", { path: status.path })}
             </p>
           ) : null}
+          {status.kind === "done" && storeWarning ? <p role="status" className="maru-diagram-ie-warnings" data-testid="render-store-warning">{t("diagram.renders.notKept", { message: storeWarning })}</p> : null}
           {status.kind === "error" ? (
             <p className="maru-diagram-export-status is-err">
               {t("diagram.dialog.export.failed", { message: status.message })}

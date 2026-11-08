@@ -115,6 +115,8 @@ pub struct ArchifyRenderReceipt {
 pub struct ArchifyRenderArtifact {
     pub bytes: Vec<u8>,
     pub receipt: ArchifyRenderReceipt,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_warning: Option<String>,
 }
 
 fn typed(code: &str, message: impl Into<String>) -> IpcError {
@@ -795,7 +797,11 @@ fn render_candidate_with_engine(
                 visual_review: ArchifyRenderGate { status: "not-run".into(), scope: "manual".into() },
             },
         };
-        Ok(ArchifyRenderArtifact { bytes, receipt })
+        Ok(ArchifyRenderArtifact {
+            bytes,
+            receipt,
+            store_warning: None,
+        })
     })());
 
     let cleanup = if owns_staging {
@@ -1002,16 +1008,21 @@ pub mod ipc {
             let engine = super::bundled_engine_path(&app).map_err(|error| {
                 super::typed(&error.code, format!("{}; restore the bundled engine or fix MARU_ARCHIFY_ENGINE and retry the export", error.message))
             })?;
-            if context.as_ref().is_some_and(|context| context.diagram_type != diagram_type) {
-                return Err(super::render_error(super::ARCHIFY_RENDER_FAILED,
-                    "Render document context names a different diagram type"));
-            }
-            let artifact = super::render_candidate_with_engine(
+            let context_type_mismatch = context
+                .as_ref()
+                .is_some_and(|context| context.diagram_type != diagram_type);
+            let mut artifact = super::render_candidate_with_engine(
                 workspace.clone(), diagram_type, candidate_json, Some(engine),
             )?;
             if let Some(context) = context {
-                crate::diagram::renders::store_render(&workspace, context, artifact.clone())
-                    .map_err(|error| super::render_error(super::ARCHIFY_RENDER_FAILED, error))?;
+                let warning = if context_type_mismatch {
+                    Some("Render was generated but not saved: document context names a different diagram type; refresh the saved diagram and export again to store it".to_string())
+                } else {
+                    crate::diagram::renders::store_render(&workspace, context, artifact.clone())
+                        .err()
+                        .map(|error| format!("Render was generated but not saved: {error}"))
+                };
+                artifact.store_warning = warning;
             }
             Ok(artifact)
         })
@@ -1283,6 +1294,7 @@ mod tests {
         let value = serde_json::to_value(ArchifyRenderArtifact {
             bytes: vec![1, 2, 3],
             receipt,
+            store_warning: None,
         })
         .unwrap();
         assert_eq!(value["bytes"], serde_json::json!([1, 2, 3]));
@@ -1530,5 +1542,78 @@ mod render_worker_boundary_tests {
         assert_eq!(receipt.doc_id, "stored-doc");
         assert_eq!(receipt.document_revision, "d".repeat(64));
         assert_eq!(receipt.dataset_id.as_deref(), Some("source-dataset"));
+    }
+
+    #[test]
+    fn optional_store_failure_keeps_a_valid_engine_artifact_and_returns_warning() {
+        let _engine = super::ENGINE_ENV_LOCK.lock().unwrap();
+        if !std::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            eprintln!("skipping: Node is unavailable for the pinned render fixture");
+            return;
+        }
+        let home = Home::new();
+        let workspace = home.root.path().join("blocked-render-store-workspace");
+        fs::create_dir_all(workspace.join(".maru")).unwrap();
+        fs::create_dir_all(workspace.join("diagrams")).unwrap();
+        fs::write(
+            workspace.join("diagrams/blocked.cmd.json"),
+            r#"{"id":"blocked-doc","docTitle":"Blocked render"}"#,
+        )
+        .unwrap();
+        // This non-directory ancestor blocks the optional attachments store
+        // while leaving the renderer's private .maru staging area writable.
+        fs::write(
+            workspace.join("attachments"),
+            b"preserve this workspace entry",
+        )
+        .unwrap();
+        let spec = r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Stored fixture","output":"fixture.html"},"layout":{"mode":"grid"},"components":[{"id":"app","label":"App","type":"backend","row":0,"col":0}]}"#;
+        let context = |diagram_type: &str| crate::diagram::renders::RenderDocumentContext {
+            doc_id: "blocked-doc".into(),
+            document_name: "Blocked render".into(),
+            document_revision: "d".repeat(64),
+            diagram_type: diagram_type.into(),
+            dataset_id: Some("blocked-dataset".into()),
+        };
+        let app = tauri::test::mock_app();
+        let artifact = crate::atomic_file::phase08_06::run(ipc::archify_render_candidate(
+            app.handle().clone(),
+            workspace.to_string_lossy().into_owned(),
+            "architecture".into(),
+            spec.into(),
+            Some(context("architecture")),
+        ))
+        .unwrap();
+        assert!(artifact.bytes.starts_with(b"<!DOCTYPE html>"));
+        assert_eq!(
+            artifact.receipt.output_sha256,
+            super::sha256(&artifact.bytes)
+        );
+        assert!(artifact.store_warning.as_deref().is_some_and(|warning| {
+            warning.contains("Render was generated but not saved")
+                && warning.contains("attachments")
+                && warning.contains("retry")
+        }));
+        assert_eq!(
+            fs::read(workspace.join("attachments")).unwrap(),
+            b"preserve this workspace entry"
+        );
+
+        let mismatch = crate::atomic_file::phase08_06::run(ipc::archify_render_candidate(
+            app.handle().clone(),
+            workspace.to_string_lossy().into_owned(),
+            "architecture".into(),
+            spec.into(),
+            Some(context("sequence")),
+        ))
+        .unwrap();
+        assert!(mismatch.bytes.starts_with(b"<!DOCTYPE html>"));
+        assert!(mismatch.store_warning.as_deref().is_some_and(|warning| {
+            warning.contains("different diagram type") && warning.contains("export again")
+        }));
     }
 }

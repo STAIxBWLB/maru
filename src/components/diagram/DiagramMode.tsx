@@ -896,11 +896,11 @@ function DiagramShell({
             reportError(t("diagram.report.failed", { message: outcome.message }));
             break;
           case "inserted":
-            reportError(t("diagram.report.inserted", { path: outcome.targetPath }));
+            reportError([t("diagram.report.inserted", { path: outcome.targetPath }), ...(outcome.storeWarnings ?? []).map((message) => t("diagram.renders.notKept", { message }))].join("\n"));
             setReportLinkState("update");
             break;
           case "updated":
-            reportError(t("diagram.report.updated", { path: outcome.targetPath }));
+            reportError([t("diagram.report.updated", { path: outcome.targetPath }), ...(outcome.storeWarnings ?? []).map((message) => t("diagram.renders.notKept", { message }))].join("\n"));
             setReportLinkState("update");
             break;
         }

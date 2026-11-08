@@ -168,6 +168,23 @@ describe("verified semantic export against the pinned renderer", () => {
     expect(rasteriseMock).not.toHaveBeenCalled();
   });
 
+
+  it.each([["도식", "Diagram"], ["long-title", "아주 긴 제목".repeat(100)]])("keeps valid static export available for %s when history cannot be kept", async (id, title) => {
+    const { doc, dataset } = semanticDoc("architecture");
+    doc.id = id; doc.docTitle = title;
+    const warning = "Cannot store render: attachments is not a directory; repair the store and retry";
+    const result = await exportVerifiedSemanticArtifact({ doc, workspace: "/fixture", format: "svg", host: async (type, json, context) => {
+      expect(context?.docId).toBe(id);
+      expect(new TextEncoder().encode(context?.documentName).length).toBeLessThanOrEqual(256);
+      expect(title.startsWith(context?.documentName ?? "")).toBe(true);
+      return { ...pinnedNodeArtifact(type, json), storeWarning: warning };
+    } });
+    expect(result.storeWarning).toBe(warning);
+    expect(result.receipt.outputMimeType).toBe("image/svg+xml");
+    expect(result.receipt.outputSha256).toBe(digest(result.bytes));
+    expect(result.receipt.inputSpecSha256).toBe(digest(new TextEncoder().encode(JSON.stringify(dataset.spec))));
+  });
+
   it("validates the exact fixed native fixture and drops unknown receipt diagnostics", async () => {
     const { dataset } = archifySpecToDataset("architecture", NATIVE_EXPORT_SPEC);
     const doc = { ...createEmptyDoc("native-fixed", 1), datasets: [dataset] };

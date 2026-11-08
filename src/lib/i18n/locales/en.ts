@@ -4215,4 +4215,6 @@ export const en: Record<string, string> = {
   "diagram.renders.gates": "Verification gates",
   "diagram.renders.close": "Close",
 
+  "diagram.renders.notKept": "The copy was exported, but the render was not kept in history: {message}",
+
 };

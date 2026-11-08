@@ -117,6 +117,7 @@ export interface ArchifyRenderReceipt {
 }
 
 export interface ArchifyRenderArtifact {
+  storeWarning?: string | null;
   bytes: number[];
   receipt: ArchifyRenderReceipt;
 }

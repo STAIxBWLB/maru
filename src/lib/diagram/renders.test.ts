@@ -45,9 +45,28 @@ describe("saved render source binding", () => {
   });
   it("allows a unique legacy source and holds a missing document for restoration", async () => {
     const { doc, first } = source(); doc.datasets = [first];
-    await rerenderDocument("/workspace", group);
+    await rerenderDocument("/workspace", group, { docId: "doc", renderId: "legacy", verified: true, receipt });
     expect(mocks.render).toHaveBeenCalledTimes(1);
     await expect(rerenderDocument("/workspace", { ...group, orphaned: true })).rejects.toThrow(/restore/);
     expect(mocks.render).toHaveBeenCalledTimes(1);
   });
+  it("does not change diagram type for a legacy receipt with a sole mismatched dataset", async () => {
+    const { doc } = source();
+    doc.datasets = [archifySpecToDataset("workflow", SEMANTIC_FIXTURES.workflow).dataset];
+    await expect(rerenderDocument("/workspace", group, { docId: "doc", renderId: "legacy", verified: true, receipt })).rejects.toThrow(/no unique source dataset/);
+    expect(mocks.render).not.toHaveBeenCalled();
+  });
+
+  it("uses the original document identity when the store key is hashed", async () => {
+    const { doc, first } = source(); doc.id = "도식"; doc.datasets = [first];
+    await rerenderDocument("/workspace", { ...group, docId: "__hashed_bucket", originalDocId: "도식" }, { docId: "__hashed_bucket", renderId: "legacy", verified: true, receipt: { ...receipt, docId: "도식" } });
+    expect(mocks.render).toHaveBeenCalledWith("/workspace", "architecture", JSON.stringify(first.spec), expect.objectContaining({ docId: "도식" }));
+  });
+
+  it("surfaces a nonfatal renderer history warning when the action specifically requests a stored rerender", async () => {
+    const { doc, first } = source(); doc.datasets = [first];
+    mocks.render.mockResolvedValueOnce({ storeWarning: "Render store is not writable; repair permissions and retry" });
+    await expect(rerenderDocument("/workspace", group, { docId: "doc", renderId: "legacy", verified: true, receipt })).rejects.toThrow(/not kept in history.*repair permissions/);
+  });
+
 });

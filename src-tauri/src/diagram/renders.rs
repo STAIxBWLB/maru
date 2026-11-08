@@ -35,6 +35,10 @@ const MAX_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_RECEIPT_BYTES: u64 = 512 * 1024;
 const MAX_ARTIFACT_BYTES: u64 = 24 * 1024 * 1024;
 const MAX_DISPLAY_NAME_BYTES: usize = 256;
+const MAX_LOGICAL_DOC_ID_BYTES: usize = 64 * 1024;
+// `~` was excluded by the legacy safe-component grammar, keeping hashed
+// folders disjoint from every compatible pre-existing ASCII folder key.
+const HASHED_DOC_PREFIX: &str = "~doc-";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +68,7 @@ pub struct DiagramRenderReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredRender {
+    pub doc_id: String,
     pub render_id: String,
     pub artifact_name: String,
     pub receipt: DiagramRenderReceipt,
@@ -87,6 +92,8 @@ pub struct RenderEntry {
 pub struct RenderGroup {
     pub doc_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_doc_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub document_name: Option<String>,
     pub orphaned: bool,
     pub renders: Vec<RenderEntry>,
@@ -102,6 +109,7 @@ pub struct RenderView {
 
 #[derive(Debug, Clone)]
 struct DocumentIdentity {
+    original_id: String,
     name: String,
 }
 
@@ -120,17 +128,51 @@ fn operation_error(
 }
 
 fn validate_doc_id(doc_id: &str) -> Result<&str, String> {
-    if doc_id.is_empty()
-        || doc_id.len() > 160
-        || doc_id.starts_with('.')
-        || doc_id.contains("..")
-        || !doc_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-    {
-        return Err("Invalid diagram document ID; select a saved diagram and retry".into());
+    if doc_id.is_empty() || doc_id.len() > MAX_LOGICAL_DOC_ID_BYTES {
+        return Err("Diagram document ID is empty or exceeds the receipt bound; save the diagram with a shorter ID and retry".into());
     }
     Ok(doc_id)
+}
+
+fn legacy_safe_doc_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 160
+        && !key.starts_with('.')
+        && !key.contains("..")
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn validate_doc_key(key: &str) -> Result<&str, String> {
+    let hashed = key.strip_prefix(HASHED_DOC_PREFIX).is_some_and(|suffix| {
+        suffix.len() == 64
+            && suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    });
+    if hashed || (legacy_safe_doc_key(key) && !key.starts_with(HASHED_DOC_PREFIX)) {
+        Ok(key)
+    } else {
+        Err("Invalid render document folder key; refresh the render list and retry".into())
+    }
+}
+
+fn document_directory_key(doc_id: &str) -> Result<String, String> {
+    validate_doc_id(doc_id)?;
+    if legacy_safe_doc_key(doc_id)
+        && !doc_id.bytes().any(|byte| byte.is_ascii_uppercase())
+        && !doc_id.starts_with(HASHED_DOC_PREFIX)
+    {
+        Ok(doc_id.to_string())
+    } else {
+        Ok(format!("{HASHED_DOC_PREFIX}{}", sha256(doc_id.as_bytes())))
+    }
+}
+
+fn folder_matches_document(folder: &str, logical_id: &str) -> bool {
+    document_directory_key(logical_id).ok().as_deref() == Some(folder)
+        || (legacy_safe_doc_key(logical_id) && logical_id == folder)
 }
 
 fn validate_render_id(render_id: &str) -> Result<&str, String> {
@@ -155,15 +197,35 @@ fn validate_diagram_type(diagram_type: &str) -> Result<(), String> {
     }
 }
 
-fn validate_display_name(name: &str) -> Result<String, String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty()
-        || trimmed.len() > MAX_DISPLAY_NAME_BYTES
-        || trimmed.chars().any(char::is_control)
+fn bounded_display_name(name: &str, fallback: &str) -> String {
+    let mut output = String::new();
+    for character in name
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
     {
-        return Err("Render document name is empty, too long, or contains control characters; save the diagram with a shorter title".into());
+        if output.len() + character.len_utf8() > MAX_DISPLAY_NAME_BYTES {
+            break;
+        }
+        output.push(character);
     }
-    Ok(trimmed.to_string())
+    let output = output.trim().to_string();
+    if !output.is_empty() {
+        return output;
+    }
+    let mut output = String::new();
+    for character in fallback.chars().filter(|character| !character.is_control()) {
+        if output.len() + character.len_utf8() > MAX_DISPLAY_NAME_BYTES {
+            break;
+        }
+        output.push(character);
+    }
+    let fallback = output.trim().to_string();
+    if fallback.is_empty() {
+        "Untitled diagram".to_string()
+    } else {
+        fallback
+    }
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -215,7 +277,6 @@ fn validate_base_receipt(receipt: &ArchifyRenderReceipt) -> Result<&'static str,
 
 fn validate_extended_receipt(receipt: &DiagramRenderReceipt) -> Result<&'static str, String> {
     validate_doc_id(&receipt.doc_id)?;
-    validate_display_name(&receipt.document_name)?;
     validate_diagram_type(&receipt.diagram_type)?;
     if receipt
         .dataset_id
@@ -257,7 +318,7 @@ fn extended_receipt(
     let extended = DiagramRenderReceipt {
         render: receipt,
         doc_id: context.doc_id.clone(),
-        document_name: validate_display_name(&context.document_name)?,
+        document_name: bounded_display_name(&context.document_name, &context.doc_id),
         document_revision: context.document_revision.clone(),
         rendered_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
         diagram_type: context.diagram_type.clone(),
@@ -267,8 +328,16 @@ fn extended_receipt(
     Ok(extended)
 }
 
+fn normalize_loaded_receipt(
+    mut receipt: DiagramRenderReceipt,
+) -> Result<DiagramRenderReceipt, String> {
+    validate_extended_receipt(&receipt)?;
+    receipt.document_name = bounded_display_name(&receipt.document_name, &receipt.doc_id);
+    Ok(receipt)
+}
+
 fn render_directory(workspace: &Path, doc_id: &str, render_id: &str) -> Result<PathBuf, String> {
-    validate_doc_id(doc_id)?;
+    validate_doc_key(doc_id)?;
     validate_render_id(render_id)?;
     let path = lexical_normalize(
         &workspace
@@ -635,11 +704,14 @@ fn parse_document_index(workspace: &Path) -> Result<HashMap<String, DocumentIden
         if validate_doc_id(id).is_err() {
             continue;
         }
+        let key = document_directory_key(id)?;
+        let display_name = bounded_display_name(document_name, id);
         if documents
             .insert(
-                id.to_string(),
+                key,
                 DocumentIdentity {
-                    name: document_name.to_string(),
+                    original_id: id.to_string(),
+                    name: display_name,
                 },
             )
             .is_some()
@@ -718,7 +790,7 @@ fn inspect_render(workspace: &Path, doc_id: &str, render_id: &str) -> Result<Ren
             ))
         }
     };
-    if receipt.doc_id != doc_id {
+    if !folder_matches_document(doc_id, &receipt.doc_id) {
         return Ok(unverified_entry(
             doc_id,
             render_id,
@@ -727,6 +799,10 @@ fn inspect_render(workspace: &Path, doc_id: &str, render_id: &str) -> Result<Ren
             "receipt document ID does not match its folder; restore the original render folder",
         ));
     }
+    let receipt = match normalize_loaded_receipt(receipt) {
+        Ok(receipt) => receipt,
+        Err(error) => return Ok(unverified_entry(doc_id, render_id, None, None, error)),
+    };
     let artifact_name = match validate_extended_receipt(&receipt) {
         Ok(name) => name,
         Err(error) => {
@@ -844,7 +920,7 @@ pub fn list_renders(workspace: &str) -> Result<Vec<RenderGroup>, String> {
     let mut groups = Vec::new();
     let mut total = 0usize;
     for (doc_id, doc_dir) in doc_dirs {
-        if validate_doc_id(&doc_id).is_err() {
+        if validate_doc_key(&doc_id).is_err() {
             continue;
         }
         let renders_dir = doc_dir.join(RENDERS_DIR);
@@ -870,7 +946,12 @@ pub fn list_renders(workspace: &str) -> Result<Vec<RenderGroup>, String> {
             renders.push(inspect_render(&root, &doc_id, &render_id)?);
         }
         if !renders.is_empty() {
-            let document = documents.get(&doc_id);
+            let legacy_key = legacy_safe_doc_key(&doc_id)
+                .then(|| document_directory_key(&doc_id).ok())
+                .flatten();
+            let document = documents
+                .get(&doc_id)
+                .or_else(|| legacy_key.as_ref().and_then(|key| documents.get(key)));
             let fallback_name = renders.iter().find_map(|render| {
                 render
                     .receipt
@@ -879,6 +960,14 @@ pub fn list_renders(workspace: &str) -> Result<Vec<RenderGroup>, String> {
             });
             groups.push(RenderGroup {
                 doc_id: doc_id.clone(),
+                original_doc_id: document.map(|doc| doc.original_id.clone()).or_else(|| {
+                    renders.iter().find_map(|render| {
+                        render
+                            .receipt
+                            .as_ref()
+                            .map(|receipt| receipt.doc_id.clone())
+                    })
+                }),
                 document_name: document.map(|doc| doc.name.clone()).or(fallback_name),
                 orphaned: document.is_none(),
                 renders,
@@ -921,7 +1010,7 @@ fn read_verified_render(
             "rerender the diagram to repair its receipt",
         )
     })?;
-    if receipt.doc_id != doc_id {
+    if !folder_matches_document(doc_id, &receipt.doc_id) {
         return Err(operation_error(
             "verify render receipt",
             workspace,
@@ -930,6 +1019,7 @@ fn read_verified_render(
             "restore the original render folder and retry",
         ));
     }
+    let receipt = normalize_loaded_receipt(receipt)?;
     let artifact_name = validate_extended_receipt(&receipt)?;
     let artifact_file = artifact_path(&dir, artifact_name);
     let artifact_bytes = read_bounded_file(workspace, &artifact_file, MAX_ARTIFACT_BYTES)?;
@@ -994,6 +1084,16 @@ pub fn prepare_render_view<R: tauri::Runtime>(
                 "rerender the diagram to repair its receipt",
             )
         })?;
+    if !folder_matches_document(doc_id, &receipt.doc_id) {
+        return Err(operation_error(
+            "verify render receipt",
+            &root,
+            &receipt_file,
+            "receipt document ID does not match its folder",
+            "restore the original render folder and retry",
+        ));
+    }
+    let receipt = normalize_loaded_receipt(receipt)?;
     let artifact_name = validate_extended_receipt(&receipt).map_err(|error| {
         operation_error(
             "verify render receipt",
@@ -1003,15 +1103,6 @@ pub fn prepare_render_view<R: tauri::Runtime>(
             "restore the original render folder or rerender the diagram",
         )
     })?;
-    if receipt.doc_id != doc_id {
-        return Err(operation_error(
-            "verify render receipt",
-            &root,
-            &receipt_file,
-            "receipt document ID does not match its folder",
-            "restore the original render folder and retry",
-        ));
-    }
     let artifact_file = artifact_path(&dir, artifact_name);
     let request = PathTransactionRequest::new([receipt_file.clone(), artifact_file.clone()])
         .map_err(|error| {
@@ -1264,7 +1355,7 @@ fn build_context_receipt(
     base: ArchifyRenderReceipt,
 ) -> Result<DiagramRenderReceipt, String> {
     let mut context = context.clone();
-    context.document_name = validate_display_name(&context.document_name)?;
+    context.document_name = bounded_display_name(&context.document_name, &context.doc_id);
     extended_receipt(&context, base)
 }
 
@@ -1295,7 +1386,8 @@ fn store_render_with_id(
     if sha256(&artifact.bytes) != receipt.render.output_sha256 {
         return Err("Cannot store diagram render: artifact bytes do not match the receipt hash; rerender the diagram and retry".into());
     }
-    let dir = render_directory(&root, &receipt.doc_id, render_id)?;
+    let doc_key = document_directory_key(&receipt.doc_id)?;
+    let dir = render_directory(&root, &doc_key, render_id)?;
     let artifact_path = artifact_path(&dir, artifact_name);
     let receipt_path = receipt_path(&dir);
     let mut publication_paths = vec![dir.clone(), artifact_path.clone(), receipt_path.clone()];
@@ -1390,6 +1482,7 @@ fn store_render_with_id(
     })
     .map_err(|error| operation_error("store diagram render", &root, &dir, error, "refresh the Renders list and retry"))?;
     Ok(StoredRender {
+        doc_id: doc_key,
         render_id: render_id.to_string(),
         artifact_name: artifact_name.to_string(),
         receipt,
@@ -1506,6 +1599,7 @@ mod tests {
         fn artifact(&self, mime_type: &str, bytes: &[u8]) -> ArchifyRenderArtifact {
             ArchifyRenderArtifact {
                 bytes: bytes.to_vec(),
+                store_warning: None,
                 receipt: ArchifyRenderReceipt {
                     schema_version: 1,
                     input_spec_sha256: sha256(b"semantic input"),
@@ -1542,6 +1636,22 @@ mod tests {
             store_render_with_id(
                 self.work.to_str().unwrap(),
                 self.context(),
+                self.artifact(mime_type, bytes),
+                id,
+            )
+            .unwrap()
+        }
+
+        fn store_context(
+            &self,
+            id: &str,
+            context: RenderDocumentContext,
+            mime_type: &str,
+            bytes: &[u8],
+        ) -> StoredRender {
+            store_render_with_id(
+                self.work.to_str().unwrap(),
+                context,
                 self.artifact(mime_type, bytes),
                 id,
             )
@@ -1611,6 +1721,87 @@ mod tests {
             fs::read(fixture.render_dir(RENDER_A).join(HTML_FILE)).unwrap(),
             HTML
         );
+    }
+
+    #[test]
+    fn unicode_document_ids_keep_logical_identity_and_long_titles_are_bounded_utf8() {
+        let fixture = Fixture::new();
+        let logical_id = "도식";
+        fs::write(
+            fixture.work.join(DIAGRAMS_ROOT).join("unicode.cmd.json"),
+            serde_json::json!({ "id": logical_id, "docTitle": "Unicode" }).to_string(),
+        )
+        .unwrap();
+        let context = RenderDocumentContext {
+            doc_id: logical_id.into(),
+            document_name: "한".repeat(300),
+            document_revision: sha256(b"unicode document revision"),
+            diagram_type: "architecture".into(),
+            dataset_id: Some("source-dataset".into()),
+        };
+        let stored = fixture.store_context(RENDER_A, context, "image/svg+xml", SVG);
+        assert_ne!(stored.doc_id, logical_id);
+        assert!(stored.doc_id.starts_with(HASHED_DOC_PREFIX));
+        assert_eq!(stored.receipt.doc_id, logical_id);
+        assert!(stored.receipt.document_name.len() <= MAX_DISPLAY_NAME_BYTES);
+        assert!(stored.receipt.document_name.ends_with('한'));
+        assert_eq!(stored.receipt.dataset_id.as_deref(), Some("source-dataset"));
+
+        let group = list_renders(fixture.work.to_str().unwrap())
+            .unwrap()
+            .into_iter()
+            .find(|group| group.doc_id == stored.doc_id)
+            .unwrap();
+        assert_eq!(group.original_doc_id.as_deref(), Some(logical_id));
+        assert_eq!(group.document_name.as_deref(), Some("unicode"));
+        let entry = group.renders.first().unwrap();
+        assert_eq!(entry.doc_id, stored.doc_id);
+        assert_eq!(entry.receipt.as_ref().unwrap().doc_id, logical_id);
+        let app = tauri::test::mock_app();
+        let view = prepare_render_view(
+            &app.handle().clone(),
+            fixture.work.to_str().unwrap(),
+            &stored.doc_id,
+            RENDER_A,
+        )
+        .unwrap();
+        assert_eq!(view.receipt.doc_id, logical_id);
+        delete_render(fixture.work.to_str().unwrap(), &stored.doc_id, RENDER_A).unwrap();
+        assert!(!fixture
+            .work
+            .join(RENDER_ROOT)
+            .join(&stored.doc_id)
+            .join(RENDERS_DIR)
+            .join(RENDER_A)
+            .exists());
+    }
+
+    #[test]
+    fn blank_document_names_fall_back_to_the_logical_id() {
+        let fixture = Fixture::new();
+        let context = RenderDocumentContext {
+            doc_id: "도식".into(),
+            document_name: "  \n\t ".into(),
+            document_revision: sha256(b"fallback document revision"),
+            diagram_type: "architecture".into(),
+            dataset_id: None,
+        };
+        let stored = fixture.store_context(RENDER_A, context, "image/svg+xml", SVG);
+        assert_eq!(stored.receipt.document_name, "도식");
+    }
+
+    #[test]
+    fn reserved_hash_prefix_ids_are_hashed_to_avoid_legacy_key_collisions() {
+        assert_ne!(
+            document_directory_key("Doc").unwrap().to_ascii_lowercase(),
+            document_directory_key("doc").unwrap().to_ascii_lowercase()
+        );
+        let logical_id = format!("{HASHED_DOC_PREFIX}{}", "a".repeat(64));
+        let key = document_directory_key(&logical_id).unwrap();
+        assert_ne!(key, logical_id);
+        assert!(key.starts_with(HASHED_DOC_PREFIX));
+        assert!(validate_doc_key(&key).is_ok());
+        assert_eq!(document_directory_key("ascii-doc").unwrap(), "ascii-doc");
     }
 
     #[test]

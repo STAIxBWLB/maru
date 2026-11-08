@@ -22,8 +22,26 @@ async function waitProbe(count: number): Promise<Probe> {
   return (await probes())[count - 1];
 }
 
+async function currentFrame(markPrevious = false) {
+  // Read fresh DOM properties together; WebDriver element IDs do not survive
+  // React's theme remount. The old DOM reference is used only to prove removal.
+  return browser.execute((mark) => {
+    const frame = document.querySelector<HTMLIFrameElement>('[data-testid="diagram-render-frame"]');
+    if (!frame) return null;
+    const target = window as unknown as { __previousRenderFrame?: HTMLIFrameElement };
+    const previous = target.__previousRenderFrame;
+    const state = { sandbox: frame.getAttribute("sandbox"), referrer: frame.getAttribute("referrerpolicy"), src: frame.src,
+      replaced: Boolean(previous && previous !== frame), previousDetached: Boolean(previous && !previous.isConnected) };
+    if (mark) target.__previousRenderFrame = frame;
+    return state;
+  }, markPrevious);
+}
+
 describe("native saved Diagram renders", () => {
   it("loads only a verified asset with opaque-origin IPC and parent isolation and theme remount", async () => {
+    // As in the retired gallery spec: explicitly select the current main
+    // window to avoid the service's unsupported global-Tauri focus probes.
+    await browser.switchToWindow(await browser.getWindowHandle());
     const workspace = path.join(fixtureRootDir(), "workspace");
     const folder = path.join(workspace, "attachments/diagrams/native-render-doc/renders/0123456789abcdef0123456789abcdef");
     await fs.mkdir(folder, { recursive: true });
@@ -47,20 +65,20 @@ describe("native saved Diagram renders", () => {
       });
     });
     const rail = await browser.$('.activity-rail button[aria-label="다이어그램"]');
-    await rail.waitForDisplayed({ timeout: 30_000 }); await rail.click();
+    await rail.waitForDisplayed({ timeout: 30_000 }); await (await browser.$('.activity-rail button[aria-label="다이어그램"]')).click();
     await (await browser.$('[role="tab"]*=파일')).click();
     await (await browser.$('button*=렌더')).click();
     const entry = await browser.$('[data-testid="diagram-render-entry"]');
-    await entry.waitForDisplayed({ timeout: 30_000 }); await entry.click();
+    await entry.waitForDisplayed({ timeout: 30_000 }); await (await browser.$('[data-testid="diagram-render-entry"]')).click();
     const first = await waitProbe(1);
     const theme = await browser.execute(() => document.documentElement.dataset.theme ?? "light");
     assert.equal(first.theme, theme, "Render theme differs from the app; inspect the viewer theme query and rerun the spec");
     assert.equal(first.ipc, "undefined", "Render can reach native IPC; keep the opaque-origin sandbox and inspect Tauri initialization");
     assert.equal(first.parent, "blocked", "Render can reach the app document; restore the sandbox without allow-same-origin");
-    const flags = await (await browser.$('[data-testid="diagram-render-frame"]')).getAttribute("sandbox");
-    assert.ok(!flags?.split(" ").includes("allow-same-origin"), "Viewer sandbox permits parent access; remove allow-same-origin");
-    const referrer = await (await browser.$('[data-testid="diagram-render-frame"]')).getAttribute("referrerpolicy");
-    assert.equal(referrer, "no-referrer", "Viewer leaks referrers; restore referrerPolicy=no-referrer");
+    const frame = await currentFrame(true);
+    assert.ok(frame, "Prepared viewer is missing; inspect prepare-render diagnostics and rerun the spec");
+    assert.ok(!frame.sandbox?.split(" ").includes("allow-same-origin"), "Viewer sandbox permits parent access; remove allow-same-origin");
+    assert.equal(frame.referrer, "no-referrer", "Viewer leaks referrers; restore referrerPolicy=no-referrer");
     const denied = await browser.execute(async (file) => {
       const internals = (window as unknown as { __TAURI_INTERNALS__?: { convertFileSrc: (file: string, protocol?: string) => string } }).__TAURI_INTERNALS__;
       if (!internals) return false;
@@ -72,5 +90,10 @@ describe("native saved Diagram renders", () => {
     const next = await waitProbe(2);
     assert.equal(next.theme, nextTheme, "Theme change did not remount the render; inspect the iframe key and theme query");
     assert.equal(next.ipc, "undefined"); assert.equal(next.parent, "blocked");
+    const replacement = await currentFrame();
+    assert.ok(replacement?.replaced && replacement.previousDetached, "Theme did not replace the old iframe; inspect the key and recheck after its new probe");
+    assert.ok(replacement.src.includes(`theme=${nextTheme}`), "Current frame has a stale theme; inspect the theme query and rerun the spec");
+    assert.equal(replacement.referrer, "no-referrer");
+    assert.ok(!replacement.sandbox?.split(" ").includes("allow-same-origin"));
   }).timeout(120_000);
 });

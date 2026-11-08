@@ -24,7 +24,9 @@ export interface StoredRender {
   artifactName?: string | null;
 }
 export interface RenderGroup {
+  /** Filesystem-safe bucket key; the original document identity stays in the receipt. */
   docId: string;
+  originalDocId?: string | null;
   documentName?: string | null;
   orphaned: boolean;
   renders: StoredRender[];
@@ -60,15 +62,17 @@ export async function rerenderDocument(workspace: string, group: RenderGroup, re
   requireDesktop();
   if (group.orphaned || !group.documentName) throw new Error("The source document is missing; restore its diagram file before re-rendering.");
   const current = await readDiagramDetailed(workspace, group.documentName);
-  if (current.doc.id !== group.docId) throw new Error("The source document identity changed; refresh the render list before re-rendering.");
+  const originalDocId = group.originalDocId ?? render?.receipt?.docId ?? group.docId;
+  if (current.doc.id !== originalDocId) throw new Error("The source document identity changed; refresh the render list before re-rendering.");
   const datasets = (current.doc.datasets ?? []).filter((dataset) => dataset.kind === "semanticSpec");
   const requestedId = render?.receipt?.datasetId;
   const matchingType = datasets.filter((dataset) => dataset.diagramType === render?.receipt?.diagramType);
-  const datasetId = requestedId ?? (datasets.length === 1 ? datasets[0].id : matchingType.length === 1 ? matchingType[0].id : undefined);
+  const datasetId = requestedId ?? (matchingType.length === 1 ? matchingType[0].id : undefined);
   if (!datasetId) throw new Error("This render has no unique source dataset; open the diagram, select a semantic dataset in Export and create a new render.");
   const canonical = canonicalSemanticExportInput(current.doc, datasetId);
-  await archifyRenderCandidate(workspace, canonical.diagramType, canonical.candidateJson, {
+  const artifact = await archifyRenderCandidate(workspace, canonical.diagramType, canonical.candidateJson, {
     docId: current.doc.id, documentName: group.documentName,
     documentRevision: current.fileRevision, diagramType: canonical.diagramType, datasetId: canonical.datasetId,
   });
+  if (artifact?.storeWarning) throw new Error(`The render was generated but not kept in history: ${artifact.storeWarning}`);
 }

@@ -5,11 +5,24 @@ import { extractEngineSvg, type StaticTheme } from "./engineSvg";
 import { serializeDoc } from "./persistence";
 import type { DiagramDoc } from "./types";
 
-export interface VerifiedStaticArtifact { bytes: Uint8Array; receipt: ArchifyRenderReceipt }
+export interface VerifiedStaticArtifact { bytes: Uint8Array; receipt: ArchifyRenderReceipt; storeWarning?: string }
 
 export async function bytesSha256(bytes: Uint8Array): Promise<string> {
   const hash = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(bytes).buffer);
   return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function receiptDisplayName(value: string): string {
+  const encoder = new TextEncoder();
+  let result = "";
+  let bytes = 0;
+  for (const character of value.trim()) {
+    if (/\p{Cc}/u.test(character)) continue;
+    const width = encoder.encode(character).length;
+    if (bytes + width > 256) break;
+    result += character; bytes += width;
+  }
+  return result || "Untitled diagram";
 }
 
 /** A cancelled or semantically changed document can never reach the save bridge. */
@@ -25,7 +38,7 @@ export async function exportVerifiedSemanticArtifact(input: {
   const canonical = canonicalSemanticExportInput(input.doc, input.datasetId);
   const candidateHash = await bytesSha256(new TextEncoder().encode(canonical.candidateJson));
   current();
-  const context = { docId: input.doc.id, documentName: input.documentName ?? (input.doc.docTitle || input.doc.id),
+  const context = { docId: input.doc.id, documentName: receiptDisplayName(input.documentName ?? (input.doc.docTitle || input.doc.id)),
     datasetId: canonical.datasetId,
     documentRevision: input.documentRevision ?? await bytesSha256(new TextEncoder().encode(serializeDoc(input.doc))), diagramType: canonical.diagramType };
   current();
@@ -60,6 +73,7 @@ export async function exportVerifiedSemanticArtifact(input: {
   current();
   return {
     bytes,
+    ...(rendered.storeWarning ? { storeWarning: rendered.storeWarning } : {}),
     receipt: {
       schemaVersion: 1, inputSpecSha256: receipt.inputSpecSha256,
       enginePin: { name, version, revision },
