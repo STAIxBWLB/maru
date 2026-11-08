@@ -8,9 +8,20 @@ import { stripTypeScriptTypes } from "node:module";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const output = join(root, "src-tauri/crates/maru-diagram-engine/testdata");
 const digest = (text) => createHash("sha256").update(text).digest("hex");
-const privateText = /(?:(?:^|[\s"'(=])\/(?:Users|home|raid|private|tmp)\/|(?:^|[\s"'(])[A-Za-z]:[\\/]|~[\\/]|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|Young Joon Lee|이영준)/i;
+const privateText = /(?:(?:^|[\s"'(=])\/(?:Users|home|raid|private|tmp)\/|(?:^|[\s"'(])[A-Za-z]:[\\/]|~[\\/]|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/i;
+const extraPrivateTerms = (process.env.MARU_E0_PRIVATE_TERMS ?? "").split("\n").map((term) => term.trim()).filter(Boolean);
+export function hasPrivateText(text, extraTerms = []) {
+  return privateText.test(text) || extraTerms.some((term) => text.toLowerCase().includes(term.toLowerCase()));
+}
+export function withoutRepositoryEvidence(spec, diagramType) {
+  const clean = structuredClone(spec);
+  if (clean.meta) delete clean.meta.repository;
+  const collection = { architecture: "components", workflow: "nodes", sequence: "participants", dataflow: "nodes", lifecycle: "states" }[diagramType];
+  for (const node of clean[collection] ?? []) if (node && typeof node === "object") delete node.sources;
+  return clean;
+}
 function sanitize(value, changes, location = "spec") {
-  if (typeof value === "string" && privateText.test(value)) {
+  if (typeof value === "string" && hasPrivateText(value, extraPrivateTerms)) {
     changes.push(location); return "source metadata omitted";
   }
   if (Array.isArray(value)) return value.map((item, i) => sanitize(item, changes, `${location}[${i}]`));
@@ -32,7 +43,7 @@ export async function collectCases(publicCandidates = []) {
       normalized.meta.output = `${id}.html`;
     }
     const inputJson = typeof normalized === "string" ? normalized : JSON.stringify(normalized);
-    if (privateText.test(inputJson)) throw new Error(`Private content remains in ${id}; synthesize a fixture before adding it`);
+    if (hasPrivateText(inputJson, extraPrivateTerms)) throw new Error(`Private content remains in ${id}; synthesize a fixture before adding it`);
     cases.push({ id, diagramType: type, rule, inputJson, inputSha256: digest(inputJson), origin: { ...origin, ...(changes.length ? { sanitizedFields: changes } : {}) }, ...(expectedCoreOk === undefined ? {} : { expectedCoreOk }) });
   };
   // This existing fixture has one extensionless app import. Do not resolve the
@@ -108,9 +119,20 @@ async function main() {
   mkdirSync(output, { recursive: true });
   for (const count of [50, 1000]) writeFileSync(join(output, `bench-${count}.json`), `${JSON.stringify(benchmarkFixture(count))}\n`);
   const cases = await collectCases(publicCandidates);
-  for (const item of cases) item.oracle = oracle(item);
+  for (const item of cases) {
+    item.oracle = oracle(item);
+    if (item.origin.kind === "public") {
+      const input = withoutRepositoryEvidence(JSON.parse(item.inputJson), item.diagramType);
+      item.validityOracle = {
+        scope: "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        inputSha256: digest(JSON.stringify(input)),
+        strippedFields: ["meta.repository", "components[].sources"],
+        ...oracle({ ...item, inputJson: JSON.stringify(input) }),
+      };
+    }
+  }
   const pin = JSON.parse(readFileSync(join(root, "sidecars/archify/PIN.json"), "utf8"));
-  if (privateText.test(JSON.stringify(cases))) throw new Error("Private metadata remains in oracle/corpus output; sanitize it before committing");
+  if (hasPrivateText(JSON.stringify(cases), extraPrivateTerms)) throw new Error("Private metadata remains in oracle/corpus output; sanitize it before committing");
   writeFileSync(join(output, "parity.json"), `${JSON.stringify({ schemaVersion: 1, oracle: { id: pin.name, version: pin.version, revision: pin.revision }, cases }, null, 2)}\n`);
   const { unlinkSync } = await import("node:fs"); unlinkSync(join(root, ".engine-e0/oracle-input.json"));
   console.log(JSON.stringify({ cases: cases.length, byType: Object.fromEntries([...new Set(cases.map((c) => c.diagramType))].map((type) => [type, cases.filter((c) => c.diagramType === type).length])), byRule: Object.fromEntries([...new Set(cases.map((c) => c.rule))].map((rule) => [rule, cases.filter((c) => c.rule === rule).length])) }));

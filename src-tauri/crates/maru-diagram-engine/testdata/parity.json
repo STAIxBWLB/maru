@@ -296,6 +296,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "b4802b20d10af1cf1f5aaa9a37441acee62fce23754298e38b1e1c6e63988263",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {
@@ -332,6 +343,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "18bcda74f8df78540c822e1674ad8eadbc7bd6c8c935ca41d52c0df7b61a462e",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {
@@ -368,6 +390,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "0dde1437b893b4be7f78bcef9032356eaf6e6f9333df97bdb5eb034c3e797c20",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {
@@ -404,6 +437,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "76f163be7ef35d37b9a31f613667e14eecae322d6eaddf0f7947a77061ce7ef1",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {
@@ -440,6 +484,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "4cf45f6c5389aaf3178af54c1371d35cbefeda5b8aee34265efd9b2e27e857fe",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {
@@ -480,6 +535,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "5c02caec45c8528602dd6093b292dad1568079845acc89e3aa518b57d6040149",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {
@@ -516,6 +582,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "543adc74d8c67257ec11af7aa0543594cf4861da705b9049ef2036b8fe41c135",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {
@@ -552,6 +629,17 @@
           }
         ],
         "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      },
+      "validityOracle": {
+        "scope": "document validity with machine-bound repository evidence stripped; original input/verdict retained separately",
+        "inputSha256": "1854e1d527a880128e5789d498f9e97555bf116e9d61f8f5031500fed35c4e1d",
+        "strippedFields": [
+          "meta.repository",
+          "components[].sources"
+        ],
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       }
     },
     {

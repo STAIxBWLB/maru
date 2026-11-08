@@ -627,15 +627,23 @@ The parity corpus currently has 31 sanitized cases: architecture 22, two
 each for workflow, sequence, dataflow and lifecycle, plus one synthetic
 Floorplan substitute. Rule groups are 12 existing fixtures, eight public specs,
 four ID cases, two reference cases, four grid bounds cases and one privacy
-substitute. The existing Floorplan fixture's original source was not verified
-PUBLIC at intake, so its content is not copied here. Archify's unsupported-type
+substitute. The existing Floorplan fixture stays in Maru by the owner's
+2026-11-08 decision: its content is the map published at
+https://afam.staix.net/explore/map/ and its source repository is private (#547).
+This E0 corpus keeps the synthetic substitute because its source contract
+requires public repositories or synthetic fixtures. Archify's unsupported-type
 response for the substitute is labelled as such, not a validity rejection. Existing app/native fixtures and synthetic rule cases retain
 pinned Archify verdicts/diagnostics. The eight immutable public blobs had
 PUBLIC visibility verified before intake. Private/unverified repository
 candidates were excluded without copying their content. Local machine paths
 and contact strings are scrubbed; relative public source evidence remains.
-Repository-backed cases are evaluated without a repository root, and their
-root/evidence refusals are recorded rather than called geometry rejections.
+Repository-backed cases retain their original no-root/evidence verdicts.
+Each also has a separate `validityOracle` report from a clone with only
+`meta.repository` and component `sources` removed; all eight pass the pinned
+Archify document-validity gate. That second verdict does not verify repository
+evidence or change the preserved input. Additional intake-only redaction terms
+come from newline-separated `MARU_E0_PRIVATE_TERMS`, never personal names
+hardcoded in the source.
 Only the explicitly labelled architecture slice expectations are asserted by
 E0. Complete five-type differential parity, renderer constraints and screenshots
 belong to later phases; this corpus is not a claim of achieved product parity.

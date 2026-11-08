@@ -317,11 +317,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: node scripts/diagram-engine-e0.mjs needed
 
-      - name: Setup Rust for WebAssembly spike only
+      - name: Setup the pinned Rust WebAssembly target for the spike only
         if: steps.engine_e0.outputs.needed == 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+        # Honour rust-toolchain.toml instead of installing an unused stable toolchain.
+        run: rustup target add wasm32-unknown-unknown
 
       - name: Build and measure independent WebAssembly slice
         if: steps.engine_e0.outputs.needed == 'true'

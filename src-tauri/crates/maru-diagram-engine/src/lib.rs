@@ -471,7 +471,11 @@ fn validate_architecture(spec: ArchitectureSpec) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn make_report(input: &str, diagnostics: Vec<Diagnostic>) -> ValidationReport {
+fn make_report(
+    input: &str,
+    diagram_type: Option<String>,
+    diagnostics: Vec<Diagnostic>,
+) -> ValidationReport {
     let ok = diagnostics.is_empty();
     ValidationReport {
         api_version: API_VERSION,
@@ -499,7 +503,7 @@ fn make_report(input: &str, diagnostics: Vec<Diagnostic>) -> ValidationReport {
             document_name: None,
             document_revision: None,
             rendered_at: None,
-            diagram_type: Some("architecture".into()),
+            diagram_type,
             dataset_id: None,
         },
     }
@@ -513,6 +517,7 @@ pub fn validate_json(input: &str) -> ValidationReport {
         Err(error) => {
             return make_report(
                 input,
+                None,
                 vec![diagnostic(
                     "json/parse",
                     "$",
@@ -527,10 +532,15 @@ pub fn validate_json(input: &str) -> ValidationReport {
             );
         }
     };
+    let diagram_type = value
+        .get("diagram_type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
     match serde_json::from_value::<ArchitectureSpec>(value) {
-        Ok(spec) => make_report(input, validate_architecture(spec)),
+        Ok(spec) => make_report(input, diagram_type, validate_architecture(spec)),
         Err(error) => make_report(
             input,
+            diagram_type,
             vec![diagnostic(
                 "schema/type",
                 "$",
@@ -706,8 +716,25 @@ mod tests {
         let report = validate_json("{");
         assert!(!report.ok);
         assert_eq!(report.diagnostics[0].code, "json/parse");
+        assert_eq!(report.receipt.diagram_type, None);
         assert!(!report.diagnostics[0].message.is_empty());
         assert!(!report.diagnostics[0].fix.is_empty());
+    }
+
+    #[test]
+    fn rejected_other_diagram_type_is_retained_in_the_receipt() {
+        let other_type = r#"{
+          "schema_version":1,"diagram_type":"workflow",
+          "meta":{"title":"T","output":"t.html"},
+          "components":[{"id":"api","type":"backend","label":"API"}]
+        }"#;
+        let report = validate_json(other_type);
+        assert!(!report.ok);
+        assert_eq!(report.receipt.diagram_type.as_deref(), Some("workflow"));
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "schema/diagram-type"));
     }
 
     #[test]
