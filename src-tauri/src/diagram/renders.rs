@@ -1578,6 +1578,13 @@ mod tests {
         assert_eq!(view.receipt, stored.receipt);
         assert!(view.path.ends_with("/index.html"));
         assert!(view.path.starts_with(fixture.work.to_str().unwrap()));
+        assert!(app.asset_protocol_scope().is_allowed(Path::new(&view.path)));
+        assert!(!app
+            .asset_protocol_scope()
+            .is_allowed(fixture.render_dir(RENDER_A).join(RECEIPT_FILE)));
+        assert!(!app
+            .asset_protocol_scope()
+            .is_allowed(fixture.render_dir(RENDER_B).join(HTML_FILE)));
 
         let error = store_render_with_id(
             fixture.work.to_str().unwrap(),
@@ -1795,5 +1802,23 @@ mod tests {
                 RENDER_A.into(),
             ),
         );
+    }
+    #[test]
+    fn modified_artifact_is_refused_without_an_asset_grant() {
+        let f = Fixture::new();
+        f.store(RENDER_A, "text/html", HTML);
+        let artifact = f.render_dir(RENDER_A).join(HTML_FILE);
+        fs::write(&artifact, b"changed after rendering").unwrap();
+        let groups = list_renders(f.work.to_str().unwrap()).unwrap();
+        assert!(!groups[0].renders[0].verified);
+        let app = tauri::test::mock_app();
+        let error =
+            prepare_render_view(app.handle(), f.work.to_str().unwrap(), &f.doc_id, RENDER_A)
+                .unwrap_err();
+        assert!(
+            error.contains("index.html") && error.contains("hash") && error.contains("rerender"),
+            "{error}"
+        );
+        assert!(!app.asset_protocol_scope().is_allowed(&artifact));
     }
 }
