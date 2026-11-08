@@ -429,23 +429,37 @@ mod tests {
         let view = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("mock webview should build");
-        let request = InvokeRequest {
-            cmd: "plugin:maru-diagram|validate".into(),
-            callback: CallbackFn(0),
-            error: CallbackFn(1),
-            url: view.url().unwrap(),
-            body: InvokeBody::Json(serde_json::json!({
-                "input": r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Test","output":"test.html"},"components":[{"id":"api","type":"backend","label":"API"}]}"#
-            })),
-            headers: Default::default(),
-            invoke_key: INVOKE_KEY.into(),
-        };
-        let response = get_ipc_response(&view, request)
-            .expect("registered validation command should respond")
-            .deserialize::<ValidationReport>()
-            .expect("validation response should have the public report shape");
-        assert!(response.ok, "{:?}", response.diagnostics);
-        assert_eq!(response.api_version, API_VERSION);
-        assert_eq!(response.receipt.engine.id, maru_diagram_engine::ENGINE_ID);
+        let inputs = [
+            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"A","output":"a.html"},"components":[{"id":"a","type":"backend","label":"A","pos":[50,160]}]}"#,
+            r#"{"schema_version":1,"diagram_type":"workflow","meta":{"title":"W","output":"w.html"},"lanes":[{"id":"main","label":"Main"}],"nodes":[{"id":"a","lane":"main","col":0,"type":"backend","label":"A"}],"edges":[]}"#,
+            r#"{"schema_version":1,"diagram_type":"sequence","meta":{"title":"S","output":"s.html"},"participants":[{"id":"a","type":"frontend","label":"A"},{"id":"b","type":"backend","label":"B"}],"messages":[{"from":"a","to":"b","y":180,"label":"Call"}]}"#,
+            r#"{"schema_version":1,"diagram_type":"dataflow","meta":{"title":"D","output":"d.html"},"stages":[{"label":"Input"},{"label":"Output"}],"nodes":[{"id":"a","type":"frontend","label":"A","stage":0,"row":0},{"id":"b","type":"backend","label":"B","stage":1,"row":0}],"flows":[{"from":"a","to":"b","label":"Data"}]}"#,
+            r#"{"schema_version":1,"diagram_type":"lifecycle","meta":{"title":"L","output":"l.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"a","type":"start","label":"A","lane":"main","col":0},{"id":"b","type":"success","label":"B","lane":"main","col":1}],"transitions":[{"from":"a","to":"b"}]}"#,
+        ];
+        for input in inputs {
+            let request = InvokeRequest {
+                cmd: "plugin:maru-diagram|validate".into(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: view.url().unwrap(),
+                body: InvokeBody::Json(serde_json::json!({
+                    "input": input
+                })),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.into(),
+            };
+            let response = get_ipc_response(&view, request)
+                .expect("registered validation command should respond")
+                .deserialize::<ValidationReport>()
+                .expect("validation response should have the public report shape");
+            assert!(response.ok, "{:?}", response.diagnostics);
+            assert_eq!(response.api_version, API_VERSION);
+            assert_eq!(response.receipt.engine.id, maru_diagram_engine::ENGINE_ID);
+            let kind: serde_json::Value = serde_json::from_str(input).unwrap();
+            assert_eq!(
+                response.receipt.diagram_type.as_deref(),
+                kind["diagram_type"].as_str()
+            );
+        }
     }
 }

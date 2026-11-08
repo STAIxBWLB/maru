@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "sequence fixture",
+    "output": "fixture.html"
+  },
+  "participants": [
+    {
+      "id": "a",
+      "type": "frontend",
+      "label": "A"
+    },
+    {
+      "id": "b",
+      "type": "backend",
+      "label": "B"
+    }
+  ],
+  "messages": [
+    {
+      "from": "a",
+      "to": "b",
+      "y": 180,
+      "label": "Call"
+    }
+  ]
+}

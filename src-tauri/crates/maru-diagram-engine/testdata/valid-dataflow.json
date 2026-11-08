@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "dataflow fixture",
+    "output": "fixture.html"
+  },
+  "stages": [
+    {
+      "label": "Input"
+    },
+    {
+      "label": "Output"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "a",
+      "type": "frontend",
+      "label": "A",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "b",
+      "type": "backend",
+      "label": "B",
+      "stage": 1,
+      "row": 0
+    }
+  ],
+  "flows": [
+    {
+      "from": "a",
+      "to": "b",
+      "label": "Data"
+    }
+  ]
+}

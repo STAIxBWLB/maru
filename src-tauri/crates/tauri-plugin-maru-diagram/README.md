@@ -2,12 +2,17 @@
 
 Version 0.1.0 is the standalone Tauri 2 adapter for `maru-diagram-engine`.
 `Builder::new(host, sources).build::<R>()` installs one asynchronous `validate`
-command. The command dispatches the pure validator to Tauri's blocking pool.
+command. It delegates to the core `validate_json` dispatcher for architecture,
+workflow, sequence, dataflow, and lifecycle documents, and runs validation on
+Tauri's blocking pool. Architecture/sequence/dataflow use schema-version 1;
+workflow/lifecycle accept versions 1 and 2.
 
-`DiagramHost` supplies a workspace root and a write-authorization hook for
-later store commands. `DiagramSources` exposes bounded snapshots for document
-relations, workspace structure, and vault concepts. E0 defines those seams but
-does not connect them to Maru files or data. `FixtureSources` contains only
+The command accepts document JSON and returns the core diagnostic report and
+engine receipt. It does not write files, render diagrams, or switch the host
+application to this transport. `DiagramHost` provides a workspace-root and
+write-authorization seam for later store operations; validation does not use
+it. `DiagramSources` defines bounded snapshot interfaces, but this release does
+not connect them to workspace or vault data. `FixtureSources` contains only
 synthetic examples.
 
 The crate has no dependency on the Maru application crate. Its standalone Cargo

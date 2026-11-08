@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "workflow fixture",
+    "output": "fixture.html"
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Main"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "a",
+      "lane": "main",
+      "col": 0,
+      "type": "frontend",
+      "label": "A",
+      "width": 96,
+      "height": 48
+    },
+    {
+      "id": "b",
+      "lane": "main",
+      "col": 2,
+      "type": "backend",
+      "label": "B",
+      "width": 96,
+      "height": 48
+    },
+    {
+      "id": "c",
+      "lane": "main",
+      "col": 4,
+      "type": "backend",
+      "label": "C",
+      "width": 96,
+      "height": 48
+    }
+  ],
+  "edges": [
+    {
+      "from": "a",
+      "to": "b",
+      "role": "main"
+    },
+    {
+      "from": "b",
+      "to": "c",
+      "role": "main"
+    }
+  ]
+}
