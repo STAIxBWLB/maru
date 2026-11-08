@@ -17,6 +17,8 @@ mod cli_path;
 mod command_output;
 mod content_search;
 mod diagram;
+#[cfg(feature = "native-e2e")]
+mod diagram_engine_e0;
 mod doc_format;
 mod document;
 mod dot_sync;
@@ -245,7 +247,9 @@ pub fn run() {
     // user can install (D-10, T-06-01). Placed after tauri_plugin_updater
     // so the shipped plugin order is unchanged when the feature is off.
     #[cfg(feature = "native-e2e")]
-    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    let builder = builder
+        .plugin(tauri_plugin_wdio_webdriver::init())
+        .plugin(diagram_engine_e0::plugin());
     builder
         .menu(app_menu::build_app_menu)
         .on_menu_event(app_menu::handle_menu_event)
@@ -265,6 +269,8 @@ pub fn run() {
         .manage(BrowserPasskeyState::default())
         .manage(SiteOpenedUrlState::default())
         .setup(|app| {
+            #[cfg(feature = "native-e2e")]
+            diagram_engine_e0::allow_measurement(app)?;
             #[cfg(all(feature = "native-e2e", target_os = "macos"))]
             native_e2e::create_fixture_webviews(app)?;
             // M0 Anchor→Maru one-time on-disk migration (~/.anchor → ~/.maru,

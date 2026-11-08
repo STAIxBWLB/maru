@@ -471,3 +471,79 @@ notices, and regenerate the manifest from those exact upstream bytes. Update
 `ARCHIFY_ENGINE` in `src/lib/diagram/archifyCodec.ts` to the same version and
 review the upstream diff before running the full verification gate. Never
 refresh from a mutable installed skill directory.
+
+## Engine
+
+E0 (#544) is an independent architecture validation spike, not the product
+apply/render engine. `maru-diagram-engine` and `tauri-plugin-maru-diagram` live
+in the standalone `src-tauri/crates/` Cargo workspace. The core has no Tauri,
+Maru app, Archify, Floorplan or Node dependency. The plugin accepts host hooks
+for the selected workspace root and write authorization, and read-only
+`DiagramSources` queries for document relations, workspace structure and vault
+concepts. Only synthetic fixture sources are implemented in E0. Each snapshot
+carries stable IDs, revisions and provenance; queries bound depth and node count.
+The crates keep their own README, license notice and changelog for later
+subtree extraction. E0 does not change licensing or publish either crate.
+
+The app registers the plugin only under the existing default-off `native-e2e`
+feature. A local-main-only capability permits its one validate command. The
+native bridge measures JSON serialization plus actual Tauri IPC and validation
+for 50 and 1,000 components. The browser spike loads the same core as
+`wasm32-unknown-unknown` through wasm-bindgen; it does not install the Node
+engine host override. This proves only this architecture slice can gate in
+Chromium without Node. Product structural editing still uses the pinned
+Archify gate, and the other five semantic types have not switched engines.
+
+### E0 measurement and decision
+
+The decision is pending the exact-head hosted measurements, not inferred from
+Rust test speed. Choose WebAssembly only if its added payload is at most
+400 KB gzip and 1,000-component validation stays below 50 ms; otherwise IPC.
+The harness records all 30 samples per size, cold initialization plus first
+validation, source engine revision, fixture input bytes, and runner/build
+scope. Use p95 of the warm 1,000-component samples for the latency gate.
+`ENGINE_E0_BUILD`, `ENGINE_E0_WASM` and `ENGINE_E0_IPC` log records retain the
+raw measurements. Native IPC uses the debug real app/WKWebView; WASM uses a
+release core in Chromium, so these are separate absolute measurements, not a
+cross-platform speedup claim. Build time includes tool compilation and bindgen
+work on that runner and is not a promised clean-cache duration.
+
+The WASM payload receipt sums gzip-level-9 sizes of the generated WASM and web
+JS plus the host facade source as conservative separately attributed overhead.
+It does not count the whole existing application bundle. Cold load uses a
+fresh browser context and includes module initialization and first validation.
+The native cold sample includes lazy facade/fixture loading and the first IPC
+round trip. Render, layout, UI application/undo and visual checks are outside
+these validation timings.
+
+### Receipt and source contracts
+
+Public API version 1 returns `ok`, diagnostics with rule/path/cause/fix, and a
+receipt with `engine: { id, version, revision }`, input hash and scoped gates.
+The architecture slice labels its schema scope; artifact/browser/visual gates
+remain not-run. Optional output/engine-output hashes, conversion, readback,
+document identity/name/revision, renderedAt, diagramType and datasetId preserve
+#528/#534 fields. The legacy parser accepts Archify `enginePin.name` (and
+`engine.name`) and normalizes it to `engine.id`; it does not relabel an old
+Archify validation as Maru validation. Product receipt migration is deferred.
+
+Rust is the type source. `ts-rs` generates the checked-in engine declarations;
+`node scripts/diagram-engine-e0.mjs types` fails CI on drift. Use its `--write`
+option after changing Rust types. The host boundary check refuses app/outside
+path dependencies and source inclusion, and refuses Tauri in the pure core.
+CI dry-runs `git subtree split --prefix=src-tauri/crates`, extracts the result,
+and runs each crate's tests there without the app or a Node engine host.
+
+The parity corpus currently has 30 sanitized cases: architecture 22 and two
+each for workflow, sequence, dataflow and lifecycle. Rule groups are 12 existing
+fixtures, eight public specs, four ID cases, two reference cases and four grid
+bounds cases. Existing app/native fixtures and synthetic rule cases retain
+pinned Archify verdicts/diagnostics. The eight immutable public blobs had
+PUBLIC visibility verified before intake. Private/unverified repository
+candidates were excluded without copying their content. Local machine paths
+and contact strings are scrubbed; relative public source evidence remains.
+Repository-backed cases are evaluated without a repository root, and their
+root/evidence refusals are recorded rather than called geometry rejections.
+Only the explicitly labelled architecture slice expectations are asserted by
+E0. Complete five-type differential parity, renderer constraints and screenshots
+belong to later phases; this corpus is not a claim of achieved product parity.

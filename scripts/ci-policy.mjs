@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const NATIVE_PREFIXES = [
-  "e2e-native/", "src-tauri/src/terminal/", "src-tauri/capabilities/",
+  "e2e-native/", "src-tauri/crates/", "src-tauri/src/terminal/", "src-tauri/capabilities/",
   "src-tauri/permissions/", "src/components/sites/", "src/lib/terminal",
 ];
 export const NATIVE_FILES = [

@@ -1,0 +1,838 @@
+{
+  "schemaVersion": 1,
+  "oracle": {
+    "id": "archify",
+    "version": "3.0.0",
+    "revision": "9286c3b9c2cef359e98586b420d769d87bcb163f"
+  },
+  "cases": [
+    {
+      "id": "app-architecture",
+      "diagramType": "architecture",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"Shop\",\"output\":\"app-architecture.html\",\"locale\":\"en\"},\"layout\":{\"mode\":\"grid\"},\"components\":[{\"id\":\"web\",\"type\":\"frontend\",\"label\":\"Web\",\"row\":0,\"col\":0},{\"id\":\"api\",\"type\":\"backend\",\"label\":\"API\",\"row\":0,\"col\":1},{\"id\":\"db\",\"type\":\"database\",\"label\":\"DB\",\"row\":0,\"col\":2}],\"boundaries\":[{\"kind\":\"region\",\"label\":\"Cloud\",\"wraps\":[\"api\",\"db\"]}],\"connections\":[{\"from\":\"web\",\"to\":\"api\",\"label\":\"HTTPS\"},{\"from\":\"api\",\"to\":\"db\"}]}",
+      "inputSha256": "3e1eafd8422fe53e581d02352cc2c024cd3d9b5229e75c5944ec52125849bd68",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src/lib/diagram/__fixtures__/semantic.ts"
+      },
+      "expectedCoreOk": true,
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "app-workflow",
+      "diagramType": "workflow",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"Review\",\"output\":\"app-workflow.html\",\"locale\":\"en\"},\"lanes\":[{\"id\":\"author\",\"label\":\"Author\"},{\"id\":\"reviewer\",\"label\":\"Reviewer\"}],\"nodes\":[{\"id\":\"draft\",\"lane\":\"author\",\"col\":0,\"type\":\"frontend\",\"label\":\"Draft\"},{\"id\":\"review\",\"lane\":\"reviewer\",\"col\":1,\"type\":\"backend\",\"label\":\"Review\"},{\"id\":\"merge\",\"lane\":\"author\",\"col\":2,\"type\":\"backend\",\"label\":\"Merge\"}],\"edges\":[{\"from\":\"draft\",\"to\":\"review\",\"role\":\"main\"},{\"from\":\"review\",\"to\":\"merge\",\"label\":\"approve\",\"role\":\"main\"}]}",
+      "inputSha256": "970119ce39e6fce5446d80313a7444d3e31d615569025a4263072f0e1dcc125a",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src/lib/diagram/__fixtures__/semantic.ts"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "app-sequence",
+      "diagramType": "sequence",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"Login\",\"output\":\"app-sequence.html\",\"locale\":\"en\"},\"participants\":[{\"id\":\"web\",\"type\":\"frontend\",\"label\":\"Web\"},{\"id\":\"api\",\"type\":\"backend\",\"label\":\"API\"},{\"id\":\"db\",\"type\":\"database\",\"label\":\"DB\"}],\"messages\":[{\"from\":\"web\",\"to\":\"api\",\"y\":180,\"label\":\"POST /login\"},{\"from\":\"api\",\"to\":\"db\",\"y\":230,\"label\":\"find user\"},{\"from\":\"db\",\"to\":\"api\",\"y\":280,\"label\":\"row\",\"variant\":\"return\"},{\"from\":\"api\",\"to\":\"web\",\"y\":330,\"label\":\"200 OK\",\"variant\":\"return\"}]}",
+      "inputSha256": "b4937d1240e7ee7593ab7b1b66178681b1ae6a2ed7e6530d7373b1bd7ffde3ae",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src/lib/diagram/__fixtures__/semantic.ts"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "app-dataflow",
+      "diagramType": "dataflow",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"Events\",\"output\":\"app-dataflow.html\",\"locale\":\"en\"},\"stages\":[{\"label\":\"Collect\"},{\"label\":\"Store\"}],\"nodes\":[{\"id\":\"app\",\"type\":\"frontend\",\"label\":\"App\",\"stage\":0,\"row\":0},{\"id\":\"wh\",\"type\":\"database\",\"label\":\"Warehouse\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"app\",\"to\":\"wh\",\"label\":\"events\",\"classification\":\"PII\"}]}",
+      "inputSha256": "ad3958a4047ccbd0c482af85f593d7a5e73e22f01a110848b3c32162a596f03b",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src/lib/diagram/__fixtures__/semantic.ts"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "app-lifecycle",
+      "diagramType": "lifecycle",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"Run\",\"output\":\"app-lifecycle.html\",\"locale\":\"en\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"queued\",\"type\":\"start\",\"label\":\"Queued\",\"lane\":\"main\",\"col\":0},{\"id\":\"running\",\"type\":\"active\",\"label\":\"Running\",\"lane\":\"main\",\"col\":1},{\"id\":\"done\",\"type\":\"success\",\"label\":\"Done\",\"lane\":\"main\",\"col\":2}],\"transitions\":[{\"from\":\"queued\",\"to\":\"running\",\"label\":\"start\"},{\"from\":\"running\",\"to\":\"done\",\"label\":\"finish\"}]}",
+      "inputSha256": "3904f97f7c8f3af501c422a762dd0825914efdbf6ee48d41f08691d1cc84beb2",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src/lib/diagram/__fixtures__/semantic.ts"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "app-native-export",
+      "diagramType": "architecture",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"Native static export 한日中\",\"output\":\"app-native-export.html\",\"locale\":\"en\"},\"layout\":{\"mode\":\"grid\"},\"components\":[{\"id\":\"native_app\",\"type\":\"backend\",\"label\":\"한日中\",\"row\":0,\"col\":0}],\"boundaries\":[],\"connections\":[]}",
+      "inputSha256": "000f9c92523e693cc3fb7c2ee36259c9678a5660c33240a2c93dc0d477f3aeae",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src/lib/diagram/__fixtures__/nativeExport.ts"
+      },
+      "expectedCoreOk": true,
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "rust-literal-1",
+      "diagramType": "architecture",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"Probe\",\"output\":\"rust-literal-1.html\"},\"layout\":{\"mode\":\"grid\"},\"components\":[{\"id\":\"app\",\"label\":\"App\",\"type\":\"backend\",\"row\":0,\"col\":0}]}",
+      "inputSha256": "3cdb9d6cef755c0972e10cbe59235ab60609cbc69cb5359663b0597443ff58fe",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src-tauri/src/archify.rs raw JSON fixture 1"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "rust-literal-2",
+      "diagramType": "architecture",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"output\":\"rust-literal-2.html\"},\"layout\":{\"mode\":\"grid\"},\"components\":[{\"id\":\"app\",\"label\":\"App\",\"type\":\"backend\",\"row\":0,\"col\":0}]}",
+      "inputSha256": "5b1fc77b9b3e31ce4ca75ae22ccf2d6aaf47efc6f5175723f23b208735710522",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src-tauri/src/archify.rs raw JSON fixture 2"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "schema/required"
+        ],
+        "diagnostics": [
+          {
+            "code": "schema/required",
+            "severity": "error",
+            "message": "/meta must have required property 'title' {\"missingProperty\":\"title\"}",
+            "subject": {
+              "diagramType": "architecture",
+              "path": "/meta"
+            },
+            "evidence": {
+              "keyword": "required",
+              "missingProperty": "title"
+            },
+            "supportedFixes": [
+              "add required property \"title\""
+            ]
+          }
+        ],
+        "error": "architecture schema validation failed:\n  /meta must have required property 'title' {\"missingProperty\":\"title\"}"
+      }
+    },
+    {
+      "id": "rust-literal-3",
+      "diagramType": "workflow",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"Review\",\"output\":\"rust-literal-3.html\",\"locale\":\"en\"},\"lanes\":[{\"id\":\"author\",\"label\":\"Author\"},{\"id\":\"reviewer\",\"label\":\"Reviewer\"}],\"nodes\":[{\"id\":\"draft\",\"lane\":\"author\",\"col\":0,\"type\":\"frontend\",\"label\":\"Draft\"},{\"id\":\"review\",\"lane\":\"reviewer\",\"col\":1,\"type\":\"backend\",\"label\":\"Review\"},{\"id\":\"merge\",\"lane\":\"author\",\"col\":2,\"type\":\"backend\",\"label\":\"Merge\"}],\"edges\":[{\"from\":\"draft\",\"to\":\"review\"},{\"from\":\"review\",\"to\":\"merge\"}]}",
+      "inputSha256": "93bd043f39c60653803c3f9f1ce2b71dfe9a1999afefe0d0dab09a3098701219",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src-tauri/src/archify.rs raw JSON fixture 3"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "rust-literal-4",
+      "diagramType": "sequence",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"Login\",\"output\":\"rust-literal-4.html\",\"locale\":\"en\"},\"participants\":[{\"id\":\"web\",\"type\":\"frontend\",\"label\":\"Web\"},{\"id\":\"api\",\"type\":\"backend\",\"label\":\"API\"},{\"id\":\"db\",\"type\":\"database\",\"label\":\"DB\"}],\"messages\":[{\"from\":\"web\",\"to\":\"api\",\"y\":180,\"label\":\"POST /login\"},{\"from\":\"api\",\"to\":\"db\",\"y\":230,\"label\":\"find user\"},{\"from\":\"db\",\"to\":\"api\",\"y\":280,\"label\":\"row\",\"variant\":\"return\"},{\"from\":\"api\",\"to\":\"web\",\"y\":330,\"label\":\"200 OK\",\"variant\":\"return\"}]}",
+      "inputSha256": "f8159f5579cde0d87423dbeae965499ab37626f2567dff384f7b9f1625d80a47",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src-tauri/src/archify.rs raw JSON fixture 4"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "rust-literal-5",
+      "diagramType": "dataflow",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"Events\",\"output\":\"rust-literal-5.html\",\"locale\":\"en\"},\"stages\":[{\"label\":\"Collect\"},{\"label\":\"Store\"}],\"nodes\":[{\"id\":\"app\",\"type\":\"frontend\",\"label\":\"App\",\"stage\":0,\"row\":0},{\"id\":\"wh\",\"type\":\"database\",\"label\":\"Warehouse\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"app\",\"to\":\"wh\",\"label\":\"events\",\"classification\":\"PII\"}]}",
+      "inputSha256": "e61086f47b99a4b1ea19bc40c4d5d1cc2ba53c0c6d5582faa5c1035f76d88b65",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src-tauri/src/archify.rs raw JSON fixture 5"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "rust-literal-6",
+      "diagramType": "lifecycle",
+      "rule": "existing-fixture",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"Run\",\"output\":\"rust-literal-6.html\",\"locale\":\"en\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"queued\",\"type\":\"start\",\"label\":\"Queued\",\"lane\":\"main\",\"col\":0},{\"id\":\"running\",\"type\":\"active\",\"label\":\"Running\",\"lane\":\"main\",\"col\":1},{\"id\":\"done\",\"type\":\"success\",\"label\":\"Done\",\"lane\":\"main\",\"col\":2}],\"transitions\":[{\"from\":\"queued\",\"to\":\"running\",\"label\":\"start\"},{\"from\":\"running\",\"to\":\"done\",\"label\":\"finish\"}]}",
+      "inputSha256": "91b8ececf1483673ad83455b2fd4f7fcaecbbd1ba5289d77f40d3c215aaf22b2",
+      "origin": {
+        "kind": "synthetic-existing",
+        "source": "src-tauri/src/archify.rs raw JSON fixture 6"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "public-01",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"rootfiles CLI\",\"locale\":\"en\",\"quality_profile\":\"showcase\",\"output\":\"public-01.html\",\"repository\":{\"url\":\"https://github.com/STAIxBWLB/rootfiles\",\"provider\":\"github\",\"revision\":\"b7f940c3d06579a8039fc423952c4663b88f4e2c\"}},\"components\":[{\"id\":\"user\",\"type\":\"external\",\"label\":\"Root Operators\",\"sublabel\":\"sudo, systemd timer\",\"pos\":[40,230],\"size\":[140,64],\"sources\":[{\"path\":\"internal/cli/root.go\",\"line\":12,\"end_line\":21,\"label\":\"rootfiles root command\"},{\"path\":\"internal/cli/schedule.go\",\"line\":25,\"end_line\":44,\"label\":\"timer runs check and doctor\"}]},{\"id\":\"cli\",\"type\":\"backend\",\"label\":\"rootfiles CLI\",\"sublabel\":\"internal/cli, cobra\",\"tag\":\"12 commands\",\"pos\":[290,227],\"size\":[140,70],\"sources\":[{\"path\":\"internal/cli/root.go\",\"line\":39,\"end_line\":53,\"label\":\"12 AddCommand + markMutating\"},{\"path\":\"internal/cli/runtime.go\",\"line\":21,\"end_line\":80,\"label\":\"root + lock preflight, audit\"},{\"path\":\"cmd/rootfiles/main.go\",\"line\":19,\"end_line\":38,\"label\":\"signal context, exit codes\"}]},{\"id\":\"config\",\"type\":\"backend\",\"label\":\"Config Loader\",\"sublabel\":\"internal/config\",\"tag\":\"5 profiles\",\"pos\":[40,60],\"size\":[140,60],\"sources\":[{\"path\":\"internal/config/loader.go\",\"line\":21,\"label\":\"Load profile or custom YAML\"},{\"path\":\"internal/config/loader.go\",\"line\":154,\"end_line\":160,\"label\":\"strict keys\"},{\"path\":\"internal/config/validate.go\",\"line\":21,\"label\":\"Validate\"}]},{\"id\":\"runstate\",\"type\":\"database\",\"label\":\"Run State\",\"sublabel\":\"/var/lib, /var/log, /run\",\"tag\":\"lock, log, backups\",\"pos\":[290,60],\"size\":[140,60],\"sources\":[{\"path\":\"internal/state/state.go\",\"line\":19,\"end_line\":24,\"label\":\"state dir, log file, lock, backups\"},{\"path\":\"internal/state/state.go\",\"line\":57,\"end_line\":81,\"label\":\"Record state + history\"},{\"path\":\"internal/state/state.go\",\"line\":102,\"end_line\":125,\"label\":\"non-blocking flock\"}]},{\"id\":\"system\",\"type\":\"database\",\"label\":\"System State\",\"sublabel\":\"apt, systemd, /etc, homes\",\"pos\":[790,60],\"size\":[140,60],\"sources\":[{\"path\":\"internal/exec/apt.go\",\"line\":14,\"end_line\":25,\"label\":\"noninteractive apt-get\"},{\"path\":\"internal/module/cloudflared.go\",\"line\":26,\"end_line\":29,\"label\":\"systemd unit paths\"}]},{\"id\":\"module\",\"type\":\"backend\",\"label\":\"Module Registry\",\"sublabel\":\"internal/module\",\"tag\":\"13 modules\",\"pos\":[540,230],\"size\":[140,64],\"sources\":[{\"path\":\"internal/module/module.go\",\"line\":57,\"end_line\":71,\"label\":\"defaultOrder, 13 names\"},{\"path\":\"internal/module/module.go\",\"line\":124,\"end_line\":191,\"label\":\"RunAll: Check then Apply\"},{\"path\":\"internal/cli/apply.go\",\"line\":59,\"end_line\":120,\"label\":\"apply wiring\"}]},{\"id\":\"runner\",\"type\":\"backend\",\"label\":\"Exec Runner\",\"sublabel\":\"internal/exec\",\"tag\":\"dry-run + backup\",\"pos\":[790,230],\"size\":[140,64],\"sources\":[{\"path\":\"internal/exec/runner.go\",\"line\":12,\"end_line\":30,\"label\":\"DryRun and Backup hook\"},{\"path\":\"internal/exec/runner.go\",\"line\":163,\"end_line\":224,\"label\":\"WriteFile, Symlink, Remove, Rename preserve\"},{\"path\":\"internal/exec/backup.go\",\"line\":16,\"end_line\":19,\"label\":\"per-run backup session\"}]},{\"id\":\"github\",\"type\":\"external\",\"label\":\"GitHub Releases\",\"sublabel\":\"rootfiles self-update\",\"pos\":[290,400],\"size\":[140,60],\"sources\":[{\"path\":\"internal/cli/upgrade.go\",\"line\":145,\"end_line\":150,\"label\":\"releases/latest\"},{\"path\":\"internal/cli/upgrade.go\",\"line\":187,\"end_line\":192,\"label\":\"checksums.txt\"}]},{\"id\":\"ops\",\"type\":\"backend\",\"label\":\"User, GPU, Tunnel\",\"sublabel\":\"direct module ops\",\"tag\":\"flock GPU db\",\"pos\":[540,400],\"size\":[140,60],\"sources\":[{\"path\":\"internal/module/lifecycle.go\",\"line\":81,\"end_line\":127,\"label\":\"DeleteUser\"},{\"path\":\"internal/module/gpu.go\",\"line\":712,\"end_line\":760,\"label\":\"withGPUDBLock\"},{\"path\":\"internal/module/cloudflared.go\",\"line\":278,\"end_line\":316,\"label\":\"TunnelSetup\"}]}],\"connections\":[{\"id\":\"user-cli\",\"from\":\"user\",\"to\":\"cli\",\"label\":\"sudo / timer\",\"variant\":\"emphasis\"},{\"id\":\"cli-runstate\",\"from\":\"cli\",\"to\":\"runstate\",\"label\":\"lock, audit, state\"},{\"id\":\"cli-config\",\"from\":\"cli\",\"to\":\"config\",\"label\":\"load + validate\",\"fromSide\":\"left\",\"toSide\":\"right\"},{\"id\":\"cli-module\",\"from\":\"cli\",\"to\":\"module\",\"label\":\"check / apply\"},{\"id\":\"module-runner\",\"from\":\"module\",\"to\":\"runner\",\"label\":\"exec + writes\"},{\"id\":\"runner-system\",\"from\":\"runner\",\"to\":\"system\",\"label\":\"apt, systemctl, files\"},{\"id\":\"runner-runstate\",\"from\":\"runner\",\"to\":\"runstate\",\"label\":\"backups\"},{\"id\":\"cli-ops\",\"from\":\"cli\",\"to\":\"ops\",\"label\":\"user / gpu / tunnel\"},{\"id\":\"ops-runner\",\"from\":\"ops\",\"to\":\"runner\",\"label\":\"exec + writes\"},{\"id\":\"cli-github\",\"from\":\"cli\",\"to\":\"github\",\"label\":\"update\"}],\"cards\":[{\"dot\":\"cyan\",\"title\":\"Check and apply\",\"items\":[\"13 modules in a fixed defaultOrder; RunAll runs Check then Apply and records each outcome\",\"check, status and doctor use an always-dry-run Runner; check and doctor exit 2 on drift or findings\",\"5 embedded profiles (minimal, base, full, gpu-server, dgx), tree-merged with extends and strict keys\"]},{\"dot\":\"rose\",\"title\":\"Safety model\",\"items\":[\"Mutating commands need root and a non-blocking flock on /run/rootfiles.lock; dry runs are exempt\",\"Real mutating runs log JSON to /var/log/rootfiles.log; files the Runner writes, renames or removes are backed up first, commands it runs are not\",\"rollback restores only those Runner backups; the update binary swap, the GPU db rename, packages, users and services are not reverted\",\"--force overrides guards such as SSH lockout protection\"]},{\"dot\":\"violet\",\"title\":\"Direct operations\",\"items\":[\"<home-base>/.rootfiles/users.json records user add, key and quota changes and drops the entry on del; lock, expire and rehome are not recorded\",\"gpu assign and revoke update gpu-allocations.json under flock with an atomic rename; gpu mig status is read-only\",\"tunnel setup installs the cloudflared service and systemd VLAN units; the cloudflared module also converges them on apply\"]},{\"dot\":\"emerald\",\"title\":\"Reports and updates\",\"items\":[\"schedule enable installs rootfiles-check.timer, which writes check.json and doctor.json to the state dir\",\"check and doctor also emit Prometheus text for the node_exporter textfile collector\",\"update replaces the binary with a GitHub release after verifying checksums.txt; cloudflared binaries also come from GitHub releases\"]}]}",
+      "inputSha256": "075dd5e87efca6233fd62e7368c8da5f778831ce13fc1cf68626a3e1954878be",
+      "origin": {
+        "kind": "public",
+        "repository": "STAIxBWLB/rootfiles",
+        "sourceUrl": "https://github.com/STAIxBWLB/rootfiles/blob/7a641b84a60aa3bb5135531045cb69f15c94e4d9/docs/architecture/rootfiles-v2.architecture.json",
+        "blobSha": "d138661864f1617fc34419cff5cfcfc3cb6ce2da",
+        "visibility": "PUBLIC"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "public-02",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"Maru Desktop Workspace\",\"output\":\"public-02.html\",\"quality_profile\":\"showcase\",\"repository\":{\"url\":\"https://github.com/STAIxBWLB/maru\",\"provider\":\"github\",\"revision\":\"6aa17880805916ef4336b734ba8ac9400149ba4d\"}},\"components\":[{\"id\":\"user\",\"type\":\"external\",\"label\":\"User\",\"sublabel\":\"Maru window\",\"pos\":[30,410],\"size\":[140,60],\"sources\":[{\"path\":\"src-tauri/tauri.conf.json\",\"line\":13,\"end_line\":31,\"label\":\"main window\"}]},{\"id\":\"frontend\",\"type\":\"frontend\",\"label\":\"React 19 Shell\",\"sublabel\":\"src/, 18 lazy modes\",\"tag\":\"TypeScript + Vite\",\"pos\":[290,410],\"size\":[150,60],\"sources\":[{\"path\":\"src/main.tsx\",\"line\":14,\"end_line\":21,\"label\":\"webview entry\"},{\"path\":\"src/lib/modeRegistry.tsx\",\"line\":191,\"end_line\":208,\"label\":\"lazy modes\"},{\"path\":\"package.json\",\"line\":66,\"label\":\"react 19\"}]},{\"id\":\"ipc\",\"type\":\"messagebus\",\"label\":\"Tauri IPC\",\"sublabel\":\"383 commands\",\"tag\":\"structured errors\",\"pos\":[520,410],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/lib.rs\",\"line\":245,\"end_line\":651,\"label\":\"generate_handler\"},{\"path\":\"src/lib/api.ts\",\"line\":1183,\"end_line\":1190,\"label\":\"invoke + normalize\"},{\"path\":\"src-tauri/src/ipc_error.rs\",\"line\":35,\"end_line\":39,\"label\":\"IpcError\"}]},{\"id\":\"rust-core\",\"type\":\"backend\",\"label\":\"Tauri 2 Rust Core\",\"sublabel\":\"document, vault, files\",\"tag\":\"fail-closed mutation\",\"pos\":[760,410],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/document.rs\",\"line\":138,\"end_line\":228,\"label\":\"save_document\"},{\"path\":\"src-tauri/src/vault_guard.rs\",\"line\":225,\"end_line\":252,\"label\":\"managed-write gate\"},{\"path\":\"src-tauri/src/frontmatter/ops.rs\",\"line\":1,\"end_line\":4,\"label\":\"frontmatter editor\"}]},{\"id\":\"fs\",\"type\":\"database\",\"label\":\"Workspace Folder\",\"sublabel\":\"files are the SSOT\",\"tag\":\"atomic replace\",\"pos\":[1010,410],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/atomic_file.rs\",\"line\":747,\"end_line\":752,\"label\":\"write_atomic\"},{\"path\":\"src-tauri/src/vault.rs\",\"line\":680,\"end_line\":697,\"label\":\"path containment\"},{\"path\":\"README.md\",\"line\":28,\"end_line\":29,\"label\":\"filesystem authoritative\"}]},{\"id\":\"ota-bundles\",\"type\":\"cloud\",\"label\":\"OTA Skill Bundles\",\"sublabel\":\"skills-channel release\",\"tag\":\"minisign signed\",\"pos\":[30,230],\"size\":[140,60],\"sources\":[{\"path\":\"src-tauri/src/skill_host/store.rs\",\"line\":4599,\"end_line\":4601,\"label\":\"channel defaults\"},{\"path\":\"src-tauri/src/skill_host/bundle_update.rs\",\"line\":357,\"end_line\":372,\"label\":\"release discovery\"},{\"path\":\"src-tauri/src/skill_host/bundle_update.rs\",\"line\":280,\"end_line\":302,\"label\":\"signature check\"}]},{\"id\":\"skill-host\",\"type\":\"backend\",\"label\":\"Skill Host\",\"sublabel\":\"skill_host/\",\"tag\":\"background + terminal\",\"pos\":[290,230],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/skill_host/dispatch.rs\",\"line\":295,\"end_line\":310,\"label\":\"background argv via agent_host\"},{\"path\":\"src-tauri/src/skill_host/dispatch.rs\",\"line\":700,\"end_line\":710,\"label\":\"background spawn\"},{\"path\":\"src-tauri/src/skill_host/dispatch.rs\",\"line\":93,\"end_line\":160,\"label\":\"terminal launch spec\"}]},{\"id\":\"ai-router\",\"type\":\"backend\",\"label\":\"AI Router\",\"sublabel\":\"ai_router.rs\",\"tag\":\"streams ai:// events\",\"pos\":[520,230],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/ai_router.rs\",\"line\":1,\"end_line\":10,\"label\":\"bridge contract\"},{\"path\":\"src-tauri/src/ai_router.rs\",\"line\":57,\"end_line\":138,\"label\":\"start_agent_cli_invocation\"},{\"path\":\"src-tauri/src/ai_router.rs\",\"line\":238,\"end_line\":282,\"label\":\"spawn + stream\"}]},{\"id\":\"agent-host\",\"type\":\"backend\",\"label\":\"Agent Host\",\"sublabel\":\"agent_host/\",\"tag\":\"argv + five-role loop\",\"pos\":[760,230],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/agent_host/provider.rs\",\"line\":201,\"end_line\":318,\"label\":\"build_cli_command_with_policy\"},{\"path\":\"src-tauri/src/agent_host/structured_loop.rs\",\"line\":155,\"end_line\":165,\"label\":\"loop on CliProviderAdapter\"},{\"path\":\"src-tauri/src/agent_host/runtime_policy.rs\",\"line\":264,\"end_line\":306,\"label\":\"opt-in dot policy\"}]},{\"id\":\"agents-cli\",\"type\":\"external\",\"label\":\"CLI Agents\",\"sublabel\":\"claude, codex, kimi, kiro\",\"pos\":[520,50],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/agent_host/provider.rs\",\"line\":42,\"end_line\":76,\"label\":\"CliProviderKind\"},{\"path\":\"src-tauri/src/agent_host/provider.rs\",\"line\":329,\"end_line\":400,\"label\":\"loop spawn\"}]},{\"id\":\"hub-server\",\"type\":\"cloud\",\"label\":\"Maru Hub\",\"sublabel\":\"configured endpoint\",\"pos\":[30,570],\"size\":[140,60],\"sources\":[{\"path\":\"src-tauri/src/hub_client/mod.rs\",\"line\":532,\"end_line\":549,\"label\":\"hub.endpoint config\"},{\"path\":\"src-tauri/src/hub_client/http.rs\",\"line\":131,\"end_line\":158,\"label\":\"resource URLs\"}]},{\"id\":\"hub-client\",\"type\":\"backend\",\"label\":\"Hub Client\",\"sublabel\":\"hub_client/\",\"tag\":\"opt-in, safety-checked\",\"pos\":[520,570],\"size\":[150,60],\"sources\":[{\"path\":\"src-tauri/src/hub_client/mod.rs\",\"line\":112,\"end_line\":131,\"label\":\"catalog fetch + cache\"},{\"path\":\"src-tauri/src/hub_client/mod.rs\",\"line\":258,\"end_line\":294,\"label\":\"submit gate + queue\"},{\"path\":\"src-tauri/src/hub_client/safety.rs\",\"line\":6,\"end_line\":30,\"label\":\"safety check\"}]},{\"id\":\"maru-mcp\",\"type\":\"backend\",\"label\":\"maru-mcp Sidecar\",\"sublabel\":\"Node, stdio JSON-RPC\",\"tag\":\"read-first\",\"pos\":[1010,570],\"size\":[150,60],\"sources\":[{\"path\":\"sidecars/maru-mcp/index.mjs\",\"line\":8,\"end_line\":9,\"label\":\"workspace root\"},{\"path\":\"sidecars/maru-mcp/index.mjs\",\"line\":91,\"end_line\":130,\"label\":\"stdio dispatch\"},{\"path\":\"sidecars/maru-mcp/index.mjs\",\"line\":210,\"end_line\":226,\"label\":\"append proposal event\"}]}],\"boundaries\":[{\"kind\":\"region\",\"label\":\"Maru desktop app (Tauri 2)\",\"wraps\":[\"frontend\",\"ipc\",\"rust-core\",\"skill-host\",\"ai-router\",\"agent-host\",\"hub-client\"]}],\"connections\":[{\"id\":\"user-to-frontend\",\"from\":\"user\",\"to\":\"frontend\",\"label\":\"interact\"},{\"id\":\"frontend-to-ipc\",\"from\":\"frontend\",\"to\":\"ipc\",\"label\":\"invoke()\"},{\"id\":\"ipc-to-core\",\"from\":\"ipc\",\"to\":\"rust-core\",\"label\":\"command\"},{\"id\":\"core-to-fs\",\"from\":\"rust-core\",\"to\":\"fs\",\"label\":\"atomic write\"},{\"id\":\"ipc-to-ai-router\",\"from\":\"ipc\",\"to\":\"ai-router\",\"label\":\"start invocation\"},{\"id\":\"ipc-to-skill-host\",\"from\":\"ipc\",\"to\":\"skill-host\",\"label\":\"skill dispatch\",\"fromSide\":\"top\",\"toSide\":\"bottom\"},{\"id\":\"ota-to-skill-host\",\"from\":\"ota-bundles\",\"to\":\"skill-host\",\"label\":\"signed bundle\"},{\"id\":\"ipc-to-agent-host\",\"from\":\"ipc\",\"to\":\"agent-host\",\"label\":\"run loop\",\"fromSide\":\"top\",\"toSide\":\"bottom\"},{\"id\":\"ai-router-to-cli\",\"from\":\"ai-router\",\"to\":\"agents-cli\",\"label\":\"spawn, stream stdout\"},{\"id\":\"skill-host-to-cli\",\"from\":\"skill-host\",\"to\":\"agents-cli\",\"label\":\"background spawn\"},{\"id\":\"agent-host-to-cli\",\"from\":\"agent-host\",\"to\":\"agents-cli\",\"label\":\"loop spawn\"},{\"id\":\"ipc-to-hub-client\",\"from\":\"ipc\",\"to\":\"hub-client\",\"label\":\"hub commands\"},{\"id\":\"hub-client-to-server\",\"from\":\"hub-client\",\"to\":\"hub-server\",\"label\":\"HTTP when enabled\",\"variant\":\"dashed\"},{\"id\":\"mcp-to-fs\",\"from\":\"maru-mcp\",\"to\":\"fs\",\"label\":\"read, append events\"}],\"cards\":[{\"dot\":\"cyan\",\"title\":\"Core\",\"items\":[\"Filesystem is authoritative; caches are disposable\",\"383 production commands registered in lib.rs; conflicts cross as IpcError { code, message }\",\"save_document: path-transaction admission, write policy, managed-vault check, revision check, managed-root snapshot, then atomic replace\",\"Frontmatter edits go through frontmatter/ops.rs, preserving key order and comments\"]},{\"dot\":\"violet\",\"title\":\"AI and Skills\",\"items\":[\"ai_router, background skill dispatch and the five-role loop build argv with agent_host::provider; each spawns its own CLI process\",\"Terminal dispatch returns its own launch spec for the embedded PTY; Codex runs via /bin/zsh -lc with shell-quoted args and the prompt in MARU_SKILL_PROMPT\",\"Output returns to the webview as ai://output, ai://done and ai://error events\",\"Adaptive policy is off unless ai.adaptivePolicy is enabled; then agent_host runs dot ai policy resolve --json, and a missing dot or failed resolve stops the launch instead of bypassing permissions\",\"The 60s scheduler ticker dispatches due schedules through the skill host\",\"Bundles from the STAIxBWLB/skills skills-channel release are verified with the updater minisign key\"]},{\"dot\":\"emerald\",\"title\":\"Integration\",\"items\":[\"While hub.enabled is false the Hub client still serves the cached catalog and queues submit gates; only HTTP to the Hub is off. Online catalog reads revalidate with ETags\",\"Submit gates pass a safety check (no body, content or binary keys) and queue offline under .maru/queue/hub\",\"maru-mcp is started by an external MCP client over stdio (MARU_MCP_WORKSPACE); the desktop app does not spawn it\",\"The sidecar reads workspace files and only appends proposal events under .maru/runs/skills\",\"The Rust core also runs inbox connectors (gws for Gmail, m365 for Outlook, a configured Python script for Telegram, a KakaoTalk relay folder), the signed Tauri updater, and portable-pty terminal sessions\"]}]}",
+      "inputSha256": "b16d25f43bf3ad17674fedf4cd4fc52c7fc659309320b9115434a194e7cbbd77",
+      "origin": {
+        "kind": "public",
+        "repository": "STAIxBWLB/maru",
+        "sourceUrl": "https://github.com/STAIxBWLB/maru/blob/3910f6a1d98910d8aa62df518e780832ef1646af/docs/architecture/maru.architecture.json",
+        "blobSha": "69e45a69f5419f57989f1e9729fe9265acf6b18c",
+        "visibility": "PUBLIC"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "public-03",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"Dept. of AI Website (halla.ai)\",\"output\":\"public-03.html\",\"quality_profile\":\"showcase\",\"repository\":{\"url\":\"https://github.com/halla-ai/home\",\"provider\":\"github\",\"revision\":\"8083feeda1906329ca5e9eb71b364900af28b487\"}},\"components\":[{\"id\":\"repo\",\"type\":\"backend\",\"label\":\"GitHub Repo\",\"sublabel\":\"main branch\",\"pos\":[280,110],\"size\":[140,60],\"sources\":[{\"path\":\".github/workflows/deploy.yaml\",\"line\":3,\"end_line\":7,\"label\":\"main push triggers deploy\"}]},{\"id\":\"visitor\",\"type\":\"external\",\"label\":\"Visitors\",\"sublabel\":\"applicants and public\",\"pos\":[40,490],\"size\":[150,60],\"sources\":[{\"path\":\"README.md\",\"line\":3,\"label\":\"official department website\"},{\"path\":\"astro/src/pages/admissions.astro\",\"line\":7,\"end_line\":17,\"label\":\"admissions page\"}]},{\"id\":\"ci\",\"type\":\"cloud\",\"label\":\"GitHub Actions\",\"sublabel\":\"deploy.yaml, astro/dist\",\"pos\":[280,302],\"size\":[140,60],\"tag\":\"pages-artifact\",\"sources\":[{\"path\":\".github/workflows/deploy.yaml\",\"line\":44,\"end_line\":45,\"label\":\"cd astro && pnpm build\"},{\"path\":\".github/workflows/deploy.yaml\",\"line\":19,\"end_line\":50,\"label\":\"build job uploads astro/dist\"}]},{\"id\":\"site\",\"type\":\"frontend\",\"label\":\"Astro 6 Static Site\",\"sublabel\":\"halla.ai\",\"pos\":[575,300],\"size\":[160,64],\"tag\":\"Tailwind CSS 4\",\"sources\":[{\"path\":\"astro/astro.config.mjs\",\"line\":7,\"end_line\":38,\"label\":\"static output, ko/en i18n routing\"}]},{\"id\":\"collections\",\"type\":\"database\",\"label\":\"Content Collections\",\"sublabel\":\"5 collections, ko/en\",\"pos\":[575,110],\"size\":[160,64],\"tag\":\"59 posts, 8 faculty\",\"sources\":[{\"path\":\"astro/src/content.config.ts\",\"line\":75,\"end_line\":81,\"label\":\"five collections\"},{\"path\":\"astro/src/pages/admissions.astro\",\"line\":8,\"label\":\"getCollection(pages)\"}]},{\"id\":\"gh-pages\",\"type\":\"cloud\",\"label\":\"GitHub Pages\",\"sublabel\":\"halla.ai\",\"pos\":[280,490],\"size\":[140,60],\"sources\":[{\"path\":\".github/workflows/deploy.yaml\",\"line\":52,\"end_line\":61,\"label\":\"deploy-pages job\"},{\"path\":\"astro/public/CNAME\",\"line\":1,\"label\":\"halla.ai custom domain\"}]},{\"id\":\"i18n\",\"type\":\"database\",\"label\":\"Translation Files\",\"sublabel\":\"src/i18n: ko.json + en.json\",\"pos\":[570,490],\"size\":[170,60],\"tag\":\"t(locale, key.path)\",\"sources\":[{\"path\":\"astro/src/i18n/ui.ts\",\"line\":14,\"label\":\"t() with ko fallback\"}]}],\"boundaries\":[{\"kind\":\"region\",\"label\":\"Astro Static Build\",\"wraps\":[\"site\",\"collections\",\"i18n\"],\"pad\":16}],\"connections\":[{\"id\":\"repo-to-ci\",\"from\":\"repo\",\"to\":\"ci\",\"label\":\"push main\"},{\"id\":\"ci-to-site\",\"from\":\"ci\",\"to\":\"site\",\"label\":\"pnpm build\"},{\"id\":\"ci-to-gh-pages\",\"from\":\"ci\",\"to\":\"gh-pages\",\"label\":\"deploy\"},{\"id\":\"gh-pages-to-visitor\",\"from\":\"gh-pages\",\"to\":\"visitor\",\"label\":\"serves\"},{\"id\":\"collections-to-site\",\"from\":\"collections\",\"to\":\"site\",\"label\":\"getCollection()\"},{\"id\":\"i18n-to-site\",\"from\":\"i18n\",\"to\":\"site\",\"label\":\"t() lookups\"}],\"cards\":[{\"dot\":\"cyan\",\"title\":\"Site\",\"items\":[\"Astro 6 static output for halla.ai with inlineStylesheets: 'always' and Tailwind CSS 4\",\"Korean is the default locale (no URL prefix); English lives under /en/ via i18n routing\",\"Dark mode is class-based with a custom .dark variant and pre-paint init in BaseHead\",\"BaseHead injects Google Analytics gtag.js on non-localhost hosts\"]},{\"dot\":\"emerald\",\"title\":\"Content\",\"items\":[\"Five content collections (posts, projects, faculty, testimonials, pages) with ko/ and en/ locales\",\"59 news posts and 8 faculty profiles in Korean, mirrored by matching English files\",\"A PostLayout script collects post body images into a gallery grid with a lightbox; repo policy keeps images at 1920px width or less\"]},{\"dot\":\"violet\",\"title\":\"Build\",\"items\":[\"Site source lives in the astro/ subdirectory; Makefile targets cd astro && pnpm build\",\"deploy.yaml installs from astro/pnpm-lock.yaml and uploads the astro/dist pages artifact\",\"@astrojs/sitemap filters tag pages to lowercase-only tag slugs\"]}]}",
+      "inputSha256": "b57f443c0d65a63543614798f44a3821c26b6cef60bcb56a5f557a09ea9367ea",
+      "origin": {
+        "kind": "public",
+        "repository": "halla-ai/home",
+        "sourceUrl": "https://github.com/halla-ai/home/blob/befab6e6b14c702ab10419ce4a221d546fe89e83/docs/halla-ai.architecture.json",
+        "blobSha": "023102f26cb68d83ad322c058d18b544fbdbd945",
+        "visibility": "PUBLIC"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "public-04",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"djgirls-2026-1 Placeholder Repo\",\"output\":\"public-04.html\",\"quality_profile\":\"showcase\",\"repository\":{\"url\":\"https://github.com/halla-ai/djgirls-2026-1\",\"provider\":\"github\",\"revision\":\"e91a913b23ec3d83d5b5c7c6a2e4f23f75b73368\"}},\"components\":[{\"id\":\"agent\",\"type\":\"external\",\"label\":\"Codex Agents\",\"sublabel\":\"coding agent\",\"pos\":[40,80],\"size\":[150,64],\"sources\":[{\"path\":\"AGENTS.md\",\"line\":3,\"end_line\":4,\"label\":\"Codex adapter only\"},{\"path\":\"AGENTS.md\",\"line\":9,\"label\":\"use Codex tools\"}]},{\"id\":\"agents\",\"type\":\"backend\",\"label\":\"AGENTS.md\",\"sublabel\":\"Codex adapter\",\"pos\":[330,80],\"size\":[150,64],\"tag\":\"no project rules\",\"sources\":[{\"path\":\"AGENTS.md\",\"line\":1,\"end_line\":11,\"label\":\"adapter rules\"}]},{\"id\":\"readme\",\"type\":\"database\",\"label\":\"README.md\",\"sublabel\":\"source of truth\",\"pos\":[620,80],\"size\":[150,64],\"tag\":\"title only\",\"sources\":[{\"path\":\"README.md\",\"line\":1,\"label\":\"# djgirls-2026-1\"},{\"path\":\"AGENTS.md\",\"line\":7,\"end_line\":8,\"label\":\"declared source of truth\"}]}],\"boundaries\":[{\"kind\":\"region\",\"label\":\"Repository: main\",\"wraps\":[\"agents\",\"readme\"]}],\"connections\":[{\"id\":\"agent-to-agents\",\"from\":\"agent\",\"to\":\"agents\",\"label\":\"reads\"},{\"id\":\"agents-to-readme\",\"from\":\"agents\",\"to\":\"readme\",\"label\":\"defers rules to\"}],\"cards\":[{\"dot\":\"slate\",\"title\":\"State\",\"items\":[\"At e91a913, main held three files: README.md (a title line only), AGENTS.md and .gitignore\",\"At that revision there was no site, dependency, build or deploy configuration\",\".gitignore excludes .omc/ and .omx/\",\"e91a913 was the third commit: initial commit, the .gitignore entries, then the Codex AGENTS.md adapter\"]},{\"dot\":\"cyan\",\"title\":\"Adapter rules\",\"items\":[\"AGENTS.md scopes itself to this directory and its descendants\",\"Command, folder and policy changes belong in README.md, not in the adapter\",\"Claude-specific references are translated into Codex tools and skills\"]}]}",
+      "inputSha256": "5dbc2c316df365fa7b2c7ca1cdfdab1c863875ac8519bc83c538a39145adc2c9",
+      "origin": {
+        "kind": "public",
+        "repository": "halla-ai/djgirls-2026-1",
+        "sourceUrl": "https://github.com/halla-ai/djgirls-2026-1/blob/a689ce4de7d47ad465a24588df8c2aec563f6ded/docs/djgirls-2026-1.architecture.json",
+        "blobSha": "f9ea1e77c4eed04adc8feca388b0944ee9434aa4",
+        "visibility": "PUBLIC"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "public-05",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"hwp-cli Rust Workspace\",\"locale\":\"en\",\"quality_profile\":\"showcase\",\"output\":\"public-05.html\",\"repository\":{\"url\":\"https://github.com/STAIxBWLB/hwp-cli\",\"provider\":\"github\",\"revision\":\"1989573f62ae1db4176caa43d232c8094dc0673a\"}},\"components\":[{\"id\":\"user\",\"type\":\"external\",\"label\":\"Users / AI agents\",\"sublabel\":\"shell, MCP clients\",\"pos\":[30,250],\"size\":[130,64],\"sources\":[{\"path\":\"crates/hwp-cli/src/cli.rs\",\"line\":68,\"label\":\"clap Cmd enum users invoke\"},{\"path\":\"deploy/cloudflare/src/index.ts\",\"line\":10,\"end_line\":17,\"label\":\"remote MCP clients connect\"}]},{\"id\":\"cli\",\"type\":\"backend\",\"label\":\"hwp CLI entry\",\"sublabel\":\"clap Cmd enum\",\"tag\":\"26 commands\",\"pos\":[260,250],\"size\":[140,64],\"sources\":[{\"path\":\"crates/hwp-cli/src/cli.rs\",\"line\":68,\"end_line\":586,\"label\":\"26-variant Cmd enum\"},{\"path\":\"crates/hwp-cli/src/main.rs\",\"line\":46,\"end_line\":361,\"label\":\"dispatch to commands\"}]},{\"id\":\"commands\",\"type\":\"backend\",\"label\":\"Command layer\",\"sublabel\":\"hwp-cli/src/commands\",\"tag\":\"shared by CLI + MCP\",\"pos\":[480,250],\"size\":[150,64],\"sources\":[{\"path\":\"crates/hwp-cli/src/commands/cat.rs\",\"line\":177,\"end_line\":210,\"label\":\"load_document picks a codec\"},{\"path\":\"crates/hwp-cli/src/commands/output.rs\",\"line\":17,\"end_line\":40,\"label\":\"write_validated atomic publish\"},{\"path\":\"crates/hwp-cli/src/commands/render.rs\",\"line\":640,\"end_line\":672,\"label\":\"JPEG/WebP encoded from raster\"}]},{\"id\":\"mcp\",\"type\":\"backend\",\"label\":\"MCP server\",\"sublabel\":\"stdio + POST /mcp\",\"tag\":\"22 tools\",\"pos\":[260,430],\"size\":[140,60],\"sources\":[{\"path\":\"crates/hwp-cli/src/commands/mcp/mod.rs\",\"line\":2346,\"end_line\":2891,\"label\":\"tool_defs: 22 tools\"},{\"path\":\"crates/hwp-cli/src/commands/mcp/mod.rs\",\"line\":1,\"end_line\":16,\"label\":\"core; stdio + http adapters\"},{\"path\":\"crates/hwp-cli/src/commands/mcp/http.rs\",\"line\":364,\"end_line\":456,\"label\":\"/files writes root.join(name)\"}]},{\"id\":\"edge\",\"type\":\"cloud\",\"label\":\"Remote edge\",\"sublabel\":\"Worker or AgentCore\",\"tag\":\"auth + TLS\",\"pos\":[30,430],\"size\":[130,60],\"sources\":[{\"path\":\"deploy/cloudflare/src/index.ts\",\"line\":18,\"end_line\":37,\"label\":\"Worker OAuth provider + PAT\"},{\"path\":\"deploy/cloudflare/src/mcp-api.ts\",\"line\":190,\"end_line\":196,\"label\":\"forward to container /mcp\"},{\"path\":\"deploy/aws/Dockerfile.agentcore\",\"line\":82,\"end_line\":87,\"label\":\"AgentCore runs hwp serve\"}]},{\"id\":\"codecs\",\"type\":\"backend\",\"label\":\"Document codecs\",\"sublabel\":\"hwp5 CFB + hwpx OWPML\",\"tag\":\"unedited hwp5 lossless\",\"pos\":[760,430],\"size\":[160,60],\"sources\":[{\"path\":\"crates/hwp5/src/lib.rs\",\"line\":1,\"end_line\":16,\"label\":\"HWP 5.0 CFB reader/writer\"},{\"path\":\"crates/hwpx/src/lib.rs\",\"line\":1,\"end_line\":9,\"label\":\"HWPX ZIP + XML reader/writer\"},{\"path\":\"crates/hwp5/tests/identity.rs\",\"line\":1,\"end_line\":5,\"label\":\"identity gate, decompressed streams\"}]},{\"id\":\"model\",\"type\":\"backend\",\"label\":\"hwp-model IR\",\"sublabel\":\"serde-only hub\",\"tag\":\"slot grammar\",\"pos\":[1030,250],\"size\":[130,64],\"sources\":[{\"path\":\"crates/hwp-model/src/lib.rs\",\"line\":1,\"end_line\":27,\"label\":\"L1 semantic IR, serde only\"},{\"path\":\"crates/hwp-model/src/slot.rs\",\"line\":1,\"end_line\":7,\"label\":\"shared {{ name }} grammar\"}]},{\"id\":\"convert\",\"type\":\"backend\",\"label\":\"hwp-convert\",\"sublabel\":\"md/HTML/DOCX/ODT, edit\",\"tag\":\"lint + forms\",\"pos\":[760,250],\"size\":[160,64],\"sources\":[{\"path\":\"crates/hwp-convert/src/form.rs\",\"line\":1,\"end_line\":9,\"label\":\"Korean form fields (kordoc port)\"},{\"path\":\"crates/hwp-convert/src/lint.rs\",\"line\":76,\"end_line\":85,\"label\":\"10 lint rule ids\"},{\"path\":\"crates/hwp-convert/src/official.rs\",\"line\":7,\"end_line\":16,\"label\":\"6 official-document profiles\"}]},{\"id\":\"render\",\"type\":\"backend\",\"label\":\"hwp-render\",\"sublabel\":\"rustybuzz + tiny-skia\",\"tag\":\"PNG/SVG/PDF pages\",\"pos\":[760,80],\"size\":[160,60],\"sources\":[{\"path\":\"crates/hwp-render/src/lib.rs\",\"line\":1,\"end_line\":5,\"label\":\"IR to layout to backends\"},{\"path\":\"crates/hwp-render/src/segment_map.rs\",\"line\":1,\"end_line\":12,\"label\":\"per-page segment geometry rows\"},{\"path\":\"crates/hwp-render/src/segment_map.rs\",\"line\":58,\"end_line\":62,\"label\":\"drawing-object text rows\"}]},{\"id\":\"fs\",\"type\":\"database\",\"label\":\"Local filesystem\",\"sublabel\":\"inputs + staged outputs\",\"tag\":\"stage, fsync, rename\",\"pos\":[760,600],\"size\":[160,60],\"sources\":[{\"path\":\"crates/hwp-cli/src/commands/output.rs\",\"line\":1,\"end_line\":40,\"label\":\"stage beside target, verify, rename\"},{\"path\":\"crates/hwp5/src/write.rs\",\"line\":75,\"label\":\"hwp5 write_document(path)\"},{\"path\":\"crates/hwp-cli/src/commands/mcp/mod.rs\",\"line\":1028,\"end_line\":1060,\"label\":\"hwp_get_file reads directly\"}]}],\"boundaries\":[{\"kind\":\"region\",\"label\":\"One hwp binary: 6 Rust crates, no external HWP library\",\"wraps\":[\"cli\",\"commands\",\"mcp\",\"codecs\",\"model\",\"convert\",\"render\"],\"pad\":16},{\"kind\":\"security-group\",\"label\":\"--root gate\",\"wraps\":[\"mcp\"],\"pad\":12}],\"connections\":[{\"id\":\"user-to-cli\",\"from\":\"user\",\"to\":\"cli\",\"label\":\"hwp <cmd>\",\"variant\":\"emphasis\"},{\"id\":\"cli-to-commands\",\"from\":\"cli\",\"to\":\"commands\",\"label\":\"dispatch\"},{\"id\":\"commands-to-convert\",\"from\":\"commands\",\"to\":\"convert\",\"label\":\"convert, fill\"},{\"id\":\"convert-to-model\",\"from\":\"convert\",\"to\":\"model\",\"label\":\"edit + read\"},{\"id\":\"commands-to-render\",\"from\":\"commands\",\"to\":\"render\",\"label\":\"render\",\"fromSide\":\"right\",\"toSide\":\"left\"},{\"id\":\"commands-to-codecs\",\"from\":\"commands\",\"to\":\"codecs\",\"label\":\"load + write\",\"fromSide\":\"right\",\"toSide\":\"left\"},{\"id\":\"render-to-model\",\"from\":\"render\",\"to\":\"model\",\"label\":\"read IR\",\"fromSide\":\"right\",\"toSide\":\"top\"},{\"id\":\"codecs-to-model\",\"from\":\"codecs\",\"to\":\"model\",\"label\":\"build IR\",\"fromSide\":\"right\",\"toSide\":\"bottom\"},{\"id\":\"codecs-to-fs\",\"from\":\"codecs\",\"to\":\"fs\",\"label\":\"read + write\",\"fromSide\":\"bottom\",\"toSide\":\"top\"},{\"id\":\"commands-to-fs\",\"from\":\"commands\",\"to\":\"fs\",\"label\":\"atomic publish\",\"fromSide\":\"bottom\",\"toSide\":\"left\"},{\"id\":\"cli-to-mcp\",\"from\":\"cli\",\"to\":\"mcp\",\"label\":\"hwp mcp | serve\",\"fromSide\":\"bottom\",\"toSide\":\"top\"},{\"id\":\"mcp-to-fs\",\"from\":\"mcp\",\"to\":\"fs\",\"label\":\"/files, get_file\",\"fromSide\":\"bottom\",\"toSide\":\"left\"},{\"id\":\"mcp-to-commands\",\"from\":\"mcp\",\"to\":\"commands\",\"label\":\"tools/call\",\"fromSide\":\"right\",\"toSide\":\"bottom\"},{\"id\":\"user-to-edge\",\"from\":\"user\",\"to\":\"edge\",\"label\":\"remote MCP\",\"fromSide\":\"bottom\",\"toSide\":\"top\"},{\"id\":\"edge-to-mcp\",\"from\":\"edge\",\"to\":\"mcp\",\"label\":\"POST /mcp\",\"variant\":\"security\"}],\"cards\":[{\"dot\":\"cyan\",\"title\":\"Core pipeline\",\"items\":[\"6-crate workspace at v1.3.1, edition 2024; SemVer covers commands, flags, MCP tools and schemas\",\"hwp5 and hwpx never depend on each other: both go through the hwp-model IR\",\"Unedited hwp-origin files re-serialize byte-identically (decompressed streams); edited or hwpx/markdown input is rewritten semantically equivalent\",\"Codecs open inputs by path; command outputs and hwp_put_file are staged, verified, renamed; serve /files writes in place\"]},{\"dot\":\"violet\",\"title\":\"Formats and forms\",\"items\":[\"cat: plain/markdown/JSON/HTML/CSV; convert to hwp, hwpx, md, json, html, pdf, odt, txt, csv, docx\",\"hwp-render draws PNG/SVG/PDF; the command layer encodes JPEG/WebP from the raster; render-layout-v1 rows include drawing-object text\",\"slots --forms and fill --forms: Korean form fields (label cells, label: value, blanks, checkboxes)\",\"lint: 10 rule ids; 6 official-document profiles\"]},{\"dot\":\"emerald\",\"title\":\"MCP and deployment\",\"items\":[\"22 tools reuse the command modules' execute and publish helpers (not their stdout run paths); stdio and HTTP share one handle_request core\",\"hwp serve: close-per-request POST /mcp on httparse, 1 MiB body cap, private hop behind a trusted edge\",\"hwp mcp without --root is unrestricted (warns); hwp serve always requires --root\",\"Tier A Cloudflare (OAuth or PAT, /files sideband) and Tier B AgentCore (/mcp only) images pin v1.3.1\"]}]}",
+      "inputSha256": "2c61e557bd3a6180d09c8f0d5f896d63636081b3bfec7e79bad54e92174e48fe",
+      "origin": {
+        "kind": "public",
+        "repository": "STAIxBWLB/hwp-cli",
+        "sourceUrl": "https://github.com/STAIxBWLB/hwp-cli/blob/206dd8df082f3f6805092ddccd861a32373d3a38/docs/architecture/hwp-cli.architecture.json",
+        "blobSha": "f3115146c2ead794e497cffcdb1ed79b7befb1d5",
+        "visibility": "PUBLIC"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "public-06",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"dotfiles dot CLI\",\"locale\":\"en\",\"quality_profile\":\"showcase\",\"output\":\"public-06.html\",\"repository\":{\"url\":\"https://github.com/STAIxBWLB/dotfiles\",\"provider\":\"github\",\"revision\":\"388a398a32a82c86f68ecabf8f6bfe56686ccbf6\"}},\"components\":[{\"id\":\"user\",\"type\":\"external\",\"label\":\"Users / LaunchAgents\",\"sublabel\":\"shell, launchd, systemd\",\"pos\":[40,230],\"size\":[150,60],\"sources\":[{\"path\":\"internal/cli/root.go\",\"line\":22,\"end_line\":31,\"label\":\"dot root command\"},{\"path\":\"internal/watchdog/plist.go\",\"line\":55,\"end_line\":71,\"label\":\"LaunchAgent runs dot watchdog reap\"}]},{\"id\":\"cli\",\"type\":\"backend\",\"label\":\"dot CLI\",\"sublabel\":\"internal/cli, cobra\",\"tag\":\"33 commands\",\"pos\":[280,220],\"size\":[150,80],\"sources\":[{\"path\":\"internal/cli/root.go\",\"line\":51,\"end_line\":108,\"label\":\"33 AddCommand registrations\"},{\"path\":\"cmd/dot/main.go\",\"line\":16,\"end_line\":33,\"label\":\"entrypoint, command exit codes\"}]},{\"id\":\"config\",\"type\":\"backend\",\"label\":\"Config Loader\",\"sublabel\":\"internal/config\",\"tag\":\"profile + host\",\"pos\":[40,400],\"size\":[150,60],\"sources\":[{\"path\":\"internal/config/loader.go\",\"line\":18,\"label\":\"Load profile + custom YAML\"},{\"path\":\"internal/config/detector.go\",\"line\":36,\"label\":\"DetectSystem\"},{\"path\":\"internal/cli/apply.go\",\"line\":130,\"end_line\":134,\"label\":\"apply loads config\"}]},{\"id\":\"admission\",\"type\":\"security\",\"label\":\"Admission Gate\",\"sublabel\":\"internal/admission\",\"tag\":\"repo slot + pressure\",\"pos\":[280,60],\"size\":[150,60],\"sources\":[{\"path\":\"internal/cli/admit_cmd.go\",\"line\":107,\"end_line\":215,\"label\":\"gate, slot, uncovered scan\"},{\"path\":\"internal/admission/slots.go\",\"line\":79,\"end_line\":82,\"label\":\"source metadata omitted\"},{\"path\":\"internal/resourceguard/guard.go\",\"line\":1,\"end_line\":5,\"label\":\"shared by dot ai run + tooling\"}]},{\"id\":\"aitool\",\"type\":\"backend\",\"label\":\"AI Tooling\",\"sublabel\":\"aitooling, aisettings\",\"tag\":\"agents + guard\",\"pos\":[540,60],\"size\":[150,60],\"sources\":[{\"path\":\"internal/aitooling/engine.go\",\"line\":69,\"end_line\":100,\"label\":\"Run takes the tooling slot\"},{\"path\":\"internal/aisettings/agents_registry.go\",\"line\":14,\"end_line\":60,\"label\":\"AGENTS.md targets per tool\"},{\"path\":\"internal/aisettings/coauthor_guard.go\",\"line\":25,\"end_line\":35,\"label\":\"config-based commit-msg hook\"}]},{\"id\":\"module\",\"type\":\"backend\",\"label\":\"Module Registry\",\"sublabel\":\"internal/module\",\"tag\":\"14 modules\",\"pos\":[540,230],\"size\":[150,60],\"sources\":[{\"path\":\"internal/module/module.go\",\"line\":62,\"end_line\":78,\"label\":\"defaultOrder, 14 names\"},{\"path\":\"internal/module/module.go\",\"line\":120,\"end_line\":140,\"label\":\"Resolve by enabled set\"},{\"path\":\"internal/module/ai.go\",\"line\":171,\"end_line\":181,\"label\":\"ai module ensures tooling\"}]},{\"id\":\"home\",\"type\":\"database\",\"label\":\"Home Directory\",\"sublabel\":\"config, agent files, plists\",\"tag\":\"dry-run aware\",\"pos\":[800,230],\"size\":[150,60],\"sources\":[{\"path\":\"internal/exec/runner.go\",\"line\":172,\"end_line\":190,\"label\":\"WriteFile, WriteFileAtomic\"},{\"path\":\"internal/module/templated.go\",\"line\":41,\"end_line\":60,\"label\":\"render then EnsureFile\"},{\"path\":\"internal/watchdog/manager.go\",\"line\":36,\"end_line\":60,\"label\":\"LaunchAgent + state paths\"}]},{\"id\":\"secrets\",\"type\":\"security\",\"label\":\"Secrets Store\",\"sublabel\":\"internal/secrets\",\"tag\":\"age archives\",\"pos\":[280,400],\"size\":[150,60],\"sources\":[{\"path\":\"internal/secrets/store.go\",\"line\":77,\"end_line\":104,\"label\":\"Entries: SSH key, shell, Beszel\"},{\"path\":\"internal/secrets/store.go\",\"line\":119,\"end_line\":165,\"label\":\"encryptFile via 0600 temp\"},{\"path\":\"internal/secrets/store.go\",\"line\":283,\"end_line\":363,\"label\":\"restoreFile renames into place\"}]},{\"id\":\"syncer\",\"type\":\"backend\",\"label\":\"Sync + Peer\",\"sublabel\":\"internal/syncer\",\"tag\":\"rsync, epoch fence\",\"pos\":[540,400],\"size\":[150,60],\"sources\":[{\"path\":\"internal/syncer/sync.go\",\"line\":707,\"end_line\":713,\"label\":\"push; intake is separate\"},{\"path\":\"internal/syncer/peer_commands.go\",\"line\":463,\"end_line\":515,\"label\":\"PeerSync: owner, lock, fence\"},{\"path\":\"internal/syncer/peer_handover.go\",\"line\":530,\"end_line\":545,\"label\":\"PeerHandover\"}]},{\"id\":\"watchdog\",\"type\":\"backend\",\"label\":\"Watchdog\",\"sublabel\":\"internal/watchdog\",\"tag\":\"reaper, WARP, monit\",\"pos\":[800,400],\"size\":[150,60],\"sources\":[{\"path\":\"internal/watchdog/manager.go\",\"line\":69,\"end_line\":95,\"label\":\"Install reaper LaunchAgent\"},{\"path\":\"internal/cli/watchdog_cmd.go\",\"line\":61,\"end_line\":120,\"label\":\"one reap pass\"},{\"path\":\"internal/watchdog/reaper.go\",\"line\":107,\"end_line\":135,\"label\":\"SIGTERM, grace, SIGKILL\"}]},{\"id\":\"targets\",\"type\":\"cloud\",\"label\":\"Sync Targets\",\"sublabel\":\"cloud folder, SSH, peer\",\"pos\":[540,570],\"size\":[150,60],\"sources\":[{\"path\":\"internal/syncer/sync.go\",\"line\":876,\"end_line\":884,\"label\":\"runRsync\"},{\"path\":\"internal/syncer/peer_commands.go\",\"line\":1040,\"end_line\":1061,\"label\":\"rsync -e ssh to the peer\"}]}],\"connections\":[{\"id\":\"user-cli\",\"from\":\"user\",\"to\":\"cli\",\"label\":\"dot <cmd>\",\"variant\":\"emphasis\"},{\"id\":\"cli-admission\",\"from\":\"cli\",\"to\":\"admission\",\"label\":\"dot admit / ai run\"},{\"id\":\"cli-config\",\"from\":\"cli\",\"to\":\"config\",\"label\":\"load profile\"},{\"id\":\"cli-module\",\"from\":\"cli\",\"to\":\"module\",\"label\":\"check / apply\"},{\"id\":\"cli-aitool\",\"from\":\"cli\",\"to\":\"aitool\",\"label\":\"dot ai\",\"fromSide\":\"right\",\"toSide\":\"left\"},{\"id\":\"aitool-admission\",\"from\":\"aitool\",\"to\":\"admission\",\"label\":\"tooling slot\"},{\"id\":\"module-aitool\",\"from\":\"module\",\"to\":\"aitool\",\"label\":\"ai module\"},{\"id\":\"module-home\",\"from\":\"module\",\"to\":\"home\",\"label\":\"Runner writes\"},{\"id\":\"aitool-home\",\"from\":\"aitool\",\"to\":\"home\",\"label\":\"agent files\"},{\"id\":\"cli-secrets\",\"from\":\"cli\",\"to\":\"secrets\",\"label\":\"dot secrets\"},{\"id\":\"secrets-home\",\"from\":\"secrets\",\"to\":\"home\",\"label\":\"restore\",\"fromSide\":\"bottom\",\"toSide\":\"right\",\"via\":[[355,660],[974,660],[974,260]]},{\"id\":\"cli-syncer\",\"from\":\"cli\",\"to\":\"syncer\",\"label\":\"dot sync / peer\",\"fromSide\":\"bottom\",\"toSide\":\"top\"},{\"id\":\"syncer-targets\",\"from\":\"syncer\",\"to\":\"targets\",\"label\":\"rsync\"},{\"id\":\"cli-watchdog\",\"from\":\"cli\",\"to\":\"watchdog\",\"label\":\"dot watchdog\"},{\"id\":\"watchdog-home\",\"from\":\"watchdog\",\"to\":\"home\",\"label\":\"LaunchAgents\"}],\"cards\":[{\"dot\":\"cyan\",\"title\":\"Check and apply\",\"items\":[\"14 modules run in a fixed defaultOrder, filtered by the profile and --module\",\"Modules render embedded templates (internal/template) and write through exec.Runner\",\"exec.Runner logs instead of writing under --dry-run\"]},{\"dot\":\"violet\",\"title\":\"AI tooling and admission\",\"items\":[\"dot ai tools and dot ai update reconcile only the selected agent CLIs and tools\",\"source metadata omitted\",\"The coauthor guard wires a commit-msg hook through git config-based hooks\",\"dot admit, dot ai run and tooling updates share one controller: a heavy slot per repo, one maintenance slot per host\",\"The gate defers (dot admit exits 75) on memory, thermal, WindowServer or CPU pressure\"]},{\"dot\":\"emerald\",\"title\":\"Sync and peer\",\"items\":[\"dot sync pushes with previewed rsync; intake is a separate pull; launchd or systemd units can schedule each\",\".git and linked worktree roots are always excluded\",\"dot peer syncs with one SSH peer; an owner epoch fence demotes the losing coordinator\",\"handover and takeover move the coordinator role; dot peer git status and realign classify repos\"]},{\"dot\":\"amber\",\"title\":\"Watchdog and secrets\",\"items\":[\"Opt-in reaper LaunchAgent: enforce mode sends SIGTERM, waits, then SIGKILL\",\"Optional WARP heal, monit and Beszel agents; alerts via macOS notification or ntfy\",\"dot secrets encrypts the SSH key, shell secrets and Beszel env with age\",\"dot profile snapshots config and app lists, optionally age identities\"]}]}",
+      "inputSha256": "8ef5cd217811de9daa344265e1505889e4939d87fb5f19e9a245bc0eb63f6a95",
+      "origin": {
+        "kind": "public",
+        "repository": "STAIxBWLB/dotfiles",
+        "sourceUrl": "https://github.com/STAIxBWLB/dotfiles/blob/499bcf67e53f3a131af014e981edf0b00c288baf/docs/architecture/dotfiles-v2.architecture.json",
+        "blobSha": "076ca34ed27bac237fd2b5c11fa695caaf40636a",
+        "visibility": "PUBLIC",
+        "sanitizedFields": [
+          "spec.components[3].sources[1].label",
+          "spec.cards[1].items[1]"
+        ]
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "public-07",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"entelecheia Profile CLI\",\"output\":\"public-07.html\",\"quality_profile\":\"showcase\",\"repository\":{\"url\":\"https://github.com/entelecheia/entelecheia\",\"provider\":\"github\",\"revision\":\"ac3519ea892aa6c13f468ef6b489ad9fab4369ed\"}},\"components\":[{\"id\":\"user\",\"type\":\"external\",\"label\":\"User\",\"sublabel\":\"terminal args\",\"pos\":[40,240],\"size\":[110,60],\"sources\":[{\"path\":\"main.go\",\"line\":14,\"end_line\":16,\"label\":\"os.Args to run\"}]},{\"id\":\"cli\",\"type\":\"backend\",\"label\":\"entelecheia CLI\",\"sublabel\":\"main.go run()\",\"tag\":\"Go 1.22\",\"pos\":[240,234],\"size\":[140,72],\"sources\":[{\"path\":\"main.go\",\"line\":18,\"end_line\":79,\"label\":\"command dispatch\"},{\"path\":\"go.mod\",\"line\":3,\"label\":\"go 1.22\"}]},{\"id\":\"profile\",\"type\":\"backend\",\"label\":\"Profile Package\",\"sublabel\":\"internal/profile\",\"tag\":\"10 sites\",\"pos\":[500,234],\"size\":[140,72],\"sources\":[{\"path\":\"internal/profile/profile.go\",\"line\":16,\"end_line\":27,\"label\":\"Sites registry\"},{\"path\":\"internal/profile/profile.go\",\"line\":33,\"end_line\":43,\"label\":\"FindSite\"},{\"path\":\"internal/profile/profile.go\",\"line\":45,\"end_line\":91,\"label\":\"PrintIntro, PrintLinks\"}]},{\"id\":\"opener\",\"type\":\"external\",\"label\":\"OS Opener\",\"sublabel\":\"open, xdg-open\",\"tag\":\"rundll32 on Windows\",\"pos\":[790,234],\"size\":[140,72],\"sources\":[{\"path\":\"internal/profile/open.go\",\"line\":9,\"end_line\":28,\"label\":\"exec.Command Start\"}]},{\"id\":\"sites\",\"type\":\"external\",\"label\":\"Personal Sites\",\"sublabel\":\"youngjoon-lee.com + 9\",\"pos\":[1050,234],\"size\":[140,72],\"sources\":[{\"path\":\"internal/profile/profile.go\",\"line\":17,\"end_line\":26,\"label\":\"site URLs\"}]},{\"id\":\"gomod\",\"type\":\"cloud\",\"label\":\"Go Modules\",\"sublabel\":\"go install @latest\",\"pos\":[240,70],\"size\":[140,60],\"sources\":[{\"path\":\"go.mod\",\"line\":1,\"label\":\"module path\"},{\"path\":\"README.md\",\"line\":147,\"end_line\":151,\"label\":\"install docs\"}]},{\"id\":\"releases\",\"type\":\"cloud\",\"label\":\"GitHub Releases\",\"sublabel\":\"goreleaser, v* tags\",\"pos\":[240,420],\"size\":[140,60],\"sources\":[{\"path\":\".github/workflows/release.yaml\",\"line\":4,\"end_line\":34,\"label\":\"tag-triggered release\"},{\"path\":\".goreleaser.yaml\",\"line\":9,\"end_line\":38,\"label\":\"builds and archives\"}]}],\"boundaries\":[{\"kind\":\"region\",\"label\":\"Single Go binary\",\"wraps\":[\"cli\",\"profile\"]}],\"connections\":[{\"id\":\"user-to-cli\",\"from\":\"user\",\"to\":\"cli\",\"label\":\"run\",\"variant\":\"emphasis\"},{\"id\":\"cli-to-profile\",\"from\":\"cli\",\"to\":\"profile\",\"label\":\"FindSite, Open\",\"variant\":\"emphasis\"},{\"id\":\"profile-to-opener\",\"from\":\"profile\",\"to\":\"opener\",\"label\":\"exec Start\"},{\"id\":\"opener-to-sites\",\"from\":\"opener\",\"to\":\"sites\",\"label\":\"launch browser\"},{\"id\":\"gomod-to-cli\",\"from\":\"gomod\",\"to\":\"cli\",\"label\":\"go install\",\"variant\":\"dashed\"},{\"id\":\"releases-to-cli\",\"from\":\"releases\",\"to\":\"cli\",\"label\":\"download\",\"variant\":\"dashed\"}],\"cards\":[{\"dot\":\"cyan\",\"title\":\"CLI\",\"items\":[\"Module github.com/entelecheia/entelecheia, one Go binary with no server or storage\",\"No args or intro prints the profile and links prints the alias table; version, -v, --version and help print from main.go; their only profile call is SupportsColor at the top of run()\",\"Color output only on a TTY without NO_COLOR (SupportsColor)\"]},{\"dot\":\"violet\",\"title\":\"Link registry\",\"items\":[\"10 sites with case-insensitive aliases: home, cv, halla, koica, rise, staix, research, repos, github, linkedin\",\"open defaults to home (youngjoon-lee.com); unknown aliases exit 1 and point to links\",\"docs/index.html meta-refreshes to the LinkedIn profile\"]},{\"dot\":\"emerald\",\"title\":\"Build and release\",\"items\":[\"ci.yml runs go vet, build and test on PRs and pushes to main\",\"release.yaml runs goreleaser on v* tags: darwin, linux, windows builds with main.Version set by ldflags\"]}]}",
+      "inputSha256": "6e072df6102004b1e486d765ab45e426686accec3fbcb79f751fc9017608fc43",
+      "origin": {
+        "kind": "public",
+        "repository": "entelecheia/entelecheia",
+        "sourceUrl": "https://github.com/entelecheia/entelecheia/blob/11619bb8097d25b73dba229ef1c388c8ff98a897/architecture/entelecheia.architecture.json",
+        "blobSha": "28dbddb92501f8cd47e1ed2a5c0aabef66eafa77",
+        "visibility": "PUBLIC"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "public-08",
+      "diagramType": "architecture",
+      "rule": "public-spec",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"AI Systems 2026 Course Site\",\"output\":\"public-08.html\",\"quality_profile\":\"showcase\",\"repository\":{\"url\":\"https://github.com/halla-ai/ai-systems-2026\",\"provider\":\"github\",\"revision\":\"c8fc01a9d5f91cdddad9e2bacbf1bbf4fe9ee9ef\"}},\"components\":[{\"id\":\"actions\",\"type\":\"cloud\",\"label\":\"GitHub Actions\",\"sublabel\":\"deploy.yml\",\"pos\":[360,332],\"size\":[150,60],\"tag\":\"push on main\",\"sources\":[{\"path\":\".github/workflows/deploy.yml\",\"line\":3,\"end_line\":6,\"label\":\"push to main trigger\"},{\"path\":\".github/workflows/deploy.yml\",\"line\":18,\"end_line\":51,\"label\":\"build job runs astro build\"}]},{\"id\":\"content\",\"type\":\"database\",\"label\":\"Content Collections\",\"sublabel\":\"src/content/docs\",\"pos\":[40,190],\"size\":[150,60],\"tag\":\"16 weeks + 12 labs\",\"sources\":[{\"path\":\"src/content.config.ts\",\"line\":5,\"end_line\":23,\"label\":\"Starlight docs collection\"},{\"path\":\"astro.config.mjs\",\"line\":84,\"end_line\":133,\"label\":\"week-01 to week-16 in sidebar\"},{\"path\":\"astro.config.mjs\",\"line\":135,\"end_line\":154,\"label\":\"lab-01 to lab-12 in sidebar\"}]},{\"id\":\"student\",\"type\":\"external\",\"label\":\"Students\",\"sublabel\":\"CHU AI 4th year\",\"pos\":[900,332],\"size\":[130,60],\"sources\":[{\"path\":\"astro.config.mjs\",\"line\":48,\"label\":\"course audience\"},{\"path\":\"README.md\",\"line\":69,\"end_line\":76,\"label\":\"assignment PRs\"}]},{\"id\":\"frontend\",\"type\":\"frontend\",\"label\":\"Starlight Docs UI\",\"sublabel\":\"Astro 6 static output\",\"pos\":[40,330],\"size\":[150,64],\"tag\":\"MDX + Space Grotesk\",\"sources\":[{\"path\":\"astro.config.mjs\",\"line\":16,\"label\":\"starlight() integration\"},{\"path\":\"package.json\",\"line\":20,\"end_line\":22,\"label\":\"astro ^6.1.3, starlight ^0.38.2\"},{\"path\":\"src/styles/custom.css\",\"line\":41,\"label\":\"Space Grotesk site font\"}]},{\"id\":\"pages\",\"type\":\"cloud\",\"label\":\"GitHub Pages\",\"sublabel\":\"ai-systems-2026.halla.ai\",\"pos\":[620,332],\"size\":[170,60],\"tag\":\"CNAME\",\"sources\":[{\"path\":\".github/workflows/deploy.yml\",\"line\":53,\"end_line\":63,\"label\":\"deploy-pages job\"},{\"path\":\"public/CNAME\",\"line\":1,\"label\":\"custom domain\"}]}],\"boundaries\":[{\"kind\":\"region\",\"label\":\"Static site, no backend\",\"wraps\":[\"frontend\",\"content\"],\"pad\":16}],\"connections\":[{\"id\":\"actions-to-frontend\",\"from\":\"actions\",\"to\":\"frontend\",\"label\":\"astro build\"},{\"id\":\"content-to-frontend\",\"from\":\"content\",\"to\":\"frontend\",\"label\":\"MDX\",\"fromSide\":\"bottom\",\"toSide\":\"top\"},{\"id\":\"pages-to-student\",\"from\":\"pages\",\"to\":\"student\",\"label\":\"serves\"},{\"id\":\"actions-to-pages\",\"from\":\"actions\",\"to\":\"pages\",\"label\":\"deploy dist/\"}],\"cards\":[{\"dot\":\"cyan\",\"title\":\"Course\",\"items\":[\"Cheju Halla University AI department 4th-year course: agentic workflows and harness engineering, 16 weeks across 5 phases\",\"16 week notes (week-01 to week-16), 12 labs, and capstone pages in src/content/docs/\",\"Students submit assignments as GitHub pull requests under assignments/lab-XX or assignments/week-XX\",\"Sidebar phases: agentic system foundations, harness engineering, multi-agent SDLC, open-source models and MLOps, capstone Ralphthon\"]},{\"dot\":\"violet\",\"title\":\"Stack\",\"items\":[\"Astro 6 with Starlight 0.38 integration, MDX content, sharp image processing (package.json)\",\"Bilingual locales: root label Korean and en English with custom ThemeSelect and LanguageSelect components\",\"Build-time active phase computed in astro.config.mjs from SEMESTER_START 2026-03-03 expands the current phase and its neighbors in the sidebar\"]},{\"dot\":\"emerald\",\"title\":\"Deploy\",\"items\":[\"Static build to dist/ via make build, preview via make preview (Makefile)\",\"GitHub Actions deploy.yml pushes to GitHub Pages with CNAME for ai-systems-2026.halla.ai\",\"Edit links point to github.com/halla-ai/ai-systems-2026 with lastUpdated enabled\"]}]}",
+      "inputSha256": "62c6af34b78e0ce12b88188c83dce3b2e57b4ba68602b4576558ea27bb136c17",
+      "origin": {
+        "kind": "public",
+        "repository": "halla-ai/ai-systems-2026",
+        "sourceUrl": "https://github.com/halla-ai/ai-systems-2026/blob/f5e9d6455066e8a93f4d980b43526150a26c709e/docs/ai-systems-2026.architecture.json",
+        "blobSha": "14d1b2955877c26d2c4dba16768c9801a9e95a4f",
+        "visibility": "PUBLIC"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "repository-evidence/root-required"
+        ],
+        "diagnostics": [
+          {
+            "code": "repository-evidence/root-required",
+            "severity": "error",
+            "message": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering.",
+            "subject": {
+              "surface": "repository-evidence",
+              "path": "/meta/repository"
+            },
+            "evidence": {},
+            "supportedFixes": [
+              "pass --repo-root with the matching local Git checkout"
+            ]
+          }
+        ],
+        "error": "This diagram declares source evidence. Pass --repo-root <repository> so Archify can verify it before rendering."
+      }
+    },
+    {
+      "id": "generated-valid",
+      "diagramType": "architecture",
+      "rule": "ids",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-valid.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[{\"from\":\"a\",\"to\":\"b\"}]}",
+      "inputSha256": "f843c15113cc77a4cfa6a0ddc84d5d250ee3ba5e7f5ee44feaa8b36bf654c769",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": true,
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "generated-blank-id",
+      "diagramType": "architecture",
+      "rule": "ids",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-blank-id.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[]}",
+      "inputSha256": "351f6a8da47139a1ba0caf70a8617a3447f0d2d3c7a11692210adb76c2a52e6f",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "schema/pattern"
+        ],
+        "diagnostics": [
+          {
+            "code": "schema/pattern",
+            "severity": "error",
+            "message": "/components/0/id (id/label: \"\") must match pattern \"^[a-zA-Z][a-zA-Z0-9_-]*$\" {\"pattern\":\"^[a-zA-Z][a-zA-Z0-9_-]*$\"}",
+            "subject": {
+              "diagramType": "architecture",
+              "path": "/components/0/id",
+              "identity": ""
+            },
+            "evidence": {
+              "keyword": "pattern",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+            },
+            "supportedFixes": [
+              "match the required pattern \"^[a-zA-Z][a-zA-Z0-9_-]*$\""
+            ]
+          }
+        ],
+        "error": "architecture schema validation failed:\n  /components/0/id (id/label: \"\") must match pattern \"^[a-zA-Z][a-zA-Z0-9_-]*$\" {\"pattern\":\"^[a-zA-Z][a-zA-Z0-9_-]*$\"}"
+      }
+    },
+    {
+      "id": "generated-duplicate-id",
+      "diagramType": "architecture",
+      "rule": "ids",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-duplicate-id.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"a\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[]}",
+      "inputSha256": "5f7900b58cfeaa78bbae83e9ca1d533bd417478d7d34fabc52264d100bf46dc3",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Component ids must be unique.",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- Component ids must be unique."
+      }
+    },
+    {
+      "id": "generated-invalid-id",
+      "diagramType": "architecture",
+      "rule": "ids",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-invalid-id.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"Bad Id\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[]}",
+      "inputSha256": "7b6af0197bff8d61f63ad8e2c8c533d34c120c43909b32de3ae2428a1bae425a",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "schema/pattern"
+        ],
+        "diagnostics": [
+          {
+            "code": "schema/pattern",
+            "severity": "error",
+            "message": "/components/0/id (id/label: \"Bad Id\") must match pattern \"^[a-zA-Z][a-zA-Z0-9_-]*$\" {\"pattern\":\"^[a-zA-Z][a-zA-Z0-9_-]*$\"}",
+            "subject": {
+              "diagramType": "architecture",
+              "path": "/components/0/id",
+              "identity": "Bad Id"
+            },
+            "evidence": {
+              "keyword": "pattern",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+            },
+            "supportedFixes": [
+              "match the required pattern \"^[a-zA-Z][a-zA-Z0-9_-]*$\""
+            ]
+          }
+        ],
+        "error": "architecture schema validation failed:\n  /components/0/id (id/label: \"Bad Id\") must match pattern \"^[a-zA-Z][a-zA-Z0-9_-]*$\" {\"pattern\":\"^[a-zA-Z][a-zA-Z0-9_-]*$\"}"
+      }
+    },
+    {
+      "id": "generated-missing-from",
+      "diagramType": "architecture",
+      "rule": "references",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-missing-from.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[{\"from\":\"absent\",\"to\":\"b\"}]}",
+      "inputSha256": "190cdc3cb324813237eab0b0144637a572d1725e8d07a0ab363b8dfcc7dda70f",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Connection \"absent\" references unknown source \"absent\".",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- Connection \"absent\" references unknown source \"absent\"."
+      }
+    },
+    {
+      "id": "generated-missing-to",
+      "diagramType": "architecture",
+      "rule": "references",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-missing-to.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[{\"from\":\"a\",\"to\":\"absent\"}]}",
+      "inputSha256": "54aa3eb7c30be7e3d51547967df3a7343051c0ab0ed28420d5e758d5af30a29a",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Connection \"absent\" references unknown target \"absent\".",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- Connection \"absent\" references unknown target \"absent\"."
+      }
+    },
+    {
+      "id": "generated-zero-cols",
+      "diagramType": "architecture",
+      "rule": "grid-bounds",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-zero-cols.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":0},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[{\"from\":\"a\",\"to\":\"b\"}]}",
+      "inputSha256": "a531b607c6b7014d5f39d0d67057c7adefd2a967aea923b5faa49323bfe126b4",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "schema/minimum"
+        ],
+        "diagnostics": [
+          {
+            "code": "schema/minimum",
+            "severity": "error",
+            "message": "/layout/cols must be >= 1 {\"comparison\":\">=\",\"limit\":1}",
+            "subject": {
+              "diagramType": "architecture",
+              "path": "/layout/cols"
+            },
+            "evidence": {
+              "keyword": "minimum",
+              "comparison": ">=",
+              "limit": 1
+            },
+            "supportedFixes": [
+              "use a value >= 1"
+            ]
+          }
+        ],
+        "error": "architecture schema validation failed:\n  /layout/cols must be >= 1 {\"comparison\":\">=\",\"limit\":1}"
+      }
+    },
+    {
+      "id": "generated-too-many-cols",
+      "diagramType": "architecture",
+      "rule": "grid-bounds",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-too-many-cols.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":13},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[{\"from\":\"a\",\"to\":\"b\"}]}",
+      "inputSha256": "758d6eecce97b823b977e7a8b31ba1354e2bcbed61a65265428c680f9bd006cb",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "schema/maximum"
+        ],
+        "diagnostics": [
+          {
+            "code": "schema/maximum",
+            "severity": "error",
+            "message": "/layout/cols must be <= 12 {\"comparison\":\"<=\",\"limit\":12}",
+            "subject": {
+              "diagramType": "architecture",
+              "path": "/layout/cols"
+            },
+            "evidence": {
+              "keyword": "maximum",
+              "comparison": "<=",
+              "limit": 12
+            },
+            "supportedFixes": [
+              "use a value <= 12"
+            ]
+          }
+        ],
+        "error": "architecture schema validation failed:\n  /layout/cols must be <= 12 {\"comparison\":\"<=\",\"limit\":12}"
+      }
+    },
+    {
+      "id": "generated-col-outside",
+      "diagramType": "architecture",
+      "rule": "grid-bounds",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-col-outside.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":0,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":4}],\"connections\":[{\"from\":\"a\",\"to\":\"b\"}]}",
+      "inputSha256": "663cb630cf7f443388fce5c001bd0d83c494da0194a71c6d6fbb8d94dbb86180",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Component \"b\" col 4 exceeds layout.cols 4 (valid: 0..3).",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- Component \"b\" col 4 exceeds layout.cols 4 (valid: 0..3)."
+      }
+    },
+    {
+      "id": "generated-negative-row",
+      "diagramType": "architecture",
+      "rule": "grid-bounds",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"E0 synthetic\",\"output\":\"generated-negative-row.html\"},\"layout\":{\"mode\":\"grid\",\"cols\":4},\"components\":[{\"id\":\"a\",\"label\":\"A\",\"type\":\"backend\",\"row\":-1,\"col\":0},{\"id\":\"b\",\"label\":\"B\",\"type\":\"backend\",\"row\":0,\"col\":1}],\"connections\":[{\"from\":\"a\",\"to\":\"b\"}]}",
+      "inputSha256": "0b6c6288be6da870296b41c952b622d6418d514698fe73db621de81bcacbbc23",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "expectedCoreOk": false,
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "schema/minimum"
+        ],
+        "diagnostics": [
+          {
+            "code": "schema/minimum",
+            "severity": "error",
+            "message": "/components/0/row (id/label: \"a\") must be >= 0 {\"comparison\":\">=\",\"limit\":0}",
+            "subject": {
+              "diagramType": "architecture",
+              "path": "/components/0/row",
+              "identity": "a"
+            },
+            "evidence": {
+              "keyword": "minimum",
+              "comparison": ">=",
+              "limit": 0
+            },
+            "supportedFixes": [
+              "use a value >= 0"
+            ]
+          }
+        ],
+        "error": "architecture schema validation failed:\n  /components/0/row (id/label: \"a\") must be >= 0 {\"comparison\":\">=\",\"limit\":0}"
+      }
+    }
+  ]
+}

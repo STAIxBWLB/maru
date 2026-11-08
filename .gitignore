@@ -86,3 +86,7 @@ docs/design-qa/
 .agenthub/state/
 .agenthub/config.local.json
 .agenthub/routing.local.toml
+
+# E0 measurement outputs and private intake inventory
+.engine-e0/
+src/lib/diagram/__generated__/engine-e0/

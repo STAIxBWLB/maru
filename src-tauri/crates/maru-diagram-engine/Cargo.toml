@@ -1,0 +1,34 @@
+[package]
+name = "maru-diagram-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "UNLICENSED"
+description = "Maru's independent typed diagram validation engine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen"]
+typegen = ["dep:ts-rs"]
+bindgen-web = ["wasm", "dep:wasm-bindgen-cli-support"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+wasm-bindgen = { workspace = true, optional = true }
+ts-rs = { workspace = true, optional = true }
+wasm-bindgen-cli-support = { workspace = true, optional = true }
+
+[[bin]]
+name = "export-types"
+path = "src/bin/export_types.rs"
+required-features = ["typegen"]
+
+[[bin]]
+name = "bindgen-web"
+path = "src/bin/bindgen_web.rs"
+required-features = ["bindgen-web"]
