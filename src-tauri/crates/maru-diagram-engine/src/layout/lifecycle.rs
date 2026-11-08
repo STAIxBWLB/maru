@@ -130,7 +130,13 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
         }
     }
 
-    for (index, transition) in spec.transitions.iter().enumerate() {
+    let route_ids = super::allocate_route_ids(
+        "transition",
+        spec.transitions
+            .iter()
+            .map(|transition| transition.id.as_deref()),
+    );
+    for (index, (transition, id)) in spec.transitions.iter().zip(route_ids).enumerate() {
         let path = format!("/transitions/{index}");
         let label = match (&transition.label, &transition.note) {
             (Some(label), Some(note)) if !note.is_empty() => format!("{label}\n{note}"),
@@ -156,10 +162,7 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             .transpose()
             .map_err(|error| geometry_error(&format!("{path}/labelAt"), error.message))?;
         scene.connection(RouteRequest {
-            id: transition
-                .id
-                .clone()
-                .unwrap_or_else(|| format!("transition:{index}")),
+            id,
             from: transition.from.clone(),
             to: transition.to.clone(),
             label: (!label.is_empty()).then_some(label),
@@ -213,7 +216,7 @@ mod tests {
 
     #[test]
     fn places_states_lanes_and_transition_geometry_deterministically() {
-        let spec = r#"{"schema_version":2,"diagram_type":"lifecycle","meta":{"title":"Lifecycle","output":"lifecycle.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"begin","type":"start","label":"Begin","lane":"main","col":0,"step":"Entry"},{"id":"done","type":"success","label":"Done","lane":"main","col":1}],"transitions":[{"id":"complete","from":"begin","to":"done","label":"complete","note":"after review","route":"auto","fromSide":"right","toSide":"left","labelAt":[320,40]}]}"#;
+        let spec = r#"{"schema_version":2,"diagram_type":"lifecycle","meta":{"title":"Lifecycle","output":"lifecycle.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"begin","type":"start","label":"Begin","sublabel":"Current","lane":"main","col":0,"step":"Entry"},{"id":"done","type":"success","label":"Done","lane":"main","col":1}],"transitions":[{"id":"complete","from":"begin","to":"done","label":"complete","note":"after review","route":"auto","fromSide":"right","toSide":"left","labelAt":[320,40]}]}"#;
         let report = layout(spec);
         assert!(report.ok, "{:?}", report.diagnostics);
         let geometry = report.geometry.unwrap();
@@ -223,7 +226,10 @@ mod tests {
             .containers
             .iter()
             .any(|container| container.id == "lane:main"));
-        assert!(geometry.labels.iter().any(|label| label.text == "Entry"));
+        assert!(geometry
+            .labels
+            .iter()
+            .any(|label| label.text == "Current\nEntry"));
         assert!(geometry
             .labels
             .iter()

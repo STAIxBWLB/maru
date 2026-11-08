@@ -321,5 +321,74 @@
     },
     "testFeature": "geometry-corpus; separate wasm-test bindings only",
     "hostedCi": "pending"
+  },
+  "routeAndTextAuditFollowUp": {
+    "sdkTree": "4185e16a009d5a024a840c4be3efc50a8c756d75",
+    "executionScope": "remote Linux x64 container; S2 functional and deterministic reproduction, not hosted S3 acceptance",
+    "checks": {
+      "coreUnit": 117,
+      "differential": 2,
+      "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T22:21:48.004Z",
+        "duration": 7760.860000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "productIsolation": "normal JS and actual WASM omit scene_corpus_hashes"
+    },
+    "routeIdentity": "all authored IDs reserved before anonymous naming; source ordinals own failures and paths; five-family blocked/clear collision regression at typed scene-builder seam",
+    "presetAudit": {
+      "acceptedFamilyPresetPairs": 23,
+      "directions": 2,
+      "authoredOverrideVariants": 2,
+      "inputOverrides": "architecture via; workflow/dataflow/lifecycle channel coordinates; resolver tests also cover explicit sides",
+      "workflowBias": "source-relative Q16 interpolation in actual routed drop corridor"
+    },
+    "visibleTextAudit": "docs/diagram.md enumerates all five families plus shared metadata, legends and cards; dataflow classification is measured with flow label",
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "51010131a71cc488a2da0c9052e983133c6c76e692396af2b8daeb91ab884108",
+      "reportBytes": 58637,
+      "corpusSha256": "5f547a61ae57b679fb6ff6504639f0bcdea8405ae1f4c8adcc590242325754ab",
+      "corpusCases": 259,
+      "successfulReports": 38,
+      "nonSuccessReports": 221
+    },
+    "productPayload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 17225.683848999997,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324219,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-CoXTTQCb.js",
+          "bytes": 4431389,
+          "gzipBytes": 1455867,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324219,
+      "validationGzipBytes": 324219,
+      "lazyGeometryGzipBytes": 1455867,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1780208
+    },
+    "hostedCi": "pending on the next pushed head"
   }
 }

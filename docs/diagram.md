@@ -1098,3 +1098,84 @@ budget-0 failure for the same edge, and still routes adjacent clear edges.
 The normal product export guard passed for JS and WASM. Validation measures
 324,220 B gzip; normal lazy layout/metrics measures 1,434,912 B, excluding the
 harness. These are remote checks; new-head hosted and S3 gates remain pending.
+
+#### Visible text audit for the five typed families
+
+Every authored scene-text field below reaches the shared measured label path,
+which emits pinned glyphs, font size and ink bounds and supplies route obstacles.
+Multiline combinations preserve the full content rather than shortening labels.
+The regression tests inspect both label text and emitted glyph inputs.
+
+| Family | Node text | Route text | Container text | Cards |
+| --- | --- | --- | --- | --- |
+| Architecture | `components[].label`, `.sublabel`, `.tag` | `connections[].label` | `boundaries[].label` | `cards[].title`, every `.items[]` string |
+| Workflow | `nodes[].label`, `.sublabel`, `.tag` | `edges[].label` | `lanes[].label`, `phases[].label`, `groups[].label` | Same shared card path |
+| Sequence | `participants[].label`, `.sublabel` | `messages[].label` and `.note`, combined as lines | `segments[].label`; activation bars have no separate authored caption | Same shared card path |
+| Dataflow | `nodes[].label`, `.sublabel`, `.tag` | `flows[].label` and `.classification`, combined as lines | `stages[].label` | Same shared card path |
+| Lifecycle | `states[].label`, `.sublabel`, `.tag`, `.step` | `transitions[].label` and `.note` | `lanes[].label` | Same shared card path |
+
+Shared text on every family is `meta.title`, `meta.subtitle`, and the resolved
+`meta.legend.entries[key].label` overrides. Default legend names are also
+measured. The lifecycle detail combines sublabel/step and avoids duplicating
+identical content; a sequence activation's participant reference points to the
+already-labelled header. `tag` exists on the shared decoration model but is not
+an E1-admitted sequence participant field, so it is not claimed as sequence copy.
+
+Text exclusions are intentional: IDs, endpoint/member/lane references, types,
+variants, roles, semantic checks and routing/layout controls are identifiers or
+style/geometry inputs. `icon` selects a known vector mark; `brand` selects an
+asset, not another authored caption. Source-reference paths, line ranges and
+labels are provenance/interactive citation metadata. `meta.views` labels/notes
+and locale/translation catalog strings belong to Viewer controls, not static
+scene copy; they do not silently translate authored labels. Output filenames
+and repository descriptors are not drawn. These fields remain in the original
+spec for their owning renderer/Viewer paths.
+
+#### Complete preset and route-identity contract
+
+The preset resolver consumes the same accepted lists as document validation.
+A table-driven audit covers every family/preset in both endpoint directions,
+including authored channel-coordinate overrides. Named presets have concrete
+port/channel intent, not an `auto` fall-through: horizontal/vertical orthogonal
+midpoint corridors; outer right/left and upper/lower channels; dataflow's
+vertical channel; and drop's source-relative inter-box gap. Workflow drop
+carries its validated bias through checked Q16 interpolation; lifecycle drop
+uses the midpoint. When no safe vertical gap exists, drop chooses an explicit
+bottom detour. Explicit waypoints bypass unused generated channels. `auto`
+remains automatic. A `straight` preference that needs bends to stay orthogonal
+and obstacle-free gets a nonfatal preset-adjusted notice naming the preset and
+its repair, rather than an undisclosed replacement.
+
+| Families | Accepted preset | Generated corridor |
+| --- | --- | --- |
+| All four routed families | `auto`, `straight` | Automatic obstacle-safe path; `straight` discloses bends |
+| Architecture | `orthogonal-h`, `orthogonal-v` | Midpoint X/Y between effective escaped ports |
+| Workflow | `outside-right` | Right/right ports, X outside the whole scene |
+| Workflow | `return-left` | Left/left ports, X left of both endpoints |
+| Workflow, Lifecycle | `drop` | Facing vertical ports and source-relative clear Y gap; explicit bottom detour when spans overlap |
+| Workflow, Dataflow, Lifecycle | `bottom-channel` | Bottom/bottom ports, Y below both endpoints |
+| Workflow | `up-channel` | Top/top ports, Y above both endpoints |
+| Dataflow, Lifecycle | `top-channel` | Top/top ports, Y above both endpoints |
+| Dataflow | `vertical-channel` | Facing horizontal ports, X beyond the source escape toward the target |
+| Lifecycle | `right-channel`, `left-channel` | Matching right/right or left/left ports, X beyond both endpoints |
+| Sequence | None | Authored message timeline and lifeline ports, no route-preset input |
+
+All authored route IDs are reserved before anonymous output IDs are allocated.
+Generated names skip every reserved name, even an authored name later in the
+source array. Internal failures and diagnostic paths use the source ordinal,
+not a route display ID. An all-family blocked-plus-clear regression deliberately
+collides an authored name with an anonymous edge's original fallback and checks
+unique output IDs, the original source path and the unaffected clear route.
+That regression enters through the typed scene builder: current E1 public ID
+syntax already rejects colons, but the internal naming/routing contract must
+remain safe independently. Public-input tests also cover distinct authored and
+anonymous IDs. Architecture overrides use its admitted `via` coordinates;
+`channelX`/`channelY` overrides are tested on the families that admit them.
+
+The round-two route/text audit, SDK tree `4185e16a`, passed 117 core tests,
+two document differential tests, clippy and binding drift in the remote Linux
+container. All 259 native/test-WASM scene reports are byte-identical; both
+Chromium probes passed without a retry. Normal product exports still omit
+corpus tooling. Validation is 324,219 B gzip and the separate lazy geometry
+chunk is 1,455,867 B. These are source-bound remote reproductions; the new-head
+hosted matrix/native gates and S3 cold-load/layout budgets remain unverified.

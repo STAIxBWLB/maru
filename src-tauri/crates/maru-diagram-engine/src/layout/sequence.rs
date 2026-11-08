@@ -92,6 +92,10 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
             ) / 64.0,
         );
     }
+    let route_ids = super::allocate_route_ids(
+        "message",
+        spec.messages.iter().map(|message| message.id.as_deref()),
+    );
     for (index, message) in spec.messages.iter().enumerate() {
         let label = match &message.note {
             Some(note) if !note.is_empty() => format!("{}\n{note}", message.label),
@@ -99,10 +103,7 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
         };
         let y = px(message.y)?;
         scene.connection(RouteRequest {
-            id: message
-                .id
-                .clone()
-                .unwrap_or_else(|| format!("message:{index}")),
+            id: route_ids[index].clone(),
             from: message.from.clone(),
             to: message.to.clone(),
             label: Some(label),
@@ -178,6 +179,46 @@ mod tests {
         let report = super::super::layout_json(&request.to_string());
         assert!(report.ok, "{:?}", report.diagnostics);
         report.geometry.unwrap()
+    }
+
+    #[test]
+    fn sequence_text_includes_participant_details_message_notes_and_segment_labels() {
+        let mut source = spec();
+        source["participants"][0]["sublabel"] = "Browser".into();
+        source["messages"][0]["note"] = "PII".into();
+        let geometry = layout(&source, None);
+        for text in ["Client", "Browser", "API", "Request\nPII", "Session"] {
+            let label = geometry
+                .labels
+                .iter()
+                .find(|label| label.text == text)
+                .unwrap_or_else(|| panic!("missing visible text {text}"));
+            let glyph_text: String = label
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.input.as_str())
+                .collect();
+            assert_eq!(glyph_text, text.replace('\n', ""));
+        }
+        assert!(!geometry
+            .labels
+            .iter()
+            .any(|label| label.target_id == "activation:0"));
+    }
+
+    #[test]
+    fn sequence_anonymous_route_id_does_not_alias_an_authored_id() {
+        let mut source = spec();
+        source["messages"][0].as_object_mut().unwrap().remove("id");
+        source["messages"].as_array_mut().unwrap().push(serde_json::json!({"id":"message-0","from":"api","to":"client","y":450,"label":"Reply"}));
+        let geometry = layout(&source, None);
+        let ids: std::collections::HashSet<_> = geometry
+            .routes
+            .iter()
+            .map(|route| route.id.as_deref().unwrap())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("message-0"));
     }
 
     #[test]

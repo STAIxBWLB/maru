@@ -236,7 +236,9 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
             .map_err(|error| geometry_error(&format!("/groups/{index}"), error.message))?;
     }
 
-    for (index, edge) in spec.edges.iter().enumerate() {
+    let route_ids =
+        super::allocate_route_ids("edge", spec.edges.iter().map(|edge| edge.id.as_deref()));
+    for (index, (edge, id)) in spec.edges.iter().zip(route_ids).enumerate() {
         let path = format!("/edges/{index}");
         let waypoints = edge
             .via
@@ -256,7 +258,7 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
             .transpose()
             .map_err(|error| geometry_error(&format!("{path}/labelAt"), error.message))?;
         scene.connection(RouteRequest {
-            id: edge.id.clone().unwrap_or_else(|| format!("edge:{index}")),
+            id,
             from: edge.from.clone(),
             to: edge.to.clone(),
             label: edge.label.clone(),
@@ -286,6 +288,7 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
                 .transpose()
                 .map_err(|error| geometry_error(&format!("{path}/labelDy"), error.message))?,
             label_segment: segment_index(edge.label_segment, &format!("{path}/labelSegment"))?,
+            bias: edge.bias,
             variant: edge.variant.clone(),
             role: edge.role.clone(),
             width: edge
@@ -309,7 +312,7 @@ mod tests {
     #[test]
     fn places_nodes_and_all_declared_workflow_containers() {
         let report = layout(
-            r#"{"schema_version":2,"diagram_type":"workflow","meta":{"title":"Workflow","output":"workflow.html"},"lanes":[{"id":"main","label":"Main"},{"id":"empty","label":"Empty lane"}],"phases":[{"id":"build","label":"Build","fromCol":0,"toCol":1}],"groups":[{"id":"review","label":"Review","lane":"main","fromCol":1,"toCol":1}],"nodes":[{"id":"start","lane":"main","col":0,"type":"frontend","label":"Start"},{"id":"review-node","lane":"main","col":1,"type":"backend","label":"Review"}],"edges":[{"id":"continue","from":"start","to":"review-node","role":"main","variant":"dashed","label":"continue","labelAt":[320,40]}],"mainPath":["start","review-node"]}"#,
+            r#"{"schema_version":2,"diagram_type":"workflow","meta":{"title":"Workflow","output":"workflow.html"},"lanes":[{"id":"main","label":"Main"},{"id":"empty","label":"Empty lane"}],"phases":[{"id":"build","label":"Build","fromCol":0,"toCol":1}],"groups":[{"id":"review","label":"Review","lane":"main","fromCol":1,"toCol":1}],"nodes":[{"id":"start","lane":"main","col":0,"type":"frontend","label":"Start","sublabel":"Request","tag":"API"},{"id":"review-node","lane":"main","col":1,"type":"backend","label":"Review"}],"edges":[{"id":"continue","from":"start","to":"review-node","role":"main","variant":"dashed","label":"continue","labelAt":[320,40]}],"mainPath":["start","review-node"]}"#,
         );
         assert!(report.ok, "{:?}", report.diagnostics);
         let geometry = report.geometry.unwrap();
@@ -331,6 +334,8 @@ mod tests {
             .containers
             .iter()
             .any(|container| container.id == "group:review"));
+        assert!(geometry.labels.iter().any(|label| label.text == "Request"));
+        assert!(geometry.labels.iter().any(|label| label.text == "API"));
     }
 
     #[test]

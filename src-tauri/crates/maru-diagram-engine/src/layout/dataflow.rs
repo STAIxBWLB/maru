@@ -132,12 +132,22 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
             scene.container_for_members(&id, "stage", &stage.label, &members, PADDING)?;
         }
     }
+    let route_ids =
+        super::allocate_route_ids("flow", spec.flows.iter().map(|flow| flow.id.as_deref()));
     for (index, flow) in spec.flows.iter().enumerate() {
+        let label = match flow
+            .classification
+            .as_deref()
+            .filter(|text| !text.is_empty())
+        {
+            Some(classification) => format!("{}\n{classification}", flow.label),
+            None => flow.label.clone(),
+        };
         scene.connection(RouteRequest {
-            id: flow.id.clone().unwrap_or_else(|| format!("flow:{index}")),
+            id: route_ids[index].clone(),
             from: flow.from.clone(),
             to: flow.to.clone(),
-            label: Some(flow.label.clone()),
+            label: Some(label),
             from_side: flow.from_side.clone(),
             to_side: flow.to_side.clone(),
             waypoints: flow
@@ -192,6 +202,60 @@ mod tests {
         let report = super::super::layout_json(&request.to_string());
         assert!(report.ok, "{:?}", report.diagnostics);
         report.geometry.unwrap()
+    }
+
+    #[test]
+    fn dataflow_classification_is_measured_with_the_route_text() {
+        let mut source = spec();
+        source["flows"][0]["classification"] = "PII".into();
+        source["flows"][0]["labelAt"] = serde_json::json!([650, 500]);
+        source["nodes"][0]["sublabel"] = "Browser".into();
+        source["nodes"][0]["tag"] = "Source".into();
+        let geometry = layout(&source, None);
+        for text in ["Input", "Output", "A", "Browser", "Source", "B", "F\nPII"] {
+            let label = geometry
+                .labels
+                .iter()
+                .find(|label| label.text == text)
+                .unwrap_or_else(|| panic!("missing visible text {text}"));
+            let glyph_text: String = label
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.input.as_str())
+                .collect();
+            assert_eq!(glyph_text, text.replace('\n', ""));
+        }
+        let label = geometry
+            .labels
+            .iter()
+            .find(|label| label.target_id == "f")
+            .unwrap();
+        assert_eq!(label.text, "F\nPII");
+        assert!(label.bounds.height >= label.font_size * 2);
+        let expected = crate::metrics::measure_text("PII", 400, label.font_size).unwrap();
+        let actual: i64 = label
+            .glyphs
+            .iter()
+            .skip(1)
+            .map(|glyph| i64::from(glyph.advance))
+            .sum();
+        assert_eq!(actual, i64::from(expected.advance));
+    }
+
+    #[test]
+    fn dataflow_anonymous_route_id_does_not_alias_an_authored_id() {
+        let mut source = spec();
+        source["flows"][0].as_object_mut().unwrap().remove("id");
+        source["flows"][0]["labelAt"] = serde_json::json!([650, 500]);
+        source["flows"].as_array_mut().unwrap().push(serde_json::json!({"id":"flow-0","from":"b","to":"a","label":"Return","labelAt":[650,600]}));
+        let geometry = layout(&source, None);
+        let ids: std::collections::HashSet<_> = geometry
+            .routes
+            .iter()
+            .map(|route| route.id.as_deref().unwrap())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("flow-0"));
     }
 
     #[test]

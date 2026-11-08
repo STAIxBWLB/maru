@@ -34,6 +34,8 @@ pub struct RouteRequest {
     pub from_y: Option<Coord>,
     pub to_y: Option<Coord>,
     pub route: Option<String>,
+    pub bias: Option<f64>,
+    pub source_index: usize,
     pub channel_x: Option<Coord>,
     pub channel_y: Option<Coord>,
     pub label_dx: Option<Coord>,

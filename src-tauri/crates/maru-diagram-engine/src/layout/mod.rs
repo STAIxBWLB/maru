@@ -3,6 +3,7 @@ mod architecture;
 mod dataflow;
 pub mod fixed;
 mod lifecycle;
+mod presets;
 mod sequence;
 mod workflow;
 
@@ -55,11 +56,39 @@ fn inflate(b: GeometryBox, p: Coord) -> Result<GeometryBox, Diagnostic> {
     )
 }
 
+/// Preserve authored names and reserve them all before naming anonymous routes.
+/// Source ordinals, not these display IDs, own failure and diagnostic state.
+pub(crate) fn allocate_route_ids<'a>(
+    prefix: &str,
+    authored: impl IntoIterator<Item = Option<&'a str>>,
+) -> Vec<String> {
+    let authored: Vec<_> = authored.into_iter().collect();
+    let mut used: BTreeSet<String> = authored
+        .iter()
+        .flatten()
+        .map(|id| (*id).to_owned())
+        .collect();
+    authored
+        .into_iter()
+        .enumerate()
+        .map(|(index, id)| match id {
+            Some(id) => id.to_owned(),
+            None => {
+                let mut candidate = format!("{prefix}:{index}");
+                while used.contains(&candidate) {
+                    candidate.push_str(":generated");
+                }
+                used.insert(candidate.clone());
+                candidate
+            }
+        })
+        .collect()
+}
+
 pub(crate) struct SceneBuilder {
     pub(crate) document: GeometryDocument,
     pub(crate) diagnostics: Vec<Diagnostic>,
     has_errors: bool,
-    route_paths: BTreeMap<String, String>,
     #[cfg(test)]
     route_budget: Option<usize>,
     request: LayoutRequest,
@@ -107,7 +136,6 @@ impl SceneBuilder {
             },
             diagnostics: vec![],
             has_errors: false,
-            route_paths: BTreeMap::new(),
             #[cfg(test)]
             route_budget: None,
             request,
@@ -394,7 +422,14 @@ impl SceneBuilder {
         )?;
         Ok(())
     }
-    pub(crate) fn connection(&mut self, request: RouteRequest) {
+    pub(crate) fn connection(&mut self, mut request: RouteRequest) {
+        request.source_index = self.connections.len();
+        self.connections.push(request);
+    }
+    fn route_error(&mut self, route: &RouteRequest, mut diagnostic: Diagnostic) {
+        if let Some(suffix) = diagnostic.code.strip_prefix("document/") {
+            diagnostic.code = format!("{}/{suffix}", self.kind);
+        }
         let collection = match self.kind.as_str() {
             "architecture" => "connections",
             "workflow" => "edges",
@@ -403,21 +438,7 @@ impl SceneBuilder {
             "lifecycle" => "transitions",
             _ => "routes",
         };
-        self.route_paths.insert(
-            request.id.clone(),
-            format!("/{collection}/{}", self.connections.len()),
-        );
-        self.connections.push(request);
-    }
-    fn route_error(&mut self, route: &RouteRequest, mut diagnostic: Diagnostic) {
-        if let Some(suffix) = diagnostic.code.strip_prefix("document/") {
-            diagnostic.code = format!("{}/{suffix}", self.kind);
-        }
-        diagnostic.path = self
-            .route_paths
-            .get(&route.id)
-            .cloned()
-            .unwrap_or_else(|| "/routes".into());
+        diagnostic.path = format!("/{collection}/{}", route.source_index);
         diagnostic.message = format!("edge {:?}: {}", route.id, diagnostic.message);
         self.has_errors = true;
         self.diagnostics.push(diagnostic);
@@ -503,14 +524,21 @@ impl SceneBuilder {
         } else {
             ("top", "bottom")
         };
-        let preset_sides = match r.route.as_deref() {
-            Some("bottom-channel") => Some(("bottom", "bottom")),
-            Some("top-channel" | "up-channel") => Some(("top", "top")),
-            Some("right-channel" | "outside-right") => Some(("right", "right")),
-            Some("left-channel" | "return-left") => Some(("left", "left")),
-            Some("orthogonal-v" | "drop") => Some(vertical),
-            Some("orthogonal-h" | "vertical-channel") => Some(horizontal),
-            _ => None,
+        let clearance = add(r.width.unwrap_or(2 * 64) / 2, 2 * 64)?.max(4 * 64);
+        let scene_bounds = self
+            .document
+            .nodes
+            .iter()
+            .map(|n| n.bounds)
+            .chain(self.document.containers.iter().map(|c| c.bounds))
+            .try_fold(from, |extent, b| extent.union(b).map_err(arithmetic))?;
+        let preset = presets::resolve(&self.kind, r, from, to, scene_bounds, clearance)?;
+        let auto_sides = if r.from == r.to {
+            ("right", "bottom")
+        } else if dy.abs() > dx.abs() {
+            vertical
+        } else {
+            horizontal
         };
         let default_sides = if r.from_y.is_some() {
             if r.from == r.to {
@@ -519,17 +547,11 @@ impl SceneBuilder {
                 horizontal
             }
         } else {
-            preset_sides.unwrap_or_else(|| {
-                if r.from == r.to {
-                    ("right", "bottom")
-                } else if dy.abs() > dx.abs() {
-                    vertical
-                } else {
-                    horizontal
-                }
-            })
+            (
+                preset.from_side.unwrap_or(auto_sides.0),
+                preset.to_side.unwrap_or(auto_sides.1),
+            )
         };
-        let clearance = add(r.width.unwrap_or(2 * 64) / 2, 2 * 64)?.max(4 * 64);
         let escape = add(clearance, 6 * 64)?;
         let (mut a, mut start) = self.port(
             from,
@@ -567,38 +589,8 @@ impl SceneBuilder {
             end = end.checked_translate(sx, sy).map_err(arithmetic)?;
         }
         let mut waypoints = r.waypoints.clone();
-        let mut channel_x = r.channel_x;
-        let mut channel_y = r.channel_y;
-        if waypoints.is_empty() {
-            let padding = add(clearance, 32 * 64)?;
-            match r.route.as_deref() {
-                Some("outside-right") if channel_x.is_none() => {
-                    let right = self
-                        .document
-                        .nodes
-                        .iter()
-                        .map(|n| n.bounds)
-                        .chain(self.document.containers.iter().map(|c| c.bounds))
-                        .try_fold(from.right().map_err(arithmetic)?, |value, b| {
-                            Ok::<_, Diagnostic>(value.max(b.right().map_err(arithmetic)?))
-                        })?;
-                    channel_x = Some(add(right, padding)?);
-                }
-                Some("return-left") if channel_x.is_none() => {
-                    channel_x = Some(add(from.x.min(to.x), -padding)?)
-                }
-                Some("up-channel") if channel_y.is_none() => {
-                    channel_y = Some(add(from.y.min(to.y), -padding)?)
-                }
-                Some("vertical-channel") if channel_x.is_none() => {
-                    channel_x = Some(add(
-                        start.x,
-                        if end.x >= start.x { 44 * 64 } else { -44 * 64 },
-                    )?)
-                }
-                _ => {}
-            }
-        }
+        let channel_x = preset.channel_x;
+        let channel_y = preset.channel_y;
         let channels = match (channel_x, channel_y) {
             (Some(x), Some(y)) => vec![
                 GeometryPoint { x, y: start.y },
@@ -770,13 +762,13 @@ impl SceneBuilder {
             if let Err(diagnostic) = self.route_label(&r) {
                 self.document.labels.truncate(label_count);
                 self.diagnostics.truncate(diagnostic_count);
-                failed.insert(r.id.clone());
+                failed.insert(r.source_index);
                 self.route_error(&r, diagnostic);
             }
         }
         let mut final_routes = Vec::new();
         for r in self.connections.clone() {
-            let points = if failed.contains(&r.id) {
+            let points = if failed.contains(&r.source_index) {
                 Vec::new()
             } else {
                 let result = self.route_points(&r).and_then(|(points, _)| {
@@ -805,6 +797,21 @@ impl SceneBuilder {
                     }
                 }
             };
+            if r.route.as_deref() == Some("straight") && !points.is_empty() {
+                let first = points[0];
+                let collinear =
+                    points.iter().all(|p| p.x == first.x) || points.iter().all(|p| p.y == first.y);
+                if !collinear {
+                    let collection = match self.kind.as_str() {
+                        "architecture" => "connections",
+                        "workflow" => "edges",
+                        "sequence" => "messages",
+                        "dataflow" => "flows",
+                        _ => "transitions",
+                    };
+                    self.diagnostics.push(Diagnostic{code:format!("{}/route-preset-adjusted",self.kind),path:format!("/{collection}/{}",r.source_index),rule:"geometry-v1/orthogonal-straight-preference".into(),message:format!("edge {:?} preset straight requires bends to keep its route orthogonal and obstacle-free",r.id),fix:"align endpoints on a clear axis for a straight segment, or select an orthogonal/channel preset".into()});
+                }
+            }
             final_routes.push(Self::route_record(&r, points));
         }
         self.document.routes = final_routes;
@@ -1447,6 +1454,299 @@ mod tests {
                 case["id"]
             );
         }
+    }
+
+    #[test]
+    fn generated_route_ids_reserve_authored_ids_even_when_they_appear_later() {
+        let ids = allocate_route_ids(
+            "connection",
+            [
+                None,
+                Some("connection:0"),
+                Some("connection:0:generated"),
+                None,
+            ],
+        );
+        assert_eq!(ids[1], "connection:0");
+        assert_eq!(ids[2], "connection:0:generated");
+        assert_eq!(ids.iter().collect::<BTreeSet<_>>().len(), 4);
+    }
+    #[test]
+    fn authored_generated_id_collisions_do_not_share_failures_or_source_paths() {
+        for input in fixtures() {
+            let mut spec: Value = serde_json::from_str(input).unwrap();
+            let kind = spec["diagram_type"].as_str().unwrap().to_string();
+            let (collection, prefix) = match kind.as_str() {
+                "architecture" => ("connections", "connection"),
+                "workflow" => ("edges", "edge"),
+                "sequence" => ("messages", "message"),
+                "dataflow" => ("flows", "flow"),
+                _ => ("transitions", "transition"),
+            };
+            let base = layout(input);
+            assert!(base.ok);
+            let node = base
+                .geometry
+                .unwrap()
+                .nodes
+                .into_iter()
+                .find(|n| n.id == "a")
+                .unwrap();
+            let mut blocked = spec[collection][0].clone();
+            blocked["id"] = format!("{prefix}:1").into();
+            let mut clear = spec[collection][0].clone();
+            clear.as_object_mut().unwrap().remove("id");
+            clear.as_object_mut().unwrap().remove("via");
+            let pins = if kind == "sequence" {
+                blocked["y"] = 180.into();
+                clear["y"] = 360.into();
+                Some(
+                    serde_json::json!([{"targetId":"a","targetKind":"node","position":{"x":node.bounds.x,"y":160*64}}]),
+                )
+            } else {
+                blocked["via"] = serde_json::json!([[
+                    f64::from(node.bounds.x) / 64.0 + 10.0,
+                    f64::from(node.bounds.y) / 64.0 + 10.0
+                ]]);
+                None
+            };
+            spec[collection] = serde_json::json!([blocked, clear]);
+            let source = spec.to_string();
+            let mut request = serde_json::json!({"specJson":source});
+            if let Some(pins) = pins {
+                request["pinSet"] =
+                    serde_json::json!({"sourceSpecSha256":crate::spec_hash(&source),"pins":pins});
+            }
+            // Exercise naming and routing directly: current E1 ID syntax already
+            // rejects colons, but internal/generated IDs must remain safe even
+            // when a typed caller supplies an authored fallback-shaped name.
+            let request: LayoutRequest = serde_json::from_value(request).unwrap();
+            let mut builder = SceneBuilder::new(request, &kind);
+            match kind.as_str() {
+                "architecture" => architecture::place(&typed(&spec).unwrap(), &mut builder),
+                "workflow" => workflow::place(&typed(&spec).unwrap(), &mut builder),
+                "sequence" => sequence::place(&typed(&spec).unwrap(), &mut builder),
+                "dataflow" => dataflow::place(&typed(&spec).unwrap(), &mut builder),
+                _ => lifecycle::place(&typed(&spec).unwrap(), &mut builder),
+            }
+            .unwrap();
+            let (scene, diagnostics, ok) = builder.finish(&typed(&spec["meta"]).unwrap()).unwrap();
+            assert!(!ok, "{kind}");
+            assert_eq!(diagnostics.len(), 1, "{kind}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].path, format!("/{collection}/0"));
+            assert_eq!(scene.routes.len(), 2);
+            assert_eq!(
+                scene
+                    .routes
+                    .iter()
+                    .filter_map(|r| r.id.as_deref())
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                2
+            );
+            assert!(scene
+                .routes
+                .iter()
+                .find(|r| r.id.as_deref() == Some(&format!("{prefix}:1")))
+                .unwrap()
+                .points
+                .is_empty());
+            assert!(
+                scene
+                    .routes
+                    .iter()
+                    .find(|r| r.id.as_deref() != Some(&format!("{prefix}:1")))
+                    .unwrap()
+                    .points
+                    .len()
+                    >= 2,
+                "{kind}"
+            );
+        }
+    }
+
+    fn preset_audit_spec(kind: &str) -> Value {
+        let index = match kind {
+            "architecture" => 0,
+            "workflow" => 1,
+            "dataflow" => 3,
+            _ => 4,
+        };
+        let mut spec: Value = serde_json::from_str(fixtures()[index]).unwrap();
+        match kind {
+            "architecture" => spec["components"][1]["row"] = 2.into(),
+            "workflow" => spec["nodes"][1]["yOffset"] = 220.into(),
+            "dataflow" => spec["nodes"][1]["row"] = 2.into(),
+            _ => spec["states"][1]["yOffset"] = 220.into(),
+        };
+        spec
+    }
+    #[test]
+    fn every_validated_preset_routes_both_directions_and_honors_authored_channels() {
+        for kind in ["architecture", "workflow", "dataflow", "lifecycle"] {
+            let source = preset_audit_spec(kind);
+            let baseline = layout(&source.to_string());
+            assert!(baseline.ok);
+            let nodes = baseline.geometry.unwrap().nodes;
+            let a = nodes.iter().find(|n| n.id == "a").unwrap().bounds;
+            let b = nodes.iter().find(|n| n.id == "b").unwrap().bounds;
+            let gapx = fixed::checked_midpoint(a.right().unwrap(), b.x).unwrap();
+            let gapy = fixed::checked_midpoint(a.bottom().unwrap(), b.y).unwrap();
+            let collection = match kind {
+                "architecture" => "connections",
+                "workflow" => "edges",
+                "dataflow" => "flows",
+                _ => "transitions",
+            };
+            for preset in presets::accepted(kind).unwrap() {
+                for reverse in [false, true] {
+                    for authored in [false, true] {
+                        let mut spec = source.clone();
+                        let mut edge = serde_json::json!({"id":"audit","from":if reverse{"b"}else{"a"},"to":if reverse{"a"}else{"b"},"route":preset});
+                        if kind == "dataflow" {
+                            edge["label"] = "F".into();
+                        }
+                        let override_axis = if ["outside-right", "right-channel"].contains(preset) {
+                            ('x', b.right().unwrap() + 100 * 64)
+                        } else if ["return-left", "left-channel"].contains(preset) {
+                            ('x', a.x - 100 * 64)
+                        } else if ["vertical-channel", "orthogonal-h"].contains(preset) {
+                            ('x', gapx)
+                        } else if ["top-channel", "up-channel"].contains(preset) {
+                            ('y', a.y - 240 * 64)
+                        } else if *preset == "bottom-channel" {
+                            ('y', b.bottom().unwrap() + 100 * 64)
+                        } else {
+                            ('y', gapy)
+                        };
+                        if authored && kind == "architecture" {
+                            let x = f64::from(override_axis.1) / 64.0;
+                            edge["via"] = if override_axis.0 == 'x' {
+                                serde_json::json!([
+                                    [x, f64::from(a.y + a.height / 2) / 64.0],
+                                    [x, f64::from(b.y + b.height / 2) / 64.0]
+                                ])
+                            } else {
+                                serde_json::json!([
+                                    [f64::from(a.x + a.width / 2) / 64.0, x],
+                                    [f64::from(b.x + b.width / 2) / 64.0, x]
+                                ])
+                            };
+                        } else if authored {
+                            edge[if override_axis.0 == 'x' {
+                                "channelX"
+                            } else {
+                                "channelY"
+                            }] = serde_json::json!(f64::from(override_axis.1) / 64.0);
+                        }
+                        spec[collection] = serde_json::json!([edge]);
+                        let report = layout(&spec.to_string());
+                        assert!(
+                            report.ok,
+                            "{kind}/{preset} reverse={reverse} authored={authored}: {:?}",
+                            report.diagnostics
+                        );
+                        let scene = report.geometry.unwrap();
+                        let route = &scene.routes[0];
+                        assert!(!route.points.is_empty());
+                        assert!(route
+                            .points
+                            .windows(2)
+                            .all(|p| p[0].x == p[1].x || p[0].y == p[1].y));
+                        if authored {
+                            assert!(
+                                route.points.iter().any(|p| if override_axis.0 == 'x' {
+                                    p.x == override_axis.1
+                                } else {
+                                    p.y == override_axis.1
+                                }),
+                                "{kind}/{preset} ignored override"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn workflow_drop_bias_reaches_the_actual_horizontal_corridor_in_both_directions() {
+        let source = preset_audit_spec("workflow");
+        let scene = layout(&source.to_string()).geometry.unwrap();
+        let a = scene.nodes.iter().find(|n| n.id == "a").unwrap().bounds;
+        let b = scene.nodes.iter().find(|n| n.id == "b").unwrap().bounds;
+        let upper = a.bottom().unwrap() + 10 * 64;
+        let lower = b.y - 10 * 64;
+        for reverse in [false, true] {
+            for bias in [0.0, 0.5, 1.0] {
+                let mut spec = source.clone();
+                spec["edges"] = serde_json::json!([{"from":if reverse{"b"}else{"a"},"to":if reverse{"a"}else{"b"},"route":"drop","bias":bias}]);
+                let report = layout(&spec.to_string());
+                assert!(report.ok, "{:?}", report.diagnostics);
+                let scene = report.geometry.unwrap();
+                let fraction = if reverse { 1.0 - bias } else { bias };
+                let expected =
+                    px(f64::from(upper) / 64.0 + f64::from(lower - upper) / 64.0 * fraction)
+                        .unwrap();
+                assert!(
+                    scene.routes[0]
+                        .points
+                        .windows(2)
+                        .any(|p| p[0].y == expected && p[1].y == expected && p[0].x != p[1].x),
+                    "reverse={reverse} bias={bias}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shared_authored_text_fields_are_measured_and_preserved_as_glyphs_in_every_family() {
+        for input in fixtures() {
+            let mut spec: Value = serde_json::from_str(input).unwrap();
+            let kind = spec["diagram_type"].as_str().unwrap().to_string();
+            spec["meta"]["title"] = "AuditTitle".into();
+            spec["meta"]["subtitle"] = "AuditSubtitle".into();
+            let key = common::legend_keys(&kind)[0];
+            spec["meta"]["legend"] =
+                serde_json::json!({"mode":"all","entries":{(key):{"label":"AuditLegend"}}});
+            spec["cards"] = serde_json::json!([{"dot":"cyan","title":"AuditCard","items":["FirstItem","SecondItem"]}]);
+            let report = layout(&spec.to_string());
+            assert!(report.ok, "{kind}: {:?}", report.diagnostics);
+            let scene = report.geometry.unwrap();
+            for text in [
+                "AuditTitle",
+                "AuditSubtitle",
+                "AuditLegend",
+                "AuditCard",
+                "FirstItem",
+                "SecondItem",
+            ] {
+                let label = scene
+                    .labels
+                    .iter()
+                    .find(|l| l.text.contains(text))
+                    .unwrap_or_else(|| panic!("{kind}: missing{text}"));
+                assert!(label
+                    .glyphs
+                    .iter()
+                    .map(|g| g.input.as_str())
+                    .collect::<String>()
+                    .contains(text));
+                assert!(label.bounds.width > 0 && label.bounds.height > 0);
+            }
+        }
+    }
+    #[test]
+    fn a_straight_preference_that_needs_bends_is_disclosed_without_hiding_the_scene() {
+        let mut spec = preset_audit_spec("architecture");
+        spec["connections"][0]["route"] = "straight".into();
+        let report = layout(&spec.to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        assert!(report.geometry.is_some());
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "architecture/route-preset-adjusted"
+                && d.message.contains("straight")));
     }
 
     #[test]

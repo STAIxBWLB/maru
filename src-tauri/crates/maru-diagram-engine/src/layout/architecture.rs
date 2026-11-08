@@ -97,7 +97,13 @@ pub(crate) fn place(spec: &ArchitectureSpec, scene: &mut SceneBuilder) -> Result
         )?;
     }
 
-    for (index, connection) in spec.connections.iter().enumerate() {
+    let route_ids = super::allocate_route_ids(
+        "connection",
+        spec.connections
+            .iter()
+            .map(|connection| connection.id.as_deref()),
+    );
+    for (index, (connection, id)) in spec.connections.iter().zip(route_ids).enumerate() {
         let path = format!("/connections/{index}");
         let waypoints = connection
             .via
@@ -117,10 +123,7 @@ pub(crate) fn place(spec: &ArchitectureSpec, scene: &mut SceneBuilder) -> Result
             .transpose()
             .map_err(|error| geometry_error(&format!("{path}/labelAt"), error.message))?;
         scene.connection(RouteRequest {
-            id: connection
-                .id
-                .clone()
-                .unwrap_or_else(|| format!("connection:{index}")),
+            id,
             from: connection.from.clone(),
             to: connection.to.clone(),
             label: connection.label.clone(),
@@ -168,7 +171,7 @@ mod tests {
     #[test]
     fn authored_positions_override_grid_and_boundary_ordinals_are_deterministic() {
         let report = layout(
-            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Architecture","output":"architecture.html"},"layout":{"mode":"grid","cols":2,"origin":[30,50],"cellW":100,"cellH":80,"gapX":20,"gapY":15},"components":[{"id":"authored","type":"backend","label":"Authored","pos":[400,80]},{"id":"grid","type":"database","label":"Grid","row":0,"col":1}],"boundaries":[{"kind":"region","label":"Region","wraps":["authored","grid"]}],"connections":[{"id":"connect","from":"grid","to":"authored","fromSide":"right","toSide":"left","route":"orthogonal-h"}]}"#,
+            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Architecture","output":"architecture.html"},"layout":{"mode":"grid","cols":2,"origin":[30,50],"cellW":100,"cellH":80,"gapX":20,"gapY":15},"components":[{"id":"authored","type":"backend","label":"Authored","sublabel":"Details","tag":"Primary","pos":[400,80]},{"id":"grid","type":"database","label":"Grid","row":0,"col":1}],"boundaries":[{"kind":"region","label":"Region","wraps":["authored","grid"]}],"connections":[{"id":"connect","from":"grid","to":"authored","fromSide":"right","toSide":"left","route":"orthogonal-h"}]}"#,
         );
         assert!(report.ok, "{:?}", report.diagnostics);
         let geometry = report.geometry.unwrap();
@@ -196,6 +199,8 @@ mod tests {
             .containers
             .iter()
             .any(|container| container.id == boundary_id));
+        assert!(geometry.labels.iter().any(|label| label.text == "Details"));
+        assert!(geometry.labels.iter().any(|label| label.text == "Primary"));
     }
 
     #[test]
