@@ -322,8 +322,10 @@ fn ensure_directory_chain(
                     "repair the render store and retry",
                 ));
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound && create.is_some() => {
-                let lease = create.expect("creation requires an admitted lease");
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(lease) = create else {
+                    return Ok(false);
+                };
                 lease.ensure_covered([current.clone()])?;
                 lease.before_effect()?;
                 match fs::create_dir(&current) {
@@ -362,7 +364,7 @@ fn ensure_directory_chain(
                     }
                 }
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+
             Err(error) => {
                 return Err(operation_error(
                     "inspect render directory",
@@ -1067,7 +1069,7 @@ pub fn prepare_render_view<R: tauri::Runtime>(
             error,
             "refresh the Renders list and retry",
         )
-    })?
+    })
 }
 
 fn remove_render_contents(workspace: &Path, dir: &Path) -> Result<Vec<PathBuf>, String> {
@@ -1242,7 +1244,7 @@ pub fn delete_render(workspace: &str, doc_id: &str, render_id: &str) -> Result<(
             error,
             "refresh the Renders list and retry",
         )
-    })?
+    })
 }
 
 fn build_context_receipt(
