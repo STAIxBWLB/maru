@@ -1,6 +1,8 @@
 /** Keyboard and ribbon Delete share a previewed, atomic semantic cascade.
  * Every confirmation settles before mutation; a changed doc invalidates it.
  */
+import { createGenerationHost } from "../../lib/diagram/generationHost";
+import { validateSemanticDraft, type SemanticValidationHost } from "../../lib/diagram/semanticApply";
 import { confirmDialog, messageDialog } from "../../lib/confirmDialog";
 import { removeEdges, removeNodes, withSnapshot } from "../../lib/diagram/actions";
 import type { Coalescer } from "../../lib/diagram/history";
@@ -10,10 +12,11 @@ import { planSemanticEdit, removeSemanticEntries } from "../../lib/diagram/seman
 import type { DiagramStore } from "../../lib/diagram/state";
 import { semanticCascadeLines, type SemanticTranslate } from "./semanticCascade";
 
-export async function deleteSelection(store: DiagramStore, coalescer: Coalescer, t: SemanticTranslate): Promise<void> {
+export async function deleteSelection(store: DiagramStore, coalescer: Coalescer, t: SemanticTranslate, host: SemanticValidationHost = createGenerationHost({ workPath: null }),
+  selection?: { nodes: readonly string[]; edges: readonly string[] }): Promise<void> {
   const state = store.getState();
-  const nodeIds = [...state.ephemeral.selection.nodes].filter((id) => !state.doc.nodes.find((node) => node.id === id)?.locked);
-  const edgeIds = [...state.ephemeral.selection.edges];
+  const nodeIds = [...(selection?.nodes ?? state.ephemeral.selection.nodes)].filter((id) => !state.doc.nodes.find((node) => node.id === id)?.locked);
+  const edgeIds = [...(selection?.edges ?? state.ephemeral.selection.edges)];
   if (nodeIds.length + edgeIds.length === 0) return;
   const analysis = analyzeViewDrag(state.doc, nodeIds);
   if (analysis.subsets.length > 0 && !(await confirmDialog(t("diagram.detach.confirm")))) return;
@@ -72,6 +75,15 @@ export async function deleteSelection(store: DiagramStore, coalescer: Coalescer,
   }
   if (store.getState().doc !== state.doc) {
     await messageDialog(t("diagram.semantic.editStale"), "warning");
+    return;
+  }
+  const diagnostics = await validateSemanticDraft(next.doc, plans.map(({ dataset }) => dataset.id), host);
+  if (store.getState().doc !== state.doc) {
+    await messageDialog(t("diagram.semantic.editStale"), "warning");
+    return;
+  }
+  if (diagnostics.length > 0) {
+    await messageDialog(diagnostics.map((item) => t(item.key, item.params ?? {})).join("\n"), "warning");
     return;
   }
   if (next !== state) store.setState(withSnapshot(() => next, coalescer));

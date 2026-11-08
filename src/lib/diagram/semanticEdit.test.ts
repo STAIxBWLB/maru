@@ -278,6 +278,44 @@ describe("semantic structural edits", () => {
     }
   });
 
+  it("drops broken workflow semantic checks after relation removal and preserves root/terminal allowlists", () => {
+    const source = {
+      ...structuredClone(SEMANTIC_FIXTURES.workflow),
+      semanticChecks: {
+        allowedRoots: ["draft", "review"],
+        allowedTerminals: ["draft", "merge"],
+        requiredEdges: [{ from: "draft", to: "review" }],
+        requiredPaths: [{ from: "draft", to: "merge" }],
+      },
+    };
+    validateWithPinnedArchify("workflow", source);
+    const removal = removeSemanticEntries("workflow", source, [{ field: "edges", index: 0 }]);
+    expect(removal.effects).toContainEqual({ field: "semanticChecks.requiredEdges", index: 0, label: "requiredEdges", action: "remove" });
+    expect(removal.effects).toContainEqual({ field: "semanticChecks.requiredPaths", index: 0, label: "requiredPaths", action: "remove" });
+    const next = removal.transform(source)!.spec;
+    expect(next.semanticChecks).toEqual({
+      allowedRoots: ["draft", "review"],
+      allowedTerminals: ["draft", "merge"],
+      requiredEdges: [],
+      requiredPaths: [],
+    });
+    validateWithPinnedArchify("workflow", next);
+  });
+
+  it("refuses removal of lifecycle lane main even when other lanes remain", () => {
+    const source = structuredClone(SEMANTIC_FIXTURES.lifecycle);
+    source.lanes = [...(source.lanes as Record<string, unknown>[]), { id: "side", label: "Side" }];
+    source.states = [...(source.states as Record<string, unknown>[]), { id: "paused", type: "waiting", label: "Paused", lane: "side", col: 0 }];
+    const store = storeOf("lifecycle", source);
+    const before = JSON.stringify(store.getState().doc);
+    const { transform } = removeSemanticEntries("lifecycle", specOf(store.getState()), [{ field: "lanes", index: 0 }]);
+    expect(apply(store, transform)).toEqual({
+      status: "invalid",
+      diagnostics: [{ key: "diagram.semantic.reservedMainLane" }],
+    });
+    expect(JSON.stringify(store.getState().doc)).toBe(before);
+  });
+
   it("remaps sequence ranges when a message is inserted and prevents applying a stale capture", () => {
     const source = { ...structuredClone(SEMANTIC_FIXTURES.sequence), segments: [{ from: 170, to: 250, label: "request" }] };
     const transform = addSemanticEntry("sequence", "messages", { from: "web", to: "db", label: "cache lookup" }, 1);

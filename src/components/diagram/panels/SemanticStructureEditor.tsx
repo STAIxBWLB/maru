@@ -1,16 +1,13 @@
 import { useState, type ReactNode } from "react";
 
-import { confirmDialog, messageDialog } from "../../../lib/confirmDialog";
 import {
   LIFECYCLE_STATE_TYPES, SEMANTIC_TYPES, semanticContainers, specEntries, type SemanticMember,
 } from "../../../lib/diagram/semantic";
 import {
-  addSemanticEntry, removeSemanticEntries, setBoundaryMembership, setSpecField, type SpecTransform,
+  addSemanticEntry, setBoundaryMembership, setSpecField, type SpecTransform,
 } from "../../../lib/diagram/semanticEdit";
 import { createDiagramId } from "../../../lib/diagram/types";
 import { useTranslation } from "../../../lib/i18n";
-import { useDiagramStore } from "../DiagramStoreContext";
-import { semanticCascadeLines } from "../semanticCascade";
 
 const COMPONENT_TYPES = ["frontend", "backend", "database", "cloud", "security", "messagebus", "external"];
 const entryId = (entry: Record<string, unknown>) => String(entry.id ?? "");
@@ -20,12 +17,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="maru-diagram-prop"><span>{label}</span>{children}</label>;
 }
 
-export function SemanticStructureEditor({ member, run }: {
+export function SemanticStructureEditor({ member, run, remove: removeSelection }: {
   member: SemanticMember;
-  run: (transform: SpecTransform) => boolean;
+  run: (transform: SpecTransform) => Promise<boolean>;
+  remove: () => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const store = useDiagramStore();
   const { dataset } = member;
   const type = dataset.diagramType;
   const descriptor = SEMANTIC_TYPES[type];
@@ -64,7 +61,10 @@ export function SemanticStructureEditor({ member, run }: {
     return <label key={id}><input type="checkbox" value={id} checked={selected.includes(id)}
       onChange={(event) => change(event.target.checked ? [...selected, id] : selected.filter((item) => item !== id))} />{entryLabel(entry)}</label>;
   });
-  const add = () => {
+  const layout = typeof spec.layout === "object" && spec.layout !== null ? spec.layout as Record<string, unknown> : {};
+  const maxCol = type === "architecture" ? Math.max(0, (typeof layout.cols === "number" ? layout.cols : 4) - 1) : 5;
+  const reservedMain = type === "lifecycle" && member.kind === "container" && member.role === "lane" && member.entry.id === "main";
+  const add = async () => {
     let entry: Record<string, unknown> = { label: label.trim() };
     if (isEntity) {
       entry.type = entityType;
@@ -81,21 +81,12 @@ export function SemanticStructureEditor({ member, run }: {
     if (isEntity || isRelation || semanticContainers(descriptor).some((container) => container.field === field && container.keyedBy === "id")) {
       entry.id = `item-${createDiagramId()}`;
     }
-    if (run(addSemanticEntry(type, field, entry))) setLabel("");
+    if (await run(addSemanticEntry(type, field, entry))) setLabel("");
   };
   const remove = async () => {
-    if (busy) return;
-    const before = store.getState().doc;
-    const removal = removeSemanticEntries(type, spec, [{ field: member.field, index: member.index }]);
+    if (busy || reservedMain) return;
     setBusy(true);
-    try {
-      if (!(await confirmDialog([t("diagram.semantic.removeConfirm"), ...semanticCascadeLines(removal.effects, t)].join("\n")))) return;
-      if (store.getState().doc !== before) {
-        await messageDialog(t("diagram.semantic.editStale"), "warning");
-        return;
-      }
-      run(removal.transform);
-    } finally { setBusy(false); }
+    try { await removeSelection(); } finally { setBusy(false); }
   };
   const columnRange = member.kind === "container" && (member.role === "phase" || member.role === "group");
   const timelineRange = member.kind === "container" && (member.role === "segment" || member.role === "activation");
@@ -103,14 +94,14 @@ export function SemanticStructureEditor({ member, run }: {
     from: Number(member.entry[columnRange ? "fromCol" : "from"]),
     to: Number(member.entry[columnRange ? "toCol" : "to"]),
   };
-  const commitRange = () => {
+  const commitRange = async () => {
     const fromKey = columnRange ? "fromCol" : "from";
     const toKey = columnRange ? "toCol" : "to";
     if (member.entry[fromKey] === range.from && member.entry[toKey] === range.to) {
       setRangeDraft(null);
       return;
     }
-    if (run((current) => ({ spec: { ...current, [member.field]: specEntries(current, member.field).map((entry, index) =>
+    if (await run((current) => ({ spec: { ...current, [member.field]: specEntries(current, member.field).map((entry, index) =>
       index === member.index ? { ...entry, [fromKey]: range.from, [toKey]: range.to } : entry) } }))) setRangeDraft(null);
   };
 
@@ -119,15 +110,15 @@ export function SemanticStructureEditor({ member, run }: {
       <legend>{t("diagram.semantic.members")}</legend>
       {checkboxList(membershipDraft ?? (Array.isArray(member.entry.wraps) ? member.entry.wraps as string[] : []), setMembershipDraft)}
       <button type="button" data-testid="semantic-apply-membership" disabled={membershipDraft === null}
-        onClick={() => { if (run(setBoundaryMembership(member.index, membershipDraft ?? []))) setMembershipDraft(null); }}>{t("diagram.semantic.applyMembership")}</button>
+        onClick={() => { void run(setBoundaryMembership(member.index, membershipDraft ?? [])).then((ok) => { if (ok) setMembershipDraft(null); }); }}>{t("diagram.semantic.applyMembership")}</button>
     </fieldset> : null}
     {member.kind === "container" && member.role === "group" ? <Field label={t("diagram.semantic.lane")}>
       <select data-testid="semantic-group-lane" value={String(member.entry.lane)}
-        onChange={(event) => run(setSpecField(member.field, member.index, "lane", event.target.value))}>{laneOptions}</select>
+        onChange={(event) => void run(setSpecField(member.field, member.index, "lane", event.target.value))}>{laneOptions}</select>
     </Field> : null}
     {member.kind === "container" && member.role === "activation" ? <Field label={t("diagram.semantic.participant")}>
       <select data-testid="semantic-activation-participant" value={String(member.entry.participant)}
-        onChange={(event) => run(setSpecField(member.field, member.index, "participant", event.target.value))}>{entityOptions}</select>
+        onChange={(event) => void run(setSpecField(member.field, member.index, "participant", event.target.value))}>{entityOptions}</select>
     </Field> : null}
     {columnRange || timelineRange ? <fieldset>
       <legend>{t("diagram.semantic.range")}</legend>
@@ -138,9 +129,10 @@ export function SemanticStructureEditor({ member, run }: {
         min={columnRange ? 0 : 72} max={columnRange ? 5 : undefined}
         onChange={(event) => setRangeDraft({ ...range, to: Number(event.target.value) })} /></Field>
       <button type="button" data-testid="semantic-apply-range" disabled={rangeDraft === null}
-        onClick={commitRange}>{t("diagram.semantic.applyRange")}</button>
+        onClick={() => void commitRange()}>{t("diagram.semantic.applyRange")}</button>
     </fieldset> : null}
-    <button type="button" data-testid="semantic-remove" disabled={busy} onClick={() => void remove()}>{t("diagram.semantic.remove")}</button>
+    <button type="button" data-testid="semantic-remove" disabled={busy || reservedMain} onClick={() => void remove()}>{t("diagram.semantic.remove")}</button>
+    {reservedMain ? <p>{t("diagram.semantic.reservedMainLane")}</p> : null}
     <fieldset>
       <legend>{t("diagram.semantic.add")}</legend>
       <Field label={t("diagram.semantic.collection")}><select data-testid="semantic-add-collection" value={field} onChange={(event) => setField(event.target.value)}>
@@ -161,7 +153,7 @@ export function SemanticStructureEditor({ member, run }: {
         {stages.map((entry, index) => <option key={index} value={index}>{entryLabel(entry)}</option>)}
       </select></Field> : null}
       {(isEntity && ["architecture", "workflow", "lifecycle"].includes(type)) || isRange ? <Field label={t("diagram.semantic.column")}>
-        <input type="number" min={0} max={5} value={col} data-testid="semantic-add-col" onChange={(event) => setCol(Number(event.target.value))} />
+        <input type="number" min={0} max={maxCol} value={col} data-testid="semantic-add-col" onChange={(event) => setCol(Number(event.target.value))} />
       </Field> : null}
       {isRange ? <Field label={t("diagram.semantic.rangeTo")}><input type="number" min={0} max={5} value={toCol} data-testid="semantic-add-to-col" onChange={(event) => setToCol(Number(event.target.value))} /></Field> : null}
       {isTimeline ? <>
@@ -169,8 +161,8 @@ export function SemanticStructureEditor({ member, run }: {
         <Field label={t("diagram.semantic.rangeTo")}><input type="number" min={72} value={toY} data-testid="semantic-add-to-y" onChange={(event) => setToY(Number(event.target.value))} /></Field>
       </> : null}
       {field === "boundaries" ? <fieldset><legend>{t("diagram.semantic.members")}</legend>{checkboxList(wraps, setWraps)}</fieldset> : null}
-      <button type="button" data-testid="semantic-add-confirm" disabled={field !== "activations" && label.trim().length === 0}
-        onClick={add}>{t("diagram.semantic.add")}</button>
+      <button type="button" data-testid="semantic-add-confirm" disabled={(field !== "activations" && label.trim().length === 0) || (isEntity && type === "architecture" && (col < 0 || col > maxCol || !Number.isInteger(col)))}
+        onClick={() => void add()}>{t("diagram.semantic.add")}</button>
     </fieldset>
   </div>;
 }

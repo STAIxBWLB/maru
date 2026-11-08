@@ -7,8 +7,8 @@
  * dataset's members, current locks and a touched filter, then
  * `prepareProposalApply`), so the caller commits exactly one `withSnapshot`
  * undo entry. Only canvas members whose projection changed are touched, so
- * canvas drift on other members survives. Manual edits never run the engine
- * (it is async and Tauri-only); the publication gate must.
+ * canvas drift on other members survives. Planning stays synchronous; apply
+ * controllers must use semanticApply's pinned-engine gate before committing.
  */
 
 import type { StateTransformer } from "./actions";
@@ -86,6 +86,13 @@ export function planSemanticEdit(
   if (!dataset) return { status: "unchanged" };
   const result = transform(dataset.spec);
   if (!result) return { status: "unchanged" };
+  if (
+    dataset.diagramType === "lifecycle" &&
+    specEntries(dataset.spec, "lanes").some((lane) => lane.id === "main") &&
+    !specEntries(result.spec, "lanes").some((lane) => lane.id === "main")
+  ) {
+    return { status: "invalid", diagnostics: [{ key: "diagram.semantic.reservedMainLane" }] };
+  }
   const content = validateSemanticContent(dataset.diagramType, result.spec);
   if (content.length > 0) return { status: "invalid", diagnostics: content };
 
@@ -152,6 +159,27 @@ const entryLabel = (entry: Record<string, unknown>, fallback: string) =>
 function isValidWorkflowMainPath(path: readonly unknown[], edges: readonly Record<string, unknown>[]): boolean {
   return path.length >= 2 && path.every((id) => typeof id === "string") &&
     path.slice(1).every((to, index) => edges.some((edge) => edge.from === path[index] && edge.to === to));
+}
+
+function hasWorkflowPath(edges: readonly Record<string, unknown>[], from: string, to: string): boolean {
+  if (from === to) return true;
+  const adjacency = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (typeof edge.from !== "string" || typeof edge.to !== "string") continue;
+    adjacency.set(edge.from, [...(adjacency.get(edge.from) ?? []), edge.to]);
+  }
+  const pending = [from];
+  const visited = new Set(pending);
+  while (pending.length > 0) {
+    const current = pending.shift()!;
+    for (const next of adjacency.get(current) ?? []) {
+      if (next === to) return true;
+      if (visited.has(next)) continue;
+      visited.add(next);
+      pending.push(next);
+    }
+  }
+  return false;
 }
 
 function mintSpecId(type: SemanticDiagramType, field: string, spec: Record<string, unknown>): string {
@@ -365,6 +393,32 @@ export function removeSemanticEntries(
       if (activation.participant === id) addRemoval("activations", activationIndex);
     });
   }
+  const droppedWorkflowChecks = new Map<string, Set<number>>();
+  if (type === "workflow") {
+    const remainingEdges = specEntries(spec, "edges").filter((edge, index) =>
+      !removals.get("edges")?.has(index) &&
+      !removedEntityIds.has(String(edge.from)) &&
+      !removedEntityIds.has(String(edge.to)),
+    );
+    const checks = spec.semanticChecks as Record<string, unknown> | undefined;
+    if (checks) {
+      for (const field of ["requiredEdges", "requiredPaths"]) {
+        const entries = Array.isArray(checks[field]) ? checks[field] as Record<string, unknown>[] : [];
+        const dropped = new Set<number>();
+        entries.forEach((check, index) => {
+          if (typeof check.from !== "string" || typeof check.to !== "string" ||
+              removedEntityIds.has(check.from) || removedEntityIds.has(check.to)) {
+            dropped.add(index);
+          } else if (field === "requiredEdges") {
+            if (!remainingEdges.some((edge) => edge.from === check.from && edge.to === check.to)) dropped.add(index);
+          } else if (!hasWorkflowPath(remainingEdges, check.from, check.to)) {
+            dropped.add(index);
+          }
+        });
+        if (dropped.size > 0) droppedWorkflowChecks.set(field, dropped);
+      }
+    }
+  }
   if (type === "architecture" && removedEntityIds.size > 0) {
     specEntries(spec, "boundaries").forEach((boundary, index) => {
       if (removals.get("boundaries")?.has(index)) return;
@@ -407,13 +461,21 @@ export function removeSemanticEntries(
       });
     }
   }
-  if (type === "workflow" && removedEntityIds.size > 0) {
+  if (type === "workflow") {
     const checks = spec.semanticChecks as Record<string, unknown> | undefined;
-    if (checks) for (const key of ["allowedRoots", "allowedTerminals", "requiredEdges", "requiredPaths"]) {
-      (Array.isArray(checks[key]) ? checks[key] as unknown[] : []).forEach((value, index) => {
-        const affected = typeof value === "string" ? removedEntityIds.has(value) : typeof value === "object" && value !== null && [((value as Record<string, unknown>).from), ((value as Record<string, unknown>).to)].some((id) => typeof id === "string" && removedEntityIds.has(id));
-        if (affected) effects.push({ field: `semanticChecks.${key}`, index, label: key, action: "unlink" });
-      });
+    if (checks) {
+      for (const key of ["allowedRoots", "allowedTerminals"]) {
+        (Array.isArray(checks[key]) ? checks[key] as unknown[] : []).forEach((id, index) => {
+          if (typeof id === "string" && removedEntityIds.has(id)) {
+            effects.push({ field: `semanticChecks.${key}`, index, label: key, action: "unlink" });
+          }
+        });
+      }
+      for (const key of ["requiredEdges", "requiredPaths"]) {
+        for (const index of droppedWorkflowChecks.get(key) ?? []) {
+          effects.push({ field: `semanticChecks.${key}`, index, label: key, action: "remove" });
+        }
+      }
     }
   }
 
@@ -435,13 +497,18 @@ export function removeSemanticEntries(
       if (mainPath.length === 0 || !isValidWorkflowMainPath(mainPath, specEntries(next, "edges"))) delete next.mainPath;
       else next.mainPath = mainPath;
     }
-    if (type === "workflow" && removedEntityIds.size > 0) {
+    if (type === "workflow" && (removedEntityIds.size > 0 || droppedWorkflowChecks.size > 0)) {
       const checks = spec.semanticChecks as Record<string, unknown> | undefined;
       if (checks) {
         const clean = { ...checks };
-        for (const key of ["allowedRoots", "allowedTerminals"]) if (Array.isArray(clean[key])) clean[key] = (clean[key] as unknown[]).filter((id) => !removedEntityIds.has(String(id)));
-        for (const key of ["requiredEdges", "requiredPaths"]) if (Array.isArray(clean[key])) clean[key] = (clean[key] as Record<string, unknown>[]).filter((item) => !removedEntityIds.has(String(item.from)) && !removedEntityIds.has(String(item.to)));
-        next.semanticChecks = clean;
+        for (const key of ["allowedRoots", "allowedTerminals"]) {
+          if (Array.isArray(clean[key])) clean[key] = (clean[key] as unknown[]).filter((id) => !removedEntityIds.has(String(id)));
+        }
+        for (const key of ["requiredEdges", "requiredPaths"]) {
+          if (Array.isArray(clean[key])) clean[key] = (clean[key] as unknown[]).filter((_, index) => !droppedWorkflowChecks.get(key)?.has(index));
+        }
+        if (Object.keys(clean).length > 0) next.semanticChecks = clean;
+        else delete next.semanticChecks;
       }
     }
     if (type === "dataflow" && removals.has("stages")) {

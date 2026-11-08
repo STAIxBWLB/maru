@@ -10,7 +10,7 @@
  * freeform..." drops the dataset after a confirm listing what is lost.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { defaultCoalescer, withSnapshot } from "../../../lib/diagram/actions";
@@ -26,7 +26,6 @@ import {
 import {
   detachSemanticDatasetAction,
   moveMessage,
-  planSemanticEdit,
   setClassification,
   setLane,
   setStage,
@@ -34,8 +33,10 @@ import {
   type SpecTransform,
 } from "../../../lib/diagram/semanticEdit";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
+import { applyValidatedSemanticEdit } from "../../../lib/diagram/semanticApply";
+import { deleteSelection } from "../deleteSelection";
 import { useTranslation } from "../../../lib/i18n";
-import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
+import { useDiagram, useDiagramStore, useDiagramValidationHost } from "../DiagramStoreContext";
 import { SemanticStructureEditor } from "./SemanticStructureEditor";
 
 function Row({ labelKey, value, testId }: { labelKey: string; value: string; testId?: string }) {
@@ -55,6 +56,9 @@ function labelOf(entry: Record<string, unknown> | undefined, fallback: string): 
 export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: string }) {
   const { t } = useTranslation();
   const store = useDiagramStore();
+  const validationHost = useDiagramValidationHost();
+  const pending = useRef(false);
+  const [validating, setValidating] = useState(false);
   const doc = useDiagram((s) => s.doc);
   const member = useMemo(
     () =>
@@ -74,16 +78,16 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
   const descriptor = SEMANTIC_TYPES[type];
   const spec = dataset.spec;
 
-  const run = (transform: SpecTransform) => {
-    const outcome = planSemanticEdit(store.getState(), dataset.id, transform);
-    if (outcome.status === "applied") {
-      store.setState(withSnapshot(outcome.transformer, defaultCoalescer()));
-      setStatus(outcome.warnings);
-      return true;
-    } else if (outcome.status === "invalid") {
-      setStatus([{ key: "diagram.semantic.editRefused" }, ...outcome.diagnostics]);
-    }
-    return false;
+  const run = async (transform: SpecTransform): Promise<boolean> => {
+    if (pending.current) return false;
+    pending.current = true;
+    setValidating(true);
+    try {
+      const outcome = await applyValidatedSemanticEdit(store, dataset.id, transform, validationHost);
+      if (outcome.status === "applied") { setStatus(outcome.warnings); return true; }
+      if (outcome.status === "invalid") setStatus([{ key: "diagram.semantic.editRefused" }, ...outcome.diagnostics]);
+      return false;
+    } finally { pending.current = false; setValidating(false); }
   };
 
   const detach = async () => {
@@ -149,7 +153,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
     typeof member.entry.classification === "string" ? member.entry.classification : "";
   const commitClassification = () => {
     if (classificationDraft === null) return;
-    run(setClassification(member.index, classificationDraft.trim()));
+    void run(setClassification(member.index, classificationDraft.trim()));
     setClassificationDraft(null);
   };
 
@@ -172,7 +176,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
             <span data-testid="semantic-order">{`${position + 1}/${order.length}`}</span>
             <button
               type="button"
-              onClick={() => run(moveMessage(member.index, -1))}
+              onClick={() => void run(moveMessage(member.index, -1))}
               disabled={position === 0}
               data-testid="semantic-move-earlier"
             >
@@ -180,7 +184,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
             </button>
             <button
               type="button"
-              onClick={() => run(moveMessage(member.index, 1))}
+              onClick={() => void run(moveMessage(member.index, 1))}
               disabled={position === order.length - 1}
               data-testid="semantic-move-later"
             >
@@ -194,7 +198,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
             <span>{t("diagram.semantic.stateType")}</span>
             <select
               value={typeof member.entry.type === "string" ? member.entry.type : ""}
-              onChange={(e) => run(setStateType(member.index, e.target.value))}
+              onChange={(e) => void run(setStateType(member.index, e.target.value))}
               data-testid="semantic-state-type"
             >
               {LIFECYCLE_STATE_TYPES.map((value) => (
@@ -211,7 +215,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
             <span>{t("diagram.semantic.lane")}</span>
             <select
               value={typeof member.entry.lane === "string" ? member.entry.lane : ""}
-              onChange={(e) => run(setLane(descriptor.entities as "nodes" | "states", member.index, e.target.value))}
+              onChange={(e) => void run(setLane(descriptor.entities as "nodes" | "states", member.index, e.target.value))}
               data-testid="semantic-lane"
             >
               {lanes.map((lane) => (
@@ -228,7 +232,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
             <span>{t("diagram.semantic.stage")}</span>
             <select
               value={String(member.entry.stage ?? 0)}
-              onChange={(e) => run(setStage(member.index, Number(e.target.value)))}
+              onChange={(e) => void run(setStage(member.index, Number(e.target.value)))}
               data-testid="semantic-stage"
             >
               {stages.map((stage, index) => (
@@ -255,8 +259,11 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
           </label>
         ) : null}
 
-        <SemanticStructureEditor key={`${dataset.id}:${member.field}:${member.index}:${JSON.stringify(member.entry)}`} member={member} run={run} />
+        <SemanticStructureEditor key={`${dataset.id}:${member.field}:${member.index}:${JSON.stringify(member.entry)}`} member={member} run={run}
+          remove={() => deleteSelection(store, defaultCoalescer(), t, validationHost,
+            { nodes: nodeId ? [nodeId] : [], edges: edgeId ? [edgeId] : [] })} />
 
+        {validating ? <p role="status">{t("diagram.semantic.validating")}</p> : null}
         {status.length > 0 ? (
           <ul className="maru-diagram-ie-warnings" data-testid="semantic-status">
             {status.map((diagnostic, i) => (

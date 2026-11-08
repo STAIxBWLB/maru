@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { pinnedEngineHost } from "../src/lib/diagram/__fixtures__/engineHost";
 import { SEMANTIC_FIXTURES } from "../src/lib/diagram/__fixtures__/semantic";
 import type { SemanticDiagramType } from "../src/lib/diagram/reportTypes";
 
@@ -241,7 +242,22 @@ test("rejects a Unicode output segment exceeding the pinned UTF-8 budget in the 
 // Semantic types and semantic editing (issue #433 P2)
 // ---------------------------------------------------------------------------
 
+async function installSemanticValidationHost(page: Page) {
+  // Browser-only replacement of the generation host factory, not a production
+  // bypass. Structural apply uses the same host contract and pinned CLI.
+  await page.exposeFunction("diagramValidateFixture", pinnedEngineHost.validateCandidate);
+  await page.route("**/src/lib/diagram/generationHost.ts*", (route) => route.fulfill({
+    contentType: "application/javascript",
+    body: `export function createGenerationHost() { return {
+      runAgent: async () => { throw new Error("Diagram generation is only available inside the Tauri shell."); },
+      validateCandidate: (type, spec) => window.diagramValidateFixture(type, spec),
+      cancel() {}
+    }; }`,
+  }));
+}
+
 async function importSemanticSpec(page: Page, type: SemanticDiagramType) {
+  await installSemanticValidationHost(page);
   await page.goto("/");
   await page.getByRole("button", { name: "다이어그램", exact: true }).click();
   await page.getByRole("tab", { name: "파일" }).click();

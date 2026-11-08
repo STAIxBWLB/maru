@@ -7,6 +7,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { createGenerationHost } from "../../lib/diagram/generationHost";
+import type { GenerationHost } from "../../lib/diagram/generation";
 import { defaultCoalescer } from "../../lib/diagram/actions";
 import { createDiagramStore, type DiagramStore } from "../../lib/diagram/state";
 import { type DiagramStateRoot } from "../../lib/diagram/types";
@@ -14,6 +16,8 @@ import { type Coalescer } from "../../lib/diagram/history";
 
 interface DiagramStoreContextValue {
   store: DiagramStore;
+  hostOverride: GenerationHost | null;
+  validationHost: Pick<GenerationHost, "validateCandidate">;
   coalescer: Coalescer;
   /** Persistent per-gesture-type coalescers (typing / resize / paste) — created once per workspace. */
   gestureCoalescers: GestureCoalescers;
@@ -85,10 +89,12 @@ export function _resetDiagramSharedStoreForTests(): void {
 export interface DiagramStoreProviderProps {
   initial?: Partial<DiagramStateRoot>;
   storeKey?: string | null;
+  workPath?: string | null;
+  hostOverride?: GenerationHost | null;
   children: ReactNode;
 }
 
-export function DiagramStoreProvider({ initial, storeKey, children }: DiagramStoreProviderProps) {
+export function DiagramStoreProvider({ initial, storeKey, workPath = null, hostOverride = null, children }: DiagramStoreProviderProps) {
   // First-time hydration only — if a caller passes `initial` and the shared
   // store is still pristine (empty doc, untouched ephemeral), apply it.
   // Subsequent mounts ignore `initial` so we don't clobber in-flight work.
@@ -101,9 +107,20 @@ export function DiagramStoreProvider({ initial, storeKey, children }: DiagramSto
         ephemeral: initial.ephemeral ?? current.ephemeral,
       }));
     }
-    return { store, coalescer: ctx.coalescer, gestureCoalescers: ctx.gestureCoalescers };
-  }, [initial, storeKey]);
+    return { store, coalescer: ctx.coalescer, gestureCoalescers: ctx.gestureCoalescers,
+      hostOverride, validationHost: hostOverride ?? createGenerationHost({ workPath }) };
+  }, [initial, storeKey, workPath, hostOverride]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+export function useDiagramValidationHost(): Pick<GenerationHost, "validateCandidate"> {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error("Diagram validation requires DiagramStoreProvider; reopen Diagram mode.");
+  return ctx.validationHost;
+}
+
+export function useDiagramHostOverride(): GenerationHost | null {
+  return useContext(Ctx)?.hostOverride ?? null;
 }
 
 export function useDiagramStore(): DiagramStore {

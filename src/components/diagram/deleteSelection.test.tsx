@@ -20,6 +20,11 @@ import { RibbonEdit } from "./ribbon/RibbonEdit";
 
 vi.mock("../../lib/confirmDialog", () => ({ confirmDialog: vi.fn(async () => true), messageDialog: vi.fn(async () => {}) }));
 
+const engineHost = vi.hoisted(() => ({
+  validateCandidate: vi.fn(async () => ({ ok: true, errors: [] as string[], warnings: [] as string[] })),
+}));
+vi.mock("../../lib/diagram/generationHost", () => ({ createGenerationHost: () => engineHost }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const ko = (key: string, vars?: Record<string, string | number>) => translate("ko", key, vars);
@@ -40,6 +45,8 @@ function storeWith(doc: DiagramDoc, nodes: string[]): DiagramStore {
 
 describe("deleteSelection", () => {
   beforeEach(() => {
+    engineHost.validateCandidate.mockReset();
+    engineHost.validateCandidate.mockResolvedValue({ ok: true, errors: [], warnings: [] });
     vi.mocked(messageDialog).mockClear();
     vi.mocked(confirmDialog).mockReset();
     vi.mocked(confirmDialog).mockResolvedValue(true);
@@ -180,6 +187,17 @@ describe("deleteSelection", () => {
     expect(store.getState().ephemeral.history.past).toHaveLength(1);
   });
 
+  it("keeps a confirmed batch unchanged when the engine refuses its spec", async () => {
+    const doc = lifecycleDoc();
+    const store = storeWith(doc, ["running", "note"]);
+    engineHost.validateCandidate.mockResolvedValueOnce({ ok: false, errors: ["workflow/unexpected-root"], warnings: [] });
+    await deleteSelection(store, defaultCoalescer(), ko);
+    expect(confirmDialog).toHaveBeenCalled();
+    expect(store.getState().doc).toBe(doc);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    expect(vi.mocked(messageDialog).mock.calls[0]![0]).toContain("workflow/unexpected-root");
+  });
+
   it("deletes freeform objects without asking", async () => {
     const store = storeWith(lifecycleDoc(), ["note"]);
     await deleteSelection(store, defaultCoalescer(), ko);
@@ -199,6 +217,8 @@ describe("RibbonEdit Delete", () => {
 
   beforeEach(() => {
     _resetDiagramSharedStoreForTests();
+    engineHost.validateCandidate.mockReset();
+    engineHost.validateCandidate.mockResolvedValue({ ok: true, errors: [], warnings: [] });
     vi.mocked(messageDialog).mockClear();
     vi.mocked(confirmDialog).mockReset();
     vi.mocked(confirmDialog).mockResolvedValue(false);

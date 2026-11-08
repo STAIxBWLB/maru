@@ -246,7 +246,11 @@ state type, dataflow classification, lane and stage) are spec edits:
 `planSemanticEdit` (`semanticEdit.ts`) validates the edited spec and routes
 it through `buildProposalFromCandidate` and `prepareProposalApply` with a
 touched filter, so each edit is one undo entry and canvas drift on
-untouched members survives. Manual edits never run the engine.
+untouched members survives. Preview stays synchronous; applying a structural
+edit runs the resulting spec through the pinned engine before committing.
+An engine refusal, unavailable engine or document change during validation
+leaves both the document and undo history untouched. Text write-through and
+explicit detach remain local operations.
 
 **Detach and delete.** "Detach to freeform..." drops the dataset and the
 member markers after a confirm listing what is lost (types, order,
@@ -276,11 +280,17 @@ insert/remove deterministically re-space message y coordinates and retain
 valid timeline ranges. Boundary member checkboxes apply the entire wraps
 set in one edit; phase/group and segment/activation ranges have explicit
 Apply controls, with group lane and activation participant selectors.
-Every command runs `validateSemanticContent` and proposal validation before
-one undoable commit. New range checks refuse reversed ranges, overlapping
-phases, empty groups and segments outside an authored canvas. Manual edits
-remain synchronous and do not call the engine; per-type fixtures also run
-the pinned engine validator in the focused test suite.
+Every structural command runs `validateSemanticContent`, proposal validation
+and the existing `archify_validate_candidate` engine path before one
+undoable commit. Keyboard/ribbon Delete and inspector Remove share the same
+cascade/annotation preview and apply gate. Lifecycle's reserved main lane
+cannot be removed. Architecture column inputs respect layout.cols; other
+renderer limits, such as dataflow stage/canvas width, are enforced by the
+engine with its diagnostic. New range checks refuse reversed ranges,
+overlapping phases, empty groups and segments outside an authored canvas.
+Preview remains synchronous; apply is asynchronous. Per-type fixtures also
+run the pinned engine validator in the focused test suite. Browser tests
+inject the generation host contract; production never bypasses engine admission.
 
 ## Archify engine pin
 

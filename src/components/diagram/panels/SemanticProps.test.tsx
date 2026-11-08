@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { confirmDialog, messageDialog } from "../../../lib/confirmDialog";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
+import type { GenerationHost } from "../../../lib/diagram/generation";
 import { undo } from "../../../lib/diagram/actions";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
 import type { SemanticDiagramType, SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
@@ -21,6 +22,9 @@ import { RightPanel } from "./RightPanel";
 vi.mock("../../../lib/confirmDialog", () => ({ confirmDialog: vi.fn(async () => true), messageDialog: vi.fn(async () => {}) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const validateCandidate = vi.fn<GenerationHost["validateCandidate"]>();
+const hostOverride: GenerationHost = { runAgent: async () => "", validateCandidate };
 
 let probe: DiagramStore | null = null;
 function StoreProbe() {
@@ -50,7 +54,7 @@ function render(doc: DiagramDoc, selection: { nodes?: string[]; edges?: string[]
   act(() => {
     root!.render(
       <LocaleContext.Provider value={{ locale: "ko", setLocale: () => {}, t: ko }}>
-        <DiagramStoreProvider initial={{ doc, ephemeral }} storeKey={`semantic-props-${seq}`}>
+        <DiagramStoreProvider initial={{ doc, ephemeral }} hostOverride={hostOverride} storeKey={`semantic-props-${seq}`}>
           <StoreProbe />
           <RightPanel />
         </DiagramStoreProvider>
@@ -93,6 +97,8 @@ describe("SemanticProps", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     probe = null;
+    validateCandidate.mockReset();
+    validateCandidate.mockResolvedValue({ ok: true, errors: [], warnings: [] });
     _resetDiagramSharedStoreForTests();
     vi.mocked(messageDialog).mockClear();
     vi.mocked(confirmDialog).mockReset();
@@ -168,6 +174,46 @@ describe("SemanticProps", () => {
     expect(probe!.getState().ephemeral.history.past).toHaveLength(1);
     act(() => probe!.setState(undo()));
     expect(probe!.getState().doc).toEqual(doc);
+  });
+
+  it("refuses the engine's rejection without writing a doc or undo entry", async () => {
+    const doc = docOf("lifecycle");
+    render(doc, { nodes: ["running"] });
+    validateCandidate.mockResolvedValueOnce({ ok: false, errors: ["renderer rule rejected this candidate"], warnings: [] });
+    await typeInto(q<HTMLInputElement>("semantic-add-label")!, "Rejected state");
+    await click("semantic-add-confirm");
+    expect(validateCandidate).toHaveBeenCalled();
+    expect(probe!.getState().doc).toBe(doc);
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+    expect(q("semantic-status")!.textContent).toContain("renderer rule rejected this candidate");
+  });
+
+  it("shows the main-lane removal reason without allowing confirmation", () => {
+    render(docOf("lifecycle"), { nodes: ["ds:lane:main"] });
+    expect(q<HTMLButtonElement>("semantic-remove")!.disabled).toBe(true);
+    expect(q("semantic-structure")!.textContent).toContain(ko("diagram.semantic.reservedMainLane"));
+  });
+
+  it("bounds architecture columns by layout.cols before apply", async () => {
+    const spec = { ...structuredClone(SEMANTIC_FIXTURES.architecture), layout: { mode: "grid", cols: 4 } };
+    const doc = projectSemanticDocument(archifySpecToDataset("architecture", spec, { id: "ds" }).dataset).doc;
+    render(doc, { nodes: ["api"] });
+    await typeInto(q<HTMLInputElement>("semantic-add-label")!, "Outside grid");
+    await typeInto(q<HTMLInputElement>("semantic-add-col")!, "4");
+    expect(q<HTMLInputElement>("semantic-add-col")!.max).toBe("3");
+    expect(q<HTMLButtonElement>("semantic-add-confirm")!.disabled).toBe(true);
+    expect(validateCandidate).not.toHaveBeenCalled();
+    expect(probe!.getState().doc).toBe(doc);
+  });
+
+  it("uses the same annotation preview for inspector removal as Delete", async () => {
+    const base = docOf("lifecycle");
+    const doc = { ...base, edges: [...base.edges, { id: "annotation", fromNode: "running", fromPort: "e" as const, toNode: "done", toPort: "w" as const, label: "Shared note" }] };
+    render(doc, { nodes: ["running"] });
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await click("semantic-remove");
+    expect(vi.mocked(confirmDialog).mock.calls[0]![0]).toContain("Shared note (annotation)");
+    expect(probe!.getState().doc).toBe(doc);
   });
 
   it("previews a remove cascade and keeps the dataset through apply and undo", async () => {

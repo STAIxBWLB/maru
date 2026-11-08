@@ -53,7 +53,7 @@ import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { useTranslation, type Locale } from "../../../lib/i18n";
 import { useShellSettings } from "../../../lib/shellSettingsStore";
-import { useDiagramCoalescer, useDiagramStore } from "../DiagramStoreContext";
+import { useDiagramCoalescer, useDiagramStore, useDiagramHostOverride } from "../DiagramStoreContext";
 
 export interface GenerateDiagramDialogProps {
   open: boolean;
@@ -124,6 +124,7 @@ export function GenerateDiagramDialog({
   } | null>(null);
 
   const cancelledRef = useRef(false);
+  const sharedHostOverride = useDiagramHostOverride();
   const hostRef = useRef<(GenerationHost & { cancel?: () => void }) | null>(null);
 
   // Clear transient run state whenever the dialog opens; keep the form so a
@@ -175,7 +176,7 @@ export function GenerateDiagramDialog({
       ...(targetDataset ? { target: { datasetId: targetDataset.id, spec: targetDataset.spec } } : {}),
     });
     const host =
-      hostOverride ??
+      hostOverride ?? sharedHostOverride ??
       createGenerationHost({
         workPath,
         runtime: aiSettings.defaultRuntime,
