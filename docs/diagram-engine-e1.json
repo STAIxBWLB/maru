@@ -140,6 +140,9 @@
     "splitCommit": "f78583829fbb10231cee05bb05b631d3bc5c07ec",
     "sdkTree": "a5c859a12fada3d6f5594ee16a8e45fb8e1bbbde",
     "executionScope": "remote Linux container, Node removed from PATH",
-    "status": "pending"
+    "status": "passed",
+    "coreUnitTests": 28,
+    "differentialTests": 2,
+    "pluginTests": 3
   }
 }

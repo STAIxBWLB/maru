@@ -826,3 +826,8 @@ host override and refuses an invalid connection. Remote app checks, SDK
 boundary/type drift and the full differential suite passed. Hosted Chromium
 remains the final 400 KB gzip / 50 ms p95 gate; no final-head hosted result is
 claimed from these remote tests.
+
+The final SDK subtree split `f7858382` (tree `a5c859a1`) passed 28 core unit
+and two differential tests plus three plugin tests from its source-only archive
+with Node removed from PATH. This is separate from the browser's Node-free
+validation proof and from the pending hosted final-head gate.
