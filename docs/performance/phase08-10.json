@@ -2253,7 +2253,7 @@
         "src-tauri/src/archify.rs::bounded_engine_output reuses src-tauri/src/command_output.rs::run_command_with_timeout_and_limits for drained bounded pipes and owned-process-tree deadline termination; render staging shape and size are checked by the abort callback.",
         "src-tauri/src/archify.rs::stage_candidate uses shared path admission and atomic candidate publication; cleanup_job_dir rejects replaced symlink/unsafe parents and removes only the owned private staging directory."
       ],
-      "workerBoundary": "src-tauri/src/archify.rs::ipc::archify_render_candidate owns arguments and awaits spawn_blocking around bundled_engine_path and render_candidate_with_engine. The physical render_command_runs_in_worker_and_propagates_worker_failure fixture is added; cargo check compiled its Rust path locally, but its execution is deferred to hosted CI and not claimed by the Node/jsdom run.",
+      "workerBoundary": "src-tauri/src/archify.rs::ipc::archify_render_candidate owns arguments and awaits spawn_blocking around bundled_engine_path and render_candidate_with_engine. The physical render_command_runs_in_worker_and_propagates_worker_failure case passed in the actual archify-filtered Cargo run recorded below.",
       "syncCallers": [
         "src-tauri/src/archify.rs::archify_render_candidate is the cfg(test) source-engine adapter; production enters render_candidate_with_engine only through the blocking IPC wrapper."
       ],
@@ -2266,9 +2266,16 @@
           "exitCode": 0
         },
         {
-          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib archify",
-          "status": "pending-hosted-execution",
-          "executed": false
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib archify -- --test-threads=2",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0,
+          "filteredOut": 2123,
+          "buildJobs": 2,
+          "executionHost": "macOS",
+          "sourceCommit": "83263020fe589c574a867b5047016f185057dc49",
+          "executionNote": "Actual local filtered run under the owner command-isolation-only exception (2026-11-08); no whole-lib local test run."
         }
       ],
       "processingCaller": {
@@ -2309,9 +2316,9 @@
           "render_timeout_stops_late_descendant_writes",
           "render_command_runs_in_worker_and_propagates_worker_failure"
         ],
-        "workerProof": "Owned IPC arguments enter the awaited blocking worker before all engine/path/process work; the physical Rust boundary fixture is added but not run locally.",
-        "platformScope": "Actual local Node CLI validation/render ran for all five pinned types and the exact native fixture; JSdom checked CJK, both themes, receipt/hash lineage and cancel/failure conversion. PNG rasterisation is mocked at its boundary in this focused run. Local cargo check --lib --tests passed; Rust test execution and real native-e2e canvas/save proof await hosted CI; no Windows or shipped-release-bundle execution claimed.",
-        "deferredChecks": "The unchanged evidence checker intentionally refuses this pending Rust selector until an actual hosted Rust result is recorded. Local cargo check passed but is not a test receipt; no Rust test passing count or exit status is invented."
+        "workerProof": "Owned IPC arguments enter the awaited blocking worker before engine/path/process work. The physical render worker boundary and failure-propagation case passed in the recorded real filtered Cargo run.",
+        "platformScope": "Local macOS: actual archify-filtered Cargo run passed 18/0/0, including the worker boundary, five-type pinned render, symlink refusal and process-tree timeout cases. Node/jsdom checks cover CJK, both themes, receipt lineage and cancellation; PNG is mocked only in those focused tests. Hosted run42451907498 on prior source head4f424356 passed the real native diagram-export SVG/PNG/save/readback spec and all15 spec files. Final-head hosted CI is still required; no Windows, shipped-release-bundle or manual visual-review execution claimed.",
+        "deferredChecks": "The pending selector was replaced only after an actual local filtered Cargo result under the owner exception. Final-head hosted verify, Playwright and native suite remain the merge gates; the isolation checker is unchanged."
       }
     }
   ]
