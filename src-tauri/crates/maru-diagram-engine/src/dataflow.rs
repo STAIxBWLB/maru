@@ -18,7 +18,7 @@ const TYPES: &[&str] = &[
 ];
 const VARIANTS: &[&str] = &["default", "emphasis", "security", "dashed"];
 const SIDES: &[&str] = &["left", "right", "top", "bottom"];
-const ROUTES: &[&str] = &[
+pub(crate) const ROUTES: &[&str] = &[
     "auto",
     "straight",
     "vertical-channel",

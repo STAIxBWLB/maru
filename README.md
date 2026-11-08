@@ -656,9 +656,11 @@ suite through a reusable workflow. Other code PRs keep native compile coverage;
 selected native PRs do not compile twice. `ci-ok` requires every selected job,
 including the suite, and rejects failures, cancellations and unplanned skips.
 SDK/toolchain/geometry-harness changes also select the reusable Linux/macOS/Windows
-foundation determinism matrix, required by `ci-ok`. Its first stage compares
-fixed arithmetic and pinned text metrics for the parity corpus; whole-scene
-layout/routing agreement is a later E2 gate, not implied by that foundation check.
+scene determinism matrix, required by `ci-ok`. It compares whole-scene geometry
+and refusal diagnostics across Linux, macOS, Windows and the Linux WASM build,
+including an unchanged re-layout check for every parity-corpus record and
+three seeded 200-node stress scenes. Renderer
+constraint parity and layout performance are separate E2 gates.
 Version-changing PRs use `make release-checks`. Docs-only and `.planning/**`
 changes skip builds; performance evidence JSON remains validation input. Native
 label changes may reuse successful CI for the same SHA and tree, while unrelated labels

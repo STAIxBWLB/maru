@@ -8,36 +8,89 @@ permissions:
 
 jobs:
   matrix:
-    name: SDK foundation hashes (${{ matrix.os }})
+    name: SDK scene hashes (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-26, windows-latest]
+        include:
+          - os: ubuntu-22.04
+            receipt: linux
+          - os: macos-26
+            receipt: macos
+          - os: windows-latest
+            receipt: windows
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - name: Generate the same seeded dense and parity input
+        run: |
+          node scripts/diagram-engine-e2-dense.mjs --check
+          node scripts/diagram-engine-e2-dense.mjs combine .engine-e2/determinism-corpus.json
       - name: Cache pure SDK
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri/crates -> target
-          shared-key: diagram-fixed-metrics-${{ matrix.os }}
-      - name: Hash foundation metrics for the whole corpus
+          shared-key: diagram-scene-${{ matrix.os }}
+      - name: Hash whole scenes and unchanged re-layouts for the complete corpus
         shell: bash
         run: |
           mkdir -p .engine-e2/determinism
-          cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry --bin geometry-foundation-hashes -- src-tauri/crates/maru-diagram-engine/testdata/parity.json .engine-e2/determinism/foundation.json
+          cargo test --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --lib geometry_corpus -- --test-threads=2
+          cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-foundation-hashes -- .engine-e2/determinism-corpus.json .engine-e2/determinism/native-${{ matrix.receipt }}.json
       - uses: actions/upload-artifact@v4
         with:
-          name: diagram-foundation-${{ matrix.os }}
-          path: .engine-e2/determinism/foundation.json
+          name: diagram-scene-native-${{ matrix.receipt }}
+          path: .engine-e2/determinism/native-${{ matrix.receipt }}.json
           if-no-files-found: error
           retention-days: 3
+
+  wasm:
+    name: SDK scene hashes (Linux WASM)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - name: Generate the same seeded dense and parity input
+        run: |
+          node scripts/diagram-engine-e2-dense.mjs --check
+          node scripts/diagram-engine-e2-dense.mjs combine .engine-e2/determinism-corpus.json
+      - name: Cache pure SDK and bindgen tooling
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/crates -> target
+          shared-key: diagram-scene-linux-wasm
+      - name: Build the separate test-featured geometry WASM artifact
+        shell: bash
+        run: |
+          rustup target add wasm32-unknown-unknown
+          export MARU_DIAGRAM_ENGINE_REVISION=$(git rev-parse HEAD:src-tauri/crates)
+          cargo build --locked --release --lib --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features wasm-layout,geometry-corpus --target wasm32-unknown-unknown
+          cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features bindgen-web --bin bindgen-web -- src-tauri/crates/target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm .engine-e2/wasm-test
+      - name: Hash whole scenes through WASM without a Node engine override
+        run: node scripts/diagram-engine-e2-wasm-hashes.mjs .engine-e2/determinism-corpus.json .engine-e2/determinism/wasm-linux.json .engine-e2/wasm-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diagram-scene-wasm-linux
+          path: .engine-e2/determinism/wasm-linux.json
+          if-no-files-found: error
+          retention-days: 3
+
   compare:
-    name: cross-platform SDK hash agreement
-    needs: matrix
+    name: native and WASM scene hash agreement
+    needs: [matrix, wasm]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -45,16 +98,22 @@ jobs:
         with:
           sparse-checkout: |
             scripts/diagram-engine-e2-determinism.mjs
+            scripts/diagram-engine-e2-dense.mjs
             src-tauri/crates/maru-diagram-engine/testdata/parity.json
+            src-tauri/crates/maru-diagram-engine/testdata/dense-scenes.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22.22.3
           package-manager-cache: false
+      - name: Generate the same seeded dense and parity input
+        run: |
+          node scripts/diagram-engine-e2-dense.mjs --check
+          node scripts/diagram-engine-e2-dense.mjs combine .engine-e2/determinism-corpus.json
       - uses: actions/download-artifact@v4
         with:
-          pattern: diagram-foundation-*
+          pattern: diagram-scene-*
           path: .engine-e2/determinism
-      - name: Require all three identical foundation reports
-        run: node scripts/diagram-engine-e2-determinism.mjs .engine-e2/determinism src-tauri/crates/maru-diagram-engine/testdata/parity.json
+      - name: Require three native and one WASM whole-scene report to agree
+        run: node scripts/diagram-engine-e2-determinism.mjs .engine-e2/determinism .engine-e2/determinism-corpus.json

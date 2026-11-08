@@ -956,3 +956,226 @@ ZWJ examples at both font weights. Its remote validation entry measured
 324,124 B gzip; lazy metrics measured 1,038,558 B. The 1,000-node validation
 p95 was 8.7 ms. This remains a remote reproduction; hosted CI, whole-scene geometry
 and lazy cold-load proof are separate gates.
+
+
+### E2 five-type scene layout (S2)
+
+The optional geometry feature now exposes `layout::layout_json`, accepting a
+serialized `LayoutRequest`. It runs the existing E1 document gate first, then
+uses the typed models for architecture grid/free placement, workflow and
+lifecycle lane/column placement, sequence participant headers and authored
+message times/ranges, and dataflow stage/row placement. The lazy TS facade is
+`loadGeometryEngine().layout(request)`. Production `layout.ts`, `edgeRouting.ts`
+and `semanticApply` remain on their existing paths; this is a test/SDK entry.
+
+Coordinates remain signed integers in 1/64-pixel units. Explicit-ID entities,
+lanes, groups and phases are pinnable: pins take precedence over authored
+positions and automatic placement, and surviving authored-ID keys retain their
+exact positions after unrelated edits. Lane/group/phase keys retain their role
+namespace (for example `lane:main`). A frame pin holds that frame's own origin;
+it is not an implicit compound/group drag of its children.
+
+Architecture boundaries, dataflow stages, sequence segments and activations
+are derived geometry, not independent pin targets. Their output IDs are a
+role plus ordinal (`boundary:0`, `stage:0`, `segment:0`, `activation:0`), matching
+the source array order. Placement ignores pins aimed at them. `resolve_pins`
+drops each such pin using the existing per-pin diagnostic, with the cause
+"this container's position derives from its members" and a next step to edit
+or pin the members or timeline. Anonymous cards are likewise derived annotations;
+`semantic.ts` does not project them as independently movable canvas members.
+Their `card:<ordinal>` IDs are also not pin targets. No content-hash identity or
+hidden source IDs are introduced. Adding/removing a member changes the derived
+frame naturally, without a stale pin moving it independently of its contents.
+Membership constraints and incompatible authored pins remain S3 geometry-gate
+work.
+
+Labels carry the pinned font identity, fixed-point font size, absolute glyph
+origins and ink boxes, including nonfatal .notdef replacements and ignored
+Unicode scalars. The S2 profile uses 13 px bold node labels, 11 px details and
+10 px tags; relationship/legend text is 12 px, frame titles 13 px and the document
+title 24 px. Multiline text, negative bearings, cards and legend overrides feed
+measured bounds. Page bounds include nodes, ranges, labels, routes, cards and
+legend extents. A passed S2 result does not claim the pinned renderer's full
+label-fit, viewBox or legend-clearance rules; those refusals remain S3 work.
+
+Routing uses deterministic port choices, obstacle visibility fast paths and an
+independently implemented sparse A* over compressed obstacle-edge coordinates.
+It never returns a diagonal or collision fallback. Once placement succeeds,
+a route failure does not erase the scene: that edge remains in `routes` with
+its ID and empty `points`, and a source edge-path diagnostic names the cause
+and next step. Other routes continue independently. `ok` is false while an
+error exists, but `geometry` remains present for inspection. Nonfatal font and
+pin notices do not make the report fail. Input/placement failures, including
+unrepresentable coordinates, can still return no geometry. S3 geometry-rule
+diagnostics must likewise flag the existing geometry rather than clear it. Node and label rectangles are routing obstacles; derived cards are placed
+below the completed relationship extents. Search/axis/waypoint budgets refuse
+with a cause and next step. Explicit `via` points are retained; without them channel
+hints constrain the route. `labelAt` is a center anchor and takes precedence over
+relative offsets. Labels are allocated before final routing, so paths avoid the
+complete label set. A diagonal `straight` preference still lowers to an
+orthogonal obstacle-avoiding path in this stage. Variant, role and stroke width
+remain in route output. Renderer-specific aesthetics/refusal parity are not
+claimed by those basic safety checks.
+
+The previous foundation matrix now hashes the canonical `{ok, geometry,
+diagnostics}` result for every corpus case, including structured refusals.
+Each case is laid out twice and must be identical. The v1 receipt and build
+revision are excluded from this cross-runtime hash; successful receipts still
+bind the actual input and geometry hash. Three hosted native builds and a real
+Linux WASM build must produce byte-identical reports. The comparator requires
+all four artifact identities and checks the corpus SHA, count, IDs/order and
+hashes against the checked-in corpus. No case is silently skipped. This is a
+determinism gate, not the S3 differential renderer-rule verdict.
+
+S3 still adds the renderer-rule corpus cases and geometry refusal mappings,
+resolves the three E1-labelled geometry differences, connects the test-only
+canvas adapter, and records hosted 1,000-node layout/routing p95 plus lazy chunk
+cold load. No SVG/PNG renderer or production apply/canvas switch is included.
+
+The source-bound [S2 remote receipt](diagram-engine-e2-s2.json), SDK tree
+`c399848c`, records 82 core tests, two document differential tests, geometry
+clippy, default-feature compilation, boundary/type drift, and two Chromium
+probes passing. The native and real WASM scene reports are byte-identical for
+all 256 cases: 37 successful scenes and 219 structured refusals. The only
+E1-accepted case additionally refused at this stage is an authored dataflow row
+outside the fixed-point coordinate range. Those counts do not assert renderer
+rule parity. Hosted Linux/macOS/Windows plus WASM agreement remains pending.
+The validation graph measures 324,219 B gzip; separately lazy layout/metrics
+measures 1,500,551 B. No 1,000-node layout p95 or lazy cold-load acceptance is
+claimed by this functional proof; both remain S3 work.
+
+The derived-frame pin-policy follow-up is recorded separately in that receipt,
+SDK tree `2862495c`. It passed 84 core tests, two differential tests, geometry
+clippy/type drift and both Chromium tests. The updated 256-case native/WASM
+reports remain byte-identical. Validation remains 324,219 B gzip; the lazy
+layout/metrics chunk is 1,482,982 B. These are remote checks; new-head hosted CI
+and the remaining S3 gates are still pending.
+
+The partial-scene contract is tested with an enclosed endpoint and a forced
+small, per-call test-only A* budget. Both retain all nodes and a clear second
+route, emit one unrouted edge and one error, and repeat deterministically.
+The production search limits are unchanged. The browser probe also checks this
+behavior through the actual WASM layout facade.
+
+The partial-scene follow-up is separately anchored to SDK tree `5f8d81a9` in
+that receipt. It passed 88 core tests, two differential tests, geometry clippy,
+binding drift and both Chromium probes, including the actual-WASM partial scene.
+All 256 native/WASM corpus reports remain byte-identical. Validation is
+324,219 B gzip and the lazy layout/metrics chunk is 1,489,129 B. New-head hosted
+checks and the S3 renderer/performance gates remain pending.
+
+
+The routing-preset follow-up resolves workflow `outside-right`, `return-left`
+and `up-channel` to their corresponding port families and explicit outer
+channels; dataflow `vertical-channel` uses horizontal ports and a vertical
+corridor. Authored channel coordinates override generated ones. A preset is
+not silently treated as `auto`. Tests cover each family and an explicit channel
+coordinate. Automatic vertical-segment labels are placed to a side of the
+corridor, so final routing need not replace the channel just to avoid its label.
+Workflow/lifecycle pin selection also precedes automatic yOffset conversion.
+
+The determinism input now combines the 256 document-parity cases with three
+checked-in, seeded synthetic stress scenes: 200 nodes and 48 relationships each
+for architecture, workflow and dataflow. The generator has no host/random/time
+input and is drift-checked. The same combined file is generated in all native,
+WASM and compare jobs; its SHA/count/order are the comparison contract. These
+are determinism stress fixtures, not additional renderer-oracle verdicts.
+The unit proof checks that a production route succeeds where budget 0 reports
+A* exhaustion for that same edge, while visible adjacent edges still complete.
+
+Corpus tooling is gated by the explicit `geometry-corpus` test feature. Normal
+`wasm-layout` links neither the corpus module nor its export. A guard checks
+both JS and actual WASM exports for absence of `scene_corpus_hashes` after the
+normal build. CI builds `wasm-layout,geometry-corpus` separately into a test-only
+directory, leaving measured product bytes free of the corpus harness. Standalone
+subtree tests enable that feature explicitly to retain test coverage.
+
+The preset/dense-feature follow-up, SDK tree `97d4822b`, passed 97 core tests,
+two differential tests, clippy/type drift and both Chromium probes. The combined
+259-case native and separate test-WASM reports are byte-identical. Each dense
+fixture retains all 200 nodes, proves a successful production A* detour and a
+budget-0 failure for the same edge, and still routes adjacent clear edges.
+The normal product export guard passed for JS and WASM. Validation measures
+324,220 B gzip; normal lazy layout/metrics measures 1,434,912 B, excluding the
+harness. These are remote checks; new-head hosted and S3 gates remain pending.
+
+#### Visible text audit for the five typed families
+
+Every authored scene-text field below reaches the shared measured label path,
+which emits pinned glyphs, font size and ink bounds and supplies route obstacles.
+Multiline combinations preserve the full content rather than shortening labels.
+The regression tests inspect both label text and emitted glyph inputs.
+
+| Family | Node text | Route text | Container text | Cards |
+| --- | --- | --- | --- | --- |
+| Architecture | `components[].label`, `.sublabel`, `.tag` | `connections[].label` | `boundaries[].label` | `cards[].title`, every `.items[]` string |
+| Workflow | `nodes[].label`, `.sublabel`, `.tag` | `edges[].label` | `lanes[].label`, `phases[].label`, `groups[].label` | Same shared card path |
+| Sequence | `participants[].label`, `.sublabel` | `messages[].label` and `.note`, combined as lines | `segments[].label`; activation bars have no separate authored caption | Same shared card path |
+| Dataflow | `nodes[].label`, `.sublabel`, `.tag` | `flows[].label` and `.classification`, combined as lines | `stages[].label` | Same shared card path |
+| Lifecycle | `states[].label`, `.sublabel`, `.tag`, `.step` | `transitions[].label` and `.note` | `lanes[].label` | Same shared card path |
+
+Shared text on every family is `meta.title`, `meta.subtitle`, and the resolved
+`meta.legend.entries[key].label` overrides. Default legend names are also
+measured. The lifecycle detail combines sublabel/step and avoids duplicating
+identical content; a sequence activation's participant reference points to the
+already-labelled header. `tag` exists on the shared decoration model but is not
+an E1-admitted sequence participant field, so it is not claimed as sequence copy.
+
+Text exclusions are intentional: IDs, endpoint/member/lane references, types,
+variants, roles, semantic checks and routing/layout controls are identifiers or
+style/geometry inputs. `icon` selects a known vector mark; `brand` selects an
+asset, not another authored caption. Source-reference paths, line ranges and
+labels are provenance/interactive citation metadata. `meta.views` labels/notes
+and locale/translation catalog strings belong to Viewer controls, not static
+scene copy; they do not silently translate authored labels. Output filenames
+and repository descriptors are not drawn. These fields remain in the original
+spec for their owning renderer/Viewer paths.
+
+#### Complete preset and route-identity contract
+
+The preset resolver consumes the same accepted lists as document validation.
+A table-driven audit covers every family/preset in both endpoint directions,
+including authored channel-coordinate overrides. Named presets have concrete
+port/channel intent, not an `auto` fall-through: horizontal/vertical orthogonal
+midpoint corridors; outer right/left and upper/lower channels; dataflow's
+vertical channel; and drop's source-relative inter-box gap. Workflow drop
+carries its validated bias through checked Q16 interpolation; lifecycle drop
+uses the midpoint. When no safe vertical gap exists, drop chooses an explicit
+bottom detour. Explicit waypoints bypass unused generated channels. `auto`
+remains automatic. A `straight` preference that needs bends to stay orthogonal
+and obstacle-free gets a nonfatal preset-adjusted notice naming the preset and
+its repair, rather than an undisclosed replacement.
+
+| Families | Accepted preset | Generated corridor |
+| --- | --- | --- |
+| All four routed families | `auto`, `straight` | Automatic obstacle-safe path; `straight` discloses bends |
+| Architecture | `orthogonal-h`, `orthogonal-v` | Midpoint X/Y between effective escaped ports |
+| Workflow | `outside-right` | Right/right ports, X outside the whole scene |
+| Workflow | `return-left` | Left/left ports, X left of both endpoints |
+| Workflow, Lifecycle | `drop` | Facing vertical ports and source-relative clear Y gap; explicit bottom detour when spans overlap |
+| Workflow, Dataflow, Lifecycle | `bottom-channel` | Bottom/bottom ports, Y below both endpoints |
+| Workflow | `up-channel` | Top/top ports, Y above both endpoints |
+| Dataflow, Lifecycle | `top-channel` | Top/top ports, Y above both endpoints |
+| Dataflow | `vertical-channel` | Facing horizontal ports, X beyond the source escape toward the target |
+| Lifecycle | `right-channel`, `left-channel` | Matching right/right or left/left ports, X beyond both endpoints |
+| Sequence | None | Authored message timeline and lifeline ports, no route-preset input |
+
+All authored route IDs are reserved before anonymous output IDs are allocated.
+Generated names skip every reserved name, even an authored name later in the
+source array. Internal failures and diagnostic paths use the source ordinal,
+not a route display ID. An all-family blocked-plus-clear regression deliberately
+collides an authored name with an anonymous edge's original fallback and checks
+unique output IDs, the original source path and the unaffected clear route.
+That regression enters through the typed scene builder: current E1 public ID
+syntax already rejects colons, but the internal naming/routing contract must
+remain safe independently. Public-input tests also cover distinct authored and
+anonymous IDs. Architecture overrides use its admitted `via` coordinates;
+`channelX`/`channelY` overrides are tested on the families that admit them.
+
+The round-two route/text audit, SDK tree `4185e16a`, passed 117 core tests,
+two document differential tests, clippy and binding drift in the remote Linux
+container. All 259 native/test-WASM scene reports are byte-identical; both
+Chromium probes passed without a retry. Normal product exports still omit
+corpus tooling. Validation is 324,219 B gzip and the separate lazy geometry
+chunk is 1,455,867 B. These are source-bound remote reproductions; the new-head
+hosted matrix/native gates and S3 cold-load/layout budgets remain unverified.

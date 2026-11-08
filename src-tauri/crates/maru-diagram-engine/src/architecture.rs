@@ -7,6 +7,9 @@ use std::collections::HashSet;
 
 pub type ArchitectureMeta = Meta;
 
+pub(crate) const ARCHITECTURE_ROUTES: &[&str] =
+    &["auto", "straight", "orthogonal-h", "orthogonal-v"];
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(deny_unknown_fields)]
@@ -299,11 +302,7 @@ pub(crate) fn validate(value: Value) -> Vec<Diagnostic> {
             }
         }
         if let Some(v) = &edge.route {
-            ctx.enum_value(
-                v,
-                &["auto", "straight", "orthogonal-h", "orthogonal-v"],
-                &format!("{p}/route"),
-            );
+            ctx.enum_value(v, ARCHITECTURE_ROUTES, &format!("{p}/route"));
         }
         if let Some(n) = edge.label_segment {
             ctx.integer(n, Some(0.0), None, &format!("{p}/labelSegment"));

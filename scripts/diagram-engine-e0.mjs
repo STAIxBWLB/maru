@@ -32,6 +32,9 @@ if (action === "types") {
   // references these URLs, so validation cannot inline or fetch them eagerly.
   sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-layout", "--target", "wasm32-unknown-unknown"]);
   sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", join(sdk, "target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm"), join(root, "src/lib/diagram/__generated__/engine-geometry")]);
+  // Corpus hashing belongs only to the dedicated CI test build, never the
+  // normal layout artifact whose bytes and cold load the browser measures.
+  run(process.execPath, [join(root, "scripts/diagram-engine-e2-wasm-hashes.mjs"), "--assert-product", join(root, "src/lib/diagram/__generated__/engine-geometry")]);
   // Build the real browser facade, including generated assets, with Vite's
   // library pipeline. Its output is the artifact the browser measurement loads.
   const { build } = await import("vite");

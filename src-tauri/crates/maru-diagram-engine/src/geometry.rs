@@ -178,6 +178,23 @@ pub struct GeometryRoute {
     pub from: String,
     pub to: String,
     pub points: Vec<GeometryPoint>,
+    pub variant: Option<String>,
+    pub role: Option<String>,
+    pub width: Option<Coord>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryGlyph {
+    pub glyph_id: u16,
+    pub input: String,
+    pub position: GeometryPoint,
+    pub ink: GeometryBox,
+    pub advance: Coord,
+    pub ignored: bool,
+    pub replaced: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -192,6 +209,8 @@ pub struct GeometryLabel {
     pub text: String,
     pub bounds: GeometryBox,
     pub font: FontIdentity,
+    pub font_size: Coord,
+    pub glyphs: Vec<GeometryGlyph>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -291,6 +310,17 @@ pub struct PinResolution {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// These output namespaces describe member/timeline-derived geometry, not
+/// independently authored position targets. Nodes with similar IDs are unaffected.
+pub(crate) fn is_derived_container_id(id: &str) -> bool {
+    id.split_once(':').is_some_and(|(role, _)| {
+        matches!(
+            role,
+            "boundary" | "stage" | "segment" | "activation" | "card"
+        )
+    })
+}
+
 /// Resolve against current semantic members, never against array slots or an
 /// exact source hash. Placement supplies its current node/container identity set.
 /// Retained pins keep their input order and exact fixed-point positions.
@@ -311,13 +341,22 @@ pub fn resolve_pins<'a>(
         result.diagnostics.push(Diagnostic {
             code: "document/pin-source-stale".into(), path: "/pinSet/sourceSpecSha256".into(),
             rule: "pin-v1/source-staleness".into(),
-            message: "the source spec changed; pins for surviving semantic members are retained".into(),
+            message: "the source spec changed; pins for surviving independent members are retained".into(),
             fix: "review retained positions after the edit and update the pin set source hash when saving".into(),
         });
     }
     let members: HashMap<_, _> = members.into_iter().map(|(kind, id)| (id, kind)).collect();
     for (index, pin) in pin_set.pins.iter().enumerate() {
         if let Some(kind) = members.get(pin.target_id.as_str()) {
+            if *kind == GeometryTargetKind::Container && is_derived_container_id(&pin.target_id) {
+                result.diagnostics.push(Diagnostic {
+                    code:"document/pin-member-removed".into(),path:format!("/pinSet/pins/{index}"),
+                    rule:"pin-v1/derived-container".into(),
+                    message:format!("pin {:?} was dropped because this container's position derives from its members",pin.target_id),
+                    fix:"remove this pin and edit or pin the members or timeline that determine this container".into(),
+                });
+                continue;
+            }
             let mut retained = pin.clone();
             retained.target_kind = *kind;
             result.pins.push(retained);
@@ -461,6 +500,7 @@ pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
         GeometryNode::decl(cfg),
         GeometryContainer::decl(cfg),
         GeometryRoute::decl(cfg),
+        GeometryGlyph::decl(cfg),
         GeometryLabel::decl(cfg),
         GeometryLegendEntry::decl(cfg),
         GeometryLegend::decl(cfg),
@@ -624,6 +664,43 @@ mod tests {
         );
         assert_eq!(resolved.pins[0].target_kind, GeometryTargetKind::Container);
         assert!(resolved.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn derived_containers_are_dropped_individually_but_explicit_members_remain_pinnable() {
+        let ids = [
+            "boundary:0",
+            "stage:0",
+            "segment:0",
+            "activation:0",
+            "card:0",
+            "lane:main",
+            "group:workers",
+            "phase:build",
+        ];
+        let pins:Vec<_>=ids.iter().map(|id|serde_json::json!({"targetId":id,"targetKind":"container","position":{"x":64,"y":128}})).collect();
+        let request = parse_layout_request(&request_json(serde_json::json!(pins))).unwrap();
+        let resolution = resolve_pins(
+            &request,
+            ids.iter().map(|id| (GeometryTargetKind::Container, *id)),
+        );
+        assert_eq!(
+            resolution
+                .pins
+                .iter()
+                .map(|p| p.target_id.as_str())
+                .collect::<Vec<_>>(),
+            ids[5..]
+        );
+        assert_eq!(resolution.diagnostics.len(), 5);
+        for (index, diagnostic) in resolution.diagnostics.iter().enumerate() {
+            assert_eq!(diagnostic.code, "document/pin-member-removed");
+            assert_eq!(diagnostic.path, format!("/pinSet/pins/{index}"));
+            assert!(diagnostic
+                .message
+                .contains("this container's position derives from its members"));
+            assert!(!diagnostic.fix.is_empty());
+        }
     }
 
     #[test]

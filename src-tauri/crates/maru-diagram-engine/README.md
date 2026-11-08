@@ -15,8 +15,10 @@ required-edge, and required-path contract. Lifecycle checks include lane and
 transition references. Workflow/lifecycle v2 authored-coordinate restrictions are document rules;
 their readable layout calculation is outside E1.
 
-This is document validity only. It does not compute layout, route relationships,
-check geometry or label/legend fit, or render artifacts. A passed schema gate
+The default feature provides document validity only. The optional `geometry`
+feature computes deterministic placement and orthogonal routes, with measured
+labels, legend and page bounds. Renderer-constraint parity remains the E2 final
+stage; neither feature renders artifacts. A passed schema gate
 does not imply those checks passed. Generated TypeScript declarations describe
 the Serde model, including optional fields; they do not validate runtime JSON.
 Defaulted Option inputs accept omission and null; defaulted Vec inputs accept
@@ -29,12 +31,16 @@ Optional features:
 - `wasm` exports the multi-type `validate_diagram_json` dispatcher and
   `parse_receipt_json` through wasm-bindgen. `validate_architecture_json`
   remains as a compatibility alias to the dispatcher.
-- `geometry` enables S1 fixed-point DTOs, pin preflight and pinned Noto Sans CJK
-  KR metrics. This stage exposes no scene-layout success function. Coordinate
+- `geometry` enables `layout::layout_json`, fixed-point DTOs, pin reconciliation
+  and pinned Noto Sans CJK KR metrics for all five document families. Coordinate
   units are 1/64 pixel; runtime font tables are integer-only and separately OFL
   licensed under `src/metrics/data/`.
-- `wasm-layout` exports actual text metrics as a separate lazy WASM binary;
-  default `wasm` validation excludes both geometry and metric tables.
+- `wasm-layout` exports layout and text metrics as the normal lazy WASM binary;
+  it excludes corpus tooling. Default `wasm` validation excludes geometry and
+  metric tables.
+- `geometry-corpus` is an explicit test/CI feature for the native corpus runner;
+  combined with `wasm-layout` it exposes corpus hashing in a separate test
+  artifact. The product JS and WASM export guard rejects that symbol.
 - `font-tools` enables the host-only pinned-font generator. It is never a
   dependency of the runtime geometry or validation path.
 - `typegen` enables `export-types`, which prints a deterministic TypeScript

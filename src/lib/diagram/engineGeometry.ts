@@ -1,18 +1,39 @@
-/** Lazy E2 foundation. This module alone owns metric-WASM asset references. */
-import type { Diagnostic, TextMetrics } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+/** Lazy test-only E2 layout/metrics. This module alone owns geometry-WASM asset references. */
+import type { Diagnostic, TextMetrics, GeometryReport, LayoutRequest } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 export interface GeometryFoundation {
   measureText(text: string, weight: 400 | 700, size: number): TextMetrics;
 }
-export async function loadGeometryFoundation(): Promise<GeometryFoundation> {
+export interface GeometryEngine extends GeometryFoundation {
+  layout(input: LayoutRequest): GeometryReport;
+}
+export async function loadGeometryEngine(): Promise<GeometryEngine> {
   const moduleUrl = new URL("./__generated__/engine-geometry/maru_diagram_engine.js", import.meta.url).href;
   const wasmUrl = new URL("./__generated__/engine-geometry/maru_diagram_engine_bg.wasm", import.meta.url);
   const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
-  if (typeof bindings.default !== "function" || typeof bindings.measure_text_json !== "function") {
-    throw new Error("Geometry metric bindings are missing; run node scripts/diagram-engine-e0.mjs wasm and reload the measurement page.");
+  if (typeof bindings.default !== "function" || typeof bindings.measure_text_json !== "function" || typeof bindings.layout_json !== "function") {
+    throw new Error("Geometry layout/metric bindings are missing; run node scripts/diagram-engine-e0.mjs wasm and reload the measurement page.");
   }
   await bindings.default({ module_or_path: wasmUrl });
   const measure = bindings.measure_text_json as (text: string, weight: number, size: number) => string;
-  return { measureText(text, weight, size) {
+  const layout = bindings.layout_json as (input: string) => string;
+  return { layout(input) {
+    let encoded: string;
+    try { encoded = JSON.stringify(input); }
+    catch { throw new Error("Layout input cannot be serialized; provide an acyclic LayoutRequest with finite fixed-point pins and retry."); }
+    if (typeof encoded !== "string") throw new Error("Layout input is missing; provide a LayoutRequest with specJson and retry.");
+    let value: unknown;
+    try { value = JSON.parse(layout(encoded)); }
+    catch { throw new Error("Geometry engine returned invalid JSON; rebuild compatible WASM bindings and reload the test page."); }
+    if (!value || typeof value !== "object" || !("apiVersion" in value) || value.apiVersion !== 1
+        || !("ok" in value) || typeof value.ok !== "boolean" || !("diagnostics" in value) || !Array.isArray(value.diagnostics)
+        || !("receipt" in value) || !value.receipt || typeof value.receipt !== "object"
+        || ((value.ok || ("geometry" in value && value.geometry != null)) && (!("geometry" in value) || !value.geometry || typeof value.geometry !== "object"
+          || !("nodes" in value.geometry) || !Array.isArray(value.geometry.nodes)
+          || !("routes" in value.geometry) || !Array.isArray(value.geometry.routes)))) {
+      throw new Error("Geometry engine returned an incompatible scene report; regenerate bindings and rebuild the same SDK revision.");
+    }
+    return value as GeometryReport;
+  }, measureText(text, weight, size) {
     if (typeof text !== "string" || (weight !== 400 && weight !== 700)
         || !Number.isInteger(size) || size <= 0 || size > 2147483647) {
       throw new Error("Text metric arguments are outside the fixed-point font contract; use string text, weight 400 or 700, and a positive signed-32-bit size in 1/64 pixel units.");
@@ -22,3 +43,6 @@ export async function loadGeometryFoundation(): Promise<GeometryFoundation> {
     return report.metrics;
   } };
 }
+
+/** S1 compatibility name; both calls share the same lazy geometry artifact. */
+export const loadGeometryFoundation = loadGeometryEngine;

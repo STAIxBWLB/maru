@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {"title": "Partial scene", "output": "partial-route.html"},
+  "components": [
+    {"id": "a", "type": "backend", "label": "A", "pos": [100, 180], "size": [80, 60]},
+    {"id": "b", "type": "backend", "label": "B", "pos": [500, 180], "size": [80, 60]},
+    {"id": "wall", "type": "backend", "label": "W", "pos": [80, 160], "size": [140, 100]},
+    {"id": "c", "type": "backend", "label": "C", "pos": [100, 500], "size": [80, 60]},
+    {"id": "d", "type": "backend", "label": "D", "pos": [500, 500], "size": [80, 60]}
+  ],
+  "connections": [
+    {"id": "blocked", "from": "a", "to": "b"},
+    {"id": "clear", "from": "c", "to": "d"}
+  ]
+}

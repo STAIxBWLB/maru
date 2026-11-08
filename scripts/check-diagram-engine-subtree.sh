@@ -10,7 +10,7 @@ trap 'rm -rf "$fixture"' EXIT
 git archive "$split" | tar -x -C "$fixture"
 (
   cd "$fixture"
-  CARGO_BUILD_JOBS=2 cargo test --locked -p maru-diagram-engine --features geometry,typegen -- --test-threads=2
+  CARGO_BUILD_JOBS=2 cargo test --locked -p maru-diagram-engine --features geometry,typegen,geometry-corpus -- --test-threads=2
   CARGO_BUILD_JOBS=2 cargo test --locked -p tauri-plugin-maru-diagram -- --test-threads=2
 )
 echo "E0 subtree split $split: both standalone crate test suites passed"

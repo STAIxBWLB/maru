@@ -11,11 +11,15 @@ mod common;
 pub mod dataflow;
 #[cfg(feature = "geometry")]
 pub mod geometry;
+#[cfg(feature = "geometry-corpus")]
+pub mod geometry_corpus;
 #[cfg(feature = "geometry")]
 pub mod layout;
 pub mod lifecycle;
 #[cfg(feature = "geometry")]
 pub mod metrics;
+#[cfg(feature = "geometry")]
+pub mod routing;
 pub mod rules;
 pub mod sequence;
 pub mod workflow;
@@ -358,13 +362,28 @@ pub fn parse_receipt_json_for_wasm(input: &str) -> String {
     }
 }
 
-/// S1 exposes real text metrics only; the scene-layout API is added after placement/routing.
+/// The lazy geometry slice exposes layout and text metrics; the scene-layout API is added after placement/routing.
 #[cfg(feature = "wasm-layout")]
 #[wasm_bindgen]
 pub fn measure_text_json(text: &str, weight: u16, size: i32) -> String {
     match metrics::measure_text(text, weight, size) {
         Ok(metrics) => serde_json::json!({ "ok": true, "metrics": metrics }).to_string(),
         Err(diagnostic) => serde_json::json!({ "ok": false, "diagnostic": diagnostic }).to_string(),
+    }
+}
+
+#[cfg(feature = "wasm-layout")]
+#[wasm_bindgen(js_name = layout_json)]
+pub fn layout_json_wasm(input: &str) -> String {
+    serde_json::to_string(&layout::layout_json(input)).expect("integer geometry report serializes")
+}
+
+#[cfg(all(feature = "wasm-layout", feature = "geometry-corpus"))]
+#[wasm_bindgen(js_name = scene_corpus_hashes)]
+pub fn scene_corpus_hashes_wasm(input: &str) -> String {
+    match geometry_corpus::scene_corpus_hashes(input) {
+        Ok(report) => report,
+        Err(diagnostic) => serde_json::json!({"error":diagnostic}).to_string(),
     }
 }
 

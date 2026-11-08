@@ -1,0 +1,394 @@
+{
+  "schemaVersion": 1,
+  "stage": "S2 placement/routing/determinism, not S3 renderer parity or performance acceptance",
+  "sdkTree": "c399848c591724542380bcee959f515cce537e90",
+  "executionScope": {
+    "environment": "remote Linux x64 container",
+    "rust": "1.98.0",
+    "cargoBuildJobs": 2,
+    "browserWorkers": 1,
+    "hostedCi": "pending"
+  },
+  "checks": {
+    "coreUnit": 82,
+    "differential": 2,
+    "clippy": "passed with -D warnings for geometry/typegen lib",
+    "defaultFeatureCompile": "passed",
+    "boundary": "passed",
+    "bindingDrift": "passed",
+    "browser": {
+      "startTime": "2026-11-08T21:11:00.902Z",
+      "duration": 8470.278,
+      "expected": 2,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "sceneAgreement": {
+    "corpusCases": 256,
+    "acceptedScenes": 37,
+    "structuredRefusals": 219,
+    "nativeWasmBytesEqual": true,
+    "reportSha256": "4c074077d8d79113a652e34c1295d3cf3fe85e64d90d41965c156686e45c487b",
+    "reportBytes": 57995,
+    "repeatEveryCase": true,
+    "hostedMacWindows": "pending"
+  },
+  "browserProof": {
+    "scope": "functional lazy WASM scene/pin/repeat proof, no performance claim",
+    "proof": [
+      {
+        "type": "architecture",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "workflow",
+        "version": 1,
+        "nodes": 3,
+        "routes": 2,
+        "orthogonal": true
+      },
+      {
+        "type": "sequence",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "dataflow",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "lifecycle",
+        "version": 1,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      },
+      {
+        "type": "workflow",
+        "version": 2,
+        "nodes": 3,
+        "routes": 2,
+        "orthogonal": true
+      },
+      {
+        "type": "lifecycle",
+        "version": 2,
+        "nodes": 2,
+        "routes": 1,
+        "orthogonal": true
+      }
+    ]
+  },
+  "payload": {
+    "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+    "buildMs": 44675.444533,
+    "platform": "linux",
+    "arch": "x64",
+    "sizes": [
+      {
+        "name": "engine-e0.js",
+        "bytes": 1307013,
+        "gzipBytes": 324219,
+        "path": "validation"
+      },
+      {
+        "name": "core-B2rNBH2e.js",
+        "bytes": 114,
+        "gzipBytes": 122,
+        "path": "lazy-transport"
+      },
+      {
+        "name": "engineGeometry-BJtjDuZ8.js",
+        "bytes": 4807862,
+        "gzipBytes": 1500551,
+        "path": "lazy-geometry-metrics"
+      }
+    ],
+    "gzipBytes": 324219,
+    "validationGzipBytes": 324219,
+    "lazyGeometryGzipBytes": 1500551,
+    "lazyTransportGzipBytes": 122,
+    "totalGzipBytes": 1824892
+  },
+  "layoutP95": {
+    "status": "deferred to S3",
+    "targetMs": 200
+  },
+  "lazyColdLoad": {
+    "status": "deferred to S3"
+  },
+  "rendererRuleParity": {
+    "status": "deferred to S3"
+  },
+  "pinPolicyFollowUp": {
+    "sdkTree": "2862495c02840e10ef7c2c03ea125c3bdaf0e96c",
+    "policy": "Derived boundary/stage/segment/activation/card frames use role:ordinal output IDs, ignore independent pins and drop them with a per-pin diagnostic; explicit authored-ID entities/lanes/groups/phases remain pinnable.",
+    "checks": {
+      "coreUnit": 84,
+      "differential": 2,
+      "clippy": "passed geometry/typegen lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T21:22:31.841Z",
+        "duration": 7585.11,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      }
+    },
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "f35fb2b70099a53f1b9fe692d12ddaa4fd62f5cef31662b54db4dfa8d595a961",
+      "reportBytes": 57995,
+      "corpusCases": 256,
+      "acceptedScenes": 37,
+      "structuredRefusals": 219
+    },
+    "payload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 16901.39933,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324219,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-Ds8yLhO2.js",
+          "bytes": 4724034,
+          "gzipBytes": 1482982,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324219,
+      "validationGzipBytes": 324219,
+      "lazyGeometryGzipBytes": 1482982,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1807323
+    },
+    "hostedCi": "pending"
+  },
+  "partialSceneFollowUp": {
+    "sdkTree": "5f8d81a9752d44e637373c28701532661e86564b",
+    "contract": "After placement, routing errors retain geometry with ok=false and empty points on the affected edge; other routes continue. Placement/input errors can still omit geometry.",
+    "checks": {
+      "coreUnit": 88,
+      "differential": 2,
+      "clippy": "passed geometry/typegen lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T21:32:54.266Z",
+        "duration": 7617.785000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "regressions": [
+        "enclosed endpoint retains all five nodes, clear second route, one unrouted edge and one source-edge diagnostic",
+        "per-call test-only budget exhaustion retains the same scene and clear second route; production caps unchanged",
+        "actual WASM enclosed-endpoint partial scene"
+      ]
+    },
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "f35fb2b70099a53f1b9fe692d12ddaa4fd62f5cef31662b54db4dfa8d595a961",
+      "reportBytes": 57995,
+      "corpusCases": 256,
+      "acceptedScenes": 37,
+      "structuredRefusals": 219
+    },
+    "payload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 16920.325819,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324219,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-CAKFbQMJ.js",
+          "bytes": 4726285,
+          "gzipBytes": 1489129,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324219,
+      "validationGzipBytes": 324219,
+      "lazyGeometryGzipBytes": 1489129,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1813470
+    },
+    "hostedCi": "pending"
+  },
+  "presetDenseFeatureFollowUp": {
+    "sdkTree": "97d4822bf22dd8d6029673e27a44139189aba34e",
+    "checks": {
+      "coreUnit": 97,
+      "differential": 2,
+      "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T21:49:13.828Z",
+        "duration": 7592.561,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "denseAstar": "passed all three scenes: production finds a route that fails with route-budget at0; visible adjacent paths remain",
+      "productIsolation": "normal JS and actual WASM exports omit scene_corpus_hashes"
+    },
+    "denseFixtures": {
+      "synthetic": true,
+      "seed": 5502026,
+      "scenes": 3,
+      "nodesPerScene": 200,
+      "relationshipsPerScene": 48,
+      "combinedCases": 259,
+      "generatorDrift": "passed"
+    },
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "a6e0df1fd8e9a4470d9da05015b32cc335f6fd7a54334206b56fd0be56ab8906",
+      "reportBytes": 58637,
+      "corpusSha256": "5f547a61ae57b679fb6ff6504639f0bcdea8405ae1f4c8adcc590242325754ab",
+      "corpusCases": 259,
+      "successfulReports": 38,
+      "nonSuccessReports": 221,
+      "note": "Dense non-success reports retain placement geometry and any completed routes; the unit proof checks200nodes and actual successful A* detours in each scene."
+    },
+    "productPayload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 16952.153394,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324220,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-B0rq_c8v.js",
+          "bytes": 4355565,
+          "gzipBytes": 1434912,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324220,
+      "validationGzipBytes": 324220,
+      "lazyGeometryGzipBytes": 1434912,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1759254
+    },
+    "testFeature": "geometry-corpus; separate wasm-test bindings only",
+    "hostedCi": "pending"
+  },
+  "routeAndTextAuditFollowUp": {
+    "sdkTree": "4185e16a009d5a024a840c4be3efc50a8c756d75",
+    "executionScope": "remote Linux x64 container; S2 functional and deterministic reproduction, not hosted S3 acceptance",
+    "checks": {
+      "coreUnit": 117,
+      "differential": 2,
+      "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
+      "bindingDrift": "passed",
+      "browser": {
+        "startTime": "2026-11-08T22:21:48.004Z",
+        "duration": 7760.860000000001,
+        "expected": 2,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "productIsolation": "normal JS and actual WASM omit scene_corpus_hashes"
+    },
+    "routeIdentity": "all authored IDs reserved before anonymous naming; source ordinals own failures and paths; five-family blocked/clear collision regression at typed scene-builder seam",
+    "presetAudit": {
+      "acceptedFamilyPresetPairs": 23,
+      "directions": 2,
+      "authoredOverrideVariants": 2,
+      "inputOverrides": "architecture via; workflow/dataflow/lifecycle channel coordinates; resolver tests also cover explicit sides",
+      "workflowBias": "source-relative Q16 interpolation in actual routed drop corridor"
+    },
+    "visibleTextAudit": "docs/diagram.md enumerates all five families plus shared metadata, legends and cards; dataflow classification is measured with flow label",
+    "sceneAgreement": {
+      "nativeWasmBytesEqual": true,
+      "reportSha256": "51010131a71cc488a2da0c9052e983133c6c76e692396af2b8daeb91ab884108",
+      "reportBytes": 58637,
+      "corpusSha256": "5f547a61ae57b679fb6ff6504639f0bcdea8405ae1f4c8adcc590242325754ab",
+      "corpusCases": 259,
+      "successfulReports": 38,
+      "nonSuccessReports": 221
+    },
+    "productPayload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 17225.683848999997,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324219,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-CoXTTQCb.js",
+          "bytes": 4431389,
+          "gzipBytes": 1455867,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324219,
+      "validationGzipBytes": 324219,
+      "lazyGeometryGzipBytes": 1455867,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1780208
+    },
+    "hostedCi": "pending on the next pushed head"
+  }
+}

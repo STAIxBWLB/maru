@@ -35,3 +35,8 @@ export async function loadWasmEngine(): Promise<DiagramEngine> {
 export async function loadGeometryFoundation() {
   return (await import("./engineGeometry")).loadGeometryFoundation();
 }
+
+/** Explicit test-only geometry loading; product apply/canvas does not call it. */
+export async function loadGeometryEngine() {
+  return (await import("./engineGeometry")).loadGeometryEngine();
+}

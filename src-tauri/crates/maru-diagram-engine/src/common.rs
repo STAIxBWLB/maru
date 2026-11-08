@@ -17,6 +17,17 @@ pub const COMPONENT_TYPES: &[&str] = &[
 pub const VARIANTS: &[&str] = &["default", "emphasis", "security", "dashed"];
 pub const SIDES: &[&str] = &["left", "right", "top", "bottom"];
 
+pub(crate) fn legend_keys(kind: &str) -> Vec<&'static str> {
+    match kind {
+        "sequence" => vec!["default", "emphasis", "security", "dashed", "return"],
+        "dataflow" => vec!["default", "emphasis", "security", "dashed", "database"],
+        "lifecycle" => vec![
+            "start", "active", "waiting", "decision", "success", "failure", "neutral", "external",
+        ],
+        _ => COMPONENT_TYPES.to_vec(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typegen", ts(rename = "ArchitectureMeta"))]
@@ -696,15 +707,7 @@ fn validate_meta(meta: &Meta, raw: &Value, min_viewbox: (f64, f64), ctx: &mut Co
             ctx.enum_value(mode, &["auto", "all", "hidden"], "/meta/legend/mode");
         }
         if let Some(entries) = &legend.entries {
-            let keys = match ctx.kind {
-                "sequence" => vec!["default", "emphasis", "security", "dashed", "return"],
-                "dataflow" => vec!["default", "emphasis", "security", "dashed", "database"],
-                "lifecycle" => vec![
-                    "start", "active", "waiting", "decision", "success", "failure", "neutral",
-                    "external",
-                ],
-                _ => COMPONENT_TYPES.to_vec(),
-            };
+            let keys = legend_keys(ctx.kind);
             for (key, entry) in entries {
                 let p = pointer("/meta/legend/entries", key);
                 ctx.enum_value(key, &keys, &p);

@@ -9,7 +9,7 @@ use std::collections::HashSet;
 const STATE_TYPES: &[&str] = &[
     "start", "active", "waiting", "decision", "success", "failure", "neutral", "external",
 ];
-const LIFECYCLE_ROUTES: &[&str] = &[
+pub(crate) const LIFECYCLE_ROUTES: &[&str] = &[
     "auto",
     "straight",
     "drop",

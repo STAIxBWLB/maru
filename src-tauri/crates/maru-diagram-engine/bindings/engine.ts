@@ -103,9 +103,11 @@ positionSource: GeometryPositionSource, };
 
 export type GeometryContainer = { id: string, kind: string, bounds: GeometryBox, };
 
-export type GeometryRoute = { id?: string | null, from: string, to: string, points: Array<GeometryPoint>, };
+export type GeometryRoute = { id?: string | null, from: string, to: string, points: Array<GeometryPoint>, variant: string | null, role: string | null, width: number | null, };
 
-export type GeometryLabel = { id?: string | null, targetId: string, text: string, bounds: GeometryBox, font: FontIdentity, };
+export type GeometryGlyph = { glyphId: number, input: string, position: GeometryPoint, ink: GeometryBox, advance: number, ignored: boolean, replaced: boolean, };
+
+export type GeometryLabel = { id?: string | null, targetId: string, text: string, bounds: GeometryBox, font: FontIdentity, fontSize: number, glyphs: Array<GeometryGlyph>, };
 
 export type GeometryLegendEntry = { key: string, label: string, bounds: GeometryBox, };
 
