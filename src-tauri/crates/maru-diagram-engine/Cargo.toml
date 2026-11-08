@@ -1,8 +1,8 @@
 [package]
 name = "maru-diagram-engine"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90.0"
 license = "UNLICENSED"
 description = "Maru's independent typed diagram validation engine"
 
@@ -16,12 +16,12 @@ typegen = ["dep:ts-rs"]
 bindgen-web = ["wasm", "dep:wasm-bindgen-cli-support"]
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-wasm-bindgen = { workspace = true, optional = true }
-ts-rs = { workspace = true, optional = true }
-wasm-bindgen-cli-support = { workspace = true, optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+wasm-bindgen = { version = "=0.2.118", optional = true }
+ts-rs = { version = "=12.0.1", features = ["serde-json-impl", "no-serde-warnings"], optional = true }
+wasm-bindgen-cli-support = { version = "=0.2.118", optional = true }
 
 [[bin]]
 name = "export-types"

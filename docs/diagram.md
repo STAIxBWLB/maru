@@ -572,9 +572,11 @@ release core in Chromium, so these are separate absolute measurements, not a
 cross-platform speedup claim. Build time includes tool compilation and bindgen
 work on that runner and is not a promised clean-cache duration.
 
-The WASM payload receipt sums gzip-level-9 sizes of the generated WASM and web
-JS plus the host facade source as conservative separately attributed overhead.
-It does not count the whole existing application bundle. Cold load uses a
+The payload receipt sums gzip-level-9 sizes of the actual minified browser
+library output. Vite library mode inlines the generated web JS and WASM assets;
+the facade includes both transport entry points. The browser loads that built
+artifact. This measures an isolated deliverable, not the whole existing app
+bundle; later product integration may emit separate binary assets. Cold load uses a
 fresh browser context and includes module initialization and first validation.
 The native cold sample includes lazy facade/fixture loading and the first IPC
 round trip. Render, layout, UI application/undo and visual checks are outside

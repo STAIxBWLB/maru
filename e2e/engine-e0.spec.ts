@@ -9,7 +9,7 @@ test.describe("independent engine WebAssembly spike", () => {
     const fixtures = [50, 1000].map((count) => JSON.parse(readFileSync(`src-tauri/crates/maru-diagram-engine/testdata/bench-${count}.json`, "utf8")) as { components: unknown[] });
     await page.goto("/");
     const result = await page.evaluate(async (inputs) => {
-      const modulePath = "/src/lib/diagram/engine.ts";
+      const modulePath = "/.engine-e0/browser/engine-e0.js";
       const coldStart = performance.now();
       const { loadWasmEngine } = await import(/* @vite-ignore */ modulePath) as { loadWasmEngine(): Promise<{ validate(input: string): Promise<{ ok: boolean; diagnostics: unknown[]; receipt: { engine: unknown } }> }> };
       const engine = await loadWasmEngine();

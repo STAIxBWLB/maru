@@ -16,6 +16,7 @@
 # - src-tauri/src/channel_delivery.rs
 # - src-tauri/src/lib.rs
 # - src-tauri/src/main.rs
+# - src-tauri/src/diagram_engine_e0.rs
 # - src-tauri/src/app_menu.rs
 # - src-tauri/src/site_view.rs
 # - src-tauri/src/site_launcher.rs

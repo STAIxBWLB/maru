@@ -9,7 +9,7 @@ export const NATIVE_PREFIXES = [
 ];
 export const NATIVE_FILES = [
   "src-tauri/src/ipc_policy.rs", "src-tauri/src/channel_delivery.rs", "src-tauri/src/lib.rs",
-  "src-tauri/src/main.rs", "src-tauri/src/app_menu.rs", "src-tauri/src/site_view.rs",
+  "src-tauri/src/main.rs", "src-tauri/src/diagram_engine_e0.rs", "src-tauri/src/app_menu.rs", "src-tauri/src/site_view.rs",
   "src-tauri/src/site_launcher.rs", "src-tauri/src/native_e2e.rs", "src-tauri/src/browser_passkeys.rs",
   "src-tauri/src/paths.rs", "src-tauri/src/terminal_hooks.rs",
   "src-tauri/build.rs", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock",

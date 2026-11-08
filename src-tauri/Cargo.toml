@@ -18,7 +18,7 @@ path = "src/main.rs"
 
 [workspace]
 members = [".", "maru-cli"]
-exclude = ["crates/maru-diagram-engine", "crates/tauri-plugin-maru-diagram"]
+exclude = ["crates", "crates/*"]
 default-members = ["."]
 resolver = "2"
 

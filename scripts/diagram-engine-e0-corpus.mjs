@@ -65,7 +65,8 @@ export async function collectCases(publicCandidates = []) {
     if (source.visibility !== "PUBLIC") throw new Error("Corpus source visibility was not verified; check it with gh before copying");
     add(`public-${String(i + 1).padStart(2, "0")}`, "architecture", "public-spec", source.spec, { kind: "public", repository: source.repo, sourceUrl: source.sourceUrl, blobSha: source.blobSha, visibility: "PUBLIC" });
   }
-  for (const [id, rule, change, expected] of [
+  /** @type {Array<[string, string, (spec: ReturnType<typeof seed>) => void, boolean]>} */
+  const generated = [
     ["valid", "ids", () => {}, true],
     ["blank-id", "ids", (s) => { s.components[0].id = ""; s.connections = []; }, false],
     ["duplicate-id", "ids", (s) => { s.components[1].id = "a"; s.connections = []; }, false],
@@ -76,7 +77,10 @@ export async function collectCases(publicCandidates = []) {
     ["too-many-cols", "grid-bounds", (s) => { s.layout.cols = 13; }, false],
     ["col-outside", "grid-bounds", (s) => { s.components[1].col = 4; }, false],
     ["negative-row", "grid-bounds", (s) => { s.components[0].row = -1; }, false],
-  ]) { const spec = seed(); change(spec); add(`generated-${id}`, "architecture", rule, spec, { kind: "synthetic-generated" }, expected); }
+  ];
+  for (const [id, rule, change, expected] of generated) {
+    const spec = seed(); change(spec); add(`generated-${id}`, "architecture", rule, spec, { kind: "synthetic-generated" }, expected);
+  }
   return cases;
 }
 function oracle(corpusCase) {

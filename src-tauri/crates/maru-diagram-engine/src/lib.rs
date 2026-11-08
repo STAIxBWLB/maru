@@ -618,6 +618,9 @@ pub fn typescript_declarations() -> String {
         ArchitectureBoundary::decl(&config),
         ArchitectureSpec::decl(&config),
     ]
+    .into_iter()
+    .map(|declaration| format!("export {declaration}"))
+    .collect::<Vec<_>>()
     .join("\n\n")
 }
 
@@ -770,5 +773,14 @@ mod tests {
         }
         assert!(architecture_inputs >= 22);
         assert_eq!(expected_subset, 12);
+    }
+
+    #[cfg(feature = "typegen")]
+    #[test]
+    fn generated_typescript_declarations_are_module_exports() {
+        let declarations = typescript_declarations();
+        assert!(declarations.starts_with("export type EngineIdentity"));
+        assert!(declarations.contains("export type EngineReceipt"));
+        assert!(declarations.contains("export type ValidationReport"));
     }
 }

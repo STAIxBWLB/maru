@@ -13,7 +13,7 @@ describe("E0 engine IPC measurement", () => {
     const result = await browser.executeAsync((done: (value: Measurement) => void) => {
       const deadline = Date.now() + 20000;
       const tick = () => {
-        const bridge = window.__MARU_NATIVE_E2E__;
+        const bridge = window.__MARU_NATIVE_E2E__ as unknown as { diagramEngineMeasurement(): Promise<Measurement> } | undefined;
         if (bridge) {
           bridge.diagramEngineMeasurement().then(done).catch((error: unknown) => done({ transport: "ipc", coldMs: 0, samples: [], error: String(error) }));
         } else if (Date.now() >= deadline) done({ transport: "ipc", coldMs: 0, samples: [], error: "Native bridge absent; rebuild with make test-e2e-native." });
