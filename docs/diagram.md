@@ -45,9 +45,8 @@ Backend commands (`src-tauri/src/diagram/mod.rs`): `diagram_save_document`,
 and `diagram_write_report_asset` (report assets; extension-whitelisted to
 svg/png/json, traversal-safe, atomic, write-guard checked). Generation adds
 `archify_validate_candidate` (`src-tauri/src/archify.rs`, pinned-engine
-validation) and the architecture gallery adds
-`architecture_read_sibling_spec` (`src-tauri/src/architecture.rs`, guarded
-sibling read). The command-isolation gate expects the registered command
+validation). The retired gallery commands are no longer registered.
+The command-isolation gate expects the registered command
 count set in `Makefile` (`--expected-count`) with recorded evidence.
 
 ## Canvas & nodes
