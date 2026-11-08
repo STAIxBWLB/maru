@@ -634,7 +634,8 @@ CI dry-runs `git subtree split --prefix=src-tauri/crates`, extracts the result,
 and runs each crate's tests there without the app or a Node engine host.
 The local split dry run produced commit `61e16d8f` (SDK tree `b19f5140`);
 its source-only archive passed core 5/5 and plugin 3/3 tests on dgx02 with Node
-removed from PATH. The original SDK's typegen-enabled suite passed 6/6.
+removed from PATH. The baseline SDK's typegen-enabled suite passed 6/6; the N4 receipt
+follow-up passed 7/7 plus plugin 3/3 on dgx02.
 
 The parity corpus currently has 31 sanitized cases: architecture 22, two
 each for workflow, sequence, dataflow and lifecycle, plus one synthetic

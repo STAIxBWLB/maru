@@ -396,5 +396,21 @@
       "scope": "pre-serialized spec string; invoke envelope transport, core validation/hash and reply decode; 30 warm samples",
       "transport": "ipc"
     }
+  },
+  "followUp": {
+    "sourceCommit": "c67824624df362c826555dec0fd3cd60692f7902",
+    "sdkTree": "08e384981a857ef961ea9714ff4cdbe49d563f74",
+    "executionHost": "dgx02 remote dev container",
+    "coreTypegenTests": {
+      "passed": 7,
+      "failed": 0
+    },
+    "pluginTests": {
+      "passed": 3,
+      "failed": 0
+    },
+    "appNativeFeatureCheck": "passed",
+    "formatAndTypeDrift": "passed",
+    "scope": "N1-N5 source follow-up; no performance samples are attributed to this SDK revision; fresh hosted CI required"
   }
 }
