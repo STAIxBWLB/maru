@@ -90,3 +90,7 @@ docs/design-qa/
 # E0 measurement outputs and private intake inventory
 .engine-e0/
 src/lib/diagram/__generated__/engine-e0/
+
+# Geometry foundation measurement/font cache and generated lazy bindings
+.engine-e2/
+src/lib/diagram/__generated__/engine-geometry/

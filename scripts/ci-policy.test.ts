@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { classifyPrChanges, evaluateCiJobs, isDocsOnlyPath } from "./ci-policy.mjs";
+import { classifyPrChanges, evaluateCiJobs, isDocsOnlyPath, geometryForPushComparison } from "./ci-policy.mjs";
 
 const policyPath = resolve(process.cwd(), "scripts/ci-policy.mjs");
 const decisionOutputs = {
@@ -11,6 +11,7 @@ const decisionOutputs = {
   run_e2e: "false",
   run_native: "false",
   run_native_compile: "false",
+  run_geometry: "false",
 };
 
 function needs(overrides: Record<string, unknown> = {}) {
@@ -20,6 +21,7 @@ function needs(overrides: Record<string, unknown> = {}) {
     e2e: { result: "skipped" },
     "native-e2e-compile": { result: "skipped" },
     "native-e2e": { result: "skipped" },
+    "geometry-determinism": { result: "skipped" },
     ...overrides,
   };
 }
@@ -58,6 +60,7 @@ describe("PR change classification", () => {
       run_e2e: false,
       run_native: false,
       run_native_compile: false,
+      run_geometry: false,
     });
     expect(isDocsOnlyPath("docs/performance/evidence.json")).toBe(false);
     expect(classifyPrChanges(["docs/performance/evidence.json"]).run_full).toBe(true);
@@ -69,6 +72,7 @@ describe("PR change classification", () => {
       run_e2e: true,
       run_native: false,
       run_native_compile: true,
+      run_geometry: false,
     });
   });
 
@@ -89,6 +93,7 @@ describe("PR change classification", () => {
         run_e2e: true,
         run_native: true,
         run_native_compile: false,
+        run_geometry: path.startsWith("src-tauri/crates/"),
       });
     }
     expect(classifyPrChanges(["src/lib/ordinary.ts"], ["Native-E2E"])).toEqual({
@@ -96,7 +101,17 @@ describe("PR change classification", () => {
       run_e2e: true,
       run_native: true,
       run_native_compile: false,
+      run_geometry: false,
     });
+  });
+
+  it("selects deterministic SDK hashes only for engine/workflow paths", () => {
+    expect(classifyPrChanges(["src-tauri/crates/maru-diagram-engine/src/metrics/mod.rs"]).run_geometry).toBe(true);
+    expect(classifyPrChanges([".github/workflows/diagram-determinism.yml"]).run_geometry).toBe(true);
+    expect(classifyPrChanges(["rust-toolchain.toml"]).run_geometry).toBe(true);
+    expect(classifyPrChanges(["src/lib/ordinary.ts"]).run_geometry).toBe(false);
+    expect(classifyPrChanges(["docs/diagram.md"]).run_geometry).toBe(false);
+    expect(evaluateCiJobs(needs({ decision: { result: "success", outputs: { ...decisionOutputs, run_geometry: "true" } }, "geometry-determinism": { result: "failure" } })).ok).toBe(false);
   });
 
   it("treats deletions as their changed path and renames as both old and new paths through the CLI", () => {
@@ -110,6 +125,7 @@ describe("PR change classification", () => {
       run_e2e: false,
       run_native: false,
       run_native_compile: false,
+      run_geometry: false,
     });
 
     const renamedIntoNative = classifyThroughCli(
@@ -122,6 +138,7 @@ describe("PR change classification", () => {
       run_e2e: true,
       run_native: true,
       run_native_compile: false,
+      run_geometry: false,
     });
   });
 
@@ -158,6 +175,7 @@ describe("CI job aggregation", () => {
       run_e2e: "true",
       run_native: "false",
       run_native_compile: "true",
+      run_geometry: "false",
     };
     expect(evaluateCiJobs(needs({
       decision: { result: "success", outputs: sourceOutputs },
@@ -199,6 +217,7 @@ describe("CI job aggregation", () => {
       ["run_e2e", { ...decisionOutputs, run_e2e: "sometimes" }],
       ["run_native", { ...decisionOutputs, run_native: undefined }],
       ["run_native_compile", { ...decisionOutputs, run_native_compile: undefined }],
+      ["run_geometry", { ...decisionOutputs, run_geometry: undefined }],
     ] as const) {
       const result = evaluateCiJobs(needs({ decision: { result: "success", outputs } }));
       expect(result.ok).toBe(false);
@@ -217,6 +236,7 @@ describe("CI job aggregation", () => {
       ["e2e", "cancelled"],
       ["native-e2e-compile", undefined],
       ["native-e2e", "cancelled"],
+      ["geometry-determinism", "cancelled"],
     ] as const) {
       const resultState = result === undefined ? undefined : { result };
       const outcome = evaluateCiJobs(needs({ [job]: resultState }));
@@ -225,5 +245,22 @@ describe("CI job aggregation", () => {
     }
     expect(evaluateCiJobs(needs({ lint: { result: "skipped" } })).message)
       .toContain("additional CI gate lint did not succeed");
+  });
+});
+
+
+describe("geometry intent on main pushes", () => {
+  it("uses the PR path policy for docs, code, and renamed SDK paths", () => {
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "docs/diagram.md" }] })).toBe(false);
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "src/lib/other.ts" }] })).toBe(false);
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "src-tauri/crates/core.rs" }] })).toBe(true);
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "docs/moved.md", previous_filename: "src-tauri/crates/core.rs" }] })).toBe(true);
+    expect(geometryForPushComparison({ status: "identical", files: [] })).toBe(false);
+  });
+  it("fails closed on API errors, invalid paths, divergent history, and the API cap", () => {
+    for (const value of [null, {}, { status: "diverged", files: [] }, { status: "ahead", files: [null] }]) {
+      expect(() => geometryForPushComparison(value)).toThrow("keep the geometry gate enabled");
+    }
+    expect(geometryForPushComparison({ status: "ahead", files: Array.from({ length: 300 }, () => ({ filename: "docs/page.md" })) })).toBe(true);
   });
 });

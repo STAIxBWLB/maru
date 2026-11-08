@@ -20,6 +20,26 @@ export const NATIVE_FILES = [
   ".github/workflows/native-e2e.yml", "scripts/ci-policy.mjs",
 ];
 
+export function needsGeometryDeterminism(paths) {
+  return paths.some((name) => name.startsWith("src-tauri/crates/")
+    || name.startsWith("scripts/diagram-engine-e2")
+    || ["rust-toolchain.toml", "src/lib/diagram/engineGeometry.ts", ".github/workflows/diagram-determinism.yml", ".github/workflows/ci.yml", "scripts/ci-policy.mjs"].includes(name));
+}
+
+// Compare responses expose at most 300 files. At the cap, preserve the costly
+// gate rather than interpreting an incomplete list as a docs-only push.
+export function geometryForPushComparison(comparison) {
+  if (!comparison || !["ahead", "identical"].includes(comparison.status)
+      || !Array.isArray(comparison.files)
+      || comparison.files.some((file) => !file || typeof file.filename !== "string"
+        || (file.previous_filename !== undefined && typeof file.previous_filename !== "string"))) {
+    throw new Error("Push changed-file comparison is unavailable or incomplete; keep the geometry gate enabled and inspect the compare API result");
+  }
+  if (comparison.files.length >= 300) return true;
+  const paths = comparison.files.flatMap((file) => file.previous_filename ? [file.filename, file.previous_filename] : [file.filename]);
+  return needsGeometryDeterminism(paths);
+}
+
 export function isDocsOnlyPath(name) {
   // Performance JSON is gate input, even though it lives under docs/.
   if (name.startsWith("docs/performance/") && name.endsWith(".json")) return false;
@@ -42,6 +62,7 @@ export function classifyPrChanges(paths, labels = []) {
     run_e2e: !docsOnly,
     run_native: runNative,
     run_native_compile: !docsOnly && !runNative,
+    run_geometry: !docsOnly && needsGeometryDeterminism(paths),
   };
 }
 
@@ -50,12 +71,12 @@ export function evaluateCiJobs(needs) {
     return { ok: false, message: "CI decision did not succeed; inspect its logs and rerun CI" };
   }
   const outputs = needs.decision.outputs ?? {};
-  for (const flag of ["run_full", "run_e2e", "run_native", "run_native_compile"]) {
+  for (const flag of ["run_full", "run_e2e", "run_native", "run_native_compile", "run_geometry"]) {
     if (!["true", "false"].includes(outputs[flag])) {
       return { ok: false, message: `CI decision output ${flag} is invalid; inspect the decision and rerun CI` };
     }
   }
-  const gates = { verify: "run_full", e2e: "run_e2e", "native-e2e-compile": "run_native_compile", "native-e2e": "run_native" };
+  const gates = { verify: "run_full", e2e: "run_e2e", "native-e2e-compile": "run_native_compile", "native-e2e": "run_native", "geometry-determinism": "run_geometry" };
   for (const [job, flag] of Object.entries(gates)) {
     const result = needs[job]?.result;
     if (result === "success" || (result === "skipped" && outputs[flag] === "false")) continue;
@@ -109,6 +130,11 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
           throw new Error("CI intent could not be recorded in GITHUB_OUTPUT; check runner file permissions and rerun CI");
         }
       }
+    } else if (process.argv[2] === "geometry-push" && process.argv.length === 4) {
+      let comparison;
+      try { comparison = JSON.parse(readFileSync(process.argv[3], "utf8")); }
+      catch { throw new Error("Push comparison could not be read as JSON; keep the geometry gate enabled and inspect the API response"); }
+      console.log(String(geometryForPushComparison(comparison)));
     } else if (process.argv[2] === "aggregate" && process.argv.length === 3) {
       let needs;
       try { needs = JSON.parse(process.env.CI_NEEDS_JSON ?? "null"); }
@@ -116,7 +142,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       const result = evaluateCiJobs(needs);
       if (!result.ok) throw new Error(result.message);
       console.log(result.message);
-    } else throw new Error("usage: ci-policy.mjs classify <files.json> <event.json> or aggregate with CI_NEEDS_JSON; correct inputs and rerun CI");
+    } else throw new Error("usage: ci-policy.mjs classify <files.json> <event.json> or geometry-push <compare.json> or aggregate with CI_NEEDS_JSON; correct inputs and rerun CI");
   } catch (error) {
     console.error(`::error::${error instanceof Error ? error.message : "CI policy failed; inspect the decision and rerun CI"}`);
     process.exitCode = 1;

@@ -70,3 +70,16 @@ it("keeps a typed minimal fixture for every dispatched family", () => {
   expect([minimal, workflow, sequence, dataflow, lifecycle].map((spec) => spec.diagram_type))
     .toEqual(["architecture", "workflow", "sequence", "dataflow", "lifecycle"]);
 });
+
+// S1's new input models retain Serde defaults and explicit nullable Options.
+import type { LayoutRequest, PinSet, GeometryPin } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+const layoutRequest: LayoutRequest = { specJson: JSON.stringify(minimal) };
+const emptyPins: PinSet = { sourceSpecSha256: "a".repeat(64) };
+const geometryPin: GeometryPin = { targetId: "dataset:component:api", targetKind: "node", position: { x: 64, y: -64 } };
+const nullableLayout: LayoutRequest = { ...layoutRequest, pinSet: null };
+it("keeps geometry request defaults optional and nullable without casts", () => {
+  expect(layoutRequest).not.toHaveProperty("pinSet");
+  expect(emptyPins).not.toHaveProperty("pins");
+  expect(geometryPin).not.toHaveProperty("role");
+  expect(nullableLayout.pinSet).toBeNull();
+});

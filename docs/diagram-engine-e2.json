@@ -1,0 +1,480 @@
+{
+  "schemaVersion": 1,
+  "stage": "S1 geometry foundations, not scene layout",
+  "executionScope": {
+    "environment": "remote Linux x64 container with Chromium",
+    "rustToolchain": "1.98.0",
+    "cargoBuildJobs": 2,
+    "browserWorkers": 1,
+    "wasmRevisionLabel": "e9eac9078b3431b61701f1c63891d45a59d7e4af",
+    "cache": "Warm registry, native check and WASM release dependencies; incremental build. Not hosted CI build time.",
+    "hostedCi": "pending",
+    "crossPlatformFoundationMatrix": "pending hosted CI",
+    "wholeSceneDeterminism": "not implemented in S1",
+    "layoutRoutingLatency": "not implemented in S1",
+    "sdkTree": "e9eac9078b3431b61701f1c63891d45a59d7e4af"
+  },
+  "build": {
+    "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+    "buildMs": 16798.954038,
+    "platform": "linux",
+    "arch": "x64",
+    "sizes": [
+      {
+        "name": "engine-e0.js",
+        "bytes": 1306889,
+        "gzipBytes": 324126,
+        "path": "validation"
+      },
+      {
+        "name": "core-B2rNBH2e.js",
+        "bytes": 114,
+        "gzipBytes": 122,
+        "path": "lazy-transport"
+      },
+      {
+        "name": "engineGeometry-_l9UQOq2.js",
+        "bytes": 2759161,
+        "gzipBytes": 1043487,
+        "path": "lazy-geometry-metrics"
+      }
+    ],
+    "gzipBytes": 324126,
+    "validationGzipBytes": 324126,
+    "lazyGeometryGzipBytes": 1043487,
+    "lazyTransportGzipBytes": 122,
+    "totalGzipBytes": 1367735
+  },
+  "validation": {
+    "transport": "wasm",
+    "scope": "pre-serialized spec string; wasm call, core validation/hash and report JSON parse; 30 warm samples",
+    "coldMs": 471.19999998807907,
+    "samples": [
+      {
+        "nodes": 50,
+        "bytes": 5217,
+        "durationsMs": [
+          1.300000011920929,
+          1.199999988079071,
+          1.0999999642372131,
+          1,
+          0.9000000357627869,
+          1.0999999642372131,
+          0.7000000476837158,
+          0.699999988079071,
+          0.5999999642372131,
+          0.7000000476837158,
+          0.5,
+          0.5999999642372131,
+          0.800000011920929,
+          0.5,
+          0.5,
+          0.6000000238418579,
+          0.5999999642372131,
+          0.5,
+          0.6000000238418579,
+          0.3999999761581421,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.40000003576278687,
+          0.5999999642372131,
+          0.5
+        ]
+      },
+      {
+        "nodes": 1000,
+        "bytes": 106760,
+        "durationsMs": [
+          11.600000023841858,
+          8.100000023841858,
+          7.799999952316284,
+          7.800000011920929,
+          7.600000023841858,
+          7.5,
+          7.699999988079071,
+          7.5,
+          7.5,
+          7.699999988079071,
+          7.300000011920929,
+          7.5,
+          7.300000011920929,
+          7.300000011920929,
+          7.299999952316284,
+          7.400000035762787,
+          7.399999976158142,
+          7.199999988079071,
+          7.300000011920929,
+          7.300000011920929,
+          7.300000011920929,
+          7.300000011920929,
+          7.299999952316284,
+          7.200000047683716,
+          7.299999952316284,
+          7.300000011920929,
+          7.100000023841858,
+          7.300000011920929,
+          7.299999952316284,
+          7.300000011920929
+        ]
+      }
+    ],
+    "dispatched": [
+      "architecture@1",
+      "workflow@1",
+      "sequence@1",
+      "dataflow@1",
+      "lifecycle@1",
+      "workflow@2",
+      "lifecycle@2"
+    ],
+    "refusesInvalid": true,
+    "engine": {
+      "id": "maru-diagram-engine",
+      "version": "0.1.0",
+      "revision": "e9eac9078b3431b61701f1c63891d45a59d7e4af"
+    }
+  },
+  "foundation": {
+    "scope": "lazy text metrics only, not scene layout",
+    "browserProbe": "passed: metric chunk absent before explicit load, present after load; both fonts cover the CJK sample",
+    "fonts": [
+      {
+        "font": {
+          "fontSha256": "6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a",
+          "id": "noto-sans-cjk-kr",
+          "license": "OFL-1.1",
+          "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+          "unitsPerEm": 1000,
+          "weight": 400
+        },
+        "advance": 8852,
+        "glyphCount": 15,
+        "replacements": 0
+      },
+      {
+        "font": {
+          "fontSha256": "26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a",
+          "id": "noto-sans-cjk-kr",
+          "license": "OFL-1.1",
+          "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+          "unitsPerEm": 1000,
+          "weight": 700
+        },
+        "advance": 9010,
+        "glyphCount": 15,
+        "replacements": 0
+      }
+    ],
+    "corpusProbeCases": 256
+  },
+  "tests": {
+    "coreUnit": 43,
+    "differential": 2,
+    "corpusCases": 256,
+    "plugin": 3,
+    "browser": {
+      "passed": 1,
+      "failed": 0,
+      "flaky": 0
+    },
+    "appNativeFeatureCompile": "passed after production frontend build",
+    "sdkBoundary": "passed",
+    "fontRegenerationDrift": "passed: exact derived tables, licence and manifest match pinned source generation"
+  },
+  "pinContractFollowUp": {
+    "scope": "Later S1 source revision than the measured SDK tree; benchmark numbers remain attributed only to that baseline.",
+    "coreUnit": 47,
+    "differential": 2,
+    "pinBehavior": "Source hash changes are nonfatal; retain existing members, report each removed member.",
+    "hostedCi": "pending"
+  },
+  "coverageFollowUp": {
+    "scope": "Remote Linux/Chromium reproduction, not hosted acceptance or scene layout/routing",
+    "sdkTree": "8143f6412d3e9edfeb6be2c745f0d12772c4d85c",
+    "build": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 17801.196418,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1306889,
+          "gzipBytes": 324124,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-DPCQCNk9.js",
+          "bytes": 2763405,
+          "gzipBytes": 1038558,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324124,
+      "validationGzipBytes": 324124,
+      "lazyGeometryGzipBytes": 1038558,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1362804
+    },
+    "validation": {
+      "transport": "wasm",
+      "scope": "pre-serialized spec string; wasm call, core validation/hash and report JSON parse; 30 warm samples",
+      "coldMs": 531.8999999761581,
+      "samples": [
+        {
+          "nodes": 50,
+          "bytes": 5217,
+          "durationsMs": [
+            1.4000000357627869,
+            1.300000011920929,
+            1.0999999642372131,
+            1.100000023841858,
+            0.800000011920929,
+            0.8999999761581421,
+            0.699999988079071,
+            0.6000000238418579,
+            0.699999988079071,
+            0.5,
+            0.699999988079071,
+            0.6000000238418579,
+            0.5999999642372131,
+            0.6000000238418579,
+            0.5,
+            0.6000000238418579,
+            0.5,
+            0.699999988079071,
+            0.5,
+            0.3999999761581421,
+            0.6000000238418579,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5999999642372131,
+            0.40000003576278687,
+            0.5999999642372131
+          ]
+        },
+        {
+          "nodes": 1000,
+          "bytes": 106760,
+          "durationsMs": [
+            12.100000023841858,
+            8.699999988079071,
+            8.399999976158142,
+            8.400000035762787,
+            8.199999988079071,
+            8.399999976158142,
+            8.100000023841858,
+            8.199999988079071,
+            8.100000023841858,
+            8.399999976158142,
+            8.100000023841858,
+            8,
+            8,
+            8.099999964237213,
+            7.900000035762787,
+            8,
+            8,
+            8,
+            8,
+            7.899999976158142,
+            8,
+            7.800000011920929,
+            8.100000023841858,
+            8,
+            7.799999952316284,
+            7.800000011920929,
+            8,
+            8,
+            7.900000035762787,
+            7.899999976158142
+          ]
+        }
+      ],
+      "dispatched": [
+        "architecture@1",
+        "workflow@1",
+        "sequence@1",
+        "dataflow@1",
+        "lifecycle@1",
+        "workflow@2",
+        "lifecycle@2"
+      ],
+      "refusesInvalid": true,
+      "engine": {
+        "id": "maru-diagram-engine",
+        "version": "0.1.0",
+        "revision": "8143f6412d3e9edfeb6be2c745f0d12772c4d85c"
+      }
+    },
+    "fallbackSamples": [
+      {
+        "text": "🚀",
+        "weight": 400,
+        "replacements": 1,
+        "ignoredScalars": 0,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 1 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      },
+      {
+        "text": "😀",
+        "weight": 400,
+        "replacements": 1,
+        "ignoredScalars": 0,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 1 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      },
+      {
+        "text": "✔",
+        "weight": 400,
+        "replacements": 1,
+        "ignoredScalars": 0,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 1 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      },
+      {
+        "text": "⚠️",
+        "weight": 400,
+        "replacements": 0,
+        "ignoredScalars": 1,
+        "diagnostics": []
+      },
+      {
+        "text": "👩‍💻",
+        "weight": 400,
+        "replacements": 2,
+        "ignoredScalars": 1,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 2 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      },
+      {
+        "text": "🚀",
+        "weight": 700,
+        "replacements": 1,
+        "ignoredScalars": 0,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 1 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      },
+      {
+        "text": "😀",
+        "weight": 700,
+        "replacements": 1,
+        "ignoredScalars": 0,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 1 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      },
+      {
+        "text": "✔",
+        "weight": 700,
+        "replacements": 1,
+        "ignoredScalars": 0,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 1 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      },
+      {
+        "text": "⚠️",
+        "weight": 700,
+        "replacements": 0,
+        "ignoredScalars": 1,
+        "diagnostics": []
+      },
+      {
+        "text": "👩‍💻",
+        "weight": 700,
+        "replacements": 2,
+        "ignoredScalars": 1,
+        "diagnostics": [
+          {
+            "code": "document/font-replacement-notice",
+            "fix": "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font",
+            "message": "the pinned font used its actual .notdef glyph for 2 unsupported text scalars",
+            "path": "/text",
+            "rule": "font-v1/replacement-notice"
+          }
+        ]
+      }
+    ],
+    "tests": {
+      "coreUnit": 50,
+      "foundationHashUnit": 2,
+      "differential": 2,
+      "corpusCases": 256,
+      "browser": {
+        "startTime": "2026-11-08T20:07:17.159Z",
+        "duration": 6393.7429999999995,
+        "expected": 1,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "fontRegenerationDrift": "passed",
+      "bindingDrift": "passed",
+      "sdkBoundary": "passed"
+    },
+    "hostedCi": "pending",
+    "lazyColdLoad": "deferred to S3 alongside layout/routing p95"
+  }
+}

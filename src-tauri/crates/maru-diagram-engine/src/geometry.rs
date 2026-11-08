@@ -1,0 +1,652 @@
+//! Versioned geometry DTOs and request parsing for the E2 layout pipeline.
+//!
+//! These contracts do not produce a layout. Placement, routing, metrics and
+//! report construction are added by later E2 slices.
+
+use crate::common::{self, Context};
+pub use crate::layout::fixed::Coord;
+use crate::layout::fixed::{self, FixedPointError};
+use crate::{Diagnostic, EngineReceipt};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+
+pub const GEOMETRY_API_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub enum GeometryTargetKind {
+    Node,
+    Container,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub enum GeometryPositionSource {
+    PlannedPin,
+    AuthoredPosition,
+    Automatic,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryPoint {
+    pub x: Coord,
+    pub y: Coord,
+}
+
+impl GeometryPoint {
+    /// Quantize a pixel-space input exactly once at the system boundary.
+    pub fn from_pixels(x: f64, y: f64) -> Result<Self, FixedPointError> {
+        Ok(Self {
+            x: fixed::quantize_pixels(x)?,
+            y: fixed::quantize_pixels(y)?,
+        })
+    }
+
+    pub fn checked_translate(self, dx: Coord, dy: Coord) -> Result<Self, FixedPointError> {
+        Ok(Self {
+            x: fixed::checked_add(self.x, dx)?,
+            y: fixed::checked_add(self.y, dy)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryBox {
+    pub x: Coord,
+    pub y: Coord,
+    pub width: Coord,
+    pub height: Coord,
+}
+
+impl GeometryBox {
+    pub fn new(x: Coord, y: Coord, width: Coord, height: Coord) -> Result<Self, FixedPointError> {
+        if width < 0 || height < 0 {
+            return Err(FixedPointError::NegativeDimension);
+        }
+        Ok(Self {
+            x,
+            y,
+            width,
+            height,
+        })
+    }
+
+    pub fn from_pixels(x: f64, y: f64, width: f64, height: f64) -> Result<Self, FixedPointError> {
+        Self::new(
+            fixed::quantize_pixels(x)?,
+            fixed::quantize_pixels(y)?,
+            fixed::quantize_pixels(width)?,
+            fixed::quantize_pixels(height)?,
+        )
+    }
+
+    pub fn right(self) -> Result<Coord, FixedPointError> {
+        fixed::checked_add(self.x, self.width)
+    }
+
+    pub fn bottom(self) -> Result<Coord, FixedPointError> {
+        fixed::checked_add(self.y, self.height)
+    }
+
+    pub fn area(self) -> Result<i64, FixedPointError> {
+        fixed::checked_area(self.width, self.height)
+    }
+
+    pub fn checked_translate(self, dx: Coord, dy: Coord) -> Result<Self, FixedPointError> {
+        Self::new(
+            fixed::checked_add(self.x, dx)?,
+            fixed::checked_add(self.y, dy)?,
+            self.width,
+            self.height,
+        )
+    }
+
+    pub fn union(self, other: Self) -> Result<Self, FixedPointError> {
+        let left = self.x.min(other.x);
+        let top = self.y.min(other.y);
+        let right = self.right()?.max(other.right()?);
+        let bottom = self.bottom()?.max(other.bottom()?);
+        Self::new(
+            left,
+            top,
+            fixed::checked_sub(right, left)?,
+            fixed::checked_sub(bottom, top)?,
+        )
+    }
+
+    pub fn contains(self, point: GeometryPoint) -> Result<bool, FixedPointError> {
+        Ok(point.x >= self.x
+            && point.x <= self.right()?
+            && point.y >= self.y
+            && point.y <= self.bottom()?)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct FontIdentity {
+    pub id: String,
+    pub revision: String,
+    pub font_sha256: String,
+    pub weight: u16,
+    pub units_per_em: u16,
+    pub license: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryNode {
+    pub id: String,
+    pub bounds: GeometryBox,
+    /// Future placement resolution order is planned pin, authored position,
+    /// then automatic placement.
+    pub position_source: GeometryPositionSource,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryContainer {
+    pub id: String,
+    pub kind: String,
+    pub bounds: GeometryBox,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryRoute {
+    #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub id: Option<String>,
+    pub from: String,
+    pub to: String,
+    pub points: Vec<GeometryPoint>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryLabel {
+    #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub id: Option<String>,
+    pub target_id: String,
+    pub text: String,
+    pub bounds: GeometryBox,
+    pub font: FontIdentity,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryLegendEntry {
+    pub key: String,
+    pub label: String,
+    pub bounds: GeometryBox,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryLegend {
+    pub bounds: GeometryBox,
+    pub entries: Vec<GeometryLegendEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryPage {
+    pub bounds: GeometryBox,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryDocument {
+    pub nodes: Vec<GeometryNode>,
+    pub containers: Vec<GeometryContainer>,
+    pub routes: Vec<GeometryRoute>,
+    pub labels: Vec<GeometryLabel>,
+    pub legend: GeometryLegend,
+    pub page: GeometryPage,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryReport {
+    pub api_version: u32,
+    pub ok: bool,
+    #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub geometry: Option<GeometryDocument>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub receipt: EngineReceipt,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct LayoutRequest {
+    pub spec_json: String,
+    #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub pin_set: Option<PinSet>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct PinSet {
+    pub source_spec_sha256: String,
+    #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(as = "Option<Vec<GeometryPin>>", optional))]
+    pub pins: Vec<GeometryPin>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct GeometryPin {
+    pub target_id: String,
+    pub target_kind: GeometryTargetKind,
+    pub position: GeometryPoint,
+    #[serde(default)]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub role: Option<String>,
+}
+
+/// Nonfatal pin reconciliation, separate from request/scene validity errors.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub struct PinResolution {
+    pub pins: Vec<GeometryPin>,
+    pub source_changed: bool,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Resolve against current semantic members, never against array slots or an
+/// exact source hash. Placement supplies its current node/container identity set.
+/// Retained pins keep their input order and exact fixed-point positions.
+pub fn resolve_pins<'a>(
+    request: &LayoutRequest,
+    members: impl IntoIterator<Item = (GeometryTargetKind, &'a str)>,
+) -> PinResolution {
+    let mut result = PinResolution {
+        pins: Vec::new(),
+        source_changed: false,
+        diagnostics: Vec::new(),
+    };
+    let Some(pin_set) = &request.pin_set else {
+        return result;
+    };
+    result.source_changed = pin_set.source_spec_sha256 != crate::spec_hash(&request.spec_json);
+    if result.source_changed {
+        result.diagnostics.push(Diagnostic {
+            code: "document/pin-source-stale".into(), path: "/pinSet/sourceSpecSha256".into(),
+            rule: "pin-v1/source-staleness".into(),
+            message: "the source spec changed; pins for surviving semantic members are retained".into(),
+            fix: "review retained positions after the edit and update the pin set source hash when saving".into(),
+        });
+    }
+    let members: HashMap<_, _> = members.into_iter().map(|(kind, id)| (id, kind)).collect();
+    for (index, pin) in pin_set.pins.iter().enumerate() {
+        if let Some(kind) = members.get(pin.target_id.as_str()) {
+            let mut retained = pin.clone();
+            retained.target_kind = *kind;
+            result.pins.push(retained);
+        } else {
+            result.diagnostics.push(Diagnostic {
+                code: "document/pin-member-removed".into(), path: format!("/pinSet/pins/{index}"),
+                rule: "pin-v1/member-existence".into(),
+                message: format!("pin {:?} was dropped because its semantic member no longer exists", pin.target_id),
+                fix: "remove this pin from the saved pin set, or restore that member before pinning it again".into(),
+            });
+        }
+    }
+    result
+}
+
+fn lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Parse layout request shape. A prior source hash reports staleness only. This is an
+/// input-preflight API only; it does not produce a geometry report.
+pub fn parse_layout_request(input: &str) -> Result<LayoutRequest, Vec<Diagnostic>> {
+    let mut ctx = Context::new("document");
+    let value: Value = match serde_json::from_str(input) {
+        Ok(value) => value,
+        Err(error) => {
+            ctx.error(
+                "request-json",
+                "/",
+                format!("layout request is not valid JSON: {error}"),
+                "repair the request JSON object and retry",
+            );
+            return Err(ctx.finish());
+        }
+    };
+    ctx.fields(&value, "", &["specJson", "pinSet"]);
+    if let Some(pin_set) = value.get("pinSet").filter(|item| !item.is_null()) {
+        ctx.fields(pin_set, "/pinSet", &["sourceSpecSha256", "pins"]);
+        if let Some(pins) = pin_set.get("pins").and_then(Value::as_array) {
+            for (index, pin) in pins.iter().enumerate() {
+                let path = format!("/pinSet/pins/{index}");
+                ctx.fields(pin, &path, &["targetId", "targetKind", "position", "role"]);
+                if pin.get("position").is_some() {
+                    ctx.fields(
+                        pin.get("position").unwrap(),
+                        &format!("{path}/position"),
+                        &["x", "y"],
+                    );
+                }
+            }
+        }
+    }
+
+    let Some(request) = common::decode::<LayoutRequest>(&value, &mut ctx) else {
+        return Err(ctx.finish());
+    };
+
+    if request.spec_json.is_empty() {
+        ctx.error(
+            "spec-json",
+            "/specJson",
+            "source spec JSON is empty",
+            "supply the exact nonempty serialized spec used for layout",
+        );
+        return Err(ctx.finish());
+    }
+    let spec: Value = match serde_json::from_str(&request.spec_json) {
+        Ok(spec) => spec,
+        Err(error) => {
+            ctx.error(
+                "spec-json",
+                "/specJson",
+                format!("source spec JSON is invalid: {error}"),
+                "supply a valid serialized diagram object and retry",
+            );
+            return Err(ctx.finish());
+        }
+    };
+    if !spec.is_object() {
+        ctx.error(
+            "spec-object",
+            "/specJson",
+            "source spec must be a JSON object",
+            "supply a serialized diagram document object",
+        );
+        return Err(ctx.finish());
+    }
+
+    if let Some(pin_set) = &request.pin_set {
+        if !lowercase_sha256(&pin_set.source_spec_sha256) {
+            ctx.error(
+                "pin-source-hash",
+                "/pinSet/sourceSpecSha256",
+                "sourceSpecSha256 must be a lowercase 64-character SHA-256 value",
+                "hash the exact specJson UTF-8 bytes with SHA-256 and use lowercase hexadecimal",
+            );
+        }
+
+        let mut seen = HashSet::new();
+        for (index, pin) in pin_set.pins.iter().enumerate() {
+            let path = format!("/pinSet/pins/{index}");
+            if pin.target_id.trim().is_empty() {
+                ctx.error(
+                    "pin-target-id",
+                    &format!("{path}/targetId"),
+                    "pin targetId is empty",
+                    "use the stable semantic member key for the pin target",
+                );
+            }
+            if !seen.insert(pin.target_id.as_str()) {
+                ctx.error(
+                    "duplicate-pin-id",
+                    &format!("{path}/targetId"),
+                    format!("pin target id {:?} occurs more than once", pin.target_id),
+                    "keep only one planned pin for each semantic member key",
+                );
+            }
+        }
+    }
+
+    let diagnostics = ctx.finish();
+    if diagnostics.is_empty() {
+        Ok(request)
+    } else {
+        Err(diagnostics)
+    }
+}
+
+#[cfg(feature = "typegen")]
+pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
+    use ts_rs::TS;
+    vec![
+        GeometryTargetKind::decl(cfg),
+        GeometryPositionSource::decl(cfg),
+        GeometryPoint::decl(cfg),
+        GeometryBox::decl(cfg),
+        FontIdentity::decl(cfg),
+        GeometryNode::decl(cfg),
+        GeometryContainer::decl(cfg),
+        GeometryRoute::decl(cfg),
+        GeometryLabel::decl(cfg),
+        GeometryLegendEntry::decl(cfg),
+        GeometryLegend::decl(cfg),
+        GeometryPage::decl(cfg),
+        GeometryDocument::decl(cfg),
+        GeometryReport::decl(cfg),
+        LayoutRequest::decl(cfg),
+        PinSet::decl(cfg),
+        GeometryPin::decl(cfg),
+        PinResolution::decl(cfg),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source_json() -> String {
+        r#"{"schema_version":1,"diagram_type":"architecture"}"#.to_string()
+    }
+
+    fn request_json(pin_set: Value) -> String {
+        let spec_json = source_json();
+        let source_hash = crate::spec_hash(&spec_json);
+        serde_json::json!({"specJson":spec_json,"pinSet":{ "sourceSpecSha256": source_hash, "pins": pin_set }}).to_string()
+    }
+
+    #[test]
+    fn quantized_geometry_uses_fixed_point_bounds_and_checked_arithmetic() {
+        let origin = GeometryPoint::from_pixels(-0.5 / 64.0, 1.0).unwrap();
+        assert_eq!(origin, GeometryPoint { x: -1, y: 64 });
+        let bounds = GeometryBox::new(10, 20, 30, 40).unwrap();
+        assert_eq!(bounds.right().unwrap(), 40);
+        assert_eq!(bounds.bottom().unwrap(), 60);
+        assert_eq!(bounds.area().unwrap(), 1200);
+        assert_eq!(bounds.checked_translate(2, 3).unwrap().x, 12);
+        assert_eq!(
+            GeometryBox::new(0, 0, -1, 2),
+            Err(FixedPointError::NegativeDimension)
+        );
+        assert_eq!(
+            GeometryBox::new(Coord::MAX, 0, 1, 1).unwrap().right(),
+            Err(FixedPointError::ArithmeticOverflow)
+        );
+    }
+
+    #[test]
+    fn layout_request_accepts_absent_pin_set_and_default_empty_pins() {
+        let spec_json = source_json();
+        let request_json = serde_json::json!({"specJson":spec_json}).to_string();
+        let request = parse_layout_request(&request_json).unwrap();
+        assert!(request.pin_set.is_none());
+        let spec_json = source_json();
+        let source_hash = crate::spec_hash(&spec_json);
+        let request =
+            serde_json::json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":source_hash}})
+                .to_string();
+        assert!(parse_layout_request(&request)
+            .unwrap()
+            .pin_set
+            .unwrap()
+            .pins
+            .is_empty());
+    }
+
+    #[test]
+    fn layout_request_rejects_malformed_hash_duplicate_targets_and_array_points() {
+        let spec_json = source_json();
+        let mismatched = serde_json::json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":"not-a-sha256","pins":[]}}).to_string();
+        assert!(parse_layout_request(&mismatched)
+            .unwrap_err()
+            .iter()
+            .any(|d| d.code == "document/pin-source-hash"));
+
+        let duplicate = request_json(serde_json::json!([
+            {"targetKind":"node","targetId":"node-a","position":{"x":64,"y":128}},
+            {"targetKind":"container","targetId":"node-a","position":{"x":192,"y":256}}
+        ]));
+        assert!(parse_layout_request(&duplicate)
+            .unwrap_err()
+            .iter()
+            .any(|d| d.code == "document/duplicate-pin-id"));
+
+        let array_point = request_json(serde_json::json!([
+            {"targetKind":"node","targetId":"node-a","position":[64,128]}
+        ]));
+        assert!(parse_layout_request(&array_point).is_err());
+    }
+
+    #[test]
+    fn only_missing_members_are_dropped_with_individual_diagnostics() {
+        let original = serde_json::json!({"schema_version":1,"diagram_type":"architecture","meta":{"title":"Before"}}).to_string();
+        let edited = serde_json::json!({"schema_version":1,"diagram_type":"architecture","meta":{"title":"After"}}).to_string();
+        let request = serde_json::json!({"specJson":edited,"pinSet":{
+            "sourceSpecSha256": crate::spec_hash(&original), "pins":[
+                {"targetKind":"node","targetId":"kept","position":{"x":-64,"y":128}},
+                {"targetKind":"container","targetId":"gone-a","position":{"x":192,"y":256}},
+                {"targetKind":"node","targetId":"gone-b","position":{"x":320,"y":384}}
+            ]
+        }})
+        .to_string();
+        let request = parse_layout_request(&request).unwrap();
+        let resolved = resolve_pins(&request, [(GeometryTargetKind::Node, "kept")]);
+        assert!(resolved.source_changed);
+        assert_eq!(resolved.pins, request.pin_set.as_ref().unwrap().pins[..1]);
+        assert_eq!(resolved.pins[0].position, GeometryPoint { x: -64, y: 128 });
+        let removed: Vec<_> = resolved
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "document/pin-member-removed")
+            .collect();
+        assert_eq!(removed.len(), 2);
+        assert_eq!(removed[0].path, "/pinSet/pins/1");
+        assert_eq!(removed[1].path, "/pinSet/pins/2");
+        assert!(resolved
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "document/pin-source-stale"));
+    }
+
+    #[test]
+    fn editing_an_unrelated_valid_spec_field_keeps_every_existing_pin() {
+        let original = include_str!("../testdata/valid-architecture.json");
+        let mut edited: Value = serde_json::from_str(original).unwrap();
+        edited["meta"]["title"] = Value::String("Renamed diagram".into());
+        let edited = edited.to_string();
+        assert!(crate::validate_json(original).ok);
+        assert!(crate::validate_json(&edited).ok);
+        let request = serde_json::json!({"specJson":edited,"pinSet":{
+            "sourceSpecSha256":crate::spec_hash(original),"pins":[
+                {"targetKind":"node","targetId":"a","position":{"x":64,"y":128}},
+                {"targetKind":"node","targetId":"b","position":{"x":192,"y":256}}
+            ]
+        }})
+        .to_string();
+        let request = parse_layout_request(&request).unwrap();
+        let resolved = resolve_pins(
+            &request,
+            [
+                (GeometryTargetKind::Node, "a"),
+                (GeometryTargetKind::Node, "b"),
+            ],
+        );
+        assert_eq!(resolved.pins, request.pin_set.as_ref().unwrap().pins);
+        assert!(resolved.source_changed);
+        assert_eq!(resolved.diagnostics.len(), 1);
+        assert_eq!(resolved.diagnostics[0].code, "document/pin-source-stale");
+    }
+
+    #[test]
+    fn a_surviving_member_id_keeps_its_position_when_its_kind_changes() {
+        let request = parse_layout_request(&request_json(serde_json::json!([
+            {"targetKind":"node","targetId":"kept","position":{"x":64,"y":128}}
+        ])))
+        .unwrap();
+        let resolved = resolve_pins(&request, [(GeometryTargetKind::Container, "kept")]);
+        assert_eq!(resolved.pins.len(), 1);
+        assert_eq!(
+            resolved.pins[0].position,
+            request.pin_set.unwrap().pins[0].position
+        );
+        assert_eq!(resolved.pins[0].target_kind, GeometryTargetKind::Container);
+        assert!(resolved.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn unchanged_source_and_absent_pins_have_no_staleness_notice() {
+        let request = parse_layout_request(&request_json(serde_json::json!([
+            {"targetKind":"node","targetId":"kept","position":{"x":64,"y":128}}
+        ])))
+        .unwrap();
+        let resolved = resolve_pins(&request, [(GeometryTargetKind::Node, "kept")]);
+        assert!(!resolved.source_changed);
+        assert!(resolved.diagnostics.is_empty());
+        assert_eq!(resolved.pins, request.pin_set.unwrap().pins);
+        let request = LayoutRequest {
+            spec_json: source_json(),
+            pin_set: None,
+        };
+        assert!(resolve_pins(&request, []).pins.is_empty());
+    }
+
+    #[test]
+    fn layout_request_rejects_nonobject_request_and_unknown_fields() {
+        assert!(parse_layout_request("[]").is_err());
+        assert!(parse_layout_request(r#"{"specJson":"{}","unknown":true}"#).is_err());
+        assert!(parse_layout_request(r#"{"specJson":"[]"}"#).is_err());
+    }
+}

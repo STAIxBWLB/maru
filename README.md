@@ -655,6 +655,10 @@ window/menu/webview, PTY and runtime/config changes (listed in
 suite through a reusable workflow. Other code PRs keep native compile coverage;
 selected native PRs do not compile twice. `ci-ok` requires every selected job,
 including the suite, and rejects failures, cancellations and unplanned skips.
+SDK/toolchain/geometry-harness changes also select the reusable Linux/macOS/Windows
+foundation determinism matrix, required by `ci-ok`. Its first stage compares
+fixed arithmetic and pinned text metrics for the parity corpus; whole-scene
+layout/routing agreement is a later E2 gate, not implied by that foundation check.
 Version-changing PRs use `make release-checks`. Docs-only and `.planning/**`
 changes skip builds; performance evidence JSON remains validation input. Native
 label changes may reuse successful CI for the same SHA and tree, while unrelated labels
