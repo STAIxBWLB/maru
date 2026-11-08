@@ -47,13 +47,13 @@ export interface ReportInsertDeps {
     content: string,
     expectedRevision: string | null,
   ) => Promise<unknown>;
-  renderAssets: (doc: DiagramDoc) => Promise<{ svg: Uint8Array; png: Uint8Array; receipts?: { svg: ArchifyRenderReceipt; png: ArchifyRenderReceipt } }>;
+  renderAssets: (doc: DiagramDoc) => Promise<{ svg: Uint8Array; png: Uint8Array; receipts?: { svg: ArchifyRenderReceipt; png: ArchifyRenderReceipt }; storeWarnings?: string[] }>;
   digestHex: (text: string) => Promise<string>;
 }
 
 export type ReportInsertOutcome =
-  | { status: "inserted"; targetPath: string }
-  | { status: "updated"; targetPath: string }
+  | { status: "inserted"; targetPath: string; storeWarnings?: string[] }
+  | { status: "updated"; targetPath: string; storeWarnings?: string[] }
   | { status: "needs-save" }
   | { status: "needs-target" }
   | { status: "conflict"; message: string }
@@ -138,9 +138,11 @@ export async function insertDiagramIntoReport(
 
   let svgPath: string;
   let pngPath: string;
+  let storeWarnings: string[] = [];
   try {
     current();
     const assets = await deps.renderAssets(scopeDocForRender(doc, scope));
+    storeWarnings = [...new Set(assets.storeWarnings ?? [])];
     current();
     if (assets.receipts) {
       const { svg, png } = assets.receipts;
@@ -179,8 +181,8 @@ export async function insertDiagramIntoReport(
     });
     await deps.saveTarget(target.path, spliced.content, fresh.revision ?? null);
     return spliced.mode === "updated"
-      ? { status: "updated", targetPath: target.path }
-      : { status: "inserted", targetPath: target.path };
+      ? { status: "updated", targetPath: target.path, ...(storeWarnings.length ? { storeWarnings } : {}) }
+      : { status: "inserted", targetPath: target.path, ...(storeWarnings.length ? { storeWarnings } : {}) };
   } catch (err) {
     const message = errorMessage(err);
     return isConflict(err)
@@ -240,7 +242,8 @@ export function defaultReportInsertDeps(
       if (!datasets.length) return renderReportAssets(doc);
       const svg = await exportVerifiedSemanticArtifact({ doc, workspace, format: "svg", host: renderHost });
       const png = await exportVerifiedSemanticArtifact({ doc, workspace, format: "png", host: renderHost });
-      return { svg: svg.bytes, png: png.bytes, receipts: { svg: svg.receipt, png: png.receipt } };
+      const storeWarnings = [...new Set([svg.storeWarning, png.storeWarning].filter((value): value is string => Boolean(value)))];
+      return { svg: svg.bytes, png: png.bytes, receipts: { svg: svg.receipt, png: png.receipt }, ...(storeWarnings.length ? { storeWarnings } : {}) };
     },
     digestHex: sha256Hex,
   };

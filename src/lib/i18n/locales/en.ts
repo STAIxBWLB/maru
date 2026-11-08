@@ -4204,4 +4204,31 @@ export const en: Record<string, string> = {
   "dashboard.agents.status.done": "Done",
   "dashboard.agents.status.never": "Never run",
 
+  "diagram.renders.title": "Renders",
+  "diagram.renders.description": "Saved artifacts and their verification receipts in this workspace.",
+  "diagram.renders.desktopOnly": "Saved renders require the desktop app. Open this workspace in Maru.",
+  "diagram.renders.workspaceRequired": "Open a workspace to list its renders.",
+  "diagram.renders.refresh": "Refresh",
+  "diagram.renders.empty": "No saved renders. Render a semantic diagram first.",
+  "diagram.renders.orphaned": "Document missing",
+  "diagram.renders.unverified": "Unverified",
+  "diagram.renders.open": "Open in default app",
+  "diagram.renders.reveal": "Reveal in Files",
+  "diagram.renders.rerender": "Re-render",
+  "diagram.renders.delete": "Delete render",
+  "diagram.renders.deleteConfirm": "Delete this render folder and receipt? The source document stays.",
+  "diagram.renders.confirmDelete": "Confirm deletion",
+  "diagram.renders.cancel": "Cancel",
+  "diagram.renders.loading": "Checking render files...",
+  "diagram.renders.frameTitle": "Saved diagram render",
+  "diagram.renders.documentRevision": "Document revision",
+  "diagram.renders.specHash": "Spec hash",
+  "diagram.renders.artifactHash": "Artifact hash",
+  "diagram.renders.gates": "Verification gates",
+  "diagram.renders.close": "Close",
+
+  "diagram.renders.notKept": "The copy was exported, but the render was not kept in history: {message}",
+
+  "diagram.renders.ambiguous": "Duplicate document ID",
+
 };

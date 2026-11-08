@@ -11,6 +11,7 @@ import { matrixFromRowsCols, type MatrixCell, type MatrixDataset } from "../../.
 import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
+import { serializeDoc } from "../../../lib/diagram/persistence";
 import { canonicalSemanticExportInput } from "../../../lib/diagram/export";
 import { extractEngineSvg } from "../../../lib/diagram/engineSvg";
 import { DiagramStoreProvider } from "../DiagramStoreContext";
@@ -254,6 +255,24 @@ describe("ImportExportDialog (export)", () => {
     expect(document.body.textContent).toContain(translate("ko", "diagram.dialog.export.done", { path: "diagram.json" }));
   });
 
+
+  it("exports a valid artifact and reports a nonfatal history-store warning", async () => {
+    const { doc } = semanticDoc();
+    doc.id = "도식";
+    doc.docTitle = "아주 긴 제목".repeat(100);
+    const host: ArchifyRenderHost = vi.fn(async (type, json) => ({ ...renderArtifact(type, json), storeWarning: "Cannot keep render: attachments is not a folder; repair the render store and retry" }));
+    setNativeMode();
+    chooseSaveFileMock.mockResolvedValue("/workspace/copy.svg");
+    diagramExportBlobToPathMock.mockResolvedValue("/workspace/copy.svg");
+    harness = renderDialog("export", doc, generationHost(host), "/workspace");
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(diagramExportBlobToPathMock, 1);
+    expect(document.body.textContent).toContain(translate("ko", "diagram.dialog.export.done", { path: "/workspace/copy.svg" }));
+    expect(query('[data-testid="render-store-warning"]')?.textContent).toContain("repair the render store and retry");
+    expect(query('[data-testid="engine-export-receipt"]')).not.toBeNull();
+  });
+
   it("renders the semantic engine codec only on Export and displays verified hashes, gates and native readback", async () => {
     const { doc, dataset } = semanticDoc();
     const host = renderHostSpy();
@@ -273,7 +292,10 @@ describe("ImportExportDialog (export)", () => {
     await waitForCalls(diagramExportBlobToPathMock, 1);
     const receipt = query<HTMLElement>('[data-testid="engine-export-receipt"]')!;
     expect(host).toHaveBeenCalledTimes(1);
-    expect(host).toHaveBeenCalledWith("architecture", canonical.candidateJson);
+    expect(host).toHaveBeenCalledWith("architecture", canonical.candidateJson, {
+      docId: doc.id, documentName: doc.docTitle || doc.id, datasetId: dataset.id,
+      documentRevision: hash(new TextEncoder().encode(serializeDoc(doc))), diagramType: "architecture",
+    });
     expect(receipt.textContent).toContain(`${name} ${version} (${revision})`);
     expect(receipt.textContent).toContain(expectedInputHash);
     expect(receipt.textContent).toContain(expectedOutputHash);
