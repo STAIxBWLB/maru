@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -79,6 +80,17 @@ describe("archifySpecToDataset", () => {
 });
 
 describe("parseArchifySpec", () => {
+  it("imports the repository architecture documentation through the surviving codec", () => {
+    const raw = readFileSync("docs/architecture/maru.architecture.json", "utf8");
+    expect(codecForFilename("maru.architecture.json")?.id).toBe("archify-json");
+    const parsed = parseArchifySpec(raw);
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+    const source = JSON.parse(raw) as Record<string, unknown>;
+    expect(parsed.result.dataset.diagramType).toBe("architecture");
+    expect(parsed.result.dataset.spec.components).toEqual(source.components);
+    expect(parsed.result.dataset.spec.meta).toEqual(source.meta);
+  });
+
   it("accepts a valid spec and records provenance", () => {
     const outcome = parseArchifySpec(JSON.stringify(ARCH_SPEC), {
       provenance: { origin: "gallery-copy", sourcePath: "dev/x/docs/a.architecture.json" },
