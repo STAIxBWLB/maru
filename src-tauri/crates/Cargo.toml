@@ -1,0 +1,3 @@
+[workspace]
+members = ["maru-diagram-engine", "tauri-plugin-maru-diagram"]
+resolver = "2"

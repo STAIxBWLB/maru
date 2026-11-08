@@ -6,6 +6,7 @@
 # PR scope, derived from native fixtures, IPC, window/menu/child-view and PTY
 # owners (predicate SSOT: scripts/ci-policy.mjs), or the native-e2e label:
 # - e2e-native/**
+# - src-tauri/crates/**
 # - src-tauri/src/terminal/**
 # - src-tauri/capabilities/**
 # - src-tauri/permissions/**
@@ -15,6 +16,7 @@
 # - src-tauri/src/channel_delivery.rs
 # - src-tauri/src/lib.rs
 # - src-tauri/src/main.rs
+# - src-tauri/src/diagram_engine_e0.rs
 # - src-tauri/src/app_menu.rs
 # - src-tauri/src/site_view.rs
 # - src-tauri/src/site_launcher.rs
@@ -109,7 +111,9 @@ jobs:
       - name: Run the native e2e suite
         id: suite
         shell: bash
-        run: make test-e2e-native 2>&1 | tee /tmp/native-e2e-run.log
+        run: |
+          export MARU_DIAGRAM_ENGINE_REVISION=$(git rev-parse HEAD:src-tauri/crates)
+          make test-e2e-native 2>&1 | tee /tmp/native-e2e-run.log
 
       # Evidence on failure: the wdio/make log and a screencapture of the
       # runner's screen, so a modal-permission hang is diagnosable from the

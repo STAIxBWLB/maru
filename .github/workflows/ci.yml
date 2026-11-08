@@ -257,6 +257,22 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Select independent engine spike checks
+        id: engine_e0
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/diagram-engine-e0.mjs needed
+
+      - name: Check independent SDK, generated types and subtree extraction
+        if: steps.engine_e0.outputs.needed == 'true'
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: |
+          node scripts/check-diagram-engine-boundary.mjs
+          cargo fmt --manifest-path src-tauri/crates/Cargo.toml --all --check
+          node scripts/diagram-engine-e0.mjs types
+          bash scripts/check-diagram-engine-subtree.sh
+
       - name: Run verify (typecheck + version checks + guards + tests + frontend build)
         if: steps.changes.outputs.release != 'true'
         run: make verify
@@ -294,6 +310,29 @@ jobs:
       # first surfaced on the release tag instead of on the PR that caused it.
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
+
+      - name: Select independent engine browser spike
+        id: engine_e0
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/diagram-engine-e0.mjs needed
+
+      - name: Setup the pinned Rust WebAssembly target for the spike only
+        if: steps.engine_e0.outputs.needed == 'true'
+        # Honour rust-toolchain.toml instead of installing an unused stable toolchain.
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build and measure independent WebAssembly slice
+        if: steps.engine_e0.outputs.needed == 'true'
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: node scripts/diagram-engine-e0.mjs wasm
+
+      - name: Measure browser apply gate without the Node host override
+        if: steps.engine_e0.outputs.needed == 'true'
+        env:
+          MARU_ENGINE_E0: '1'
+        run: pnpm exec playwright test e2e/engine-e0.spec.ts --workers=1
 
       - name: Run e2e
         run: make test-e2e

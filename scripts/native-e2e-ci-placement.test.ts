@@ -87,7 +87,7 @@ describe("native-e2e CI placement (T-06-11)", () => {
     expect(on).toContain("workflow_dispatch:");
     // `shell: bash` adds pipefail, so tee cannot swallow make's exit status (#368).
     expect(nativeE2eYml).toMatch(
-      /^ {8}shell: bash\n {8}run: make test-e2e-native 2>&1 \| tee \/tmp\/native-e2e-run\.log$/m,
+      /^ {8}shell: bash\n {8}run: \|\n {10}export MARU_DIAGRAM_ENGINE_REVISION=\$\(git rev-parse HEAD:src-tauri\/crates\)\n {10}make test-e2e-native 2>&1 \| tee \/tmp\/native-e2e-run\.log$/m,
     );
   });
 

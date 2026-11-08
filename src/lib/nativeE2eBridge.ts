@@ -57,7 +57,15 @@ export interface NativeE2eDiagramStaticExportResult {
   pngReceipt: ArchifyRenderReceipt;
 }
 
+export interface NativeE2eEngineMeasurement {
+  transport: "ipc";
+  scope: string;
+  coldMs: number;
+  samples: Array<{ nodes: number; bytes: number; durationsMs: number[]; engine: { id: string; version: string; revision: string } }>;
+}
+
 export interface MaruNativeE2eBridge {
+  diagramEngineMeasurement(): Promise<NativeE2eEngineMeasurement>;
   /** Whole-screen text mirror for one terminal session, or null when the
    *  session id was never registered (a spec racing a session teardown gets
    *  a clean answer, not a throw). */
@@ -178,6 +186,32 @@ let appStateRegistration: { read: () => NativeAppState } | null = null;
 function bridgeNamespace(): MaruNativeE2eBridge {
   if (!window.__MARU_NATIVE_E2E__) {
     window.__MARU_NATIVE_E2E__ = {
+      async diagramEngineMeasurement() {
+        const start = performance.now();
+        const { createIpcEngine } = await import("./diagram/engine");
+        const engine = createIpcEngine();
+        const fixtures = [
+          (await import("../../src-tauri/crates/maru-diagram-engine/testdata/bench-50.json")).default,
+          (await import("../../src-tauri/crates/maru-diagram-engine/testdata/bench-1000.json")).default,
+        ];
+        const first = await engine.validate(JSON.stringify(fixtures[0]));
+        if (!first.ok) throw new Error("E0 IPC fixture failed validation; inspect the SDK fixture and rebuild native-e2e.");
+        const coldMs = performance.now() - start;
+        const samples = [];
+        for (const fixture of fixtures) {
+          const input = JSON.stringify(fixture);
+          const durationsMs = [];
+          let report = first;
+          for (let i = 0; i < 30; i++) {
+            const before = performance.now();
+            report = await engine.validate(input);
+            durationsMs.push(performance.now() - before);
+            if (!report.ok) throw new Error("E0 IPC validation failed; inspect the engine diagnostics and rerun the spike.");
+          }
+          samples.push({ nodes: fixture.components.length, bytes: new TextEncoder().encode(input).length, durationsMs, engine: report.receipt.engine });
+        }
+        return { transport: "ipc", scope: "pre-serialized spec string; invoke envelope transport, core validation/hash and reply decode; 30 warm samples", coldMs, samples };
+      },
       terminalText: (sessionId) => terminalTextReaders.get(sessionId)?.() ?? null,
       menuCommandReady: () => menuCommandRegistration !== null,
       readAppState: () => {

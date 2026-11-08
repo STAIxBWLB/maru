@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-maru-diagram"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90.0"
+license = "UNLICENSED"
+description = "Tauri 2 adapter for the standalone Maru diagram engine"
+links = "tauri-plugin-maru-diagram"
+build = "build.rs"
+
+[dependencies]
+maru-diagram-engine = { path = "../maru-diagram-engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "=2.12.5", default-features = false }
+
+[build-dependencies]
+tauri-plugin = { version = "=2.7.2", features = ["build"] }
+
+[dev-dependencies]
+tauri = { version = "=2.12.5", default-features = false, features = ["test"] }

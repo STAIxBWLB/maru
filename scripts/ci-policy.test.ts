@@ -75,6 +75,7 @@ describe("PR change classification", () => {
   it("routes native paths and the native-e2e label to the full native suite without duplicate compile", () => {
     for (const path of [
       "e2e-native/specs/menu.spec.ts",
+      "src-tauri/crates/maru-diagram-engine/src/lib.rs",
       "src-tauri/src/terminal/input.rs",
       "src-tauri/capabilities/main.json",
       "src/components/sites/SitesPane.tsx",
