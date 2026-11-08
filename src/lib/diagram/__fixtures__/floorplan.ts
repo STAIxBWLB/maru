@@ -1,8 +1,9 @@
 /**
- * A trimmed public Floorplan map (issue #535): 21 of the 53 nodes of the
- * public agent-hub-site `diagrams/floorplan/architecture.json`, with the
- * edges, flow steps and tour stops among them. `floorplan/architecture@1`
- * verbatim; no local paths.
+ * A trimmed copy of the ahub family Floorplan map published at
+ * https://afam.staix.net/explore/map/ (the source repository is private; the
+ * content is the published map): 21 of its 53 nodes, with the edges, flow
+ * steps and tour stops among them. `floorplan/architecture@1` verbatim; no
+ * local paths. Issue #535.
  */
 
 export const FLOORPLAN_FIXTURE: Record<string, unknown> = {
