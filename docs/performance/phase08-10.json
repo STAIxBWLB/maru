@@ -2251,7 +2251,9 @@
         "src-tauri/src/archify.rs::ipc::archify_render_candidate owns its arguments and awaits spawn_blocking around render_candidate_with_engine.",
         "src-tauri/src/archify.rs::render_candidate_with_engine gates type/input bytes, resolves the pinned bundle engine and Node, stages a private candidate, validates its exact SHA-256, renders HTML and checks it before returning bytes plus separate receipt gates.",
         "src-tauri/src/archify.rs::bounded_engine_output reuses src-tauri/src/command_output.rs::run_command_with_timeout_and_limits for drained bounded pipes and owned-process-tree deadline termination; render staging shape and size are checked by the abort callback.",
-        "src-tauri/src/archify.rs::stage_candidate uses shared path admission and atomic candidate publication; cleanup_job_dir rejects replaced symlink/unsafe parents and removes only the owned private staging directory."
+        "src-tauri/src/archify.rs::stage_candidate uses shared path admission and atomic candidate publication; cleanup_job_dir rejects replaced symlink/unsafe parents and removes only the owned private staging directory.",
+        "src-tauri/src/diagram/renders.rs::store_render validates document context and the engine receipt hash, admits immutable artifact/receipt plus missing ancestor paths, and publishes the pair with no-clobber writes inside the same blocking command when context is supplied.",
+        "Optional history publication uses filesystem-safe document_directory_key values while preserving original logical IDs in receipts. Store errors become store_warning on the valid artifact; they never replace a successful engine result with a history error."
       ],
       "workerBoundary": "src-tauri/src/archify.rs::ipc::archify_render_candidate owns arguments and awaits spawn_blocking around bundled_engine_path and render_candidate_with_engine. The physical render_command_runs_in_worker_and_propagates_worker_failure case passed in the actual archify-filtered Cargo run recorded below.",
       "syncCallers": [
@@ -2259,23 +2261,37 @@
       ],
       "tests": [
         {
-          "command": "node scripts/run-vitest.mjs src/lib/diagram/verifiedExport.test.ts src/lib/diagram/engineSvg.test.ts",
-          "passed": 18,
-          "failed": 0,
-          "ignored": 0,
-          "exitCode": 0
-        },
-        {
-          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib archify -- --test-threads=2",
-          "passed": 18,
+          "command": "node scripts/run-vitest.mjs src/lib/diagram/renders.test.ts src/components/diagram/modals/RendersDialog.test.tsx src/components/diagram/modals/ImportExportDialog.test.tsx src/lib/diagram/verifiedExport.test.ts src/lib/diagram/reportInsert.test.ts src/lib/diagram/engineSvg.test.ts scripts/check-main-iframes.test.ts",
+          "passed": 77,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0,
-          "filteredOut": 2123,
-          "buildJobs": 2,
           "executionHost": "macOS",
-          "sourceCommit": "83263020fe589c574a867b5047016f185057dc49",
-          "executionNote": "Actual local filtered run under the owner command-isolation-only exception (2026-11-08); no whole-lib local test run."
+          "scope": "Focused Node/jsdom contract and conversion tests; no native execution."
+        },
+        {
+          "command": "cargo test --lib archify -- --test-threads=2",
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0,
+          "filteredOut": 2159,
+          "exitCode": 0,
+          "workingDirectory": "src-tauri",
+          "buildJobs": 2,
+          "executionHost": "dgx02 container (Debian trixie)",
+          "sourceCommit": "8b0d399c551472725d520b1d27744edfef07a964"
+        },
+        {
+          "command": "cargo test --lib renders -- --test-threads=2",
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0,
+          "filteredOut": 2162,
+          "exitCode": 0,
+          "workingDirectory": "src-tauri",
+          "buildJobs": 2,
+          "executionHost": "dgx02 container (Debian trixie)",
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
         }
       ],
       "processingCaller": {
@@ -2283,12 +2299,13 @@
           "src/lib/archify.ts",
           "src/lib/diagram/verifiedExport.ts",
           "src/components/diagram/modals/ImportExportDialog.tsx",
-          "src/lib/diagram/reportInsert.ts"
+          "src/lib/diagram/reportInsert.ts",
+          "src/lib/diagram/renders.ts"
         ],
         "payload": "One selected stored semantic spec JSON and its type, never canvas/viewer state; engine HTML is converted to sanitized static SVG/PNG rather than exported as HTML in T1.",
         "classification": "n/a: one private rendering job, not a file-processing batch",
         "classifier": "n/a: one semantic candidate rendered through the pin",
-        "successRetention": "Artifact bytes and spec/pin/engine-output/final-output hashes are returned to the caller. Export displays separate schema, artifact, browser-conversion, visual-unverified and readback gates. No render-store or sibling receipt is written.",
+        "successRetention": "With document context, engine HTML plus its extended receipt is retained in a fresh UUID workspace render folder. SVG/PNG remain frontend-converted export copies, with final-byte hashes in their operation receipt. No sibling receipt is written next to an external copy. Unicode/long-title compatibility is covered. A history failure leaves export/report success intact and is surfaced by the initiating UI as a store warning.",
         "failureReasons": "Typed backend IpcError and frontend explicit conversion/receipt/stale diagnostics. Missing engine/runtime/capability is an error, never a success or a canvas-renderer fallback.",
         "singleTerminalNoticeOwner": true,
         "terminalNoticeOwner": "The initiating Export dialog status or report-insert outcome owns its terminal notice; cancelled/stale requests never reach the save bridge."
@@ -2297,14 +2314,17 @@
         "lexicalPaths": [
           "<workspace>/.maru/diagram-gen/<jobId>/",
           "<workspace>/.maru/diagram-gen/<jobId>/candidate.json",
-          "<workspace>/.maru/diagram-gen/<jobId>/rendered.html"
+          "<workspace>/.maru/diagram-gen/<jobId>/rendered.html",
+          "<workspace>/attachments/diagrams/<storeKey>/renders/<renderId>/index.html",
+          "<workspace>/attachments/diagrams/<storeKey>/renders/<renderId>/receipt.json",
+          "Missing ancestor directories only, admitted before their creation; existing parents are read-validated without reserving the whole attachments tree."
         ],
         "aliasPaths": [
           "Physical identity keys/parent snapshots captured by PathTransactionRequest; render output and its staging parents are rechecked around engine execution and bounded reads."
         ],
-        "postAdmissionPreconditions": "stage_candidate rechecks workspace registry, declared staging paths and workspace create permission after admission, refuses pre-existing job paths, then atomically writes candidate.json. The forced render target stays inside that job directory.",
+        "postAdmissionPreconditions": "stage_candidate rechecks workspace registry, declared staging paths and workspace create permission after admission, refuses pre-existing job paths, then atomically writes candidate.json. The forced render target stays inside that job directory. Render-store publication validates context IDs, hash/MIME and real parent directories, refuses existing destinations and checks Create permission before effects.",
         "domainLockOrder": "Shared admission before the workspace write-allow guard and any domain locks; staging is atomic under its path lease. No domain lock or path lease is held across the engine subprocess; UUID job staging is private, monitored and removed after settlement.",
-        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions admits the private staging candidate before effects; the caller uses the existing admitted native save bridge for the final copy."
+        "sharedAdmissionEntry": "src-tauri/src/atomic_file.rs::with_path_transactions admits the private staging candidate before effects; the caller uses the existing admitted native save bridge for the final copy. src-tauri/src/diagram/renders.rs::store_render_with_id independently admits the store pair and missing parents through with_path_transactions before any store filesystem effect."
       },
       "evidence": {
         "behaviorCases": [
@@ -2314,11 +2334,194 @@
           "render_rejects_staging_symlink_without_removing_its_target",
           "render_kills_and_reaps_a_timed_out_engine",
           "render_timeout_stops_late_descendant_writes",
-          "render_command_runs_in_worker_and_propagates_worker_failure"
+          "render_command_runs_in_worker_and_propagates_worker_failure",
+          "render_with_document_context_publishes_an_immutable_receipt_pair",
+          "optional_store_failure_keeps_a_valid_engine_artifact_and_returns_warning"
         ],
-        "workerProof": "Owned IPC arguments enter the awaited blocking worker before engine/path/process work. The physical render worker boundary and failure-propagation case passed in the recorded real filtered Cargo run.",
-        "platformScope": "Local macOS: actual archify-filtered Cargo run passed 18/0/0, including the worker boundary, five-type pinned render, symlink refusal and process-tree timeout cases. Node/jsdom checks cover CJK, both themes, receipt lineage and cancellation; PNG is mocked only in those focused tests. Hosted run42451907498 on prior source head4f424356 passed the real native diagram-export SVG/PNG/save/readback spec and all15 spec files. Final-head hosted CI is still required; no Windows, shipped-release-bundle or manual visual-review execution claimed.",
-        "deferredChecks": "The pending selector was replaced only after an actual local filtered Cargo result under the owner exception. Final-head hosted verify, Playwright and native suite remain the merge gates; the isolation checker is unchanged."
+        "workerProof": "The whole render and optional immutable pair publication run inside the awaited blocking worker. Real archify-filtered tests include worker failure/first-poll proof and context-to-persisted-HTML/receipt readback.",
+        "platformScope": "Actual dgx02 Debian-trixie filtered run:20 passed/0 failed/0 ignored, including real pinned render with successful history and blocked-history nonfatal artifact/hash proof. Frontend focused tests cover copy/report warnings and legacy type matching. Final native fixture synchronization and release/Windows behavior require separate evidence. Current delegated store/list helpers also passed the renders selector19/0/0 at merged source bcc8e18a.",
+        "deferredChecks": "Final-head hosted verify, Playwright and native suite remain required; no checker edits or invented counts."
+      }
+    },
+    {
+      "name": "diagram_list_renders",
+      "module": "src-tauri/src/diagram/renders.rs",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::renders::ipc::diagram_list_renders",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/diagram/renders.rs::ipc::diagram_list_renders owns arguments and awaits spawn_blocking around list_renders.",
+        "src-tauri/src/diagram/renders.rs::list_renders performs bounded disk/document matching and keeps orphaned or unverified entries; prepare_render_view re-reads bounded receipts/artifacts and verifies full hashes before an exact-file grant; delete_render admits one validated UUID folder, applies Delete permission and refuses symlinks/nested unexpected content before removing its files."
+      ],
+      "workerBoundary": "src-tauri/src/diagram/renders.rs::ipc::diagram_list_renders awaits spawn_blocking before filesystem, parse/hash, scope or admission work; list_command_yields_and_propagates_worker_failure proves a nonblocking first poll and propagated worker failure.",
+      "syncCallers": [
+        "src-tauri/src/diagram/renders.rs::list_renders is entered by its isolated IPC wrapper; focused tests call the domain adapter directly."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --lib renders -- --test-threads=2",
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0,
+          "filteredOut": 2162,
+          "exitCode": 0,
+          "workingDirectory": "src-tauri",
+          "buildJobs": 2,
+          "executionHost": "dgx02 container (Debian trixie)",
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/diagram/renders.ts",
+          "src/components/diagram/modals/RendersDialog.tsx"
+        ],
+        "payload": "Workspace plus validated document/render IDs; receipts and artifact bytes remain in workspace files. No prompts, credentials or runtime environment enter these records.",
+        "classification": "n/a: render history inspection or one explicitly selected view/delete, not a processing batch",
+        "classifier": "List entries are verified or unverified; the UI does not invent browser entries or grant an unverified artifact.",
+        "successRetention": "Workspace artifact/receipt pairs remain immutable and survive source deletion; list/prepare return typed disk-derived metadata, while confirmed deletion removes only its selected folder.",
+        "failureReasons": "Bounded file/receipt/path/hash diagnostics name the affected file and recovery; the initiating modal displays the terminal outcome.",
+        "singleTerminalNoticeOwner": true,
+        "terminalNoticeOwner": "src/components/diagram/modals/RendersDialog.tsx owns the selected action status and ignores stale async results."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "copied_receipt_is_listed_and_missing_or_bad_receipts_are_unverified",
+          "orphaned_renders_remain_listed_and_delete_removes_only_the_selected_folder",
+          "list_command_yields_and_propagates_worker_failure",
+          "unicode_document_ids_keep_logical_identity_and_long_titles_are_bounded_utf8",
+          "reserved_hash_prefix_ids_are_hashed_to_avoid_legacy_key_collisions",
+          "portable_reserved_names_and_trailing_dot_use_hashed_keys",
+          "duplicate_document_ids_mark_only_the_ambiguous_group_and_keep_renders_usable"
+        ],
+        "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:19 passed/0 failed/0 ignored, including portable names, duplicate-id groups, hash/grant integrity, deletion isolation and worker boundaries; no native/release execution inferred."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem inspection with no filesystem mutation or registry migration. Prepare additionally changes the in-memory asset scope only after verification, through an exact allow_file (never its directory)."
+      }
+    },
+    {
+      "name": "diagram_prepare_render_view",
+      "module": "src-tauri/src/diagram/renders.rs",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::renders::ipc::diagram_prepare_render_view",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/diagram/renders.rs::ipc::diagram_prepare_render_view owns arguments and awaits spawn_blocking around prepare_render_view.",
+        "src-tauri/src/diagram/renders.rs::list_renders performs bounded disk/document matching and keeps orphaned or unverified entries; prepare_render_view re-reads bounded receipts/artifacts and verifies full hashes before an exact-file grant; delete_render admits one validated UUID folder, applies Delete permission and refuses symlinks/nested unexpected content before removing its files."
+      ],
+      "workerBoundary": "src-tauri/src/diagram/renders.rs::ipc::diagram_prepare_render_view awaits spawn_blocking before filesystem, parse/hash, scope or admission work; prepare_command_yields_and_propagates_worker_failure proves a nonblocking first poll and propagated worker failure.",
+      "syncCallers": [
+        "src-tauri/src/diagram/renders.rs::prepare_render_view is entered by its isolated IPC wrapper; focused tests call the domain adapter directly."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --lib renders -- --test-threads=2",
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0,
+          "filteredOut": 2162,
+          "exitCode": 0,
+          "workingDirectory": "src-tauri",
+          "buildJobs": 2,
+          "executionHost": "dgx02 container (Debian trixie)",
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/diagram/renders.ts",
+          "src/components/diagram/modals/RendersDialog.tsx"
+        ],
+        "payload": "Workspace plus validated document/render IDs; receipts and artifact bytes remain in workspace files. No prompts, credentials or runtime environment enter these records.",
+        "classification": "n/a: render history inspection or one explicitly selected view/delete, not a processing batch",
+        "classifier": "List entries are verified or unverified; the UI does not invent browser entries or grant an unverified artifact.",
+        "successRetention": "Workspace artifact/receipt pairs remain immutable and survive source deletion; list/prepare return typed disk-derived metadata, while confirmed deletion removes only its selected folder.",
+        "failureReasons": "Bounded file/receipt/path/hash diagnostics name the affected file and recovery; the initiating modal displays the terminal outcome.",
+        "singleTerminalNoticeOwner": true,
+        "terminalNoticeOwner": "src/components/diagram/modals/RendersDialog.tsx owns the selected action status and ignores stale async results."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "stores_immutable_html_and_prepares_only_the_hash_verified_file",
+          "modified_artifact_is_refused_without_an_asset_grant",
+          "mismatched_artifact_filename_is_unverified_and_cannot_be_prepared",
+          "prepare_command_yields_and_propagates_worker_failure"
+        ],
+        "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:19 passed/0 failed/0 ignored, including portable names, duplicate-id groups, hash/grant integrity, deletion isolation and worker boundaries; no native/release execution inferred."
+      },
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "reason": "Read-only filesystem inspection with no filesystem mutation or registry migration. Prepare additionally changes the in-memory asset scope only after verification, through an exact allow_file (never its directory)."
+      }
+    },
+    {
+      "name": "diagram_delete_render",
+      "module": "src-tauri/src/diagram/renders.rs",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::renders::ipc::diagram_delete_render",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/diagram/renders.rs::ipc::diagram_delete_render owns arguments and awaits spawn_blocking around delete_render.",
+        "src-tauri/src/diagram/renders.rs::list_renders performs bounded disk/document matching and keeps orphaned or unverified entries; prepare_render_view re-reads bounded receipts/artifacts and verifies full hashes before an exact-file grant; delete_render admits one validated UUID folder, applies Delete permission and refuses symlinks/nested unexpected content before removing its files."
+      ],
+      "workerBoundary": "src-tauri/src/diagram/renders.rs::ipc::diagram_delete_render awaits spawn_blocking before filesystem, parse/hash, scope or admission work; delete_command_yields_and_propagates_worker_failure proves a nonblocking first poll and propagated worker failure.",
+      "syncCallers": [
+        "src-tauri/src/diagram/renders.rs::delete_render is entered by its isolated IPC wrapper; focused tests call the domain adapter directly."
+      ],
+      "tests": [
+        {
+          "command": "cargo test --lib renders -- --test-threads=2",
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0,
+          "filteredOut": 2162,
+          "exitCode": 0,
+          "workingDirectory": "src-tauri",
+          "buildJobs": 2,
+          "executionHost": "dgx02 container (Debian trixie)",
+          "sourceCommit": "bcc8e18ac1dcc9e9bc0974c6ed44b1b17b0f7c12"
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/diagram/renders.ts",
+          "src/components/diagram/modals/RendersDialog.tsx"
+        ],
+        "payload": "Workspace plus validated document/render IDs; receipts and artifact bytes remain in workspace files. No prompts, credentials or runtime environment enter these records.",
+        "classification": "n/a: render history inspection or one explicitly selected view/delete, not a processing batch",
+        "classifier": "List entries are verified or unverified; the UI does not invent browser entries or grant an unverified artifact.",
+        "successRetention": "Workspace artifact/receipt pairs remain immutable and survive source deletion; list/prepare return typed disk-derived metadata, while confirmed deletion removes only its selected folder.",
+        "failureReasons": "Bounded file/receipt/path/hash diagnostics name the affected file and recovery; the initiating modal displays the terminal outcome.",
+        "singleTerminalNoticeOwner": true,
+        "terminalNoticeOwner": "src/components/diagram/modals/RendersDialog.tsx owns the selected action status and ignores stale async results."
+      },
+      "evidence": {
+        "behaviorCases": [
+          "orphaned_renders_remain_listed_and_delete_removes_only_the_selected_folder",
+          "refuses_symlink_artifacts_without_granting_or_deleting_the_target",
+          "delete_command_yields_and_propagates_worker_failure"
+        ],
+        "workerProof": "Physical first-poll/failure fixtures use the actual awaited IPC wrapper. Domain fixtures cover copied/missing/bad receipts, immutable writes, orphan deletion, hash refusal, exact asset scopes and symlink refusal.",
+        "platformScope": "Actual dgx02 Debian-trixie renders selector:19 passed/0 failed/0 ignored, including portable names, duplicate-id groups, hash/grant integrity, deletion isolation and worker boundaries; no native/release execution inferred."
+      },
+      "mutationKey": {
+        "lexicalPaths": [
+          "<workspace>/attachments/diagrams/<docId>/renders/<renderId>/ and its bounded direct files"
+        ],
+        "aliasPaths": [
+          "Validated real directory chain and canonical aliases captured by PathTransactionRequest; symlinks and non-file render contents are refused."
+        ],
+        "postAdmissionPreconditions": "Recheck real folder/children, exact coverage, workspace registry and Delete permission before removing any file. The source diagram and sibling render folders are outside this mutation.",
+        "domainLockOrder": "Shared path admission is taken before the workspace write guard and filesystem effects; no separate domain lock or subprocess wait is held.",
+        "sharedAdmissionEntry": "src-tauri/src/diagram/renders.rs::delete_render uses with_path_transactions over the exact render folder and gathered direct files before the first effect."
       }
     }
   ]

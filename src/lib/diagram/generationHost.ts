@@ -148,9 +148,9 @@ export function createGenerationHost(options: GenerationHostOptions): DiagramGen
   return {
     runAgent,
     validateCandidate,
-    renderCandidate: (type, json) => {
+    renderCandidate: (type, json, context) => {
       if (!options.workPath) throw new Error("Engine export needs a workspace; open a workspace and retry.");
-      return archifyRenderCandidate(options.workPath, type, json);
+      return archifyRenderCandidate(options.workPath, type, json, context);
     },
     cancel: () => cancelCurrent?.(),
   };

@@ -8,6 +8,11 @@ import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 
+// Reviewed asset viewer contract: receipt/hash verification precedes its grant.
+const ASSET_FRAME_CONTRACTS = new Map([
+  ["src/components/diagram/modals/RendersDialog.tsx", "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox"],
+]);
+
 export function iframeViolations(text, filename) {
   const extension = posix.extname(filename).toLowerCase();
   const kind = extension === ".jsx" ? ts.ScriptKind.JSX
@@ -81,6 +86,28 @@ export function iframeViolations(text, filename) {
     if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(source) === "iframe") {
       const attributes = node.attributes.properties;
       if (attributes.some(ts.isJsxSpreadAttribute)) report(node, "iframe props must be explicit");
+      const sandboxContract = ASSET_FRAME_CONTRACTS.get(filename);
+      if (sandboxContract) {
+        const staticText = (expression, seen = new Set()) => {
+          if (ts.isStringLiteral(expression)) return expression.text;
+          if (ts.isIdentifier(expression)) {
+            const symbol = checker.getSymbolAtLocation(expression);
+            if (!symbol || seen.has(symbol)) return null;
+            const value = constants.get(symbol);
+            return value ? staticText(value, new Set([...seen, symbol])) : null;
+          }
+          return null;
+        };
+        const attrText = (name) => {
+          const attribute = attributes.find((entry) => ts.isJsxAttribute(entry) && entry.name.getText(source) === name);
+          if (!attribute || !ts.isJsxAttribute(attribute)) return null;
+          const value = attribute.initializer;
+          return value && ts.isStringLiteral(value) ? value.text
+            : value && ts.isJsxExpression(value) && value.expression ? staticText(value.expression) : null;
+        };
+        if (attrText("sandbox") !== sandboxContract) report(node, "render viewer must keep its reviewed opaque-origin sandbox");
+        if (attrText("referrerPolicy") !== "no-referrer") report(node, "render viewer must suppress referrers");
+      }
       const src = attributes.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "src");
       const srcDoc = attributes.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "srcDoc");
       if (src && ts.isJsxAttribute(src)) {

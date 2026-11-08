@@ -425,3 +425,12 @@ describe("scopeDocForRender", () => {
     expect(seen[0].nodes.map((n) => n.id)).toEqual(["a", "b"]);
   });
 });
+
+it("keeps report insertion successful while surfacing a render-history store failure", async () => {
+  const harness = makeHarness();
+  harness.deps.renderAssets = async () => ({ ...verifiedAssets(), storeWarnings: ["Render history folder is not writable; repair permissions and retry"] });
+  const result = await insertDiagramIntoReport(makeRequest(), harness.deps);
+  expect(result).toEqual({ status: "inserted", targetPath: "reports/weekly.md", storeWarnings: ["Render history folder is not writable; repair permissions and retry"] });
+  expect(harness.writes).toHaveLength(2);
+  expect(harness.saves).toHaveLength(1);
+});

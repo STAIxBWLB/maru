@@ -134,6 +134,8 @@ import { InlineTextEditor, type InlineEditField } from "./canvas/InlineTextEdito
 import { LeftPanel } from "./panels/LeftPanel";
 import { RightPanel } from "./panels/RightPanel";
 import { Ribbon } from "./ribbon/Ribbon";
+import { RendersDialog } from "./modals/RendersDialog";
+import { rerenderDocument } from "../../lib/diagram/renders";
 import { ImportExportDialog } from "./modals/ImportExportDialog";
 import { GenerateDiagramDialog } from "./modals/GenerateDiagramDialog";
 import { MappingPreviewDialog } from "./modals/MappingPreviewDialog";
@@ -313,6 +315,7 @@ function DiagramShell({
     sourceViewId: string;
     targetPatternId: string;
   } | null>(null);
+  const [rendersOpen, setRendersOpen] = useState(false);
   const [ioDialog, setIoDialog] = useState<"import" | "export" | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -909,11 +912,11 @@ function DiagramShell({
             reportError(t("diagram.report.failed", { message: outcome.message }));
             break;
           case "inserted":
-            reportError(t("diagram.report.inserted", { path: outcome.targetPath }));
+            reportError([t("diagram.report.inserted", { path: outcome.targetPath }), ...(outcome.storeWarnings ?? []).map((message) => t("diagram.renders.notKept", { message }))].join("\n"));
             setReportLinkState("update");
             break;
           case "updated":
-            reportError(t("diagram.report.updated", { path: outcome.targetPath }));
+            reportError([t("diagram.report.updated", { path: outcome.targetPath }), ...(outcome.storeWarnings ?? []).map((message) => t("diagram.renders.notKept", { message }))].join("\n"));
             setReportLinkState("update");
             break;
         }
@@ -1617,6 +1620,7 @@ function DiagramShell({
           onTemplates: () => openGallery("apply"),
           onGenerate: () => setGenerateOpen(true),
           onHistory: () => setHistoryOpen(true),
+          onRenders: () => setRendersOpen(true),
           onImport: () => setIoDialog("import"),
           onCopyPng: () => void handleCopyPng(),
           onCopySvg: () => void handleCopySvg(),
@@ -1808,6 +1812,9 @@ function DiagramShell({
           onCancel={() => setMappingPreview(null)}
         />
       ) : null}
+      {rendersOpen && <RendersDialog open workspace={workPath} theme={theme}
+        onRerender={(group, render) => workPath ? rerenderDocument(workPath, group, render) : Promise.reject(new Error("Open a workspace before re-rendering."))}
+        onClose={() => setRendersOpen(false)} />}
       <ImportExportDialog
         open={ioDialog !== null}
         mode={ioDialog ?? "export"}

@@ -438,15 +438,72 @@ artifact, browser-conversion, visual-review and saved-byte-readback gates.
 Conversion success does not mark visual review as passed. Only a native save
 acknowledgement after byte comparison marks readback passed. The save bridge
 atomically replaces the selected file under its existing lease, preserving the
-previous file on a failed replacement. The receipt is shown for this operation;
-no sibling receipt or workspace render-store entry is written. Durable paired
-receipts belong to the subsequent render-store work.
+previous file on a failed replacement. The final converted-file receipt is shown
+for this operation; no sibling receipt is written next to that export copy.
+When document context is supplied, the backend engine HTML and its own receipt
+are retained in the Renders store below. SVG/PNG remain frontend-converted
+export copies and are not stored there.
 
 A changed document, workspace or closed dialog invalidates an in-flight render
 before save. Once a native file copy has begun it completes atomically; the UI
 keeps that operation busy until its acknowledgement. The native-only
 `diagram-export` spec exercises real SVG/PNG conversion and saved-file hashes;
 Chromium/jsdom checks alone do not prove WKWebView or a shipped release bundle.
+
+## Workspace Renders
+
+File > Renders lists disk artifacts from
+`attachments/diagrams/<storeKey>/renders/<renderId>/`. Compatible lowercase ASCII
+IDs retain their directory key; Unicode, uppercase, unsafe and reserved-prefix
+IDs use a hash key to prevent traversal and case-insensitive collisions. Keys
+also pass the shared portable-name rules, so Windows device names and trailing
+dots are hashed rather than used as directories. The
+receipt retains the original logical `docId`; list entries return the safe key
+for prepare/delete and `originalDocId` for source matching. Each successful
+history write creates a fresh UUID folder with `index.html` and `receipt.json`;
+existing folders/files are never overwritten. The engine receipt
+adds `docId`, historical `documentName`, `documentRevision`, `renderedAt` and
+`diagramType` (display names are sanitized and capped at 256 UTF-8 bytes), plus the optional source `datasetId` for unambiguous re-rendering
+in multi-dataset documents. Older receipts without it require a unique matching
+source, or a new export with an explicit dataset choice. Its output hash belongs to the stored engine HTML, while a static
+export's final SVG/PNG hash belongs to the converted copy. This is not HTML export
+to a user-selected path; that remains behind #528 T2's platform gates.
+
+The native commands scan receipts and join current `diagrams/*.cmd.json` files
+by `docId`, using the current filename for Re-render. Removing or renaming a
+source document does not delete its renders: a missing source is listed as
+orphaned. When two saved diagrams share one ID, that group is marked ambiguous
+with a bounded recovery diagnostic. Listing, verified viewing and deletion
+remain available, while Re-render refuses to choose an arbitrary source until
+one file receives a distinct ID. Copied render folders with valid receipts are listed; missing, malformed
+or mismatched receipts/artifacts stay visible as unverified. Copied static
+`index.svg`/`index.png` artifacts use image previews instead of HTML frames.
+
+`diagram_prepare_render_view` rereads the receipt and artifact, compares their
+SHA-256 values and grants exactly that file to the asset protocol. It never
+grants the parent folder. Grants are exact-file additions to Tauri's app-session
+asset scope, like the retired gallery; selecting another render does not revoke
+an earlier verified file's grant. A mismatch names the affected file and asks for a
+re-render. HTML uses the reviewed gallery sandbox flags
+`allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox`,
+without `allow-same-origin`, plus `referrerPolicy="no-referrer"`. Theme changes
+recheck the artifact and remount with a `theme` query. The main-iframe guard
+checks this viewer's source, exact sandbox and referrer policy.
+
+Open in default app (the configured HTML handler, normally a browser) and Reveal
+recheck the file first. Re-render reads the current
+saved semantic spec rather than old render content. Legacy receipts without a
+dataset ID match the prior diagram type first and require a unique source of
+that type; a lone dataset of another type is refused. Confirmed Delete admits
+and removes only the selected render folder through the workspace Delete guard;
+source documents and other attachments remain. History is optional: if storage
+fails after a valid engine render, export copies and report insertion still
+succeed and show a cause/recovery warning that the render was not kept. An
+action specifically requesting a stored re-render surfaces that warning as a
+failed history action. Browser builds show the desktop
+requirement and no invented render entries. The native `diagram-renders` spec
+probes parent/IPC isolation, theme remount and a denied neighboring file; a
+custom-protocol test build is not a shipped-release or manual visual check.
 
 ## Insert/Update in report
 

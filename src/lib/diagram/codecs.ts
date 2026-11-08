@@ -73,6 +73,7 @@ export interface CodecParseOutcome {
 }
 
 export interface CodecSerializeOutcome {
+  storeWarning?: string;
   receipt?: ArchifyRenderReceipt;
   bytes: string | Uint8Array;
   fidelity: CodecFidelity;
@@ -1039,7 +1040,7 @@ function engineStaticCodec(format: "svg" | "png"): DiagramCodec {
         doc: input.doc, datasetId: input.datasetId, workspace: input.workspace, format,
         host: input.renderHost, isCurrent: input.isCurrent, theme: input.theme,
       });
-      return { bytes: artifact.bytes, receipt: artifact.receipt, fidelity: "visual", warnings: [{ key: "diagram.codec.warn.engineSemanticOnly" }] };
+      return { bytes: artifact.bytes, receipt: artifact.receipt, storeWarning: artifact.storeWarning, fidelity: "visual", warnings: [{ key: "diagram.codec.warn.engineSemanticOnly" }] };
     },
   };
 }
