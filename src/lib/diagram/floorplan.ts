@@ -91,16 +91,13 @@ export function floorplanNodeIds(spec: Record<string, unknown>): Set<string> {
 }
 
 /**
- * Whether `ref` (an edge endpoint, flow step or tour stop) names something
- * on the map: a node id, or a file path. A file path contains `/`, or is a
- * dotted name whose part before the first dot is not a node id (`app.py`);
- * `api.ghost` under an existing `api` node reads as a dangling node id.
+ * Whether `ref` (an edge endpoint, flow step or tour stop) names something on
+ * the map: a node id first, else a file some node's `paths` claim
+ * ({@link floorplanOwner}), else it dangles.
  */
-export function isFloorplanRef(ref: unknown, nodeIds: ReadonlySet<string>): boolean {
+export function isFloorplanRef(ref: unknown, spec: Record<string, unknown>, nodeIds: ReadonlySet<string>): boolean {
   if (typeof ref !== "string" || ref.length === 0) return false;
-  if (nodeIds.has(ref) || ref.includes("/")) return true;
-  const dot = ref.indexOf(".");
-  return dot > 0 && dot < ref.length - 1 && !nodeIds.has(ref.slice(0, dot));
+  return nodeIds.has(ref) || floorplanOwner(spec, ref) !== null;
 }
 
 /** Descendant ids of `id` (children first-order, cycle safe). */
@@ -122,29 +119,95 @@ export function floorplanDescendants(spec: Record<string, unknown>, ids: Iterabl
 
 const globCache = new Map<string, RegExp>();
 
-/** Upstream glob subset: `**`, `*`, `?`, `{a,b}`; a wildcard-free pattern also matches as a directory. */
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
+/**
+ * Compile one glob (schema.md "Glob syntax") with a small tokenizer:
+ * `**` any depth, `*` within a segment, `?` one char, `{a,b}` alternation
+ * (members may hold wildcards), a whole folder name in brackets (`[id]`,
+ * `[...slug]`, `[[...slug]]`) literal, elsewhere `[abc]` / `[!abc]` a class,
+ * and a wildcard-free pattern also matching as a directory.
+ */
+function compileGlob(pattern: string): RegExp {
+  const wildcard = /[*?{]|\[/.test(pattern.replace(/(^|\/)\[[^/]*\](?=\/|$)/g, "$1"));
+  const parse = (start: number, inBrace: boolean): { source: string; end: number } => {
+    let source = "";
+    let i = start;
+    while (i < pattern.length) {
+      const ch = pattern[i]!;
+      if (inBrace && (ch === "," || ch === "}")) break;
+      const segmentStart = i === 0 || pattern[i - 1] === "/";
+      if (ch === "[" && segmentStart) {
+        const slash = pattern.indexOf("/", i);
+        const segment = pattern.slice(i, slash < 0 ? pattern.length : slash);
+        if (segment.endsWith("]") && !/[{},]/.test(segment)) {
+          source += escapeRegex(segment);
+          i += segment.length;
+          continue;
+        }
+      }
+      if (ch === "*" && pattern[i + 1] === "*") {
+        const slash = pattern[i + 2] === "/";
+        source += slash ? "(?:.*/)?" : ".*";
+        i += slash ? 3 : 2;
+      } else if (ch === "*") {
+        source += "[^/]*";
+        i += 1;
+      } else if (ch === "?") {
+        source += "[^/]";
+        i += 1;
+      } else if (ch === "{") {
+        const options: string[] = [];
+        let cursor = i + 1;
+        let closed = false;
+        while (cursor <= pattern.length) {
+          const part = parse(cursor, true);
+          options.push(part.source);
+          cursor = part.end;
+          if (pattern[cursor] === ",") cursor += 1;
+          else {
+            closed = pattern[cursor] === "}";
+            break;
+          }
+        }
+        if (closed) {
+          source += `(?:${options.join("|")})`;
+          i = cursor + 1;
+        } else {
+          source += "\\{";
+          i += 1;
+        }
+      } else if (ch === "[") {
+        const close = pattern.indexOf("]", i + 2);
+        if (close < 0) {
+          source += "\\[";
+          i += 1;
+        } else {
+          let body = pattern.slice(i + 1, close);
+          const negate = body[0] === "!" || body[0] === "^";
+          if (negate) body = body.slice(1);
+          source += `[${negate ? "^" : ""}${body.replace(/[\\\]^]/g, "\\$&")}]`;
+          i = close + 1;
+        }
+      } else {
+        source += escapeRegex(ch);
+        i += 1;
+      }
+    }
+    return { source, end: i };
+  };
+  return new RegExp(`^${parse(0, false).source}${wildcard ? "" : "(?:/.*)?"}$`);
+}
+
+/** Upstream glob subset; see {@link compileGlob}. Never throws: a bad pattern matches nothing. */
 export function floorplanGlobMatches(pattern: string, path: string): boolean {
   let regex = globCache.get(pattern);
   if (!regex) {
-    const wildcard = /[*?{]/.test(pattern);
-    let source = "";
-    for (let i = 0; i < pattern.length; i += 1) {
-      const ch = pattern[i]!;
-      if (ch === "*" && pattern[i + 1] === "*") {
-        source += pattern[i + 2] === "/" ? "(?:.*/)?" : ".*";
-        i += pattern[i + 2] === "/" ? 2 : 1;
-      } else if (ch === "*") source += "[^/]*";
-      else if (ch === "?") source += "[^/]";
-      else if (ch === "{") {
-        const end = pattern.indexOf("}", i);
-        if (end < 0) source += "\\{";
-        else {
-          source += `(?:${pattern.slice(i + 1, end).split(",").map((part) => part.replace(/[.+^$()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")).join("|")})`;
-          i = end;
-        }
-      } else source += ch.replace(/[.+^$()|[\]\\]/g, "\\$&");
+    try {
+      regex = compileGlob(pattern);
+    } catch {
+      regex = /$^/;
     }
-    regex = new RegExp(`^${source}${wildcard ? "" : "(?:/.*)?"}$`);
     globCache.set(pattern, regex);
   }
   return regex.test(path);
@@ -275,7 +338,7 @@ export function validateFloorplanSpec(spec: Record<string, unknown>): Validation
     if (!isRecord(edge)) return meta(at);
     for (const end of ["from", "to"] as const) {
       if (typeof edge[end] !== "string" || edge[end] === "") meta(`${at}.${end}`);
-      else if (!isFloorplanRef(edge[end], seen)) {
+      else if (!isFloorplanRef(edge[end], spec, seen)) {
         diagnostics.push({ key: "diagram.semantic.danglingReference", params: { field: `${at}.${end}`, id: String(edge[end]) } });
       }
     }
@@ -307,7 +370,7 @@ export function validateFloorplanSpec(spec: Record<string, unknown>): Validation
     steps.forEach((step, stepIndex) => {
       const stepAt = `${at}.steps[${stepIndex}].node`;
       if (!isRecord(step) || typeof step.node !== "string") meta(stepAt);
-      else if (!isFloorplanRef(step.node, seen)) {
+      else if (!isFloorplanRef(step.node, spec, seen)) {
         diagnostics.push({ key: "diagram.semantic.danglingReference", params: { field: stepAt, id: step.node } });
       }
     });
@@ -317,7 +380,7 @@ export function validateFloorplanSpec(spec: Record<string, unknown>): Validation
   (Array.isArray(spec.tour) ? spec.tour as unknown[] : []).forEach((stop, index) => {
     const at = `tour[${index}].node`;
     if (!isRecord(stop) || typeof stop.node !== "string") meta(at);
-    else if (!isFloorplanRef(stop.node, seen)) {
+    else if (!isFloorplanRef(stop.node, spec, seen)) {
       diagnostics.push({ key: "diagram.semantic.danglingReference", params: { field: at, id: stop.node } });
     }
   });

@@ -248,7 +248,7 @@ export function collectSemanticIds(diagramType: SemanticDiagramType, spec: Recor
 
 /** Maru canvas id for a spec id, via the dataset's id map (identity fallback). */
 function maruIdFor(dataset: SemanticSpecDataset, specId: string): string {
-  return dataset.idMap[specId] ?? specId;
+  return Object.hasOwn(dataset.idMap, specId) ? dataset.idMap[specId]! : specId;
 }
 
 /** Spec id for a Maru canvas id: idMap reverse lookup, then identity. */

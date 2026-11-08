@@ -267,7 +267,7 @@ export function buildProposalFromCandidate(
         const descriptor = descriptorFor(dataset);
         return descriptor
           ? specEntries(dataset.spec, descriptor.relations).map((entry, index) =>
-              typeof entry.id === "string" ? (dataset.idMap[entry.id] ?? entry.id) : `${dataset.id}-e${index}`,
+              typeof entry.id === "string" ? (Object.hasOwn(dataset.idMap, entry.id) ? dataset.idMap[entry.id]! : entry.id) : `${dataset.id}-e${index}`,
             )
           : [];
       }),

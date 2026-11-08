@@ -33,6 +33,21 @@ import { createDiagramId, DIAGRAM_SCHEMA_VERSION, type DiagramStateRoot } from "
 import type { ValidationDiagnostic } from "./validation";
 import type { SemanticDiagramType } from "./reportTypes";
 
+/**
+ * Keep a floorplan's canvas nodes parent-first like a fresh projection, so a
+ * reparented node is not painted under its new (opaque) parent section. The
+ * dataset's nodes keep their slots among freeform nodes.
+ */
+function reorderFloorplanNodes(state: DiagramStateRoot, dataset: Parameters<typeof projectSemanticDataset>[0]): DiagramStateRoot {
+  const order = new Map(projectSemanticDataset(dataset).nodes.map((node, index) => [node.id, index]));
+  const owned = new Set(semanticMemberNodeIds(state.doc, dataset.id));
+  const sorted = state.doc.nodes.filter((node) => owned.has(node.id))
+    .sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+  let slot = 0;
+  const nodes = state.doc.nodes.map((node) => owned.has(node.id) ? sorted[slot++]! : node);
+  return nodes.every((node, index) => node === state.doc.nodes[index]) ? state : { ...state, doc: { ...state.doc, nodes } };
+}
+
 /** A spec edit: the next spec plus warnings, or null when nothing changes. */
 export type SpecTransform = (
   spec: Record<string, unknown>,
@@ -282,6 +297,10 @@ export function planSemanticEdit(
   if (outcome.status === "applied") {
     const applyProposal = outcome.transformer;
     const transformer: StateTransformer = (current) => {
+      const committed = commit(current);
+      return dataset.diagramType === "floorplan" && committed.doc !== current.doc ? reorderFloorplanNodes(committed, next) : committed;
+    };
+    const commit: StateTransformer = (current) => {
       if (current.doc !== state.doc) return current;
       if (result.edgeIndexRemaps?.length) current = remapEdgeIndexCanvas(current, datasetId, result.edgeIndexRemaps);
       if (result.containerIndexRemaps?.length) {

@@ -69,7 +69,9 @@ export function floorplanSpecToDataset(
     params: { field },
   }));
   const idMap: Record<string, string> = {};
-  for (const id of floorplanNodeIds(spec)) idMap[id] = id;
+  // Identity map. `__proto__` would set the prototype instead of an entry; the
+  // lookup falls back to the id itself, so it is left out.
+  for (const id of floorplanNodeIds(spec)) if (id !== "__proto__") idMap[id] = id;
   const project = isRecord(spec.project) ? spec.project : {};
   const name = opts.name ?? (typeof project.name === "string" && project.name.length > 0 ? project.name : "floorplan");
   return {

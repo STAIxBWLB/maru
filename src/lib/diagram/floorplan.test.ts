@@ -62,13 +62,23 @@ describe("floorplan validation", () => {
     expect(validateFloorplanSpec(spec).map((d) => d.key)).toContain("diagram.semantic.parentCycle");
   });
 
-  it("tells file paths from dangling dotted ids", () => {
+  it("resolves a ref as a node id, else a claimed file, else dangling", () => {
+    const spec = {
+      project: { name: "x" },
+      nodes: [
+        { id: "api", label: "API", kind: "service", paths: ["Dockerfile", ".env", "api.ts", "shop-api/**"] },
+        { id: "web", label: "Web", kind: "ui" },
+      ],
+    };
     const ids = new Set(["api", "web"]);
-    expect(isFloorplanRef("api", ids)).toBe(true);
-    expect(isFloorplanRef("shop-api/app.py", ids)).toBe(true);
-    expect(isFloorplanRef("app.py", ids)).toBe(true);
-    expect(isFloorplanRef("api.ghost", ids)).toBe(false);
-    expect(isFloorplanRef("ghost", ids)).toBe(false);
+    expect(isFloorplanRef("api", spec, ids)).toBe(true);
+    expect(isFloorplanRef("Dockerfile", spec, ids)).toBe(true);
+    expect(isFloorplanRef(".env", spec, ids)).toBe(true);
+    expect(isFloorplanRef("api.ts", spec, ids)).toBe(true);
+    expect(isFloorplanRef("shop-api/app.py", spec, ids)).toBe(true);
+    expect(isFloorplanRef("api.ghost", spec, ids)).toBe(false);
+    expect(isFloorplanRef("ghost", spec, ids)).toBe(false);
+    expect(isFloorplanRef("other/file.ts", spec, ids)).toBe(false);
   });
 
   it("matches upstream globs", () => {
@@ -76,6 +86,16 @@ describe("floorplan validation", () => {
     expect(floorplanGlobMatches("shop-api/app", "shop-api/app/routes/x.py")).toBe(true);
     expect(floorplanGlobMatches("src/{a,b}.ts", "src/b.ts")).toBe(true);
     expect(floorplanGlobMatches("src/*.ts", "src/x/y.ts")).toBe(false);
+    expect(floorplanGlobMatches("src/[ab].ts", "src/a.ts")).toBe(true);
+    expect(floorplanGlobMatches("src/[ab].ts", "src/c.ts")).toBe(false);
+    expect(floorplanGlobMatches("src/{?,bb}.ts", "src/z.ts")).toBe(true);
+    expect(floorplanGlobMatches("src/{?,bb}.ts", "src/bb.ts")).toBe(true);
+    expect(floorplanGlobMatches("src/{?,bb}.ts", "src/bbb.ts")).toBe(false);
+    expect(floorplanGlobMatches("app/orders/[id]/**", "app/orders/[id]/page.tsx")).toBe(true);
+    expect(floorplanGlobMatches("app/orders/[id]/**", "app/orders/7/page.tsx")).toBe(false);
+    expect(floorplanGlobMatches("app/[...slug]/page.tsx", "app/[...slug]/page.tsx")).toBe(true);
+    expect(floorplanGlobMatches("app/[[...slug]]/page.tsx", "app/[[...slug]]/page.tsx")).toBe(true);
+    expect(floorplanGlobMatches("src/{broken", "src/{broken")).toBe(true);
   });
 });
 
@@ -102,6 +122,34 @@ describe("floorplan file ownership (upstream assignment rule)", () => {
     expect(floorplanOwner(base(spec.nodes.slice(0, 2)), "src/other.ts")).toBe("broad");
     expect(floorplanOwner(spec, "src/api/routes.ts")).toBe("deep");
     expect(floorplanOwner(spec, "docs/readme.md")).toBeNull();
+  });
+});
+
+describe("floorplan structural edge cases", () => {
+  it("keeps a reparented node painted over its new parent, as a fresh projection orders it", async () => {
+    const spec = { project: { name: "x" }, nodes: [
+      { id: "a", label: "A", kind: "service" },
+      { id: "b", label: "B", kind: "service" },
+    ] };
+    const store = storeOf(spec);
+    expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+    const out = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "b"), refusingHost);
+    expect(out.status).toBe("applied");
+    const dataset = store.getState().doc.datasets![0] as SemanticSpecDataset;
+    expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(projectSemanticDataset(dataset).nodes.map((n) => n.id));
+    expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(["b", "a"]);
+  });
+
+  it("handles a __proto__ node id without turning ids into objects", () => {
+    const spec = { project: { name: "x" }, nodes: [
+      { id: "__proto__", label: "P", kind: "service" },
+      { id: "ok", label: "OK", kind: "service", parent: "__proto__" },
+    ] };
+    expect(validateFloorplanSpec(spec)).toEqual([]);
+    const { dataset } = floorplanSpecToDataset(spec, { id: "fp" });
+    const projected = projectSemanticDataset(dataset);
+    expect(projected.nodes.map((n) => n.id)).toEqual(["__proto__", "ok"]);
+    expect(projected.nodes.every((n) => typeof n.id === "string")).toBe(true);
   });
 });
 
