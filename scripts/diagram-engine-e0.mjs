@@ -40,7 +40,7 @@ if (action === "types") {
     const bytes = readFileSync(join(browserOutput, name));
     return { name, bytes: bytes.length, gzipBytes: gzipSync(bytes, { level: 9 }).length };
   });
-  const report = { scope: "actual minified ES browser library output, assets inlined by Vite library mode, gzip level9 per emitted JS file (both transports included)", buildMs: performance.now() - before, platform: process.platform, arch: process.arch, sizes, gzipBytes: sizes.reduce((sum, file) => sum + file.gzipBytes, 0) };
+  const report = { scope: "actual ES browser library output (Vite retains ES library whitespace), assets inlined, gzip level9 per emitted JS file (both transports included)", buildMs: performance.now() - before, platform: process.platform, arch: process.arch, sizes, gzipBytes: sizes.reduce((sum, file) => sum + file.gzipBytes, 0) };
   writeFileSync(join(scratch, "wasm-build.json"), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`ENGINE_E0_BUILD ${JSON.stringify(report)}`);
 } else if (action === "needed") {

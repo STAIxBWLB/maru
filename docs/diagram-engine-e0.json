@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "executionScope": {
+    "host": "dgx02 remote dev container",
+    "os": "Debian trixie Linux x64",
+    "node": "24",
+    "rust": "1.98.0",
+    "cargoBuildJobs": 2,
+    "containerCpuQuota": 16,
+    "browserWorkers": 1,
+    "browser": "Chrome for Testing 147.0.7727.15 / Playwright Chromium1217",
+    "cache": "Registry and prior SDK check artifacts were warm; this is not hosted CI build time.",
+    "sdkTree": "b19f51402ecc37682179572105061a50a89cf971",
+    "hostedCi": "pending",
+    "nativeIpc": "pending",
+    "fixture": "50/1000 grid-and-chain populations adapted from src/lib/diagram/perf.bench.ts with deterministic IDs and semantic grid limited to 12 columns; no layout/viewport timing"
+  },
+  "build": {
+    "scope": "actual ES browser library output (Vite retains ES library whitespace), assets inlined, gzip level9 per emitted JS file (both transports included)",
+    "buildMs": 27160.887187,
+    "platform": "linux",
+    "arch": "x64",
+    "sizes": [
+      {
+        "name": "core-B2rNBH2e.js",
+        "bytes": 114,
+        "gzipBytes": 122
+      },
+      {
+        "name": "engine-e0.js",
+        "bytes": 370499,
+        "gzipBytes": 130204
+      }
+    ],
+    "gzipBytes": 130326
+  },
+  "wasm": {
+    "transport": "wasm",
+    "scope": "pre-serialized spec string; wasm call, core validation/hash and report JSON parse; 30 warm samples",
+    "coldMs": 436.59999999403954,
+    "samples": [
+      {
+        "nodes": 50,
+        "bytes": 5217,
+        "durationsMs": [
+          0.4000000059604645,
+          0.29999998211860657,
+          0.4000000059604645,
+          0.4000000059604645,
+          0.19999998807907104,
+          0.30000001192092896,
+          0.4000000059604645,
+          0.29999998211860657,
+          0.4000000059604645,
+          0.4000000059604645,
+          0.30000001192092896,
+          0.29999998211860657,
+          0.30000001192092896,
+          0.4000000059604645,
+          0.29999998211860657,
+          0.5999999940395355,
+          0.10000002384185791,
+          0.19999998807907104,
+          0.19999998807907104,
+          0.20000001788139343,
+          0.09999999403953552,
+          0.09999999403953552,
+          0.30000001192092896,
+          0.19999998807907104,
+          0.09999999403953552,
+          0.20000001788139343,
+          0.09999999403953552,
+          0.09999999403953552,
+          0.09999999403953552,
+          0.20000001788139343
+        ],
+        "medianMs": 0.29999998211860657,
+        "p95Ms": 0.4000000059604645,
+        "maxMs": 0.5999999940395355
+      },
+      {
+        "nodes": 1000,
+        "bytes": 106760,
+        "durationsMs": [
+          3.5,
+          1.9000000059604645,
+          1.9000000059604645,
+          1.5,
+          1.5999999940395355,
+          1.5999999940395355,
+          1.5,
+          1.5,
+          1.5,
+          1.4000000059604645,
+          1.5,
+          1.5,
+          1.4000000059604645,
+          1.4000000059604645,
+          1.699999988079071,
+          2.5999999940395355,
+          2.5,
+          1.5,
+          1.4000000059604645,
+          1.5,
+          1.4000000059604645,
+          1.4000000059604645,
+          1.4000000059604645,
+          1.399999976158142,
+          1.5,
+          1.4000000059604645,
+          1.4000000059604645,
+          1.5999999940395355,
+          1.4000000059604645,
+          1.4000000059604645
+        ],
+        "medianMs": 1.5,
+        "p95Ms": 2.5999999940395355,
+        "maxMs": 3.5
+      }
+    ],
+    "refusesInvalid": true,
+    "engine": {
+      "id": "maru-diagram-engine",
+      "version": "0.1.0",
+      "revision": "b19f51402ecc37682179572105061a50a89cf971"
+    }
+  },
+  "decision": {
+    "provisional": "wasm",
+    "rule": "gzip <=400000 bytes and warm 1000-component p95 <50ms",
+    "hostedReproductionRequired": true
+  },
+  "standaloneExtraction": {
+    "splitCommit": "61e16d8f9c14c02ed5d520dd2851fb676a812cc8",
+    "tree": "b19f51402ecc37682179572105061a50a89cf971",
+    "executionHost": "dgx02 container",
+    "nodeOnPath": false,
+    "coreTests": {
+      "passed": 5,
+      "failed": 0
+    },
+    "pluginTests": {
+      "passed": 3,
+      "failed": 0
+    }
+  }
+}

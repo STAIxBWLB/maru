@@ -551,7 +551,7 @@ subtree extraction. E0 does not change licensing or publish either crate.
 
 The app registers the plugin only under the existing default-off `native-e2e`
 feature. A local-main-only capability permits its one validate command. The
-native bridge measures JSON serialization plus actual Tauri IPC and validation
+native bridge measures actual Tauri IPC, core validation/hash and reply decoding
 for 50 and 1,000 components. The browser spike loads the same core as
 `wasm32-unknown-unknown` through wasm-bindgen; it does not install the Node
 engine host override. This proves only this architecture slice can gate in
@@ -560,9 +560,27 @@ Archify gate, and the other five semantic types have not switched engines.
 
 ### E0 measurement and decision
 
-The decision is pending the exact-head hosted measurements, not inferred from
-Rust test speed. Choose WebAssembly only if its added payload is at most
+The provisional decision is WebAssembly, based on the measured dgx02 browser
+slice below; exact-head hosted reproduction and the real WKWebView IPC baseline
+remain pending. Choose WebAssembly only if its added payload is at most
 400 KB gzip and 1,000-component validation stays below 50 ms; otherwise IPC.
+
+| dgx02 Chromium slice | 50 components | 1,000 components |
+| --- | --- | --- |
+| warm median | 0.3 ms | 1.5 ms |
+| warm p95 (30 samples) | 0.4 ms | 2.6 ms |
+| warm maximum | 0.6 ms | 3.5 ms |
+
+The actual ES library gzip total is 130,326 bytes; cold module load plus first
+validation is 436.6 ms. The build step took 27.16 s with warm registry/prior SDK
+check artifacts; this is a remote-container result, not hosted CI build time.
+Raw samples, engine subtree identity and execution scope are retained in
+[diagram-engine-e0.json](diagram-engine-e0.json). The container has a 16-CPU
+quota, Cargo is limited to two workers and Playwright to one. Both fixtures
+adapt the existing `perf.bench.ts` grid/chain populations to typed architecture
+JSON with deterministic IDs and at most 12 columns; they do not measure that
+canvas benchmark's geometry, rendering or viewport operations.
+
 The harness records all 30 samples per size, cold initialization plus first
 validation, source engine revision, fixture input bytes, and runner/build
 scope. Use p95 of the warm 1,000-component samples for the latency gate.
@@ -572,15 +590,17 @@ release core in Chromium, so these are separate absolute measurements, not a
 cross-platform speedup claim. Build time includes tool compilation and bindgen
 work on that runner and is not a promised clean-cache duration.
 
-The payload receipt sums gzip-level-9 sizes of the actual minified browser
-library output. Vite library mode inlines the generated web JS and WASM assets;
+The payload receipt sums gzip-level-9 sizes of the actual optimized ES browser
+library output (Vite retains ES-library whitespace). Vite library mode inlines the generated web JS and WASM assets;
 the facade includes both transport entry points. The browser loads that built
 artifact. This measures an isolated deliverable, not the whole existing app
 bundle; later product integration may emit separate binary assets. Cold load uses a
 fresh browser context and includes module initialization and first validation.
 The native cold sample includes lazy facade/fixture loading and the first IPC
 round trip. Render, layout, UI application/undo and visual checks are outside
-these validation timings.
+these validation timings. Warm calls use an already serialized spec string;
+fixture construction and the initial spec JSON.stringify are outside that
+window, while transport envelope serialization and result decoding remain in it.
 
 ### Receipt and source contracts
 
@@ -599,6 +619,9 @@ option after changing Rust types. The host boundary check refuses app/outside
 path dependencies and source inclusion, and refuses Tauri in the pure core.
 CI dry-runs `git subtree split --prefix=src-tauri/crates`, extracts the result,
 and runs each crate's tests there without the app or a Node engine host.
+The local split dry run produced commit `61e16d8f` (SDK tree `b19f5140`);
+its source-only archive passed core 5/5 and plugin 3/3 tests on dgx02 with Node
+removed from PATH. The original SDK's typegen-enabled suite passed 6/6.
 
 The parity corpus currently has 31 sanitized cases: architecture 22, two
 each for workflow, sequence, dataflow and lifecycle, plus one synthetic

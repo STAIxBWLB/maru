@@ -59,6 +59,7 @@ export interface NativeE2eDiagramStaticExportResult {
 
 export interface NativeE2eEngineMeasurement {
   transport: "ipc";
+  scope: string;
   coldMs: number;
   samples: Array<{ nodes: number; bytes: number; durationsMs: number[]; engine: { id: string; version: string; revision: string } }>;
 }
@@ -209,7 +210,7 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           }
           samples.push({ nodes: fixture.components.length, bytes: new TextEncoder().encode(input).length, durationsMs, engine: report.receipt.engine });
         }
-        return { transport: "ipc", coldMs, samples };
+        return { transport: "ipc", scope: "pre-serialized spec string; invoke envelope transport, core validation/hash and reply decode; 30 warm samples", coldMs, samples };
       },
       terminalText: (sessionId) => terminalTextReaders.get(sessionId)?.() ?? null,
       menuCommandReady: () => menuCommandRegistration !== null,

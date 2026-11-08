@@ -31,11 +31,15 @@ test.describe("independent engine WebAssembly spike", () => {
       const invalid = structuredClone(inputs[0]) as { components: unknown[]; connections?: Array<{ from: string; to: string }> };
       invalid.connections = [{ from: "missing", to: "node-0" }];
       const refused = await engine.validate(JSON.stringify(invalid));
-      return { transport: "wasm", coldMs, samples, refusesInvalid: !refused.ok, engine: first.receipt.engine };
+      return { transport: "wasm", scope: "pre-serialized spec string; wasm call, core validation/hash and report JSON parse; 30 warm samples", coldMs, samples, refusesInvalid: !refused.ok, engine: first.receipt.engine };
     }, fixtures);
     expect(result.refusesInvalid).toBe(true);
     expect(result.samples.map((sample) => sample.nodes)).toEqual([50, 1000]);
-    for (const sample of result.samples) expect(sample.durationsMs).toHaveLength(30);
+    expect(Number.isFinite(result.coldMs) && result.coldMs >= 0).toBe(true);
+    for (const sample of result.samples) {
+      expect(sample.durationsMs).toHaveLength(30);
+      expect(sample.durationsMs.every((value) => Number.isFinite(value) && value >= 0)).toBe(true);
+    }
     console.log(`ENGINE_E0_WASM ${JSON.stringify(result)}`);
     await test.info().attach("engine-e0-wasm.json", { body: JSON.stringify(result, null, 2), contentType: "application/json" });
   });
