@@ -217,6 +217,12 @@ export async function exportPdf(
   }, 250);
 }
 
+/** Only the diagram types implemented by the current pinned Archify engine. */
+export const ARCHIFY_STATIC_TYPES = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"] as const;
+export function supportsArchifyStaticExport(type: string): boolean {
+  return ARCHIFY_STATIC_TYPES.some((supported) => supported === type);
+}
+
 /** The engine consumes one stored semantic spec, never canvas/editor state. */
 export interface CanonicalSemanticExportInput {
   datasetId: string;
@@ -235,6 +241,9 @@ export function canonicalSemanticExportInput(
     : datasets.length === 1 ? datasets[0] : undefined;
   if (!dataset) {
     throw new Error("A semantic dataset was not selected; select the diagram's semantic dataset and retry the engine export.");
+  }
+  if (!supportsArchifyStaticExport(dataset.diagramType)) {
+    throw new Error("The pinned Archify engine does not render this diagram type; select a supported semantic dataset or export its source JSON.");
   }
   const validation = validateArchifySpecPreCheck(dataset.diagramType, dataset.spec);
   if (!validation.ok) {

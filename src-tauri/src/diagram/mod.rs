@@ -443,10 +443,17 @@ fn diagram_export_blob_to_path_in_transaction(
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)
-                .map_err(|err| format!("Cannot create export folder: {err}"))?;
+                .map_err(|err| format!("Cannot create export folder: {err}; choose another folder or check its permissions"))?;
         }
     }
-    fs::write(&path, &bytes).map_err(|err| format!("Cannot write export: {err}"))?;
+    write_atomic(&path, &bytes).map_err(|err| format!("Cannot write export to {}: {err}; choose a shorter file name, another folder or free disk space", path.file_name().unwrap_or_default().to_string_lossy()))?;
+    use std::io::Read;
+    let mut saved = Vec::new();
+    fs::File::open(&path).and_then(|file| file.take(bytes.len() as u64 + 1).read_to_end(&mut saved))
+        .map_err(|err| format!("Export was saved but readback failed: {err}; inspect the saved file before retrying"))?;
+    if saved != bytes {
+        return Err("Export readback differs from the requested bytes; inspect the destination file and retry the export".into());
+    }
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -776,7 +783,27 @@ fn diagram_write_report_asset_in_transaction(
     };
     assert_maru_can_write(&workspace, action)?;
     lease.before_effect()?;
-    write_atomic(&candidate, &bytes)?;
+    let verified_hash_name = Path::new(name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| stem.rsplit_once('-'))
+        .is_some_and(|(_, hash)| {
+            hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        });
+    if !verified_hash_name {
+        write_atomic(&candidate, &bytes)?;
+    } else if candidate.exists() {
+        if fs::read(&candidate).map_err(|err| {
+            format!("Cannot read existing report artifact: {err}; inspect the asset and retry")
+        })? != bytes
+        {
+            return Err("Report artifact already exists with different bytes; inspect the existing asset and regenerate with a new render hash".into());
+        }
+    } else if let Err(error) = write_atomic_create(&candidate, &bytes) {
+        if fs::read(&candidate).ok().as_deref() != Some(bytes.as_slice()) {
+            return Err(format!("Cannot publish report artifact without replacing an existing file: {error}; inspect the destination and retry"));
+        }
+    }
     Ok(format!("{REPORT_ASSET_ROOT}/{id}/{name}"))
 }
 
@@ -1385,6 +1412,54 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "<svg/>");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_atomic_export_keeps_the_previous_file_bytes() {
+        let (tmp, _work) = setup_workspace();
+        // The target name fits NAME_MAX, but the atomic helper's temporary
+        // prefix does not. This is an actual I/O failure, independent of UID.
+        let target = tmp.path().join(format!("{}.svg", "a".repeat(238)));
+        fs::write(&target, b"previous verified bytes").unwrap();
+        let error = diagram_export_blob_to_path(
+            target.to_string_lossy().into_owned(),
+            "svg".into(),
+            b"replacement".to_vec(),
+        )
+        .unwrap_err();
+        assert!(error.contains("Cannot write export"), "{error}");
+        assert!(error.contains("shorter file name"), "{error}");
+        assert_eq!(fs::read(target).unwrap(), b"previous verified bytes");
+    }
+
+    #[test]
+    fn full_hash_report_assets_are_idempotent_and_never_replaced_with_different_bytes() {
+        let _home = crate::atomic_file::phase08_06::Home::new();
+        let (_tmp, work) = setup_workspace();
+        let name = format!("doc-{}.svg", "a".repeat(64));
+        let first = diagram_write_report_asset(
+            work.clone(),
+            "doc".into(),
+            name.clone(),
+            b"verified".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            diagram_write_report_asset(
+                work.clone(),
+                "doc".into(),
+                name.clone(),
+                b"verified".to_vec()
+            )
+            .unwrap(),
+            first
+        );
+        let error =
+            diagram_write_report_asset(work.clone(), "doc".into(), name, b"different".to_vec())
+                .unwrap_err();
+        assert!(error.contains("different bytes"), "{error}");
+        assert_eq!(fs::read(Path::new(&work).join(first)).unwrap(), b"verified");
     }
 
     #[test]

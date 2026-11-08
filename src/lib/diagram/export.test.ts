@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canonicalSemanticExportInput, exportJson, suggestedFileName } from "./export";
+import { ARCHIFY_STATIC_TYPES, supportsArchifyStaticExport, canonicalSemanticExportInput, exportJson, suggestedFileName } from "./export";
 import { DIAGRAM_SCHEMA_VERSION, createEmptyDoc } from "./types";
 import { archifySpecToDataset } from "./archifyCodec";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
@@ -30,6 +30,10 @@ describe("export helpers", () => {
 });
 
 describe("canonical semantic export input", () => {
+  it("limits static rendering to the pinned engine's five diagram types", () => {
+    expect(ARCHIFY_STATIC_TYPES).toEqual(["architecture", "workflow", "sequence", "dataflow", "lifecycle"]);
+    expect(supportsArchifyStaticExport("floorplan")).toBe(false);
+  });
   it("serializes only the stored spec, preserving Korean text and excluding canvas/viewer provenance", () => {
     const doc = createEmptyDoc("doc", 1);
     const spec = { ...SEMANTIC_FIXTURES.architecture, meta: { title: "한글 구조", output: "diagram.html" } };

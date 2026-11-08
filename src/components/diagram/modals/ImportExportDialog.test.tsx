@@ -3,13 +3,35 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { name, revision, version } from "../../../../sidecars/archify/PIN.json";
 import { unmountReactRoot } from "../../../lib/testing/unmountReactRoot";
 
 import { matrixFromRowsCols, type MatrixCell, type MatrixDataset } from "../../../lib/diagram/reportTypes";
 import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
+import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
+import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
+import { canonicalSemanticExportInput } from "../../../lib/diagram/export";
+import { extractEngineSvg } from "../../../lib/diagram/engineSvg";
+import { DiagramStoreProvider } from "../DiagramStoreContext";
+import type { GenerationHost } from "../../../lib/diagram/generation";
+import type { ArchifyRenderArtifact, ArchifyRenderHost } from "../../../lib/archify";
 import { LocaleContext, t as translate } from "../../../lib/i18n";
 import "../../../lib/i18n/testing";
 import { ImportExportDialog } from "./ImportExportDialog";
+
+const { chooseSaveFileMock, diagramExportBlobToPathMock } = vi.hoisted(() => ({
+  chooseSaveFileMock: vi.fn(),
+  diagramExportBlobToPathMock: vi.fn(),
+}));
+vi.mock("../../../lib/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../lib/api")>(),
+  chooseSaveFile: chooseSaveFileMock,
+}));
+vi.mock("../../../lib/diagram", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../lib/diagram")>(),
+  diagramExportBlobToPath: diagramExportBlobToPathMock,
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,39 +54,49 @@ interface Harness {
   onImportDoc: ReturnType<typeof vi.fn>;
   onImportDataset: ReturnType<typeof vi.fn>;
   onClose: ReturnType<typeof vi.fn>;
+  setDoc: (doc: DiagramDoc) => void;
 }
 
-function renderDialog(mode: "import" | "export", doc?: DiagramDoc): Harness {
+function renderDialog(
+  mode: "import" | "export",
+  doc?: DiagramDoc,
+  hostOverride: GenerationHost | null = null,
+  workspace: string | null = null,
+): Harness {
   const onImportDoc = vi.fn();
   const onImportDataset = vi.fn();
   const onClose = vi.fn();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  const finalDoc = doc ?? createEmptyDoc("doc-1", 1);
-  act(() => {
-    root.render(
-      <LocaleContext.Provider
-        value={{
-          locale: "ko",
-          setLocale: () => {},
-          t: (key, vars) => translate("ko", key, vars),
-        }}
-      >
-        <ImportExportDialog
-          open
-          mode={mode}
-          doc={finalDoc}
-          workspace={null}
-          dirty={false}
-          onImportDoc={onImportDoc}
-          onImportDataset={onImportDataset}
-          onClose={onClose}
-        />
-      </LocaleContext.Provider>,
-    );
-  });
-  return { container, root, onImportDoc, onImportDataset, onClose };
+  const render = (currentDoc: DiagramDoc) => {
+    act(() => {
+      root.render(
+        <DiagramStoreProvider workPath={workspace} hostOverride={hostOverride}>
+          <LocaleContext.Provider
+            value={{
+              locale: "ko",
+              setLocale: () => {},
+              t: (key, vars) => translate("ko", key, vars),
+            }}
+          >
+            <ImportExportDialog
+              open
+              mode={mode}
+              doc={currentDoc}
+              workspace={workspace}
+              dirty={false}
+              onImportDoc={onImportDoc}
+              onImportDataset={onImportDataset}
+              onClose={onClose}
+            />
+          </LocaleContext.Provider>
+        </DiagramStoreProvider>,
+      );
+    });
+  };
+  render(doc ?? createEmptyDoc("doc-1", 1));
+  return { container, root, onImportDoc, onImportDataset, onClose, setDoc: render };
 }
 
 function query<T extends Element>(selector: string): T | null {
@@ -86,13 +118,85 @@ async function click(el: Element) {
   });
 }
 
+function hash(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+const RENDER_HTML = '<!doctype html><html><body><svg viewBox="0 0 120 60"><text x="2" y="20">한글 다이어그램</text></svg></body></html>';
+
+function renderArtifact(_diagramType: string, candidateJson: string): ArchifyRenderArtifact {
+  const bytes = new TextEncoder().encode(RENDER_HTML);
+  return {
+    bytes: [...bytes],
+    receipt: {
+      schemaVersion: 1,
+      inputSpecSha256: hash(new TextEncoder().encode(candidateJson)),
+      enginePin: { name, version, revision },
+      outputSha256: hash(bytes),
+      outputMimeType: "text/html",
+      gates: {
+        schema: { status: "passed", scope: "pinned-engine-validation" },
+        artifact: { status: "passed", scope: "pinned-engine-rendered-html" },
+        browser: { status: "not-run", scope: "none" },
+        visualReview: { status: "not-run", scope: "manual" },
+      },
+    },
+  };
+}
+
+function semanticDoc(): { doc: DiagramDoc; dataset: ReturnType<typeof archifySpecToDataset>["dataset"] } {
+  const { dataset } = archifySpecToDataset("architecture", SEMANTIC_FIXTURES.architecture);
+  const doc = { ...createEmptyDoc("semantic-export", 1), datasets: [dataset] };
+  return { doc, dataset };
+}
+
+function renderHostSpy(): ArchifyRenderHost {
+  return vi.fn(async (diagramType, candidateJson) => renderArtifact(diagramType, candidateJson));
+}
+
+function generationHost(renderCandidate?: ArchifyRenderHost): GenerationHost {
+  return {
+    renderCandidate,
+    runAgent: vi.fn(async () => ""),
+    validateCandidate: vi.fn(async () => ({ ok: true, errors: [], warnings: [] })),
+  };
+}
+
+async function selectFormat(id: string) {
+  const select = query<HTMLSelectElement>('[data-testid="ie-format-select"]')!;
+  await act(async () => {
+    select.value = id;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+async function waitForCalls(mock: { mock: { calls: unknown[][] } }, count: number) {
+  await act(async () => {
+    await vi.waitFor(() => expect(mock).toHaveBeenCalledTimes(count));
+  });
+}
+
+async function flushAsyncUi() {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+
+function setNativeMode() {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+}
+
 describe("ImportExportDialog (export)", () => {
   let harness: Harness | null = null;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     document.body.innerHTML = "";
     (URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn(() => "blob:mock");
     (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn();
+    const { webcrypto } = await import("node:crypto");
+    vi.stubGlobal("crypto", webcrypto);
+    vi.stubGlobal("__TAURI_INTERNALS__", undefined);
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    chooseSaveFileMock.mockReset().mockResolvedValue(null);
+    diagramExportBlobToPathMock.mockReset().mockResolvedValue("/workspace/diagrams/saved.svg");
   });
 
   afterEach(async () => {
@@ -101,6 +205,8 @@ describe("ImportExportDialog (export)", () => {
       harness.container.remove();
       harness = null;
     }
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    vi.unstubAllGlobals();
   });
 
   it("lists registry codecs and shows the declared fidelity badge", () => {
@@ -146,6 +252,138 @@ describe("ImportExportDialog (export)", () => {
     await click(query('[data-testid="ie-export-confirm"]')!);
     expect(URL.createObjectURL).toHaveBeenCalled();
     expect(document.body.textContent).toContain(translate("ko", "diagram.dialog.export.done", { path: "diagram.json" }));
+  });
+
+  it("renders the semantic engine codec only on Export and displays verified hashes, gates and native readback", async () => {
+    const { doc, dataset } = semanticDoc();
+    const host = renderHostSpy();
+    const override = generationHost(host);
+    setNativeMode();
+    chooseSaveFileMock.mockResolvedValue("/workspace/diagrams/Weekly-chart.svg");
+    harness = renderDialog("export", doc, override, "/workspace");
+    await selectFormat("archify-svg");
+    expect(host).not.toHaveBeenCalled(); // codec preview is deliberately absent for engine formats
+
+    const canonical = canonicalSemanticExportInput(doc, dataset.id);
+    const artifact = renderArtifact(canonical.diagramType, canonical.candidateJson);
+    const expectedSvg = extractEngineSvg(RENDER_HTML, "light");
+    const expectedOutputHash = hash(new TextEncoder().encode(expectedSvg));
+    const expectedInputHash = hash(new TextEncoder().encode(canonical.candidateJson));
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(diagramExportBlobToPathMock, 1);
+    const receipt = query<HTMLElement>('[data-testid="engine-export-receipt"]')!;
+    expect(host).toHaveBeenCalledTimes(1);
+    expect(host).toHaveBeenCalledWith("architecture", canonical.candidateJson);
+    expect(receipt.textContent).toContain(`${name} ${version} (${revision})`);
+    expect(receipt.textContent).toContain(expectedInputHash);
+    expect(receipt.textContent).toContain(expectedOutputHash);
+    expect(receipt.textContent).toContain(translate("ko", "diagram.dialog.ie.gatePassed"));
+    expect(receipt.textContent).toContain(translate("ko", "diagram.dialog.ie.gateNotRun"));
+    expect(diagramExportBlobToPathMock).toHaveBeenCalledWith(
+      "/workspace/diagrams/Weekly-chart.svg",
+      "svg",
+      expect.anything(),
+    );
+    expect(receipt.textContent).not.toContain(artifact.receipt.outputSha256); // UI shows the converted SVG hash, not the HTML hash
+  });
+
+  it("cancels a pending render before the native chooser and never saves", async () => {
+    const { doc } = semanticDoc();
+    let resolveRender!: (artifact: ArchifyRenderArtifact) => void;
+    let candidateJson = "";
+    const host = vi.fn<ArchifyRenderHost>((_type, candidate) => {
+      candidateJson = candidate;
+      return new Promise<ArchifyRenderArtifact>((resolve) => { resolveRender = resolve; });
+    });
+    harness = renderDialog("export", doc, generationHost(host), "/workspace");
+    setNativeMode();
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(host, 1);
+    const cancel = [...document.body.querySelectorAll("button")].find(
+      (button) => button.textContent === translate("ko", "diagram.dialog.ie.cancel"),
+    )!;
+    await click(cancel);
+    resolveRender(renderArtifact("architecture", candidateJson));
+    await flushAsyncUi();
+    expect(chooseSaveFileMock).not.toHaveBeenCalled();
+    expect(diagramExportBlobToPathMock).not.toHaveBeenCalled();
+  });
+
+  it("unmounts during render without opening the chooser or saving", async () => {
+    const { doc } = semanticDoc();
+    let resolveRender!: (artifact: ArchifyRenderArtifact) => void;
+    let candidateJson = "";
+    const host = vi.fn<ArchifyRenderHost>((_type, candidate) => {
+      candidateJson = candidate;
+      return new Promise<ArchifyRenderArtifact>((resolve) => { resolveRender = resolve; });
+    });
+    harness = renderDialog("export", doc, generationHost(host), "/workspace");
+    setNativeMode();
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(host, 1);
+    const pending = harness;
+    await unmountReactRoot(pending.root);
+    pending.container.remove();
+    harness = null;
+    resolveRender(renderArtifact("architecture", candidateJson));
+    await flushAsyncUi();
+    expect(chooseSaveFileMock).not.toHaveBeenCalled();
+    expect(diagramExportBlobToPathMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a document change during render before the native chooser", async () => {
+    const { doc } = semanticDoc();
+    let resolveRender!: (artifact: ArchifyRenderArtifact) => void;
+    let candidateJson = "";
+    const host = vi.fn<ArchifyRenderHost>((_type, candidate) => {
+      candidateJson = candidate;
+      return new Promise<ArchifyRenderArtifact>((resolve) => { resolveRender = resolve; });
+    });
+    harness = renderDialog("export", doc, generationHost(host), "/workspace");
+    setNativeMode();
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(host, 1);
+    harness.setDoc({ ...doc, docTitle: "Changed after render started" });
+    resolveRender(renderArtifact("architecture", candidateJson));
+    await flushAsyncUi();
+    expect(chooseSaveFileMock).not.toHaveBeenCalled();
+    expect(diagramExportBlobToPathMock).not.toHaveBeenCalled();
+  });
+
+  it("does not save when the native chooser resolves after the document changes", async () => {
+    const { doc } = semanticDoc();
+    let resolveChoice!: (path: string | null) => void;
+    chooseSaveFileMock.mockImplementation(() => new Promise((resolve) => { resolveChoice = resolve; }));
+    const host = renderHostSpy();
+    harness = renderDialog("export", doc, generationHost(host), "/workspace");
+    setNativeMode();
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(chooseSaveFileMock, 1);
+    harness.setDoc({ ...doc, docTitle: "Changed while chooser was open" });
+    resolveChoice("/workspace/diagrams/late.svg");
+    await flushAsyncUi();
+    expect(host).toHaveBeenCalledTimes(1);
+    expect(diagramExportBlobToPathMock).not.toHaveBeenCalled();
+  });
+
+  it("does not save when the native chooser is canceled", async () => {
+    const { doc } = semanticDoc();
+    const host = renderHostSpy();
+    harness = renderDialog("export", doc, generationHost(host), "/workspace");
+    setNativeMode();
+    chooseSaveFileMock.mockResolvedValue(null);
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(chooseSaveFileMock, 1);
+    await flushAsyncUi();
+    expect(diagramExportBlobToPathMock).not.toHaveBeenCalled();
+    expect(query('[data-testid="engine-export-receipt"]')!.textContent).toContain(
+      translate("ko", "diagram.dialog.ie.gateNotRun"),
+    );
   });
 });
 

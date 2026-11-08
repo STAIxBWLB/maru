@@ -1814,3 +1814,5 @@
 .maru-diagram-toolbar-primary:hover:not(:disabled) {
   background: var(--button-primary-hover) !important;
 }
+
+.maru-diagram-ie-receipt dd { overflow-wrap: anywhere; margin-inline-start: 0; }

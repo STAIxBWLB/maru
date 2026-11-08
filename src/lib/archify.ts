@@ -97,3 +97,39 @@ export async function archifyValidateCandidate(
     throw normalizeIpcError(err);
   }
 }
+
+export interface ArchifyRenderGate {
+  status: "passed" | "not-run";
+  scope: string;
+}
+
+export interface ArchifyRenderReceipt {
+  schemaVersion: 1;
+  inputSpecSha256: string;
+  enginePin: { name: string; version: string; revision: string };
+  outputSha256: string;
+  outputMimeType: string;
+  engineOutputSha256?: string;
+  conversion?: { format: "svg" | "png"; theme: "light" | "dark"; pixelRatio: 1 };
+  gates: { schema: ArchifyRenderGate; artifact: ArchifyRenderGate; browser: ArchifyRenderGate; visualReview: ArchifyRenderGate };
+  readback?: ArchifyRenderGate;
+}
+
+export interface ArchifyRenderArtifact {
+  bytes: number[];
+  receipt: ArchifyRenderReceipt;
+}
+
+export type ArchifyRenderHost = (diagramType: string, candidateJson: string) => Promise<ArchifyRenderArtifact>;
+
+export async function archifyRenderCandidate(workspace: string, diagramType: string, candidateJson: string): Promise<ArchifyRenderArtifact> {
+  if (!isTauri()) throw new ArchifyEngineError(ENGINE_UNAVAILABLE, "The pinned renderer requires the desktop app; open this workspace in Maru and retry the export.");
+  try {
+    return await invoke<ArchifyRenderArtifact>("archify_render_candidate", { workspace, diagramType, candidateJson });
+  } catch (error) {
+    if (rawCode(error) === BACKEND_ENGINE_UNAVAILABLE || isUnknownCommand(error)) {
+      throw new ArchifyEngineError(ENGINE_UNAVAILABLE, "The bundled renderer is unavailable; update or reinstall Maru and retry the export.");
+    }
+    throw normalizeIpcError(error);
+  }
+}

@@ -17,8 +17,12 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { useDiagramHostOverride } from "../DiagramStoreContext";
+import type { ArchifyRenderReceipt } from "../../../lib/archify";
+import { supportsArchifyStaticExport } from "../../../lib/diagram/export";
+import type { StaticTheme } from "../../../lib/diagram/engineSvg";
 import { chooseSaveFile } from "../../../lib/api";
 import { diagramExportBlobToPath, type DiagramExportKind } from "../../../lib/diagram";
 import {
@@ -121,6 +125,12 @@ export function ImportExportDialog({
   onClose,
 }: ImportExportDialogProps) {
   const { t } = useTranslation();
+  const hostOverride = useDiagramHostOverride();
+  const [theme, setTheme] = useState<StaticTheme>("light");
+  const [saving, setSaving] = useState(false);
+  const [renderReceipt, setRenderReceipt] = useState<ArchifyRenderReceipt | null>(null);
+  const epoch = useRef(0);
+  const latestDoc = useRef(doc);
   const [direction, setDirection] = useState<"import" | "export">(mode);
   const [codecId, setCodecId] = useState<string>("maru-json");
   const [datasetId, setDatasetId] = useState<string | null>(null);
@@ -128,12 +138,23 @@ export function ImportExportDialog({
   const [importState, setImportState] = useState<ImportState | null>(null);
   const [range, setRange] = useState<RangeInput | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const copyOperation = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    latestDoc.current = doc;
+    epoch.current += 1;
+    setRenderReceipt(null);
+    if (copyOperation.current === null) { setStatus({ kind: "idle" }); setSaving(false); }
+    return () => { epoch.current += 1; };
+  }, [doc, open, workspace, mode]);
 
   const matrices = useMemo(
     () => (doc.datasets ?? []).filter((ds): ds is MatrixDataset => ds.kind === "matrix"),
     [doc.datasets],
   );
 
+  const semanticDatasets = (doc.datasets ?? []).filter(
+    (ds): ds is SemanticSpecDataset => ds.kind === "semanticSpec" && supportsArchifyStaticExport(ds.diagramType),
+  );
   const semanticDataset = (doc.datasets ?? []).find(
     (ds): ds is SemanticSpecDataset => ds.kind === "semanticSpec",
   );
@@ -142,29 +163,33 @@ export function ImportExportDialog({
     () =>
       CODEC_LIST.filter(
         (codec) => codec.canExport && (codec.dataKind !== "matrix" || matrices.length > 0)
-          && (codec.id !== "archify-json" || semanticDataset !== undefined),
+          && (codec.id !== "archify-json" || semanticDataset !== undefined)
+          && (codec.dataKind !== "semantic" || semanticDatasets.length > 0),
       ),
-    [matrices.length, semanticDataset],
+    [matrices.length, semanticDataset, semanticDatasets.length],
   );
 
   // Reset transient state whenever the dialog opens.
   useEffect(() => {
-    if (!open) return;
+    if (!open || copyOperation.current !== null) return;
     setDirection(mode);
     setStatus({ kind: "idle" });
     setImportState(null);
     setRange(null);
+    setRenderReceipt(null);
+    setSaving(false);
     setDatasetId(matrices[0]?.id ?? null);
     setCodecId(mode === "export" ? "maru-svg" : "maru-json");
   }, [open, mode, matrices]);
 
   const codec = getCodec(codecId);
-  const needsDataset = codec?.dataKind === "matrix";
-  const effectiveDatasetId = datasetId ?? matrices[0]?.id;
+  const selectableDatasets = codec?.dataKind === "semantic" ? semanticDatasets : matrices;
+  const needsDataset = codec?.dataKind === "matrix" || codec?.dataKind === "semantic";
+  const effectiveDatasetId = selectableDatasets.some((dataset) => dataset.id === datasetId) ? datasetId ?? undefined : selectableDatasets[0]?.id;
 
   // Sync text codecs expose their warnings/ignored fields pre-export.
   const exportPreview: CodecSerializeOutcome | null = useMemo(() => {
-    if (direction !== "export" || !codec?.serialize || codec.dataKind === "visual") return null;
+    if (direction !== "export" || !codec?.serialize || (codec.dataKind === "visual" || codec.dataKind === "semantic")) return null;
     try {
       const out = codec.serialize({ doc, ...(needsDataset ? { datasetId: effectiveDatasetId } : {}) });
       return out instanceof Promise ? null : out;
@@ -218,6 +243,9 @@ export function ImportExportDialog({
   const handleExport = async () => {
     if (!codec) return;
     setStatus({ kind: "busy" });
+    setRenderReceipt(null);
+    const operation = ++epoch.current;
+    const isCurrent = () => epoch.current === operation && latestDoc.current === doc;
     try {
       if (codec.id === "pdf") {
         // PDF keeps the platform print flow — there is no byte sink.
@@ -229,7 +257,11 @@ export function ImportExportDialog({
       const outcome = await codec.serialize({
         doc,
         ...(needsDataset ? { datasetId: effectiveDatasetId } : {}),
+        workspace: workspace ?? undefined, renderHost: hostOverride?.renderCandidate,
+        isCurrent, theme,
       });
+      if (!isCurrent()) return;
+      if (outcome.receipt) setRenderReceipt(outcome.receipt);
       const ext = codec.id === "archify-json" && semanticDataset
         ? `${semanticDataset.diagramType}.json`
         : codec.extensions[0]!.replace(/^\./, "");
@@ -241,6 +273,7 @@ export function ImportExportDialog({
       if (workspace && runningInTauri()) {
         const defaultPath = `${workspace.replace(/[/\\]+$/, "")}/diagrams/${fileName}`;
         const targetPath = await chooseSaveFile(t("diagram.dialog.export.saveTitle"), defaultPath);
+        if (!isCurrent()) return;
         if (!targetPath) {
           setStatus({ kind: "idle" });
           return;
@@ -249,18 +282,28 @@ export function ImportExportDialog({
           typeof outcome.bytes === "string"
             ? new TextEncoder().encode(outcome.bytes)
             : outcome.bytes;
+        copyOperation.current = operation;
+        setSaving(true);
         const path = await diagramExportBlobToPath(
           targetPath,
           (codec.exportKind ?? ext) as DiagramExportKind,
           data,
         );
+        if (!isCurrent()) return;
+        if (outcome.receipt) setRenderReceipt({ ...outcome.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } });
         setStatus({ kind: "done", path });
       } else {
         downloadBlob(blob, fileName);
         setStatus({ kind: "done", path: fileName });
       }
     } catch (err) {
-      setStatus({ kind: "error", message: (err as Error).message ?? "unknown" });
+      if (isCurrent()) setStatus({ kind: "error", message: (err as Error).message ?? "unknown" });
+    } finally {
+      if (copyOperation.current === operation) {
+        copyOperation.current = null;
+        setSaving(false);
+        if (!isCurrent()) { setStatus({ kind: "idle" }); setCodecId("maru-svg"); setDatasetId(null); }
+      }
     }
   };
 
@@ -309,10 +352,10 @@ export function ImportExportDialog({
     direction === "export" ? exportPreview?.ignoredFields : importState?.outcome.ignoredFields;
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+    <Dialog.Root open={open} onOpenChange={(next) => { if (!next && !saving) { epoch.current += 1; onClose(); } }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content maru-diagram-ie-dialog">
+        <Dialog.Content className="dialog-content maru-diagram-ie-dialog" onEscapeKeyDown={(event) => { if (saving) event.preventDefault(); }}>
           <div className="dialog-header">
             <Dialog.Title>
               {t(direction === "export" ? "diagram.dialog.ie.title.export" : "diagram.dialog.ie.title.import")}
@@ -321,6 +364,7 @@ export function ImportExportDialog({
               <button
                 type="button"
                 className="icon-button"
+                disabled={saving}
                 aria-label={t("diagram.dialog.export.close")}
                 title={t("diagram.dialog.export.close")}
               >
@@ -335,7 +379,8 @@ export function ImportExportDialog({
               role="tab"
               aria-selected={direction === "import"}
               className={direction === "import" ? "is-active" : ""}
-              onClick={() => setDirection("import")}
+              disabled={status.kind === "busy"}
+              onClick={() => { epoch.current += 1; setStatus({ kind: "idle" }); setRenderReceipt(null); setDirection("import"); }}
             >
               {t("diagram.dialog.ie.direction.import")}
             </button>
@@ -344,7 +389,8 @@ export function ImportExportDialog({
               role="tab"
               aria-selected={direction === "export"}
               className={direction === "export" ? "is-active" : ""}
-              onClick={() => setDirection("export")}
+              disabled={status.kind === "busy"}
+              onClick={() => { epoch.current += 1; setStatus({ kind: "idle" }); setRenderReceipt(null); setDirection("export"); }}
             >
               {t("diagram.dialog.ie.direction.export")}
             </button>
@@ -356,7 +402,8 @@ export function ImportExportDialog({
                 <span>{t("diagram.dialog.ie.format")}</span>
                 <select
                   value={codecId}
-                  onChange={(e) => setCodecId(e.target.value)}
+                  disabled={status.kind === "busy"}
+                  onChange={(e) => { epoch.current += 1; setRenderReceipt(null); setCodecId(e.target.value); }}
                   data-testid="ie-format-select"
                 >
                   {exportCodecs.map((fmt) => (
@@ -366,15 +413,23 @@ export function ImportExportDialog({
                   ))}
                 </select>
               </label>
-              {needsDataset && matrices.length > 1 ? (
+              {codec?.dataKind === "semantic" ? <label className="maru-diagram-ie-field">
+                <span>{t("diagram.dialog.ie.engineTheme")}</span>
+                <select value={theme} disabled={status.kind === "busy"} onChange={(event) => { epoch.current += 1; setRenderReceipt(null); setTheme(event.target.value === "dark" ? "dark" : "light"); }}>
+                  <option value="light">{t("diagram.dialog.ie.themeLight")}</option><option value="dark">{t("diagram.dialog.ie.themeDark")}</option>
+                </select>
+                <p>{t("diagram.codec.warn.engineSemanticOnly")}</p>
+              </label> : null}
+              {needsDataset && selectableDatasets.length > 1 ? (
                 <label className="maru-diagram-ie-field">
                   <span>{t("diagram.dialog.ie.dataset")}</span>
                   <select
                     value={effectiveDatasetId ?? ""}
-                    onChange={(e) => setDatasetId(e.target.value)}
+                    disabled={status.kind === "busy"}
+                    onChange={(e) => { epoch.current += 1; setRenderReceipt(null); setDatasetId(e.target.value); }}
                     data-testid="ie-dataset-select"
                   >
-                    {matrices.map((matrix) => (
+                    {selectableDatasets.map((matrix) => (
                       <option key={matrix.id} value={matrix.id}>
                         {matrix.name || matrix.id}
                       </option>
@@ -502,6 +557,15 @@ export function ImportExportDialog({
             </div>
           ) : null}
 
+          {renderReceipt ? <section className="maru-diagram-ie-receipt" data-testid="engine-export-receipt" aria-label={t("diagram.dialog.ie.engineReceipt")}>
+            <strong>{t("diagram.dialog.ie.engineReceipt")}</strong>
+            <dl>
+              <dt>{t("diagram.dialog.ie.enginePin")}</dt><dd>{renderReceipt.enginePin.name} {renderReceipt.enginePin.version} ({renderReceipt.enginePin.revision})</dd>
+              <dt>{t("diagram.dialog.ie.specHash")}</dt><dd>{renderReceipt.inputSpecSha256}</dd>
+              <dt>{t("diagram.dialog.ie.outputHash")}</dt><dd>{renderReceipt.outputSha256}</dd>
+              {Object.entries({ ...renderReceipt.gates, readback: renderReceipt.readback }).map(([name, gate]) => <div key={name}><dt>{t(`diagram.dialog.ie.gate.${name}`)}</dt><dd>{t(gate?.status === "passed" ? "diagram.dialog.ie.gatePassed" : "diagram.dialog.ie.gateNotRun")}</dd></div>)}
+            </dl>
+          </section> : null}
           {status.kind === "busy" ? (
             <p className="maru-diagram-export-status">{t("diagram.dialog.export.busy")}</p>
           ) : null}
@@ -517,7 +581,7 @@ export function ImportExportDialog({
           ) : null}
 
           <div className="maru-diagram-ie-actions">
-            <button type="button" onClick={onClose}>
+            <button type="button" onClick={() => { epoch.current += 1; onClose(); }} disabled={saving}>
               {t("diagram.dialog.ie.cancel")}
             </button>
             {direction === "export" ? (

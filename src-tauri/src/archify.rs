@@ -13,10 +13,14 @@ use crate::ipc_error::IpcError;
 use crate::vault::resolve_inside_vault;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 use tauri::Manager;
 
 pub const ARCHIFY_INVALID_DIAGRAM_TYPE: &str = "archify_invalid_diagram_type";
@@ -24,10 +28,23 @@ pub const ARCHIFY_CANDIDATE_TOO_LARGE: &str = "archify_candidate_too_large";
 pub const ARCHIFY_ENGINE_UNAVAILABLE: &str = "archify_engine_unavailable";
 pub const ARCHIFY_VALIDATE_TIMEOUT: &str = "archify_validate_timeout";
 pub const ARCHIFY_ENGINE_FAILED: &str = "archify_engine_failed";
+pub const ARCHIFY_RENDER_TIMEOUT: &str = "archify_render_timeout";
+pub const ARCHIFY_RENDER_OUTPUT_TOO_LARGE: &str = "archify_render_output_too_large";
+pub const ARCHIFY_RENDER_FAILED: &str = "archify_render_failed";
+
+fn render_error(code: &str, cause: impl Into<String>) -> IpcError {
+    typed(
+        code,
+        format!(
+            "{}; next step: review the diagram and retry the export, or contact support if it repeats",
+            cause.into()
+        ),
+    )
+}
 
 const MAX_CANDIDATE_BYTES: usize = 512 * 1024;
+const MAX_RENDERED_HTML_BYTES: u64 = 8 * 1024 * 1024;
 const VALIDATE_TIMEOUT: Duration = Duration::from_secs(30);
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Host-owned staging root for validation jobs, inside the workspace vault.
 const STAGING_DIR: &str = ".maru/diagram-gen";
 const ENGINE_REL: &str = "sidecars/archify/bin/archify.mjs";
@@ -37,6 +54,13 @@ const ENGINE_ENV: &str = "MARU_ARCHIFY_ENGINE";
 const NODE_ENV: &str = "MARU_NODE_PATH";
 /// Millisecond timeout override, so tests can exercise the kill path quickly.
 const TIMEOUT_ENV: &str = "MARU_ARCHIFY_TIMEOUT_MS";
+#[cfg(test)]
+const JOB_ID_ENV: &str = "MARU_ARCHIFY_TEST_JOB_ID";
+
+const ENGINE_PIN_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../sidecars/archify/PIN.json"
+));
 
 #[cfg(test)]
 static ENGINE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -49,6 +73,48 @@ pub struct ArchifyValidationReceipt {
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
     pub candidate_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchifyEnginePin {
+    pub name: String,
+    pub version: String,
+    pub revision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchifyRenderGate {
+    pub status: String,
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchifyRenderGates {
+    pub schema: ArchifyRenderGate,
+    pub artifact: ArchifyRenderGate,
+    pub browser: ArchifyRenderGate,
+    pub visual_review: ArchifyRenderGate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchifyRenderReceipt {
+    pub schema_version: u32,
+    pub input_spec_sha256: String,
+    pub engine_pin: ArchifyEnginePin,
+    pub output_sha256: String,
+    pub output_mime_type: String,
+    pub gates: ArchifyRenderGates,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchifyRenderArtifact {
+    pub bytes: Vec<u8>,
+    pub receipt: ArchifyRenderReceipt,
 }
 
 fn typed(code: &str, message: impl Into<String>) -> IpcError {
@@ -80,7 +146,9 @@ fn validate_diagram_type(diagram_type: &str) -> Result<&'static str, IpcError> {
 /// `<repo>/sidecars/archify/bin/archify.mjs`: walk up from the current exe and
 /// from the compile-time manifest dir until it appears. An explicit
 /// `MARU_ARCHIFY_ENGINE` override wins and must exist.
-pub(crate) fn bundled_engine_path(app: &tauri::AppHandle) -> Result<PathBuf, IpcError> {
+pub(crate) fn bundled_engine_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<PathBuf, IpcError> {
     if cfg!(debug_assertions) {
         return resolve_engine_path();
     }
@@ -135,19 +203,27 @@ fn resolve_node() -> Result<PathBuf, IpcError> {
             engine_unavailable(format!("Node runtime not found (set {NODE_ENV})"))
         })?,
     };
-    match Command::new(&candidate)
-        .env("PATH", augmented_path())
-        .arg("--version")
-        .output()
-    {
-        Ok(output) if output.status.success() => Ok(candidate),
-        Ok(_) => Err(engine_unavailable(format!(
-            "Node runtime probe failed: {}",
+    let output = bounded_engine_output(
+        Command::new(&candidate)
+            .env("PATH", augmented_path())
+            .arg("--version"),
+        Duration::from_secs(2),
+        ARCHIFY_ENGINE_UNAVAILABLE,
+        None,
+    )
+    .map_err(|error| {
+        engine_unavailable(format!(
+            "Node runtime probe failed: {}; check {NODE_ENV} or reinstall Node, then retry",
+            error.message
+        ))
+    })?;
+    if output.status.success() {
+        Ok(candidate)
+    } else {
+        Err(engine_unavailable(format!(
+            "Node runtime probe failed for {}; check {NODE_ENV} or reinstall Node, then retry",
             candidate.display()
-        ))),
-        Err(err) => Err(engine_unavailable(format!(
-            "Node runtime not found (set {NODE_ENV}): {err}"
-        ))),
+        )))
     }
 }
 
@@ -157,6 +233,30 @@ fn validate_timeout() -> Duration {
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|ms| *ms > 0)
         .map_or(VALIDATE_TIMEOUT, Duration::from_millis)
+}
+
+fn render_job_id() -> String {
+    #[cfg(test)]
+    if let Ok(value) = std::env::var(JOB_ID_ENV) {
+        if !value.is_empty()
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return value;
+        }
+    }
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+fn engine_pin() -> Result<ArchifyEnginePin, IpcError> {
+    serde_json::from_str(ENGINE_PIN_JSON).map_err(|err| {
+        engine_unavailable(format!("Pinned Archify engine metadata is invalid: {err}"))
+    })
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn stderr_tail(output: &Output) -> String {
@@ -232,6 +332,58 @@ fn parse_receipt(
 
 /// Spawn the engine with piped output and poll `try_wait`: on timeout the
 /// child is killed and reaped so no orphan node process outlives the command.
+fn bounded_engine_output(
+    command: &mut Command,
+    timeout: Duration,
+    timeout_code: &str,
+    monitored_html: Option<&Path>,
+) -> Result<Output, IpcError> {
+    use crate::command_output::{
+        run_command_with_timeout_and_limits, CommandTermination, OutputLimits,
+    };
+    let output = run_command_with_timeout_and_limits(
+        command,
+        timeout,
+        OutputLimits::new(1024 * 1024, 64 * 1024),
+        |_, _| {
+            monitored_html.is_some_and(|path| {
+                validate_render_staging_parents(path).is_err()
+                    || fs::symlink_metadata(path).is_ok_and(|metadata| {
+                        metadata.file_type().is_symlink()
+                            || !metadata.is_file()
+                            || metadata.len() > MAX_RENDERED_HTML_BYTES
+                    })
+            })
+        },
+    )
+    .map_err(|error| {
+        render_error(
+            ARCHIFY_ENGINE_FAILED,
+            format!("Cannot execute the pinned engine: {error}"),
+        )
+    })?;
+    if output.termination == CommandTermination::TimedOut {
+        return Err(render_error(
+            timeout_code,
+            "Pinned engine exceeded its deadline; its owned process tree was terminated",
+        ));
+    }
+    if output.termination == CommandTermination::Aborted {
+        return Err(render_error(ARCHIFY_RENDER_FAILED, "Staging changed or exceeded the output budget; the owned engine process tree was terminated"));
+    }
+    if output.stdout_truncated || output.stderr_truncated {
+        return Err(render_error(
+            ARCHIFY_ENGINE_FAILED,
+            "Pinned engine diagnostics exceeded the bounded output budget",
+        ));
+    }
+    Ok(Output {
+        status: output.status,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
 fn run_engine(
     node: &Path,
     engine: &Path,
@@ -239,60 +391,366 @@ fn run_engine(
     candidate: &Path,
     timeout: Duration,
 ) -> Result<ArchifyValidationReceipt, IpcError> {
-    let child = Command::new(node)
-        .env("PATH", augmented_path())
-        .arg(engine)
-        .arg("validate")
-        .arg(diagram_type)
-        .arg(candidate)
-        .arg("--json")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| engine_unavailable(format!("Cannot start the Archify engine: {err}")))?;
-    wait_engine(child, diagram_type, timeout)
+    let output = bounded_engine_output(
+        Command::new(node)
+            .env("PATH", augmented_path())
+            .arg(engine)
+            .arg("validate")
+            .arg(diagram_type)
+            .arg(candidate)
+            .arg("--json"),
+        timeout,
+        ARCHIFY_VALIDATE_TIMEOUT,
+        None,
+    )?;
+    parse_receipt(diagram_type, &output)
 }
 
-fn wait_engine(
-    mut child: std::process::Child,
-    diagram_type: &str,
-    timeout: Duration,
-) -> Result<ArchifyValidationReceipt, IpcError> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(typed(
-                        ARCHIFY_VALIDATE_TIMEOUT,
-                        format!(
-                            "Archify validate exceeded {}ms and was killed",
-                            timeout.as_millis()
-                        ),
-                    ));
-                }
-                std::thread::sleep(POLL_INTERVAL);
-            }
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(typed(
-                    ARCHIFY_ENGINE_FAILED,
-                    format!("Cannot wait on the Archify engine: {err}"),
-                ));
-            }
+fn validate_render_staging_parents(html_output: &Path) -> Result<(), IpcError> {
+    let Some(parent) = html_output.parent() else {
+        return Err(render_error(
+            ARCHIFY_RENDER_FAILED,
+            "Staged HTML output has no parent directory",
+        ));
+    };
+    for directory in parent.ancestors().take(4) {
+        let metadata = fs::symlink_metadata(directory).map_err(|error| {
+            render_error(
+                ARCHIFY_RENDER_FAILED,
+                format!(
+                    "Cannot verify staged render directory {}: {error}",
+                    directory.display()
+                ),
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(render_error(
+                ARCHIFY_RENDER_FAILED,
+                format!(
+                    "Staged render directory was replaced or is not a directory: {}",
+                    directory.display()
+                ),
+            ));
         }
     }
-    let output = child.wait_with_output().map_err(|err| {
-        typed(
-            ARCHIFY_ENGINE_FAILED,
-            format!("Cannot read engine output: {err}"),
+    Ok(())
+}
+
+fn run_render_engine(
+    node: &Path,
+    engine: &Path,
+    diagram_type: &str,
+    candidate: &Path,
+    html_output: &Path,
+    timeout: Duration,
+) -> Result<(), IpcError> {
+    validate_render_staging_parents(html_output)?;
+    match fs::symlink_metadata(html_output) {
+        Ok(_) => {
+            return Err(render_error(
+                ARCHIFY_ENGINE_FAILED,
+                format!(
+                    "Archify staging output already exists: {}",
+                    html_output.display()
+                ),
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(render_error(
+                ARCHIFY_ENGINE_FAILED,
+                format!(
+                    "Cannot inspect Archify staging output {}: {error}",
+                    html_output.display()
+                ),
+            ))
+        }
+    }
+    let output = bounded_engine_output(
+        Command::new(node)
+            .env("PATH", augmented_path())
+            .arg(engine)
+            .arg("render")
+            .arg(diagram_type)
+            .arg(candidate)
+            .arg(html_output),
+        timeout,
+        ARCHIFY_RENDER_TIMEOUT,
+        Some(html_output),
+    )?;
+    if !output.status.success() {
+        return Err(render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!(
+                "Pinned Archify render failed ({}): {}",
+                output.status,
+                stderr_tail(&output)
+            ),
+        ));
+    }
+    let metadata = fs::symlink_metadata(html_output).map_err(|error| {
+        render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!(
+                "Archify render did not produce a readable staged artifact {}: {error}",
+                html_output.display()
+            ),
         )
     })?;
-    parse_receipt(diagram_type, &output)
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!(
+                "Archify render produced an unsafe staged artifact: {}",
+                html_output.display()
+            ),
+        ));
+    }
+    if metadata.len() > MAX_RENDERED_HTML_BYTES {
+        return Err(render_error(
+            ARCHIFY_RENDER_OUTPUT_TOO_LARGE,
+            format!(
+                "Rendered HTML exceeds {MAX_RENDERED_HTML_BYTES} bytes at {}",
+                html_output.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn check_rendered_html(
+    node: &Path,
+    engine: &Path,
+    html: &Path,
+    timeout: Duration,
+) -> Result<(), IpcError> {
+    let scripts = engine.parent().and_then(Path::parent).ok_or_else(|| {
+        render_error(
+            ARCHIFY_ENGINE_UNAVAILABLE,
+            "Pinned engine path has no artifact-checker directory",
+        )
+    })?;
+    let checker = scripts.join("scripts/check-render-output.mjs");
+    if !checker.is_file() {
+        return Err(render_error(
+            ARCHIFY_ENGINE_UNAVAILABLE,
+            format!(
+                "Pinned Archify artifact checker is missing: {}",
+                checker.display()
+            ),
+        ));
+    }
+    validate_render_staging_parents(html)?;
+    let output = bounded_engine_output(
+        Command::new(node)
+            .env("PATH", augmented_path())
+            .arg(checker)
+            .arg(html),
+        timeout,
+        ARCHIFY_RENDER_TIMEOUT,
+        Some(html),
+    )?;
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| {
+        render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!(
+                "Archify artifact checker emitted invalid JSON ({error}): {}",
+                stderr_tail(&output)
+            ),
+        )
+    })?;
+    if !output.status.success()
+        || report.get("ok").and_then(serde_json::Value::as_bool) != Some(true)
+    {
+        return Err(render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!(
+                "Pinned Archify artifact check failed: {}",
+                stderr_tail(&output)
+            ),
+        ));
+    }
+    validate_render_staging_parents(html)?;
+    Ok(())
+}
+
+fn read_bounded_rendered_html(path: &Path) -> Result<Vec<u8>, IpcError> {
+    validate_render_staging_parents(path)?;
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!("Cannot inspect rendered HTML {}: {error}", path.display()),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!(
+                "Rendered HTML is not a regular staged file: {}",
+                path.display()
+            ),
+        ));
+    }
+    if metadata.len() > MAX_RENDERED_HTML_BYTES {
+        return Err(render_error(
+            ARCHIFY_RENDER_OUTPUT_TOO_LARGE,
+            format!(
+                "Rendered HTML exceeds {MAX_RENDERED_HTML_BYTES} bytes; simplify the diagram before exporting"
+            ),
+        ));
+    }
+    let file = fs::File::open(path).map_err(|error| {
+        render_error(
+            ARCHIFY_RENDER_FAILED,
+            format!("Cannot read rendered HTML {}: {error}", path.display()),
+        )
+    })?;
+    let mut bytes = Vec::new();
+    file.take(MAX_RENDERED_HTML_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            render_error(
+                ARCHIFY_RENDER_FAILED,
+                format!("Cannot read rendered HTML {}: {error}", path.display()),
+            )
+        })?;
+    if bytes.len() as u64 > MAX_RENDERED_HTML_BYTES {
+        return Err(render_error(
+            ARCHIFY_RENDER_OUTPUT_TOO_LARGE,
+            format!(
+                "Rendered HTML exceeded {MAX_RENDERED_HTML_BYTES} bytes while reading; simplify the diagram before exporting"
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn cleanup_job_dir(job_dir: &Path) -> Result<(), IpcError> {
+    match fs::symlink_metadata(job_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(typed(
+            ARCHIFY_ENGINE_FAILED,
+            format!(
+                "Refusing to clean replaced Archify staging symlink {}",
+                job_dir.display()
+            ),
+        )),
+        Ok(metadata) if metadata.is_dir() => {
+            validate_render_staging_parents(&job_dir.join("candidate.json"))?;
+            fs::remove_dir_all(job_dir).map_err(|error| {
+                typed(
+                    ARCHIFY_ENGINE_FAILED,
+                    format!(
+                        "Cannot clean Archify staging directory {}: {error}",
+                        job_dir.display()
+                    ),
+                )
+            })
+        }
+        Ok(_) => Err(typed(
+            ARCHIFY_ENGINE_FAILED,
+            format!(
+                "Refusing to clean non-directory Archify staging path {}",
+                job_dir.display()
+            ),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(typed(
+            ARCHIFY_ENGINE_FAILED,
+            format!(
+                "Cannot inspect Archify staging directory {}: {error}",
+                job_dir.display()
+            ),
+        )),
+    }
+}
+
+fn render_candidate_with_engine(
+    workspace: String,
+    diagram_type: String,
+    candidate_json: String,
+    engine: Option<PathBuf>,
+) -> Result<ArchifyRenderArtifact, IpcError> {
+    let diagram_type = validate_diagram_type(&diagram_type)
+        .map_err(|error| render_error(&error.code, error.message))?;
+    if candidate_json.len() > MAX_CANDIDATE_BYTES {
+        return Err(typed(
+            ARCHIFY_CANDIDATE_TOO_LARGE,
+            format!("Candidate exceeds {MAX_CANDIDATE_BYTES} bytes; reduce the diagram spec before exporting"),
+        ));
+    }
+    let engine = engine
+        .map_or_else(resolve_engine_path, Ok)
+        .map_err(|error| render_error(&error.code, error.message))?;
+    let node = resolve_node().map_err(|error| render_error(&error.code, error.message))?;
+    let pin: ArchifyEnginePin = serde_json::from_str(ENGINE_PIN_JSON).map_err(|error| {
+        render_error(
+            ARCHIFY_ENGINE_UNAVAILABLE,
+            format!("Pinned Archify metadata is invalid: {error}"),
+        )
+    })?;
+    let input_spec_sha256 = sha256(candidate_json.as_bytes());
+    let job_id = render_job_id();
+    let job_dir = resolve_inside_vault(&workspace, STAGING_DIR)
+        .map_err(|error: String| render_error(ARCHIFY_RENDER_FAILED, error))?
+        .join(&job_id);
+    let candidate = job_dir.join("candidate.json");
+    let rendered_html = job_dir.join("rendered.html");
+
+    let staged = stage_candidate(&workspace, &job_dir, &candidate, candidate_json.as_bytes())
+        .map_err(|error| render_error(&error.code, error.message));
+    let owns_staging = staged.is_ok();
+    let result = staged.and_then(|()| (|| {
+        let validation = run_engine(&node, &engine, diagram_type, &candidate, validate_timeout())
+            .map_err(|error| render_error(&error.code, error.message))?;
+        if !validation.ok {
+            return Err(render_error(
+                ARCHIFY_ENGINE_FAILED,
+                format!("Pinned Archify schema/render validation failed: {}; review the diagnostics and edit the diagram before exporting", validation.errors.join("; ")),
+            ));
+        }
+        if validation.candidate_sha256 != input_spec_sha256 {
+            return Err(render_error(
+                ARCHIFY_ENGINE_FAILED,
+                "Pinned Archify validation hash did not match the submitted spec; retry with the unchanged candidate".to_string(),
+            ));
+        }
+        run_render_engine(&node, &engine, diagram_type, &candidate, &rendered_html, validate_timeout())?;
+        check_rendered_html(&node, &engine, &rendered_html, validate_timeout())?;
+        let bytes = read_bounded_rendered_html(&rendered_html)?;
+        let receipt = ArchifyRenderReceipt {
+            schema_version: 1,
+            input_spec_sha256,
+            engine_pin: pin,
+            output_sha256: sha256(&bytes),
+            output_mime_type: "text/html".into(),
+            gates: ArchifyRenderGates {
+                schema: ArchifyRenderGate { status: "passed".into(), scope: "pinned-engine-validation".into() },
+                artifact: ArchifyRenderGate { status: "passed".into(), scope: "pinned-engine-rendered-html".into() },
+                browser: ArchifyRenderGate { status: "not-run".into(), scope: "none".into() },
+                visual_review: ArchifyRenderGate { status: "not-run".into(), scope: "manual".into() },
+            },
+        };
+        Ok(ArchifyRenderArtifact { bytes, receipt })
+    })());
+
+    let cleanup = if owns_staging {
+        cleanup_job_dir(&job_dir)
+    } else {
+        Ok(())
+    }
+    .map_err(|error| render_error(&error.code, error.message));
+    match (result, cleanup) {
+        (Ok(artifact), Ok(())) => Ok(artifact),
+        (Err(mut error), Err(cleanup_error)) => {
+            error.message = format!(
+                "{}; staging cleanup also failed: {}",
+                error.message, cleanup_error.message
+            );
+            Err(error)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+    }
 }
 
 /// Job-private staging write, admitted through the shared path-transaction
@@ -304,6 +762,35 @@ fn stage_candidate(
     bytes: &[u8],
 ) -> Result<(), IpcError> {
     let root = resolve_inside_vault(workspace, ".")?;
+    match fs::symlink_metadata(job_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(typed(
+                ARCHIFY_ENGINE_FAILED,
+                format!("Unsafe Archify staging symlink at {}", job_dir.display()),
+            ))
+        }
+        Ok(_) => {
+            return Err(typed(
+                ARCHIFY_ENGINE_FAILED,
+                format!(
+                    "Archify staging directory already exists: {}",
+                    job_dir.display()
+                ),
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(typed(
+                ARCHIFY_ENGINE_FAILED,
+                format!(
+                    "Cannot inspect Archify staging directory {}: {error}",
+                    job_dir.display()
+                ),
+            ))
+        }
+    }
+    ensure_staging_path_absent(candidate)
+        .map_err(|message| typed(ARCHIFY_ENGINE_FAILED, message))?;
     let request =
         PathTransactionRequest::new(vec![job_dir.to_path_buf(), candidate.to_path_buf()])?
             .require_parent(&root)?
@@ -311,13 +798,41 @@ fn stage_candidate(
     with_path_transactions(request, |lease| {
         lease.ensure_workspace_registry()?;
         lease.ensure_covered(vec![job_dir.to_path_buf(), candidate.to_path_buf()])?;
+        ensure_staging_path_absent(job_dir)?;
+        ensure_staging_path_absent(candidate)?;
         assert_maru_can_write(workspace, WorkspaceWriteAction::Create)?;
         lease.before_effect()?;
         fs::create_dir_all(job_dir).map_err(|err| format!("Cannot create staging dir: {err}"))?;
-        write_atomic(candidate, bytes)?;
+        if let Err(error) = write_atomic(candidate, bytes) {
+            let cleanup = match fs::symlink_metadata(job_dir) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                    fs::remove_dir_all(job_dir).map_err(|cleanup_error| cleanup_error.to_string())
+                }
+                Ok(_) => Err("staging path changed type before cleanup".to_string()),
+                Err(cleanup_error) => Err(cleanup_error.to_string()),
+            };
+            return Err(match cleanup {
+                Ok(()) => error,
+                Err(cleanup_error) => format!("{error}; staging cleanup failed: {cleanup_error}"),
+            });
+        }
         Ok(())
     })?;
     Ok(())
+}
+
+fn ensure_staging_path_absent(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(format!(
+            "Archify staging path already exists: {}",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Cannot inspect Archify staging path {}: {error}",
+            path.display()
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -327,6 +842,15 @@ fn archify_validate_candidate(
     candidate_json: String,
 ) -> Result<ArchifyValidationReceipt, IpcError> {
     validate_candidate_with_engine(workspace, diagram_type, candidate_json, None)
+}
+
+#[cfg(test)]
+fn archify_render_candidate(
+    workspace: String,
+    diagram_type: String,
+    candidate_json: String,
+) -> Result<ArchifyRenderArtifact, IpcError> {
+    render_candidate_with_engine(workspace, diagram_type, candidate_json, None)
 }
 
 fn validate_candidate_with_engine(
@@ -348,17 +872,28 @@ fn validate_candidate_with_engine(
     let job_id = uuid::Uuid::new_v4().simple().to_string();
     let job_dir = resolve_inside_vault(&workspace, STAGING_DIR)?.join(&job_id);
     let candidate = job_dir.join("candidate.json");
-    let staged = stage_candidate(&workspace, &job_dir, &candidate, candidate_json.as_bytes());
+    let staged = stage_candidate(&workspace, &job_dir, &candidate, candidate_json.as_bytes())
+        .map_err(|error| {
+            typed(
+                &error.code,
+                format!(
+                    "{}; next step: review the workspace path and retry validation",
+                    error.message
+                ),
+            )
+        });
+    let owns_staging = staged.is_ok();
     let result = staged
         .and_then(|()| run_engine(&node, &engine, diagram_type, &candidate, validate_timeout()));
-    // Best-effort cleanup, success or failure: the job dir is private staging.
-    let _ = fs::remove_dir_all(&job_dir);
+    if owns_staging {
+        let _ = cleanup_job_dir(&job_dir);
+    }
     result
 }
 
 /// Owned production IPC boundary; tests use a synchronous source-engine adapter.
 pub mod ipc {
-    use super::{ArchifyValidationReceipt, IpcError};
+    use super::{ArchifyRenderArtifact, ArchifyValidationReceipt, IpcError};
 
     #[tauri::command]
     pub async fn archify_validate_candidate(
@@ -383,6 +918,33 @@ pub mod ipc {
         })
         .await
         .map_err(|err| IpcError::from(format!("archify_validate_candidate_task_failed: {err}")))?
+    }
+
+    #[tauri::command]
+    pub async fn archify_render_candidate<R: tauri::Runtime>(
+        app: tauri::AppHandle<R>,
+        workspace: String,
+        diagram_type: String,
+        candidate_json: String,
+    ) -> Result<ArchifyRenderArtifact, IpcError> {
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(test)]
+            crate::atomic_file::PathTransactionLease::test_stage(
+                &[std::path::PathBuf::from(&workspace)],
+                "worker:archify_render_candidate",
+            );
+            let engine = super::bundled_engine_path(&app).map_err(|error| {
+                super::typed(&error.code, format!("{}; restore the bundled engine or fix MARU_ARCHIFY_ENGINE and retry the export", error.message))
+            })?;
+            super::render_candidate_with_engine(
+                workspace,
+                diagram_type,
+                candidate_json,
+                Some(engine),
+            )
+        })
+        .await
+        .map_err(|err| IpcError::from(format!("archify_render_candidate_task_failed: {err}; retry the export and restart Maru if the worker failure repeats")))?
     }
 }
 
@@ -413,6 +975,19 @@ mod tests {
   "components": [
     { "id": "app", "label": "App", "type": "backend", "row": 0, "col": 0 }
   ]
+}"#;
+
+    const WORKFLOW_SPEC: &str = r#"{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": { "title": "Review", "output": "review.html", "locale": "en" },
+  "lanes": [{ "id": "author", "label": "Author" }, { "id": "reviewer", "label": "Reviewer" }],
+  "nodes": [
+    { "id": "draft", "lane": "author", "col": 0, "type": "frontend", "label": "Draft" },
+    { "id": "review", "lane": "reviewer", "col": 1, "type": "backend", "label": "Review" },
+    { "id": "merge", "lane": "author", "col": 2, "type": "backend", "label": "Merge" }
+  ],
+  "edges": [{ "from": "draft", "to": "review" }, { "from": "review", "to": "merge" }]
 }"#;
 
     fn lock_env() -> MutexGuard<'static, ()> {
@@ -501,6 +1076,43 @@ mod tests {
         assert_eq!(receipt.diagram_type, diagram_type);
     }
 
+    fn assert_fixture_renders(diagram_type: &str, spec: &str) {
+        let _lock = lock_env();
+        std::env::remove_var(TIMEOUT_ENV);
+        std::env::remove_var(JOB_ID_ENV);
+        if !node_available() {
+            eprintln!("skipping: node is not available on PATH");
+            return;
+        }
+        let (tmp, work) = setup_workspace();
+        let source_path = tmp.path().join("source.json");
+        fs::write(&source_path, spec).unwrap();
+        let original = fs::read(&source_path).unwrap();
+        let artifact =
+            archify_render_candidate(work, diagram_type.to_string(), spec.to_string()).unwrap();
+        assert!(artifact.bytes.starts_with(b"<!DOCTYPE html>"));
+        assert_eq!(artifact.receipt.schema_version, 1);
+        assert_eq!(artifact.receipt.input_spec_sha256, sha256(spec.as_bytes()));
+        assert_eq!(artifact.receipt.engine_pin.name, "archify");
+        assert_eq!(artifact.receipt.engine_pin.version, "3.0.0");
+        assert_eq!(artifact.receipt.output_sha256, sha256(&artifact.bytes));
+        assert_eq!(artifact.receipt.output_mime_type, "text/html");
+        assert_eq!(artifact.receipt.gates.schema.status, "passed");
+        assert_eq!(artifact.receipt.gates.artifact.status, "passed");
+        assert_eq!(artifact.receipt.gates.browser.status, "not-run");
+        assert_eq!(artifact.receipt.gates.visual_review.status, "not-run");
+        assert!(artifact.bytes.len() as u64 <= MAX_RENDERED_HTML_BYTES);
+        assert_eq!(
+            fs::read(source_path).unwrap(),
+            original,
+            "render must not mutate the submitted source file"
+        );
+        let leftovers: Vec<_> = fs::read_dir(tmp.path().join(STAGING_DIR))
+            .map(|entries| entries.flatten().collect())
+            .unwrap_or_default();
+        assert!(leftovers.is_empty(), "staging leftovers: {leftovers:?}");
+    }
+
     #[test]
     fn sequence_fixture_validates_with_real_engine() {
         assert_fixture_validates("sequence", SEQUENCE_SPEC);
@@ -514,6 +1126,175 @@ mod tests {
     #[test]
     fn lifecycle_fixture_validates_with_real_engine() {
         assert_fixture_validates("lifecycle", LIFECYCLE_SPEC);
+    }
+
+    #[test]
+    fn renders_actual_pinned_html_for_all_five_diagram_types() {
+        for (diagram_type, spec) in [
+            ("architecture", VALID_SPEC),
+            ("workflow", WORKFLOW_SPEC),
+            ("sequence", SEQUENCE_SPEC),
+            ("dataflow", DATAFLOW_SPEC),
+            ("lifecycle", LIFECYCLE_SPEC),
+        ] {
+            assert_fixture_renders(diagram_type, spec);
+        }
+    }
+
+    #[test]
+    fn render_refuses_invalid_or_oversize_input() {
+        let _lock = lock_env();
+        if !node_available() {
+            eprintln!("skipping: node is not available on PATH");
+            return;
+        }
+        let (_tmp, work) = setup_workspace();
+        let invalid = archify_render_candidate(
+            work.clone(),
+            "architecture".into(),
+            MISSING_TITLE_SPEC.into(),
+        )
+        .unwrap_err();
+        assert_eq!(invalid.code, ARCHIFY_ENGINE_FAILED);
+        let oversized = archify_render_candidate(
+            work,
+            "architecture".into(),
+            " ".repeat(MAX_CANDIDATE_BYTES + 1),
+        )
+        .unwrap_err();
+        assert_eq!(oversized.code, ARCHIFY_CANDIDATE_TOO_LARGE);
+    }
+
+    #[test]
+    fn render_rejects_unsafe_authored_output_without_writing_outside_staging() {
+        let _lock = lock_env();
+        if !node_available() {
+            eprintln!("skipping: node is not available on PATH");
+            return;
+        }
+        let (tmp, work) = setup_workspace();
+        let unsafe_spec = VALID_SPEC.replace("x.html", "../outside.html");
+        let error = archify_render_candidate(work, "architecture".into(), unsafe_spec).unwrap_err();
+        assert_eq!(error.code, ARCHIFY_ENGINE_FAILED);
+        assert!(!tmp.path().join("outside.html").exists());
+        let staging = tmp.path().join(STAGING_DIR);
+        assert!(fs::read_dir(staging).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn render_serializes_separate_gates_and_binary_payload() {
+        let receipt = ArchifyRenderReceipt {
+            schema_version: 1,
+            input_spec_sha256: "a".repeat(64),
+            engine_pin: engine_pin().unwrap(),
+            output_sha256: "b".repeat(64),
+            output_mime_type: "text/html".into(),
+            gates: ArchifyRenderGates {
+                schema: ArchifyRenderGate {
+                    status: "passed".into(),
+                    scope: "pinned-engine-validation".into(),
+                },
+                artifact: ArchifyRenderGate {
+                    status: "passed".into(),
+                    scope: "pinned-engine-rendered-html".into(),
+                },
+                browser: ArchifyRenderGate {
+                    status: "not-run".into(),
+                    scope: "none".into(),
+                },
+                visual_review: ArchifyRenderGate {
+                    status: "not-run".into(),
+                    scope: "manual".into(),
+                },
+            },
+        };
+        let value = serde_json::to_value(ArchifyRenderArtifact {
+            bytes: vec![1, 2, 3],
+            receipt,
+        })
+        .unwrap();
+        assert_eq!(value["bytes"], serde_json::json!([1, 2, 3]));
+        assert_eq!(value["receipt"]["schemaVersion"], 1);
+        assert_eq!(value["receipt"]["enginePin"]["name"], "archify");
+        assert_eq!(value["receipt"]["enginePin"]["version"], "3.0.0");
+        assert_eq!(value["receipt"]["outputMimeType"], "text/html");
+        assert_eq!(value["receipt"]["gates"]["schema"]["status"], "passed");
+        assert_eq!(
+            value["receipt"]["gates"]["schema"]["scope"],
+            "pinned-engine-validation"
+        );
+        assert_eq!(
+            value["receipt"]["gates"]["artifact"]["scope"],
+            "pinned-engine-rendered-html"
+        );
+        assert_eq!(value["receipt"]["gates"]["browser"]["status"], "not-run");
+        assert_eq!(value["receipt"]["gates"]["browser"]["scope"], "none");
+        assert_eq!(value["receipt"]["gates"]["visualReview"]["scope"], "manual");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn render_rejects_staging_symlink_without_removing_its_target() {
+        use std::os::unix::fs::symlink;
+        let _lock = lock_env();
+        let _job = EnvRestore::set(JOB_ID_ENV, "render-symlink-test");
+        if !node_available() {
+            eprintln!("skipping: node is not available on PATH");
+            return;
+        }
+        let (_tmp, work) = setup_workspace();
+        let external = TempDir::new().unwrap();
+        let marker = external.path().join("preserve");
+        fs::write(&marker, b"keep").unwrap();
+        let staging = Path::new(&work).join(STAGING_DIR);
+        fs::create_dir_all(&staging).unwrap();
+        symlink(external.path(), staging.join("render-symlink-test")).unwrap();
+        let error =
+            archify_render_candidate(work, "architecture".into(), VALID_SPEC.into()).unwrap_err();
+        assert_eq!(error.code, ARCHIFY_ENGINE_FAILED);
+        assert_eq!(fs::read(marker).unwrap(), b"keep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn render_kills_and_reaps_a_timed_out_engine() {
+        let _lock = lock_env();
+        let _timeout = EnvRestore::set(TIMEOUT_ENV, "300");
+        let tmp = TempDir::new().unwrap();
+        let fake = tmp.path().join("fake-node");
+        let hash = sha256(VALID_SPEC.as_bytes());
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo fake; exit 0; fi\nif [ \"$2\" = \"validate\" ]; then echo '{{\"ok\":true,\"candidate\":{{\"sha256\":\"{hash}\"}},\"diagnostics\":[]}}'; exit 0; fi\nsleep 30\n"
+        );
+        crate::test_support::write_executable_fixture(&fake, &script, 0o755).unwrap();
+        let _node = EnvRestore::set(NODE_ENV, fake.to_str().unwrap());
+        let (_workspace, work) = setup_workspace();
+        let started = Instant::now();
+        let error =
+            archify_render_candidate(work, "architecture".into(), VALID_SPEC.into()).unwrap_err();
+        assert_eq!(error.code, ARCHIFY_RENDER_TIMEOUT);
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn render_timeout_stops_late_descendant_writes() {
+        let _lock = lock_env();
+        let _timeout = EnvRestore::set(TIMEOUT_ENV, "300");
+        let tmp = TempDir::new().unwrap();
+        let marker = tmp.path().join("late-descendant-write");
+        let _marker = EnvRestore::set("MARU_TEST_ARCHIFY_LATE_MARKER", marker.to_str().unwrap());
+        let fake = tmp.path().join("fake-node");
+        let hash = sha256(VALID_SPEC.as_bytes());
+        let script = format!("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo fixture; exit 0; fi\nif [ \"$2\" = \"validate\" ]; then echo '{{\"ok\":true,\"candidate\":{{\"sha256\":\"{hash}\"}},\"diagnostics\":[]}}'; exit 0; fi\n(sleep 1; printf late > \"$MARU_TEST_ARCHIFY_LATE_MARKER\") &\nsleep 30\n");
+        crate::test_support::write_executable_fixture(&fake, &script, 0o755).unwrap();
+        let _node = EnvRestore::set(NODE_ENV, fake.to_str().unwrap());
+        let (_workspace, work) = setup_workspace();
+        let error =
+            archify_render_candidate(work, "architecture".into(), VALID_SPEC.into()).unwrap_err();
+        assert_eq!(error.code, ARCHIFY_RENDER_TIMEOUT);
+        std::thread::sleep(Duration::from_millis(1200));
+        assert!(!marker.exists(), "timed-out engine descendants survived; inspect the process-tree runner before retrying");
     }
 
     #[test]
@@ -607,5 +1388,32 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.code, ARCHIFY_ENGINE_UNAVAILABLE);
         assert!(err.message.contains(ENGINE_ENV));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod render_worker_boundary_tests {
+    use super::ipc;
+    use crate::atomic_file::phase08_06::{boundary, Home};
+    use std::fs;
+
+    #[test]
+    fn render_command_runs_in_worker_and_propagates_worker_failure() {
+        let home = Home::new();
+        let workspace = home.root.path().join("render-worker-workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        boundary(workspace.clone(), "archify_render_candidate", async move {
+            ipc::archify_render_candidate(
+                handle,
+                workspace.to_string_lossy().into_owned(),
+                "architecture".into(),
+                "{}".into(),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.message)
+        });
     }
 }

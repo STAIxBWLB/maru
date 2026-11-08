@@ -19,6 +19,9 @@
  */
 
 import { rasterise } from "./export";
+import { exportVerifiedSemanticArtifact } from "./verifiedExport";
+import type { ArchifyRenderHost, ArchifyRenderReceipt } from "../archify";
+import type { StaticTheme } from "./engineSvg";
 import { docToMermaid, mermaidToDocDetailed } from "./mermaid";
 import { datasetToArchifySpec, parseArchifySpec } from "./archifyCodec";
 import { projectSemanticDocument } from "./semantic";
@@ -69,6 +72,7 @@ export interface CodecParseOutcome {
 }
 
 export interface CodecSerializeOutcome {
+  receipt?: ArchifyRenderReceipt;
   bytes: string | Uint8Array;
   fidelity: CodecFidelity;
   warnings: CodecWarning[];
@@ -76,7 +80,7 @@ export interface CodecSerializeOutcome {
 }
 
 /** What a codec consumes/produces: whole docs, matrix datasets, or pixels. */
-export type CodecDataKind = "doc" | "matrix" | "visual";
+export type CodecDataKind = "doc" | "matrix" | "visual" | "semantic";
 
 export interface DiagramCodec {
   id: string;
@@ -94,6 +98,10 @@ export interface DiagramCodec {
   serialize?(input: {
     doc: DiagramDoc;
     datasetId?: string;
+    workspace?: string;
+    renderHost?: ArchifyRenderHost;
+    isCurrent?: () => boolean;
+    theme?: StaticTheme;
   }): CodecSerializeOutcome | Promise<CodecSerializeOutcome>;
 }
 
@@ -975,6 +983,22 @@ const pdfCodec: DiagramCodec = {
   dataKind: "visual",
 };
 
+function engineStaticCodec(format: "svg" | "png"): DiagramCodec {
+  return {
+    id: `archify-${format}`, labelKey: `diagram.codec.label.archify-${format}`,
+    extensions: [`.${format}`], canImport: false, canExport: true,
+    exportFidelity: "visual", dataKind: "semantic", exportKind: format,
+    async serialize(input) {
+      if (!input.workspace) throw new Error("Engine export needs a workspace; open a workspace and retry.");
+      const artifact = await exportVerifiedSemanticArtifact({
+        doc: input.doc, datasetId: input.datasetId, workspace: input.workspace, format,
+        host: input.renderHost, isCurrent: input.isCurrent, theme: input.theme,
+      });
+      return { bytes: artifact.bytes, receipt: artifact.receipt, fidelity: "visual", warnings: [{ key: "diagram.codec.warn.engineSemanticOnly" }] };
+    },
+  };
+}
+
 export const CODEC_LIST: readonly DiagramCodec[] = [
   maruJsonCodec,
   maruSvgCodec,
@@ -989,6 +1013,8 @@ export const CODEC_LIST: readonly DiagramCodec[] = [
   htmlTableCodec,
   mermaidCodec,
   archifyJsonCodec,
+  engineStaticCodec("svg"),
+  engineStaticCodec("png"),
 ];
 
 export function getCodec(id: string): DiagramCodec | undefined {

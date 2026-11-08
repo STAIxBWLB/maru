@@ -23,6 +23,8 @@ import { blobToUint8Array, exportPng } from "./export";
 import { IpcError } from "../ipcError";
 import { serializeDoc } from "./persistence";
 import { renderDocToSvg } from "./renderSvg";
+import { bytesSha256, exportVerifiedSemanticArtifact } from "./verifiedExport";
+import type { ArchifyRenderHost, ArchifyRenderReceipt } from "../archify";
 import { buildManagedBlock, spliceManagedBlock } from "./reportLink";
 import type { DiagramDoc } from "./types";
 
@@ -43,7 +45,7 @@ export interface ReportInsertDeps {
     content: string,
     expectedRevision: string | null,
   ) => Promise<unknown>;
-  renderAssets: (doc: DiagramDoc) => Promise<{ svg: Uint8Array; png: Uint8Array }>;
+  renderAssets: (doc: DiagramDoc) => Promise<{ svg: Uint8Array; png: Uint8Array; receipts?: { svg: ArchifyRenderReceipt; png: ArchifyRenderReceipt } }>;
   digestHex: (text: string) => Promise<string>;
 }
 
@@ -65,6 +67,7 @@ export interface ReportInsertRequest {
   scope: string;
   /** Target Markdown document; null when the caller must ask the user. */
   target: ReportTarget | null;
+  isCurrent?: () => boolean;
 }
 
 function errorMessage(err: unknown): string {
@@ -85,6 +88,7 @@ export function scopeDocForRender(doc: DiagramDoc, scope: string): DiagramDoc {
   const edgeIds = new Set(view.edgeIds);
   return {
     ...doc,
+    datasets: (doc.datasets ?? []).filter((dataset) => dataset.id === view.datasetId),
     nodes: doc.nodes.filter((node) => nodeIds.has(node.id)),
     edges: doc.edges.filter((edge) => edgeIds.has(edge.id)),
   };
@@ -111,8 +115,11 @@ export async function insertDiagramIntoReport(
   } catch (err) {
     return { status: "error", message: errorMessage(err) };
   }
-  const renderHash = `sha256:${hex}`;
-  const hash8 = hex.slice(0, 8);
+  let renderHash = `sha256:${hex}`;
+  let fileHash = hex.slice(0, 8);
+  const current = () => {
+    if (request.isCurrent?.() === false) throw new Error("The source diagram changed during export; save the current diagram and insert it again.");
+  };
   // Windows-safe path components: scope may contain ':' (`pattern:<viewId>`,
   // an NTFS alternate-data-stream separator), and an imported doc id is an
   // arbitrary JSON string that could carry newlines/parens which would break
@@ -130,9 +137,23 @@ export async function insertDiagramIntoReport(
   let svgPath: string;
   let pngPath: string;
   try {
+    current();
     const assets = await deps.renderAssets(scopeDocForRender(doc, scope));
-    svgPath = await deps.writeAsset(assetDocId, `${fileScope}-${hash8}.svg`, assets.svg);
-    pngPath = await deps.writeAsset(assetDocId, `${fileScope}-${hash8}.png`, assets.png);
+    current();
+    if (assets.receipts) {
+      const { svg, png } = assets.receipts;
+      if (svg.outputSha256 !== await bytesSha256(assets.svg) || png.outputSha256 !== await bytesSha256(assets.png)
+          || svg.inputSpecSha256 !== png.inputSpecSha256 || svg.enginePin.revision !== png.enginePin.revision) {
+        throw new Error("Report artifact receipts do not match their bytes or semantic source; regenerate the engine exports before inserting.");
+      }
+      hex = await deps.digestHex(JSON.stringify({ svg: svg.outputSha256, png: png.outputSha256, input: svg.inputSpecSha256, engine: svg.enginePin }));
+      renderHash = `sha256:${hex}`;
+      fileHash = hex;
+    }
+    current();
+    svgPath = await deps.writeAsset(assetDocId, `${fileScope}-${fileHash}.svg`, assets.svg);
+    current();
+    pngPath = await deps.writeAsset(assetDocId, `${fileScope}-${fileHash}.png`, assets.png);
   } catch (err) {
     return { status: "error", message: errorMessage(err) };
   }
@@ -147,7 +168,9 @@ export async function insertDiagramIntoReport(
   });
 
   try {
+    current();
     const fresh = await deps.readTarget(target.path);
+    current();
     const spliced = spliceManagedBlock(fresh.content, block, {
       source: `diagrams/${diagramName}.cmd.json`,
       scope,
@@ -200,6 +223,7 @@ export async function renderReportAssets(
 export function defaultReportInsertDeps(
   workspace: string,
   saveTarget: ReportInsertDeps["saveTarget"],
+  renderHost?: ArchifyRenderHost,
 ): ReportInsertDeps {
   return {
     writeAsset: (docId, fileName, bytes) =>
@@ -209,7 +233,13 @@ export function defaultReportInsertDeps(
       return { content: payload.content, revision: payload.revision ?? null };
     },
     saveTarget,
-    renderAssets: renderReportAssets,
+    renderAssets: async (doc) => {
+      const datasets = (doc.datasets ?? []).filter((dataset) => dataset.kind === "semanticSpec");
+      if (!datasets.length) return renderReportAssets(doc);
+      const svg = await exportVerifiedSemanticArtifact({ doc, workspace, format: "svg", host: renderHost });
+      const png = await exportVerifiedSemanticArtifact({ doc, workspace, format: "png", host: renderHost });
+      return { svg: svg.bytes, png: png.bytes, receipts: { svg: svg.receipt, png: png.receipt } };
+    },
     digestHex: sha256Hex,
   };
 }
