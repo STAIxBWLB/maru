@@ -295,6 +295,23 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   themes and remembered layout.
 - Claude Code, Codex, Kimi, and Kiro are first-class runtimes. Each named agent
   binds a skill, runtime, permission mode, and optional schedule.
+- Task execution ownership is opt-in on existing CLI/structured invocation metadata:
+  `taskExecution: {requestId, taskPath, sourceRevision, tasksRoot?}`. The revision is
+  the task document revision read before admission; `tasksRoot` defaults to `tasks`.
+  Admission assigns a stable `taskId` through managed frontmatter and records a
+  generation-bound run receipt under `.maru/task-execution/`. Reusing a request ID
+  returns its recorded run without spawning again. A bounded history retains 100
+  earlier requests; reaching the bound refuses another generation instead of
+  forgetting an old request and spawning it again. Results validate the current
+  source revision; claim updates and release require the full task/run/generation
+  token. Completion never marks the Markdown task Done automatically. Task moves
+  retain the ID, and renamed files are resolved by that ID. Source changes and terminal/archived
+  tasks prevent result adoption. Recovery holds live or unverified native owners
+  for review, never elapsed-time takeover.
+  Ordinary invocations do not create task identities or claims. Managed task
+  note APIs and Markdown renames share a short per-path lock with first admission
+  to prevent an identity assignment race; that coordination lock does not opt a
+  task in.
 - Adaptive runtime policy is opt-in under Settings > AI (`ai.adaptivePolicy`).
   Each invocation asks `dot ai policy resolve --json` for an eligible runtime,
   model, reasoning effort, and native automatic-review permission. Missing or
@@ -311,21 +328,6 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   write permission is added.
   Runtime decisions are reported in invocation metadata and chat diagnostics.
   Structured roles freeze the complete initial configuration and stop on drift.
-  Task execution ownership is opt-in on existing CLI/structured invocation metadata:
-  `taskExecution: {requestId, taskPath, sourceRevision, tasksRoot?}`. The revision is
-  the task document revision read before admission; `tasksRoot` defaults to `tasks`.
-  Admission assigns a stable `taskId` through managed frontmatter and records a
-  generation-bound run receipt under `.maru/task-execution/`. Reusing a request ID
-  returns its recorded run without spawning again. A bounded history retains 100
-  earlier requests; reaching the bound refuses another generation instead of
-  forgetting an old request and spawning it again. Results and release compare the
-  full task/run/generation token and the current source revision; completion never
-  marks the Markdown task Done automatically. Task moves retain the ID, and
-  renamed files are resolved by that ID. Changed/terminal/archived tasks and live
-  or unverified native owners require review, never elapsed-time takeover.
-  Ordinary invocations do not create task identities or claims. Managed task
-  mutations share a short per-path lock with first admission to prevent an identity
-  assignment race; that coordination lock does not opt a task in.
   Chat permits at most two configuration changes per task, then stops on another
   change; explicit selections freeze the recorded configuration. New turns resolve
   again using capped transcript replay, not native session resume. Maru does
