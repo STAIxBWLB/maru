@@ -107,43 +107,66 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
         requested_permission.to_string()
     };
 
+    let task_execution = crate::task_execution_runtime::TaskExecutionSession::admit(
+        &cwd,
+        metadata.as_ref(),
+        &run_id,
+    )?;
+    if let Some((session, true)) = &task_execution {
+        return Ok(session.token.run_id.clone());
+    }
+    let task_execution = task_execution.map(|(session, _)| session);
+
     // Write `run.started` up-front so an invalid cwd fails fast (propagated to
     // the caller). The top-level `runtimeProvider` lets the redacted-summary
     // export surface the provider without exposing prompt bodies.
-    append_run_event_payload(
-        &cwd,
-        &run_id,
-        "run.started",
-        "maru.structured_loop",
-        json!({
-            "runtimeProvider": provider_kind.id(),
-            "adaptivePolicyResolution": resolution,
-            "directive": directive,
-            "highRisk": high_risk,
-            "ambiguous": ambiguous,
-            "maxRework": max_rework,
-            "permissionMode": permission_mode,
-            "commandOverride": command_override,
-        }),
-    )?;
+    let admission_result = (|| {
+        append_run_event_payload(
+            &cwd,
+            &run_id,
+            "run.started",
+            "maru.structured_loop",
+            json!({
+                "runtimeProvider": provider_kind.id(),
+                "adaptivePolicyResolution": resolution,
+                "directive": directive,
+                "highRisk": high_risk,
+                "ambiguous": ambiguous,
+                "maxRework": max_rework,
+                "permissionMode": permission_mode,
+                "commandOverride": command_override,
+            }),
+        )?;
 
-    mission_state::register_mission_logical(
-        &app,
-        &run_id,
-        provider_kind.id(),
-        Some(json!({
+        let mut mission_metadata = json!({
             "origin": "structuredLoop",
             "provider": provider_kind.id(),
-            // `runtime` + `workspacePath` mirror the skill-dispatch mission shape so
-            // SkillRunsPanel labels the run and resolves the cwd for review/apply.
+            // Mirror the skill-dispatch mission shape for labels and review/apply.
             "runtime": provider_kind.id(),
             "adaptivePolicyResolution": resolution,
-            "workspacePath": cwd.clone(),
+            "workspacePath": task_execution.as_ref().map(|session| session.workspace().to_string_lossy().into_owned()).unwrap_or_else(|| cwd.clone()),
             "skillName": "Structured run",
             "permissionMode": permission_mode,
             "commandOverride": command_override,
-        })),
-    )?;
+        });
+        if let Some(session) = &task_execution {
+            mission_metadata["taskExecution"] = session.metadata();
+        }
+        mission_state::register_mission_logical(
+            &app,
+            &run_id,
+            provider_kind.id(),
+            Some(mission_metadata),
+        )?;
+
+        Ok::<(), String>(())
+    })();
+    if let Err(error) = admission_result {
+        if let Some(session) = &task_execution {
+            session.admission_failed();
+        }
+        return Err(error);
+    }
 
     let input = FiveRoleLoopInput {
         directive,
@@ -191,6 +214,7 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
                 CliProviderAdapter::new(provider_kind, add_dirs, command_override, permission_mode)
                     .with_metadata(metadata)
                     .with_bundle_session(bundle_session)
+                    .with_task_execution(task_execution.clone())
                     // Each call's usage is appended when the call ends, so a
                     // failed, cancelled or interrupted run keeps it (maru#431).
                     .with_usage_sink(cwd_thread.clone(), run_id_thread.clone());
@@ -213,6 +237,12 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
             }
             result
         })();
+        let result = result.and_then(|result| {
+            if let Some(session) = &task_execution {
+                session.finish(result.status == "passed", Some(0))?;
+            }
+            Ok(result)
+        });
         match result {
             Ok(result) => {
                 for role_output in &result.role_outputs {
@@ -262,6 +292,14 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
                 );
             }
             Err(err) => {
+                if let Some(session) = &task_execution {
+                    if let Err(error) = session.finish(false, None) {
+                        eprintln!(
+                            "maru: task execution {} needs review: {error}",
+                            session.token.run_id
+                        );
+                    }
+                }
                 let _ = append_run_event_payload(
                     &cwd_thread,
                     &run_id_thread,

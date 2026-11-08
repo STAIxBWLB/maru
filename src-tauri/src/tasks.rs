@@ -487,6 +487,8 @@ pub fn update_task_status(
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
     let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &rel_path)?;
+    let mut claim = crate::task_execution_claims::guard_task_mutation(&work, &source)?;
     let paths = vec![
         resolve_inside_vault(&work_path, &rel_path)?,
         resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
@@ -508,11 +510,22 @@ pub fn update_task_status(
             [path, alias]
         })
         .collect::<Vec<_>>();
+    let mut paths = paths;
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
     let request = PathTransactionRequest::new(paths)?
         .require_parent(&work)?
         .with_workspace_registry()?;
     with_path_transactions(request, |lease| {
-        update_task_status_in_transaction(lease, work_path, rel_path, status, root)
+        if let Some(guard) = &claim {
+            guard.check(lease, &source)?;
+        }
+        let row = update_task_status_in_transaction(lease, work_path, rel_path, status, root)?;
+        if let Some(guard) = &mut claim {
+            guard.after_mutation(lease, Path::new(&row.path))?;
+        }
+        Ok(row)
     })
 }
 
@@ -587,6 +600,8 @@ pub fn update_task_schedule_fields(
     fields: UpdateTaskScheduleFields,
 ) -> Result<TaskNoteRow, String> {
     let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &rel_path)?;
+    let mut claim = crate::task_execution_claims::guard_task_mutation(&work, &source)?;
     let paths = vec![resolve_inside_vault(&work_path, &rel_path)?];
     let lexical_work = if Path::new(&work_path).is_absolute() {
         PathBuf::from(&work_path)
@@ -605,11 +620,22 @@ pub fn update_task_schedule_fields(
             [path, alias]
         })
         .collect::<Vec<_>>();
+    let mut paths = paths;
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
     let request = PathTransactionRequest::new(paths)?
         .require_parent(&work)?
         .with_workspace_registry()?;
     with_path_transactions(request, |lease| {
-        update_task_schedule_fields_in_transaction(lease, work_path, rel_path, fields)
+        if let Some(guard) = &claim {
+            guard.check(lease, &source)?;
+        }
+        let row = update_task_schedule_fields_in_transaction(lease, work_path, rel_path, fields)?;
+        if let Some(guard) = &mut claim {
+            guard.after_mutation(lease, Path::new(&row.path))?;
+        }
+        Ok(row)
     })
 }
 
@@ -653,6 +679,8 @@ pub fn update_task_details(
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
     let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &rel_path)?;
+    let mut claim = crate::task_execution_claims::guard_task_mutation(&work, &source)?;
     let paths = vec![
         resolve_inside_vault(&work_path, &rel_path)?,
         resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
@@ -674,11 +702,22 @@ pub fn update_task_details(
             [path, alias]
         })
         .collect::<Vec<_>>();
+    let mut paths = paths;
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
     let request = PathTransactionRequest::new(paths)?
         .require_parent(&work)?
         .with_workspace_registry()?;
     with_path_transactions(request, |lease| {
-        update_task_details_in_transaction(lease, work_path, rel_path, fields, root)
+        if let Some(guard) = &claim {
+            guard.check(lease, &source)?;
+        }
+        let row = update_task_details_in_transaction(lease, work_path, rel_path, fields, root)?;
+        if let Some(guard) = &mut claim {
+            guard.after_mutation(lease, Path::new(&row.path))?;
+        }
+        Ok(row)
     })
 }
 
@@ -787,6 +826,8 @@ pub fn move_task_note(
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
     let work = normalize_existing_dir(&work_path)?;
+    let source = resolve_inside_vault(&work_path, &rel_path)?;
+    let mut claim = crate::task_execution_claims::guard_task_mutation(&work, &source)?;
     let paths = vec![
         resolve_inside_vault(&work_path, &rel_path)?,
         resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?,
@@ -808,11 +849,22 @@ pub fn move_task_note(
             [path, alias]
         })
         .collect::<Vec<_>>();
+    let mut paths = paths;
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
     let request = PathTransactionRequest::new(paths)?
         .require_parent(&work)?
         .with_workspace_registry()?;
     with_path_transactions(request, |lease| {
-        move_task_note_in_transaction(lease, work_path, rel_path, target_bucket, root)
+        if let Some(guard) = &claim {
+            guard.check(lease, &source)?;
+        }
+        let row = move_task_note_in_transaction(lease, work_path, rel_path, target_bucket, root)?;
+        if let Some(guard) = &mut claim {
+            guard.after_mutation(lease, Path::new(&row.path))?;
+        }
+        Ok(row)
     })
 }
 

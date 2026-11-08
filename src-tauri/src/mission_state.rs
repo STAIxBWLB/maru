@@ -578,18 +578,92 @@ impl MissionState {
     }
 
     fn hydrate_from_disk(&self) -> Result<(), String> {
-        with_path_transactions(
+        let recovery = with_path_transactions(
             PathTransactionRequest::new(vec![mission_dir()?])?,
             |lease| self.hydrate_from_disk_in_transaction(lease),
-        )
+        )?;
+        // Claim operations acquire a cross-process lock before their path lease.
+        // Reconcile only disk-hydrated missions, outside both mission locks.
+        for (id, metadata) in recovery {
+            match crate::task_execution_runtime::reconcile_mission(metadata.as_ref()) {
+                Ok(Some(claim)) => {
+                    // A prior generation's mission must never inherit a newer run's status.
+                    if claim.run_id != id {
+                        continue;
+                    }
+                    use crate::task_execution_claims::TaskExecutionLifecycle as Lifecycle;
+                    let status = match claim.lifecycle {
+                        Lifecycle::Finished if claim.receipt.process_outcome == "succeeded" => {
+                            Some(MissionStatus::Done)
+                        }
+                        Lifecycle::Finished => Some(MissionStatus::Failed),
+                        Lifecycle::Released | Lifecycle::Reconciled => Some(MissionStatus::Stopped),
+                        Lifecycle::Active | Lifecycle::NeedsReview => None,
+                    };
+                    mission_transaction(&id, |lease| {
+                        let mut missions = self
+                            .missions
+                            .lock()
+                            .map_err(|_| "mission_state_poisoned".to_string())?;
+                        let Some(record) = missions.get_mut(&id) else {
+                            return Ok(());
+                        };
+                        if !matches!(record.status, MissionStatus::Running | MissionStatus::Idle) {
+                            return Ok(());
+                        }
+                        if let Some(status) = status {
+                            record.status = status;
+                            record.exit_code = claim.receipt.exit_code;
+                            if let Some(metadata) =
+                                record.metadata.as_mut().and_then(JsonValue::as_object_mut)
+                            {
+                                metadata.remove("taskExecutionNeedsReview");
+                            }
+                        } else if let Some(metadata) =
+                            record.metadata.as_mut().and_then(JsonValue::as_object_mut)
+                        {
+                            metadata
+                                .insert("taskExecutionNeedsReview".into(), JsonValue::Bool(true));
+                        }
+                        persist_record_in_transaction(record, lease)
+                    })?;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!(
+                        "maru: task execution recovery for mission {id} needs review: {error}"
+                    );
+                    mission_transaction(&id, |lease| {
+                        let mut missions = self
+                            .missions
+                            .lock()
+                            .map_err(|_| "mission_state_poisoned".to_string())?;
+                        let Some(record) = missions.get_mut(&id) else {
+                            return Ok(());
+                        };
+                        if let Some(metadata) =
+                            record.metadata.as_mut().and_then(JsonValue::as_object_mut)
+                        {
+                            metadata
+                                .insert("taskExecutionNeedsReview".into(), JsonValue::Bool(true));
+                        }
+                        persist_record_in_transaction(record, lease)
+                    })?;
+                }
+            }
+        }
+        Ok(())
     }
 
-    fn hydrate_from_disk_in_transaction(&self, lease: &PathTransactionLease) -> Result<(), String> {
+    fn hydrate_from_disk_in_transaction(
+        &self,
+        lease: &PathTransactionLease,
+    ) -> Result<Vec<(String, Option<JsonValue>)>, String> {
         lease.ensure_covered(vec![mission_dir()?])?;
         lease.before_effect()?;
         let dir = mission_dir()?;
         if !dir.is_dir() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let pids = self
             .pids
@@ -600,6 +674,7 @@ impl MissionState {
             .missions
             .lock()
             .map_err(|_| "mission_state_poisoned".to_string())?;
+        let mut recovery = Vec::new();
         for entry in fs::read_dir(&dir)
             .map_err(|err| format!("Cannot read mission state directory: {err}"))?
         {
@@ -617,13 +692,21 @@ impl MissionState {
             }
             if matches!(record.status, MissionStatus::Running | MissionStatus::Idle)
                 && !pids.contains_key(&record.id)
+                && !record
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.get("taskExecution"))
+                    .is_some_and(|value| !value.is_null())
             {
                 record.status = MissionStatus::Stopped;
                 let _ = persist_record_in_transaction(&record, lease);
             }
+            if matches!(record.status, MissionStatus::Running | MissionStatus::Idle) {
+                recovery.push((record.id.clone(), record.metadata.clone()));
+            }
             missions.insert(record.id.clone(), record);
         }
-        Ok(())
+        Ok(recovery)
     }
 
     #[cfg(test)]
@@ -863,6 +946,67 @@ mod tests {
 
     fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::skill_host::fs::test_maru_home_lock()
+    }
+
+    #[test]
+    fn task_claim_hydration_holds_unverified_ownership_and_recovers_finished_receipts() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let work = home.root.path().join("task-work");
+        fs::create_dir_all(work.join("tasks/active")).unwrap();
+        let content = "---\nstatus: active\n---\nTask\n";
+        fs::write(work.join("tasks/active/task.md"), content).unwrap();
+        let request = serde_json::json!({"taskExecution": {
+            "requestId": "hydrate-request", "taskPath": "tasks/active/task.md",
+            "sourceRevision": crate::document::revision_for(content)
+        }});
+        let (session, replayed) = crate::task_execution_runtime::TaskExecutionSession::admit(
+            work.to_str().unwrap(),
+            Some(&request),
+            "ai-hydrate-task",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!replayed);
+        let metadata = serde_json::json!({"workspacePath": work.to_str().unwrap(), "taskExecution": session.metadata()});
+        let original = MissionState::default();
+        original
+            .start(
+                "ai-hydrate-task",
+                "test",
+                std::process::id(),
+                Some(metadata),
+            )
+            .unwrap();
+        drop(original);
+        let restarted = MissionState::default();
+        let rows = restarted.list().unwrap();
+        let row = rows.iter().find(|row| row.id == "ai-hydrate-task").unwrap();
+        assert_eq!(row.status, MissionStatus::Running);
+        assert_eq!(
+            row.metadata.as_ref().unwrap()["taskExecutionNeedsReview"],
+            true
+        );
+        let mut child = session
+            .spawn_child(|| {
+                Command::new(std::env::current_exe().unwrap())
+                    .arg("--list")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .map_err(|error| {
+                        format!("fixture child could not start: {error}; rebuild the test binary")
+                    })
+            })
+            .unwrap();
+        let pid = child.id();
+        assert!(child.wait().unwrap().success());
+        session.child_reaped(pid).unwrap();
+        session.finish(true, Some(0)).unwrap();
+        let recovered = MissionState::default();
+        let rows = recovered.list().unwrap();
+        let row = rows.iter().find(|row| row.id == "ai-hydrate-task").unwrap();
+        assert_eq!(row.status, MissionStatus::Done);
+        assert_eq!(row.exit_code, Some(0));
     }
 
     #[test]

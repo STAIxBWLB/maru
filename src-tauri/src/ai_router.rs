@@ -77,7 +77,7 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
         cwd.as_deref(),
         command_override.as_deref(),
         &permission_mode,
-        metadata,
+        metadata.clone(),
     )?;
     if resolution.is_some() && extra_args.as_ref().is_some_and(|args| !args.is_empty()) {
         return Err("adaptive_policy_launch_overrides_forbidden".into());
@@ -99,6 +99,15 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
         permission_mode
     };
     let invocation_id = format!("ai-{}", Uuid::new_v4());
+    let task_execution = crate::task_execution_runtime::TaskExecutionSession::admit(
+        &resolved_cwd,
+        metadata.as_ref(),
+        &invocation_id,
+    )?;
+    if let Some((session, true)) = &task_execution {
+        return Ok(session.token.run_id.clone());
+    }
+    let task_execution = task_execution.map(|(session, _)| session);
     if let Some(resolution) = &resolution {
         let _ = app.emit(
             "ai://runtime",
@@ -114,7 +123,7 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
         );
     }
     let mission_cwd = resolved_cwd.clone();
-    let mission_metadata = json!({
+    let mut mission_metadata = json!({
         "origin": "agentCliInvocation",
         "provider": provider_kind.id(),
         "runtime": provider_kind.id(),
@@ -123,6 +132,9 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
         "commandOverride": command_override,
         "adaptivePolicyResolution": resolution,
     });
+    if let Some(session) = &task_execution {
+        mission_metadata["taskExecution"] = session.metadata();
+    }
     spawn_streaming_invocation(
         app,
         invocation_id,
@@ -133,6 +145,7 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
         MissionInfo {
             kind: provider_kind.id().to_string(),
             metadata: Some(mission_metadata),
+            task_execution,
         },
     )
 }
@@ -233,6 +246,7 @@ fn build_agent_command(
 struct MissionInfo {
     kind: String,
     metadata: Option<JsonValue>,
+    task_execution: Option<crate::task_execution_runtime::TaskExecutionSession>,
 }
 
 /// Spawn `cmd`, wire stdout/stderr pumps + the reaper, register a mission keyed
@@ -251,7 +265,11 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
     if let Some(cwd) = cwd.as_ref() {
         cmd.current_dir(cwd);
     }
-    let extra_env = prepare_invocation_env(cwd.as_deref(), extra_env)?;
+    let extra_env = prepare_invocation_env(cwd.as_deref(), extra_env).inspect_err(|_| {
+        if let Some(session) = &mission.task_execution {
+            session.admission_failed();
+        }
+    })?;
     let augmented = augmented_path();
     let effective_path = merge_path_env(
         extra_env.get("PATH").map(std::ffi::OsStr::new),
@@ -273,11 +291,10 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
     .stderr(Stdio::piped())
     .no_window();
 
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(err) => {
-            return Err(format_spawn_error(&err));
-        }
+    let mut child = if let Some(session) = &mission.task_execution {
+        session.spawn_child(|| cmd.spawn().map_err(|err| format_spawn_error(&err)))?
+    } else {
+        cmd.spawn().map_err(|err| format_spawn_error(&err))?
     };
     let child_pid = child.id();
 
@@ -302,13 +319,22 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
     // Register before spawning the line pumps: a fast child can emit lines
     // before the registration lands, and those touch_output calls fail with
     // `mission_not_found`, permanently dropping the lines from the log.
-    let _ = mission_state::register_mission_with_metadata(
+    let registration = mission_state::register_mission_with_metadata(
         &app,
         &invocation_id,
         &mission.kind,
         child_pid,
         mission.metadata,
     );
+    if let (Some(session), Err(error)) = (&mission.task_execution, registration) {
+        let _ = child.kill();
+        if child.wait().is_ok() {
+            let _ = session
+                .child_reaped(child_pid)
+                .and_then(|()| session.finish(false, None));
+        }
+        return Err(format!("task_execution_mission_registration_failed: {error}; review the task claim and retry with a fresh requestId"));
+    }
 
     let stdout_pump = spawn_line_pump(
         app.clone(),
@@ -333,6 +359,23 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
         Ok(status) => {
             let _ = stdout_pump.join();
             let _ = stderr_pump.join();
+            if let Some(session) = &mission.task_execution {
+                if let Err(error) = session
+                    .child_reaped(child_pid)
+                    .and_then(|()| session.finish(status.success(), status.code()))
+                {
+                    mission_state::fail_mission(&app_done, &id_done, &error);
+                    let _ = app_done.emit(
+                        "ai://error",
+                        AiErrorEvent {
+                            invocation_id: id_done,
+                            kind: "task_execution_conflict".into(),
+                            message: error,
+                        },
+                    );
+                    return;
+                }
+            }
             mission_state::finish_mission(&app_done, &id_done, status.code(), status.success());
             let _ = app_done.emit(
                 "ai://done",
@@ -858,6 +901,67 @@ mod phase08_16 {
             assert!(Instant::now() < deadline, "fixture missions must finish");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn task_execution_replay_does_not_spawn_again_and_revision_conflicts_before_spawn() {
+        let home = Home::new();
+        let app = app();
+        let handle = app.handle().clone();
+        let (work, cli) = fixture(&home);
+        fs::create_dir_all(work.join("tasks/active")).unwrap();
+        let task = work.join("tasks/active/example.md");
+        let original = "---\ntitle: Example\nstatus: active\n---\nWork\n";
+        fs::write(&task, original).unwrap();
+        let calls = work.join("calls");
+        crate::test_support::write_executable_fixture(
+            &cli,
+            &format!(
+                "#!/bin/sh\nprintf x >> '{}'\necho complete\n",
+                calls.display()
+            ),
+            0o755,
+        )
+        .unwrap();
+        let metadata = json!({"taskExecution": {"requestId": "request-1", "taskPath": "tasks/active/example.md", "sourceRevision": crate::document::revision_for(original)}});
+        let invoke = |metadata| {
+            start_agent_cli_invocation(
+                handle.clone(),
+                "claude".into(),
+                "work".into(),
+                Some(text(&work)),
+                None,
+                None,
+                Some(text(&cli)),
+                Some("plan".into()),
+                Some(metadata),
+            )
+        };
+        let first = invoke(metadata.clone()).unwrap();
+        let second = invoke(metadata.clone()).unwrap();
+        assert_eq!(first, second);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let records = crate::mission_state::list_ai_missions(handle.clone()).unwrap();
+            if records
+                .iter()
+                .any(|record| record.id == first && record.exit_code == Some(0))
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "task fixture did not finish; inspect its mission and claim before retrying"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fs::read_to_string(&calls).unwrap(), "x");
+        let bound = fs::read_to_string(&task).unwrap();
+        fs::write(&task, format!("{bound}Changed\n")).unwrap();
+        let mut changed = metadata;
+        changed["taskExecution"]["requestId"] = json!("request-2");
+        assert!(invoke(changed).unwrap_err().contains("revision"));
+        assert_eq!(fs::read_to_string(&calls).unwrap(), "x");
     }
 
     #[test]
