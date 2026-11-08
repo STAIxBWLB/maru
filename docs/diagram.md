@@ -560,26 +560,38 @@ Archify gate, and the other five semantic types have not switched engines.
 
 ### E0 measurement and decision
 
-The provisional decision is WebAssembly, based on the measured dgx02 browser
-slice below; exact-head hosted reproduction and the real WKWebView IPC baseline
-remain pending. Choose WebAssembly only if its added payload is at most
-400 KB gzip and 1,000-component validation stays below 50 ms; otherwise IPC.
+**Decision: WebAssembly** for the planned frontend engine integration. The
+hosted baseline at `a7139154` meets both AC1 limits: 130,258 bytes gzip (at most
+400 KB) and 1,000-component warm p95 1.8 ms (below 50 ms). This selects the
+transport; E0 does not switch product apply/render paths.
 
-| dgx02 Chromium slice | 50 components | 1,000 components |
+[Hosted CI run 42469991110](https://github.com/STAIxBWLB/maru/actions/runs/42469991110)
+passed ci-ok, make verify (including both standalone SDK suites and subtree
+extraction), Playwright, and the real-app macOS native suite. Measurements use
+SDK subtree `b19f5140` before the N1-N5 follow-up; the final follow-up head still
+requires its own green CI. The samples are not relabelled as measurements of
+later code.
+
+| Hosted baseline, 30 warm samples | 50 components | 1,000 components |
 | --- | --- | --- |
-| warm median | 0.3 ms | 1.5 ms |
-| warm p95 (30 samples) | 0.4 ms | 2.6 ms |
-| warm maximum | 0.6 ms | 3.5 ms |
+| WASM / Chromium median | 0.3 ms | 1.2 ms |
+| WASM / Chromium p95 | 0.5 ms | 1.8 ms |
+| WASM / Chromium maximum | 0.7 ms | 4.3 ms |
+| IPC / WKWebView median | 3 ms | 25 ms |
+| IPC / WKWebView p95 | 15 ms | 46 ms |
+| IPC / WKWebView maximum | 16 ms | 46 ms |
 
-The actual ES library gzip total is 130,326 bytes; cold module load plus first
-validation is 436.6 ms. The build step took 27.16 s with warm registry/prior SDK
-check artifacts; this is a remote-container result, not hosted CI build time.
-Raw samples, engine subtree identity and execution scope are retained in
-[diagram-engine-e0.json](diagram-engine-e0.json). The container has a 16-CPU
-quota, Cargo is limited to two workers and Playwright to one. Both fixtures
-adapt the existing `perf.bench.ts` grid/chain populations to typed architecture
-JSON with deterministic IDs and at most 12 columns; they do not measure that
-canvas benchmark's geometry, rendering or viewport operations.
+The hosted WASM build step took 30.92 s. Cold module load plus first validation
+was 333 ms for Chromium/WASM and 58 ms for native IPC. These are different
+platform/build scopes, not a speedup ratio. The earlier dgx02 reproduction
+measured 130,326 bytes gzip, 1,000-component p95 2.6 ms, cold 436.6 ms and a
+27.16 s build with warm registry/check artifacts. Raw samples, source identities,
+job receipts and scope are retained in
+[diagram-engine-e0.json](diagram-engine-e0.json). The dgx02 container had a
+16-CPU quota, Cargo used two workers and Playwright one. Both fixtures adapt
+the existing `perf.bench.ts` grid/chain populations to typed architecture JSON
+with deterministic IDs and at most 12 columns; they do not measure that canvas
+benchmark's geometry, rendering or viewport operations.
 
 The harness records all 30 samples per size, cold initialization plus first
 validation, source engine revision, fixture input bytes, and runner/build
@@ -591,7 +603,8 @@ cross-platform speedup claim. Build time includes tool compilation and bindgen
 work on that runner and is not a promised clean-cache duration.
 
 The payload receipt sums gzip-level-9 sizes of the actual optimized ES browser
-library output (Vite retains ES-library whitespace). Vite library mode inlines the generated web JS and WASM assets;
+library output (Vite retains ES-library whitespace). Vite library mode inlines
+the generated web JS and WASM assets;
 the facade includes both transport entry points. The browser loads that built
 artifact. This measures an isolated deliverable, not the whole existing app
 bundle; later product integration may emit separate binary assets. Cold load uses a
