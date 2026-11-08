@@ -562,11 +562,81 @@ fn check_rendered_html(
     if !output.status.success()
         || report.get("ok").and_then(serde_json::Value::as_bool) != Some(true)
     {
+        let bounded = |text: &str, limit: usize| -> String {
+            text.chars()
+                .take(limit)
+                .map(|ch| if ch.is_control() { ' ' } else { ch })
+                .collect()
+        };
+        let mut causes = Vec::new();
+        for check in report
+            .get("checks")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|check| check.get("ok").and_then(serde_json::Value::as_bool) == Some(false))
+            .take(8)
+        {
+            let name = bounded(
+                check
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unnamed check"),
+                80,
+            );
+            let details: Vec<String> = check
+                .get("details")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .take(3)
+                .map(|detail| bounded(&detail.to_string(), 240))
+                .collect();
+            causes.push(format!("{name}: {}", details.join(", ")));
+        }
+        if let Some(composition) = report.get("composition") {
+            if composition
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                == Some("fail")
+            {
+                causes.push(format!(
+                    "composition rejected: {} errors",
+                    composition
+                        .pointer("/summary/errors")
+                        .unwrap_or(&serde_json::Value::Null)
+                ));
+            }
+            for issue in composition
+                .get("issues")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|issue| {
+                    issue.get("severity").and_then(serde_json::Value::as_str) == Some("error")
+                })
+                .take(4)
+            {
+                causes.push(format!("composition: {}", bounded(&issue.to_string(), 360)));
+            }
+        }
+        if causes.is_empty() {
+            let stderr = stderr_tail(&output);
+            causes.push(if stderr.is_empty() {
+                format!(
+                    "checker rejected the artifact (exit {}, report ok={})",
+                    output.status,
+                    report.get("ok").unwrap_or(&serde_json::Value::Null)
+                )
+            } else {
+                stderr
+            });
+        }
         return Err(render_error(
             ARCHIFY_RENDER_FAILED,
             format!(
                 "Pinned Archify artifact check failed: {}",
-                stderr_tail(&output)
+                bounded(&causes.join("; "), 3200)
             ),
         ));
     }
@@ -682,12 +752,7 @@ fn render_candidate_with_engine(
         .map_or_else(resolve_engine_path, Ok)
         .map_err(|error| render_error(&error.code, error.message))?;
     let node = resolve_node().map_err(|error| render_error(&error.code, error.message))?;
-    let pin: ArchifyEnginePin = serde_json::from_str(ENGINE_PIN_JSON).map_err(|error| {
-        render_error(
-            ARCHIFY_ENGINE_UNAVAILABLE,
-            format!("Pinned Archify metadata is invalid: {error}"),
-        )
-    })?;
+    let pin = engine_pin().map_err(|error| render_error(&error.code, error.message))?;
     let input_spec_sha256 = sha256(candidate_json.as_bytes());
     let job_id = render_job_id();
     let job_dir = resolve_inside_vault(&workspace, STAGING_DIR)

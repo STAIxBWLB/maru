@@ -1,9 +1,11 @@
 /**
  * "Insert/Update in report" flow (Report Pattern Studio Phase 4).
  *
- * Renders the saved diagram to SVG + 2x PNG, writes both under
- * `attachments/diagrams/<docId>/<scope>-<hash8>.{svg,png}` via the
- * `diagram_write_report_asset` command, then splices a `maru-diagram:v1`
+ * Semantic datasets use pinned-engine SVG + pixel-ratio-1 PNG with receipts
+ * and immutable full-64-hex pair-hash names. Other diagrams retain model SVG
+ * + 2x PNG and legacy hash8 names. Both paths write under
+ * `attachments/diagrams/<docId>/<scope>-<hash>.{svg,png}` through
+ * `diagram_write_report_asset`, then splice a `maru-diagram:v1`
  * managed block (see {@link ./reportLink}) into the target Markdown document
  * through the revision-checked document save path.
  *
