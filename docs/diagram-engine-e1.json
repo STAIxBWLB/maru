@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "executionScope": {
+    "environment": "remote Linux x64 container",
+    "nodeMajor": 24,
+    "rustToolchain": "1.98.0",
+    "cargoBuildJobs": 2,
+    "browserWorkers": 1,
+    "sdkTree": "a5c859a12fada3d6f5594ee16a8e45fb8e1bbbde",
+    "sourceCommit": "516ca807276be38149db15156f75764bfb1bc815",
+    "cache": "Registry, check and prior release artifacts warm (incremental build); not hosted CI build time.",
+    "hostedCi": "pending"
+  },
+  "build": {
+    "scope": "actual ES browser library output (Vite retains ES library whitespace), assets inlined, gzip level9 per emitted JS file (both transports included)",
+    "buildMs": 6774.854303,
+    "platform": "linux",
+    "arch": "x64",
+    "sizes": [
+      {
+        "name": "core-B2rNBH2e.js",
+        "bytes": 114,
+        "gzipBytes": 122
+      },
+      {
+        "name": "engine-e0.js",
+        "bytes": 1217981,
+        "gzipBytes": 307596
+      }
+    ],
+    "gzipBytes": 307718
+  },
+  "wasm": {
+    "transport": "wasm",
+    "scope": "pre-serialized spec string; wasm call, core validation/hash and report JSON parse; 30 warm samples",
+    "coldMs": 476.4000000357628,
+    "samples": [
+      {
+        "nodes": 50,
+        "bytes": 5217,
+        "durationsMs": [
+          1,
+          0.699999988079071,
+          0.5999999642372131,
+          0.800000011920929,
+          0.6000000238418579,
+          0.699999988079071,
+          0.5,
+          0.3999999761581421,
+          0.5,
+          0.5,
+          0.40000003576278687,
+          0.5,
+          0.3999999761581421,
+          0.40000003576278687,
+          0.5,
+          0.2999999523162842,
+          0.40000003576278687,
+          0.3999999761581421,
+          0.40000003576278687,
+          0.2999999523162842,
+          0.30000001192092896,
+          0.30000001192092896,
+          0.30000001192092896,
+          0.3999999761581421,
+          0.30000001192092896,
+          0.19999998807907104,
+          0.30000001192092896,
+          0.3999999761581421,
+          0.30000001192092896,
+          0.30000001192092896
+        ],
+        "medianMs": 0.4000000059604645,
+        "p95Ms": 0.800000011920929,
+        "maxMs": 1
+      },
+      {
+        "nodes": 1000,
+        "bytes": 106760,
+        "durationsMs": [
+          6.900000035762787,
+          5.099999964237213,
+          4.600000023841858,
+          4.599999964237213,
+          4.5,
+          4.400000035762787,
+          4.5,
+          4.399999976158142,
+          4.199999988079071,
+          4.400000035762787,
+          4.5,
+          4.099999964237213,
+          4.200000047683716,
+          4.199999988079071,
+          4.199999988079071,
+          4.300000011920929,
+          4.099999964237213,
+          4.100000023841858,
+          4.100000023841858,
+          4.100000023841858,
+          4.099999964237213,
+          4.200000047683716,
+          4.099999964237213,
+          4.199999988079071,
+          4.100000023841858,
+          4.199999988079071,
+          4,
+          4.199999988079071,
+          4,
+          4.200000047683716
+        ],
+        "medianMs": 4.199999988079071,
+        "p95Ms": 5.099999964237213,
+        "maxMs": 6.900000035762787
+      }
+    ],
+    "dispatched": [
+      "architecture@1",
+      "workflow@1",
+      "sequence@1",
+      "dataflow@1",
+      "lifecycle@1",
+      "workflow@2",
+      "lifecycle@2"
+    ],
+    "refusesInvalid": true,
+    "engine": {
+      "id": "maru-diagram-engine",
+      "version": "0.1.0",
+      "revision": "a5c859a12fada3d6f5594ee16a8e45fb8e1bbbde"
+    }
+  },
+  "limits": {
+    "gzipBytes": 400000,
+    "warm1000P95Ms": 50,
+    "remotePassed": true,
+    "hostedReproductionRequired": true
+  },
+  "standaloneExtraction": {
+    "splitCommit": "f78583829fbb10231cee05bb05b631d3bc5c07ec",
+    "sdkTree": "a5c859a12fada3d6f5594ee16a8e45fb8e1bbbde",
+    "executionScope": "remote Linux container, Node removed from PATH",
+    "status": "pending"
+  }
+}
