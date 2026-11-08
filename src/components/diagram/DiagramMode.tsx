@@ -1,4 +1,3 @@
-import { subscribeDiagramHandoff, takeDiagramHandoff } from "../../lib/diagram/handoff";
 import { setError } from "../../lib/errorStore";
 import { Eye, Network } from "lucide-react";
 import {
@@ -280,10 +279,6 @@ function DiagramShell({
   const gestureCoalescers = useDiagramGestureCoalescers();
   const validationHost = useDiagramValidationHost();
   const sessionKey = workPath ?? "__no-workspace__";
-  const handoffOpening = useRef<string | null>(null);
-  useEffect(() => {
-    handoffOpening.current = null;
-  }, [workPath]);
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
   const edges = doc.edges;
@@ -457,12 +452,12 @@ function DiagramShell({
       try {
         const settings = await readMaruSettings(workPath);
         const lastDocument = settings.diagram.lastDocument ?? readLastDocumentFallback(workPath);
-        if (!lastDocument || cancelled || handoffOpening.current === workPath) return;
+        if (!lastDocument || cancelled) return;
         if (getDiagramSession(sessionKey).activeName) return;
         const current = store.getState().doc;
         if (current.nodes.length > 0 || current.edges.length > 0 || current.docTitle.trim()) return;
         const { doc: restored, migratedFromLegacy, sourceVersion, fileRevision } = await readDiagramDetailed(workPath, lastDocument);
-        if (cancelled || handoffOpening.current === workPath) return;
+        if (cancelled) return;
         store.setState(replaceDoc(restored));
         setActiveName(lastDocument);
         setLastSavedBody(serializeDoc(restored));
@@ -1129,21 +1124,6 @@ function DiagramShell({
     },
     [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
   );
-
-  // Subscribe first, then drain any request queued before this lazy mount.
-  useEffect(() => {
-    if (!workPath) return;
-    const openPending = () => {
-      const name = takeDiagramHandoff(workPath);
-      if (name) {
-        handoffOpening.current = workPath;
-        void handleOpen(name);
-      }
-    };
-    const unsubscribe = subscribeDiagramHandoff(openPending);
-    openPending();
-    return unsubscribe;
-  }, [handleOpen, workPath]);
 
   const handleDeleteFile = useCallback(
     async (name: string) => {

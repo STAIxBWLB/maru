@@ -45,9 +45,8 @@ Backend commands (`src-tauri/src/diagram/mod.rs`): `diagram_save_document`,
 and `diagram_write_report_asset` (report assets; extension-whitelisted to
 svg/png/json, traversal-safe, atomic, write-guard checked). Generation adds
 `archify_validate_candidate` (`src-tauri/src/archify.rs`, pinned-engine
-validation) and the architecture gallery adds
-`architecture_read_sibling_spec` (`src-tauri/src/architecture.rs`, guarded
-sibling read). The command-isolation gate expects the registered command
+validation). The retired gallery commands are no longer registered.
+The command-isolation gate expects the registered command
 count set in `Makefile` (`--expected-count`) with recorded evidence.
 
 ## Canvas & nodes
@@ -326,20 +325,12 @@ node -e 'const{createHash}=require("node:crypto"),{readdirSync,readFileSync,stat
 `pinnedAt`, review the diff, and keep the MIT notices (LICENSE,
 THIRD_PARTY_NOTICES.md) intact.
 
-## Architecture gallery handoff
+## Architecture documents
 
-The Architecture gallery's "Diagram으로 복사해 편집" action copies a
-blueprint's `<slug>.architecture.json` spec into Diagram mode as a NEW
-workspace diagram. The read goes through `architecture_read_sibling_spec`,
-a guarded sibling read: the spec must live in the same submodule as the
-viewer (own containment check with `..`/symlink resolution, symlinks
-escaping the submodule root refused), under a 1 MiB size cap, and it must
-parse against the Archify schema — a missing or unsupported spec simply
-leaves the action unavailable. The copy lands as a `semanticSpec` dataset
-with `provenance.origin = "gallery-copy"` and the workspace-relative source
-path, gets projected and laid out, and is saved under a never-overwriting
-name; the source repo's files and the gallery's per-file asset-protocol
-grants are untouched.
+The retired Architecture gallery is replaced by Diagram's Import dialog.
+Repository documentation under `docs/architecture/` stays on disk; import
+its typed JSON through `archify-json`. Existing copied documents retain
+`provenance.origin = "gallery-copy"` and load/save without migration.
 
 ## Export / import
 

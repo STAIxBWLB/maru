@@ -4,7 +4,7 @@
  * (PERF-05, phase 10 plan 02).
  *
  * Every mode's pane CSS moved out of src/styles.css into per-mode files
- * (src/components/{today,meetings,tasks,calendar,drafts,gap,agents,architecture}) and
+ * (src/components/{today,meetings,tasks,calendar,drafts,gap,agents}) and
  * rides that mode's lazy chunk: the component imports its CSS, and Vite
  * 7.3.2 (default cssCodeSplit) hoists the import into that mode's lazy CSS
  * chunk. styles.css keeps only entry-side shared chrome (shell grid-area
@@ -20,7 +20,7 @@
  *   1. RED LIST      — the entry chunk (index-*.css) must carry zero
  *                      markers and zero per-mode pane-root signatures: no
  *                      mode's pane CSS may leak back into the entry CSS.
- *   2. FULL INVENTORY — every registered mode id (hardcoded 19-mode list;
+ *   2. FULL INVENTORY — every registered mode id (hardcoded 18-mode list;
  *                      keep in sync with modeRegistry.getRegisteredModeIds())
  *                      either has a marker-bearing per-mode CSS file whose
  *                      ownership fingerprint is verified in exactly one
@@ -72,7 +72,7 @@ const MARKER_SCAN = /\/\*!\s*maru:mode:([a-z0-9-]+)\s*\*\//g;
 
 /**
  * Keep in sync with src/lib/modeRegistry.tsx getRegisteredModeIds().
- * The 19 registered production modes; the subset with a marker-bearing
+ * The 18 registered production modes; the subset with a marker-bearing
  * per-mode CSS file must pass FULL INVENTORY via that file's ownership
  * fingerprint.
  */
@@ -80,7 +80,6 @@ const REGISTERED_MODE_IDS = [
   "pkm",
   "e2e",
   "diagram",
-  "architecture",
   "graph",
   "sites",
   "agents",
@@ -134,7 +133,6 @@ const PER_MODE_FINGERPRINTS = [
   { id: "drafts", file: "src/components/drafts/drafts.css", selector: ".drafts-pane" },
   { id: "gap", file: "src/components/gap/gap.css", selector: ".gap-pane" },
   { id: "agents", file: "src/components/agents/agents.css", selector: ".agents-pane" },
-  { id: "architecture", file: "src/components/architecture/architecture.css", selector: ".architecture-pane" },
 ];
 
 /**
@@ -155,7 +153,6 @@ const PANE_ROOT_BODY_PREFIX = {
   ".drafts-pane": "display:flex",
   ".gap-pane": "display:flex",
   ".agents-pane": "display:flex",
-  ".architecture-pane": "display:flex",
 };
 
 /**
