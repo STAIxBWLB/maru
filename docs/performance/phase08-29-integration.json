@@ -1,6 +1,6 @@
 {
   "plan": "08-29",
-  "commandCount": 389,
+  "commandCount": 386,
   "verificationStatus": "produced-phase29-rust-tests-passed",
   "executionResults": [
     {

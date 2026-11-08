@@ -14,7 +14,6 @@ use crate::vault::resolve_inside_vault;
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -318,57 +317,6 @@ fn stage_candidate(
         write_atomic(candidate, bytes)?;
         Ok(())
     })?;
-    Ok(())
-}
-
-/// Validate the exact bytes already read through gallery containment guards.
-/// The pinned schema validator runs without rendering or source-file writes.
-pub(crate) fn validate_sibling_schema(body: &str, engine: Option<PathBuf>) -> Result<(), IpcError> {
-    #[cfg(test)]
-    let _environment = ENGINE_ENV_LOCK.lock().unwrap();
-    let engine = engine.map_or_else(resolve_engine_path, Ok)?;
-    let validator = engine
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| engine_unavailable("Invalid engine location"))?
-        .join("renderers/shared/validator.mjs");
-    let script = r#"import { pathToFileURL } from 'node:url';
-import { readFileSync } from 'node:fs';
-const { validateSchema } = await import(pathToFileURL(process.argv[1]).href);
-try {
-  validateSchema('architecture', JSON.parse(readFileSync(0, 'utf8')));
-  console.log(JSON.stringify({ok:true}));
-} catch (error) {
-  console.log(JSON.stringify({ok:false,error:error.message}));
-  process.exitCode = 1;
-}"#;
-    let mut child = Command::new(resolve_node()?)
-        .env("PATH", augmented_path())
-        .args(["--input-type=module", "--eval", script])
-        .arg(validator)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| engine_unavailable(format!("Cannot start schema validator: {err}")))?;
-    if let Err(err) = child.stdin.take().unwrap().write_all(body.as_bytes()) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(typed(
-            ARCHIFY_ENGINE_FAILED,
-            format!("Cannot send sibling spec: {err}"),
-        ));
-    }
-    let receipt = wait_engine(child, "architecture", validate_timeout())?;
-    if !receipt.ok {
-        return Err(typed(
-            ARCHIFY_ENGINE_FAILED,
-            format!(
-                "Sibling spec fails pinned architecture schema: {}",
-                receipt.errors.join("; ")
-            ),
-        ));
-    }
     Ok(())
 }
 
