@@ -208,7 +208,8 @@ fn build(input: &Path, output: &Path, weight: u16) -> io::Result<(Value, BTreeSe
         "tableSha256": sha(&table), "tableBytes": table.len(), "mappedScalars": mappings.len(),
         "metricGlyphs": glyphs.len(), "sourceGlyphs": face.number_of_glyphs(),
         "ascender": face.ascender(), "descender": face.descender(), "lineGap": face.line_gap(),
-        "replacementCovered": replacement != MISSING_GLYPH,
+        "replacementScalar": "�", "replacementScalarCovered": replacement != MISSING_GLYPH,
+        "notdefGlyphId": 0,
         "coverageRanges": ranges(&mappings), "requiredSample": SAMPLE, "probes": probes,
     });
     Ok((entry, copyrights))
@@ -267,7 +268,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "license": { "spdx": "OFL-1.1", "sourceUrl": format!("{SOURCE_ROOT}/Sans/LICENSE"), "sha256": sha(&license) },
         "shaping": { "kerning": false, "ligatures": false, "localizedSubstitution": false, "normalization": false,
             "policy": "one Unicode scalar maps through the pinned preferred cmap; E3 uses these glyph IDs and positions" },
-        "unknownGlyph": "use the covered replacement character �; otherwise return an explicit diagnostic, never OS fallback",
+        "unknownGlyph": {
+            "policy": "unsupported nonignorables use actual glyph 0 .notdef metrics and outline, never Unicode substitution or OS fallback",
+            "glyphId": 0, "rendered": "", "ignored": false,
+            "noticeCode": "document/font-replacement-notice", "noticeFatal": false,
+        },
+        "defaultIgnorables": {
+            "unicodeVersion": "17.0.0", "property": "Default_Ignorable_Code_Point", "scalarCount": 4174,
+            "sourceUrl": "https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt",
+            "license": "Unicode-3.0", "licenseSourceUrl": "https://www.unicode.org/license.txt",
+            "policy": "zero advance and no ink; glyphId 0 with rendered empty and ignored true means skip drawing",
+        },
         "fonts": [regular, bold],
     });
     write_generated(

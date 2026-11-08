@@ -83,6 +83,7 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_ACTION: ${{ github.event.action }}
           PR_LABEL: ${{ github.event.label.name }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -uo pipefail
           PR_LABEL=${PR_LABEL,,}
@@ -131,6 +132,15 @@ jobs:
             fi
           elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
             reason="no exact successful pull request validation was found"
+            # Use the same geometry path policy as PRs. Compare errors, initial
+            # pushes and GitHub's 300-file cap keep the gate enabled.
+            if [[ "$PUSH_BEFORE" =~ ^[a-f0-9]{40}$ ]] && [[ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]] \
+              && gh api "repos/$GITHUB_REPOSITORY/compare/$PUSH_BEFORE...$GITHUB_SHA" > "$RUNNER_TEMP/ci-push.json" \
+              && push_geometry=$(node scripts/ci-policy.mjs geometry-push "$RUNNER_TEMP/ci-push.json"); then
+              run_geometry="$push_geometry"
+            else
+              echo "::warning::Could not classify pushed geometry paths; keeping the geometry matrix enabled. Inspect the compare API response before rerunning CI."
+            fi
 
             if ! pulls=$(gh api \
               -H "Accept: application/vnd.github+json" \

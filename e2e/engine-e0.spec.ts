@@ -61,17 +61,34 @@ test.describe("independent engine WebAssembly spike", () => {
       const modulePath = "/.engine-e0/browser/engine-e0.js";
       const { loadGeometryFoundation } = await import(/* @vite-ignore */ modulePath) as {
         loadGeometryFoundation(): Promise<{ measureText(text: string, weight: 400 | 700, size: number): {
-          advance: number; replacements: number; font: { weight: number }; glyphs: unknown[];
+          advance: number; replacements: number; font: { weight: number };
+          glyphs: Array<{ glyphId: number; ignored: boolean; advance: number; ink: { width: number; height: number } }>;
+          diagnostics: Array<{ code: string }>;
         } }>;
       };
       const metrics = await loadGeometryFoundation();
       const text = "Latin 한글 日本語 漢字";
-      return [400, 700].map((weight) => metrics.measureText(text, weight as 400 | 700, 14 * 64));
+      const covered = [400, 700].map((weight) => metrics.measureText(text, weight as 400 | 700, 14 * 64));
+      const fallbacks = [400, 700].flatMap((weight) => ["🚀", "😀", "✔", "⚠️", "👩‍💻"].map((sample) => ({
+        text: sample, weight, measured: metrics.measureText(sample, weight as 400 | 700, 14 * 64),
+      })));
+      return { covered, fallbacks };
     });
     expect(loadedChunks.some((url) => url.includes("engineGeometry"))).toBe(true);
-    expect(foundation.map((item) => item.font.weight)).toEqual([400, 700]);
-    expect(foundation.every((item) => item.advance > 0 && item.replacements === 0 && item.glyphs.length > 0)).toBe(true);
-    console.log(`ENGINE_E2_FOUNDATION ${JSON.stringify({ scope: "lazy text metrics only, not scene layout", foundation })}`);
+    expect(foundation.covered.map((item) => item.font.weight)).toEqual([400, 700]);
+    expect(foundation.covered.every((item) => item.advance > 0 && item.replacements === 0 && item.glyphs.length > 0)).toBe(true);
+    for (const { text, measured } of foundation.fallbacks) {
+      expect(measured.replacements).toBe(measured.glyphs.filter((glyph) => !glyph.ignored && glyph.glyphId === 0).length);
+      if (measured.replacements > 0) expect(measured.diagnostics.some((item) => item.code === "document/font-replacement-notice")).toBe(true);
+      const ignored = measured.glyphs.filter((glyph) => glyph.ignored);
+      for (const glyph of ignored) {
+        expect([glyph.advance, glyph.ink.width, glyph.ink.height]).toEqual([0, 0, 0]);
+      }
+      if (text === "⚠️" || text === "👩‍💻") expect(ignored).toHaveLength(1);
+      else expect(measured.replacements).toBe(1);
+      if (text === "👩‍💻") expect(measured.replacements).toBe(2);
+    }
+    console.log(`ENGINE_E2_FOUNDATION ${JSON.stringify({ scope: "lazy text metrics only, not scene layout", foundation: foundation.covered, fallbacks: foundation.fallbacks })}`);
     console.log(`ENGINE_E0_WASM ${JSON.stringify(result)}`);
     await test.info().attach("engine-e0-wasm.json", { body: JSON.stringify(result, null, 2), contentType: "application/json" });
   });

@@ -131,7 +131,8 @@ export type GlyphPosition = {
  */
 input: string,
 /**
- * The scalar mapped to glyph_id, never an OS fallback glyph.
+ * The mapped scalar, or empty when no Unicode mapping is claimed.
+ * For nonignored .notdef entries, E3 renders glyph_id 0 directly.
  */
 rendered: string, glyphId: number, position: GeometryPoint,
 /**
@@ -141,7 +142,11 @@ advance: number, leftSideBearing: number,
 /**
  * Ink relative to the run baseline, with outward-rounded bounds.
  */
-ink: GeometryBox, replaced: boolean, };
+ink: GeometryBox, replaced: boolean,
+/**
+ * Default-ignorable input: skip drawing even though glyph_id is 0.
+ */
+ignored: boolean, };
 
 export type TextMetrics = { font: FontIdentity,
 /**
@@ -155,4 +160,8 @@ ink: GeometryBox, ascender: number,
 /**
  * Signed, normally negative below the baseline.
  */
-descender: number, lineGap: number, glyphs: Array<GlyphPosition>, replacements: number, };
+descender: number, lineGap: number, glyphs: Array<GlyphPosition>, replacements: number,
+/**
+ * Nonfatal replacement notices; successful metrics remain available.
+ */
+diagnostics: Array<Diagnostic>, };

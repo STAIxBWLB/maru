@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { classifyPrChanges, evaluateCiJobs, isDocsOnlyPath } from "./ci-policy.mjs";
+import { classifyPrChanges, evaluateCiJobs, isDocsOnlyPath, geometryForPushComparison } from "./ci-policy.mjs";
 
 const policyPath = resolve(process.cwd(), "scripts/ci-policy.mjs");
 const decisionOutputs = {
@@ -245,5 +245,22 @@ describe("CI job aggregation", () => {
     }
     expect(evaluateCiJobs(needs({ lint: { result: "skipped" } })).message)
       .toContain("additional CI gate lint did not succeed");
+  });
+});
+
+
+describe("geometry intent on main pushes", () => {
+  it("uses the PR path policy for docs, code, and renamed SDK paths", () => {
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "docs/diagram.md" }] })).toBe(false);
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "src/lib/other.ts" }] })).toBe(false);
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "src-tauri/crates/core.rs" }] })).toBe(true);
+    expect(geometryForPushComparison({ status: "ahead", files: [{ filename: "docs/moved.md", previous_filename: "src-tauri/crates/core.rs" }] })).toBe(true);
+    expect(geometryForPushComparison({ status: "identical", files: [] })).toBe(false);
+  });
+  it("fails closed on API errors, invalid paths, divergent history, and the API cap", () => {
+    for (const value of [null, {}, { status: "diverged", files: [] }, { status: "ahead", files: [null] }]) {
+      expect(() => geometryForPushComparison(value)).toThrow("keep the geometry gate enabled");
+    }
+    expect(geometryForPushComparison({ status: "ahead", files: Array.from({ length: 300 }, () => ({ filename: "docs/page.md" })) })).toBe(true);
   });
 });

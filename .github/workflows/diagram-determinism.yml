@@ -43,7 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: scripts/diagram-engine-e2-determinism.mjs
+          sparse-checkout: |
+            scripts/diagram-engine-e2-determinism.mjs
+            src-tauri/crates/maru-diagram-engine/testdata/parity.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/setup-node@v5
@@ -55,4 +57,4 @@ jobs:
           pattern: diagram-foundation-*
           path: .engine-e2/determinism
       - name: Require all three identical foundation reports
-        run: node scripts/diagram-engine-e2-determinism.mjs .engine-e2/determinism
+        run: node scripts/diagram-engine-e2-determinism.mjs .engine-e2/determinism src-tauri/crates/maru-diagram-engine/testdata/parity.json

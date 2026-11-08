@@ -1,4 +1,13 @@
 {
+  "defaultIgnorables": {
+    "license": "Unicode-3.0",
+    "licenseSourceUrl": "https://www.unicode.org/license.txt",
+    "policy": "zero advance and no ink; glyphId 0 with rendered empty and ignored true means skip drawing",
+    "property": "Default_Ignorable_Code_Point",
+    "scalarCount": 4174,
+    "sourceUrl": "https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt",
+    "unicodeVersion": "17.0.0"
+  },
   "fonts": [
     {
       "ascender": 1160,
@@ -8137,6 +8146,7 @@
       "lineGap": 0,
       "mappedScalars": 44810,
       "metricGlyphs": 44074,
+      "notdefGlyphId": 0,
       "probes": [
         {
           "advance": 543,
@@ -8307,7 +8317,8 @@
           "scalar": "한"
         }
       ],
-      "replacementCovered": false,
+      "replacementScalar": "�",
+      "replacementScalarCovered": false,
       "requiredSample": "한글漢字日本語あアLatin",
       "sourceBytes": 16433112,
       "sourceGlyphs": 65535,
@@ -16456,6 +16467,7 @@
       "lineGap": 0,
       "mappedScalars": 44810,
       "metricGlyphs": 44074,
+      "notdefGlyphId": 0,
       "probes": [
         {
           "advance": 578,
@@ -16626,7 +16638,8 @@
           "scalar": "한"
         }
       ],
-      "replacementCovered": false,
+      "replacementScalar": "�",
+      "replacementScalarCovered": false,
       "requiredSample": "한글漢字日本語あアLatin",
       "sourceBytes": 16997996,
       "sourceGlyphs": 65535,
@@ -16658,5 +16671,12 @@
     "policy": "one Unicode scalar maps through the pinned preferred cmap; E3 uses these glyph IDs and positions"
   },
   "sourceRevision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
-  "unknownGlyph": "use the covered replacement character �; otherwise return an explicit diagnostic, never OS fallback"
+  "unknownGlyph": {
+    "glyphId": 0,
+    "ignored": false,
+    "noticeCode": "document/font-replacement-notice",
+    "noticeFatal": false,
+    "policy": "unsupported nonignorables use actual glyph 0 .notdef metrics and outline, never Unicode substitution or OS fallback",
+    "rendered": ""
+  }
 }

@@ -16,3 +16,11 @@ The default validator does not bundle these tables. The host generator parses
 pinned original font files; it never reads installed system fonts.
 
 HWPX form handling uses the released `hwp` binary, which carries its own notices.
+
+## Unicode default-ignorable property data
+
+The geometry text policy uses the Default_Ignorable_Code_Point ranges from
+Unicode 17.0.0 `DerivedCoreProperties.txt`. The source and version are recorded
+in `src-tauri/crates/maru-diagram-engine/src/metrics/README.md`; the accompanying
+Unicode License V3 copyright and permission notice is retained in
+`src-tauri/crates/maru-diagram-engine/src/metrics/UNICODE-LICENSE.txt`.

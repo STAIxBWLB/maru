@@ -18,9 +18,32 @@ horizontal advance, side bearing and ink-bounds records in integer font units.
 The runtime returns a single unshaped horizontal run. It does not apply
 normalization, kerning, ligatures, localized substitutions, wrapping or OS
 fallback. E3 must use the same pinned fonts, original glyph IDs and returned
-positions with shaping disabled. An unknown scalar maps to the literal
-replacement character � if the pinned font covers it; otherwise it produces an
-explicit diagnostic. This policy also applies to unmapped controls.
+positions with shaping disabled. Unsupported nonignorables use the actual
+font glyph 0 (`.notdef`) with its table advance, side bearing and ink bounds.
+Both pinned fonts lack a mapping for the Unicode replacement character �;
+the runtime does not pretend that character is mapped. Coverage never blocks
+the run: `replacements` counts unsupported nonignorables and `diagnostics`
+contains one nonfatal `document/font-replacement-notice` when the count is
+nonzero. Invalid size/weight, coordinate overflow and malformed bundled data
+remain explicit errors.
+
+For known characters, `rendered` names the scalar mapped to `glyphId`. A
+replacement has `glyphId: 0`, `rendered: ""`, `replaced: true` and
+`ignored: false`. E3 must draw the original pinned font's glyph 0 outline/box
+at the returned origin. Rendering the original unsupported Unicode scalar
+would invoke platform fallback and is prohibited; drawing an invented box
+from the advance alone would also disagree with the measured ink.
+
+Unicode 17.0.0 `Default_Ignorable_Code_Point` data (4,174 scalars) is pinned
+from [DerivedCoreProperties.txt](https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt).
+These inputs, including variation selectors and ZWJ/ZWNJ, have zero advance
+and no ink even when a cmap entry exists. Their output uses `ignored: true`,
+`replaced: false`, `glyphId: 0` and `rendered: ""`; E3 skips them instead of
+drawing the `.notdef` glyph. The original scalar remains in `input` for
+attribution. Ignorables do not increase `replacements` or produce a notice.
+The associated [Unicode License V3](UNICODE-LICENSE.txt) is preserved beside
+this module; its official source is https://www.unicode.org/license.txt.
+The font manifest records this property version and rendering policy.
 
 Coordinates use 1/64 pixel units. Glyph origins and total advance are scaled
 from cumulative font-unit advances, rounded nearest with ties away from zero.

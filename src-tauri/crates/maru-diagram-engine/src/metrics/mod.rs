@@ -3,7 +3,8 @@
 //! This module is reachable only with `geometry`. It performs no font lookup,
 //! parsing, normalization, kerning, ligature or locale-specific substitution.
 //! E3 must use these original-font glyph IDs and positions with the same pinned
-//! fonts. Unsupported scalars use the pinned replacement glyph when present.
+//! fonts. Unsupported scalars use the font's actual glyph 0 (.notdef), never
+//! Unicode substitution or OS fallback. Default-ignorable scalars are skipped.
 mod format;
 
 use crate::geometry::{FontIdentity, GeometryBox, GeometryPoint};
@@ -14,6 +15,37 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
 const REVISION: &str = "f8d157532fbfaeda587e826d4cd5b21a49186f7c";
+/// Unicode property data from the pinned DerivedCoreProperties.txt, not text
+/// encodings. See UNICODE-LICENSE.txt for the associated data license.
+pub const IGNORABLE_UNICODE_VERSION: &str = "17.0.0";
+const DEFAULT_IGNORABLE_RANGES: &[(u32, u32)] = &[
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+];
+/// Unicode 17 Default_Ignorable_Code_Point (4,174 scalars).
+/// Source: https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt
+pub fn is_default_ignorable(scalar: char) -> bool {
+    let value = scalar as u32;
+    DEFAULT_IGNORABLE_RANGES
+        .iter()
+        .any(|&(first, last)| first <= value && value <= last)
+}
+
 const REGULAR_BYTES: &[u8] = include_bytes!("data/noto-cjk-kr-400.bin");
 const BOLD_BYTES: &[u8] = include_bytes!("data/noto-cjk-kr-700.bin");
 static REGULAR: OnceLock<Result<FontTable, Diagnostic>> = OnceLock::new();
@@ -26,7 +58,8 @@ static BOLD: OnceLock<Result<FontTable, Diagnostic>> = OnceLock::new();
 pub struct GlyphPosition {
     /// Original scalar, retained for attribution when replacement was needed.
     pub input: String,
-    /// The scalar mapped to glyph_id, never an OS fallback glyph.
+    /// The mapped scalar, or empty when no Unicode mapping is claimed.
+    /// For nonignored .notdef entries, E3 renders glyph_id 0 directly.
     pub rendered: String,
     pub glyph_id: u16,
     pub position: GeometryPoint,
@@ -36,6 +69,8 @@ pub struct GlyphPosition {
     /// Ink relative to the run baseline, with outward-rounded bounds.
     pub ink: GeometryBox,
     pub replaced: bool,
+    /// Default-ignorable input: skip drawing even though glyph_id is 0.
+    pub ignored: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,6 +90,8 @@ pub struct TextMetrics {
     pub line_gap: Coord,
     pub glyphs: Vec<GlyphPosition>,
     pub replacements: u32,
+    /// Nonfatal replacement notices; successful metrics remain available.
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Clone, Copy)]
@@ -174,6 +211,9 @@ impl FontTable {
                 return Err(bad_table());
             }
             previous = Some(scalar);
+        }
+        if table.glyph(0).is_none() {
+            return Err(bad_table());
         }
         let mapped_replacement = table.lookup('�');
         if mapped_replacement.map(|g| g.id).unwrap_or(MISSING_GLYPH) != table.replacement {
@@ -333,14 +373,29 @@ pub fn measure_text(text: &str, weight: u16, size: Coord) -> Result<TextMetrics,
     let mut pen_units: i64 = 0;
     let mut replacements: u32 = 0;
     let mut ink: Option<(Coord, Coord, Coord, Coord)> = None;
+    let notdef = table.glyph(0).ok_or_else(bad_table)?;
     for input in text.chars() {
-        let (glyph, rendered, replaced) = match table.lookup(input) {
-            Some(glyph) => (glyph, input, false),
-            None => (table.lookup('�').ok_or_else(|| error("glyph", "/text", "the pinned font has neither the requested scalar nor a replacement glyph", "replace the unsupported character with a character covered by the pinned font"))?, '�', true),
-        };
         let position = GeometryPoint {
             x: scaled(pen_units, size, table.upem, 0)?,
             y: 0,
+        };
+        if is_default_ignorable(input) {
+            glyphs.push(GlyphPosition {
+                input: input.to_string(),
+                rendered: String::new(),
+                glyph_id: 0,
+                position,
+                advance: 0,
+                left_side_bearing: 0,
+                ink: zero_box(),
+                replaced: false,
+                ignored: true,
+            });
+            continue;
+        }
+        let (glyph, rendered, replaced) = match table.lookup(input) {
+            Some(glyph) => (glyph, input.to_string(), false),
+            None => (notdef, String::new(), true),
         };
         let next_pen = pen_units
             .checked_add(i64::from(glyph.advance))
@@ -380,16 +435,24 @@ pub fn measure_text(text: &str, weight: u16, size: Coord) -> Result<TextMetrics,
         }
         glyphs.push(GlyphPosition {
             input: input.to_string(),
-            rendered: rendered.to_string(),
+            rendered,
             glyph_id: glyph.id,
             position,
             advance,
             left_side_bearing: scaled(i64::from(glyph.bearing), size, table.upem, 0)?,
             ink: glyph_ink,
             replaced,
+            ignored: false,
         });
         pen_units = next_pen;
     }
+    let diagnostics = if replacements == 0 {
+        Vec::new()
+    } else {
+        vec![error("replacement-notice", "/text",
+            format!("the pinned font used its actual .notdef glyph for {replacements} unsupported text scalars"),
+            "render the returned glyph IDs, including glyph 0 boxes, or use covered characters; never substitute a system font")]
+    };
     Ok(TextMetrics {
         font: table.identity(),
         size,
@@ -403,6 +466,7 @@ pub fn measure_text(text: &str, weight: u16, size: Coord) -> Result<TextMetrics,
         line_gap: scaled(i64::from(table.line_gap), size, table.upem, 0)?,
         glyphs,
         replacements,
+        diagnostics,
     })
 }
 
@@ -423,6 +487,11 @@ mod tests {
         for weight in [400, 700] {
             let metrics = measure_text(SAMPLE, weight, 14 * 64).unwrap();
             assert_eq!(metrics.replacements, 0);
+            assert!(metrics.diagnostics.is_empty());
+            assert!(metrics
+                .glyphs
+                .iter()
+                .all(|glyph| !glyph.ignored && !glyph.replaced));
             assert_eq!(metrics.glyphs.len(), SAMPLE.chars().count());
             assert!(metrics.advance > 0 && metrics.ink.width > 0 && metrics.ink.height > 0);
             assert_eq!(metrics.font.weight, weight);
@@ -433,6 +502,13 @@ mod tests {
     #[test]
     fn table_hashes_and_source_identity_match_the_generated_manifest() {
         let manifest: serde_json::Value = serde_json::from_str(font_manifest()).unwrap();
+        assert_eq!(
+            manifest["defaultIgnorables"]["unicodeVersion"],
+            IGNORABLE_UNICODE_VERSION
+        );
+        assert_eq!(manifest["defaultIgnorables"]["scalarCount"], 4174);
+        assert_eq!(manifest["unknownGlyph"]["glyphId"], 0);
+        assert_eq!(manifest["unknownGlyph"]["noticeFatal"], false);
         for (weight, bytes) in [(400, REGULAR_BYTES), (700, BOLD_BYTES)] {
             let entry = manifest["fonts"]
                 .as_array()
@@ -471,20 +547,99 @@ mod tests {
         }
     }
     #[test]
-    fn unknown_scalar_uses_only_the_pinned_replacement_or_an_explicit_error() {
+    fn default_ignorable_property_is_pinned_to_unicode_17_and_4174_scalars() {
+        assert_eq!(IGNORABLE_UNICODE_VERSION, "17.0.0");
+        assert_eq!(
+            DEFAULT_IGNORABLE_RANGES
+                .iter()
+                .map(|(first, last)| u64::from(last - first + 1))
+                .sum::<u64>(),
+            4174
+        );
+        for &(first, last) in DEFAULT_IGNORABLE_RANGES {
+            assert!(is_default_ignorable(char::from_u32(first).unwrap()));
+            assert!(is_default_ignorable(char::from_u32(last).unwrap()));
+        }
+        assert!(SAMPLE.chars().all(|scalar| !is_default_ignorable(scalar)));
+    }
+    #[test]
+    fn unknown_scalar_uses_actual_notdef_metrics_and_a_nonfatal_notice() {
         let unknown = char::MAX.to_string();
         for weight in [400, 700] {
-            match measure_text(&unknown, weight, 14 * 64) {
-                Ok(metrics) => {
-                    assert_eq!(metrics.replacements, 1);
-                    assert_eq!(metrics.glyphs[0].rendered, "�");
-                    assert!(metrics.glyphs[0].replaced);
+            let font = table(weight).unwrap();
+            let notdef = font.glyph(0).unwrap();
+            let metrics = measure_text(&unknown, weight, 14 * 64).unwrap();
+            assert_eq!(metrics.replacements, 1);
+            assert_eq!(metrics.glyphs[0].glyph_id, 0);
+            assert_eq!(metrics.glyphs[0].rendered, "");
+            assert!(metrics.glyphs[0].replaced && !metrics.glyphs[0].ignored);
+            assert_eq!(
+                metrics.advance,
+                scaled(i64::from(notdef.advance), 14 * 64, font.upem, 0).unwrap()
+            );
+            assert!(notdef.has_ink && metrics.ink.width > 0 && metrics.ink.height > 0);
+            let source_ink = box_from_bounds(
+                scaled(i64::from(notdef.x_min), 14 * 64, font.upem, -1).unwrap(),
+                scaled(-i64::from(notdef.y_max), 14 * 64, font.upem, -1).unwrap(),
+                scaled(i64::from(notdef.x_max), 14 * 64, font.upem, 1).unwrap(),
+                scaled(-i64::from(notdef.y_min), 14 * 64, font.upem, 1).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(metrics.ink, source_ink);
+            assert_eq!(metrics.glyphs[0].ink, source_ink);
+            assert_eq!(
+                metrics.glyphs[0].left_side_bearing,
+                scaled(i64::from(notdef.bearing), 14 * 64, font.upem, 0).unwrap()
+            );
+            assert_eq!(metrics.diagnostics.len(), 1);
+            assert_eq!(
+                metrics.diagnostics[0].code,
+                "document/font-replacement-notice"
+            );
+            assert!(
+                !metrics.diagnostics[0].message.is_empty()
+                    && !metrics.diagnostics[0].fix.is_empty()
+            );
+        }
+    }
+    #[test]
+    fn emoji_and_mixed_symbols_never_refuse_coverage_or_use_an_os_fallback() {
+        for weight in [400, 700] {
+            let font = table(weight).unwrap();
+            for input in ["🚀", "😀", "✔", "⚠️", "👩‍💻"] {
+                let metrics = measure_text(input, weight, 14 * 64).unwrap();
+                assert_eq!(metrics.glyphs.len(), input.chars().count());
+                let mut expected_replacements = 0;
+                for (scalar, glyph) in input.chars().zip(&metrics.glyphs) {
+                    if is_default_ignorable(scalar) {
+                        assert!(glyph.ignored && !glyph.replaced);
+                        assert_eq!(glyph.advance, 0);
+                        assert_eq!(glyph.ink, zero_box());
+                        assert_eq!(glyph.rendered, "");
+                        assert_eq!(glyph.glyph_id, 0);
+                    } else if let Some(mapped) = font.lookup(scalar) {
+                        assert!(!glyph.ignored && !glyph.replaced);
+                        assert_eq!(glyph.glyph_id, mapped.id);
+                        assert_eq!(glyph.rendered, scalar.to_string());
+                    } else {
+                        expected_replacements += 1;
+                        assert!(glyph.replaced && !glyph.ignored);
+                        assert_eq!(glyph.glyph_id, 0);
+                        assert_eq!(glyph.rendered, "");
+                    }
                 }
-                Err(diagnostic) => {
-                    assert_eq!(diagnostic.code, "document/font-glyph");
-                    assert!(!diagnostic.message.is_empty() && !diagnostic.fix.is_empty());
-                }
+                assert_eq!(metrics.replacements, expected_replacements);
+                assert_eq!(
+                    metrics.diagnostics.len(),
+                    usize::from(expected_replacements > 0)
+                );
             }
+            let warning = measure_text("⚠️", weight, 14 * 64).unwrap();
+            let base = measure_text("⚠", weight, 14 * 64).unwrap();
+            assert_eq!(warning.advance, base.advance);
+            assert_eq!(warning.ink, base.ink);
+            let joined = measure_text("👩‍💻", weight, 14 * 64).unwrap();
+            assert!(joined.glyphs[1].ignored);
         }
     }
     #[test]

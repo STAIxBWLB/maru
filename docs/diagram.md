@@ -900,8 +900,13 @@ under [SIL OFL 1.1](https://github.com/notofonts/noto-cjk/blob/f8d157532fbfaeda5
 The SDK carries derived cmap, horizontal advance and ink-box tables plus font
 hashes and the complete licence. Font parsing/download happens only in the
 host-side generator; runtime never queries system fonts. Prefix advances use
-integer scaling and ink boxes round outward. Unsupported scalars use the pinned
-replacement glyph and are counted. E3 must render these same original-font glyph
+integer scaling and ink boxes round outward. Uncovered visible scalars use the
+pinned font's `.notdef` glyph (glyph ID 0),
+are counted in `replacements` and produce a nonfatal coverage notice. No missing
+character refuses layout. Unicode 17.0.0 default-ignorable scalars, including
+variation selectors and joiners, have zero advance and no ink. E3 renders the
+returned `.notdef` boxes for visible missing glyphs and skips ignored scalars,
+without system fallback. E3 must render these same original-font glyph
 IDs, weights and positions, with kerning, ligatures and localized substitutions
 disabled; a system-font fallback would violate this contract.
 
@@ -923,7 +928,7 @@ three native targets.
 The three E1 geometry divergences remain open until that implementation; no new
 Archify validity agreement or 1,000-node layout latency is claimed here.
 
-S1's [remote reproduction](diagram-engine-e2.json), SDK tree `e9eac907`, measured
+The initial S1 [remote reproduction](diagram-engine-e2.json), SDK tree `e9eac907`, measured
 **324,126 B gzip** for validation (81% of the 400,000 B budget),
 **1,043,487 B** for the separately lazy metric chunk and 122 B for optional
 IPC transport. The two font tables occupy 1,948,208 raw bytes; original OTF
@@ -939,3 +944,15 @@ The later S1 pin-contract follow-up passed 47 core tests and two differential
 tests. Its unrelated-field edit retains all existing pins, and each missing
 member gets a separate nonfatal removal diagnostic. The source-bound benchmark
 above predates this follow-up; new-head hosted CI remains the gate.
+
+S3 will separately measure lazy geometry cold load (fetch plus WASM
+instantiation) in Chromium beside the warm 1,000-node layout/routing p95. The
+roughly 1.04 MB lazy metric payload is not part of validation's cold-load number.
+
+The coverage/integrity follow-up (`coverageFollowUp` in the same receipt), SDK
+tree `8143f641`, passed 50 core tests, two hash-probe tests and two differential
+tests. The WASM browser probe passed emoji, check-symbol, variation-selector and
+ZWJ examples at both font weights. Its remote validation entry measured
+324,124 B gzip; lazy metrics measured 1,038,558 B. The 1,000-node validation
+p95 was 8.7 ms. This remains a remote reproduction; hosted CI, whole-scene geometry
+and lazy cold-load proof are separate gates.

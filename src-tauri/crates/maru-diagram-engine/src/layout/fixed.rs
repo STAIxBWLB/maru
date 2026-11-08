@@ -58,11 +58,9 @@ pub fn quantize_pixels(pixels: f64) -> Result<Coord, FixedPointError> {
     if !scaled.is_finite() {
         return Err(FixedPointError::CoordinateOutOfRange);
     }
-    let rounded = if scaled >= 0.0 {
-        (scaled + 0.5).floor()
-    } else {
-        (scaled - 0.5).ceil()
-    };
+    // Adding 0.5 first can round a representable value just below the tie up
+    // to 1.0. round() implements nearest with half-away ties directly.
+    let rounded = scaled.round();
     if rounded < Coord::MIN as f64 || rounded > Coord::MAX as f64 {
         return Err(FixedPointError::CoordinateOutOfRange);
     }
@@ -174,6 +172,14 @@ mod tests {
         assert_eq!(quantize_pixels(-0.5 / 64.0), Ok(-1));
         assert_eq!(quantize_pixels(1.49 / 64.0), Ok(1));
         assert_eq!(quantize_pixels(-1.49 / 64.0), Ok(-1));
+    }
+
+    #[test]
+    fn quantization_keeps_values_immediately_below_a_half_below_the_tie() {
+        for (scaled, expected) in [(0.49999999999999994, 0), (0.5, 1), (0.5000000000000001, 1)] {
+            assert_eq!(quantize_pixels(scaled / 64.0).unwrap(), expected);
+            assert_eq!(quantize_pixels(-scaled / 64.0).unwrap(), -expected);
+        }
     }
 
     #[test]
