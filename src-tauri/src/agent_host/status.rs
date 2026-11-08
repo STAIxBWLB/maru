@@ -1204,12 +1204,20 @@ mod tests {
     #[test]
     fn run_cli_times_out_on_sleeping_process() {
         // The test probe timeout is 500ms by default (MARU_TEST_CLI_PROBE_TIMEOUT_MS
-        // may widen it for loaded full-suite runs); the sleeper must be killed
-        // and reaped well before its own 30s sleep ends.
+        // may widen it for loaded full-suite runs). The clock starts before the
+        // spawn, so spawn retries and the kill-and-reap on a loaded runner count
+        // against the allowance. 15s of slack is far above that cost and still
+        // well under the child's 30s sleep, so the test proves the sleeper was
+        // killed rather than waited out.
         let start = Instant::now();
         let output = run_cli(Path::new("/bin/sh"), &["-c", "sleep 30"]);
         assert!(output.is_none());
-        assert!(start.elapsed() < cli_probe_timeout() + Duration::from_secs(4));
+        let elapsed = start.elapsed();
+        let allowance = cli_probe_timeout() + Duration::from_secs(15);
+        assert!(
+            elapsed < allowance,
+            "sleeping CLI took {elapsed:?} to time out, allowance {allowance:?}"
+        );
     }
 
     #[test]
