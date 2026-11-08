@@ -98,6 +98,24 @@ export function generatedCases() {
     });
     add("shape", "missing-meta", (s) => { delete s.meta; });
     add("shape", "null-option", (s) => { s.meta.locale = null; });
+    // JSON Schema objects must stay objects. Serde struct visitors also
+    // support positional sequences, so each object boundary needs a negative.
+    add("shape", "meta-array", (s) => { s.meta = [s.meta.title, s.meta.output]; });
+    add("shape", "brand-array", (s) => { s[PRIMARY[type]][0].brand = ["https://example.test/logo.svg", "a".repeat(64)]; });
+    add("shape", "primary-item-array", (s) => {
+      const node = s[PRIMARY[type]][0];
+      s[PRIMARY[type]][0] = type === "workflow" ? [node.id, node.lane, node.col, node.type, node.label]
+        : type === "lifecycle" ? [node.id, node.type, node.label, "", "", "none", "Brand", [{ path: "fixture.ts" }], "Step", node.lane, node.col]
+          : type === "dataflow" ? [node.id, node.type, node.label, node.stage, node.row]
+            : type === "architecture" ? [node.id, node.type, node.label, node.row, node.col]
+              : [node.id, node.type, node.label];
+    });
+    add("shape", "source-item-array", (s) => { s[PRIMARY[type]][0].sources = [["fixture.ts", 1, 2, "Lines"]]; });
+    add("shape", "card-item-array", (s) => { s.cards = [["cyan", "Notes", ["Item"]]]; });
+    add("shape", "view-item-array", (s) => { s.meta.views = [["overview", "Overview", ["a"]]]; });
+    add("shape", "repository-array", (s) => { s.meta.repository = ["https://github.com/example/fixture", "a".repeat(40)]; });
+    add("shape", "legend-array", (s) => { s.meta.legend = ["hidden", { [LEGEND_KEY[type]]: { label: "Kind" } }]; });
+    add("shape", "legend-entry-array", (s) => { s.meta.legend = { mode: "hidden", entries: { [LEGEND_KEY[type]]: ["Kind", true] } }; });
     add("unknown-field", "top-level", (s) => { s.unexpected = true; });
     add("schema-version", "unsupported-version", (s) => { s.schema_version = ["workflow", "lifecycle"].includes(type) ? 3 : 2; });
     if (["workflow", "lifecycle"].includes(type)) add("valid", "minimal-version-two", (s) => { s.schema_version = 2; });
@@ -124,6 +142,7 @@ export function generatedCases() {
     add("repository", "revision", (s) => { s.meta.repository = { url: "https://github.com/example/fixture", revision: "short" }; });
     add(REFERENCE_RULE[type], "missing-endpoint", (s) => { s[RELATIONS[type]][0].to = "missing"; });
     if (type === "architecture") {
+      add("shape", "layout-array", (s) => { s.layout = ["grid"]; });
       add("range", "cols-zero", (s) => { s.layout.cols = 0; });
       add("integer", "fractional-row", (s) => { s.components[0].row = 0.5; });
       add("grid-column", "outside-declared-grid", (s) => { s.components[1].col = 4; });
@@ -156,6 +175,9 @@ export function generatedCases() {
         ];
       });
     } else if (type === "workflow") {
+      add("shape", "lane-item-array", (s) => { s.lanes[0] = ["main", "Main"]; });
+      add("shape", "required-edge-array", (s) => { s.semanticChecks = { requiredEdges: [["a", "b"]] }; });
+      add("shape", "required-path-array", (s) => { s.semanticChecks = { requiredPaths: [["a", "c"]] }; });
       add("range", "column", (s) => { s.nodes[0].col = 6; });
       add("lane-reference", "node", (s) => { s.nodes[0].lane = "missing"; });
       add("phase-range", "reversed", (s) => { s.phases = [{ id: "phase", label: "Phase", fromCol: 3, toCol: 1 }]; });
@@ -172,18 +194,22 @@ export function generatedCases() {
       add("required-edge", "missing", (s) => { s.semanticChecks = { requiredEdges: [{ from: "a", to: "c" }] }; });
       add("required-path", "unreachable", (s) => { s.edges = [{ from: "a", to: "b" }]; s.semanticChecks = { requiredPaths: [{ from: "a", to: "c" }] }; });
     } else if (type === "sequence") {
+      add("shape", "segment-item-array", (s) => { s.segments = [[170, 230, "Phase"]]; });
+      add("shape", "activation-item-array", (s) => { s.activations = [["a", 180, 220]]; });
       add("range", "message-y", (s) => { s.messages[0].y = 159; });
       add("participant-reference", "activation", (s) => { s.activations = [{ participant: "missing", from: 180, to: 220 }]; });
       add("range-order", "segment", (s) => { s.segments = [{ from: 230, to: 180, label: "Phase" }]; });
       add("range-order", "activation", (s) => { s.activations = [{ participant: "a", from: 230, to: 180 }]; });
       add("valid", "below-canvas", (s) => { s.messages[0].y = 2000; });
     } else if (type === "dataflow") {
+      add("shape", "stage-item-array", (s) => { s.stages[0] = ["Input"]; });
       add("range", "node-width", (s) => { s.nodes[0].width = 47; });
       add("integer", "fractional-row", (s) => { s.nodes[0].row = 0.5; });
       add("stage-reference", "past-last", (s) => { s.nodes[0].stage = 2; });
       add("valid", "unbounded-row", (s) => { s.nodes[0].row = 1_000_000_000_000; }, "dataflow-fixed-row-slots");
       add("valid", "five-stages", (s) => { s.stages.push({ label: "Third" }, { label: "Fourth" }, { label: "Fifth" }); }, "dataflow-stage-canvas-width");
     } else if (type === "lifecycle") {
+      add("shape", "lane-item-array", (s) => { s.lanes[0] = ["main", "Main"]; });
       add("range", "column", (s) => { s.states[0].col = 5; });
       add("lane-count", "too-many", (s) => { s.lanes.push(...["one", "two", "three", "four"].map((id) => ({ id, label: id }))); });
       add("lane-reference", "state", (s) => { s.states[0].lane = "missing"; });

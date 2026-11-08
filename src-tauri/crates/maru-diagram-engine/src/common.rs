@@ -223,8 +223,8 @@ impl Context {
             self.error(
                 "shape",
                 path,
-                "an object is required",
-                "replace this value with the documented object fields",
+                format!("expected an object, found {}", json_kind(value)),
+                "replace this value with a JSON object using the documented named fields",
             );
         }
     }
@@ -380,6 +380,16 @@ fn decode_at<T: DeserializeOwned + Serialize>(
         }
     }
 }
+fn json_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+        Value::Null => "null",
+        Value::String(_) => "a string",
+        Value::Number(_) => "a number",
+        Value::Bool(_) => "a boolean",
+    }
+}
 // Derive object locations from the model's own Serialize representation. This
 // closes serde struct visit_seq without duplicating per-field shape tables;
 // real Vec/tuple fields still serialize as arrays and remain valid.
@@ -387,14 +397,7 @@ fn require_objects(raw: &Value, model: &Value, path: &str, ctx: &mut Context) ->
     match model {
         Value::Object(fields) => {
             let Some(source) = raw.as_object() else {
-                let found = match raw {
-                    Value::Array(_) => "an array",
-                    Value::Null => "null",
-                    Value::String(_) => "a string",
-                    Value::Number(_) => "a number",
-                    Value::Bool(_) => "a boolean",
-                    _ => "another value",
-                };
+                let found = json_kind(raw);
                 ctx.error(
                     "shape",
                     path,
