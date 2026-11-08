@@ -4217,4 +4217,6 @@ export const en: Record<string, string> = {
 
   "diagram.renders.notKept": "The copy was exported, but the render was not kept in history: {message}",
 
+  "diagram.renders.ambiguous": "Duplicate document ID",
+
 };

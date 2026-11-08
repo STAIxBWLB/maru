@@ -70,7 +70,8 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
         <div className="maru-diagram-renders-columns"><div className="maru-diagram-renders-list">
           {!groups.length && !busy && <p>{t("diagram.renders.empty")}</p>}
           {groups.map((entry) => <section key={entry.docId}>
-            <h3>{entry.documentName ?? entry.docId}{entry.orphaned ? ` (${t("diagram.renders.orphaned")})` : ""}</h3>
+            <h3>{entry.documentName ?? entry.docId}{entry.orphaned ? ` (${t("diagram.renders.orphaned")})` : ""}{entry.ambiguous ? ` (${t("diagram.renders.ambiguous")})` : ""}</h3>
+            {entry.diagnostic && <p role="status">{entry.diagnostic}</p>}
             {entry.renders.map((render) => <button type="button" key={render.renderId} data-testid="diagram-render-entry" aria-pressed={selected?.docId === render.docId && selected.renderId === render.renderId} disabled={busy} onClick={() => void select(render)}>
               <span>{render.receipt?.renderedAt ?? render.renderId}</span>
               <span>{render.verified && render.receipt ? `${render.receipt.enginePin.name} ${render.receipt.enginePin.version} / ${render.receipt.diagramType}` : t("diagram.renders.unverified")}</span>
@@ -81,7 +82,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
           {selected && <div className="maru-diagram-renders-actions">
             <button disabled={busy || !view} onClick={() => void action(() => openRender(workspace, selected))}>{t("diagram.renders.open")}</button>
             <button disabled={busy || !view} onClick={() => void action(() => openRender(workspace, selected, true))}>{t("diagram.renders.reveal")}</button>
-            <button disabled={busy || !group || group.orphaned} onClick={() => group && void action(() => onRerender(group, selected), true)}>{t("diagram.renders.rerender")}</button>
+            <button disabled={busy || !group || group.orphaned || group.ambiguous} onClick={() => group && void action(() => onRerender(group, selected), true)}>{t("diagram.renders.rerender")}</button>
             <button disabled={busy} onClick={() => setPendingDelete(true)}>{t("diagram.renders.delete")}</button>
             {pendingDelete && <div role="alert"><p>{t("diagram.renders.deleteConfirm")}</p><button disabled={busy} onClick={() => void action(() => deleteRender(workspace, selected.docId, selected.renderId), true)}>{t("diagram.renders.confirmDelete")}</button><button disabled={busy} onClick={() => setPendingDelete(false)}>{t("diagram.renders.cancel")}</button></div>}
           </div>}

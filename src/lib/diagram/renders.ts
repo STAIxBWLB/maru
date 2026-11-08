@@ -29,6 +29,8 @@ export interface RenderGroup {
   originalDocId?: string | null;
   documentName?: string | null;
   orphaned: boolean;
+  ambiguous?: boolean;
+  diagnostic?: string | null;
   renders: StoredRender[];
 }
 export interface RenderView { path: string; mimeType: string; receipt: RenderReceipt }
@@ -60,6 +62,7 @@ export async function openRender(workspace: string, render: StoredRender, reveal
 /** Rerender the current saved spec, never an old render's embedded input. */
 export async function rerenderDocument(workspace: string, group: RenderGroup, render?: StoredRender): Promise<void> {
   requireDesktop();
+  if (group.ambiguous) throw new Error(group.diagnostic ?? "Multiple diagrams share this document ID; change one document's ID and refresh before re-rendering.");
   if (group.orphaned || !group.documentName) throw new Error("The source document is missing; restore its diagram file before re-rendering.");
   const current = await readDiagramDetailed(workspace, group.documentName);
   const originalDocId = group.originalDocId ?? render?.receipt?.docId ?? group.docId;

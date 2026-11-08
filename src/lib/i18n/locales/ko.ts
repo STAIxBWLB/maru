@@ -4212,4 +4212,6 @@ export const ko: Record<string, string> = {
 
   "diagram.renders.notKept": "복사본을 내보냈지만 렌더 기록은 저장하지 못했습니다: {message}",
 
+  "diagram.renders.ambiguous": "중복 문서 ID",
+
 };

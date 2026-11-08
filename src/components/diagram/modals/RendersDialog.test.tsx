@@ -52,4 +52,14 @@ describe("RendersDialog", () => {
     const confirm = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Confirm deletion")!;
     await act(async () => confirm.click()); expect(mocks.remove).toHaveBeenCalledWith("/fixture", "doc-a", "render-a");
   });
+  it("keeps ambiguous groups viewable and deletable while disabling re-render with a recovery reason", async () => {
+    mocks.list.mockResolvedValue([{ ...group, ambiguous: true, diagnostic: "Two diagrams share this ID; change one ID and refresh" }]);
+    await mount(); await click('[data-testid="diagram-render-entry"]');
+    expect(document.querySelector("iframe")).not.toBeNull();
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>("button")];
+    expect(buttons.find((button) => button.textContent === "Re-render")?.disabled).toBe(true);
+    expect(buttons.find((button) => button.textContent === "Delete render")?.disabled).toBe(false);
+    expect(document.body.textContent).toContain("change one ID and refresh");
+  });
+
 });

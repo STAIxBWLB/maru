@@ -69,4 +69,9 @@ describe("saved render source binding", () => {
     await expect(rerenderDocument("/workspace", group, { docId: "doc", renderId: "legacy", verified: true, receipt })).rejects.toThrow(/not kept in history.*repair permissions/);
   });
 
+  it("refuses only re-render for an ambiguous identity without reading or rendering an arbitrary source", async () => {
+    await expect(rerenderDocument("/workspace", { ...group, ambiguous: true, diagnostic: "Two diagrams share this ID; change one ID and refresh" })).rejects.toThrow(/Two diagrams share/);
+    expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
+  });
+
 });

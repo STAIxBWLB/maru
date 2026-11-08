@@ -96,6 +96,10 @@ pub struct RenderGroup {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_name: Option<String>,
     pub orphaned: bool,
+    #[serde(default)]
+    pub ambiguous: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
     pub renders: Vec<RenderEntry>,
 }
 
@@ -111,6 +115,9 @@ pub struct RenderView {
 struct DocumentIdentity {
     original_id: String,
     name: String,
+    first_filename: String,
+    ambiguous: bool,
+    diagnostic: Option<String>,
 }
 
 fn operation_error(
@@ -137,8 +144,10 @@ fn validate_doc_id(doc_id: &str) -> Result<&str, String> {
 fn legacy_safe_doc_key(key: &str) -> bool {
     !key.is_empty()
         && key.len() <= 160
+        && !key.starts_with(HASHED_DOC_PREFIX)
         && !key.starts_with('.')
         && !key.contains("..")
+        && crate::filename_rules::validate_folder_name(key).is_ok()
         && key
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
@@ -627,7 +636,7 @@ fn parse_document_index(workspace: &Path) -> Result<HashMap<String, DocumentIden
     if !ensure_directory_chain(workspace, &diagrams, None)? {
         return Ok(HashMap::new());
     }
-    let entries = fs::read_dir(&diagrams).map_err(|error| {
+    let dir_entries = fs::read_dir(&diagrams).map_err(|error| {
         operation_error(
             "list diagram documents",
             workspace,
@@ -636,9 +645,9 @@ fn parse_document_index(workspace: &Path) -> Result<HashMap<String, DocumentIden
             "repair the diagrams folder and retry",
         )
     })?;
-    let mut documents = HashMap::new();
+    let mut entries = Vec::new();
     let mut count = 0usize;
-    for entry in entries {
+    for entry in dir_entries {
         count += 1;
         if count > MAX_DOCUMENTS {
             return Err(operation_error(
@@ -649,7 +658,7 @@ fn parse_document_index(workspace: &Path) -> Result<HashMap<String, DocumentIden
                 "remove unrelated entries from the diagrams folder and retry",
             ));
         }
-        let entry = entry.map_err(|error| {
+        entries.push(entry.map_err(|error| {
             operation_error(
                 "read diagram entry",
                 workspace,
@@ -657,7 +666,11 @@ fn parse_document_index(workspace: &Path) -> Result<HashMap<String, DocumentIden
                 error,
                 "repair folder permissions and retry",
             )
-        })?;
+        })?);
+    }
+    entries.sort_by_key(|entry: &fs::DirEntry| entry.file_name());
+    let mut documents: HashMap<String, DocumentIdentity> = HashMap::new();
+    for entry in entries {
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(document_name) = name.strip_suffix(DIAGRAM_SUFFIX) else {
             continue;
@@ -706,23 +719,26 @@ fn parse_document_index(workspace: &Path) -> Result<HashMap<String, DocumentIden
         }
         let key = document_directory_key(id)?;
         let display_name = bounded_display_name(document_name, id);
-        if documents
-            .insert(
+        let filename = bounded_display_name(&name, "diagram document");
+        if let Some(first) = documents.get_mut(&key) {
+            if !first.ambiguous {
+                first.ambiguous = true;
+                first.diagnostic = Some(format!(
+                    "Duplicate diagram ID appears in {} and {filename}; give one file a unique ID before rerendering.",
+                    first.first_filename.as_str()
+                ));
+            }
+        } else {
+            documents.insert(
                 key,
                 DocumentIdentity {
                     original_id: id.to_string(),
                     name: display_name,
+                    first_filename: filename,
+                    ambiguous: false,
+                    diagnostic: None,
                 },
-            )
-            .is_some()
-        {
-            return Err(operation_error(
-                "match diagram document IDs",
-                workspace,
-                &path,
-                "multiple saved documents share one ID",
-                "repair the duplicate diagram IDs before listing renders",
-            ));
+            );
         }
     }
     Ok(documents)
@@ -970,6 +986,8 @@ pub fn list_renders(workspace: &str) -> Result<Vec<RenderGroup>, String> {
                 }),
                 document_name: document.map(|doc| doc.name.clone()).or(fallback_name),
                 orphaned: document.is_none(),
+                ambiguous: document.is_some_and(|doc| doc.ambiguous),
+                diagnostic: document.and_then(|doc| doc.diagnostic.clone()),
                 renders,
             });
         }
@@ -1802,6 +1820,87 @@ mod tests {
         assert!(key.starts_with(HASHED_DOC_PREFIX));
         assert!(validate_doc_key(&key).is_ok());
         assert_eq!(document_directory_key("ascii-doc").unwrap(), "ascii-doc");
+    }
+
+    #[test]
+    fn portable_reserved_names_and_trailing_dot_use_hashed_keys() {
+        for logical_id in ["con", "aux", "com1", "con.txt", "diagram."] {
+            assert!(!legacy_safe_doc_key(logical_id), "{logical_id}");
+            let key = document_directory_key(logical_id).unwrap();
+            assert!(key.starts_with(HASHED_DOC_PREFIX), "{logical_id}: {key}");
+            assert_ne!(key, logical_id);
+            assert!(validate_doc_key(&key).is_ok());
+            assert!(folder_matches_document(&key, logical_id));
+        }
+    }
+
+    #[test]
+    fn duplicate_document_ids_mark_only_the_ambiguous_group_and_keep_renders_usable() {
+        let fixture = Fixture::new();
+        fs::write(
+            fixture.work.join(DIAGRAMS_ROOT).join("z-duplicate.cmd.json"),
+            serde_json::json!({ "id": fixture.doc_id.as_str(), "docTitle": "Second title" }).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            fixture.work.join(DIAGRAMS_ROOT).join("unrelated.cmd.json"),
+            serde_json::json!({ "id": "unrelated-doc", "docTitle": "Unrelated" }).to_string(),
+        )
+        .unwrap();
+
+        fixture.store(RENDER_A, "text/html", HTML);
+        let unrelated_context = RenderDocumentContext {
+            doc_id: "unrelated-doc".into(),
+            document_name: "Unrelated title".into(),
+            document_revision: sha256(b"unrelated document revision"),
+            diagram_type: "architecture".into(),
+            dataset_id: None,
+        };
+        fixture.store_context(RENDER_B, unrelated_context, "image/svg+xml", SVG);
+
+        let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+        let duplicate = groups.iter().find(|group| group.doc_id == fixture.doc_id).unwrap();
+        assert!(duplicate.ambiguous);
+        assert!(!duplicate.orphaned);
+        assert_eq!(duplicate.document_name.as_deref(), Some("render-test"));
+        let diagnostic = duplicate.diagnostic.as_deref().unwrap();
+        assert!(diagnostic.contains("render-test.cmd.json"));
+        assert!(diagnostic.contains("z-duplicate.cmd.json"));
+        assert!(diagnostic.contains("unique ID"));
+        assert_eq!(duplicate.renders.len(), 1);
+        assert!(duplicate.renders[0].verified);
+
+        let unrelated = groups
+            .iter()
+            .find(|group| group.doc_id == "unrelated-doc")
+            .unwrap();
+        assert!(!unrelated.ambiguous);
+        assert!(unrelated.diagnostic.is_none());
+        assert_eq!(unrelated.renders.len(), 1);
+        assert!(unrelated.renders[0].verified);
+
+        let app = tauri::test::mock_app();
+        let view = prepare_render_view(
+            &app.handle().clone(),
+            fixture.work.to_str().unwrap(),
+            &fixture.doc_id,
+            RENDER_A,
+        )
+        .unwrap();
+        assert_eq!(view.mime_type, "text/html");
+        let unrelated_render_dir = fixture
+            .work
+            .join(RENDER_ROOT)
+            .join("unrelated-doc")
+            .join(RENDERS_DIR)
+            .join(RENDER_B);
+        delete_render(fixture.work.to_str().unwrap(), &fixture.doc_id, RENDER_A).unwrap();
+        assert!(!fixture.render_dir(RENDER_A).exists());
+        assert!(unrelated_render_dir.is_dir());
+        let after_delete = list_renders(fixture.work.to_str().unwrap()).unwrap();
+        assert!(after_delete.iter().any(|group| {
+            group.doc_id == "unrelated-doc" && group.renders.iter().any(|render| render.verified)
+        }));
     }
 
     #[test]
