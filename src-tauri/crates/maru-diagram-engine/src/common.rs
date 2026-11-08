@@ -329,14 +329,33 @@ pub(crate) fn valid_id(value: &str) -> bool {
     chars.next().is_some_and(|c| c.is_ascii_alphabetic())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
 }
-pub(crate) fn decode<T: DeserializeOwned>(value: &Value, ctx: &mut Context) -> Option<T> {
+pub(crate) fn decode<T: DeserializeOwned + Serialize>(
+    value: &Value,
+    ctx: &mut Context,
+) -> Option<T> {
     decode_at(value, "", ctx)
 }
-fn decode_at<T: DeserializeOwned>(value: &Value, prefix: &str, ctx: &mut Context) -> Option<T> {
+fn decode_at<T: DeserializeOwned + Serialize>(
+    value: &Value,
+    prefix: &str,
+    ctx: &mut Context,
+) -> Option<T> {
     let mut normalized = value.clone();
     normalize_integrals(&mut normalized);
     match serde_path_to_error::deserialize(normalized) {
-        Ok(result) => Some(result),
+        Ok(result) => match serde_json::to_value(&result) {
+            Ok(shape) if require_objects(value, &shape, prefix, ctx) => Some(result),
+            Ok(_) => None,
+            Err(error) => {
+                ctx.error(
+                    "shape",
+                    prefix,
+                    format!("decoded document cannot be represented as JSON: {error}"),
+                    "use finite JSON field values and retry validation",
+                );
+                None
+            }
+        },
         Err(error) => {
             let mut path = prefix.to_string();
             for part in error.path().iter() {
@@ -361,6 +380,50 @@ fn decode_at<T: DeserializeOwned>(value: &Value, prefix: &str, ctx: &mut Context
         }
     }
 }
+// Derive object locations from the model's own Serialize representation. This
+// closes serde struct visit_seq without duplicating per-field shape tables;
+// real Vec/tuple fields still serialize as arrays and remain valid.
+fn require_objects(raw: &Value, model: &Value, path: &str, ctx: &mut Context) -> bool {
+    match model {
+        Value::Object(fields) => {
+            let Some(source) = raw.as_object() else {
+                let found = match raw {
+                    Value::Array(_) => "an array",
+                    Value::Null => "null",
+                    Value::String(_) => "a string",
+                    Value::Number(_) => "a number",
+                    Value::Bool(_) => "a boolean",
+                    _ => "another value",
+                };
+                ctx.error(
+                    "shape",
+                    path,
+                    format!("expected an object, found {found}"),
+                    "replace this value with a JSON object using the documented named fields",
+                );
+                return false;
+            };
+            let mut valid = true;
+            for (key, value) in fields {
+                if let Some(input) = source.get(key) {
+                    valid &= require_objects(input, value, &pointer(path, key), ctx);
+                }
+            }
+            valid
+        }
+        Value::Array(items) => {
+            let mut valid = true;
+            if let Some(source) = raw.as_array() {
+                for (i, (input, model)) in source.iter().zip(items).enumerate() {
+                    valid &= require_objects(input, model, &pointer(path, &i.to_string()), ctx);
+                }
+            }
+            valid
+        }
+        _ => true,
+    }
+}
+
 // JSON Schema treats 1.0 as an integer; serde's integer visitor does not.
 // Normalize only integral floating-point lexemes, preserving integer numbers.
 fn normalize_integrals(value: &mut Value) {
@@ -774,6 +837,29 @@ pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn decoder_refuses_struct_sequences_but_keeps_coordinate_tuples() {
+        let mut ctx = Context::new("architecture");
+        let layout: Option<crate::architecture::ArchitectureLayout> =
+            decode_at(&serde_json::json!(["grid"]), "/layout", &mut ctx);
+        assert!(layout.is_none());
+        let errors = ctx.finish();
+        assert!(errors.iter().any(|d| d.path == "/layout"
+            && d.message == "expected an object, found an array"
+            && !d.fix.is_empty()));
+        let mut ctx = Context::new("architecture");
+        let brand: Option<Brand> = decode_at(
+            &serde_json::json!(["https://example.test/mark.svg", "a".repeat(64)]),
+            "/components/0/brand",
+            &mut ctx,
+        );
+        assert!(brand.is_none());
+        assert!(ctx.finish().iter().any(|d| d.path == "/components/0/brand"));
+        let mut ctx = Context::new("architecture");
+        let point: Option<Point> = decode(&serde_json::json!([10, 20]), &mut ctx);
+        assert_eq!(point, Some([10.0, 20.0]));
+        assert!(ctx.finish().is_empty());
+    }
     #[test]
     fn portable_outputs_keep_schema_segment_rules() {
         assert!(!portable_output(&format!("{}.html", "가".repeat(90))));
