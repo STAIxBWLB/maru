@@ -12,7 +12,7 @@ import {
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { codecForFilename, getCodec } from "./codecs";
 import { deserializeDoc, serializeDoc } from "./persistence";
-import { SEMANTIC_DIAGRAM_TYPES, validateSemanticSpec, type SemanticDiagramType } from "./reportTypes";
+import { ARCHIFY_DIAGRAM_TYPES as SEMANTIC_DIAGRAM_TYPES, validateSemanticSpec, type SemanticDiagramType } from "./reportTypes";
 import { SEMANTIC_TYPES, mintRelationIds, sequenceOrder, validateSemanticContent } from "./semantic";
 
 const ARCH_SPEC = {

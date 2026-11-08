@@ -24,6 +24,7 @@ import type { ArchifyRenderHost, ArchifyRenderReceipt } from "../archify";
 import type { StaticTheme } from "./engineSvg";
 import { docToMermaid, mermaidToDocDetailed } from "./mermaid";
 import { datasetToArchifySpec, parseArchifySpec } from "./archifyCodec";
+import { FLOORPLAN_EXTENSIONS, datasetToFloorplanSpec, isFloorplanFile, parseFloorplanSpec } from "./floorplanCodec";
 import { projectSemanticDocument } from "./semantic";
 import { mkNode } from "./nodeKinds";
 import { deserializeDoc, serializeDoc } from "./persistence";
@@ -911,11 +912,55 @@ const archifyJsonCodec: DiagramCodec = {
   },
   serialize({ doc }) {
     const dataset = (doc.datasets ?? []).find(
-      (entry): entry is SemanticSpecDataset => entry.kind === "semanticSpec",
+      (entry): entry is SemanticSpecDataset => entry.kind === "semanticSpec" && entry.diagramType !== "floorplan",
     );
     if (!dataset) throw new Error("diagram.archify.noSemanticDataset");
     return {
       bytes: `${JSON.stringify(datasetToArchifySpec(dataset), null, 2)}\n`,
+      fidelity: "structural",
+      warnings: [{ key: "diagram.archify.semanticOnly" }],
+      ignoredFields: ["positions", "styles"],
+    };
+  },
+};
+
+/**
+ * Floorplan `floorplan/architecture@1` interchange (issue #535). Import keeps
+ * the JSON verbatim as a floorplan semantic dataset and projects nested
+ * containers; export emits that JSON unchanged. Mermaid does not apply.
+ */
+const floorplanJsonCodec: DiagramCodec = {
+  id: "floorplan-json",
+  labelKey: "diagram.codec.label.floorplanJson",
+  extensions: FLOORPLAN_EXTENSIONS,
+  canImport: true,
+  canExport: true,
+  exportFidelity: "structural",
+  dataKind: "doc",
+  exportKind: "json",
+  parse(bytes, filename) {
+    const outcome = parseFloorplanSpec(toText(bytes), {
+      provenance: { origin: "imported", sourcePath: filename, capturedAt: Date.now() },
+    });
+    if (!outcome.ok) {
+      const first = outcome.diagnostics[0];
+      throw new Error(first ? `${first.key}: ${JSON.stringify(first.params ?? {})}` : "diagram.floorplan.invalid");
+    }
+    const projected = projectSemanticDocument(outcome.dataset);
+    return {
+      result: { kind: "doc", doc: projected.doc },
+      fidelity: "structural",
+      warnings: [...outcome.diagnostics, ...projected.diagnostics],
+      ignoredFields: ["positions", "styles"],
+    };
+  },
+  serialize({ doc }) {
+    const dataset = (doc.datasets ?? []).find(
+      (entry): entry is SemanticSpecDataset => entry.kind === "semanticSpec" && entry.diagramType === "floorplan",
+    );
+    if (!dataset) throw new Error("diagram.floorplan.noDataset");
+    return {
+      bytes: `${JSON.stringify(datasetToFloorplanSpec(dataset), null, 2)}\n`,
       fidelity: "structural",
       warnings: [{ key: "diagram.archify.semanticOnly" }],
       ignoredFields: ["positions", "styles"],
@@ -1014,6 +1059,7 @@ export const CODEC_LIST: readonly DiagramCodec[] = [
   htmlTableCodec,
   mermaidCodec,
   archifyJsonCodec,
+  floorplanJsonCodec,
   engineStaticCodec("svg"),
   engineStaticCodec("png"),
 ];
@@ -1022,10 +1068,15 @@ export function getCodec(id: string): DiagramCodec | undefined {
   return CODEC_LIST.find((codec) => codec.id === id);
 }
 
-/** Resolve an import-capable codec for a file name (compound extensions first). */
-export function codecForFilename(name: string): DiagramCodec | undefined {
+/**
+ * Resolve an import-capable codec for a file name (compound extensions first).
+ * With the file text, a file named `architecture.json` whose `$schema` is
+ * `floorplan/architecture@1` resolves to Floorplan; the name alone never does.
+ */
+export function codecForFilename(name: string, text?: string): DiagramCodec | undefined {
   const lower = name.toLowerCase();
   if (lower.endsWith(".cmd.json")) return getCodec("maru-json");
+  if (isFloorplanFile(name, text)) return getCodec("floorplan-json");
   if (ARCHIFY_EXTENSIONS.some((extension) => lower.endsWith(extension))) return getCodec("archify-json");
   const dot = lower.lastIndexOf(".");
   if (dot < 0) return undefined;

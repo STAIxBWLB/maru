@@ -62,6 +62,7 @@ import {
   SEMANTIC_TYPES,
   datasetHasContainers,
   descriptorFor,
+  orderFloorplanNodes,
   isSemanticContainerNode,
   orderSemanticContainers,
   semanticContainers,
@@ -267,7 +268,7 @@ export function buildProposalFromCandidate(
         const descriptor = descriptorFor(dataset);
         return descriptor
           ? specEntries(dataset.spec, descriptor.relations).map((entry, index) =>
-              typeof entry.id === "string" ? (dataset.idMap[entry.id] ?? entry.id) : `${dataset.id}-e${index}`,
+              typeof entry.id === "string" ? (Object.hasOwn(dataset.idMap, entry.id) ? dataset.idMap[entry.id]! : entry.id) : `${dataset.id}-e${index}`,
             )
           : [];
       }),
@@ -499,6 +500,9 @@ function applyProposalOps(doc: DiagramDoc, ops: readonly ProposalOp[]): DiagramD
       if (op.kind === "upsertSemanticDataset") nodes = orderSemanticContainers(nodes, op.dataset.id);
     }
   }
+  for (const op of ops) {
+    if (op.kind === "upsertSemanticDataset" && op.dataset.diagramType === "floorplan") nodes = orderFloorplanNodes(nodes, op.dataset);
+  }
   return { ...doc, nodes, edges, ...(datasets !== undefined ? { datasets } : {}) };
 }
 
@@ -598,7 +602,7 @@ function specEntityEntries(dataset: SemanticSpecDataset): SpecEntry[] {
       id: entry.id as string,
       label: typeof entry.label === "string" ? entry.label : (entry.id as string),
       fingerprint: JSON.stringify(
-        ["label", "sublabel", "type", "lane", "col", "stage", "row"].map((key) => entry[key] ?? null),
+        ["label", "sublabel", "type", "lane", "col", "stage", "row", "kind", "parent", "summary"].map((key) => entry[key] ?? null),
       ),
     }));
 }

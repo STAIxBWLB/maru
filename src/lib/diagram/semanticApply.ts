@@ -1,7 +1,7 @@
 /** Apply-time engine admission. Preview/projection stays pure and synchronous. */
 import { defaultCoalescer, withSnapshot } from "./actions";
 import type { GenerationHost } from "./generation";
-import { semanticDatasetsOf } from "./semantic";
+import { semanticDatasetsOf, validateSemanticContent } from "./semantic";
 import { planSemanticEdit, type SemanticEditOutcome, type SpecTransform } from "./semanticEdit";
 import type { DiagramStore } from "./state";
 import type { DiagramDoc } from "./types";
@@ -17,6 +17,13 @@ export async function validateSemanticDraft(
   for (const id of new Set(datasetIds)) {
     const dataset = semanticDatasetsOf(draft).find((item) => item.id === id);
     if (!dataset) return [{ key: "diagram.semantic.editStale" }];
+    // Floorplan has no pinned engine yet (#536): its gate is local validation
+    // only. Every Archify type keeps the pinned-engine gate below.
+    if (dataset.diagramType === "floorplan") {
+      const local = validateSemanticContent("floorplan", dataset.spec);
+      if (local.length > 0) return local;
+      continue;
+    }
     try {
       const receipt = await host.validateCandidate(dataset.diagramType, dataset.spec);
       if (receipt.ok !== true) return receipt.errors.length > 0

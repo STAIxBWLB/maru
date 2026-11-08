@@ -6,6 +6,7 @@ import {
 import {
   addSemanticEntry, setBoundaryMembership, setSpecField, type SpecTransform,
 } from "../../../lib/diagram/semanticEdit";
+import { FLOORPLAN_NODE_KINDS } from "../../../lib/diagram/floorplan";
 import { createDiagramId } from "../../../lib/diagram/types";
 import { useTranslation } from "../../../lib/i18n";
 
@@ -30,7 +31,8 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
   const entities = specEntries(spec, descriptor.entities);
   const [field, setField] = useState(descriptor.entities);
   const [label, setLabel] = useState("");
-  const [entityType, setEntityType] = useState(type === "lifecycle" ? "active" : "backend");
+  const [entityType, setEntityType] = useState(type === "lifecycle" ? "active" : type === "floorplan" ? "feature" : "backend");
+  const [parent, setParent] = useState("");
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
   const [lane, setLane] = useState("");
@@ -71,13 +73,17 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
   const reservedMain = type === "lifecycle" && member.kind === "container" && member.role === "lane" && member.entry.id === "main";
   const add = async () => {
     let entry: Record<string, unknown> = { label: label.trim() };
-    if (isEntity) {
+    if (isEntity && type === "floorplan") {
+      entry = { label: label.trim(), kind: entityType, ...(entities.some((item) => item.id === parent) ? { parent } : {}) };
+    } else if (isEntity) {
       entry.type = entityType;
       if (type === "workflow" || type === "lifecycle") Object.assign(entry, { lane: laneId, col });
       if (type === "dataflow") Object.assign(entry, { stage, row: Math.max(-1, ...entities.filter((item) => item.stage === stage).map((item) => Number(item.row) || 0)) + 1 });
       if (type === "architecture") Object.assign(entry, freePlacement
         ? { pos, size: [160, 64] }
         : { col, row: Math.max(-1, ...entities.filter((item) => item.col === col).map((item) => Number(item.row) || 0)) + 1 });
+    } else if (isRelation && type === "floorplan") {
+      entry = { from, to, ...(label.trim() ? { label: label.trim() } : {}) };
     } else if (isRelation) Object.assign(entry, { from, to });
     else if (field === "boundaries") Object.assign(entry, { kind: "region", wraps });
     else if (isRange) Object.assign(entry, { fromCol: col, toCol, ...(field === "groups" ? { lane: laneId } : {}) });
@@ -85,7 +91,7 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
       Object.assign(entry, { from: fromY, to: toY });
       if (field === "activations") entry = { participant: from, from: fromY, to: toY };
     }
-    if (isEntity || isRelation || semanticContainers(descriptor).some((container) => container.field === field && container.keyedBy === "id")) {
+    if (isEntity || (isRelation && !descriptor.noRelationIds) || semanticContainers(descriptor).some((container) => container.field === field && container.keyedBy === "id")) {
       entry.id = `item-${createDiagramId()}`;
     }
     if (await run(addSemanticEntry(type, field, entry))) setLabel("");
@@ -147,10 +153,15 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
       </select></Field>
       {field !== "activations" ? <Field label={t("diagram.semantic.label")}><input data-testid="semantic-add-label" value={label} onChange={(event) => setLabel(event.target.value)} /></Field> : null}
       {isEntity ? <Field label={t("diagram.semantic.type")}><select data-testid="semantic-add-type" value={entityType} onChange={(event) => setEntityType(event.target.value)}>
-        {(type === "lifecycle" ? LIFECYCLE_STATE_TYPES : COMPONENT_TYPES).map((value) => <option key={value} value={value}>{value}</option>)}
+        {(type === "lifecycle" ? LIFECYCLE_STATE_TYPES : type === "floorplan" ? FLOORPLAN_NODE_KINDS : COMPONENT_TYPES).map((value) => <option key={value} value={value}>{value}</option>)}
       </select></Field> : null}
       {isRelation || field === "activations" ? <Field label={t(field === "activations" ? "diagram.semantic.participant" : "diagram.semantic.from")}>
         <select data-testid="semantic-add-from" value={from} onChange={(event) => setSource(event.target.value)}>{entityOptions}</select>
+      </Field> : null}
+      {isEntity && type === "floorplan" ? <Field label={t("diagram.semantic.parent")}>
+        <select data-testid="semantic-add-parent" value={parent} onChange={(event) => setParent(event.target.value)}>
+          <option value="">{t("diagram.semantic.parentNone")}</option>{entityOptions}
+        </select>
       </Field> : null}
       {isRelation ? <Field label={t("diagram.semantic.to")}><select data-testid="semantic-add-to" value={to} onChange={(event) => setTarget(event.target.value)}>{entityOptions}</select></Field> : null}
       {((isEntity && (type === "workflow" || type === "lifecycle")) || field === "groups") ? <Field label={t("diagram.semantic.lane")}>
@@ -172,7 +183,7 @@ export function SemanticStructureEditor({ member, run, remove: removeSelection }
         <Field label={t("diagram.semantic.rangeTo")}><input type="number" min={72} value={toY} data-testid="semantic-add-to-y" onChange={(event) => setToY(Number(event.target.value))} /></Field>
       </> : null}
       {field === "boundaries" ? <fieldset><legend>{t("diagram.semantic.members")}</legend>{checkboxList(wraps, setWraps)}</fieldset> : null}
-      <button type="button" data-testid="semantic-add-confirm" disabled={(field !== "activations" && label.trim().length === 0) || (isEntity && type === "architecture" && !freePlacement && (col < 0 || col > maxCol || !Number.isInteger(col)))}
+      <button type="button" data-testid="semantic-add-confirm" disabled={(field !== "activations" && !(isRelation && type === "floorplan") && label.trim().length === 0) || (isEntity && type === "architecture" && !freePlacement && (col < 0 || col > maxCol || !Number.isInteger(col)))}
         onClick={() => void add()}>{t("diagram.semantic.add")}</button>
     </fieldset>
   </div>;

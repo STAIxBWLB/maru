@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { archifySpecToDataset } from "./archifyCodec";
 import { deserializeDoc, serializeDoc } from "./persistence";
-import { SEMANTIC_DIAGRAM_TYPES, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
+import { ARCHIFY_DIAGRAM_TYPES as SEMANTIC_DIAGRAM_TYPES, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
 import {
   detachSemanticDataset,
   mintRelationIds,
