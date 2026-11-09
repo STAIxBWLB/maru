@@ -162,7 +162,8 @@ fn png_ipc_rejects_busy_oversized_and_svg_requests() {
     .unwrap();
     invalid_spec["connections"][0]["to"] = serde_json::json!("missing-node");
     let rejected_layout = json!({"specJson":invalid_spec.to_string(),"format":"png"}).to_string();
-    let expected_diagnostics = maru_diagram_engine::render::render_png_artifact_json(&rejected_layout).diagnostics;
+    let expected_diagnostics =
+        maru_diagram_engine::render::render_png_artifact_json(&rejected_layout).diagnostics;
     let refused_value = invoke(&view, "render_png", &rejected_layout).unwrap_err();
     assert!(refused_value.get("bytes").is_none());
     let refused = ipc_error(refused_value);

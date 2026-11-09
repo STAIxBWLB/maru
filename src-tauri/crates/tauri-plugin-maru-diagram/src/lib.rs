@@ -436,8 +436,7 @@ mod commands {
             let _permit = permit;
             #[cfg(test)]
             {
-                *trace.lock().expect("test worker trace mutex") =
-                    Some(std::thread::current().id());
+                *trace.lock().expect("test worker trace mutex") = Some(std::thread::current().id());
             }
             maru_diagram_engine::render::render_png_artifact_json(&input)
         })
