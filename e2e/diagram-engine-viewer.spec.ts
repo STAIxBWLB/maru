@@ -146,7 +146,8 @@ test.describe("standalone engine diagram viewer", () => {
       await page.goto(fileUrl);
       await page.locator('svg [data-kind="node"][data-source-id="a"]').click({ force: true });
       await expect(page.locator("#selection")).toContainText("node a - 입력");
-      await expect(page.locator("#offline-viewer-source")).toContainText("offlineViewerPwned");
+      const embedded = await page.locator("#offline-viewer-source").evaluate((script) => JSON.parse(script.textContent ?? "{}"));
+      expect(embedded.components[0].label).toBe(hostileLabel);
       await expect(page.locator("img")).toHaveCount(0);
       await expect(page.locator("script")).toHaveCount(2);
       expect(await page.evaluate(() => (window as Window & { __offlineViewerPwned?: number }).__offlineViewerPwned)).toBeUndefined();
