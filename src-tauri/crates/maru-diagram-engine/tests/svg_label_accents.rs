@@ -295,7 +295,10 @@ fn route_labels_use_other_family_default_arrow_and_capture_primary_line_counts()
         assert!(check_svg_artifact(&svg, &geometry, &options).is_empty());
 
         let mut note_only = fixture("lifecycle");
-        note_only["transitions"][0]["label"] = Value::Null;
+        note_only["transitions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("label");
         note_only["transitions"][0]["note"] = json!("Details only");
         let (svg, geometry, options) = render(&note_only, theme);
         assert_eq!(
