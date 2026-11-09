@@ -944,7 +944,7 @@ fn validate_legacy_edit_args(argv: &[String]) -> Result<(), String> {
     if !argv.len().is_multiple_of(2) {
         return Err("hwped_bad_request: opsArgv must be --flag value pairs (opsToArgv output); send valid pairs or use the ops JSON array".to_string());
     }
-    for pair in argv.chunks_exact(2) {
+    for pair in argv.as_chunks::<2>().0 {
         if !LEGACY_EDIT_FLAGS.contains(&pair[0].as_str()) {
             return Err(format!("hwped_bad_request: opsArgv flag {:?} is not a permitted legacy edit operation; send opsToArgv operation flags or use the version-gated JSON ops channel for asset operations", pair[0]));
         }
