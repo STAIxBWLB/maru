@@ -449,6 +449,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "legend-entry-box" => Some("legend-entry"),
                 "page" | "legend-box" | "node" | "container" | "route" | "label"
                 | "legend-entry" => None,
+                _ if is_semantic => None,
                 _ => Some("__invalid__"),
             };
             let parent = node.parent_element();

@@ -112,10 +112,9 @@ fn caption(g: &GeometryDocument, target: &str) -> String {
         .filter(|l| {
             l.target_id == target
                 && !l.text.is_empty()
-                && l.id.as_ref().is_some_and(|id| {
-                    id.starts_with(&format!("node:{target}:"))
-                        || id.starts_with(&format!("container:{target}:"))
-                })
+                && l.id
+                    .as_ref()
+                    .is_some_and(|id| id.starts_with(&format!("container:{target}:")))
         })
         .map(|l| l.text.as_str())
         .collect();
