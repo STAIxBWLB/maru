@@ -342,6 +342,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "font-weight",
                 "font-kerning",
                 "font-variant-ligatures",
+                "text-rendering",
                 "style",
                 "space",
                 "fill",
@@ -585,6 +586,7 @@ fn check_label(
     );
     require_attr(text, "font-kerning", "none", &path, errors);
     require_attr(text, "font-variant-ligatures", "none", &path, errors);
+    require_attr(text, "text-rendering", "geometricPrecision", &path, errors);
     require_attr(
         text,
         "font-size",

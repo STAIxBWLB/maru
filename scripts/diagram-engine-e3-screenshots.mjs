@@ -48,6 +48,7 @@ try{
     await document.fonts.load('400 13px "Noto Sans CJK KR"',"입력처리완료");await document.fonts.load('700 13px "Noto Sans CJK KR"',"입력처리완료");await document.fonts.ready;
     if(!document.fonts.check('700 13px "Noto Sans CJK KR"',"입력"))throw new Error("Pinned CJK font did not load; stop capture instead of accepting fallback.");
     document.body.innerHTML=first.svg;
+    await document.fonts.ready;
     const root=document.querySelector("svg");if(root.getAttribute("role")!=="img"||root.querySelector("title").textContent!==options.title)throw new Error("SVG accessibility root differs from source metadata");
     const labels=Array.from(root.querySelectorAll('[data-kind="label"]'));
     const typographicBounds=labels.map(l=>{if(!(l instanceof SVGGraphicsElement))throw new Error("Label is not an SVG graphics element");const b=l.getBBox();return {x:b.x,y:b.y,width:b.width,height:b.height};});
@@ -68,7 +69,7 @@ try{
         const style=getComputedStyle(element);
         if(Math.abs(parseFloat(style.fontSize)-expected.fontSize/64)>1/64||Number(style.fontWeight)!==expected.font.weight)throw new Error("Browser text font differs from geometry");
         if(Math.abs(Number(element.getAttribute("x"))-glyph.position.x/64)>1/64||Math.abs(Number(element.getAttribute("y"))-glyph.position.y/64)>1/64)throw new Error("Browser glyph origin differs from geometry");
-        if(Math.abs(element.getComputedTextLength()-glyph.advance/64)>1/64)throw new Error(`Pinned-font scalar advance differs at label ${i}, glyph ${j}`);
+        if(Math.abs(element.getComputedTextLength()-glyph.advance/64)>1/64)throw new Error(`Pinned-font scalar advance differs: ${JSON.stringify({label:expected.id,text:expected.text,glyph:glyph.input,actual:element.getComputedTextLength(),expected:glyph.advance/64,font:style.font,fontFamily:style.fontFamily,fontWeight:style.fontWeight,fontSize:style.fontSize,loaded:Array.from(document.fonts).map(f=>({family:f.family,weight:f.weight,status:f.status}))})}`);
       }
     }
     return {svg:first.svg,nodes:scene.geometry.nodes.length,routes:scene.geometry.routes.length,labels:labels.length,width:scene.geometry.page.bounds.width/64,height:scene.geometry.page.bounds.height/64,fontLoaded:true,physicalScalarAdvancesChecked:true,typographicBounds};

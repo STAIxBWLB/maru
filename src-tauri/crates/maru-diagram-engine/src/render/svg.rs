@@ -296,7 +296,7 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         };
         write!(s,"<g id=\"{}\" data-kind=\"label\" data-source-id=\"{}\" data-target-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("label",&key),escaped(&key),escaped(&l.target_id),escaped(&l.text)).unwrap();
         rect(&mut s, "label-bounds", l.bounds, 0, "none", "none", "0");
-        write!(s,"<text data-kind=\"label-text\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" font-kerning=\"none\" font-variant-ligatures=\"none\" style=\"font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0\" xml:space=\"preserve\" fill=\"{color}\" aria-hidden=\"true\">",fixed(l.font_size.into()),l.font.weight).unwrap();
+        write!(s,"<text data-kind=\"label-text\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" font-kerning=\"none\" font-variant-ligatures=\"none\" text-rendering=\"geometricPrecision\" style=\"font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0\" xml:space=\"preserve\" fill=\"{color}\" aria-hidden=\"true\">",fixed(l.font_size.into()),l.font.weight).unwrap();
         for (j, p) in l
             .glyphs
             .iter()
