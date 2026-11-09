@@ -2449,10 +2449,22 @@ mod tests {
                 _ => lifecycle::place(&typed(&spec).unwrap(), &mut builder),
             }
             .unwrap();
+            if kind != "sequence" {
+                let via = blocked["via"][0].as_array().unwrap();
+                let anchor = point(via[0].as_f64().unwrap(), via[1].as_f64().unwrap()).unwrap();
+                builder.document.containers.push(GeometryContainer {
+                    id: "unrelated-card".into(),
+                    kind: "card".into(),
+                    bounds: rect(anchor.x - 64, anchor.y - 64, 128, 128).unwrap(),
+                });
+            }
             let (scene, diagnostics, ok) = builder.finish(&typed(&spec["meta"]).unwrap()).unwrap();
             assert!(!ok, "{kind}");
             assert_eq!(diagnostics.len(), 1, "{kind}: {diagnostics:?}");
             assert_eq!(diagnostics[0].path, format!("/{collection}/0"));
+            if kind != "sequence" {
+                assert_eq!(diagnostics[0].code, format!("{kind}/route-blocked"));
+            }
             assert_eq!(scene.routes.len(), 2);
             assert_eq!(
                 scene
