@@ -3,7 +3,7 @@
 //! `code: message` string; every other command keeps `Result<T, String>`
 //! (ERR-04 — display-only errors are out of scope).
 //!
-//! The four contract codes below are pinned by `ipc_error_codes_are_stable`:
+//! The contract codes below are pinned by `ipc_error_codes_are_stable`:
 //! renaming one fails `cargo test` here, and the `src/lib/types.ts` union
 //! mirror fails `tsc -b` on the frontend side — a rename breaks the build on
 //! both sides of the bridge (ERR-02).
@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 
 pub const SKILLS_SOURCE_BUSY: &str = "skills_source_busy";
 pub const SKILLS_SOURCE_STALE: &str = "skills_source_stale";
+/// The selected hwp-cli binary supports legacy editing but lacks a requested
+/// JSON-edit or render-layout feature. The message carries the upgrade step.
+pub const HWPED_FEATURE_REQUIRES_VERSION: &str = "hwped_feature_requires_version";
 
 /// Optimistic-concurrency conflict from `today_mutate` / `today_finalize_setup`
 /// / `today_calendar_publish`.
@@ -210,6 +213,10 @@ mod tests {
     fn ipc_error_codes_are_stable() {
         assert_eq!(SKILLS_SOURCE_BUSY, "skills_source_busy");
         assert_eq!(SKILLS_SOURCE_STALE, "skills_source_stale");
+        assert_eq!(
+            HWPED_FEATURE_REQUIRES_VERSION,
+            "hwped_feature_requires_version"
+        );
         assert_eq!(TODAY_CONFLICT, "today_conflict");
         assert_eq!(TASK_CONFLICT, "task_conflict");
         assert_eq!(DOCUMENT_CONFLICT, "document_conflict");

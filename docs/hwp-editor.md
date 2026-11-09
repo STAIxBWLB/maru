@@ -20,7 +20,7 @@ CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 | Command | CLI invocation | Returns |
 |---|---|---|
 | `hwped_read` | `hwp cat <in> --format markdown --with-segments` | CatEnvelope JSON |
-| `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report [--layout-json <file>]` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }] }` |
+| `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report [--layout-json <file>]` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }], notes?: [{ code, message }] }` |
 | `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial]` | `{ name, dataBase64 }` |
 | `hwped_compose` | `hwp compose <spec.json> -o <out> --report` | `{ name, dataBase64, report? }` |
 | `hwped_validate` | `hwp validate <in> --json` (exit 1 = invalid, report still parsed) | `{ valid, errors }` |
@@ -37,6 +37,12 @@ Rust checks only the array envelope; the engine owns the operation grammar. Run
 addresses and half-open source WCHAR/UTF-16 `chars` ranges pass through unchanged.
 They are never converted to text selectors. Legacy clients keep sending
 `opsArgv` flag/value pairs and remain supported from the global 0.8.7 floor.
+The legacy channel accepts only the named non-file edit-operation flags from
+`opsToArgv`. CLI controls and file options (`--ops`, `--report`, `--output`,
+`--verify`, and `--allow-partial`) are refused. Asset operations
+`--insert-image` and `--seal` use the explicit JSON channel instead. Values
+starting with `-` also use JSON; option-like values are never spliced into
+the legacy argv. JSON requires the 0.20.0 feature floor.
 Both or neither channel, and a nonarray JSON payload, fail with
 `hwped_bad_request`. Explicit null keys are present, not an alternative spelling
 of omission, and are rejected. Temporary files are removed after output
@@ -50,9 +56,19 @@ returned page receives its matching `layout` by actual page number, containing
 `width_pt`, `height_pt`, `rows` and `truncated`. Point coordinates are
 independent of image DPI. Row order, repeated segment IDs, nullable boxes and
 source-character ranges are preserved. Source ranges are not Markdown offsets
-and must not be used to slice JS text. A missing optional artifact omits
-`layout`; a present but malformed or incomplete artifact fails with
-`hwp_parse_failed`, rather than being presented as empty measured geometry.
+and must not be used to slice JS text. Row box coordinates must be finite, but
+the bridge preserves reversed endpoints because the wire schema allows them;
+source-character ranges still require `start <= end`.
+
+When layout metadata is automatic on a 0.20+ binary, missing, malformed or
+incomplete metadata does not discard valid rendered pages. The response omits
+`layout` for every page and includes one nonfatal note such as
+`{ "code": "layout_metadata_unavailable", "message": "..." }`. Metadata is
+all-or-nothing across the returned pages. `options.layout: true` instead fails
+with `hwp_parse_failed` when the artifact is missing, malformed, or does not
+cover every rendered page. `options.layout: false` and automatic rendering on
+older supported binaries do not request metadata and omit both `layout` and
+`notes`, preserving the legacy image-only response shape.
 
 `hwped_capabilities` always reports the detected version and base editing
 availability. It includes `editOps: "v1"` only when the detected binary meets

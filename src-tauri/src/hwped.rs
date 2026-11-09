@@ -115,8 +115,24 @@ pub struct HwpedRenderPage {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HwpedRenderNote {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HwpedRenderResponse {
     pub pages: Vec<HwpedRenderPage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<HwpedRenderNote>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LayoutMetadataMode {
+    Disabled,
+    Optional,
+    Required,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -248,28 +264,69 @@ struct CachedVersion {
     version: String,
 }
 
-/// Re-probe a replaced binary, without sharing a version across binary paths.
-fn ensure_version(bin: &Path) -> Result<String, String> {
-    static VERSIONS: OnceLock<Mutex<BTreeMap<PathBuf, CachedVersion>>> = OnceLock::new();
-    let path = std::fs::canonicalize(bin).map_err(|error| {
-        format!("hwp_version: cannot resolve hwp binary: {error}; check MARU_HWP_BIN and retry")
-    })?;
-    let modified = std::fs::metadata(&path).and_then(|metadata| metadata.modified()).map_err(|error| {
-        format!("hwp_version: cannot inspect hwp binary modification time: {error}; check the binary permissions and retry")
-    })?;
-    let mut versions = VERSIONS
-        .get_or_init(|| Mutex::new(BTreeMap::new()))
-        .lock()
-        .map_err(|_| {
-            "hwp_version: version cache lock is poisoned; restart Maru and retry".to_string()
-        })?;
-    if let Some(cached) = versions
-        .get(&path)
-        .filter(|cached| cached.modified == modified)
+#[cfg(any(windows, test))]
+fn windows_metadata_target(bin: &Path, is_file: impl Fn(&Path) -> bool) -> PathBuf {
+    if bin
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
     {
-        return Ok(cached.version.clone());
+        return bin.to_path_buf();
     }
-    let stdout = run_hwp_ok(&path, &[OsString::from("--version")])?;
+    let mut executable = bin.as_os_str().to_os_string();
+    executable.push(".exe");
+    let executable = PathBuf::from(executable);
+    if is_file(&executable) {
+        executable
+    } else {
+        bin.to_path_buf()
+    }
+}
+
+fn version_metadata_path(bin: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        windows_metadata_target(bin, Path::is_file)
+    }
+    #[cfg(not(windows))]
+    {
+        bin.to_path_buf()
+    }
+}
+
+/// Re-probe each logical invocation when its canonical executable is replaced.
+/// The caller's path is used for execution so symlink shims retain argv[0].
+fn ensure_version(bin: &Path) -> Result<String, String> {
+    static VERSIONS: OnceLock<Mutex<BTreeMap<(PathBuf, PathBuf), CachedVersion>>> = OnceLock::new();
+
+    let metadata_path = version_metadata_path(bin);
+    let canonical_path =
+        std::fs::canonicalize(&metadata_path).unwrap_or_else(|_| bin.to_path_buf());
+    let modified = std::fs::metadata(&metadata_path)
+        .and_then(|metadata| metadata.modified())
+        .ok();
+    let cache_key = modified.map(|modified| ((bin.to_path_buf(), canonical_path), modified));
+
+    if let Some(((logical_path, canonical_path), modified)) = &cache_key {
+        let versions = VERSIONS
+            .get_or_init(|| Mutex::new(BTreeMap::new()))
+            .lock()
+            .map_err(|_| {
+                "hwp_version: version cache lock is poisoned; restart Maru and retry".to_string()
+            })?;
+        if let Some(cached) = versions
+            .get(&(logical_path.clone(), canonical_path.clone()))
+            .filter(|cached| cached.modified == *modified)
+        {
+            return Ok(cached.version.clone());
+        }
+    }
+
+    let stdout = run_hwp_ok(bin, &[OsString::from("--version")]).map_err(|cause| {
+        format!(
+            "hwp_version: cannot query the selected hwp binary: {cause}; check MARU_HWP_BIN or PATH and retry"
+        )
+    })?;
     let version = parse_version(&stdout).ok_or_else(|| {
         "hwp_version: cannot parse hwp --version output; install a supported hwp-cli release and retry".to_string()
     })?;
@@ -280,15 +337,27 @@ fn ensure_version(bin: &Path) -> Result<String, String> {
         ));
     }
     let text = format!("{}.{}.{}", version.0, version.1, version.2);
-    versions.insert(
-        path,
-        CachedVersion {
-            modified,
-            version: text.clone(),
-        },
-    );
+    if let Some(((logical_path, canonical_path), modified)) = cache_key {
+        VERSIONS
+            .get_or_init(|| Mutex::new(BTreeMap::new()))
+            .lock()
+            .map_err(|_| {
+                "hwp_version: version cache lock is poisoned; restart Maru and retry".to_string()
+            })?
+            .insert(
+                (logical_path, canonical_path),
+                CachedVersion {
+                    modified,
+                    version: text.clone(),
+                },
+            );
+    }
     Ok(text)
 }
+
+#[cfg(test)]
+#[path = "hwped/version_tests.rs"]
+mod version_tests;
 
 /// Legacy failures retain their original string wire shape. New feature
 /// refusals use the app's structured IPC error without flattening its code.
@@ -324,7 +393,7 @@ fn require_feature_version(version: &str, feature: &str) -> Result<(), HwpedBrid
         return Ok(());
     }
     Err(HwpedBridgeError::FeatureVersion(crate::ipc_error::IpcError {
-        code: "hwped_feature_requires_version".to_string(),
+        code: crate::ipc_error::HWPED_FEATURE_REQUIRES_VERSION.to_string(),
         message: format!("{feature} requires hwp-cli >= 0.20.0; detected {version}. Upgrade hwp-cli to 0.20.0 or later, or set MARU_HWP_BIN before restarting Maru, then retry."),
     }))
 }
@@ -470,14 +539,11 @@ fn validate_layout_row(row: &Value) -> Result<(), String> {
                     .and_then(Value::as_f64)
                     .filter(|value| value.is_finite())
             });
-            let [Some(x0), Some(y0), Some(x1), Some(y1)] = coordinates else {
+            let [Some(_x0), Some(_y0), Some(_x1), Some(_y1)] = coordinates else {
                 return Err(invalid_render_layout(
                     "row.box requires four finite coordinates or null",
                 ));
             };
-            if x0 > x1 || y0 > y1 {
-                return Err(invalid_render_layout("row.box coordinates must be ordered"));
-            }
         }
         None => {
             return Err(invalid_render_layout(
@@ -587,8 +653,9 @@ fn render_attempt(
     format: &str,
     pages: &str,
     dpi: u32,
-    include_layout: bool,
-) -> Result<Vec<HwpedRenderPage>, String> {
+    layout_mode: LayoutMetadataMode,
+) -> Result<(Vec<HwpedRenderPage>, Vec<HwpedRenderNote>), String> {
+    let include_layout = layout_mode != LayoutMetadataMode::Disabled;
     let out_base = dir.join(format!("page.{format}"));
     let report_path = dir.join(format!("render-report-{format}.json"));
     let layout_path = dir.join(format!("render-layout-{format}.json"));
@@ -613,10 +680,34 @@ fn render_attempt(
         ]);
     }
     run_hwp_ok(bin, &args)?;
-    let layouts = if include_layout {
-        read_render_layouts(&layout_path)?
-    } else {
-        None
+    let mut notes = Vec::new();
+    let mut layouts = match layout_mode {
+        LayoutMetadataMode::Disabled => None,
+        LayoutMetadataMode::Optional => match read_render_layouts(&layout_path) {
+            Ok(Some(layouts)) => Some(layouts),
+            Ok(None) => {
+                notes.push(HwpedRenderNote {
+                    code: "layout_metadata_unavailable".to_string(),
+                    message: "optional render layout metadata file was not produced; continue viewing the returned images, or request layout:true to require geometry and diagnose the missing artifact".to_string(),
+                });
+                None
+            }
+            Err(error) => {
+                notes.push(HwpedRenderNote {
+                    code: "layout_metadata_unavailable".to_string(),
+                    message: format!("optional render layout metadata was invalid; image pages were returned without layout: {error}"),
+                });
+                None
+            }
+        },
+        LayoutMetadataMode::Required => match read_render_layouts(&layout_path)? {
+            Some(layouts) => Some(layouts),
+            None => {
+                return Err(invalid_render_layout(
+                    "required layout metadata file was not produced",
+                ));
+            }
+        },
     };
     // Multi-page renders land as page-<n>.<ext>; a single selected page keeps
     // the exact -o name. The report's selected_pages pins page numbers.
@@ -652,18 +743,47 @@ fn render_attempt(
     } else {
         None
     };
+    let page_numbers: Vec<u32> = files
+        .iter()
+        .enumerate()
+        .map(|(index, (num, _))| {
+            if *num > 0 {
+                *num
+            } else {
+                selected
+                    .get(index)
+                    .copied()
+                    .or(single_page)
+                    .unwrap_or(index as u32 + 1)
+            }
+        })
+        .collect();
+    if let Some(layout_map) = &layouts {
+        let missing_pages: Vec<_> = page_numbers
+            .iter()
+            .filter(|page| !layout_map.contains_key(page))
+            .copied()
+            .collect();
+        if !missing_pages.is_empty() {
+            let error = invalid_render_layout(format!(
+                "layout metadata is missing rendered page(s) {missing_pages:?}"
+            ));
+            match layout_mode {
+                LayoutMetadataMode::Optional => {
+                    notes.push(HwpedRenderNote {
+                        code: "layout_metadata_unavailable".to_string(),
+                        message: format!("optional render layout metadata was incomplete; image pages were returned without layout: {error}"),
+                    });
+                    layouts = None;
+                }
+                LayoutMetadataMode::Required => return Err(error),
+                LayoutMetadataMode::Disabled => unreachable!(),
+            }
+        }
+    }
     let mut images = Vec::new();
-    for (index, (num, file)) in files.iter().enumerate() {
+    for ((_, file), page) in files.iter().zip(page_numbers) {
         let data = std::fs::read(file).map_err(|err| format!("hwp_stage_failed: {err}"))?;
-        let page = if *num > 0 {
-            *num
-        } else {
-            selected
-                .get(index)
-                .copied()
-                .or(single_page)
-                .unwrap_or(index as u32 + 1)
-        };
         let size = if format == "png" {
             png_size(&data)
         } else {
@@ -678,17 +798,10 @@ fn render_attempt(
             data_base64: BASE64.encode(&data),
             layout: layouts
                 .as_ref()
-                .map(|layouts| {
-                    layouts.get(&page).cloned().ok_or_else(|| {
-                        invalid_render_layout(format!(
-                            "rendered page {page} is missing from layout metadata"
-                        ))
-                    })
-                })
-                .transpose()?,
+                .and_then(|layouts| layouts.get(&page).cloned()),
         });
     }
-    Ok(images)
+    Ok((images, notes))
 }
 
 fn render_now(
@@ -698,10 +811,15 @@ fn render_now(
 ) -> Result<HwpedRenderResponse, HwpedBridgeError> {
     let bin = hwp_bin()?;
     let version = ensure_version(&bin)?;
-    let include_layout = options.layout.unwrap_or(supports_feature_version(&version));
-    if include_layout {
-        require_feature_version(&version, "render layout rows")?;
-    }
+    let layout_mode = match options.layout {
+        Some(false) => LayoutMetadataMode::Disabled,
+        Some(true) => {
+            require_feature_version(&version, "render layout rows")?;
+            LayoutMetadataMode::Required
+        }
+        None if supports_feature_version(&version) => LayoutMetadataMode::Optional,
+        None => LayoutMetadataMode::Disabled,
+    };
     let requested = options.format.as_deref().unwrap_or("svg").to_string();
     if requested != "svg" && requested != "png" {
         return Err(format!(
@@ -730,14 +848,14 @@ fn render_now(
         &requested,
         &pages,
         dpi,
-        include_layout,
+        layout_mode,
     ) {
-        Ok(images) => Ok(HwpedRenderResponse { pages: images }),
+        Ok((pages, notes)) => Ok(HwpedRenderResponse { pages, notes }),
         // SVG is the default; fall back to PNG when the renderer refuses.
         Err(err) if requested == "svg" && err.starts_with("hwp_failed:") => {
-            let images =
-                render_attempt(&bin, tmp.path(), &input, "png", &pages, dpi, include_layout)?;
-            Ok(HwpedRenderResponse { pages: images })
+            let (pages, notes) =
+                render_attempt(&bin, tmp.path(), &input, "png", &pages, dpi, layout_mode)?;
+            Ok(HwpedRenderResponse { pages, notes })
         }
         Err(err) => Err(err.into()),
     }
@@ -791,6 +909,55 @@ enum EditOperations {
     Json(Value),
 }
 
+/// The non-file operation flags emitted by the legacy core opsToArgv adapter.
+/// CLI modes, output/report paths and ops-file selection are never edit ops.
+const LEGACY_EDIT_FLAGS: &[&str] = &[
+    "--replace",
+    "--set-cell",
+    "--set-field",
+    "--set-meta",
+    "--create-field",
+    "--create-bookmark",
+    "--create-hyperlink",
+    "--set-format",
+    "--set-align",
+    "--insert-para",
+    "--insert-para-before",
+    "--delete-para",
+    "--add-row",
+    "--add-col",
+    "--delete-row",
+    "--delete-col",
+    "--merge-cells",
+    "--split-cell",
+    "--add-table",
+    "--clone-table",
+    "--set-para",
+    "--set-page",
+    "--delete-image",
+    "--delete-table",
+    "--delete-field",
+    "--delete-bookmark",
+];
+
+fn validate_legacy_edit_args(argv: &[String]) -> Result<(), String> {
+    if !argv.len().is_multiple_of(2) {
+        return Err("hwped_bad_request: opsArgv must be --flag value pairs (opsToArgv output); send valid pairs or use the ops JSON array".to_string());
+    }
+    for pair in argv.chunks_exact(2) {
+        if !LEGACY_EDIT_FLAGS.contains(&pair[0].as_str()) {
+            return Err(format!("hwped_bad_request: opsArgv flag {:?} is not a permitted legacy edit operation; send opsToArgv operation flags or use the version-gated JSON ops channel for asset operations", pair[0]));
+        }
+        if pair[1].starts_with('-') {
+            return Err("hwped_bad_request: an opsArgv value starts with a CLI option prefix; send literal hyphen-leading values through the JSON ops channel, and pass verify/allowPartial in their dedicated fields".to_string());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod argv_tests;
+
 fn edit_now(
     document: HwpedDocumentRef,
     ops_argv: Option<Value>,
@@ -804,14 +971,7 @@ fn edit_now(
             let argv: Vec<String> = serde_json::from_value(argv).map_err(|_| {
                 "hwped_bad_request: opsArgv must be an array of strings; send --flag value pairs or use the ops JSON array".to_string()
             })?;
-            if !argv.len().is_multiple_of(2)
-                || argv
-                    .iter()
-                    .step_by(2)
-                    .any(|argument| !argument.starts_with("--"))
-            {
-                return Err("hwped_bad_request: opsArgv must be --flag value pairs (opsToArgv output); send valid pairs or use the ops JSON array".to_string().into());
-            }
+            validate_legacy_edit_args(&argv)?;
             EditOperations::Argv(argv)
         }
         (None, Some(ops)) if ops.is_array() => EditOperations::Json(ops),
@@ -1201,6 +1361,17 @@ mod tests {
     }
 
     #[test]
+    fn layout_metadata_preserves_reversed_box_coordinates() {
+        let mut source = layout_artifact();
+        source["pages"][1]["rows"][0]["box"] = serde_json::json!({"x0":10,"y0":12,"x1":1,"y1":2});
+        let layouts = parse_render_layouts(&serde_json::to_vec(&source).unwrap()).unwrap();
+        assert_eq!(
+            layouts[&2].rows[0]["box"],
+            serde_json::json!({"x0":10,"y0":12,"x1":1,"y1":2})
+        );
+    }
+
+    #[test]
     fn present_malformed_layout_metadata_is_a_parse_failure() {
         let valid = layout_artifact();
         let mut cases = vec![serde_json::json!(null), serde_json::json!({})];
@@ -1216,10 +1387,6 @@ mod tests {
             ("/pages/0/height_pt", serde_json::json!(-1)),
             ("/pages/1/rows/0/kind", serde_json::json!("unsupported")),
             ("/pages/1/rows/0/id", serde_json::json!("")),
-            (
-                "/pages/1/rows/0/box",
-                serde_json::json!({"x0":10,"y0":0,"x1":1,"y1":1}),
-            ),
             (
                 "/pages/1/rows/0/source_chars",
                 serde_json::json!({"start":4,"end":2}),
@@ -1667,15 +1834,16 @@ echo "hwp 0.20.0"
     }
 
     #[cfg(unix)]
-    fn fake_layout_hwp(dir: &Path, artifact: Option<&[u8]>) -> PathBuf {
+    fn fake_layout_hwp(dir: &Path, artifact: Option<&[u8]>, version: &str) -> PathBuf {
         let binary = dir.join("hwp");
         if let Some(bytes) = artifact {
             std::fs::write(dir.join("layout-fixture.json"), bytes).unwrap();
         }
         let script = r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 0.20.0" ;;
+  --version) echo "hwp __VERSION__" ;;
   render)
+    printf '%s\n' "$*" >> "$(dirname "$0")/render-args"
     out=""; report=""; layout=""
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "-o" ]; then shift; out="$1"; fi
@@ -1683,17 +1851,18 @@ case "$1" in
       if [ "$1" = "--layout-json" ]; then shift; layout="$1"; fi
       shift
     done
-    [ -n "$out" ] && [ -n "$report" ] && [ -n "$layout" ] || exit 2
+    [ -n "$out" ] && [ -n "$report" ] || exit 2
     dir=$(dirname "$out")
     printf '<svg width="200pt" height="300pt"></svg>' > "$dir/page-2.svg"
     printf '<svg width="500pt" height="700pt"></svg>' > "$dir/page-5.svg"
     printf '{"selected_pages":[2,5]}' > "$report"
     fixture="$(dirname "$0")/layout-fixture.json"
-    if [ -f "$fixture" ]; then cp "$fixture" "$layout"; fi ;;
+    if [ -n "$layout" ] && [ -f "$fixture" ]; then cp "$fixture" "$layout"; fi ;;
   *) exit 2 ;;
 esac
 "#;
-        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
+        let script = script.replace("__VERSION__", version);
+        crate::test_support::write_executable_fixture(&binary, &script, 0o755).unwrap();
         binary
     }
 
@@ -1710,7 +1879,7 @@ esac
             std::fs::create_dir_all(&bin_dir).unwrap();
             let _env = EnvGuard::set(
                 "MARU_HWP_BIN",
-                &fake_layout_hwp(&bin_dir, artifact.as_deref()),
+                &fake_layout_hwp(&bin_dir, artifact.as_deref(), "0.20.0"),
             );
             let document = HwpedDocumentRef {
                 name: "문서.hwpx".to_string(),
@@ -1718,13 +1887,6 @@ esac
                 data_base64: Some(BASE64.encode(b"document")),
             };
             let rendered = run(hwped_render(document, None, None));
-            if artifact.as_deref() == Some(b"{".as_slice()) {
-                assert!(rendered
-                    .unwrap_err()
-                    .to_string()
-                    .starts_with("hwp_parse_failed:"));
-                continue;
-            }
             let rendered = rendered.unwrap();
             assert_eq!(
                 rendered
@@ -1734,17 +1896,140 @@ esac
                     .collect::<Vec<_>>(),
                 vec![2, 5]
             );
-            if artifact.is_some() {
+            if artifact
+                .as_deref()
+                .is_some_and(|bytes| bytes != b"{".as_slice())
+            {
                 assert_eq!(rendered.pages[0].layout.as_ref().unwrap().width_pt, 200.0);
                 assert_eq!(rendered.pages[1].layout.as_ref().unwrap().width_pt, 500.0);
                 assert_eq!(rendered.pages[0].layout.as_ref().unwrap().rows.len(), 2);
                 assert!(rendered.pages[0].layout.as_ref().unwrap().truncated);
+                assert!(rendered.notes.is_empty());
+                assert!(serde_json::to_value(&rendered)
+                    .unwrap()
+                    .get("notes")
+                    .is_none());
             } else {
-                for page in rendered.pages {
+                assert_eq!(rendered.notes.len(), 1);
+                assert_eq!(rendered.notes[0].code, "layout_metadata_unavailable");
+                for page in &rendered.pages {
                     assert!(page.layout.is_none());
                     assert!(serde_json::to_value(page).unwrap().get("layout").is_none());
+                    assert!(!page.data_base64.is_empty());
+                }
+                assert_eq!(
+                    serde_json::to_value(&rendered).unwrap()["notes"][0]["code"],
+                    "layout_metadata_unavailable"
+                );
+                if artifact.is_none() {
+                    assert!(rendered.notes[0].message.contains("not produced"));
+                } else {
+                    assert!(rendered.notes[0].message.contains("hwp_parse_failed"));
                 }
             }
+        }
+    }
+
+    fn partial_layout_artifact() -> Vec<u8> {
+        let mut artifact = super::tests::layout_artifact();
+        let page = artifact["pages"][1].clone();
+        artifact["selected_pages"] = serde_json::json!([2]);
+        artifact["pages"] = serde_json::json!([page]);
+        serde_json::to_vec(&artifact).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_layout_rejects_missing_malformed_and_incomplete_artifacts() {
+        for artifact in [None, Some(b"{".to_vec()), Some(partial_layout_artifact())] {
+            let home = crate::atomic_file::phase08_06::Home::new();
+            let bin_dir = home.root.path().join("bin");
+            std::fs::create_dir_all(&bin_dir).unwrap();
+            let _env = EnvGuard::set(
+                "MARU_HWP_BIN",
+                &fake_layout_hwp(&bin_dir, artifact.as_deref(), "0.20.0"),
+            );
+            let document = HwpedDocumentRef {
+                name: "required-layout.hwpx".to_string(),
+                path: None,
+                data_base64: Some(BASE64.encode(b"document")),
+            };
+            let error = run(hwped_render(
+                document,
+                Some(HwpedRenderOptions {
+                    layout: Some(true),
+                    ..HwpedRenderOptions::default()
+                }),
+                None,
+            ))
+            .unwrap_err()
+            .to_string();
+            assert!(error.starts_with("hwp_parse_failed:"), "{error}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn optional_incomplete_layout_drops_all_metadata_but_keeps_every_image() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let artifact = partial_layout_artifact();
+        let _env = EnvGuard::set(
+            "MARU_HWP_BIN",
+            &fake_layout_hwp(&bin_dir, Some(&artifact), "0.20.0"),
+        );
+        let document = HwpedDocumentRef {
+            name: "optional-layout.hwpx".to_string(),
+            path: None,
+            data_base64: Some(BASE64.encode(b"document")),
+        };
+        let rendered = run(hwped_render(document, None, None)).unwrap();
+        assert_eq!(rendered.pages.len(), 2);
+        assert!(rendered.pages.iter().all(|page| page.layout.is_none()));
+        assert!(rendered
+            .pages
+            .iter()
+            .all(|page| !page.data_base64.is_empty()));
+        assert_eq!(rendered.notes.len(), 1);
+        assert_eq!(rendered.notes[0].code, "layout_metadata_unavailable");
+        assert!(rendered.notes[0].message.contains("incomplete"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disabled_and_old_auto_layout_keep_legacy_image_only_shape() {
+        for (layout, version) in [(Some(false), "0.20.0"), (None, "0.8.7")] {
+            let home = crate::atomic_file::phase08_06::Home::new();
+            let bin_dir = home.root.path().join("bin");
+            std::fs::create_dir_all(&bin_dir).unwrap();
+            let _env = EnvGuard::set("MARU_HWP_BIN", &fake_layout_hwp(&bin_dir, None, version));
+            let document = HwpedDocumentRef {
+                name: "legacy-layout.hwpx".to_string(),
+                path: None,
+                data_base64: Some(BASE64.encode(b"document")),
+            };
+            let rendered = run(hwped_render(
+                document,
+                Some(HwpedRenderOptions {
+                    layout,
+                    ..HwpedRenderOptions::default()
+                }),
+                None,
+            ))
+            .unwrap();
+            assert_eq!(rendered.pages.len(), 2);
+            assert!(rendered.pages.iter().all(|page| page.layout.is_none()));
+            assert!(rendered.notes.is_empty());
+            let serialized = serde_json::to_value(&rendered).unwrap();
+            assert!(serialized.get("notes").is_none());
+            assert!(serialized["pages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|page| page.get("layout").is_none()));
+            let args = std::fs::read_to_string(bin_dir.join("render-args")).unwrap();
+            assert!(!args.contains("--layout-json"), "{args}");
         }
     }
 
@@ -1973,8 +2258,8 @@ esac
         }
     }
 
-    /// Run separately with a checksum-verified released binary so its real
-    /// version probe cannot share the fake-binary memo used by the unit suite.
+    /// Opt-in integration against a checksum-verified released binary; the
+    /// hermetic suite needs only its isolated scripted fixtures.
     #[cfg(unix)]
     #[test]
     #[ignore = "requires MARU_HWPED_REAL_TEST_BIN pointing to checksum-verified hwp-cli >= 1.3.1"]
