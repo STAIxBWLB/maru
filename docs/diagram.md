@@ -1378,30 +1378,45 @@ case IDs and diagnostic codes are in `boundaryEvidence.modelDifferences`.
 | `artifact-route-rounding` | 2 | 1 | 0 | 1 | `e2-boundary-lifecycle-physical-corridor-7` |
 | `readable-v2-implicit-placement` | 8 | 8 | 0 | 0 | No differing verdict |
 | `readable-v2-placement` | 15 | 8 | 2 | 5 | `e2-boundary-workflow-v2-arrow-spacing-8`; `e2-boundary-workflow-v2-turn-7` |
-| `text-capacity` | 76 | 49 | 25 | 2 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
+| `text-capacity` | 76 | 49 | 24 | 3 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
+
+The 12 primary/detail role-fit cases now have per-case source formulas, widths,
+font sizes, glyph-advance sums, and Noto widths scaled to the source minimum in
+the ledger. Source estimates fit their budgets by 0px to 4.4px while Noto
+exceeds the role budget by 13.240385px to 75.059659px; each recorded Noto box
+matches its glyph advances within 1/64px. Pinned Noto geometry is authoritative
+for these text-fit
+checks. The separate sequence segment-title case records a 430px legacy estimate
+and a 673px Noto requirement against a 430px frame.
 
 The post-fix audit preserves the original 41 model-difference cases and the
-current 35 mismatches in a 42-case union. Seven original cases now agree, and
-one new sequence brand-rail case is current-only. Across all 101 boundary
-inputs, 66 verdicts agree, 27 are oracle-green/engine-refused, and 8 are
-oracle-red/engine-admitted. The [per-case admission ledger](performance/diagram-engine-e2-admission-ledger.json)
+current 35 mismatches in a 43-case union. Eight original cases now agree, and
+two current-only cases record the Noto sequence brand rail and automatic label
+placement boundaries. Across all 101 boundary inputs, 66 verdicts agree, 26
+are oracle-green/engine-refused, and 9 are oracle-red/engine-admitted. The
+[per-case admission ledger](performance/diagram-engine-e2-admission-ledger.json)
 records exact source inputs, original oracle results, current geometry and
 diagnostics, numeric boundary evidence, source references, and dispositions.
 The dataflow authored-via cases `e2-boundary-dataflow-label-route-3` and
-`e2-boundary-dataflow-label-route-5` now pass with retained nonempty routes;
-endpoint masking remains scoped to the route's own source/target nodes.
+`e2-boundary-dataflow-label-route-5` and sequence case
+`e2-boundary-sequence-family-label-route-above` now pass with retained
+nonempty routes. Dataflow endpoint masking is scoped to the route's own
+source/target nodes. The sequence's paired below-boundary case remains an
+oracle-red/engine-admitted automatic-placement difference: E2 moves the Noto
+label below its route to clear other message ports. Two records remain pending
+owner policy rulings: the workflow shared trunk and lifecycle band title.
 
 The model differences measure Noto text capacity against legacy text masks,
 readable-v2 placement and implicit-port solver differences. Lifecycle's rounded
 SVG-corner crossing is separately labelled `artifact-route-rounding`; the
 geometry engine does not implement E3 SVG corner rounding. In particular,
-**2 oracle-green authored-coordinate inputs still get route-blocked refusals**
+**1 oracle-green authored-coordinate input still gets a route-blocked refusal**
 on engine-placed geometry:
-`e2-boundary-sequence-family-label-route-above` and
-`e2-boundary-workflow-v2-route-lane-title-63`. They remain refusals under the
-provenance rule, not downgraded notices. The two dataflow endpoint-via cases
-are now admitted by the route-scoped endpoint mask. The remaining migration
-risk stays explicit for E4.
+`e2-boundary-workflow-v2-route-lane-title-63`. It remains a refusal under the
+provenance rule, not a downgraded notice. The two dataflow endpoint-via cases
+and sequence case `e2-boundary-sequence-family-label-route-above` now pass with
+their pinned source routes retained. The remaining migration risk stays
+explicit for E4.
 
 Automatic port candidates may move along an unpinned face, or choose another
 face if no side was authored. Authored sides remain on that face, and via,

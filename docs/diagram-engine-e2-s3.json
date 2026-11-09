@@ -475,18 +475,87 @@
     "scope": "previous source-bound reproduction before test-only logical-work instrumentation; not current-head acceptance"
   },
   "boundaryEvidence": {
-    "scope": "separate synthetic evidence; exact layer gates both directions, model layer reports without failing; does not change AC1 membership; current dispositions are in diagram-engine-e2-admission-ledger.json",
+    "scope": "Current source-bound 9e99e2c0 boundary evidence; exact layer gates both directions, model layer reports without changing AC1 membership; full case-by-case source and measured geometry dispositions are in docs/performance/diagram-engine-e2-admission-ledger.json",
     "strictParityCases": 311,
     "boundaryCases": 309,
     "rendererRefusalSites": 132,
     "exactCases": 208,
     "exactFailures": 0,
     "modelCategories": {
+      "artifact-route-rounding": {
+        "agreements": 1,
+        "cases": 2,
+        "examples": [
+          {
+            "case": "e2-boundary-lifecycle-physical-corridor-7",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          }
+        ],
+        "oracleGreenEngineRefused": 0,
+        "oracleRedEngineAdmitted": 1
+      },
+      "readable-v2-implicit-placement": {
+        "agreements": 8,
+        "cases": 8,
+        "examples": [],
+        "oracleGreenEngineRefused": 0,
+        "oracleRedEngineAdmitted": 0
+      },
+      "readable-v2-placement": {
+        "agreements": 8,
+        "cases": 15,
+        "examples": [
+          {
+            "case": "e2-boundary-workflow-v2-arrow-spacing-8",
+            "diagnosticCodes": [
+              "workflow/geometry-route-quality-notice"
+            ],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-turn-7",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-shared-trunk-25",
+            "diagnosticCodes": [
+              "workflow/geometry-route-quality-notice"
+            ],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-route-legend-191",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-label-legend-187",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-label-lane-title-59",
+            "diagnosticCodes": [
+              "workflow/route-label-space"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          }
+        ],
+        "oracleGreenEngineRefused": 2,
+        "oracleRedEngineAdmitted": 5
+      },
       "text-capacity": {
-        "cases": 76,
         "agreements": 49,
-        "oracleGreenEngineRefused": 25,
-        "oracleRedEngineAdmitted": 2,
+        "cases": 76,
         "examples": [
           {
             "case": "e2-boundary-sequence-segment-title-above",
@@ -536,78 +605,9 @@
             "engineAccepted": false,
             "oracleAccepted": true
           }
-        ]
-      },
-      "readable-v2-implicit-placement": {
-        "cases": 8,
-        "agreements": 8,
-        "oracleGreenEngineRefused": 0,
-        "oracleRedEngineAdmitted": 0,
-        "examples": []
-      },
-      "artifact-route-rounding": {
-        "cases": 2,
-        "agreements": 1,
-        "oracleGreenEngineRefused": 0,
-        "oracleRedEngineAdmitted": 1,
-        "examples": [
-          {
-            "case": "e2-boundary-lifecycle-physical-corridor-7",
-            "diagnosticCodes": [],
-            "engineAccepted": true,
-            "oracleAccepted": false
-          }
-        ]
-      },
-      "readable-v2-placement": {
-        "cases": 15,
-        "agreements": 8,
-        "oracleGreenEngineRefused": 2,
-        "oracleRedEngineAdmitted": 5,
-        "examples": [
-          {
-            "case": "e2-boundary-workflow-v2-arrow-spacing-8",
-            "diagnosticCodes": [
-              "workflow/geometry-route-quality-notice"
-            ],
-            "engineAccepted": true,
-            "oracleAccepted": false
-          },
-          {
-            "case": "e2-boundary-workflow-v2-turn-7",
-            "diagnosticCodes": [],
-            "engineAccepted": true,
-            "oracleAccepted": false
-          },
-          {
-            "case": "e2-boundary-workflow-v2-shared-trunk-25",
-            "diagnosticCodes": [
-              "workflow/geometry-route-quality-notice"
-            ],
-            "engineAccepted": true,
-            "oracleAccepted": false
-          },
-          {
-            "case": "e2-boundary-workflow-v2-route-legend-191",
-            "diagnosticCodes": [],
-            "engineAccepted": true,
-            "oracleAccepted": false
-          },
-          {
-            "case": "e2-boundary-workflow-v2-label-legend-187",
-            "diagnosticCodes": [],
-            "engineAccepted": true,
-            "oracleAccepted": false
-          },
-          {
-            "case": "e2-boundary-workflow-v2-label-lane-title-59",
-            "diagnosticCodes": [
-              "workflow/route-label-space"
-            ],
-            "engineAccepted": false,
-            "oracleAccepted": true
-          }
-        ]
+        ],
+        "oracleGreenEngineRefused": 24,
+        "oracleRedEngineAdmitted": 3
       }
     },
     "modelDifferences": [
@@ -761,13 +761,11 @@
         "diagnosticCodes": []
       },
       {
-        "case": "e2-boundary-sequence-family-label-route-above",
+        "case": "e2-boundary-sequence-family-label-route-below",
         "category": "text-capacity",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "sequence/route-blocked"
-        ]
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
       },
       {
         "case": "e2-boundary-lifecycle-family-label-route-above",
@@ -921,15 +919,6 @@
     ],
     "clearMarginControls": 10,
     "authoredCoordinateRoutingRefusals": [
-      {
-        "case": "e2-boundary-sequence-family-label-route-above",
-        "category": "text-capacity",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "sequence/route-blocked"
-        ]
-      },
       {
         "case": "e2-boundary-workflow-v2-route-lane-title-63",
         "category": "readable-v2-placement",
@@ -1423,17 +1412,20 @@
         "oracleRedEngineAdmitted": 7
       }
     },
-    "currentSourceCommit": "6f5b88f7026320605c39266e41569d28958a5c50",
-    "currentEngineCrateTree": "f4e61bf2e1f11e65a30afeca0c291b08296d5545",
+    "currentSourceCommit": "9e99e2c090b8",
+    "currentEngineCrateTree": "63e5850d6aedfd3a6699252ea96e57b60e8dc824",
     "currentModelCounts": {
       "cases": 101,
       "agreements": 66,
-      "oracleGreenEngineRefused": 27,
-      "oracleRedEngineAdmitted": 8,
+      "oracleGreenEngineRefused": 26,
+      "oracleRedEngineAdmitted": 9,
       "originalModelDifferenceCases": 41,
       "currentMismatches": 35,
-      "unionCases": 42
-    }
+      "unionCases": 43
+    },
+    "currentSdkTreePath": "src-tauri/crates",
+    "currentSdkTree": "ad7a73e750bc97c3ee2c1297dd5d77d45dd9be70",
+    "currentEngineCrateTreePath": "src-tauri/crates/maru-diagram-engine"
   },
   "hostedBaseline": {
     "runId": 42538495856,
@@ -1661,5 +1653,8 @@
     "issue": 560,
     "url": "https://github.com/STAIxBWLB/maru/issues/560",
     "scope": "remaining model/admission case audit and genuine long-tail defects, blocks E4; no implementation in this PR"
-  }
+  },
+  "sdkTreePath": "src-tauri/crates",
+  "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+  "engineCrateTree": "76752a25c972fc06bae8017f9ec800c87466487e"
 }
