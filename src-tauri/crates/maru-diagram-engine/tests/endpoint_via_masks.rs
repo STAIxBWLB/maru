@@ -66,6 +66,49 @@ fn oracle_green_dataflow_routes_keep_vias_inside_the_target_endpoint_mask() {
 }
 
 #[test]
+fn oracle_green_sequence_messages_keep_auto_labels_clear_of_fixed_ports() {
+    let spec = oracle_green_spec("e2-boundary-sequence-family-label-route-above");
+    let report = layout(&spec);
+    assert!(report.ok, "{:?}", report.diagnostics);
+    let geometry = report.geometry.expect("accepted layout retains geometry");
+    let first = geometry
+        .routes
+        .iter()
+        .find(|route| route.id.as_deref() == Some("message:0"))
+        .expect("first authored message route");
+    let second = geometry
+        .routes
+        .iter()
+        .find(|route| route.id.as_deref() == Some("message:1"))
+        .expect("second authored message route");
+    assert!(
+        !first.points.is_empty(),
+        "first route retains its fixed timeline ports"
+    );
+    assert!(
+        !second.points.is_empty(),
+        "second route retains its fixed timeline ports"
+    );
+    let label = geometry
+        .labels
+        .iter()
+        .find(|label| label.id.as_deref() == Some("edge:message:1:label"))
+        .expect("the automatic second message label remains visible");
+    let left = label.bounds.x - 4 * 64;
+    let top = label.bounds.y - 4 * 64;
+    let right = label.bounds.x + label.bounds.width + 4 * 64;
+    let bottom = label.bounds.y + label.bounds.height + 4 * 64;
+    assert!(
+        first.points.iter().all(|point| {
+            point.x <= left || point.x >= right || point.y <= top || point.y >= bottom
+        }),
+        "the automatic label must stay at least 4px from every first-message port/escape: label={:?}, route={:?}",
+        label.bounds,
+        first.points
+    );
+}
+
+#[test]
 fn third_party_node_and_its_owned_label_remain_obstacles_to_endpoint_vias() {
     let mut spec = oracle_green_spec("e2-boundary-dataflow-label-route-3");
     spec["nodes"].as_array_mut().unwrap().push(json!({

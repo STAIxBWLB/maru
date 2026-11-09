@@ -143,6 +143,20 @@ pub(crate) struct SceneBuilder {
     kinds: BTreeMap<String, String>,
     pins: BTreeMap<String, GeometryPin>,
 }
+
+#[derive(Clone, Copy)]
+struct SequenceMessageAnchor {
+    route_index: usize,
+    point: GeometryPoint,
+    clearance: Coord,
+}
+
+#[derive(Default)]
+struct SequenceMessageAnchorIndex {
+    anchors: Vec<SequenceMessageAnchor>,
+    max_clearance: Coord,
+}
+
 impl SceneBuilder {
     fn new(request: LayoutRequest, kind: &str) -> Self {
         let pins = request
@@ -1098,9 +1112,126 @@ impl SceneBuilder {
             })
     }
 
-    fn route_label(&mut self, r: &RouteRequest) -> Result<Vec<GeometryPoint>, Diagnostic> {
+    fn sequence_message_anchors(&self) -> Result<SequenceMessageAnchorIndex, Diagnostic> {
+        if self.kind != "sequence" {
+            return Ok(SequenceMessageAnchorIndex::default());
+        }
+        let mut index = SequenceMessageAnchorIndex {
+            anchors: Vec::with_capacity(self.connections.len().saturating_mul(4)),
+            max_clearance: 0,
+        };
+        for route in &self.connections {
+            let (Some(from_y), Some(authored_to_y)) = (route.from_y, route.to_y) else {
+                continue;
+            };
+            let Some(from) = self.node_bounds(&route.from) else {
+                continue;
+            };
+            let Some(to) = self.node_bounds(&route.to) else {
+                continue;
+            };
+            let from_center = add(from.x, from.width / 2)?;
+            let to_center = add(to.x, to.width / 2)?;
+            let (default_from, default_to) = if route.from == route.to {
+                ("right", "bottom")
+            } else if to_center >= from_center {
+                ("right", "left")
+            } else {
+                ("left", "right")
+            };
+            let from_side = route.from_side.as_deref().unwrap_or(default_from);
+            let to_side = route.to_side.as_deref().unwrap_or(default_to);
+            let to_y = if route.from == route.to && from_y == authored_to_y {
+                add(from_y, 32 * 64)?
+            } else {
+                authored_to_y
+            };
+            let clearance = route_clearance(route)?;
+            index.max_clearance = index.max_clearance.max(clearance);
+            let escape = add(clearance, 6 * 64)?;
+            let from_tip = GeometryPoint {
+                x: from_center,
+                y: from_y,
+            };
+            let to_tip = GeometryPoint {
+                x: to_center,
+                y: to_y,
+            };
+            let from_dx = if from_side == "left" { -escape } else { escape };
+            let to_dx = if to_side == "left" { -escape } else { escape };
+            index.anchors.push(SequenceMessageAnchor {
+                route_index: route.source_index,
+                point: from_tip,
+                clearance,
+            });
+            index.anchors.push(SequenceMessageAnchor {
+                route_index: route.source_index,
+                point: from_tip.checked_translate(from_dx, 0).map_err(arithmetic)?,
+                clearance,
+            });
+            index.anchors.push(SequenceMessageAnchor {
+                route_index: route.source_index,
+                point: to_tip,
+                clearance,
+            });
+            index.anchors.push(SequenceMessageAnchor {
+                route_index: route.source_index,
+                point: to_tip.checked_translate(to_dx, 0).map_err(arithmetic)?,
+                clearance,
+            });
+        }
+        index
+            .anchors
+            .sort_by_key(|anchor| (anchor.point.x, anchor.point.y, anchor.route_index));
+        Ok(index)
+    }
+
+    fn label_near_sequence_anchor(
+        &self,
+        bounds: GeometryBox,
+        route_index: usize,
+        sequence_anchors: &SequenceMessageAnchorIndex,
+    ) -> Result<bool, Diagnostic> {
+        if sequence_anchors.anchors.is_empty() {
+            return Ok(false);
+        }
+        let max_clearance = i64::from(sequence_anchors.max_clearance);
+        let search_left = i64::from(bounds.x) - max_clearance;
+        let search_right = i64::from(bounds.right().map_err(arithmetic)?) + max_clearance;
+        let first = sequence_anchors
+            .anchors
+            .partition_point(|anchor| i64::from(anchor.point.x) <= search_left);
+        let bounds_left = i64::from(bounds.x);
+        let bounds_top = i64::from(bounds.y);
+        let bounds_right = i64::from(bounds.right().map_err(arithmetic)?);
+        let bounds_bottom = i64::from(bounds.bottom().map_err(arithmetic)?);
+        Ok(sequence_anchors.anchors[first..]
+            .iter()
+            .take_while(|anchor| i64::from(anchor.point.x) < search_right)
+            .any(|anchor| {
+                if anchor.route_index == route_index {
+                    return false;
+                }
+                let clearance = i64::from(anchor.clearance);
+                i64::from(anchor.point.x) > bounds_left - clearance
+                    && i64::from(anchor.point.x) < bounds_right + clearance
+                    && i64::from(anchor.point.y) > bounds_top - clearance
+                    && i64::from(anchor.point.y) < bounds_bottom + clearance
+            }))
+    }
+
+    fn route_label(
+        &mut self,
+        r: &RouteRequest,
+        sequence_anchors: &SequenceMessageAnchorIndex,
+    ) -> Result<Vec<GeometryPoint>, Diagnostic> {
         let (points, obstacles) = self.route_points(r)?;
         if let Some(text) = r.label.as_deref().filter(|s| !s.is_empty()) {
+            let sequence_keepout = self.kind == "sequence"
+                && r.label_at.is_none()
+                && r.label_dx.is_none()
+                && r.label_dy.is_none()
+                && r.label_segment.is_none();
             let (w, h) = self.text_size(text, 400, 12 * 64)?;
             let position = if let Some(p) = r.label_at {
                 // Authored labelAt is the label center, not its top-left.
@@ -1151,6 +1282,12 @@ impl SceneBuilder {
                                 && !points
                                     .iter()
                                     .any(|p| candidate.contains(*p).unwrap_or(true))
+                                && (!sequence_keepout
+                                    || !self.label_near_sequence_anchor(
+                                        candidate,
+                                        r.source_index,
+                                        sequence_anchors,
+                                    )?)
                             {
                                 found = Some(GeometryPoint {
                                     x: candidate.x,
@@ -1183,6 +1320,15 @@ impl SceneBuilder {
                     .map_err(arithmetic)?
             };
             let b = rect(position.x, position.y, w, h)?;
+            if sequence_keepout
+                && self.label_near_sequence_anchor(b, r.source_index, sequence_anchors)?
+            {
+                return Err(failure(
+                    "route-label-space",
+                    "automatic route label overlaps another message's fixed timeline endpoint or escape",
+                    "increase the message spacing so automatic labels clear the other message endpoints",
+                ));
+            }
             if self.label_admission_blocked(b) {
                 return Err(failure(
                     "route-label-space",
@@ -1226,13 +1372,14 @@ impl SceneBuilder {
         self.quality_profile = meta.quality_profile.clone();
         self.connections.sort_by(|a, b| a.id.cmp(&b.id));
         self.prepare_routing();
+        let sequence_anchors = self.sequence_message_anchors()?;
         let mut first_routes = BTreeMap::new();
         let mut cached_points = 0;
         let mut failed = BTreeSet::new();
         for r in self.connections.clone() {
             let label_count = self.document.labels.len();
             let diagnostic_count = self.diagnostics.len();
-            match self.route_label(&r) {
+            match self.route_label(&r, &sequence_anchors) {
                 Ok(points) => {
                     if self.cache_enabled && points.len() <= 65_536 - cached_points {
                         cached_points += points.len();
