@@ -29,7 +29,13 @@ pub(crate) fn check(g: &GeometryDocument, primitives: &[Primitive]) -> Vec<Diagn
     let labels: Vec<_> = g
         .labels
         .iter()
-        .filter(|label| label.target_id == "legend")
+        .filter(|label| {
+            label.target_id == "legend"
+                && label
+                    .id
+                    .as_ref()
+                    .is_some_and(|id| id.starts_with("legend:"))
+        })
         .collect();
     let items: Vec<_> = primitives
         .iter()

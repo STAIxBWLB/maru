@@ -92,3 +92,67 @@ fn missing_route_label_semantics_fails_closed() {
         .iter()
         .any(|diagnostic| diagnostic.code == "document/svg-label-source"));
 }
+
+#[test]
+fn authored_legend_ids_are_not_legend_labels_even_when_legend_is_hidden() {
+    for mode in ["hidden", "all"] {
+        let mut spec: Value =
+            serde_json::from_str(include_str!("../testdata/valid-architecture.json")).unwrap();
+        spec["components"][0]["id"] = json!("legend");
+        spec["connections"][0]["from"] = json!("legend");
+        spec["connections"][0]["id"] = json!("legend");
+        spec["meta"]["legend"] = json!({"mode":mode});
+        let report = layout_json(&json!({"specJson":spec.to_string()}).to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        let g = report.geometry.unwrap();
+        for theme in [SvgTheme::Light, SvgTheme::Dark] {
+            let result = render_svg(&g, &SvgOptions::from_spec(&spec, theme).unwrap());
+            assert!(result.ok, "{:?}", result.diagnostics);
+        }
+        if mode == "hidden" {
+            assert!(g.legend.content_bounds.is_none());
+        } else {
+            assert!(g.legend.content_bounds.unwrap().y > g.nodes[0].bounds.y);
+        }
+    }
+}
+#[test]
+fn authored_frame_ids_keep_repeated_namespace_prefixes() {
+    let mut spec: Value =
+        serde_json::from_str(include_str!("../testdata/valid-workflow.json")).unwrap();
+    spec["lanes"][0]["id"] = json!("lane:main");
+    spec["lanes"][0]["variant"] = json!("exception");
+    for node in spec["nodes"].as_array_mut().unwrap() {
+        node["lane"] = json!("lane:main");
+        node["width"] = json!(64);
+    }
+    spec["phases"] =
+        json!([{"id":"phase:p","label":"Phase","fromCol":0,"toCol":4,"variant":"security"}]);
+    spec["groups"] = json!([{"id":"group:g","label":"Group","lane":"lane:main","fromCol":2,"toCol":2,"variant":"security"}]);
+    let report = layout_json(&json!({"specJson":spec.to_string()}).to_string());
+    assert!(report.ok, "{:?}", report.diagnostics);
+    let g = report.geometry.unwrap();
+    for (theme, color) in [(SvgTheme::Light, "#e11d48"), (SvgTheme::Dark, "#fb7185")] {
+        let result = render_svg(&g, &SvgOptions::from_spec(&spec, theme).unwrap());
+        assert!(result.ok, "{:?}", result.diagnostics);
+        let svg = result.svg.unwrap();
+        let doc = roxmltree::Document::parse(&svg).unwrap();
+        for key in ["lane:lane:main", "phase:phase:p", "group:group:g"] {
+            let label = doc
+                .descendants()
+                .find(|node| {
+                    node.attribute("data-kind") == Some("label")
+                        && node.attribute("data-target-id") == Some(key)
+                })
+                .unwrap();
+            assert_eq!(
+                label
+                    .descendants()
+                    .find(|node| node.attribute("data-kind") == Some("glyph"))
+                    .unwrap()
+                    .attribute("fill"),
+                Some(color)
+            );
+        }
+    }
+}

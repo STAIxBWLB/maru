@@ -56,15 +56,12 @@ pub(crate) fn colors(
             .iter()
             .find(|container| container.id == label.target_id)
             .and_then(|container| {
-                let variant_key = match container.kind.as_str() {
-                    "lane" => format!("lane:{}", container.id.trim_start_matches("lane:")),
-                    "phase" => format!("phase:{}", container.id.trim_start_matches("phase:")),
-                    "group" => format!("group:{}", container.id.trim_start_matches("group:")),
-                    _ => return None,
-                };
+                if !matches!(container.kind.as_str(), "lane" | "phase" | "group") {
+                    return None;
+                }
                 let variant = semantics
                     .frame_variants
-                    .get(&variant_key)
+                    .get(&container.id)
                     .map(String::as_str);
                 if container.kind == "lane" && variant == Some("exception") {
                     return options.theme.kind("security").map(|kind| kind.stroke);
@@ -228,13 +225,13 @@ pub(crate) fn reference_colors(
             .iter()
             .find(|container| container.id == label.target_id)
             .and_then(|container| {
-                let key = match container.kind.as_str() {
-                    "lane" => format!("lane:{}", container.id.trim_start_matches("lane:")),
-                    "phase" => format!("phase:{}", container.id.trim_start_matches("phase:")),
-                    "group" => format!("group:{}", container.id.trim_start_matches("group:")),
-                    _ => return None,
-                };
-                let frame_variant = semantics.frame_variants.get(&key).map(String::as_str);
+                if !["lane", "phase", "group"].contains(&container.kind.as_str()) {
+                    return None;
+                }
+                let frame_variant = semantics
+                    .frame_variants
+                    .get(container.id.as_str())
+                    .map(String::as_str);
                 if container.kind == "lane" && frame_variant == Some("exception") {
                     options.theme.kind("security").map(|kind| kind.stroke)
                 } else {

@@ -1438,12 +1438,13 @@ impl SceneBuilder {
                     bounds = bounds.union(part).map_err(arithmetic)?;
                 }
             }
-            for label in self
-                .document
-                .labels
-                .iter()
-                .filter(|label| label.target_id == "legend")
-            {
+            for label in self.document.labels.iter().filter(|label| {
+                label.target_id == "legend"
+                    && label
+                        .id
+                        .as_ref()
+                        .is_some_and(|id| id.starts_with("legend:"))
+            }) {
                 bounds = bounds.union(label.bounds).map_err(arithmetic)?;
             }
             // Logical bounds only: cover stroke widths and local arrowheads;
