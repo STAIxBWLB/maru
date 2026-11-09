@@ -1,0 +1,32 @@
+{
+  "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+  "buildMs": 38495.392447,
+  "testHarnessBuildMs": 535.8324309999953,
+  "platform": "linux",
+  "arch": "x64",
+  "sizes": [
+    {
+      "name": "engine-e0.js",
+      "bytes": 1307013,
+      "gzipBytes": 324218,
+      "path": "validation"
+    },
+    {
+      "name": "core-B2rNBH2e.js",
+      "bytes": 114,
+      "gzipBytes": 122,
+      "path": "lazy-transport"
+    },
+    {
+      "name": "engineGeometry-COh3872Y.js",
+      "bytes": 5173885,
+      "gzipBytes": 1668914,
+      "path": "lazy-geometry-metrics"
+    }
+  ],
+  "gzipBytes": 324218,
+  "validationGzipBytes": 324218,
+  "lazyGeometryGzipBytes": 1668914,
+  "lazyTransportGzipBytes": 122,
+  "totalGzipBytes": 1993254
+}

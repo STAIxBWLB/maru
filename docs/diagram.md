@@ -1924,8 +1924,8 @@ requires exact dimensions and RGBA pixel equality. The theme background makes
 output opaque, including fractional page edges.
 
 The measurement prototype builds a real isolated Vite ES adapter with the
-WASM and fonts inlined in its separately loaded PNG module. Validation remains
-324,220 B gzip, below 400,000 B. The PNG module is 61,037,707 B raw and
+WASM and fonts inlined in its separately loaded PNG module. The latest validation gate measured
+324,218 B gzip, below 400,000 B (the initial transport measurement was 324,220 B). The PNG module is 61,037,707 B raw and
 36,321,493 B gzip; its underlying WASM is 41,274,386 B raw and 30,534,736 B
 gzip. Adapter import took 1,012.9ms and initialization 3,512.1ms, totaling
 4,525.0ms before the first request. These are observed samples, not CI timing
@@ -1933,8 +1933,8 @@ assertions.
 
 | Scene | WASM first request / warm samples (ms) | Native raster cold / warm range (ms) | Registered mock IPC samples (ms) | Request / response bytes | PNG bytes |
 | --- | --- | --- | --- | --- | --- |
-| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 66.9, 11.9, 11.7, 11.7 | 693 / 51,430 | 11,088 |
-| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2360.9, 2322.9, 2340.3, 2332.6 | 130,843 / 3,998,647 | 480,455 |
+| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 63.0, 13.5, 11.6, 11.5 | 693 / 51,447 | 11,088 |
+| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2338.2, 2324.2, 2354.2, 2318.5 | 130,843 / 3,998,664 | 480,455 |
 
 The selected PNG transport is native IPC. The measured 36.3 MB gzip PNG module
 and 4.5s cold module initialization rule out the lazy WASM candidate for this
