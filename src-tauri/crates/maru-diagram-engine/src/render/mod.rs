@@ -1,4 +1,4 @@
-//! Pure SVG output from retained fixed-point geometry. No layout or host access.
+//! Geometry-based SVG/PNG and source-bound artifact orchestration, without host access.
 mod artifact;
 mod gate;
 #[cfg(feature = "render-png")]

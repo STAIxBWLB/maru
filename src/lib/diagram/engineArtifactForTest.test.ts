@@ -29,7 +29,10 @@ afterEach(() => vi.unstubAllEnvs());
 describe("test-only Rust artifact adapter", () => {
   it("sends source, theme, format, pixel ratio, and pins through the high-level ABI", async () => {
     vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "1");
-    const host = vi.fn(async () => JSON.stringify(baseReport));
+    const host = vi.fn(async (input: string) => {
+      expect(typeof input).toBe("string");
+      return JSON.stringify(baseReport);
+    });
     const result = await renderEngineArtifactForTest({
       specJson: "{\"diagram_type\":\"architecture\"}",
       theme: "dark",
