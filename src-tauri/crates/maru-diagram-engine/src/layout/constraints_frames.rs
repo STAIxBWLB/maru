@@ -274,7 +274,10 @@ fn workflow_frames(spec: &Value, geometry: &GeometryDocument) -> Vec<Diagnostic>
             continue;
         };
         if let Some(label) = frame_label(geometry, &frame_id) {
-            if !contained(bounds, label.bounds) {
+            // The format's 16px phase rail is decorative, not a text-height
+            // clipping box. Noto line height may extend below it; only the
+            // authored horizontal range constrains this heading.
+            if label.bounds.x < bounds.x || right(label.bounds) > right(bounds) {
                 diagnostics.push(diag(
                     "workflow",
                     "geometry-phase-range",

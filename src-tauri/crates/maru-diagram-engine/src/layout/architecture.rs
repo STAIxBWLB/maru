@@ -2,7 +2,8 @@
 
 use crate::architecture::ArchitectureSpec;
 use crate::common::Point;
-use crate::geometry::GeometryPoint;
+use crate::geometry::{GeometryBox, GeometryPoint};
+use crate::layout::fixed::{checked_add, checked_sub};
 use crate::layout::{point, px, RouteRequest, SceneBuilder};
 use crate::Diagnostic;
 
@@ -51,11 +52,11 @@ pub(crate) fn place(spec: &ArchitectureSpec, scene: &mut SceneBuilder) -> Result
     let layout = spec.layout.as_ref();
     let origin = layout
         .and_then(|layout| layout.origin)
-        .unwrap_or([60.0, 160.0]);
-    let cell_w = layout.and_then(|layout| layout.cell_w).unwrap_or(220.0);
-    let cell_h = layout.and_then(|layout| layout.cell_h).unwrap_or(100.0);
-    let gap_x = layout.and_then(|layout| layout.gap_x).unwrap_or(80.0);
-    let gap_y = layout.and_then(|layout| layout.gap_y).unwrap_or(60.0);
+        .unwrap_or([40.0, 80.0]);
+    let cell_w = layout.and_then(|layout| layout.cell_w).unwrap_or(130.0);
+    let cell_h = layout.and_then(|layout| layout.cell_h).unwrap_or(64.0);
+    let gap_x = layout.and_then(|layout| layout.gap_x).unwrap_or(30.0);
+    let gap_y = layout.and_then(|layout| layout.gap_y).unwrap_or(40.0);
     let cols = f64::from(layout.and_then(|layout| layout.cols).unwrap_or(4));
 
     for (index, component) in spec.components.iter().enumerate() {
@@ -82,18 +83,18 @@ pub(crate) fn place(spec: &ArchitectureSpec, scene: &mut SceneBuilder) -> Result
             component.decoration.tag.as_deref(),
             component.pos,
             auto,
-            component.size,
+            Some(component.size.unwrap_or([120.0, 60.0])),
         )?;
     }
 
-    // Boundary frames derive from members and are not independent pin targets.
+    // Boundary frames use the format's outer padding and extra bottom rail.
     for (index, boundary) in spec.boundaries.iter().enumerate() {
-        scene.container_for_members(
+        let bounds = boundary_bounds(boundary, scene, index)?;
+        scene.add_container(
             &format!("boundary:{index}"),
             &boundary.kind,
             &boundary.label,
-            &boundary.wraps,
-            boundary.pad.unwrap_or(16.0),
+            bounds,
         )?;
     }
 
@@ -158,6 +159,67 @@ pub(crate) fn place(spec: &ArchitectureSpec, scene: &mut SceneBuilder) -> Result
     Ok(())
 }
 
+fn boundary_bounds(
+    boundary: &crate::architecture::ArchitectureBoundary,
+    scene: &SceneBuilder,
+    index: usize,
+) -> Result<GeometryBox, Diagnostic> {
+    let path = format!("/boundaries/{index}");
+    let mut left = None;
+    let mut top = None;
+    let mut right = None;
+    let mut bottom = None;
+    for member in &boundary.wraps {
+        let Some(bounds) = scene.node_bounds(member) else {
+            return Err(geometry_error(
+                &format!("{path}/wraps"),
+                "wrapped component has no placed geometry",
+            ));
+        };
+        let member_right = bounds
+            .right()
+            .map_err(|error| geometry_error(&path, error.to_string()))?;
+        let member_bottom = bounds
+            .bottom()
+            .map_err(|error| geometry_error(&path, error.to_string()))?;
+        left = Some(left.map_or(bounds.x, |value: i32| value.min(bounds.x)));
+        top = Some(top.map_or(bounds.y, |value: i32| value.min(bounds.y)));
+        right = Some(right.map_or(member_right, |value: i32| value.max(member_right)));
+        bottom = Some(bottom.map_or(member_bottom, |value: i32| value.max(member_bottom)));
+    }
+    let (Some(left), Some(top), Some(right), Some(bottom)) = (left, top, right, bottom) else {
+        return Err(geometry_error(
+            &format!("{path}/wraps"),
+            "boundary has no placed members",
+        ));
+    };
+    let pad = px(boundary.pad.unwrap_or(30.0))?;
+    let top_pad = px(boundary.pad.unwrap_or(30.0).max(22.0))?;
+    let bottom_extra = px(20.0)?;
+    let width = checked_add(
+        checked_sub(right, left).map_err(|error| geometry_error(&path, error.to_string()))?,
+        checked_add(pad, pad).map_err(|error| geometry_error(&path, error.to_string()))?,
+    )
+    .map_err(|error| geometry_error(&path, error.to_string()))?;
+    let height = checked_add(
+        checked_sub(bottom, top).map_err(|error| geometry_error(&path, error.to_string()))?,
+        checked_add(top_pad, bottom_extra)
+            .map_err(|error| geometry_error(&path, error.to_string()))?,
+    )
+    .map_err(|error| geometry_error(&path, error.to_string()))?;
+    let bounds = GeometryBox {
+        x: checked_sub(left, pad).map_err(|error| geometry_error(&path, error.to_string()))?,
+        y: checked_sub(top, top_pad).map_err(|error| geometry_error(&path, error.to_string()))?,
+        width,
+        height,
+    };
+    bounds
+        .right()
+        .and_then(|_| bounds.bottom())
+        .map_err(|error| geometry_error(&path, error.to_string()))?;
+    Ok(bounds)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +276,23 @@ mod tests {
             "/components/0"
         )
         .is_err());
+    }
+
+    #[test]
+    fn default_grid_uses_documented_origin_step_and_component_size() {
+        let report = layout(
+            r#"{"schema_version":1,"diagram_type":"architecture","meta":{"title":"Architecture","output":"architecture.html"},"layout":{"mode":"grid","cols":2},"components":[{"id":"first","type":"backend","label":"First","row":0,"col":0},{"id":"second","type":"database","label":"Second","row":0,"col":1}],"connections":[]}"#,
+        );
+        assert!(report.ok, "{:?}", report.diagnostics);
+        let nodes = report.geometry.unwrap().nodes;
+        let first = nodes.iter().find(|node| node.id == "first").unwrap();
+        let second = nodes.iter().find(|node| node.id == "second").unwrap();
+        assert_eq!((first.bounds.x, first.bounds.y), (40 * 64, 80 * 64));
+        assert_eq!(
+            (first.bounds.width, first.bounds.height),
+            (120 * 64, 60 * 64)
+        );
+        assert_eq!((second.bounds.x, second.bounds.y), (200 * 64, 80 * 64));
     }
 
     #[test]

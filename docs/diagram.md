@@ -1186,7 +1186,7 @@ hosted matrix/native gates and S3 cold-load/layout budgets remain unverified.
 
 S3 keeps document validity and geometry validity separate. The corpus retains
 its original and evidence-stripped oracle verdicts and the E1 document
-comparison. A second `geometryComparison` records the full renderer verdict,
+comparison. A second `geometryComparison` records the renderer verdict on that comparison input,
 its equivalent geometry rules and whether placement must remain available.
 The three E1 geometry deferrals are checked here rather than waived. The
 synthetic unbounded-row probe now uses row 100 instead of a coordinate that
@@ -1263,43 +1263,49 @@ obstacle-cache amplification. No route or assertion is omitted for speed.
 
 #### S3 evidence and automatic-route notices
 
-Remote reproduction at SDK tree `6849d221`: 150 core tests, two document
-differentials and the geometry differential passed, together with clippy,
-binding drift and the SDK boundary check. All 312 combined native/test-WASM
-scene reports are byte-identical. The 309 parity cases keep the original
-full-renderer verdicts, including all three former E1 geometry deferrals.
-There are no oracle-green/engine-red expectation waivers. Four browser probes
-passed with no retry; the new canvas consumer remains isolated from DiagramMode.
+Remote reproduction at SDK tree `b9f4528d`: 167 core tests, two document
+differentials, the geometry differential and the layered boundary differential
+passed, together with clippy, formatting, binding drift and the SDK boundary
+check. All 530 combined native/test-WASM scene reports are byte-identical,
+including 309 AC1 parity inputs, 218 separate boundary inputs and three seeded
+dense scenes. Every expected equivalent code must exist in the family rule
+registry and be emitted, rather than accepting any one matching code. The three
+former E1 geometry deferrals now agree with the renderer. The eight public
+cases retain both original evidence-gate verdicts and explicitly stored
+evidence-stripped renderer verdicts, as in E1; no oracle-green expectation is
+replaced by an engine refusal.
+
+All four Chromium/WASM probes passed without a retry. Local typecheck,
+applicable ESLint and 33 focused tests passed. The test canvas remains isolated
+from DiagramMode. No local Cargo build/test, full verification or native suite
+was run.
 
 | Remote Chromium reproduction | Result |
 | --- | --- |
 | Validation entry and static imports, gzip | 324,220 B |
-| Separate lazy geometry/metrics chunk, gzip | 1,578,645 B |
-| Exact emitted geometry HTTP response, identity bytes | 4,866,035 B |
-| Fresh-process lazy fetch/parse/compile/instantiate | 249 ms |
-| 1,000-node / 999-edge first layout | 396.9 ms |
-| Same workload, 20 warm samples, median / p95 / max | 309.35 / 317.6 / 318 ms |
-| Validation-only 1,000-node p95 | 8.6 ms |
+| Separate lazy geometry/metrics chunk, gzip | 1,620,462 B |
+| Exact emitted geometry HTTP response, identity bytes | 4,994,359 B |
+| Fresh-process lazy fetch/parse/compile/instantiate | 267.6 ms |
+| 1,000-node / 999-edge first layout | 387.6 ms |
+| Same workload, 20 warm samples, median / p95 / max | 301.25 / 308.4 / 316.8 ms |
+| Validation-only 1,000-node p95 | 8.3 ms |
 
-The **200 ms layout target is missed**. The proposed end-to-end budget is
+The **200 ms layout target is missed**. The proposed end-to-end budget stays
 **400 ms**, pending hosted measurements and owner acceptance; it is not an
-approved relaxation. The initial implementation measured 571.8 ms p95 on this
-remote workload. The optimized run keeps all nodes, all 999 orthogonal routes
-and every geometry check; it neither drops work nor retries for a passing time.
-These remote figures are reproductions. Hosted Chromium numbers, the hosted
-four-report determinism gate and `ci-ok` remain pending at submission.
+approved relaxation. The previous source-bound reproduction measured
+317.6 ms p95; the current reproduction is 308.4 ms. Every node, all
+999 routed edges and every geometry check remain present. These are remote
+reproductions, not hosted acceptance: the new-head four-report OS matrix,
+Chromium timings and `ci-ok` remain pending at submission.
 
-Cold-load measurement uses a fresh Chromium process and a read-only loopback
-server that serves exact compiled bytes with identity encoding. Encoded and
-decoded response sizes must match the emitted file. This replaces the initial
-Vite-rewritten response; Vite transform/sourcemap bytes are not labelled as
-the product payload or used for the final cold interval. Browser startup and
-first layout are outside that interval; the first layout is recorded separately.
+Cold loading uses a fresh Chromium process and an identity-encoded read-only
+loopback server. Response byte counts must equal the exact emitted artifacts,
+with no Vite rewriting. Browser startup and first layout are outside that
+interval; the first layout is recorded separately.
 
-The following corpus inputs remain accepted. Their generated quality defects
-are visible notices, not document refusals. Authored violations and mixed
-pairs remain blocking and point to the authored input. The native/WASM reports
-carry the same per-rule notice inventory.
+Generated routing quality stays visible as notices. Authored or mixed
+violations remain blocking and identify their source. All notice paths are
+stored in the source-bound JSON receipt and native/WASM reports.
 
 | Case | Automatic rule | Notices | Input accepted |
 | --- | --- | --- | --- |
@@ -1308,12 +1314,210 @@ carry the same per-rule notice inventory.
 | `public-02` | `geometry-v1/ambiguous-corridor` | 3 | Yes |
 | `public-05` | `geometry-v1/ambiguous-corridor` | 5 | Yes |
 | `public-05` | `geometry-v1/arrowhead-collision` | 1 | Yes |
-| `public-05` | `geometry-v1/micro-segment` | 1 | Yes |
 | `public-06` | `geometry-v1/ambiguous-corridor` | 7 | Yes |
 | `public-06` | `geometry-v1/arrowhead-collision` | 1 | Yes |
 
-Source-bound samples, hashes, scopes, the full notice paths and budget status
-are recorded in [diagram-engine-e2-s3.json](diagram-engine-e2-s3.json). The
-ordinary source-format geometry budgets, including minimum port spans and v1
-lifecycle band columns, still refuse with a source path, cause and repair.
-Architecture/Lifecycle loop positives prevent a node-center-distance shortcut.
+#### Layered boundary evidence
+
+The exact layer passes in both directions: **127 cases, zero mismatches**.
+It covers shared readable-area, page, margin, spacing, reserve and spread-width
+quantities, plus source-format defaults and placement constants. Source checks
+use 1/128px intermediates when half of an authored 1/64px dimension is needed;
+output geometry remains 1/64px. Dataflow/lifecycle readable-area predicates and
+sequence spread widths use shared source-budget helpers.
+
+The separate model layer reports all 91 inputs without failing the build.
+These synthetic inputs are not added to the strict 309-case AC1 corpus and do
+not waive any of its verdicts. Counts preserve both directions; full differing
+case IDs and diagnostic codes are in `boundaryEvidence.modelDifferences`.
+
+| Category | Cases | Agreements | Oracle accepts, engine refuses | Oracle refuses, engine accepts | Examples of differences |
+| --- | --- | --- | --- | --- | --- |
+| `artifact-route-rounding` | 2 | 1 | 0 | 1 | `e2-boundary-lifecycle-physical-corridor-7` |
+| `readable-v2-implicit-placement` | 8 | 8 | 0 | 0 | No differing verdict |
+| `readable-v2-placement` | 15 | 7 | 2 | 6 | `e2-boundary-workflow-v2-arrow-spacing-8`; `e2-boundary-workflow-v2-turn-7` |
+| `text-capacity` | 66 | 32 | 28 | 6 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
+
+The model differences measure Noto text capacity against legacy text masks,
+readable-v2 placement and implicit-port solver differences. Lifecycle's rounded
+SVG-corner crossing is separately labelled `artifact-route-rounding`; the
+geometry engine does not implement E3 SVG corner rounding. In particular,
+**4 oracle-green authored-coordinate inputs still get route-blocked refusals**
+on engine-placed geometry, including
+`e2-boundary-workflow-v2-route-lane-title-63` and
+`e2-boundary-dataflow-label-route-3`. These remain refusals under the provenance
+rule, not downgraded notices. Their migration risk stays explicit for E4.
+
+Automatic port candidates may move along an unpinned face, or choose another
+face if no side was authored. Authored sides remain on that face, and via,
+channel and timeline anchors never change. Search-budget exhaustion is final for
+that edge, rather than restarting an exhausted search at another candidate port.
+Automatic label positions search bounded checked normal offsets; explicit
+label positions, offsets and segment selection remain constraints. The four
+original architecture regressions retain all routes after default-size
+alignment. A workflow phase's 16px decorative rail constrains the heading's
+horizontal range, not Noto line height.
+
+Source-bound samples, hashes, the full notice inventory and budget status are
+recorded in [diagram-engine-e2-s3.json](diagram-engine-e2-s3.json). The
+ordinary source-format budgets now use the pinned defaults: architecture grid origin
+[40,80], cells 130x64 with 30x40 gaps, 120x60 components, and 30px boundary padding with a
+20px lower rail; workflow v1 centers [88,220,300,430,500,625], lanes at x40/y52 with
+width640, height104, 20px gaps and 92x52 nodes (tagged nodes use 68px height); dataflow
+centers x=100+215 per stage and rows y=128+114 per row, with 112x58 nodes and 168px-wide
+stage frames beginning at y46; lifecycle v1 uses phase centers [94,248,402,556,710],
+event/outcome centers [402,556,710], band tops 126/278/450 and the format's state
+dimensions; lifecycle v2 uses the documented 140x64 base state, 60px left margin, 64px
+minimum column gap and 56px/184px row origin/pitch; sequence fixed headers are 86x60 at y72,
+centered from x62 with 108px steps, and spread mode uses a shared column helper. These are
+exact base format constants. Readable-v2 solver expansions, Noto text capacity and implicit
+port placement remain model-difference boundaries rather than exact renderer-formula claims.
+The generated lifecycle 7px corridor case is separately a rounded-artifact model difference:
+final SVG corner rounding creates a crossing, so it is not counted as an isolated proof of
+the exact 8px source corridor threshold.
+
+The exported refusal audits below retain every renderer refusal site. Standard-audit rows preserve the source predicate and coverage note but do not provide a separate measured-boundary field; route-audit rows show a threshold only where the audit records one. Unreachable, invariant, delegated and aggregation-only rows do not claim a measured numeric boundary. Coverage notes are audit metadata, not oracle verdicts by themselves.
+
+The strict AC1 comparison remains the original 309 parity cases. The separate 218 `boundaryCases` probe source thresholds around renderer predicates; they do not replace or expand the AC1 verdict corpus. A boundary hypothesis becomes evidence only after the pinned host oracle records the actual result.
+
+##### Document and geometry refusal sites
+
+| Renderer source | Refusal cause | Engine mapping | Predicate / threshold | Coverage note |
+| --- | --- | --- | --- | --- |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:197` | duplicate participant ids | `sequence/duplicate-id` | unique participant.id; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:200` | short readable timeline | `sequence/geometry-node-viewbox` | height -65 -142 >=120; no separate measured-boundary field | schema-unreachable; sequence schema requires height >=480; renderer threshold327 cannot be crossed by a document-valid input |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:206` | primary participant label fit | `sequence/geometry-label-fit` | textUnits(label)*6.8 <= headerWidth+6; no separate measured-boundary field | existing-synthetic; spread header width boundary generated using schema-valid25 W text |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:209` | brand top rail | `sequence/geometry-label-fit` | brand mark and sigil fit participant header; no separate measured-boundary field | generated-boundary; e2-boundary-sequence-brand-rail-7/9; fixed86px header, model text-capacity |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:216` | participant sublabel fit | `sequence/geometry-label-fit` | textUnits(sublabel)*6*.6 <= headerWidth-8; no separate measured-boundary field | existing-synthetic; spread sublabel width boundary generated using45 W text |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:222` | unknown message source | `sequence/participant-reference` | message.from in participants; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:223` | unknown message target | `sequence/participant-reference` | message.to in participants; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:224` | nonnumeric message time | `sequence/shape` | typeof message.y is number; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:226` | message timeline bounds | `sequence/geometry-message-time` | 160 <= message.y <= authored height-83; no separate measured-boundary field | generated-boundary; lower bound160 is already schema-minimum; upper authored budget has 1/64px neighbours |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:230` | message endpoint span | `sequence/geometry-route-distance` | message endpoint distance >=60; no separate measured-boundary field | existing-synthetic; non-self fixed/spread pitch >=108; self relation is discrete14px case, not a continuous threshold |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:236` | edge through participant header | `sequence/geometry-route-clearance` | route avoids third-party opaque header; no separate measured-boundary field | shared-covered; e2-boundary-architecture-unrelated-node-clearance-1/3 proves shared2px predicate; sequence source y>=160 stays below all header bodies ending132 |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:246` | proper route crossing | `sequence/geometry-route-quality` | showcase disjoint endpoints do not cross; no separate measured-boundary field | renderer-invariant; sequence routes are horizontal so no proper perpendicular crossing; coincident overlaps handled corridor predicate |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:255` | ambiguous corridor | `sequence/geometry-route-quality` | showcase unrelated horizontal overlap is separated; no separate measured-boundary field | generated-boundary; e2-boundary-sequence-parallel-messages-180/212; source-family disjoint endpoints |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:264` | segment border run | `sequence/geometry-route-quality` | no positive collinear overlap with trimmed frame side; no separate measured-boundary field | existing-synthetic; equality predicate is non-monotone: y==border is negative, both 1/64px neighbours positive; not represented as a false one-sided boundary |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:274` | route rhythm | `sequence/geometry-route-quality` | showcase micro segment8/interior16 floors; no separate measured-boundary field | renderer-invariant; one horizontal sequence segment has no interior turns; self span14 is above micro floor |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:298` | message row crowding | `sequence/geometry-message-spacing` | overlapping horizontal span requires deltaY >=28; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:311` | message label overlap | `sequence/geometry-label-overlap` | message label masks do not overlap at inset-2; no separate measured-boundary field | generated-boundary; e2-boundary-sequence-label-pair-*; tangent arrow spans isolate label-only overlap, model text-capacity |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:315` | label near another route | `sequence/geometry-route-clearance` | showcase label-to-other-route clearance >=4; no separate measured-boundary field | generated-boundary; e2-boundary-sequence-family-label-route-below/above; actual4px oracle cause observed |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:325` | message label canvas containment | `sequence/geometry-label-overlap` | showcase label overflow <=0.5px; no separate measured-boundary field | generated-boundary; e2-boundary-sequence-message-label-canvas-32/34; model text-capacity |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:336` | reversed segment range | `sequence/range-order` | segment.to > segment.from; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:339` | segment canvas range | `sequence/geometry-segment-range` | from>=72 and to<=authored height-45; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:345` | segment title fit | `sequence/geometry-segment-label-fit` | label width +104 <= page width; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:350` | unknown activation participant | `sequence/participant-reference` | activation.participant in participants; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:351` | reversed activation range | `sequence/range-order` | activation.to > activation.from; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:357` | participant columns exceed page | `sequence/geometry-participant-canvas-width` | last center +half header+40 <=width; no separate measured-boundary field | generated-boundary; fixed and spread modes both covered |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:365` | implicit showcase legend hidden | `sequence/geometry-legend-clearance` | effective contentBottom +96 +22/additional row <=height (conservative growth hint uses98); no separate measured-boundary field | generated-boundary; legend-note/message/activation exact reserves; legend-wrap-label-width and legend-wrap-overrides model text-capacity; no unclaimed locale chrome proof |
+| `sidecars/archify/renderers/sequence/render-sequence.mjs:369` | aggregate sequence refusal | `no single engine code (aggregate)` | any accumulated problem; no separate measured-boundary field | aggregation-only |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:122` | duplicate node ids | `dataflow/duplicate-id` | unique node.id; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:127` | unknown node stage | `dataflow/stage-reference` | stage in existing stage indices; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:130` | fixed row slots | `dataflow/fixed-row-slots` | row integer in0..4; no separate measured-boundary field | existing-synthetic; row5 rejection already recorded; row4/5 is a discrete integer boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:133` | nonfinite placed coordinates | `dataflow/fixed-row-slots` | finite stage/row/width/height/offset projection; no separate measured-boundary field | mixed-admission; malformed scalar is E1-covered; schema-unbounded row5+ is fixed-row-slots; fixedpoint overflow is SDK coordinate refusal |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:137` | node horizontal page bounds | `dataflow/geometry-node-viewbox` | 24 <= node.left; node.right <=width-24; no separate measured-boundary field | generated-boundary; left margin covered; stage-frame width budget dominates a narrow authored-page right margin |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:140` | node vertical readable bounds | `dataflow/geometry-node-viewbox` | 104 <=node.y; node.bottom <=height-74; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:144` | primary node label fit | `dataflow/geometry-label-fit` | textUnits(label)*6.2 <=width+6; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:147` | brand top rail | `dataflow/geometry-label-fit` | brand mark and sigil fit node width; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-brand-rail-71/73; both actual CLI verdicts observed, model text-capacity |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:158` | sublabel and tag fit | `dataflow/geometry-label-fit` | textUnits(value)*6*.6 <=width-8; no separate measured-boundary field | generated-boundary; separate sublabel/tag pairs |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:169` | node collision gap | `dataflow/geometry-node-overlap` | separation >=10px; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:175` | unknown flow source | `dataflow/reference` | flow.from in nodes; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:176` | unknown flow target | `dataflow/reference` | flow.to in nodes; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:177` | missing flow data label | `dataflow/text` | nonempty flow.label; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:182` | flow endpoint span | `dataflow/geometry-route-distance` | Euclidean endpoint distance >=34; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:191` | authored diagonal via | `dataflow/geometry-route-quality` | each via segment dx<=.01 or dy<=.01; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-diagonal-via-0/1; source-aligned versus diagonal control |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:197` | endpoint side direction | `dataflow/geometry-route-quality` | first/last segment crosses selected border perpendicularly; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-endpoint-direction-0/1; physical source port at156,157 |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:207` | flow through third-party node | `dataflow/geometry-route-clearance` | segment avoids third-party node interior; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-third-node-gap-1/3; actual clean-flow/edge-through-node observed at gap1 |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:216` | proper crossing | `dataflow/geometry-route-quality` | showcase unrelated paths do not cross; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-physical-crossing--1/1; real four-node crossing observed at180,200 |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:225` | ambiguous shared corridor | `dataflow/geometry-route-quality` | showcase unrelated paths do not share corridor; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-physical-corridor-7/9; 7px control actually accepted; 50px same fixture corridor actually refused |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:234` | stage border run | `dataflow/geometry-route-quality` | no positive collinear overlap with trimmed stage side; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-stage-border-45/46/47; showcase exact46 top border with title X and x10 corridor actually refuses148px run; no fake header-bottom82 frame |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:244` | route rhythm | `dataflow/geometry-route-quality` | showcase micro8/interior16 floors; no separate measured-boundary field | shared-covered; e2-boundary-architecture-turn-7/9/15/17 shared rhythm floors plus existing e2-dataflow-geometry-route-quality-micro-segment actual family refusal |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:264` | label overlaps node | `dataflow/geometry-label-overlap` | label/node inset overlap forbidden; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-label-node-124/126; model text-capacity |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:271` | label pairs overlap | `dataflow/geometry-label-overlap` | label pair inset-2 overlap forbidden; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:275` | label route clearance | `dataflow/geometry-route-clearance` | showcase label/other-route distance >=4; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:285` | label canvas overflow | `dataflow/geometry-label-overlap` | showcase label overflow <=.5px; no separate measured-boundary field | generated-boundary; e2-boundary-dataflow-label-canvas-15/18; model text-capacity |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:295` | stages exceed page width | `dataflow/stage-canvas-width` | last stage center +84+24 <=width; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/dataflow/render-dataflow.mjs:299` | aggregate dataflow refusal | `no single engine code (aggregate)` | any accumulated problem; no separate measured-boundary field | aggregation-only |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:351` | duplicate state ids | `lifecycle/duplicate-id` | unique state.id; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:357` | v1 fixed band page floor | `lifecycle/geometry-node-viewbox` | height -122 +4 >=448; no separate measured-boundary field | generated-boundary; v2 auto-row layout intentionally does not apply this floor |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:361` | duplicate lane ids | `lifecycle/duplicate-id` | unique lane.id; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:363` | reserved main lane absent | `lifecycle/reserved-main-lane` | main lane exists in v1/v2; no separate measured-boundary field | existing-synthetic; not E1: preserved from previous stage; discrete main/nonmain probe |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:370` | unknown state lane | `lifecycle/lane-reference` | state.lane in lanes; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:375` | v2 state column range | `lifecycle/range` | integer col in0..4; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:386` | v1 fixed band column capacity | `lifecycle/geometry-state-column` | phase col0..4; event/outcome col0..2; no separate measured-boundary field | existing-synthetic; v1 ordinary/terminal col3 rejects; v2 col3 accepted by its five-column grid |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:391` | nonfinite placed coordinates | `lifecycle/geometry-node-viewbox` | finite column/size/offset projection; no separate measured-boundary field | mixed-admission; wrong scalar shape is E1; invalid fixed-band columns above; huge valid coordinates hit SDK fixedpoint boundary |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:395` | state horizontal page bounds | `lifecycle/geometry-node-viewbox` | v1 margin32;v2 margin28; no separate measured-boundary field | generated-boundary; v1 phase left and ordinary/outcome right margins; v2 authored right margin covered; v2 source-sized first left stays60 and cannot cross margin28 |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:398` | state vertical lifecycle area | `lifecycle/geometry-node-viewbox` | v1 top64,bottomH-122;v2 top44,bottomH-extra-96; no separate measured-boundary field | generated-boundary; v1/v2 top and authored bottom reserves covered; auto-growth controls remain separate |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:402` | primary state label fit | `lifecycle/geometry-label-fit` | textUnits(label)*6.2 <=width+6; no separate measured-boundary field | generated-boundary; v1/v2 separate width pairs |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:405` | brand top rail | `lifecycle/geometry-label-fit` | brand mark and sigil fit state width; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-brand-rail-71/73; shared brand predicate, model text-capacity |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:416` | sublabel and tag fit | `lifecycle/geometry-label-fit` | v1 minimum6,v2 minimum7; width budget minus8; no separate measured-boundary field | generated-boundary; v1/v2 separate sublabel/tag pairs |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:429` | state collision gap | `lifecycle/geometry-node-overlap` | state separation >=10px; no separate measured-boundary field | generated-boundary; v1/v2 same-column offset pairs |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:435` | unknown transition source | `lifecycle/transition-endpoint` | transition.from in states; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:436` | unknown transition target | `lifecycle/transition-endpoint` | transition.to in states; no separate measured-boundary field | E1-covered |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:441` | transition endpoint span | `lifecycle/geometry-route-distance` | Euclidean endpoint distance >=32; no separate measured-boundary field | generated-boundary |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:449` | endpoint side direction | `lifecycle/geometry-route-quality` | automatic route border crossing perpendicular; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-endpoint-direction-0/1; straight preset avoids authored-via bypass; actual source-side refusal observed |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:460` | route through third-party state | `lifecycle/geometry-route-clearance` | segment avoids third-party state interior; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-third-state-gap-1/3; three physical main-column states |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:469` | proper crossing | `lifecycle/geometry-route-quality` | showcase disjoint routes do not cross unless planner halo resolves; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-physical-crossing--1/1; actual authored-route crossing at180,200; planner halo exemption not claimed |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:480` | ambiguous corridor | `lifecycle/geometry-route-quality` | showcase unrelated routes do not merge; no separate measured-boundary field | shared-covered; e2-boundary-architecture-corridor-7/9 exact shared8px predicate proof; lifecycle physical-corridor7/9 retained as MODEL artifact-route-rounding because final rounded SVG corner crossing preempts isolated source-corridor proof |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:492` | container border run | `lifecycle/geometry-route-quality` | frames=[]; no separate measured-boundary field | renderer-invariant; lifecycle bands are guides, not closed structural containers; no admitted source can trigger this call |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:501` | route rhythm | `lifecycle/geometry-route-quality` | showcase micro8/interior16 floors; no separate measured-boundary field | shared-covered; e2-boundary-architecture-turn-7/9/15/17 shared rhythm floors plus existing e2-lifecycle-geometry-route-quality-micro-segment actual family refusal |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:517` | transition label overlaps band title | `lifecycle/geometry-label-overlap` | showcase label rect misses band title rect; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-band-title-*; below114 actual composition/label-band-title-overlap observed; model text-capacity |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:523` | band-title refusal accumulation | `lifecycle/geometry-label-overlap` | same recorded cause as line517; no separate measured-boundary field | aggregation-only |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:530` | label overlaps state | `lifecycle/geometry-label-overlap` | label/state inset overlap forbidden; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-label-node-122/124; model text-capacity |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:537` | label pairs overlap | `lifecycle/geometry-label-overlap` | label pair inset-2 overlap forbidden; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-label-pair-412/416; model text-capacity |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:541` | label route clearance | `lifecycle/geometry-route-clearance` | showcase label/other-route distance >=4; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-family-label-route-below/above; actual source4px oracle cause observed with displaced lower states |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:550` | label canvas overflow | `lifecycle/geometry-label-overlap` | showcase label overflow <=.5px; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-label-canvas-15/18; model text-capacity |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:559` | aggregate lifecycle refusal | `no single engine code (aggregate)` | any accumulated problem; no separate measured-boundary field | aggregation-only |
+
+##### Route, text and frame refusal sites
+
+| Renderer source | Refusal cause | Engine mapping | Predicate / threshold | Coverage note |
+| --- | --- | --- | --- | --- |
+| `sidecars/archify/renderers/architecture/grid.mjs:33-59` | grid mode, position, nonnegative cell, column and uniqueness | `architecture/{enum,placement-input,range,grid-column,grid-cell}` | pos overrides grid hints; otherwise valid unique declared cell; no numeric threshold claimed | E1 architecture.rs and generated cases |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:430-454` | identity, placement and finite positive size | `architecture/{duplicate-id,placement-input,shape,range}` | ids unique; free pos required; finite positive size; no numeric threshold claimed | E1: architecture.rs; generated E1 cases |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:458` | component outside canvas | `architecture/geometry-node-viewbox` | node bounds contained in viewBox; threshold 0 | existing e2 primary viewBox/origin cases |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:460-476` | primary/detail/tag/brand readability | `architecture/geometry-label-fit` | text minimum width <= available rail; no numeric threshold claimed | existing e2 primary/detail/tag; new brand-rail71/73 around48+5*8*.6=72px |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:480-486` | component clearance | `architecture/geometry-node-overlap` | rectsOverlap(a,b,8); threshold 8 | new boundary: architecture-node-gap |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:494` | unknown wrapped component | `architecture/reference` | wraps names existing components; no numeric threshold claimed | E1: architecture.rs reference |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:500-519` | boundary title width/frame/page/node containment | `architecture/geometry-boundary-title-fit` | title fits frame/page and avoids components; no numeric threshold claimed | existing e2 boundary-title; individual title/frame intersections unisolated |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:528-579` | boundary title pair and deployment frame containment | `architecture/geometry-boundary-overlap` | title pair disjoint; nested wraps agree with frames; no numeric threshold claimed | E1 ownership handles membership; geometry branches require frame-worker fixtures |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:585-617` | boundary canvas containment | `architecture/geometry-boundary-viewbox` | boundary contained in origin-zero page; threshold 0 | existing frame cases; no isolated route boundary |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:622-623` | unknown relation endpoints | `architecture/reference` | from/to names component; no numeric threshold claimed | E1 reference cases |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:626-635` | route outside canvas | `architecture/geometry-route-viewbox` | showcase all route points in page; threshold 0 | new boundary: architecture-route-origin |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:638-651` | endpoint distance/self-loop port distance | `architecture/geometry-route-distance` | euclidean endpoint span >=24; threshold 24 | new boundary: architecture-port-span; self-loop existing positive case |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:656-739` | shared route gates | `architecture/geometry-route-quality` | delegates endpoint/node/crossing/corridor/border/rhythm; no numeric threshold claimed | shared inventory below |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:739-747` | excessive route detour | `architecture/geometry-route-quality` | shortest legal orthogonal route ratio + excess + empty excursion; threshold {"ratio":2.5,"excessPx":200,"emptyPx":96} | oracle observed shortest408px; new actual-length1019/1021 ratio pair and excess199/201 pair |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:750-764` | automatic short label gap | `architecture/geometry-label-overlap` | un-pinned label blocked and direct span <ceil(label.width+16); threshold 16 | new architecture automatic gap; exact text metric boundary intentionally not assumed |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:773-780` | label/component and boundary title overlap | `architecture/geometry-label-overlap` | rectsOverlap(label,node,-2); title overlap; threshold -2 | new label-node pair; boundary title pair remains frame-worker coverage |
+| `sidecars/archify/renderers/architecture/render-architecture.mjs:785-805` | label route/page containment | `architecture/geometry-route-clearance` | delegates shared label gates; no numeric threshold claimed | shared inventory below |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:1941-2080` | v2 explicit pair pin conflicts | `workflow/geometry-route-quality` | label-route4; label-label -2; proper crossing; corridor8; threshold {"labelRoute":4,"labelOverlap":-2,"corridor":8} | new v2 pin boundary cases; actual final oracle diagnostics retained |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2087-2106` | v2 preset/channel compatibility | `workflow/geometry-route-quality` | preset supports authored channel field; no numeric threshold claimed | new v2 incompatible preset case; engine support requires audit |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2227-2273` | v2 origin pin containment | `workflow/geometry-route-viewbox` | labelAt/via/channel origin >=0; threshold 0 | new workflow-v2-origin pair |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2280-2300` | v2 finite and nonzero pinned segments | `workflow/geometry-route-quality` | finite coordinates; segment != zero; threshold 0 | finite E1 shape/range; new duplicate-via case |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2301-2337` | v2 orthogonal pin segments and min lengths | `workflow/geometry-route-quality` | axis aligned; direct>=28, endpoints>=8, interior>=16; threshold {"direct":28,"endpoint":8,"interior":16} | v2 anchors observed144,119 to288,119; turn15 rejects16px,17 accepted; endpoint9 accepted |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2338-2378` | v2 channel preservation and preset family | `workflow/geometry-route-quality` | via path contains authored channel; route fits preset family; no numeric threshold claimed | new channel-preservation/preset conflict; engine support requires audit |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2379-2412` | v2 endpoint orientation and unrelated-node clearance | `workflow/geometry-route-clearance` | honors sides; unrelated-node intersection; threshold 2 | new endpoint direction/node-clearance cases |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2413-2448` | v2 route legend/scene-label/frame clearance | `workflow/geometry-route-quality` | route avoids legend, title rails and frame border; threshold 0 | new source-via route legend189/191, title63/65 pairs based on observed baseline legend/header rectangles |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2450-2496` | v2 pinned label node/legend/title clearance | `workflow/geometry-label-overlap` | pinned label avoids measured obstacles; threshold {"node":-2,"legend":0,"title":0} | new pinned label legend bottom189/191 and lane-title bottom63/65 pairs |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2503-2565` | schema, identity, references, column rules | `workflow/{shape,schema-version,diagram-type,text,id,duplicate-id,lane-reference,range}` | typed document and declared references; no numeric threshold claimed | E1 workflow.rs and generated cases |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2567-2597` | node finite/label/brand/lane bounds | `workflow/geometry-node-lane` | finite geometry; text fits; node within lane; no numeric threshold claimed | E1 finite/range; existing e2 fit/lane and new brand-rail71/73 |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2600-2643` | phase/group validity and title width | `workflow/{phase-range,phase-overlap,group-range,lane-reference,empty-group,geometry-phase-label-fit}` | declared ranges valid; title fits span; no numeric threshold claimed | E1 range/reference/membership; frame-worker title boundary |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2645-2655` | same-lane node clearance | `workflow/geometry-node-overlap` | rectsOverlap(a,b,8); threshold 8 | existing same-lane-col; exact column/offset spacing needs layout-aware fixture |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2660-2668` | endpoints and direct span | `workflow/geometry-route-distance` | valid endpoints; direct span>=28; threshold 28 | E1 endpoints; new workflow-direct-span controls are oracle-measured |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2674-2759` | shared route gates | `workflow/geometry-route-quality` | endpoint/node/crossing/corridor/arrow/border/rhythm; no numeric threshold claimed | shared inventory below |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2760-2779` | mainPath node/link/order | `workflow/{main-path-node,main-path-edge,main-path-order}` | all path steps linked and forward; no numeric threshold claimed | E1 workflow.rs; existing generated rejection cases |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2782-2799` | label node/pair overlap | `workflow/geometry-label-overlap` | rectsOverlap(label,node-or-label,-2); threshold -2 | new common label-node and label-pair |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2801-2829` | label-route and v1 page/legend containment | `workflow/geometry-route-clearance` | label-route4; lane right+16; legendY+18<=page; threshold {"route":4,"lane":16,"legend":18} | shared label-route; existing e2 page/legend cases |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:2840-3056` | v2 pre-routing shape/reference/overlap errors | `workflow/{duplicate-id,edge-endpoint,lane-reference,range,geometry-node-overlap}` | source-valid nodes and identities before solve; threshold 8 | E1 for structure; node-overlap existing E2 case |
+| `sidecars/archify/renderers/workflow/workflow-compiler.mjs:3803,3878,4258,4606,4639,4836` | v2 feasibility, preset conflict, capacity, bounded solver | `workflow/geometry-route-quality` | feasible sides/pins/ranks/lanes/page; finite planning budget; threshold {"direct":28,"stub":8,"turn":16,"laneGap":32} | new preset/channel cases; solver exhaustion is algorithm-dependent, not a source numeric boundary |
+| `sidecars/archify/renderers/workflow/render-workflow.mjs:24-26` | compiled error propagation | `workflow/geometry-route-quality` | compiled.ok false => throw original diagnostics; no numeric threshold claimed | wrapper has no independent geometry predicates |
+| `sidecars/archify/renderers/shared/geometry.mjs:388-455` | endpoint-side-direction | `*/geometry-route-quality` | first/final nonzero segment honors declared/inferred side; threshold 0 | new endpoint-orientation plus raw diagonal controls |
+| `sidecars/archify/renderers/shared/geometry.mjs:463-522` | edge-through-node | `*/geometry-route-clearance` | unrelated opaque obstacle intersects segment with2px clearance; threshold 2 | new unrelated-node-clearance |
+| `sidecars/archify/renderers/shared/geometry.mjs:607-693` | proper-crossing | `*/geometry-route-quality` | strict interior segment intersection; shared ends/profile exceptions; threshold 0 | new proper-crossing raw pin case; touching control |
+| `sidecars/archify/renderers/shared/geometry.mjs:706-855` | ambiguous-corridor | `*/geometry-route-quality` | collinear overlap >=8; v2 same-style terminal trunk <=24 exempt; threshold {"minimum":8,"trunkMaximum":24} | new corridor7/9 pairs; individually observed v2 trunk23 pass /25 measured corridor refusal |
+| `sidecars/archify/renderers/shared/geometry.mjs:788-815` | arrowhead-collision | `*/geometry-route-quality` | same destination/axis/direction, tip distance <3.5*(widthA+widthB); threshold "3.5*(widthA+widthB)" | observed v2 tips288,119 /288,126; widths6/7 and8/7 test marker sums6/8 around7px; C-generated notice policy explicit |
+| `sidecars/archify/renderers/shared/geometry.mjs:876-953` | container-border-run | `*/geometry-route-quality` | positive overlap beyond epsilon on corner-trimmed frame side; threshold 0.0001 | existing seq segment-border; new sequence border-neighbor pair |
+| `sidecars/archify/renderers/shared/geometry.mjs:1028-1104` | micro/short interior segment | `*/geometry-route-quality` | nonzero segment length <8; interior length <16; threshold {"micro":8,"interior":16} | new 7/9 and15/17 source-via pairs |
+| `sidecars/archify/renderers/shared/geometry.mjs:1108-1153` | label-route-clearance | `*/geometry-route-clearance` | other-route distance <4 (own relation exempt); threshold 4 | new authored label-route3/5 pairs |
+| `sidecars/archify/renderers/shared/geometry.mjs:1179-1259` | label-canvas-containment | `*/geometry-label-viewbox` | label rect overflow >0.5; threshold 0.5 | new label-origin -0.5/+1.5 controls; actual rect extent oracle measured |
+| `sidecars/archify/renderers/shared/route-quality.mjs:10-18,494-615` | excessive-route-detour | `*/geometry-route-quality` | ratio>=2.5 AND excess>=200 AND empty>=96; <=80 obstacles; shared outer corridor exemption32; threshold {"ratio":2.5,"excess":200,"empty":96,"obstacles":80,"shared":32} | ratio, excess and serpentine empty95/97 pairs; shared outer-corridor32 exemption requires a separate multi-route witness |

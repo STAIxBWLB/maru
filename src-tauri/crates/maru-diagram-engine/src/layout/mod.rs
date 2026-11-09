@@ -11,6 +11,7 @@ pub mod fixed;
 mod lifecycle;
 mod presets;
 mod sequence;
+mod source_budgets;
 mod workflow;
 
 pub use crate::geometry::{GeometryBox, GeometryPoint};
@@ -89,6 +90,17 @@ pub(crate) fn allocate_route_ids<'a>(
             }
         })
         .collect()
+}
+
+fn route_clearance(route: &RouteRequest) -> Result<Coord, Diagnostic> {
+    // Authored coordinates use the format's 2px centerline clearance. Extra
+    // automatic clearance must not turn a valid 3px authored corridor into a
+    // repair-induced micro-turn or blocked waypoint.
+    if !route.waypoints.is_empty() || route.channel_x.is_some() || route.channel_y.is_some() {
+        Ok(2 * 64)
+    } else {
+        Ok(add(route.width.unwrap_or(2 * 64) / 2, 2 * 64)?.max(4 * 64))
+    }
 }
 
 pub(crate) struct SceneBuilder {
@@ -534,9 +546,7 @@ impl SceneBuilder {
             );
         }
         for route in &self.connections {
-            let Ok(clearance) =
-                add(route.width.unwrap_or(2 * 64) / 2, 2 * 64).map(|value| value.max(4 * 64))
-            else {
+            let Ok(clearance) = route_clearance(route) else {
                 continue;
             };
             if self.routing_obstacles.contains_key(&clearance) || self.routing_obstacles.len() >= 8
@@ -595,7 +605,7 @@ impl SceneBuilder {
         } else {
             ("top", "bottom")
         };
-        let clearance = add(r.width.unwrap_or(2 * 64) / 2, 2 * 64)?.max(4 * 64);
+        let clearance = route_clearance(r)?;
         let scene_bounds = match &self.routing_bounds {
             Some(bounds) => bounds.clone()?,
             None => self
@@ -717,20 +727,121 @@ impl SceneBuilder {
                 .map(|label| inflate(label.bounds, clearance))
                 .collect::<Result<Vec<_>, _>>()?,
         );
-        #[cfg(test)]
-        let routed = match self.route_budget {
-            Some(budget) => crate::routing::route_orthogonal_with_budget(
-                start, end, &obstacles, &waypoints, budget,
-            ),
-            None => crate::routing::route_orthogonal(start, end, &obstacles, &waypoints),
+        let automatic_ports = r.waypoints.is_empty()
+            && r.channel_x.is_none()
+            && r.channel_y.is_none()
+            && preset.channel_x.is_none()
+            && preset.channel_y.is_none()
+            && r.from_y.is_none()
+            && r.to_y.is_none()
+            && matches!(r.route.as_deref(), None | Some("auto") | Some("straight"));
+        let segment_clear = |tip, outside| {
+            !self
+                .document
+                .nodes
+                .iter()
+                .map(|n| n.bounds)
+                .chain(self.document.labels.iter().map(|l| l.bounds))
+                .any(|bounds| segment_hits_box(tip, outside, bounds))
+                && !obstacles.iter().any(|o| {
+                    i64::from(outside.x) > i64::from(o.x)
+                        && i64::from(outside.x) < i64::from(o.x) + i64::from(o.width)
+                        && i64::from(outside.y) > i64::from(o.y)
+                        && i64::from(outside.y) < i64::from(o.y) + i64::from(o.height)
+                })
         };
-        #[cfg(not(test))]
-        let routed = crate::routing::route_orthogonal(start, end, &obstacles, &waypoints);
-        let mut points = routed?;
-        points.insert(0, a);
-        points.push(z);
-        Ok((points, obstacles))
+        let endpoint_candidates =
+            |bounds: GeometryBox,
+             declared: Option<&str>,
+             default: &str,
+             first: (GeometryPoint, GeometryPoint)|
+             -> Result<Vec<(GeometryPoint, GeometryPoint)>, Diagnostic> {
+                let mut result = vec![first];
+                if !automatic_ports {
+                    return Ok(result);
+                }
+                let mut sides = vec![declared.unwrap_or(default)];
+                if declared.is_none() {
+                    for side in ["top", "bottom", "left", "right"] {
+                        if !sides.contains(&side) {
+                            sides.push(side);
+                        }
+                    }
+                }
+                for side in sides {
+                    let (tip, outside) = self.port(bounds, side, None, escape)?;
+                    let vertical_face = matches!(side, "left" | "right");
+                    let span = if vertical_face {
+                        bounds.height
+                    } else {
+                        bounds.width
+                    };
+                    let near_corner = (span / 2 - 2 * 64).max(0);
+                    for shift in [0, -span / 4, span / 4, -near_corner, near_corner] {
+                        let (dx, dy) = if vertical_face {
+                            (0, shift)
+                        } else {
+                            (shift, 0)
+                        };
+                        let pair = (
+                            tip.checked_translate(dx, dy).map_err(arithmetic)?,
+                            outside.checked_translate(dx, dy).map_err(arithmetic)?,
+                        );
+                        if !result.contains(&pair) {
+                            result.push(pair);
+                        }
+                    }
+                }
+                Ok(result)
+            };
+        let from_candidates =
+            endpoint_candidates(from, r.from_side.as_deref(), default_sides.0, (a, start))?;
+        let to_candidates =
+            endpoint_candidates(to, r.to_side.as_deref(), default_sides.1, (z, end))?;
+        let mut last_error = None;
+        for (tip, source) in from_candidates {
+            for &(target_tip, target) in &to_candidates {
+                if automatic_ports
+                    && (!segment_clear(tip, source)
+                        || !segment_clear(target_tip, target)
+                        || r.from == r.to && tip == target_tip)
+                {
+                    continue;
+                }
+                #[cfg(test)]
+                let routed = match self.route_budget {
+                    Some(budget) => crate::routing::route_orthogonal_with_budget(
+                        source, target, &obstacles, &waypoints, budget,
+                    ),
+                    None => {
+                        crate::routing::route_orthogonal(source, target, &obstacles, &waypoints)
+                    }
+                };
+                #[cfg(not(test))]
+                let routed =
+                    crate::routing::route_orthogonal(source, target, &obstacles, &waypoints);
+                match routed {
+                    Ok(mut points) => {
+                        points.insert(0, tip);
+                        points.push(target_tip);
+                        return Ok((points, obstacles));
+                    }
+                    Err(error) => {
+                        // A single edge owns one search budget. Alternative
+                        // ports must not multiply that budget or hide exhaustion.
+                        if error.code.ends_with("/route-budget") {
+                            return Err(error);
+                        }
+                        last_error = Some(error);
+                    }
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(||failure("route-blocked",
+            "no automatic endpoint port has an unobstructed escape from its node and labels",
+            "move overlapping nodes or labels apart, or provide an unobstructed authored endpoint side")))
     }
+
     fn route_label(&mut self, r: &RouteRequest) -> Result<Vec<GeometryPoint>, Diagnostic> {
         let (points, obstacles) = self.route_points(r)?;
         if let Some(text) = r.label.as_deref().filter(|s| !s.is_empty()) {
@@ -761,22 +872,38 @@ impl SceneBuilder {
                         x: fixed::checked_midpoint(p[0].x, p[1].x).map_err(arithmetic)?,
                         y: fixed::checked_midpoint(p[0].y, p[1].y).map_err(arithmetic)?,
                     };
-                    let offsets = if p[0].x == p[1].x {
-                        [(-w - 6 * 64, -h / 2), (6 * 64, -h / 2)]
-                    } else {
-                        [(-w / 2, -h - 6 * 64), (-w / 2, 6 * 64)]
-                    };
-                    for (dx, dy) in offsets {
-                        let candidate = rect(add(center.x, dx)?, add(center.y, dy)?, w, h)?;
-                        if !obstacles.iter().any(|o| intersects(candidate, *o))
-                            && !points
-                                .iter()
-                                .any(|p| candidate.contains(*p).unwrap_or(true))
-                        {
-                            found = Some(GeometryPoint {
-                                x: candidate.x,
-                                y: candidate.y,
-                            });
+                    let flexible =
+                        r.label_segment.is_none() && r.label_dx.is_none() && r.label_dy.is_none();
+                    let rings = if flexible { 8 } else { 1 };
+                    for ring in 0..rings {
+                        let step = add(h.max(16 * 64), 8 * 64)?;
+                        let gap = add(
+                            6 * 64,
+                            fixed::checked_scale(step, i64::from(ring), 1).map_err(arithmetic)?,
+                        )?;
+                        let offsets = if p[0].x == p[1].x {
+                            [(add(-w, -gap)?, -h / 2), (gap, -h / 2)]
+                        } else {
+                            [(-w / 2, add(-h, -gap)?), (-w / 2, gap)]
+                        };
+                        for (dx, dy) in offsets {
+                            let candidate = rect(add(center.x, dx)?, add(center.y, dy)?, w, h)?;
+                            if candidate.x < 0 || candidate.y < 0 {
+                                continue;
+                            }
+                            if !obstacles.iter().any(|o| intersects(candidate, *o))
+                                && !points
+                                    .iter()
+                                    .any(|p| candidate.contains(*p).unwrap_or(true))
+                            {
+                                found = Some(GeometryPoint {
+                                    x: candidate.x,
+                                    y: candidate.y,
+                                });
+                                break;
+                            }
+                        }
+                        if found.is_some() {
                             break;
                         }
                     }
@@ -1445,6 +1572,12 @@ mod tests {
             "edges"
         };
         spec[collection][0]["route"] = preset.into();
+        if collection == "edges" {
+            // Keep the corridor audit clear of the lane's numbered title rail.
+            for (i, node) in spec["nodes"].as_array_mut().unwrap().iter_mut().enumerate() {
+                node["col"] = (1 + 2 * i).into();
+            }
+        }
         if preset != "vertical-channel" {
             spec[collection][0].as_object_mut().unwrap().remove("label");
         }
@@ -1761,6 +1894,12 @@ mod tests {
             _ => 4,
         };
         let mut spec: Value = serde_json::from_str(fixtures()[index]).unwrap();
+        if kind == "workflow" {
+            // Preset intent is tested independently of title-rail collisions.
+            for (i, node) in spec["nodes"].as_array_mut().unwrap().iter_mut().enumerate() {
+                node["col"] = (1 + 2 * i).into();
+            }
+        }
         match kind {
             "architecture" => spec["components"][1]["row"] = 2.into(),
             "workflow" => {
@@ -1801,13 +1940,21 @@ mod tests {
                             edge["label"] = "F".into();
                         }
                         let override_axis = if ["outside-right", "right-channel"].contains(preset) {
-                            ('x', b.right().unwrap() + 100 * 64)
+                            (
+                                'x',
+                                nodes
+                                    .iter()
+                                    .map(|node| node.bounds.right().unwrap())
+                                    .max()
+                                    .unwrap()
+                                    + 100 * 64,
+                            )
                         } else if ["return-left", "left-channel"].contains(preset) {
-                            ('x', a.x - 100 * 64)
+                            ('x', 10 * 64)
                         } else if ["vertical-channel", "orthogonal-h"].contains(preset) {
                             ('x', gapx)
                         } else if ["top-channel", "up-channel"].contains(preset) {
-                            ('y', a.y - 240 * 64)
+                            ('y', 10 * 64)
                         } else if *preset == "bottom-channel" {
                             ('y', b.bottom().unwrap() + 100 * 64)
                         } else {
@@ -2045,5 +2192,36 @@ mod tests {
         let node = scene.nodes.iter().find(|n| n.id == "a").unwrap();
         assert_eq!(node.position_source, GeometryPositionSource::PlannedPin);
         assert_eq!((node.bounds.x, node.bounds.y), (80 * 64, 180 * 64));
+    }
+    #[test]
+    fn automatic_ports_and_remote_label_candidates_keep_original_corpus_routes_visible() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../../testdata/parity.json")).unwrap();
+        for id in [
+            "app-architecture",
+            "e1-architecture-valid-deployment-profile",
+            "public-05",
+            "public-07",
+        ] {
+            let case = corpus["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|case| case["id"] == id)
+                .expect("original regression fixture remains in corpus");
+            let source = case
+                .get("validityInputJson")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| case["comparison"]["inputJson"].as_str())
+                .or_else(|| case["inputJson"].as_str())
+                .unwrap();
+            let report = layout(source);
+            assert!(report.ok, "{id}: {:?}", report.diagnostics);
+            let geometry = report.geometry.expect("complete original scene");
+            assert!(
+                geometry.routes.iter().all(|route| !route.points.is_empty()),
+                "{id}: some original relationships vanished"
+            );
+        }
     }
 }

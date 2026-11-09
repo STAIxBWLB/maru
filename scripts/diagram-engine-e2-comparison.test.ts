@@ -21,3 +21,9 @@ it("keeps document and geometry layers distinct and preserves the three deferred
   }
   for (const item of corpus.cases) expect(geometryComparisonFor(item)).toEqual(item.geometryComparison);
 });
+
+it("never maps another family's label overlap to sequence message spacing or a loose alias",()=>{
+  const item={id:"lifecycle-overlap",diagramType:"lifecycle",comparison:{inputJson:"{}",accepted:true},oracle:{ok:false,codes:["layout/constraint"],diagnostics:[{message:'Labels "One" and "Two" overlap'}]}};
+  expect(geometryComparisonFor(item).equivalentCodes).toEqual(["lifecycle/geometry-label-overlap"]);
+  expect(geometryComparisonFor({...item,geometryRule:"lifecycle/geometry-label-overlap"}).equivalentCodes).toEqual(["lifecycle/geometry-label-overlap"]);
+});

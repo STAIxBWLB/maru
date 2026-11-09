@@ -54,19 +54,12 @@ pub(crate) fn sequence_geometry_diagnostics(
         // Fixed columns reserve a header half-width at the final center. In
         // spread mode the end margin and minimum pitch remain hard budgets.
         let spread = meta.get("column_fit").and_then(Value::as_str) == Some("spread");
-        let (header_width, first_center, pitch) = if spread {
-            let slot = (width - 124 * UNIT) / count;
-            let header = (slot - 24 * UNIT).clamp(86 * UNIT, 190 * UNIT);
-            let first = 62 * UNIT + header / 2;
-            let pitch = if count > 1 {
-                ((width - 102 * UNIT - header) / (count - 1)).max(108 * UNIT)
-            } else {
-                108 * UNIT
-            };
-            (header, first, pitch)
-        } else {
-            (86 * UNIT, 62 * UNIT, 108 * UNIT)
-        };
+        let columns = super::source_budgets::sequence_columns(width, participants.len(), spread);
+        let (header_width, first_center, pitch) = (
+            columns.participant_width,
+            columns.first_center,
+            columns.pitch,
+        );
         let required = first_center
             .saturating_add((count - 1).saturating_mul(pitch))
             .saturating_add(header_width / 2 + 40 * UNIT);
@@ -197,7 +190,9 @@ pub(crate) fn sequence_geometry_diagnostics(
             || meta.get("quality_profile").and_then(Value::as_str) == Some("showcase");
         if enforce && !legend_entries.is_empty() {
             let required = content_bottom
-                .saturating_add(98 * UNIT)
+                // The source's conservative growth hint reserves 98px, but
+                // its actual legend placement still fits at content+96px.
+                .saturating_add(96 * UNIT)
                 .saturating_add(total_row_height.saturating_sub(22 * UNIT));
             if required > height {
                 push(&mut diagnostics, "geometry-legend-clearance", "/meta/viewBox/1".into(),
@@ -262,6 +257,20 @@ mod tests {
         source["meta"].as_object_mut().unwrap().remove("viewBox");
         assert!(codes(&source).is_empty());
     }
+    #[test]
+    fn effective_legend_reserve_is_96_not_the_conservative_98_pixel_hint() {
+        let mut source = spec();
+        source["meta"]["quality_profile"] = "showcase".into();
+        source["messages"][0]["y"] = 650.into();
+        source["messages"][0]["note"] = "Detail".into();
+        for height in [768.0, 768.0 + 1.0 / 64.0, 770.0 - 1.0 / 64.0] {
+            source["meta"]["viewBox"] = serde_json::json!([920, height]);
+            assert!(!codes(&source).contains(&"sequence/geometry-legend-clearance".into()));
+        }
+        source["meta"]["viewBox"] = serde_json::json!([920, 768.0 - 1.0 / 64.0]);
+        assert!(codes(&source).contains(&"sequence/geometry-legend-clearance".into()));
+    }
+
     #[test]
     fn resolved_explicit_legend_overrides_count_width_and_multiline_height() {
         let mut source = spec();

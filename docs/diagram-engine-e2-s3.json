@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": "E2 S3 geometry rules, deterministic test canvas and measurements",
-  "sdkTree": "6849d221230549482ed591ad17d9aec73b5944ee",
+  "sdkTree": "b9f4528d5daf35403b30e62d865e1facdb98cc65",
   "execution": {
     "scope": "remote Linux x64 reproduction, not hosted acceptance",
     "rust": "1.98.0",
@@ -10,7 +10,7 @@
     "hostedCi": "pending"
   },
   "checks": {
-    "coreUnit": 150,
+    "coreUnit": 167,
     "documentDifferential": 2,
     "geometryDifferential": 1,
     "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
@@ -18,8 +18,8 @@
     "sdkBoundary": "passed",
     "productIsolation": "normal JS and actual WASM exports omit scene_corpus_hashes; normal library omits canvas bridge",
     "browser": {
-      "startTime": "2026-11-08T23:58:22.154Z",
-      "duration": 15457.649,
+      "startTime": "2026-11-09T01:27:48.870Z",
+      "duration": 15582.279999999999,
       "expected": 4,
       "skipped": 0,
       "unexpected": 0,
@@ -28,25 +28,26 @@
     "local": {
       "typecheck": "tsc -b passed",
       "applicableEslint": "passed",
-      "focusedVitest": 32
-    }
+      "focusedVitest": 33
+    },
+    "geometryBoundaries": 1
   },
   "sceneAgreement": {
-    "scope": "all 309 parity cases plus three seeded dense scenes; every unchanged scene repeated",
+    "scope": "309 strict parity cases + 218 layered boundary cases + 3 seeded dense scenes; every unchanged scene repeated",
     "nativeWasmBytesEqual": true,
-    "reportSha256": "498e1f04832a9308229d4c7d0049bb232cd194d6e2091c421f0fc6590416836d",
-    "reportBytes": 90941,
-    "corpusSha256": "b6ba9cb43a890d5fb03550edd90f30bbf2a460c61712d73bb96c51bf25f32f34",
-    "cases": 312,
-    "successfulReports": 45,
-    "nonSuccessReports": 267,
+    "reportSha256": "7928b2d90edc8b999a44af4dda8b72ab5d8d992792d5fafeb62e9c0d850315e4",
+    "reportBytes": 149265,
+    "corpusSha256": "5e9b6b39414c7dc2e3b97d97f349e538a6ebd9c0b7bbb50f50e94abe1cadd7b3",
+    "cases": 530,
+    "successfulReports": 140,
+    "nonSuccessReports": 390,
     "hostedLinuxMacosWindowsAndWasm": "pending"
   },
   "measurements": {
     "productionPayload": {
       "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
-      "buildMs": 18976.89758,
-      "testHarnessBuildMs": 350.3022810000002,
+      "buildMs": 19466.227913,
+      "testHarnessBuildMs": 327.2693790000012,
       "platform": "linux",
       "arch": "x64",
       "sizes": [
@@ -63,30 +64,30 @@
           "path": "lazy-transport"
         },
         {
-          "name": "engineGeometry-BD6JonDg.js",
-          "bytes": 4866035,
-          "gzipBytes": 1578645,
+          "name": "engineGeometry-0UP91rIG.js",
+          "bytes": 4994359,
+          "gzipBytes": 1620462,
           "path": "lazy-geometry-metrics"
         }
       ],
       "gzipBytes": 324220,
       "validationGzipBytes": 324220,
-      "lazyGeometryGzipBytes": 1578645,
+      "lazyGeometryGzipBytes": 1620462,
       "lazyTransportGzipBytes": 122,
-      "totalGzipBytes": 1902987
+      "totalGzipBytes": 1944804
     },
     "geometryCold": {
       "scope": "fresh Chromium process; exact emitted production entry already imported; cache-disabled geometry artifact HTTP fetch/parse plus bindings import and WASM compile/instantiate; no Vite transform or first layout in interval",
       "network": "same-origin loopback Node HTTP server; exact emitted artifact bytes, identity transfer without gzip or rewriting, no artificial throttling",
-      "coldLoadMs": 249,
+      "coldLoadMs": 267.60000002384186,
       "resources": [
         {
-          "path": "/.engine-e0/browser/engineGeometry-BD6JonDg.js",
-          "durationMs": 11.399999976158142,
-          "transferBytes": 4866335,
-          "encodedBodyBytes": 4866035,
-          "decodedBodyBytes": 4866035,
-          "emittedFileBytes": 4866035
+          "path": "/.engine-e0/browser/engineGeometry-0UP91rIG.js",
+          "durationMs": 11.5,
+          "transferBytes": 4994659,
+          "encodedBodyBytes": 4994359,
+          "decodedBodyBytes": 4994359,
+          "emittedFileBytes": 4994359
         }
       ]
     },
@@ -94,111 +95,113 @@
       "scope": "production wasm-layout; pre-serialized request; facade request serialization, layout+routing and scene JSON parse; validation included; 20 warm samples after one first layout",
       "nodes": 1000,
       "edges": 999,
-      "firstLayoutMs": 396.89999997615814,
+      "firstLayoutMs": 387.60000002384186,
       "durationsMs": [
-        318,
-        317.60000002384186,
-        309.60000002384186,
-        309,
-        310.5999999642372,
-        308.69999998807907,
-        313.80000001192093,
-        307.69999998807907,
-        311.89999997615814,
-        310.7000000476837,
-        309,
-        308.7999999523163,
-        309.39999997615814,
-        307.9000000357628,
-        312.89999997615814,
-        308.5999999642372,
-        309.30000001192093,
-        311.60000002384186,
-        307.10000002384186,
-        306.5999999642372
+        307.39999997615814,
+        304.60000002384186,
+        316.80000001192093,
+        303.69999998807907,
+        304.60000002384186,
+        301.2999999523163,
+        301.30000001192093,
+        299.39999997615814,
+        299.60000002384186,
+        302.60000002384186,
+        308.39999997615814,
+        297.89999997615814,
+        299,
+        300.5,
+        307.19999998807907,
+        301.2000000476837,
+        298.2999999523163,
+        298.9000000357628,
+        299.30000001192093,
+        297.89999997615814
       ],
-      "medianMs": 309.34999999403954,
-      "p95Ms": 317.60000002384186,
-      "maxMs": 318,
+      "medianMs": 301.25,
+      "p95Ms": 308.39999997615814,
+      "maxMs": 316.80000001192093,
       "targetMs": 200,
       "targetMet": false
     },
     "validation": [
       {
         "nodes": 50,
-        "medianMs": 0.5999999940395355,
-        "p95Ms": 1.100000023841858,
-        "maxMs": 1.5,
+        "bytes": 5217,
         "durationsMs": [
-          1.5,
-          1.100000023841858,
+          1.300000011920929,
+          1,
           1.0999999642372131,
           1.100000023841858,
-          0.8999999761581421,
-          0.9000000357627869,
+          1.0999999642372131,
+          0.6000000238418579,
+          0.699999988079071,
+          0.6000000238418579,
+          0.699999988079071,
+          0.6000000238418579,
           0.5999999642372131,
-          0.699999988079071,
+          0.6000000238418579,
+          0.5999999642372131,
+          0.6000000238418579,
           0.6000000238418579,
           0.5,
-          0.699999988079071,
           0.5,
-          0.699999988079071,
-          0.7000000476837158,
-          0.3999999761581421,
-          0.699999988079071,
-          0.5,
-          0.6000000238418579,
           0.5,
           0.5999999642372131,
+          0.40000003576278687,
+          0.5999999642372131,
+          0.40000003576278687,
+          0.5999999642372131,
+          0.5,
+          0.40000003576278687,
           0.5,
           0.5,
-          0.5,
-          0.5,
-          0.6000000238418579,
-          0.5,
-          0.3999999761581421,
-          0.6000000238418579,
+          0.5999999642372131,
           0.5,
           0.5
-        ]
+        ],
+        "medianMs": 0.5999999642372131,
+        "p95Ms": 1.100000023841858,
+        "maxMs": 1.300000011920929
       },
       {
         "nodes": 1000,
-        "medianMs": 7.799999952316284,
-        "p95Ms": 8.600000023841858,
-        "maxMs": 11.299999952316284,
+        "bytes": 106760,
         "durationsMs": [
-          11.299999952316284,
-          8.600000023841858,
+          11.300000011920929,
+          8.299999952316284,
+          8.100000023841858,
           8.300000011920929,
-          8.199999988079071,
-          8,
+          7.899999976158142,
           7.800000011920929,
           7.899999976158142,
-          7.900000035762787,
-          7.799999952316284,
           8,
-          7.800000011920929,
-          7.699999988079071,
           7.900000035762787,
-          7.699999988079071,
-          7.799999952316284,
-          7.800000011920929,
-          7.699999988079071,
-          7.700000047683716,
+          8,
+          8,
           7.699999988079071,
           7.699999988079071,
           7.600000023841858,
-          7.799999952316284,
-          7.700000047683716,
-          7.799999952316284,
-          7.700000047683716,
           7.599999964237213,
-          7.800000011920929,
+          7.900000035762787,
           7.699999988079071,
+          7.699999988079071,
+          7.600000023841858,
           7.800000011920929,
-          7.600000023841858
-        ]
+          7.399999976158142,
+          7.800000011920929,
+          7.800000011920929,
+          7.399999976158142,
+          7.600000023841858,
+          7.699999988079071,
+          7.599999964237213,
+          7.5,
+          7.600000023841858,
+          7.5
+        ],
+        "medianMs": 7.75,
+        "p95Ms": 8.300000011920929,
+        "maxMs": 11.300000011920929
       }
     ],
     "canvas": {
@@ -214,7 +217,7 @@
   },
   "budgetProposal": {
     "targetMs": 200,
-    "remoteP95Ms": 317.60000002384186,
+    "remoteP95Ms": 308.39999997615814,
     "targetMet": false,
     "proposedMs": 400,
     "status": "proposal only; hosted figures and owner acceptance pending",
@@ -334,12 +337,6 @@
           "message": "engine-generated route/label geometry [arrowhead-collision]: relationships 9 and 11 have overlapping incoming arrow markers at their shared target",
           "path": "/connections/9",
           "rule": "geometry-v1/arrowhead-collision"
-        },
-        {
-          "code": "architecture/geometry-route-quality-notice",
-          "message": "engine-generated route/label geometry [micro-segment]: relationship 10 has a 2.453125px micro-segment at segment 1",
-          "path": "/connections/10",
-          "rule": "geometry-v1/micro-segment"
         }
       ]
     },
@@ -403,5 +400,560 @@
     "Geometry only; no E3 SVG/PNG output or visual-review claim.",
     "Native/WASM agreement here is one remote Linux reproduction; the hosted four-report OS matrix is required.",
     "The 200 ms layout target is missed; the 400 ms proposal is not an accepted budget."
-  ]
+  ],
+  "previousReproduction": {
+    "sdkTree": "6849d221230549482ed591ad17d9aec73b5944ee",
+    "layoutP95Ms": 317.60000002384186,
+    "validationGzipBytes": 324220,
+    "lazyGeometryGzipBytes": 1578645,
+    "scope": "superseded source-bound reproduction before source-default alignment and boundary fixes"
+  },
+  "boundaryEvidence": {
+    "scope": "separate synthetic evidence; exact layer gates both directions, model layer reports without failing; does not change AC1 membership",
+    "strictParityCases": 309,
+    "boundaryCases": 218,
+    "rendererRefusalSites": 132,
+    "exactCases": 127,
+    "exactFailures": 0,
+    "modelCategories": {
+      "artifact-route-rounding": {
+        "agreements": 1,
+        "cases": 2,
+        "examples": [
+          {
+            "case": "e2-boundary-lifecycle-physical-corridor-7",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          }
+        ],
+        "oracleGreenEngineRefused": 0,
+        "oracleRedEngineAdmitted": 1
+      },
+      "readable-v2-implicit-placement": {
+        "agreements": 8,
+        "cases": 8,
+        "examples": [],
+        "oracleGreenEngineRefused": 0,
+        "oracleRedEngineAdmitted": 0
+      },
+      "readable-v2-placement": {
+        "agreements": 7,
+        "cases": 15,
+        "examples": [
+          {
+            "case": "e2-boundary-workflow-v2-arrow-spacing-8",
+            "diagnosticCodes": [
+              "workflow/geometry-route-quality-notice",
+              "workflow/geometry-route-quality-notice"
+            ],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-turn-7",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-preset-compatible",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-shared-trunk-25",
+            "diagnosticCodes": [
+              "workflow/geometry-route-quality-notice"
+            ],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-route-legend-191",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-label-legend-187",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          }
+        ],
+        "oracleGreenEngineRefused": 2,
+        "oracleRedEngineAdmitted": 6
+      },
+      "text-capacity": {
+        "agreements": 32,
+        "cases": 66,
+        "examples": [
+          {
+            "case": "e2-boundary-sequence-segment-title-above",
+            "diagnosticCodes": [
+              "sequence/geometry-segment-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-dataflow-primary-width-above",
+            "diagnosticCodes": [
+              "dataflow/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-dataflow-detail-width-sublabel-above",
+            "diagnosticCodes": [
+              "dataflow/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-dataflow-detail-width-tag-above",
+            "diagnosticCodes": [
+              "dataflow/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-lifecycle-v1-primary-width-above",
+            "diagnosticCodes": [
+              "lifecycle/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-lifecycle-v1-detail-width-sublabel-above",
+            "diagnosticCodes": [
+              "lifecycle/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          }
+        ],
+        "oracleGreenEngineRefused": 28,
+        "oracleRedEngineAdmitted": 6
+      }
+    },
+    "modelDifferences": [
+      {
+        "case": "e2-boundary-sequence-segment-title-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-segment-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-primary-width-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-detail-width-sublabel-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-detail-width-tag-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-v1-primary-width-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-v1-detail-width-sublabel-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-v1-detail-width-tag-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-label-pair-gap-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-sequence-spread-primary-header-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-sequence-spread-sublabel-header-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-v2-primary-width-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-v2-detail-width-sublabel-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-v2-detail-width-tag-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-lifecycle-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-lifecycle-physical-corridor-7",
+        "category": "artifact-route-rounding",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-sequence-message-label-canvas-32",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-band-title-114.015625",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-label-pair-416",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-sequence-family-label-route-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/route-blocked"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-family-label-route-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-overlap",
+          "lifecycle/geometry-route-clearance",
+          "lifecycle/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-label-node-124",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-lifecycle-label-node-122",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-sequence-label-pair-193.984375",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-sequence-legend-wrap-label-width-71",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-legend-clearance"
+        ]
+      },
+      {
+        "case": "e2-boundary-sequence-legend-wrap-overrides-790.015625",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-legend-clearance"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-label-route-3",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-route-quality",
+          "dataflow/route-blocked"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-label-route-5",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-route-quality",
+          "dataflow/route-blocked"
+        ]
+      },
+      {
+        "case": "e2-boundary-architecture-label-node-overlap-1",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-architecture-label-node-overlap-3",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-architecture-label-pair-overlap-1",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-architecture-label-pair-overlap-3",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/geometry-label-overlap",
+          "architecture/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-workflow-v2-arrow-spacing-8",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [
+          "workflow/geometry-route-quality-notice"
+        ]
+      },
+      {
+        "case": "e2-boundary-workflow-v2-turn-7",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-workflow-v2-preset-compatible",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-workflow-v2-shared-trunk-25",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [
+          "workflow/geometry-route-quality-notice"
+        ]
+      },
+      {
+        "case": "e2-boundary-workflow-v2-route-legend-191",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-workflow-v2-label-legend-187",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-workflow-v2-label-lane-title-59",
+        "category": "readable-v2-placement",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "workflow/route-label-space"
+        ]
+      },
+      {
+        "case": "e2-boundary-workflow-v2-route-lane-title-63",
+        "category": "readable-v2-placement",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "workflow/route-blocked"
+        ]
+      },
+      {
+        "case": "e2-boundary-architecture-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-workflow-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      },
+      {
+        "case": "e2-boundary-workflow-brand-rail-73",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
+      }
+    ],
+    "authoredCoordinateRoutingRefusals": [
+      {
+        "case": "e2-boundary-sequence-family-label-route-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/route-blocked"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-label-route-3",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-route-quality",
+          "dataflow/route-blocked"
+        ]
+      },
+      {
+        "case": "e2-boundary-dataflow-label-route-5",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-route-quality",
+          "dataflow/route-blocked"
+        ]
+      },
+      {
+        "case": "e2-boundary-workflow-v2-route-lane-title-63",
+        "category": "readable-v2-placement",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "workflow/route-blocked"
+        ]
+      }
+    ]
+  }
 }

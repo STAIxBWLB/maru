@@ -433,19 +433,14 @@ pub(crate) fn source_distance_diagnostics(
                     .and_then(|view| view.first())
                     .and_then(Value::as_f64)
                     .unwrap_or(920.0);
-                let count = participants.len().max(1);
-                let participant_width = if spread {
-                    (((view_width - 124.0) / count as f64).round() - 24.0).clamp(86.0, 190.0)
-                } else {
-                    86.0
-                };
-                let gap = if spread && count > 1 {
-                    ((view_width - 40.0 - 62.0 - participant_width) / (count - 1) as f64).max(108.0)
-                } else {
-                    108.0
-                };
+                let columns = super::source_budgets::sequence_columns(
+                    point(view_width).unwrap_or(920 * SCALE),
+                    participants.len(),
+                    spread,
+                );
+                let gap = columns.pitch;
                 let delta = (*from_column as i64 - *to_column as i64).abs();
-                let span_fixed = i128::from(delta) * i128::from(point(gap).unwrap_or(0));
+                let span_fixed = i128::from(delta) * i128::from(gap);
                 let minimum = i128::from(60 * SCALE);
                 if span_fixed * span_fixed < minimum * minimum {
                     diagnostics.push(Diagnostic {

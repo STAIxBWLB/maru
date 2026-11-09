@@ -153,7 +153,7 @@ fn node_minimum_font(family: Family, role: &str, version: u64) -> f64 {
     }
 }
 
-fn authored_width(family: Family, value: &Value, version: u64) -> Option<f64> {
+fn authored_width(family: Family, value: &Value, version: u64, spec: &Value) -> Option<f64> {
     match family.name {
         "architecture" => value
             .get("size")
@@ -162,7 +162,16 @@ fn authored_width(family: Family, value: &Value, version: u64) -> Option<f64> {
             .and_then(Value::as_f64)
             .or(Some(120.0)),
         "workflow" => Some(number(value, "width").unwrap_or(92.0)),
-        "sequence" => Some(86.0),
+        "sequence" => {
+            let width = spec["meta"]["viewBox"][0].as_f64().unwrap_or(920.0);
+            let width = super::px(width).ok()?;
+            let columns = super::source_budgets::sequence_columns(
+                i64::from(width),
+                items(spec, "participants").len(),
+                text(&spec["meta"], "column_fit") == Some("spread"),
+            );
+            Some(columns.participant_width as f64 / 64.0)
+        }
         "dataflow" => Some(number(value, "width").unwrap_or(112.0)),
         "lifecycle" => {
             let fallback = if version == 2 {
@@ -208,7 +217,7 @@ fn check_node_labels(
             continue;
         };
         let source = &items(spec, family.node_collection)[index];
-        let Some(width) = authored_width(family, source, version) else {
+        let Some(width) = authored_width(family, source, version, spec) else {
             continue;
         };
         let has_brand = source.get("brand").is_some_and(|value| !value.is_null());
@@ -296,6 +305,76 @@ fn check_node_viewbox(
     nodes_by_id: &BTreeMap<String, &GeometryNode>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    if family.name == "dataflow" {
+        let rects = super::source_budgets::dataflow_node_rects(spec, geometry);
+        let Some(frame) = super::source_budgets::dataflow_frame(spec) else {
+            return;
+        };
+        for (index, source) in items(spec, family.node_collection).iter().enumerate() {
+            let Some(id) = text(source, "id") else {
+                continue;
+            };
+            let Some(rect) = rects.get(id) else {
+                continue;
+            };
+            if rect.x < frame.min_x
+                || rect.y < frame.min_y
+                || rect.right() > frame.max_right
+                || rect.bottom() > frame.max_bottom
+            {
+                push(
+                    diagnostics,
+                    family,
+                    "geometry-node-viewbox",
+                    format!("/{}/{index}", family.node_collection),
+                    format!("node {id:?} lies outside the data-flow readable area"),
+                    "move the node to a readable stage row or enlarge the authored viewBox",
+                );
+            }
+        }
+        return;
+    }
+    if family.name == "lifecycle" {
+        if spec["schema_version"].as_u64().unwrap_or(1) == 1
+            && spec["meta"]["viewBox"][1].as_f64().unwrap_or(660.0) < 566.0
+        {
+            push(
+                diagnostics,
+                family,
+                "geometry-node-viewbox",
+                "/meta/viewBox/1",
+                "the fixed-v1 lifecycle bands require a viewBox at least 566px high",
+                "increase meta.viewBox[1] to 566 or more, or use a schema-version-2 row layout",
+            );
+        }
+        let rects = super::source_budgets::lifecycle_state_rects(spec, geometry);
+        let Some(frame) = super::source_budgets::lifecycle_frame(spec, geometry) else {
+            return;
+        };
+        for (index, source) in items(spec, family.node_collection).iter().enumerate() {
+            let Some(id) = text(source, "id") else {
+                continue;
+            };
+            let Some(rect) = rects.get(id) else {
+                continue;
+            };
+            if rect.x < frame.min_x
+                || rect.y < frame.min_y
+                || rect.right() > frame.max_right
+                || rect.bottom() > frame.max_bottom
+            {
+                push(
+                    diagnostics,
+                    family,
+                    "geometry-node-viewbox",
+                    format!("/{}/{index}", family.node_collection),
+                    format!("state {id:?} lies outside the lifecycle readable area"),
+                    "adjust its lane/column or yOffset, or enlarge the authored viewBox",
+                );
+            }
+        }
+        return;
+    }
     // Workflow and sequence renderers grow or reflow their default canvases;
     // their pinned renderer refusals are covered by their own lane/time rules.
     if family.name == "workflow" || family.name == "sequence" {
@@ -343,11 +422,18 @@ fn check_workflow_lane(
         else {
             continue;
         };
-        let top = 144.0 + lane_index as f64 * 208.0;
-        let low = top - 24.0;
-        let high = top + 208.0 - fixed(node.bounds.height) - 24.0;
+        let lane_bounds = geometry
+            .containers
+            .iter()
+            .find(|frame| frame.id == format!("lane:{lane_id}"))
+            .map(|frame| frame.bounds);
+        let top = lane_bounds.map_or(52.0 + lane_index as f64 * 124.0, |bounds| fixed(bounds.y));
+        let low = top + 30.0;
+        let high = lane_bounds.map_or(top + 104.0, bottom) - fixed(node.bounds.height);
         let node_y = fixed(node.bounds.y);
-        if node_y < low || node_y > high {
+        let outside_x = lane_bounds
+            .is_some_and(|bounds| node.bounds.x < bounds.x || right(node.bounds) > right(bounds));
+        if node_y < low || node_y > high || outside_x {
             push(
                 diagnostics,
                 Family {
@@ -359,6 +445,59 @@ fn check_workflow_lane(
                 format!("node {id:?} collides with its lane title or lane boundary"),
                 "adjust yOffset so the node remains inside the lane content area",
             );
+        }
+    }
+}
+
+fn check_workflow_column_capacity(spec: &Value, diagnostics: &mut Vec<Diagnostic>) {
+    if spec["schema_version"].as_u64() != Some(1) {
+        return;
+    }
+    let nodes: BTreeMap<_, _> = items(spec, "nodes")
+        .iter()
+        .filter_map(|node| text(node, "id").map(|id| (id, node)))
+        .collect();
+    let centers = [88_i64, 220, 300, 430, 500, 625];
+    for (index, edge) in items(spec, "edges").iter().enumerate() {
+        let (Some(from), Some(to)) = (
+            text(edge, "from").and_then(|id| nodes.get(id)),
+            text(edge, "to").and_then(|id| nodes.get(id)),
+        ) else {
+            continue;
+        };
+        if from["lane"] != to["lane"] || from["col"] == to["col"] {
+            continue;
+        }
+        let (Some(a), Some(b)) = (
+            from["col"]
+                .as_u64()
+                .and_then(|col| centers.get(col as usize)),
+            to["col"].as_u64().and_then(|col| centers.get(col as usize)),
+        ) else {
+            continue;
+        };
+        let (Ok(w1), Ok(w2), Ok(h1), Ok(h2), Ok(y1), Ok(y2)) = (
+            super::px(number(from, "width").unwrap_or(92.0)),
+            super::px(number(to, "width").unwrap_or(92.0)),
+            super::px(number(from, "height").unwrap_or(52.0)),
+            super::px(number(to, "height").unwrap_or(52.0)),
+            super::px(number(from, "yOffset").unwrap_or(0.0)),
+            super::px(number(to, "yOffset").unwrap_or(0.0)),
+        ) else {
+            continue;
+        };
+        if 2 * (i64::from(y1) - i64::from(y2)).abs() >= i64::from(h1) + i64::from(h2) + 16 * 64 {
+            continue;
+        }
+        let direct = !edge.get("via").is_some_and(|value| value.is_array())
+            && text(edge, "route").is_none_or(|route| route == "auto" || route == "straight")
+            && y1 == y2;
+        let required = if direct { 28 } else { 8 };
+        let clearance = 2 * (a - b).abs() * 64 - i64::from(w1) - i64::from(w2);
+        if clearance < 2 * required * 64 {
+            push(diagnostics,Family{name:"workflow",node_collection:"nodes"},"geometry-column-capacity",format!("/edges/{index}"),
+                format!("fixed-v1 columns leave less than {required}px of source clearance"),
+                "reduce declared node widths, choose different columns or use a schema-version-2 layout");
         }
     }
 }
@@ -586,7 +725,10 @@ pub(crate) fn geometry_diagnostics(spec: &Value, geometry: &GeometryDocument) ->
     check_node_viewbox(spec, family, geometry, &nodes_by_id, &mut diagnostics);
 
     match family.name {
-        "workflow" => check_workflow_lane(spec, geometry, &mut diagnostics),
+        "workflow" => {
+            check_workflow_lane(spec, geometry, &mut diagnostics);
+            check_workflow_column_capacity(spec, &mut diagnostics);
+        }
         "dataflow" => check_dataflow(spec, geometry, &mut diagnostics),
         "lifecycle" => {
             check_lifecycle(spec, &mut diagnostics);
@@ -668,5 +810,29 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|d| d.code == "lifecycle/reserved-main-lane"));
+    }
+
+    #[test]
+    fn dataflow_readable_area_uses_source_rows_not_s2_auto_positions() {
+        let mut spec: Value =
+            serde_json::from_str(include_str!("../../testdata/valid-dataflow.json")).unwrap();
+        spec["nodes"][0]["yOffset"] = (-30).into();
+        assert!(crate::validate_json(&spec.to_string()).ok);
+        let diagnostics = geometry_diagnostics(&spec, &empty_geometry());
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "dataflow/geometry-node-viewbox"));
+    }
+
+    #[test]
+    fn lifecycle_v1_readable_area_uses_source_band_geometry() {
+        let mut spec: Value =
+            serde_json::from_str(include_str!("../../testdata/valid-lifecycle.json")).unwrap();
+        spec["states"][0]["yOffset"] = (-70).into();
+        assert!(crate::validate_json(&spec.to_string()).ok);
+        let diagnostics = geometry_diagnostics(&spec, &empty_geometry());
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "lifecycle/geometry-node-viewbox"));
     }
 }

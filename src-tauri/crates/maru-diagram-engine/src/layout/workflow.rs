@@ -6,12 +6,33 @@ use crate::workflow::WorkflowSpec;
 use crate::Diagnostic;
 use std::collections::HashMap;
 
-const LAYOUT_X: f64 = 120.0;
-const LAYOUT_Y: f64 = 144.0;
-const COLUMN_STEP: f64 = 236.0;
-const LANE_STEP: f64 = 208.0;
-const NODE_WIDTH: f64 = 184.0;
-const NODE_HEIGHT: f64 = 76.0;
+const LEGACY_COLUMN_CENTERS: [f64; 6] = [88.0, 220.0, 300.0, 430.0, 500.0, 625.0];
+const READABLE_COLUMN_START: f64 = 94.0;
+const READABLE_COLUMN_PITCH: f64 = 120.0;
+const LANE_X: f64 = 40.0;
+const LANE_Y: f64 = 52.0;
+const LANE_WIDTH: f64 = 640.0;
+const LANE_HEIGHT: f64 = 104.0;
+const LANE_GAP: f64 = 20.0;
+const LANE_TITLE_HEIGHT: f64 = 30.0;
+const NODE_WIDTH: f64 = 92.0;
+const NODE_HEIGHT: f64 = 52.0;
+const TAGGED_NODE_HEIGHT: f64 = 68.0;
+
+fn column_center(version: u32, col: u32) -> f64 {
+    if version == 1 {
+        LEGACY_COLUMN_CENTERS
+            .get(col as usize)
+            .copied()
+            .unwrap_or_else(|| LEGACY_COLUMN_CENTERS[5] + (f64::from(col) - 5.0) * 125.0)
+    } else {
+        READABLE_COLUMN_START + f64::from(col) * READABLE_COLUMN_PITCH
+    }
+}
+
+fn lane_top(index: usize) -> f64 {
+    LANE_Y + index as f64 * (LANE_HEIGHT + LANE_GAP)
+}
 
 fn geometry_error(path: &str, cause: impl Into<String>) -> Diagnostic {
     crate::diagnostic(
@@ -69,45 +90,29 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
         .enumerate()
         .map(|(index, lane)| (lane.id.as_str(), index))
         .collect();
-    let max_col = spec
-        .nodes
-        .iter()
-        .map(|node| node.col)
-        .chain(
-            spec.phases
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .map(|phase| phase.to_col),
-        )
-        .chain(
-            spec.groups
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .map(|group| group.to_col),
-        )
-        .max()
-        .unwrap_or(0);
-    let total_width = LAYOUT_X + f64::from(max_col + 1) * COLUMN_STEP;
-    let fallback_bottom =
-        LAYOUT_Y + spec.lanes.len().saturating_sub(1) as f64 * LANE_STEP + NODE_HEIGHT;
+    let version = spec.schema_version;
 
     for (index, node) in spec.nodes.iter().enumerate() {
         let lane = *lane_indices.get(node.lane.as_str()).ok_or_else(|| {
             geometry_error(&format!("/nodes/{index}/lane"), "node lane is missing")
         })?;
         let width = node.width.unwrap_or(NODE_WIDTH);
-        let height = node.height.unwrap_or(NODE_HEIGHT);
+        let height = node.height.unwrap_or(if node.tag.is_some() {
+            TAGGED_NODE_HEIGHT
+        } else {
+            NODE_HEIGHT
+        });
         let auto = if let Some(position) = scene.pinned_position(&node.id) {
             position
         } else {
             point(
-                LAYOUT_X + f64::from(node.col) * COLUMN_STEP,
-                LAYOUT_Y + lane as f64 * LANE_STEP + node.y_offset.unwrap_or(0.0),
+                column_center(version, node.col) - width / 2.0,
+                lane_top(lane)
+                    + LANE_TITLE_HEIGHT
+                    + (LANE_HEIGHT - LANE_TITLE_HEIGHT - height) / 2.0
+                    + node.y_offset.unwrap_or(0.0),
             )?
         };
-        let size = (node.width.is_some() || node.height.is_some()).then_some([width, height]);
         scene.add_node(
             &node.id,
             &node.node_type,
@@ -116,12 +121,11 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
             node.tag.as_deref(),
             None,
             auto,
-            size,
+            Some([width, height]),
         )?;
     }
 
-    // Phase frames span their declared inclusive column range and all lanes,
-    // even when a phase contains no node. Keep them behind lane/group frames.
+    // Phase headers span their declared inclusive column range.
     for (index, phase) in spec
         .phases
         .as_deref()
@@ -129,52 +133,9 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
         .iter()
         .enumerate()
     {
-        let path = format!("/phases/{index}");
-        let mut left = LAYOUT_X + f64::from(phase.from_col) * COLUMN_STEP - 24.0;
-        let mut right = LAYOUT_X + f64::from(phase.to_col) * COLUMN_STEP + NODE_WIDTH + 24.0;
-        for node in spec
-            .nodes
-            .iter()
-            .filter(|node| (phase.from_col..=phase.to_col).contains(&node.col))
-        {
-            if let Some(bounds) = scene.node_bounds(&node.id) {
-                left = left.min(f64::from(bounds.x) / 64.0);
-                let node_right = bounds
-                    .right()
-                    .map_err(|error| geometry_error(&path, error.to_string()))?;
-                right = right.max(f64::from(node_right) / 64.0);
-            }
-        }
-        let mut top = LAYOUT_Y;
-        let mut bottom = fallback_bottom;
-        if let Some(first) = scene.document.nodes.first() {
-            top = f64::from(first.bounds.y) / 64.0;
-            bottom = f64::from(
-                first
-                    .bounds
-                    .bottom()
-                    .map_err(|error| geometry_error(&path, error.to_string()))?,
-            ) / 64.0;
-        }
-        for node in scene.document.nodes.iter().skip(1) {
-            top = top.min(f64::from(node.bounds.y) / 64.0);
-            bottom = bottom.max(
-                f64::from(
-                    node.bounds
-                        .bottom()
-                        .map_err(|error| geometry_error(&path, error.to_string()))?,
-                ) / 64.0,
-            );
-        }
-        let container_top = top - 58.0;
-        let container_bottom = bottom + 24.0;
-        let bounds = pixel_box(
-            left,
-            container_top,
-            right - left,
-            container_bottom - container_top,
-            &path,
-        )?;
+        let left = column_center(version, phase.from_col) - 46.0;
+        let right = column_center(version, phase.to_col) + 46.0;
+        let bounds = pixel_box(left, 27.0, right - left, 16.0, &format!("/phases/{index}"))?;
         scene.add_container(
             &format!("phase:{}", phase.id),
             "phase",
@@ -183,30 +144,38 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
         )?;
     }
 
-    for lane in &spec.lanes {
-        let members: Vec<_> = spec
-            .nodes
-            .iter()
-            .filter(|node| node.lane == lane.id)
-            .map(|node| node.id.clone())
-            .collect();
+    for (index, lane) in spec.lanes.iter().enumerate() {
         let id = format!("lane:{}", lane.id);
-        if members.is_empty() {
-            let lane_index = lane_indices[lane.id.as_str()];
+        let lane_label = if lane.variant.as_deref() == Some("exception") {
+            format!("EX / {}", lane.label)
+        } else {
+            format!("{:02} / {}", index + 1, lane.label)
+        };
+        scene.add_container(
+            &id,
+            "lane",
+            &lane_label,
+            pixel_box(
+                LANE_X,
+                lane_top(index),
+                LANE_WIDTH,
+                LANE_HEIGHT,
+                &format!("/lanes/{index}"),
+            )?,
+        )?;
+        if lane.variant.as_deref() == Some("exception") {
             scene.add_container(
-                &id,
-                "lane",
-                &lane.label,
+                &format!("lane:{}:exception", lane.id),
+                "exception-lane",
+                "",
                 pixel_box(
-                    LAYOUT_X - 24.0,
-                    LAYOUT_Y + lane_index as f64 * LANE_STEP - 24.0,
-                    total_width - LAYOUT_X + 24.0,
-                    NODE_HEIGHT + 48.0,
-                    &format!("/lanes/{}", lane.id),
+                    LANE_X + 6.0,
+                    lane_top(index) + 6.0,
+                    LANE_WIDTH - 12.0,
+                    LANE_HEIGHT - 12.0,
+                    &format!("/lanes/{index}"),
                 )?,
             )?;
-        } else {
-            scene.container_for_members(&id, "lane", &lane.label, &members, 24.0)?;
         }
     }
 
@@ -217,23 +186,24 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
         .iter()
         .enumerate()
     {
-        let members: Vec<_> = spec
-            .nodes
-            .iter()
-            .filter(|node| {
-                node.lane == group.lane && (group.from_col..=group.to_col).contains(&node.col)
-            })
-            .map(|node| node.id.clone())
-            .collect();
-        scene
-            .container_for_members(
-                &format!("group:{}", group.id),
-                "group",
-                &group.label,
-                &members,
-                18.0,
-            )
-            .map_err(|error| geometry_error(&format!("/groups/{index}"), error.message))?;
+        let lane = *lane_indices.get(group.lane.as_str()).ok_or_else(|| {
+            geometry_error(&format!("/groups/{index}/lane"), "group lane is missing")
+        })?;
+        let left = column_center(version, group.from_col) - 50.0;
+        let right = column_center(version, group.to_col) + 50.0;
+        let bounds = pixel_box(
+            left,
+            lane_top(lane) + LANE_TITLE_HEIGHT + 8.0,
+            right - left,
+            LANE_HEIGHT - LANE_TITLE_HEIGHT - 16.0,
+            &format!("/groups/{index}"),
+        )?;
+        scene.add_container(
+            &format!("group:{}", group.id),
+            "group",
+            &group.label,
+            bounds,
+        )?;
     }
 
     let route_ids =
@@ -339,6 +309,23 @@ mod tests {
     }
 
     #[test]
+    fn v1_defaults_match_documented_column_and_lane_geometry() {
+        let report = layout(
+            r#"{"schema_version":1,"diagram_type":"workflow","meta":{"title":"Workflow","output":"workflow.html"},"lanes":[{"id":"main","label":"Main"}],"nodes":[{"id":"first","lane":"main","col":0,"type":"frontend","label":"First"},{"id":"fourth","lane":"main","col":3,"type":"backend","label":"Fourth"}],"edges":[]}"#,
+        );
+        assert!(report.ok, "{:?}", report.diagnostics);
+        let nodes = report.geometry.unwrap().nodes;
+        let first = nodes.iter().find(|node| node.id == "first").unwrap();
+        let fourth = nodes.iter().find(|node| node.id == "fourth").unwrap();
+        assert_eq!((first.bounds.x, first.bounds.y), (42 * 64, 93 * 64));
+        assert_eq!(
+            (first.bounds.width, first.bounds.height),
+            (92 * 64, 52 * 64)
+        );
+        assert_eq!((fourth.bounds.x, fourth.bounds.y), (384 * 64, 93 * 64));
+    }
+
+    #[test]
     fn rejects_lane_coordinate_overflow_without_narrowing() {
         let error = crate::layout::point(1e30, 0.0);
         assert!(error.is_err());
@@ -359,7 +346,7 @@ mod tests {
                 "pins": [{
                     "targetId": "pinned",
                     "targetKind": "node",
-                    "position": {"x": 120 * 64, "y": 180 * 64}
+                    "position": {"x": 120 * 64, "y": 100 * 64}
                 }]
             }
         });
@@ -376,6 +363,6 @@ mod tests {
             node.position_source,
             crate::geometry::GeometryPositionSource::PlannedPin
         );
-        assert_eq!((node.bounds.x, node.bounds.y), (120 * 64, 180 * 64));
+        assert_eq!((node.bounds.x, node.bounds.y), (120 * 64, 100 * 64));
     }
 }

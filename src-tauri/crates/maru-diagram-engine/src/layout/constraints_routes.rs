@@ -346,6 +346,16 @@ fn relations<'a>(
             let mut reference = Vec::new();
             let mut authored = via.clone();
             if let (Some(a), Some(b)) = (boxes.get(from), boxes.get(to)) {
+                if f.name == "architecture"
+                    && !via.is_empty()
+                    && (text(raw, "fromSide").is_some() || text(raw, "toSide").is_some())
+                {
+                    let start = port(*a, text(raw, "fromSide"), via[0]);
+                    let end = port(*b, text(raw, "toSide"), *via.last().unwrap());
+                    authored = vec![start];
+                    authored.extend(via.iter().copied());
+                    authored.push(end);
+                }
                 if f.name == "dataflow"
                     || (f.name == "lifecycle"
                         && spec.get("schema_version").and_then(Value::as_u64) == Some(1))
@@ -492,7 +502,7 @@ fn emit(
         fix: if authored {
             fix.into()
         } else {
-            "inspect the generated diagnostic scene and rerun after correcting the engine's automatic route/label placement".into()
+            "add via points or an explicit channel to control this route".into()
         },
     };
     match out.entry(key) {
@@ -536,7 +546,21 @@ fn rhythm(
                 "short-interior-segment"
             };
             let owned = path_authored(r, points, i, domain, segment[0], segment[1], false);
-            emit(out,f,r.index,"geometry-route-quality",cause,0,format!("relationship {} has a {}px {cause} at segment {i}",r.index,n as f64/64.0),"move an offending authored via/channel; for generated geometry keep the diagnostic scene and rerun after the engine routing fix",owned);
+            emit(
+                out,
+                f,
+                r.index,
+                "geometry-route-quality",
+                cause,
+                0,
+                format!(
+                    "relationship {} has a {}px {cause} at segment {i}",
+                    r.index,
+                    n as f64 / 64.0
+                ),
+                "add via points or an explicit channel to control this route",
+                owned,
+            );
         }
     }
 }
@@ -1207,6 +1231,417 @@ fn pair_quality(
     }
 }
 
+// These source assertions are independent of the generated candidate path.
+// In particular, a repaired scene must not erase contradictory via/channel input.
+fn asserted_path(r: &Relation<'_>, boxes: &BTreeMap<String, Rect>) -> Vec<Point> {
+    if r.via.is_empty() {
+        return r.scene.clone();
+    }
+    let (Some(a), Some(b)) = (boxes.get(r.from), boxes.get(r.to)) else {
+        return r.via.clone();
+    };
+    let mut points = vec![port(*a, text(r.raw, "fromSide"), r.via[0])];
+    points.extend(r.via.iter().copied());
+    points.push(port(*b, text(r.raw, "toSide"), *r.via.last().unwrap()));
+    normalize(&points)
+}
+fn corridor_pattern(points: &[Point], vertical: bool, coordinate: i64) -> bool {
+    let (Some(start), Some(end)) = (points.first().copied(), points.last().copied()) else {
+        return false;
+    };
+    let expected = normalize(&if vertical {
+        vec![start, (coordinate, start.1), (coordinate, end.1), end]
+    } else {
+        vec![start, (start.0, coordinate), (end.0, coordinate), end]
+    });
+    let orientations = |vertices: &[Point]| {
+        vertices
+            .windows(2)
+            .map(|s| {
+                if s[0].0 == s[1].0 {
+                    0
+                } else if s[0].1 == s[1].1 {
+                    1
+                } else {
+                    2
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    orientations(points) == orientations(&expected)
+}
+fn source_presets(
+    spec: &Value,
+    f: Family,
+    r: &Relation<'_>,
+    boxes: &BTreeMap<String, Rect>,
+    out: &mut BTreeMap<(usize, String, usize), Diagnostic>,
+) {
+    if f.name != "workflow" || spec.get("schema_version").and_then(Value::as_u64) != Some(2) {
+        return;
+    }
+    let preset = text(r.raw, "route").unwrap_or("auto");
+    let permitted = match preset {
+        "auto" => &["channelX", "channelY"][..],
+        "outside-right" | "return-left" => &["channelX"][..],
+        "drop" | "bottom-channel" | "up-channel" => &["channelY"][..],
+        _ => &[][..],
+    };
+    for field in ["channelX", "channelY"] {
+        if number(r.raw, field).is_some() && !permitted.contains(&field) {
+            emit(
+                out,
+                f,
+                r.index,
+                "geometry-route-quality",
+                "route-preset-compatibility",
+                0,
+                format!("route preset {preset:?} cannot preserve authored {field}"),
+                "remove the incompatible channel or select a preset that uses its axis",
+                true,
+            );
+        }
+    }
+    if r.via.is_empty() {
+        return;
+    }
+    let points = asserted_path(r, boxes);
+    let duplicate = r.via.windows(2).any(|s| s[0] == s[1])
+        || boxes.contains_key(r.from)
+            && boxes.contains_key(r.to)
+            && (points.first().is_some_and(|p| r.via.first() == Some(p))
+                || points.last().is_some_and(|p| r.via.last() == Some(p)));
+    if duplicate {
+        emit(
+            out,
+            f,
+            r.index,
+            "geometry-route-quality",
+            "non-zero-route-segments",
+            0,
+            "authored via contains a duplicate anchor or a zero-length endpoint stub".into(),
+            "remove the repeated via point while preserving the other authored route controls",
+            true,
+        );
+    }
+    for (field, vertical) in [("channelX", true), ("channelY", false)] {
+        let Some(coordinate) = number(r.raw, field).and_then(q) else {
+            continue;
+        };
+        let present = points.windows(2).any(|s| {
+            if vertical {
+                s[0].0 == coordinate && s[1].0 == coordinate && s[0].1 != s[1].1
+            } else {
+                s[0].1 == coordinate && s[1].1 == coordinate && s[0].0 != s[1].0
+            }
+        });
+        if !present {
+            emit(
+                out,
+                f,
+                r.index,
+                "geometry-route-quality",
+                "channel-pin-preservation",
+                0,
+                format!(
+                    "authored via path never traverses {field}={}px",
+                    coordinate as f64 / 64.0
+                ),
+                "move the via path onto the authored channel or remove that channel assertion",
+                true,
+            );
+        }
+    }
+    if preset == "auto" {
+        return;
+    }
+    let (Some(a), Some(b)) = (boxes.get(r.from), boxes.get(r.to)) else {
+        return;
+    };
+    let fits = match preset {
+        "straight" => points.len() == 2,
+        "drop" => {
+            let nodes = array(spec, "nodes");
+            let lanes_differ = nodes
+                .iter()
+                .find(|n| text(n, "id") == Some(r.from))
+                .and_then(|n| text(n, "lane"))
+                != nodes
+                    .iter()
+                    .find(|n| text(n, "id") == Some(r.to))
+                    .and_then(|n| text(n, "lane"));
+            let (upper, lower) = if a.y + a.h / 2 <= b.y + b.h / 2 {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            lanes_differ
+                && (points.len() == 2 && points[0].0 == points[1].0
+                    || points.windows(2).any(|s| {
+                        s[0].1 == s[1].1
+                            && s[0].0 != s[1].0
+                            && s[0].1 >= upper.bottom()
+                            && s[0].1 <= lower.y
+                            && corridor_pattern(&points, false, s[0].1)
+                    }))
+        }
+        "outside-right" => points.windows(2).any(|s| {
+            s[0].0 == s[1].0
+                && s[0].1 != s[1].1
+                && s[0].0 > a.right().max(b.right())
+                && corridor_pattern(&points, true, s[0].0)
+        }),
+        "return-left" => points.windows(2).any(|s| {
+            s[0].0 == s[1].0
+                && s[0].1 != s[1].1
+                && s[0].0 < a.x.min(b.x)
+                && corridor_pattern(&points, true, s[0].0)
+        }),
+        "bottom-channel" => points.windows(2).any(|s| {
+            s[0].1 == s[1].1
+                && s[0].0 != s[1].0
+                && s[0].1 > a.bottom().max(b.bottom())
+                && corridor_pattern(&points, false, s[0].1)
+        }),
+        "up-channel" => points.windows(2).any(|s| {
+            s[0].1 == s[1].1
+                && s[0].0 != s[1].0
+                && s[0].1 < a.y.min(b.y)
+                && corridor_pattern(&points, false, s[0].1)
+        }),
+        _ => false,
+    };
+    if !fits {
+        emit(
+            out,
+            f,
+            r.index,
+            "geometry-route-quality",
+            "route-preset-compatibility",
+            0,
+            format!("authored via path does not have the corridor required by preset {preset:?}"),
+            "remove the preset assertion or move the authored via corridor to that preset's side",
+            true,
+        );
+    }
+}
+fn page_checks(
+    spec: &Value,
+    f: Family,
+    r: &Relation<'_>,
+    g: &GeometryDocument,
+    boxes: &BTreeMap<String, Rect>,
+    out: &mut BTreeMap<(usize, String, usize), Diagnostic>,
+) {
+    let showcase = spec.get("meta").and_then(|m| text(m, "quality_profile")) == Some("showcase");
+    let page = array(spec.get("meta").unwrap_or(&Value::Null), "viewBox");
+    let width = page
+        .first()
+        .and_then(Value::as_f64)
+        .and_then(q)
+        .unwrap_or(i64::from(g.page.bounds.width));
+    let height = page
+        .get(1)
+        .and_then(Value::as_f64)
+        .and_then(q)
+        .unwrap_or(i64::from(g.page.bounds.height));
+    if showcase && f.name == "architecture" {
+        let points = asserted_path(r, boxes);
+        for (i, p) in points.iter().copied().enumerate() {
+            if p.0 >= 0 && p.1 >= 0 && p.0 <= width && p.1 <= height {
+                continue;
+            }
+            let owned = !r.via.is_empty()
+                || points.len() > 1
+                    && path_authored(
+                        r,
+                        &points,
+                        i.min(points.len() - 2),
+                        Domain::Scene,
+                        p,
+                        p,
+                        true,
+                    );
+            emit(out,f,r.index,"geometry-route-viewbox","route-canvas-containment",0,
+                format!("route point [{},{}]px lies outside the {}x{}px canvas",p.0 as f64/64.0,p.1 as f64/64.0,width as f64/64.0,height as f64/64.0),
+                "move the offending authored point inside the canvas; enlarge an authored viewBox only for right or bottom overflow",owned);
+        }
+    }
+    let v2 = f.name == "workflow" && spec.get("schema_version").and_then(Value::as_u64) == Some(2);
+    if !showcase && !v2 {
+        return;
+    }
+    // Readable-v2 grows around labels; only its origin is an immutable page
+    // boundary. Other renderers use the shared half-pixel clipping tolerance.
+    let tolerance = if v2 { 0 } else { U / 2 };
+    for label in [r.label, r.reference_label].into_iter().flatten() {
+        if label.x >= -tolerance
+            && label.y >= -tolerance
+            && (v2 || label.right() <= width + tolerance && label.bottom() <= height + tolerance)
+        {
+            continue;
+        }
+        emit(out,f,r.index,"geometry-label-viewbox","label-canvas-containment",0,
+            format!("relationship label extends outside its {}x{}px canvas beyond the {}px tolerance",width as f64/64.0,height as f64/64.0,tolerance as f64/64.0),
+            "move the authored label position inward or enlarge the authored canvas for right/bottom overflow",label_authored(r));
+    }
+}
+fn path_length(points: &[Point]) -> Option<i64> {
+    points.windows(2).try_fold(0_i64, |total, s| {
+        axis(s[0], s[1])
+            .then(|| total.checked_add(length(s[0], s[1])))
+            .flatten()
+    })
+}
+fn bounds_of(rects: impl IntoIterator<Item = Rect>) -> Option<Rect> {
+    rects.into_iter().fold(None, |acc: Option<Rect>, r| {
+        Some(match acc {
+            None => r,
+            Some(a) => {
+                let x = a.x.min(r.x);
+                let y = a.y.min(r.y);
+                Rect {
+                    x,
+                    y,
+                    w: a.right().max(r.right()) - x,
+                    h: a.bottom().max(r.bottom()) - y,
+                }
+            }
+        })
+    })
+}
+fn checked_gp(p: Point) -> Option<GeometryPoint> {
+    Some(GeometryPoint {
+        x: i32::try_from(p.0).ok()?,
+        y: i32::try_from(p.1).ok()?,
+    })
+}
+fn detour_shortest(points: &[Point], boxes: &BTreeMap<String, Rect>) -> Option<i64> {
+    let start = *points.first()?;
+    let end = *points.last()?;
+    let first = points.get(1)?;
+    let previous = points.get(points.len().checked_sub(2)?)?;
+    let escape = |p: Point, toward: Point| -> Option<Point> {
+        if !axis(p, toward) || p == toward {
+            return None;
+        }
+        Some((
+            p.0.checked_add((toward.0 - p.0).signum() * 4 * U)?,
+            p.1.checked_add((toward.1 - p.1).signum() * 4 * U)?,
+        ))
+    };
+    let a = checked_gp(escape(start, *first)?)?;
+    let b = checked_gp(escape(end, *previous)?)?;
+    let obstacles = boxes
+        .values()
+        .map(|r| {
+            Some(crate::geometry::GeometryBox {
+                x: i32::try_from(r.x.checked_sub(4 * U)?).ok()?,
+                y: i32::try_from(r.y.checked_sub(4 * U)?).ok()?,
+                width: i32::try_from(r.w.checked_add(8 * U)?).ok()?,
+                height: i32::try_from(r.h.checked_add(8 * U)?).ok()?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let result = crate::routing::route_orthogonal(a, b, &obstacles, &[]).ok()?;
+    path_length(&result.into_iter().map(gp).collect::<Vec<_>>())?.checked_add(8 * U)
+}
+fn detour_checks(
+    spec: &Value,
+    f: Family,
+    r: &Relation<'_>,
+    g: &GeometryDocument,
+    boxes: &BTreeMap<String, Rect>,
+    routes: &[Relation<'_>],
+    out: &mut BTreeMap<(usize, String, usize), Diagnostic>,
+) {
+    // The pinned architecture renderer is the only caller of this opt-in rule.
+    if f.name != "architecture"
+        || spec.get("meta").and_then(|m| text(m, "quality_profile")) != Some("showcase")
+        || r.via.is_empty()
+        || boxes.len() > 80
+    {
+        return;
+    }
+    let points = asserted_path(r, boxes);
+    let Some(actual) = path_length(&points) else {
+        return;
+    };
+    if points.len() < 3 {
+        return;
+    }
+    let direct = length(points[0], *points.last().unwrap());
+    if i128::from(actual) * 2 < i128::from(direct) * 5 || actual - direct < 200 * U {
+        return;
+    }
+    let Some(content) = bounds_of(
+        boxes
+            .values()
+            .copied()
+            .chain(g.containers.iter().map(|frame| rect(frame.bounds))),
+    ) else {
+        return;
+    };
+    let outside = |p: Point| {
+        p.0 < content.x || p.0 > content.right() || p.1 < content.y || p.1 > content.bottom()
+    };
+    let excursion = points
+        .iter()
+        .map(|p| {
+            (content.x - p.0)
+                .max(p.0 - content.right())
+                .max(content.y - p.1)
+                .max(p.1 - content.bottom())
+                .max(0)
+        })
+        .max()
+        .unwrap_or(0);
+    let empty = points
+        .iter()
+        .map(|p| {
+            boxes
+                .values()
+                .map(|b| {
+                    let dx = (b.x - p.0).max(p.0 - b.right()).max(0);
+                    let dy = (b.y - p.1).max(p.1 - b.bottom()).max(0);
+                    integer_sqrt(i128::from(dx) * i128::from(dx) + i128::from(dy) * i128::from(dy))
+                })
+                .min()
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0);
+    if excursion.max(empty) < 96 * U {
+        return;
+    }
+    for other in routes {
+        if other.index == r.index || !shared_endpoint(r, other) {
+            continue;
+        }
+        let others = asserted_path(other, boxes);
+        if points.windows(2).any(|s| {
+            outside(((s[0].0 + s[1].0) / 2, (s[0].1 + s[1].1) / 2))
+                && others
+                    .windows(2)
+                    .any(|t| corridor(s[0], s[1], t[0], t[1]) >= 32 * U)
+        }) {
+            return;
+        }
+    }
+    let Some(shortest) = detour_shortest(&points, boxes) else {
+        return;
+    };
+    if shortest <= 0
+        || i128::from(actual) * 2 < i128::from(shortest) * 5
+        || actual - shortest < 200 * U
+    {
+        return;
+    }
+    emit(out,f,r.index,"geometry-route-quality","excessive-route-detour",0,
+        format!("authored via route travels {}px instead of the {}px obstacle-clearing reference (minimum ratio2.5, excess200px, empty excursion96px)",actual as f64/64.0,shortest as f64/64.0),
+        "remove the distant via points or move the authored corridor near its connected nodes while preserving endpoints and labels",true);
+}
+
 /// Return authored refusals and exact-allowlisted generated-geometry notices.
 pub(crate) fn route_geometry_diagnostics(
     spec: &Value,
@@ -1222,6 +1657,86 @@ pub(crate) fn route_geometry_diagnostics(
     let routes = relations(spec, f, geometry, &boxes);
     let mut out = BTreeMap::new();
     for r in &routes {
+        // Inspect authored connectors before routing repairs or discards them.
+        let raw_path = if !r.authored.is_empty() {
+            &r.authored
+        } else if text(r.raw, "route") == Some("straight") {
+            &r.reference
+        } else {
+            &r.authored
+        };
+        if (matches!(f.name, "dataflow" | "lifecycle")
+            || f.name == "architecture"
+                && (text(r.raw, "fromSide").is_some() || text(r.raw, "toSide").is_some()))
+            && raw_path.len() >= 2
+        {
+            for (id, tip, next, key) in [
+                (
+                    r.from,
+                    raw_path[0],
+                    raw_path
+                        .iter()
+                        .copied()
+                        .skip(1)
+                        .find(|p| *p != raw_path[0])
+                        .unwrap_or(raw_path[0]),
+                    "fromSide",
+                ),
+                (
+                    r.to,
+                    raw_path[raw_path.len() - 1],
+                    raw_path
+                        .iter()
+                        .copied()
+                        .rev()
+                        .skip(1)
+                        .find(|p| *p != raw_path[raw_path.len() - 1])
+                        .unwrap_or(raw_path[raw_path.len() - 1]),
+                    "toSide",
+                ),
+            ] {
+                if let Some(bounds) = boxes.get(id) {
+                    let requested = text(r.raw, key).or_else(|| endpoint_side(tip, *bounds));
+                    if let Some(side) = requested {
+                        if !outward(tip, next, side) {
+                            emit(&mut out, f, r.index, "geometry-route-quality",
+                                "authored-endpoint-direction", 0,
+                                format!("authored route {} does not leave its {side} endpoint outward", r.index),
+                                "move the first or last via point outward from the authored side, or choose a matching endpoint side", true);
+                        }
+                    }
+                }
+            }
+        }
+        source_presets(spec, f, r, &boxes, &mut out);
+        page_checks(spec, f, r, geometry, &boxes, &mut out);
+        detour_checks(spec, f, r, geometry, &boxes, &routes, &mut out);
+        if matches!(f.name, "architecture" | "workflow") {
+            let negative_via = array(r.raw, "via")
+                .iter()
+                .filter_map(point)
+                .any(|p| p.0 < 0 || p.1 < 0);
+            let negative_channel = f.name == "workflow"
+                && ["channelX", "channelY"]
+                    .iter()
+                    .any(|key| number(r.raw, key).is_some_and(|v| v < 0.0));
+            if negative_via || negative_channel {
+                emit(
+                    &mut out,
+                    f,
+                    r.index,
+                    "geometry-route-viewbox",
+                    "source-origin-containment",
+                    0,
+                    format!(
+                        "authored route {} includes a coordinate before the page origin",
+                        r.index
+                    ),
+                    "move the authored via/channel coordinates to zero or positive values",
+                    true,
+                );
+            }
+        }
         if border_gate && f.name != "lifecycle" {
             for frame in &geometry.containers {
                 if frame.kind == "activation" || frame.kind == "card" {
@@ -1913,5 +2428,137 @@ mod tests {
             g.nodes[0].position_source = provenance;
             assert_notice(&spec, &g, "proper-crossing");
         }
+    }
+    fn detour_fixture(depth: f64, small: bool, snake: bool) -> (Value, GeometryDocument) {
+        let (sx, tx, width) = if small {
+            (100, 180, 40)
+        } else {
+            (140, 540, 120)
+        };
+        let via = if snake {
+            json!([
+                [sx, 120.0 + depth],
+                [tx, 120.0 + depth],
+                [tx, 140.0 + depth],
+                [sx, 140.0 + depth],
+                [sx, 160.0 + depth],
+                [tx, 160.0 + depth]
+            ])
+        } else {
+            json!([[sx, 160.0 + depth], [tx, 160.0 + depth]])
+        };
+        let (spec, mut g) = fixture(
+            "architecture",
+            vec![json!({"from":"a","to":"b","fromSide":"bottom","toSide":"bottom","via":via})],
+            vec![vec![(sx, 160), (tx, 160)]],
+        );
+        g.nodes = [("a", 80), ("b", if small { 160 } else { 480 })]
+            .into_iter()
+            .map(|(id, x)| crate::geometry::GeometryNode {
+                id: id.into(),
+                bounds: crate::geometry::GeometryBox {
+                    x: x * 64,
+                    y: 100 * 64,
+                    width: width * 64,
+                    height: 60 * 64,
+                },
+                position_source: crate::geometry::GeometryPositionSource::AuthoredPosition,
+            })
+            .collect();
+        (spec, g)
+    }
+    #[test]
+    fn detour_reference_uses_four_pixel_endpoint_clearance() {
+        let (spec, g) = detour_fixture(310.0, false, false);
+        let f = family(&spec).unwrap();
+        let boxes = source_boxes(&spec, f, &g);
+        let rs = relations(&spec, f, &g, &boxes);
+        assert_eq!(
+            detour_shortest(&asserted_path(&rs[0], &boxes), &boxes),
+            Some(408 * 64)
+        );
+    }
+    #[test]
+    fn detour_ratio_excess_and_empty_boundaries_are_independently_enforced() {
+        for (depth, small, snake, reject) in [
+            (309.5, false, false, false),
+            (310.5, false, false, true),
+            (103.5, true, false, false),
+            (104.5, true, false, true),
+            (95.0, false, true, false),
+            (97.0, false, true, true),
+        ] {
+            let (spec, g) = detour_fixture(depth, small, snake);
+            let d = route_geometry_diagnostics(&spec, &g);
+            assert_eq!(
+                !cause(&d, "excessive-route-detour").is_empty(),
+                reject,
+                "depth{depth} small{small} snake{snake}: {d:?}"
+            );
+        }
+    }
+    #[test]
+    fn v2_presets_and_channel_preservation_are_source_assertions() {
+        let (mut spec, g) = fixture(
+            "workflow",
+            vec![
+                json!({"route":"bottom-channel","channelX":200,"via":[[100,10],[100,30],[200,30]]}),
+            ],
+            vec![vec![(0, 10), (200, 10)]],
+        );
+        spec["schema_version"] = json!(2);
+        assert_authored(&spec, &g, "route-preset-compatibility", 0);
+        spec["edges"][0]["route"] = json!("auto");
+        assert_authored(&spec, &g, "channel-pin-preservation", 0);
+        spec["edges"][0]["channelX"] = json!(100);
+        assert!(cause(
+            &route_geometry_diagnostics(&spec, &g),
+            "channel-pin-preservation"
+        )
+        .is_empty());
+        spec["edges"][0]["channelX"] = Value::Null;
+        assert!(cause(
+            &route_geometry_diagnostics(&spec, &g),
+            "channel-pin-preservation"
+        )
+        .is_empty());
+    }
+    #[test]
+    fn page_label_collision_preserves_generated_notice_and_authored_failure() {
+        let (mut spec, mut g) = fixture(
+            "architecture",
+            vec![json!({})],
+            vec![vec![(10, 10), (100, 10)]],
+        );
+        spec["meta"]["viewBox"] = json!([200, 200]);
+        g.labels.push(label_for(0, 190, 50, 20, 14));
+        assert_notice(&spec, &g, "label-canvas-containment");
+        spec["connections"][0]["labelAt"] = json!([200, 50]);
+        assert_authored(&spec, &g, "label-canvas-containment", 0);
+    }
+    #[test]
+    fn shared_outer_corridor_exempts_related_detours() {
+        let (mut spec, g) = detour_fixture(310.5, false, false);
+        let mut other = spec["connections"][0].clone();
+        other["id"] = json!("shared");
+        spec["connections"].as_array_mut().unwrap().push(other);
+        assert!(cause(
+            &route_geometry_diagnostics(&spec, &g),
+            "excessive-route-detour"
+        )
+        .is_empty());
+    }
+    #[test]
+    fn preset_corridor_requires_its_full_turn_pattern() {
+        assert!(corridor_pattern(
+            &[(0, 0), (0, 20), (80, 20), (80, 0)],
+            false,
+            20
+        ));
+        assert!(!corridor_pattern(
+            &[(0, 0), (0, 20), (20, 20), (20, 40), (80, 40), (80, 0)],
+            false,
+            20
+        ));
     }
 }

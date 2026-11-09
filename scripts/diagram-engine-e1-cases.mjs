@@ -213,7 +213,8 @@ export function generatedCases() {
       add("range", "column", (s) => { s.states[0].col = 5; });
       add("lane-count", "too-many", (s) => { s.lanes.push(...["one", "two", "three", "four"].map((id) => ({ id, label: id }))); });
       add("lane-reference", "state", (s) => { s.states[0].lane = "missing"; });
-      add("valid", "nonreserved-lane", (s) => { s.lanes[0].id = "ordinary"; s.states.forEach((state) => { state.lane = "ordinary"; }); }, "lifecycle-reserved-main-lane");
+      // Keep this prerequisite probe free of downstream short-span/label failures.
+      add("valid", "nonreserved-lane", (s) => { s.lanes[0].id = "ordinary"; s.states.forEach((state) => { state.lane = "ordinary"; }); s.states[1].col = 2; }, "lifecycle-reserved-main-lane");
     }
   }
   return result;

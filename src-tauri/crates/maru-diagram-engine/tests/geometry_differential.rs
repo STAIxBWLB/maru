@@ -2,16 +2,22 @@
 #![cfg(feature = "geometry")]
 use maru_diagram_engine::layout::layout_json;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 #[derive(Deserialize)]
 struct Corpus {
     cases: Vec<Case>,
+    rules: BTreeMap<String, Vec<Rule>>,
+}
+#[derive(Deserialize)]
+struct Rule {
+    code: String,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Case {
     id: String,
+    diagram_type: String,
     geometry_comparison: Comparison,
 }
 #[derive(Deserialize)]
@@ -44,17 +50,40 @@ fn renderer_verdicts_have_equivalent_geometry_rules_and_preserve_placed_scenes()
                 case.id, report.diagnostics
             ));
         }
-        if !expected.accepted
-            && !report
+        let mut known: HashSet<_> = corpus
+            .rules
+            .get(&case.diagram_type)
+            .into_iter()
+            .flatten()
+            .map(|rule| rule.code.clone())
+            .collect();
+        known.extend(maru_diagram_engine::rules::geometry_rule_codes(
+            &case.diagram_type,
+        ));
+        known.insert("document/diagram-type".into());
+        for code in &expected.equivalent_codes {
+            assert!(
+                known.contains(code),
+                "{}: unknown expected code {code} for {}",
+                case.id,
+                case.diagram_type
+            );
+            if !report
                 .diagnostics
                 .iter()
-                .any(|d| expected.equivalent_codes.contains(&d.code))
-        {
-            failures.push(format!(
-                "{}: expected {:?}, got {:?}",
-                case.id, expected.equivalent_codes, report.diagnostics
-            ));
+                .any(|diagnostic| diagnostic.code == *code)
+            {
+                failures.push(format!(
+                    "{}: required code {code} was not emitted; got {:?}",
+                    case.id, report.diagnostics
+                ));
+            }
         }
+        assert!(
+            expected.accepted || !expected.equivalent_codes.is_empty(),
+            "{}: rejection lacks a required code",
+            case.id
+        );
         for diagnostic in &report.diagnostics {
             assert!(
                 !diagnostic.code.is_empty()
