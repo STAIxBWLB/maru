@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 pub(crate) const KINDS: &[&str] = &[
     "sequence-lifeline",
+    "workflow-phase-span",
     "lifecycle-initial-dot",
     "lifecycle-initial-stem",
     "lifecycle-initial-head",
@@ -93,6 +94,14 @@ pub(crate) fn context<'a>(
             "use one of the five E3 diagram families",
         ));
     }
+    if ![1, 2].contains(&c.schema_version) {
+        return Err(error(
+            "semantic-version",
+            "/options/semantics/schemaVersion",
+            "semantic schema version is unsupported",
+            "provide an accepted version 1 or 2 source snapshot",
+        ));
+    }
     for n in &g.nodes {
         if !c.nodes.contains_key(&n.id) {
             return Err(error(
@@ -118,6 +127,15 @@ pub(crate) fn dash(variant: Option<&str>) -> Option<&'static str> {
         Some("return") => Some("3 5"),
         Some("security") => Some("5 5"),
         Some("dashed") => Some("4 4"),
+        _ => None,
+    }
+}
+pub(crate) fn frame_dash(kind: &str, c: &SemanticContext, id: &str) -> Option<&'static str> {
+    match kind {
+        "region" => Some("8 4"),
+        "security-group" | "exception-lane" => Some("4 4"),
+        "group" if c.frame_variants.get(id).is_some_and(|v| v == "security") => Some("4 4"),
+        "lane" | "group" | "stage" | "segment" => Some("6 6"),
         _ => None,
     }
 }
@@ -250,6 +268,29 @@ fn legend_width(c: &SemanticContext, key: &str) -> &'static str {
 pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primitive>, Diagnostic> {
     let c = context(g, o)?;
     let mut out = Vec::new();
+    if c.family == "workflow" {
+        for frame in g.containers.iter().filter(|frame| frame.kind == "phase") {
+            let variant = c.frame_variants.get(&frame.id).map(String::as_str);
+            let y = i64::from(frame.bounds.y) + i64::from(frame.bounds.height) / 2;
+            let mut p = primitive(
+                "workflow-phase-span",
+                &frame.id,
+                Shape::Line {
+                    from: at(frame.bounds.x.into(), y)?,
+                    to: at(i64::from(frame.bounds.x) + i64::from(frame.bounds.width), y)?,
+                },
+                if variant == Some("emphasis") {
+                    Paint::AccentLine
+                } else {
+                    Paint::Line
+                },
+                "1.1",
+                Layer::Underlay,
+            );
+            p.dash = dash(variant);
+            out.push(p);
+        }
+    }
     if c.family == "sequence" {
         let page_end = i64::from(g.page.bounds.y) + i64::from(g.page.bounds.height) - 65 * 64;
         let end = if g.legend.entries.is_empty() {
@@ -362,7 +403,10 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
             }
             if let Some(main) = bands.get("phase") {
                 let mut nodes = main.clone();
-                nodes.sort_by_key(|n| (n.bounds.x, n.bounds.y, n.id.as_str()));
+                if nodes.iter().any(|n| n.phase_order.is_none()) {
+                    return Err(error("semantic-order", "/nodes", "lifecycle phase geometry has no authored order", "recompute layout with the E3-capable producer before rendering pinned phases"));
+                }
+                nodes.sort_by(|a, b| (a.phase_order, &a.id).cmp(&(b.phase_order, &b.id)));
                 let mut points = Vec::new();
                 for node in nodes {
                     let center = middle(node.bounds)?;

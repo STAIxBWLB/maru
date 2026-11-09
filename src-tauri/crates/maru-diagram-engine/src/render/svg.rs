@@ -99,11 +99,15 @@ fn rect(
     kind: &str,
     b: GeometryBox,
     radius: i64,
-    fill: &str,
-    stroke: &str,
-    width: &str,
+    style: (&str, &str, &str),
+    dash: Option<&str>,
 ) {
-    write!(out,"<rect data-kind=\"{kind}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{width}\"/>",fixed(b.x.into()),fixed(b.y.into()),fixed(b.width.into()),fixed(b.height.into()),fixed(radius)).unwrap();
+    let (fill, stroke, width) = style;
+    write!(out,"<rect data-kind=\"{kind}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{width}\"",fixed(b.x.into()),fixed(b.y.into()),fixed(b.width.into()),fixed(b.height.into()),fixed(radius)).unwrap();
+    if let Some(dash) = dash {
+        write!(out, " stroke-dasharray=\"{dash}\"").unwrap();
+    }
+    out.push_str("/>");
 }
 fn caption(g: &GeometryDocument, target: &str) -> String {
     let labels: Vec<_> = g
@@ -308,7 +312,7 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
     let b = g.page.bounds;
     let mut s = String::new();
     write!(s,"<svg xmlns=\"http://www.w3.org/2000/svg\" id=\"maru-svg\" role=\"img\" aria-labelledby=\"maru-title maru-desc\" viewBox=\"{} {} {} {}\" width=\"{}\" height=\"{}\" data-theme=\"{}\"><title id=\"maru-title\">{}</title><desc id=\"maru-desc\">{}</desc>",fixed(b.x.into()),fixed(b.y.into()),fixed(b.width.into()),fixed(b.height.into()),fixed(b.width.into()),fixed(b.height.into()),o.theme.name(),escaped(&o.title),escaped(&o.description)).unwrap();
-    rect(&mut s, "page", b, 0, t.background, "none", "0");
+    rect(&mut s, "page", b, 0, (t.background, "none", "0"), None);
     s.push_str("<defs>");
     for (key, color) in [("arrow", t.arrow), ("arrow-emphasis", t.emphasis)] {
         write!(s,"<marker id=\"{key}\" markerWidth=\"10\" markerHeight=\"7\" refX=\"9\" refY=\"3.5\" orient=\"auto\" markerUnits=\"strokeWidth\"><polygon points=\"0,0 10,3.5 0,7\" fill=\"{color}\"/></marker>").unwrap();
@@ -319,7 +323,8 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             "region" => 12,
             "lane" | "segment" | "stage" => 10,
             "group" => 9,
-            "security-group" => 8,
+            "security-group" | "exception-lane" => 8,
+            "phase" => 4,
             "activation" => 3,
             _ => 6,
         };
@@ -329,9 +334,8 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             "container-box",
             c.bounds,
             radius * 64,
-            t.lane_fill,
-            t.lane_stroke,
-            "1",
+            (t.lane_fill, t.lane_stroke, "1"),
+            super::primitives::frame_dash(&c.kind, semantics, &c.id),
         );
         s.push_str("</g>");
     }
@@ -348,9 +352,8 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             "container-box",
             c.bounds,
             3 * 64,
-            t.lane_fill,
-            t.lane_stroke,
-            "1",
+            (t.lane_fill, t.lane_stroke, "1"),
+            super::primitives::frame_dash(&c.kind, semantics, &c.id),
         );
         s.push_str("</g>");
     }
@@ -389,9 +392,8 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             } else {
                 6 * 64
             },
-            t.node_fill,
-            t.node_stroke,
-            "1.5",
+            (t.node_fill, t.node_stroke, "1.5"),
+            None,
         );
         s.push_str("</g>");
     }
@@ -400,9 +402,8 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         "legend-box",
         g.legend.bounds,
         6 * 64,
-        t.lane_fill,
-        t.lane_stroke,
-        "1",
+        (t.lane_fill, t.lane_stroke, "1"),
+        None,
     );
     for e in &g.legend.entries {
         write!(
@@ -412,7 +413,14 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             escaped(&e.label)
         )
         .unwrap();
-        rect(&mut s, "legend-entry-box", e.bounds, 0, "none", "none", "0");
+        rect(
+            &mut s,
+            "legend-entry-box",
+            e.bounds,
+            0,
+            ("none", "none", "0"),
+            None,
+        );
         s.push_str("</g>");
     }
     for p in primitives
@@ -429,7 +437,14 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             t.muted
         };
         write!(s,"<g id=\"{}\" data-kind=\"label\" data-source-id=\"{}\" data-target-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("label",&key),escaped(&key),escaped(&l.target_id),escaped(&l.text)).unwrap();
-        rect(&mut s, "label-bounds", l.bounds, 0, "none", "none", "0");
+        rect(
+            &mut s,
+            "label-bounds",
+            l.bounds,
+            0,
+            ("none", "none", "0"),
+            None,
+        );
         write!(s,"<text data-kind=\"label-text\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" font-kerning=\"none\" font-variant-ligatures=\"none\" text-rendering=\"geometricPrecision\" style=\"font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0\" xml:space=\"preserve\" fill=\"{color}\" aria-hidden=\"true\">",fixed(l.font_size.into()),l.font.weight).unwrap();
         for (j, p) in l
             .glyphs

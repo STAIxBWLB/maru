@@ -239,3 +239,48 @@ fn lifecycle_final_marker_and_radius_mutations_fail() {
         &spec,
     );
 }
+
+#[test]
+fn semantic_markers_follow_placed_pins_without_reclassifying_authored_lifecycle_order() {
+    let spec = sequence_spec();
+    let spec_json = spec.to_string();
+    let request = json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":maru_diagram_engine::spec_hash(&spec_json),"pins":[{"targetId":"client","targetKind":"node","position":{"x":32000,"y":6400}}]}});
+    let g = layout_json(&request.to_string()).geometry.unwrap();
+    let o = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
+    let result = render_svg(&g, &o);
+    assert!(result.ok, "{:?}", result.diagnostics);
+    let svg = result.svg.unwrap();
+    let parsed = roxmltree::Document::parse(&svg).unwrap();
+    let line = parsed
+        .descendants()
+        .find(|n| {
+            n.attribute("data-kind") == Some("sequence-lifeline")
+                && n.attribute("data-target-id") == Some("client")
+        })
+        .unwrap();
+    let node = g.nodes.iter().find(|n| n.id == "client").unwrap();
+    assert_eq!(
+        line.attribute("x1").unwrap().parse::<f64>().unwrap(),
+        (node.bounds.x + node.bounds.width / 2) as f64 / 64.0
+    );
+    assert_eq!(
+        line.attribute("y1").unwrap().parse::<f64>().unwrap(),
+        (node.bounds.y + node.bounds.height) as f64 / 64.0
+    );
+
+    let spec: Value =
+        serde_json::from_str(include_str!("../testdata/valid-lifecycle.json")).unwrap();
+    let source = spec.to_string();
+    let g=layout_json(&json!({"specJson":source,"pinSet":{"sourceSpecSha256":maru_diagram_engine::spec_hash(&source),"pins":[{"targetId":"b","targetKind":"node","position":{"x":0,"y":8064}}]}}).to_string()).geometry.unwrap();
+    let b = g.nodes.iter().find(|n| n.id == "b").unwrap();
+    let a = g.nodes.iter().find(|n| n.id == "a").unwrap();
+    assert_eq!(b.final_state, Some(true));
+    assert_eq!(a.final_state, Some(false));
+    assert!(
+        a.phase_order < b.phase_order,
+        "authored phase order must survive swapped screen positions"
+    );
+    let o = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
+    let result = render_svg(&g, &o);
+    assert!(result.ok, "{:?}", result.diagnostics);
+}

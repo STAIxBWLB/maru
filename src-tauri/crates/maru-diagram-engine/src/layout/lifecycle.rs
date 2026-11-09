@@ -211,6 +211,16 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
         .filter(|state| state.lane == "main")
         .map(|state| state.col)
         .max();
+    let phase_order: std::collections::BTreeMap<_, _> = spec
+        .states
+        .iter()
+        .filter(|state| state.lane == "main")
+        .map(|state| state.col)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .enumerate()
+        .map(|(rank, col)| (col, rank as u32))
+        .collect();
     let final_states: std::collections::BTreeMap<_, _> = spec
         .states
         .iter()
@@ -263,6 +273,9 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             .filter(|node| node.id == state.id)
         {
             node.final_state = final_states.get(state.id.as_str()).copied();
+            if version == 1 && state.lane == "main" {
+                node.phase_order = phase_order.get(&state.col).copied();
+            }
         }
         placed?;
     }

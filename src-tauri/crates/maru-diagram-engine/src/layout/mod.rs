@@ -314,6 +314,7 @@ impl SceneBuilder {
         bounds.bottom().map_err(arithmetic)?;
         self.document.nodes.push(GeometryNode {
             final_state: None,
+            phase_order: None,
             id: id.into(),
             bounds,
             position_source: source,

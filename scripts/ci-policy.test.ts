@@ -66,6 +66,14 @@ describe("PR change classification", () => {
     expect(classifyPrChanges(["docs/performance/evidence.json"]).run_full).toBe(true);
   });
 
+  it("selects the SVG matrix for render-only facade and E3 fixture changes", () => {
+    for (const file of ["src/lib/diagram/engineSvgForTest.ts", "scripts/diagram-engine-e3-fonts.mjs", "scripts/diagram-engine-e3-screenshots.mjs"]) {
+      const decision = classifyPrChanges([file]);
+      expect(decision.run_geometry, file).toBe(true);
+      expect(decision.run_full, file).toBe(true);
+    }
+  });
+
   it("routes ordinary source changes to verify, Playwright, and native compile", () => {
     expect(classifyPrChanges(["src/components/NewPanel.tsx"])).toEqual({
       run_full: true,

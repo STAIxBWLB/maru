@@ -155,6 +155,10 @@ pub struct GeometryNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub final_state: Option<bool>,
+    /// Authored phase ordinal, separate from pin-adjusted x/y coordinates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub phase_order: Option<u32>,
     pub id: String,
     pub bounds: GeometryBox,
     /// Future placement resolution order is planned pin, authored position,

@@ -533,6 +533,7 @@ mod tests {
     fn node(id: &str, x: i32, y: i32, width: i32, height: i32) -> GeometryNode {
         GeometryNode {
             final_state: None,
+            phase_order: None,
             id: id.into(),
             bounds: GeometryBox {
                 x,

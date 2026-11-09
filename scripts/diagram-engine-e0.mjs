@@ -72,7 +72,7 @@ if (action === "types") {
   if (base && !/^0+$/.test(base)) {
     if (spawnSync("git", ["cat-file", "-e", `${base}^{commit}`]).status !== 0) run("git", ["fetch", "--no-tags", "--depth=1", "origin", base]);
     const paths = run("git", ["diff", "--name-only", base, "HEAD"]).trim().split("\n");
-    needed = paths.some((name) => /^(src-tauri\/crates\/|src-tauri\/src\/diagram_engine_e0\.rs|src\/lib\/nativeE2eBridge\.ts|rust-toolchain\.toml|scripts\/(?:check-diagram-engine|diagram-engine-e[02]|diagram-engine-payload)|src\/lib\/diagram\/engine(?:Geometry[^/]*)?\.ts|e2e\/engine-e0|e2e-native\/specs\/diagram-engine-e0|\.github\/workflows\/ci.yml)/.test(name));
+    needed = paths.some((name) => /^(src-tauri\/crates\/|src-tauri\/src\/diagram_engine_e0\.rs|src\/lib\/nativeE2eBridge\.ts|rust-toolchain\.toml|scripts\/(?:check-diagram-engine|diagram-engine-e[023]|diagram-engine-payload)|src\/lib\/diagram\/engine(?:Geometry[^/]*|SvgForTest)?\.ts|e2e\/engine-e0|e2e-native\/specs\/diagram-engine-e0|\.github\/workflows\/ci.yml)/.test(name));
   }
   if (process.env.GITHUB_OUTPUT) {
     const { appendFileSync } = await import("node:fs"); appendFileSync(process.env.GITHUB_OUTPUT, `needed=${needed}\n`);

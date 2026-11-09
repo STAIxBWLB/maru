@@ -94,7 +94,11 @@ export type GeometryBox = { x: number, y: number, width: number, height: number,
 
 export type FontIdentity = { id: string, revision: string, fontSha256: string, weight: number, unitsPerEm: number, license: string, };
 
-export type GeometryNode = { id: string, bounds: GeometryBox,
+export type GeometryNode = {
+/**
+ * Optional semantic classification; coordinates and API version are unchanged.
+ */
+finalState?: boolean | null, id: string, bounds: GeometryBox,
 /**
  * Future placement resolution order is planned pin, authored position,
  * then automatic placement.

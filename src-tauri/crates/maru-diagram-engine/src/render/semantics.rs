@@ -11,6 +11,8 @@ pub struct SemanticContext {
     pub family: String,
     pub schema_version: u32,
     pub nodes: BTreeMap<String, NodeSemantic>,
+    #[serde(default)]
+    pub frame_variants: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -154,12 +156,101 @@ impl SemanticContext {
             }
         }
 
+        let frame_variants = if family == "workflow" {
+            let mut variants = BTreeMap::new();
+            collect_frame_variants(spec, "lanes", "lane", true, &mut variants)?;
+            collect_frame_variants(spec, "phases", "phase", false, &mut variants)?;
+            collect_frame_variants(spec, "groups", "group", false, &mut variants)?;
+            variants
+        } else {
+            BTreeMap::new()
+        };
+
         Ok(Self {
             family: family.to_owned(),
             schema_version,
             nodes,
+            frame_variants,
         })
     }
+}
+
+fn collect_frame_variants(
+    spec: &Value,
+    collection: &str,
+    prefix: &str,
+    required: bool,
+    variants: &mut BTreeMap<String, String>,
+) -> Result<(), Diagnostic> {
+    let Some(value) = spec.get(collection) else {
+        if required {
+            return Err(super::error(
+                "semantic",
+                &format!("/{collection}"),
+                format!("workflow {collection} collection is missing"),
+                "provide the accepted workflow frame collection",
+            ));
+        }
+        return Ok(());
+    };
+    if value.is_null() && !required {
+        return Ok(());
+    }
+    let entries = value.as_array().ok_or_else(|| {
+        super::error(
+            "semantic",
+            &format!("/{collection}"),
+            format!("workflow {collection} collection is not an array"),
+            "provide the accepted workflow frame collection",
+        )
+    })?;
+    let mut seen = BTreeMap::<String, usize>::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let path = format!("/{collection}/{index}");
+        let object = entry.as_object().ok_or_else(|| {
+            super::error(
+                "semantic",
+                &path,
+                "workflow frame entry is not an object",
+                "provide each frame as an object with a unique id",
+            )
+        })?;
+        let id = object
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                super::error(
+                    "semantic",
+                    &format!("{path}/id"),
+                    "workflow frame id is missing or is not a nonempty string",
+                    "provide a unique nonempty id within this frame collection",
+                )
+            })?;
+        if seen.insert(id.to_owned(), index).is_some() {
+            return Err(super::error(
+                "semantic",
+                &format!("{path}/id"),
+                format!("duplicate workflow {collection} id {id:?}"),
+                "provide a unique id within this frame collection",
+            ));
+        }
+        if let Some(value) = object.get("variant").filter(|value| !value.is_null()) {
+            let variant = value
+                .as_str()
+                .filter(|variant| !variant.trim().is_empty())
+                .ok_or_else(|| {
+                    super::error(
+                        "semantic",
+                        &format!("{path}/variant"),
+                        "workflow frame variant is not a nonempty string",
+                        "provide the accepted nonempty variant string or omit variant",
+                    )
+                })?;
+            variants.insert(format!("{prefix}:{id}"), variant.to_owned());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -232,12 +323,48 @@ mod tests {
 
     #[test]
     fn ignores_layout_coordinates_and_other_spec_fields() {
-        let base = json!({"diagram_type":"workflow","schema_version":2,"meta":{"viewBox":[900,700]},"nodes":[{"id":"a","type":"backend","lane":"main","col":1,"width":100,"height":60,"yOffset":4}],"edges":[]});
-        let changed = json!({"diagram_type":"workflow","schema_version":2,"meta":{"viewBox":[1400,1200]},"layout":{"origin":[75,95]},"nodes":[{"id":"a","type":"backend","lane":"main","col":5,"width":210,"height":130,"yOffset":99,"pos":[777,888],"row":8,"x":17,"y":29}],"edges":[]});
+        let base = json!({"diagram_type":"workflow","schema_version":2,"meta":{"viewBox":[900,700]},"lanes":[{"id":"main","label":"Main","variant":"exception"}],"phases":[{"id":"build","label":"Build","fromCol":0,"toCol":2,"variant":"dashed"}],"groups":[{"id":"secure","label":"Secure","lane":"main","fromCol":1,"toCol":2,"variant":"security"}],"nodes":[{"id":"a","type":"backend","lane":"main","col":1,"width":100,"height":60,"yOffset":4}],"edges":[]});
+        let changed = json!({"diagram_type":"workflow","schema_version":2,"meta":{"viewBox":[1400,1200]},"layout":{"origin":[75,95]},"lanes":[{"id":"main","label":"Main","variant":"exception"}],"phases":[{"id":"build","label":"Build","fromCol":4,"toCol":5,"variant":"dashed"}],"groups":[{"id":"secure","label":"Secure","lane":"main","fromCol":3,"toCol":5,"variant":"security"}],"nodes":[{"id":"a","type":"backend","lane":"main","col":5,"width":210,"height":130,"yOffset":99,"pos":[777,888],"row":8,"x":17,"y":29}],"edges":[]});
         assert_eq!(
             SemanticContext::from_spec(&base).unwrap(),
             SemanticContext::from_spec(&changed).unwrap()
         );
+    }
+
+    #[test]
+    fn maps_workflow_frame_variants_by_namespaced_id() {
+        let spec = json!({"diagram_type":"workflow","schema_version":2,"lanes":[{"id":"main","label":"Main"},{"id":"catch","label":"Catch","variant":"exception"}],"phases":[{"id":"prepare","label":"Prepare","fromCol":0,"toCol":1,"variant":"dashed"}],"groups":[{"id":"guard","label":"Guard","lane":"main","fromCol":0,"toCol":1,"variant":"security"}],"nodes":[{"id":"n","type":"backend","lane":"main","col":0}]});
+        let context = SemanticContext::from_spec(&spec).unwrap();
+        assert_eq!(
+            context.frame_variants.get("lane:catch").map(String::as_str),
+            Some("exception")
+        );
+        assert_eq!(
+            context
+                .frame_variants
+                .get("phase:prepare")
+                .map(String::as_str),
+            Some("dashed")
+        );
+        assert_eq!(
+            context
+                .frame_variants
+                .get("group:guard")
+                .map(String::as_str),
+            Some("security")
+        );
+        assert!(!context.frame_variants.contains_key("lane:main"));
+    }
+
+    #[test]
+    fn rejects_duplicate_frame_ids_and_malformed_variants() {
+        let duplicate = json!({"diagram_type":"workflow","schema_version":2,"lanes":[{"id":"main","label":"Main"},{"id":"main","label":"Again"}],"nodes":[]});
+        let error = SemanticContext::from_spec(&duplicate).unwrap_err();
+        assert_eq!(error.path, "/lanes/1/id");
+
+        let malformed = json!({"diagram_type":"workflow","schema_version":2,"lanes":[{"id":"main","label":"Main","variant":7}],"nodes":[]});
+        let error = SemanticContext::from_spec(&malformed).unwrap_err();
+        assert_eq!(error.path, "/lanes/0/variant");
     }
 
     #[test]

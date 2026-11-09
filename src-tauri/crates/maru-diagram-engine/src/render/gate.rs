@@ -214,6 +214,14 @@ fn check_rect_paint(
     path: &str,
     errors: &mut Vec<Diagnostic>,
 ) {
+    if kind != "container-box" && node.attribute("stroke-dasharray").is_some() {
+        errors.push(diagnostic(
+            "paint",
+            path,
+            "a non-frame rectangle has an unexpected line pattern",
+            "restore the fixed rectangle paint for this geometry kind",
+        ));
+    }
     let tokens = options.theme.tokens();
     let (fill, stroke, width, radius) = match kind {
         "page" => (tokens.background, "none", "0", 0),
@@ -305,6 +313,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "width",
                 "height",
                 "rx",
+                "stroke-dasharray",
                 "fill",
                 "stroke",
                 "stroke-width",
@@ -1053,6 +1062,23 @@ pub fn check_svg_artifact(
                 &mut errors,
             );
             check_child_box(group, "container-box", container.bounds, &path, &mut errors);
+            if let Some(frame) =
+                elements(group).find(|n| n.attribute("data-kind") == Some("container-box"))
+            {
+                if let Some(dash) =
+                    super::primitives::frame_dash(&container.kind, semantics, &container.id)
+                {
+                    require_attr(frame, "stroke-dasharray", dash, &path, &mut errors);
+                } else if frame.attribute("stroke-dasharray").is_some() {
+                    errors.push(diagnostic(
+                        "frame-dash",
+                        &path,
+                        "frame has an unrequested line style",
+                        "restore the semantic frame style from the source kind",
+                    ));
+                }
+            }
+
             if let Some(box_node) =
                 elements(group).find(|child| child.attribute("data-kind") == Some("container-box"))
             {
@@ -1060,7 +1086,8 @@ pub fn check_svg_artifact(
                     "region" => 12,
                     "lane" | "segment" | "stage" => 10,
                     "group" => 9,
-                    "security-group" => 8,
+                    "security-group" | "exception-lane" => 8,
+                    "phase" => 4,
                     "activation" => 3,
                     _ => 6,
                 } * 64;
