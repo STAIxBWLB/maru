@@ -96,8 +96,20 @@ fn expected_paint(primitive: &Primitive, options: &SvgOptions) -> (&'static str,
     match primitive.paint {
         Paint::Line => ("none", theme.arrow),
         Paint::AccentLine => ("none", theme.emphasis),
-        Paint::Node => (theme.node_fill, theme.node_stroke),
-        Paint::OutlineNode => ("none", theme.node_stroke),
+        Paint::Node => {
+            let color = options
+                .theme
+                .kind(primitive.paint_kind(options.semantics.as_ref().expect("context validated")))
+                .expect("kind validated");
+            (color.fill, color.stroke)
+        }
+        Paint::OutlineNode => {
+            let color = options
+                .theme
+                .kind(primitive.paint_kind(options.semantics.as_ref().expect("context validated")))
+                .expect("kind validated");
+            ("none", color.stroke)
+        }
         Paint::AccentFill => (theme.emphasis, "none"),
     }
 }

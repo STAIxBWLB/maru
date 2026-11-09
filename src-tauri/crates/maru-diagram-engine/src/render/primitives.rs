@@ -102,7 +102,29 @@ pub(crate) fn context<'a>(
             "provide an accepted version 1 or 2 source snapshot",
         ));
     }
+    for entry in &g.legend.entries {
+        let route = c.family == "sequence" || (c.family == "dataflow" && entry.key != "database");
+        if !route && o.theme.kind(&entry.key).is_none() {
+            return Err(error(
+                "semantic-kind",
+                "/legend",
+                "legend kind has no semantic theme token",
+                "use the accepted legend catalog for the matching diagram family",
+            ));
+        }
+    }
     for n in &g.nodes {
+        if c.nodes
+            .get(&n.id)
+            .is_some_and(|node| o.theme.kind(&node.kind).is_none())
+        {
+            return Err(error(
+                "semantic-kind",
+                "/nodes",
+                "node kind has no semantic theme token",
+                "use an accepted semantic node type and the matching source snapshot",
+            ));
+        }
         if !c.nodes.contains_key(&n.id) {
             return Err(error(
                 "semantic-node",
@@ -540,5 +562,15 @@ pub(crate) fn node_caption(g: &GeometryDocument, c: &SemanticContext, target: &s
         format!("{text} ({kind}; final)")
     } else {
         format!("{text} ({kind})")
+    }
+}
+
+impl Primitive {
+    pub(crate) fn paint_kind<'a>(&'a self, c: &'a SemanticContext) -> &'a str {
+        if self.kind == "lifecycle-final-border" {
+            &c.nodes[&self.owner].kind
+        } else {
+            &self.owner
+        }
     }
 }

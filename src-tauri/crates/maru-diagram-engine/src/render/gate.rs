@@ -223,10 +223,36 @@ fn check_rect_paint(
         ));
     }
     let tokens = options.theme.tokens();
+    let node_color = if kind == "node-box" {
+        node.parent_element()
+            .and_then(|parent| parent.attribute("data-source-id"))
+            .and_then(|id| {
+                options
+                    .semantics
+                    .as_ref()
+                    .and_then(|context| context.nodes.get(id))
+            })
+            .and_then(|semantic| options.theme.kind(&semantic.kind))
+    } else {
+        None
+    };
+    if kind == "node-box" && node_color.is_none() {
+        errors.push(diagnostic(
+            "kind-token",
+            path,
+            "node paint has no matching source kind token",
+            "restore the node source id and accepted type",
+        ));
+        return;
+    }
     let (fill, stroke, width, radius) = match kind {
         "page" => (tokens.background, "none", "0", 0),
         "container-box" => (tokens.lane_fill, tokens.lane_stroke, "1", radius),
-        "node-box" => (tokens.node_fill, tokens.node_stroke, "1.5", radius),
+        "node-box" => {
+            let color = node_color.expect("checked above");
+            (color.fill, color.stroke, "1.5", radius)
+        }
+        "node-mask" => (tokens.mask, "none", "0", radius),
         "legend-box" => (tokens.lane_fill, tokens.lane_stroke, "1", radius),
         "legend-entry-box" | "label-bounds" => ("none", "none", "0", radius),
         _ => return,
@@ -263,6 +289,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
         "legend-box",
         "node",
         "node-box",
+        "node-mask",
         "container",
         "container-box",
         "route",
@@ -325,6 +352,8 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "id",
                 "data-kind",
                 "data-source-id",
+                "data-route-role",
+                "data-route-variant",
                 "data-target-id",
                 "role",
                 "aria-label",
@@ -450,7 +479,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
         }
         if let Some(kind) = node.attribute("data-kind") {
             let expected_parent = match kind {
-                "node-box" => Some("node"),
+                "node-box" | "node-mask" => Some("node"),
                 "container-box" => Some("container"),
                 "route-path" => Some("route"),
                 "label-bounds" | "label-text" | "notdef" => Some("label"),
@@ -948,6 +977,7 @@ pub fn check_svg_artifact(
         ("legend-box", 1),
         ("node", geometry.nodes.len()),
         ("node-box", geometry.nodes.len()),
+        ("node-mask", geometry.nodes.len()),
         ("container", geometry.containers.len()),
         ("container-box", geometry.containers.len()),
         ("route", geometry.routes.len()),
@@ -1020,6 +1050,24 @@ pub fn check_svg_artifact(
                 &mut errors,
             );
             check_child_box(group, "node-box", node.bounds, &path, &mut errors);
+            check_child_box(group, "node-mask", node.bounds, &path, &mut errors);
+            if let Some(mask) =
+                elements(group).find(|child| child.attribute("data-kind") == Some("node-mask"))
+            {
+                check_rect_paint(
+                    mask,
+                    "node-mask",
+                    if semantics.family == "lifecycle" {
+                        7 * 64
+                    } else {
+                        6 * 64
+                    },
+                    options,
+                    &path,
+                    &mut errors,
+                );
+            }
+
             if let Some(box_node) =
                 elements(group).find(|child| child.attribute("data-kind") == Some("node-box"))
             {
@@ -1126,6 +1174,21 @@ pub fn check_svg_artifact(
                 &path,
                 &mut errors,
             );
+            for (name, value) in [
+                ("data-route-role", route.role.as_deref()),
+                ("data-route-variant", route.variant.as_deref()),
+            ] {
+                if let Some(value) = value {
+                    require_attr(group, name, value, &path, &mut errors);
+                } else if group.attribute(name).is_some() {
+                    errors.push(diagnostic(
+                        "route-semantic",
+                        &path,
+                        "route carries an unrequested semantic tag",
+                        "restore the route role and variant from E2 geometry",
+                    ));
+                }
+            }
             if let Some(polyline) =
                 elements(group).find(|child| child.attribute("data-kind") == Some("route-path"))
             {

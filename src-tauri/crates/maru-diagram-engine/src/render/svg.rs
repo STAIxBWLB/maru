@@ -128,13 +128,30 @@ fn caption(g: &GeometryDocument, target: &str) -> String {
         labels.join("; ")
     }
 }
-fn write_primitive(s: &mut String, p: &super::primitives::Primitive, t: &super::theme::Tokens) {
+fn write_primitive(
+    s: &mut String,
+    p: &super::primitives::Primitive,
+    t: &super::theme::Tokens,
+    o: &SvgOptions,
+) {
     use super::primitives::{Paint, Shape};
     let (fill, stroke) = match p.paint {
         Paint::Line => ("none", t.arrow),
         Paint::AccentLine => ("none", t.emphasis),
-        Paint::Node => (t.node_fill, t.node_stroke),
-        Paint::OutlineNode => ("none", t.node_stroke),
+        Paint::Node => {
+            let color = o
+                .theme
+                .kind(p.paint_kind(o.semantics.as_ref().expect("semantic context validated")))
+                .expect("semantic kind validated");
+            (color.fill, color.stroke)
+        }
+        Paint::OutlineNode => {
+            let color = o
+                .theme
+                .kind(p.paint_kind(o.semantics.as_ref().expect("semantic context validated")))
+                .expect("semantic kind validated");
+            ("none", color.stroke)
+        }
         Paint::AccentFill => (t.emphasis, "none"),
     };
     let tag = match p.shape {
@@ -343,7 +360,7 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         .iter()
         .filter(|p| p.layer == super::primitives::Layer::Underlay)
     {
-        write_primitive(&mut s, p, &t);
+        write_primitive(&mut s, p, &t, o);
     }
     for c in g.containers.iter().filter(|c| c.kind == "activation") {
         write!(s,"<g id=\"{}\" data-kind=\"container\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("container",&c.id),escaped(&c.id),escaped(&caption(g,&c.id))).unwrap();
@@ -362,7 +379,14 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         let key = route_key(r, i);
         let emphasis = r.variant.as_deref() == Some("emphasis");
         let color = if emphasis { t.emphasis } else { t.arrow };
-        write!(s,"<g id=\"{}\" data-kind=\"route\" data-source-id=\"{}\" role=\"group\" aria-label=\"{} → {}\"><polyline data-kind=\"route-path\" points=\"",id("route",&key),escaped(&key),escaped(&r.from),escaped(&r.to)).unwrap();
+        write!(s,"<g id=\"{}\" data-kind=\"route\" data-source-id=\"{}\" role=\"group\" aria-label=\"{} → {}\"",id("route",&key),escaped(&key),escaped(&r.from),escaped(&r.to)).unwrap();
+        if let Some(role) = &r.role {
+            write!(s, " data-route-role=\"{}\"", escaped(role)).unwrap();
+        }
+        if let Some(variant) = &r.variant {
+            write!(s, " data-route-variant=\"{}\"", escaped(variant)).unwrap();
+        }
+        s.push_str("><polyline data-kind=\"route-path\" points=\"");
         for (j, p) in r.points.iter().enumerate() {
             if j > 0 {
                 s.push(' ');
@@ -382,17 +406,30 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         s.push_str("/></g>");
     }
     for n in &g.nodes {
+        let radius = if semantics.family == "lifecycle" {
+            7 * 64
+        } else {
+            6 * 64
+        };
+        let color = o
+            .theme
+            .kind(&semantics.nodes[&n.id].kind)
+            .expect("semantic kind validated");
         write!(s,"<g id=\"{}\" data-kind=\"node\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("node",&n.id),escaped(&n.id),escaped(&super::primitives::node_caption(g,semantics,&n.id))).unwrap();
+        rect(
+            &mut s,
+            "node-mask",
+            n.bounds,
+            radius,
+            (t.mask, "none", "0"),
+            None,
+        );
         rect(
             &mut s,
             "node-box",
             n.bounds,
-            if semantics.family == "lifecycle" {
-                7 * 64
-            } else {
-                6 * 64
-            },
-            (t.node_fill, t.node_stroke, "1.5"),
+            radius,
+            (color.fill, color.stroke, "1.5"),
             None,
         );
         s.push_str("</g>");
@@ -427,7 +464,7 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         .iter()
         .filter(|p| p.layer == super::primitives::Layer::Overlay)
     {
-        write_primitive(&mut s, p, &t);
+        write_primitive(&mut s, p, &t, o);
     }
     for (i, l) in g.labels.iter().enumerate() {
         let key = label_key(l, i);
