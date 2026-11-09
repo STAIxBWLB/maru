@@ -1,6 +1,6 @@
 //! Deterministic, source-pinned PNG corpus shared by native and test-featured WASM.
 use super::png::{render_png, PngOptions};
-use super::{png, SvgOptions, SvgTheme};
+use super::{SvgOptions, SvgTheme};
 use crate::{layout::layout_json, metrics, Diagnostic};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
