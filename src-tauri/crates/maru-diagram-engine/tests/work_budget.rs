@@ -26,6 +26,7 @@ struct AuthoredViaBudget {
     via_points: usize,
     minimum_route_segments: usize,
     endpoint_mask_passes_per_node_or_label_ceiling: u64,
+    endpoint_clearance_passes_per_node_label_segment_ceiling: u64,
     total_operations_per_node_segment_ceiling: u64,
 }
 fn plus_25_percent(value: u64) -> u64 {
@@ -69,6 +70,12 @@ fn seeded_thousand_node_work_is_repeatable_and_below_the_reviewed_ceiling() {
             budget.baseline.endpoint_mask_evaluations,
             budget.ceiling.endpoint_mask_evaluations,
         ),
+        (
+            "endpoint clearance evaluations in the unchanged no-via benchmark",
+            first.stats.endpoint_clearance_evaluations,
+            budget.baseline.endpoint_clearance_evaluations,
+            budget.ceiling.endpoint_clearance_evaluations,
+        ),
     ] {
         assert_eq!(
             ceiling,
@@ -109,6 +116,26 @@ fn seeded_thousand_node_work_is_repeatable_and_below_the_reviewed_ceiling() {
         via.stats.endpoint_mask_evaluations <= mask_work_ceiling,
         "endpoint-mask work {} exceeds the reviewed linear ceiling {mask_work_ceiling}; inspect repeated candidate scans",
         via.stats.endpoint_mask_evaluations
+    );
+    assert!(
+        via.stats.endpoint_clearance_evaluations > 0,
+        "the authored-via fixture must exercise the final segment clearance scan"
+    );
+    let clearance_ceiling = u64::try_from(via.nodes + via.labels)
+        .unwrap()
+        .checked_mul(u64::try_from(via.route_segments).unwrap())
+        .and_then(|n| {
+            n.checked_mul(
+                budget
+                    .authored_via
+                    .endpoint_clearance_passes_per_node_label_segment_ceiling,
+            )
+        })
+        .expect("authored-via clearance ceiling overflowed");
+    assert!(
+        via.stats.endpoint_clearance_evaluations <= clearance_ceiling,
+        "clearance work {} exceeds the node/label/segment ceiling {clearance_ceiling}",
+        via.stats.endpoint_clearance_evaluations
     );
     let total_work_ceiling = u64::try_from(via.nodes)
         .unwrap()

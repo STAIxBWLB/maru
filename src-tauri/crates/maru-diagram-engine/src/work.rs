@@ -11,12 +11,15 @@ pub struct WorkStats {
     pub constraint_evaluations: u64,
     #[serde(default)]
     pub endpoint_mask_evaluations: u64,
+    #[serde(default)]
+    pub endpoint_clearance_evaluations: u64,
 }
 impl WorkStats {
     pub fn total(self) -> u64 {
         self.astar_expanded_states.checked_add(self.route_evaluations)
             .and_then(|n|n.checked_add(self.constraint_evaluations))
             .and_then(|n|n.checked_add(self.endpoint_mask_evaluations))
+            .and_then(|n|n.checked_add(self.endpoint_clearance_evaluations))
             .expect("logical work total overflowed; reduce the measured fixture before recording a new budget")
     }
 }
@@ -43,10 +46,14 @@ pub(crate) fn record_route_evaluation() {
 pub(crate) fn record_constraint_evaluation() {
     increment(|s| s.constraint_evaluations = next(s.constraint_evaluations));
 }
-/// One candidate evaluated while deriving or checking the authored endpoint
+/// One candidate evaluated while deriving the authored endpoint
 /// node/label mask. Count candidates, not routes, so repeated scans remain visible.
 pub(crate) fn record_endpoint_mask_evaluation() {
     increment(|s| s.endpoint_mask_evaluations = next(s.endpoint_mask_evaluations));
+}
+/// One node/label candidate in a final authored-via segment clearance scan.
+pub(crate) fn record_endpoint_clearance_evaluation() {
+    increment(|s| s.endpoint_clearance_evaluations = next(s.endpoint_clearance_evaluations));
 }
 struct Reset;
 impl Drop for Reset {

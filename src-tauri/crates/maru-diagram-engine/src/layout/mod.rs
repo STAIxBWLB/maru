@@ -1437,10 +1437,18 @@ impl SceneBuilder {
                         routed.and_then(|points| {
                             if points.windows(2).any(|pair| {
                                 self.document.nodes.iter().enumerate().any(|(index, node)| {
+                                    #[cfg(any(test, feature = "geometry-corpus"))]
+                                    if !r.waypoints.is_empty() {
+                                        crate::work::record_endpoint_clearance_evaluation();
+                                    }
                                     !endpoint_masks.nodes.contains(&index)
                                         && segment_hits_box(pair[0], pair[1], node.bounds)
                                 }) || self.document.labels.iter().enumerate().any(
                                     |(index, label)| {
+                                        #[cfg(any(test, feature = "geometry-corpus"))]
+                                        if !r.waypoints.is_empty() {
+                                            crate::work::record_endpoint_clearance_evaluation();
+                                        }
                                         !endpoint_masks.labels.contains(&index)
                                             && segment_hits_box(pair[0], pair[1], label.bounds)
                                     },
