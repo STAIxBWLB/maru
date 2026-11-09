@@ -347,7 +347,7 @@ mod tests {
             "schema_version": 2,
             "diagram_type": "workflow",
             "meta": {
-                "title": "마루 workflow 렌더",
+                "title": "주문 처리 Order flow",
                 "subtitle": subtitle,
                 "output": "workflow.html",
             },
@@ -517,6 +517,57 @@ mod tests {
             offsets[1] > offsets[0] && offsets[2] > offsets[1],
             "a subtitle and a wrapped subtitle must widen the band: {offsets:?}"
         );
+    }
+
+    /// Owner direction (2026-11-10, hub memory "Diagram engine priority"):
+    /// Maru usability and readable Korean together with English come before
+    /// Archify parity, so the band and the caption clearance are measured for a
+    /// mixed-script header, not only for one script at a time.
+    #[test]
+    fn a_mixed_korean_and_english_header_is_measured_and_clears_the_captions() {
+        let mixed = header_spec("결제·배송 Payment and shipping");
+        let geometry = assert_header_clear(&mixed);
+        let band = geometry
+            .page
+            .content_offset
+            .expect("a workflow page draws the header band inside itself")
+            .y;
+        let title = label(&geometry, "title");
+        let subtitle = label(&geometry, "subtitle");
+        assert_eq!(title.text, "주문 처리 Order flow");
+        assert_eq!(subtitle.text, "결제·배송 Payment and shipping");
+        // The band follows the measured box, so it holds for any script mix.
+        assert_eq!(band, subtitle.bounds.bottom().unwrap() + 12 * 64);
+        // Both runs are measured: the mixed title is wider than its Latin half.
+        let mut latin = header_spec("결제·배송 Payment and shipping");
+        latin["meta"]["title"] = serde_json::json!("Order flow");
+        let latin = layout(&latin.to_string());
+        assert!(latin.ok, "{:?}", latin.diagnostics);
+        assert!(
+            title.bounds.width
+                > label(latin.geometry.as_ref().unwrap(), "title")
+                    .bounds
+                    .width,
+            "the Hangul run must add measured width to the title"
+        );
+        // Both themes keep both scripts and the cleared caption.
+        #[cfg(feature = "render-svg")]
+        for theme in [
+            crate::render::SvgTheme::Light,
+            crate::render::SvgTheme::Dark,
+        ] {
+            let options = crate::render::SvgOptions::from_spec(&mixed, theme).unwrap();
+            let report = crate::render::render_svg(&geometry, &options);
+            assert!(report.ok, "{theme:?}: {:?}", report.diagnostics);
+            let svg = report.svg.unwrap();
+            for text in [
+                "주문 처리 Order flow",
+                "결제·배송 Payment and shipping",
+                "메인 흐름",
+            ] {
+                assert!(svg.contains(text), "{theme:?} lost {text}");
+            }
+        }
     }
 
     #[test]

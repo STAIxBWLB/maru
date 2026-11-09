@@ -340,7 +340,7 @@ mod tests {
             "schema_version": 1,
             "diagram_type": "dataflow",
             "meta": {
-                "title": "마루 dataflow 렌더",
+                "title": "주문 흐름 Order flow",
                 "subtitle": subtitle,
                 "output": "dataflow.html",
             },
@@ -476,6 +476,62 @@ mod tests {
             offsets[1] > offsets[0] && offsets[2] > offsets[1],
             "a subtitle and a wrapped subtitle must widen the band: {offsets:?}"
         );
+    }
+
+    /// Owner direction (2026-11-10, hub memory "Diagram engine priority"):
+    /// Maru usability and readable Korean together with English come before
+    /// Archify parity, so the band and the stage-caption clearance are measured
+    /// for a mixed-script header, not only for one script at a time.
+    #[test]
+    fn a_mixed_korean_and_english_header_is_measured_and_clears_stage_captions() {
+        let mixed = header_spec("결제·배송 Payment and shipping");
+        let geometry = layout(&mixed, None);
+        let header = [label(&geometry, "title"), label(&geometry, "subtitle")];
+        assert_eq!(header[0].text, "주문 흐름 Order flow");
+        assert_eq!(header[1].text, "결제·배송 Payment and shipping");
+        for id in ["container:stage:0:label", "container:stage:1:label"] {
+            let caption = label(&geometry, id);
+            for header in header {
+                assert!(
+                    !overlap(header.bounds, caption.bounds),
+                    "header {:?} overlaps the stage caption {:?}: {:?} vs {:?}",
+                    header.text,
+                    caption.text,
+                    header.bounds,
+                    caption.bounds,
+                );
+            }
+        }
+        let band = geometry
+            .page
+            .content_offset
+            .expect("a dataflow page draws the header band inside itself")
+            .y;
+        assert_eq!(band, header[1].bounds.bottom().unwrap() + 12 * 64);
+        // Both runs are measured: the mixed title is wider than its Latin half.
+        let mut latin = header_spec("결제·배송 Payment and shipping");
+        latin["meta"]["title"] = serde_json::json!("Order flow");
+        assert!(
+            header[0].bounds.width > label(&layout(&latin, None), "title").bounds.width,
+            "the Hangul run must add measured width to the title"
+        );
+        #[cfg(feature = "render-svg")]
+        for theme in [
+            crate::render::SvgTheme::Light,
+            crate::render::SvgTheme::Dark,
+        ] {
+            let options = crate::render::SvgOptions::from_spec(&mixed, theme).unwrap();
+            let report = crate::render::render_svg(&geometry, &options);
+            assert!(report.ok, "{theme:?}: {:?}", report.diagnostics);
+            let svg = report.svg.unwrap();
+            for text in [
+                "주문 흐름 Order flow",
+                "결제·배송 Payment and shipping",
+                "입력 단계",
+            ] {
+                assert!(svg.contains(text), "{theme:?} lost {text}");
+            }
+        }
     }
 
     #[test]
