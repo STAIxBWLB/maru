@@ -177,7 +177,7 @@ fn png_ipc_rejects_busy_oversized_and_svg_requests() {
     assert_eq!(refused.diagnostics, expected_diagnostics);
     let svg=json!({"specJson":include_str!("../../maru-diagram-engine/testdata/valid-architecture.json"),"format":"svg"}).to_string();
     let svg_refused = ipc_error(invoke(&view, "render_png", &svg).unwrap_err());
-    assert_eq!(svg_refused.code, "png-command-format");
+    assert_eq!(svg_refused.code, "document/svg-png-command-format");
     assert!(svg_refused.message.contains("does not export SVG"));
     assert_eq!(svg_refused.diagnostics.len(), 1);
     assert!(!app
