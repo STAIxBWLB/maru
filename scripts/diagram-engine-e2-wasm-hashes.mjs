@@ -9,10 +9,10 @@ async function run() {
     const directory = resolve(args[1]);
     const bindings = await import(pathToFileURL(join(directory, "maru_diagram_engine.js")).href);
     const module = await WebAssembly.compile(new Uint8Array(readFileSync(join(directory, "maru_diagram_engine_bg.wasm"))));
-    if ("scene_corpus_hashes" in bindings || WebAssembly.Module.exports(module).some((item) => item.name.includes("scene_corpus_hashes"))) {
+    if (["scene_corpus_hashes", "render_scene_svg"].some((name) => name in bindings || WebAssembly.Module.exports(module).some((item) => item.name.includes(name)))) {
       throw new Error("Product geometry WASM exposes corpus tooling; rebuild it with wasm-layout only and without geometry-corpus.");
     }
-    console.log("ENGINE_E2_PRODUCT_ISOLATION corpus tooling absent from product JS and WASM exports");
+    console.log("ENGINE_E2_PRODUCT_ISOLATION corpus and SVG tooling absent from product JS and WASM exports");
     return;
   }
   if (args.length < 2 || args.length > 3) throw new Error("Expected corpus, output and optional test-bindings directory, or --assert-product <product-bindings>; supply the checked-in combined corpus and separate generated test bindings.");
