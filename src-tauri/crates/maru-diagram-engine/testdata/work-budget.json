@@ -21,7 +21,7 @@
   "totalCeiling": 4194375,
   "authoredVia": {
     "fixturePath": "testdata/bench-authored-via.json",
-    "fixtureSha256": "0b0927c2e6975e89037d634c353888725104a9f7649a3db9a086de47749396b1",
+    "fixtureSha256": "f667c96790d8e93aafeeec5ff2efb54a8d72c07dbf0f2ed1e87ae0b6c1b28b34",
     "nodes": 26,
     "minimumLabels": 26,
     "routes": 1,
