@@ -1906,3 +1906,69 @@ out of scope. The captures are reviewed projections, not acceptance of these
 source layouts for the product switch. Source-bound verification and screenshot
 hashes are recorded with the PR; hosted agreement and native results remain
 separate from a remote Linux reproduction.
+
+### PNG rasterization and transport measurement (S2)
+
+The optional `render-png` feature projects the gate-approved S1 SVG through
+resvg 0.49.0 and tiny-skia 0.12.0. It bundles the original Noto Sans CJK KR
+400/700 OTFs pinned by the E2 metric manifest. Loading checks their SHA-256
+values; the font database contains only those two faces. System-font discovery,
+file/URL image resolution and raster-image decoding are disabled. The optional
+feature adds no font binary or rasterizer to the default validation artifact or
+SVG-only WASM. Licences are recorded in `THIRD_PARTY_NOTICES.md`.
+
+PNG requests accept an integer pixel ratio from 1 through 4, at most 16,384px
+per dimension and 64 Mi pixels. Encoded output is limited to 32 MiB. The writer
+checks SVG artifacts before rasterization, then decodes the encoded PNG and
+requires exact dimensions and RGBA pixel equality. The theme background makes
+output opaque, including fractional page edges.
+
+The measurement prototype builds a real isolated Vite ES adapter with the
+WASM and fonts inlined in its separately loaded PNG module. Validation remains
+324,220 B gzip, below 400,000 B. The PNG module is 61,037,707 B raw and
+36,321,493 B gzip; its underlying WASM is 41,274,386 B raw and 30,534,736 B
+gzip. Adapter import took 1,012.9ms and initialization 3,512.1ms, totaling
+4,525.0ms before the first request. These are observed samples, not CI timing
+assertions.
+
+| Scene | WASM first request / warm samples (ms) | Native raster cold / warm range (ms) | Registered mock IPC samples (ms) | Request / response bytes | PNG bytes |
+| --- | --- | --- | --- | --- | --- |
+| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 66.9, 11.9, 11.7, 11.7 | 693 / 51,430 | 11,088 |
+| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2360.9, 2322.9, 2340.3, 2332.6 | 130,843 / 3,998,647 | 480,455 |
+
+The WASM adapter runs the two scenes in one realm, so the dense first request
+uses an already initialized font database. Native raster timings exclude
+layout; the WASM and IPC requests include source parsing, layout, SVG gates,
+rasterization, codecs and JSON serialization. The IPC prototype uses Tauri's
+registered MockRuntime dispatcher and awaited `spawn_blocking`; it proves a
+different worker thread, one request in flight, no host filesystem calls and
+source-bound receipts. It does not measure a real WebView or OS transport.
+The output PNG, decoded-pixel and SVG hashes matched native and WASM for both
+measured scenes. Cross-OS equality is checked separately by hosted manifests.
+Raw measurement reports are under `docs/performance/diagram-engine-e3/`.
+
+The pinned PNG manifest covers five source-family fixtures with CJK text in
+both themes and the 1,000-node scene in both themes. Linux native and WASM
+matched exactly in all 12 scenes, including repeat byte equality and decoded
+RGBA hashes. The hosted gate additionally requires native macOS and Windows
+to match the same bytes and pixels; no tolerance or cross-OS pass is inferred
+from the Linux comparison. All four reports must exist before that gate passes.
+
+Receipt-bearing exports accept a source spec, never caller-supplied geometry.
+Rust validates and lays out that source before rendering, so an unrelated SVG
+cannot certify it. API v1 receipts keep the existing schema and use
+`engine.id = maru-diagram-engine`, with the engine version/revision, source hash,
+SVG hash, requested output hash, conversion options and independent artifact
+gate status. Browser rendering, visual review and saved-file readback remain
+`not-run` unless their own checks actually run. Legacy Archify receipts retain
+their identity when parsed; fixtures cover old and new receipt shapes.
+
+The frontend entrypoints remain behind `VITE_ENGINE_GEOMETRY_TEST=1`. They
+verify the returned receipt and hashes before accepting bytes, and provide a
+separate DOMPurify-backed SVG string for app DOM insertion. They do not alter
+the product export, render store or canvas. The direct sanitizer supports the
+PNG geometry limits without weakening the legacy Archify SVG extraction path.
+
+Secondary captions now use the pinned renderer's `t-dim` token (#475569 dark,
+#9aa3b2 light). Writer and artifact-gate reference colors derive these roles
+independently; node sublabels and semantic accents retain their own tokens.

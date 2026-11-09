@@ -1,0 +1,37 @@
+{
+  "scope": "Linux native release CLI; layout measured separately; render includes SVG gate and PNG encode/decode",
+  "typical": {
+    "coldRenderMs": 51.55726,
+    "height": 640,
+    "layoutMs": 11.440259,
+    "pixelsSha256": "d6ceeab9ebec46c9913f6a3377f10697a0bc7efc40a28c60a1230b41feac98a3",
+    "pngBytes": 11088,
+    "pngSha256": "592fb70d1f2bba426d8ab6ba32bacb92d61941c2a71de410b1fd8cdd83edd011",
+    "svgSha256": "bcf5ce2a7a942d82e89a1d74b8040e7c18c0a36b484d194e9684ebc7b3ca54d6",
+    "warmRenderMs": [
+      11.645332,
+      11.682947,
+      11.51928,
+      11.555152000000001,
+      11.671915
+    ],
+    "width": 920
+  },
+  "1000": {
+    "coldRenderMs": 2176.7075130000003,
+    "height": 8878,
+    "layoutMs": 274.265961,
+    "pixelsSha256": "69ddf18b118831c46cc5e10561d184548a050a8e26d30b6b2a3b7a9edda6f498",
+    "pngBytes": 480455,
+    "pngSha256": "0fc1c4536e61a630de13455bdba200ad3dfa01219adc4f8ad2079211b9270c71",
+    "svgSha256": "b1090e6b88d5cab29bb721b99e26c1408e8121ce5983784344d1aedc59d09e5b",
+    "warmRenderMs": [
+      2143.588024,
+      2140.188484,
+      2130.107386,
+      2145.701219,
+      2130.317372
+    ],
+    "width": 1968
+  }
+}

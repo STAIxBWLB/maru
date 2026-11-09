@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "name": "typical",
+      "pngSha256": "592fb70d1f2bba426d8ab6ba32bacb92d61941c2a71de410b1fd8cdd83edd011",
+      "requestBytes": 693,
+      "responseBytes": 51430,
+      "roundTripMs": [
+        66.863926,
+        11.860933000000001,
+        11.652867,
+        11.656772
+      ]
+    },
+    {
+      "name": "1000",
+      "pngSha256": "0fc1c4536e61a630de13455bdba200ad3dfa01219adc4f8ad2079211b9270c71",
+      "requestBytes": 130843,
+      "responseBytes": 3998647,
+      "roundTripMs": [
+        2360.876189,
+        2322.9319290000003,
+        2340.336439,
+        2332.600225
+      ]
+    }
+  ],
+  "command": "plugin:maru-diagram|render_png",
+  "differentWorkerThread": true,
+  "hostFilesystemAccess": "none; fixture host panics on any access",
+  "pluginCommandCount": 2,
+  "pluginCommandsObserved": [
+    "validate",
+    "render_png"
+  ],
+  "schemaVersion": 1,
+  "scope": "Tauri MockRuntime registered IPC -> awaited spawn_blocking; no real WebView/OS transport claim",
+  "singleInFlight": true
+}
