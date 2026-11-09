@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { classifyPrChanges, evaluateCiJobs, isDocsOnlyPath, geometryForPushComparison } from "./ci-policy.mjs";
+import { ENGINE_E3_ARTIFACT_PATHS, isE0SelectedPath } from "./diagram-engine-e0-paths.mjs";
 
 const policyPath = resolve(process.cwd(), "scripts/ci-policy.mjs");
 const decisionOutputs = {
@@ -47,6 +48,45 @@ function classifyThroughCli(files: unknown[], event: { pull_request: { changed_f
   }
 }
 
+describe("CI sparse-checkout policy", () => {
+  it("keeps the trusted policy free of static, dynamic and side-effect relative imports", () => {
+    const source = readFileSync(policyPath, "utf8");
+    expect(source).not.toMatch(/\bfrom\s*["']\.\.?\//);
+    expect(source).not.toMatch(/\bimport\s*\(\s*["']\.\.?\//);
+    expect(source).not.toMatch(/\bimport\s*["']\.\.?\//);
+  });
+
+  it("runs both decision and aggregate with only the policy file checked out", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "maru-ci-policy-sparse-")));
+    try {
+      const isolatedPolicy = join(root, "ci-policy.mjs");
+      writeFileSync(isolatedPolicy, readFileSync(policyPath, "utf8"));
+      const filesPath = join(root, "files.json");
+      const eventPath = join(root, "event.json");
+      writeFileSync(filesPath, JSON.stringify([[{ filename: "src/lib/diagram/engineSvg.ts" }]]));
+      writeFileSync(eventPath, JSON.stringify({ pull_request: { changed_files: 1, labels: [] } }));
+      const env = {
+        PATH: process.env.PATH ?? "", HOME: root, USERPROFILE: root,
+        TMPDIR: root, TEMP: root, TMP: root,
+        ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+      };
+      const decision = spawnSync(process.execPath, [isolatedPolicy, "classify", filesPath, eventPath], {
+        cwd: root, encoding: "utf8", env,
+      });
+      expect(decision.status, decision.stderr).toBe(0);
+      expect(JSON.parse(decision.stdout)).toMatchObject({ run_geometry: true, run_native: true });
+      const aggregate = spawnSync(process.execPath, [isolatedPolicy, "aggregate"], {
+        cwd: root, encoding: "utf8", env: { ...env, CI_NEEDS_JSON: JSON.stringify(needs()) },
+      });
+      expect(aggregate.status, aggregate.stderr).toBe(0);
+      expect(aggregate.stdout).toContain("CI jobs passed with only decision-authorized skips");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("PR change classification", () => {
   it("allows docs-only changes to skip full verify, Playwright, and native compile", () => {
     expect(classifyPrChanges([
@@ -71,6 +111,42 @@ describe("PR change classification", () => {
       const decision = classifyPrChanges([file]);
       expect(decision.run_geometry, file).toBe(true);
       expect(decision.run_full, file).toBe(true);
+    }
+  });
+
+  it("selects both geometry and native gates and the E0 build for every artifact adapter", () => {
+    const paths = [
+      "src/lib/diagram/engineArtifactForTest.ts",
+      "src/lib/diagram/engineSvg.ts",
+      "src/lib/diagram/verifiedExport.ts",
+      "src/lib/diagram/export.ts",
+      "src/lib/diagram/renders.ts",
+      "src/lib/nativeE2eBridge.ts",
+    ];
+    expect(ENGINE_E3_ARTIFACT_PATHS).toEqual(paths);
+    for (const path of paths) {
+      const decision = classifyPrChanges([path]);
+      expect(decision.run_geometry, path).toBe(true);
+      expect(decision.run_native, path).toBe(true);
+      expect(decision.run_native_compile, path).toBe(false);
+      expect(isE0SelectedPath(path), path).toBe(true);
+    }
+    expect(classifyPrChanges(["scripts/diagram-engine-e0-paths.mjs"]).run_geometry).toBe(true);
+    expect(isE0SelectedPath("scripts/diagram-engine-e0-paths.mjs")).toBe(true);
+    expect(isE0SelectedPath("src/lib/diagram/types.ts")).toBe(false);
+  });
+
+  it("runs both costly gates when an E0/E3 selection or coverage harness changes", () => {
+    for (const path of [
+      "scripts/diagram-engine-e0-paths.mjs",
+      "scripts/diagram-engine-e3-integration-coverage.mjs",
+    ]) {
+      expect(classifyPrChanges([path]), path).toMatchObject({
+        run_geometry: true,
+        run_native: true,
+        run_native_compile: false,
+      });
+      expect(isE0SelectedPath(path), path).toBe(true);
     }
   });
 

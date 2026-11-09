@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { maskRust, parseArgs } from "./check-command-isolation.mjs";
+import { checkPluginEvidence, maskRust, parseArgs } from "./check-command-isolation.mjs";
 
 const CHECKER = fileURLToPath(new URL("./check-command-isolation.mjs", import.meta.url));
 const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
@@ -430,4 +430,56 @@ test("final closure rejects existing-domain-guard exemption from shared admissio
   f.overlay.integrations[0].commandRefs.push({ module: row.module, name: row.name });
   row.mutationKey = { lexicalPaths: ["fixture/checkout"], aliasPaths: ["fixture/canonical-checkout"], postAdmissionPreconditions: ["Pinned parent remains identical"], domainLockOrder: "Shared admission before domain lock", sharedAdmissionEntry: "existing domain guard exemption; no shared path admission" };
   f.save(); f.saveOverlay(); fail(f.run("--all"), /existing-domain-guard exemption/);
+});
+
+// Synthetic unit fixtures exercise scanner drift; real gate evidence is emitted by Rust IPC tests.
+function pluginFixture(t) {
+  const f = fixture(t);
+  const base = "src-tauri/crates/tauri-plugin-maru-diagram";
+  f.write(`${base}/Cargo.toml`, `[package]\nname = "tauri-plugin-maru-diagram"\nversion = "0.1.0"\n`);
+  const source = `
+fn build() { tauri::generate_handler![commands::validate, commands::render_png]; }
+mod commands {
+  #[tauri::command]
+  pub async fn validate() { tauri::async_runtime::spawn_blocking(|| ()).await; }
+  #[tauri::command]
+  pub async fn render_png() { tauri::async_runtime::spawn_blocking(|| ()).await; }
+}`;
+  f.write(`${base}/src/lib.rs`, source);
+  f.write(`${base}/build.rs`, 'const COMMANDS: &[&str] = &["validate", "render_png"];');
+  const evidence = {
+    schemaVersion: 1, scope: "synthetic MockRuntime scanner unit fixture",
+    pluginCommandCount: 2, pluginCommandsObserved: ["validate", "render_png"],
+    differentWorkerThread: true, singleInFlight: true,
+    cases: ["typical", "1000"].map((name) => ({ name, requestBytes: 1, responseBytes: 1, pngSha256: "a".repeat(64), roundTripMs: [1] })),
+  };
+  const saveEvidence = () => f.write("docs/performance/diagram-engine-e3/png-mock-ipc-transport.json", evidence);
+  saveEvidence();
+  return { ...f, base, source, evidence, saveEvidence };
+}
+
+test("plugin commands have separate invoke evidence without changing production count", (t) => {
+  const f = pluginFixture(t);
+  assert.equal(checkPluginEvidence(f.root), 2);
+  pass(f.run("--plan", "06"));
+});
+
+test("plugin scanner refuses stale permission and observed command lists", (t) => {
+  const f = pluginFixture(t);
+  f.write(`${f.base}/build.rs`, 'const COMMANDS: &[&str] = &["validate"];');
+  assert.throws(() => checkPluginEvidence(f.root), /permissions and registered commands differ/);
+  f.write(`${f.base}/build.rs`, 'const COMMANDS: &[&str] = &["validate", "render_png"];');
+  f.evidence.pluginCommandsObserved = ["validate"];
+  f.saveEvidence();
+  assert.throws(() => checkPluginEvidence(f.root), /command evidence drift/);
+});
+
+test("plugin scanner rejects an unawaited worker and failed behavioral evidence", (t) => {
+  const f = pluginFixture(t);
+  f.write(`${f.base}/src/lib.rs`, f.source.replaceAll(".await", ""));
+  assert.throws(() => checkPluginEvidence(f.root), /lost its awaited worker boundary/);
+  f.write(`${f.base}/src/lib.rs`, f.source);
+  f.evidence.singleInFlight = false;
+  f.saveEvidence();
+  assert.throws(() => checkPluginEvidence(f.root), /single-flight behavior failed/);
 });

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ArchifyRenderReceipt } from "../archify";
+import type { EngineIdentity, EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { readDiagramDetailed } from "./persistence";
 import { canonicalSemanticExportInput } from "./export";
 import { archifyRenderCandidate } from "../archify";
@@ -34,6 +35,36 @@ export interface RenderGroup {
   renders: StoredRender[];
 }
 export interface RenderView { path: string; mimeType: string; receipt: RenderReceipt }
+
+export type NormalizedEngineReceipt = Omit<EngineReceipt, "engine"> & { engine: EngineIdentity };
+
+function object(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function canonicalIdentity(value: unknown, legacy: boolean): EngineIdentity | null {
+  if (!object(value)) return null;
+  const rawId = legacy ? value.name : value.id;
+  if (typeof rawId !== "string" || !rawId.trim()
+      || typeof value.version !== "string" || !value.version
+      || typeof value.revision !== "string" || !value.revision) return null;
+  return { id: rawId.trim(), version: value.version, revision: value.revision };
+}
+
+/** Normalize old enginePin.name and new engine.id receipts without changing stored product flows. */
+export function parseRenderReceipt(value: unknown): NormalizedEngineReceipt | null {
+  if (!object(value) || value.schemaVersion !== 1
+      || typeof value.inputSpecSha256 !== "string" || !/^[a-f0-9]{64}$/i.test(value.inputSpecSha256)
+      || !object(value.gates)) return null;
+  const hasEngine = Object.prototype.hasOwnProperty.call(value, "engine");
+  const hasLegacy = Object.prototype.hasOwnProperty.call(value, "enginePin");
+  const current = hasEngine ? canonicalIdentity(value.engine, false) : null;
+  const old = hasLegacy ? canonicalIdentity(value.enginePin, true) : null;
+  if ((hasEngine && !current) || (hasLegacy && !old) || (!current && !old)) return null;
+  if (current && old && (current.id !== old.id || current.version !== old.version || current.revision !== old.revision)) return null;
+  const rest = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "enginePin"));
+  return { ...rest, engine: current ?? old! } as unknown as NormalizedEngineReceipt;
+}
 
 export function rendersAvailable(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);

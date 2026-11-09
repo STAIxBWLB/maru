@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { archifySpecToDataset } from "./archifyCodec";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { createEmptyDoc } from "./types";
-import { rerenderDocument, type RenderGroup, type RenderReceipt, type StoredRender } from "./renders";
+import { parseRenderReceipt, rerenderDocument, type RenderGroup, type RenderReceipt, type StoredRender } from "./renders";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), render: vi.fn() }));
 vi.mock("./persistence", async (original) => ({ ...await original<typeof import("./persistence")>(), readDiagramDetailed: mocks.read }));
 vi.mock("../archify", async (original) => ({ ...await original<typeof import("../archify")>(), archifyRenderCandidate: mocks.render }));
@@ -74,4 +74,31 @@ describe("saved render source binding", () => {
     expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
   });
 
+});
+
+describe("render receipt engine identity parsing", () => {
+  it("normalizes legacy Archify enginePin.name without changing the legacy engine id", () => {
+    const parsed = parseRenderReceipt(receipt);
+    expect(parsed?.engine).toEqual({ id: "archify", version: "3.0.0", revision: "pin" });
+  });
+
+  it("accepts the new canonical Rust engine identity", () => {
+    const parsed = parseRenderReceipt({
+      schemaVersion: 1,
+      inputSpecSha256: "b".repeat(64),
+      engine: { id: "maru-diagram-engine", version: "1.2.0", revision: "abc123" },
+      gates: receipt.gates,
+    });
+    expect(parsed?.engine).toEqual({ id: "maru-diagram-engine", version: "1.2.0", revision: "abc123" });
+  });
+
+  it("rejects conflicting old and new engine identities", () => {
+    expect(parseRenderReceipt({
+      schemaVersion: 1,
+      inputSpecSha256: "b".repeat(64),
+      enginePin: { name: "archify", version: "3.0.0", revision: "pin" },
+      engine: { id: "maru-diagram-engine", version: "1.2.0", revision: "abc123" },
+      gates: receipt.gates,
+    })).toBeNull();
+  });
 });

@@ -139,3 +139,68 @@ export function extractEngineSvg(html: string, theme: StaticTheme = "light"): st
   }
   return text;
 }
+
+/**
+ * Return a DOM-safe copy of the standalone Rust SVG. Keep receipt-bound bytes
+ * intact separately; any application DOM path uses only this sanitized value.
+ */
+export function sanitizeEngineSvgArtifact(svgText: string, theme: StaticTheme = "light"): string {
+  const maxSvgBytes = 16 * 1024 * 1024;
+  const maxDimension = 16_384;
+  const maxPixels = 64 * 1024 * 1024;
+  if (new TextEncoder().encode(svgText).length > maxSvgBytes) {
+    throw new Error("The engine SVG exceeds the export budget; reduce the semantic diagram and retry.");
+  }
+  if (/<!DOCTYPE|<!ENTITY|<\?xml-stylesheet/i.test(svgText)) {
+    throw new Error("The Rust SVG contains an external XML declaration; regenerate the artifact without external resources and retry.");
+  }
+  const parsed = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  if (parsed.querySelector("parsererror") || parsed.documentElement.localName !== "svg"
+      || parsed.documentElement.namespaceURI !== SVG_NS || [...parsed.childNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE).length !== 1) {
+    throw new Error("The Rust engine did not return one valid SVG root; regenerate the semantic diagram and retry.");
+  }
+  const source = parsed.documentElement;
+  const dimensions = (source.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
+  if (dimensions.length !== 4 || dimensions.some((value) => !Number.isFinite(value))
+      || dimensions[2]! <= 0 || dimensions[3]! <= 0
+      || dimensions[2]! > maxDimension || dimensions[3]! > maxDimension
+      || dimensions[2]! * dimensions[3]! > maxPixels) {
+    throw new Error("The Rust SVG has invalid or oversized viewBox dimensions; reduce its logical size and retry.");
+  }
+  const sanitized = DOMPurify.sanitize(source.outerHTML, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    FORBID_TAGS: ["script", "foreignObject", "foreignobject", "animate", "animateMotion", "animateTransform", "set", "a", "style", "iframe", "object", "embed"],
+    FORBID_ATTR: ["autofocus", "tabindex", "xml:base"],
+    ALLOW_DATA_ATTR: true,
+  });
+  const xml = new DOMParser().parseFromString(sanitized, "image/svg+xml");
+  const svg = xml.documentElement;
+  if (xml.querySelector("parsererror") || svg.localName !== "svg" || svg.namespaceURI !== SVG_NS) {
+    throw new Error("SVG sanitization produced invalid XML; regenerate the Rust artifact and retry.");
+  }
+  const featureSettings = "font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0";
+  for (const element of [svg, ...svg.querySelectorAll("*")]) {
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.localName.toLowerCase();
+      if (name.startsWith("on") || name === "src" || name === "base") {
+        element.removeAttributeNode(attribute);
+      } else if (name === "style") {
+        const compact = attribute.value.replace(/\s+/g, "").toLowerCase();
+        const accepted = "font-feature-settings:'liga'0,'clig'0,'calt'0,'locl'0,'kern'0,'mark'0,'mkmk'0";
+        if (compact === accepted) element.setAttribute("style", featureSettings);
+        else element.removeAttributeNode(attribute);
+      } else if (name === "href" && !/^#[A-Za-z0-9_.:-]+$/.test(attribute.value)) {
+        element.removeAttributeNode(attribute);
+      } else if (["fill", "stroke", "filter", "mask", "clip-path", "marker-start", "marker-mid", "marker-end", "cursor"].includes(name)
+          && !cssValue(attribute.value)) {
+        element.removeAttributeNode(attribute);
+      }
+    }
+  }
+  svg.setAttribute("xmlns", SVG_NS);
+  svg.setAttribute("width", String(dimensions[2]));
+  svg.setAttribute("height", String(dimensions[3]));
+  svg.setAttribute("data-theme", theme);
+  svg.setAttribute("role", "img");
+  return new XMLSerializer().serializeToString(svg);
+}

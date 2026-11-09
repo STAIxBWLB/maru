@@ -85,3 +85,21 @@ export async function exportVerifiedSemanticArtifact(input: {
     },
   };
 }
+
+/** Test-only source-to-Rust artifact path; product exports remain on Archify until E4. */
+export async function exportVerifiedEngineArtifactForTest(input: {
+  doc: DiagramDoc;
+  datasetId?: string;
+  format: "svg" | "png";
+  theme?: StaticTheme;
+  pixelRatio?: number;
+  pinSet?: import("../../../src-tauri/crates/maru-diagram-engine/bindings/engine").PinSet;
+  host?: import("./engineArtifactForTest").EngineArtifactHost;
+  isCurrent?: () => boolean;
+}): Promise<import("./engineArtifactForTest").VerifiedEngineArtifactForTest> {
+  if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") {
+    throw new Error("Native engine artifact export is disabled in this build; use the isolated geometry test build.");
+  }
+  const { exportVerifiedEngineArtifactForTest: verify } = await import("./engineArtifactForTest");
+  return verify(input);
+}
