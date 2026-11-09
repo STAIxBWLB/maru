@@ -1214,22 +1214,21 @@ verdicts remain unchanged. The 2px workflow-column boundary and 8px/9px
 lifecycle rail case are not pursued as compatibility work. Archify comparisons
 remain reference evidence, not a merge or E4 admission gate.
 
-The authored-via work probe at source `b97d6d54` measured 26 nodes, 29 labels, 17
-via points, 20 route segments, 53 endpoint-mask candidate evaluations and total
-logical work of 1,332. Endpoint node/label masks are precomputed once per route;
-the fixture ceiling is `2*(N+L)` candidate evaluations.
-The existing 1,000-node fixture and its 3,355,500 logical-work baseline remain
-unchanged. These focused fixture measurements do not replace the integrated
-native/WASM result: the current implementation, scene/SVG and work evidence are recorded in
-the [determinism receipt](performance/diagram-engine-e2-admission-determinism.json).
+The authored-via work probe at source `964ade69` has 26 nodes,
+29 labels, 17 via points and 20 route segments. Endpoint masks are
+precomputed once per route: 53 candidate evaluations, below the `2*(N+L)`
+ceiling. The final collision scan remains in place and separately measures
+1,060 candidate evaluations, bounded by `segments*(N+L)`. Total via work is
+2,392. The existing 1,000-node fixture and its 3,355,500 work baseline remain
+unchanged. The [determinism receipt](performance/diagram-engine-e2-admission-determinism.json)
+records the source trees and current scene/SVG/work results.
 
-That merged-S2 verification compares 623 cases against main `010180e2`: native
-and WASM scene/SVG/work reports match byte for byte. There are 218 accepted
-cases, 405 geometry-present cases (including accepted ones), 187 retained
-refusals and 218 pre-placement refusals. The receipt lists 55 changed report
-hashes and seven changed SVG scenes. The SVG changes are the endpoint-mask and
-route-label corrections from the initial implementation; actual text checks and
-provenance diagnostics also change report hashes without moving SVG geometry.
+This merged-S2 verification compares 623 cases against main `010180e2`: native
+and WASM reports match byte for byte. There are 218 accepted cases, 405 with geometry
+(including accepted ones), 187 retained refusals and 218 pre-placement refusals.
+The receipt lists 55 changed report hashes and 7 changed SVG scenes. The SVG
+changes are the initial endpoint-mask/route-label corrections; actual text-fit
+and provenance diagnostics also change report hashes without moving SVG geometry.
 No workflow-column shift or lifecycle compatibility font adjustment is added.
 
 Route-quality findings distinguish the offending geometry's provenance.

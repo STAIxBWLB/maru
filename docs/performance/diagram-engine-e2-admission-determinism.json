@@ -1,16 +1,20 @@
 {
   "schemaVersion": 1,
   "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against merged E3 S2 main",
-  "sourceCommit": "b97d6d54d3e7b906316aa24c78fd4df79a6a4675",
+  "sourceCommit": "964ade6972aeda7f582c99935b72220a3651276f",
   "sdkTreePath": "src-tauri/crates",
-  "sdkTree": "3a6928cd0bb6d6dcbed714e95f4f88abb7128c04",
+  "sdkTree": "764c2eac0b9548a1636d98bd49972a67aeb59385",
   "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-  "engineCrateTree": "a25d052df95005d99d0ec1d1fadcf5da32b4680e",
+  "engineCrateTree": "ae160cf5cb2098f70bd971128e53c8afd2e8ecaa",
   "baseCommit": "010180e23a7191dddfc72a7c74fa0745c74cb7bf",
   "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
   "corpusCaseCount": 623,
   "acceptedCaseCount": 218,
   "retainedCaseCount": 405,
+  "geometryPresentCaseCount": 405,
+  "retainedRefusalCaseCount": 187,
+  "prePlacementRefusalCaseCount": 218,
+  "countSemantics": "retainedCaseCount is the legacy alias for all geometry-present reports, including accepted cases; retainedRefusalCaseCount and prePlacementRefusalCaseCount count only refused reports.",
   "baselineWork": {
     "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
     "nodes": 1000,
@@ -29,6 +33,7 @@
     "stats": {
       "astarExpandedStates": 22167,
       "constraintEvaluations": 3332334,
+      "endpointClearanceEvaluations": 0,
       "endpointMaskEvaluations": 0,
       "routeEvaluations": 999
     },
@@ -42,15 +47,16 @@
       "stats": {
         "astarExpandedStates": 0,
         "constraintEvaluations": 1278,
+        "endpointClearanceEvaluations": 1060,
         "endpointMaskEvaluations": 53,
         "routeEvaluations": 1
       },
-      "total": 1332,
+      "total": 2392,
       "viaPoints": 17
     }
   },
-  "nativeReportSha256": "9b8a3111700764bec807d16d390ca27f1b1d1ab8ae493c2309ea32b996abcfa2",
-  "wasmReportSha256": "9b8a3111700764bec807d16d390ca27f1b1d1ab8ae493c2309ea32b996abcfa2",
+  "nativeReportSha256": "3748864271ee2869bfb1c34f657b444e73a38a9a0e46c533aaa332bc9011c261",
+  "wasmReportSha256": "3748864271ee2869bfb1c34f657b444e73a38a9a0e46c533aaa332bc9011c261",
   "changes": [
     {
       "id": "public-01",
@@ -774,9 +780,5 @@
       "sceneChanged": true,
       "svgChanged": []
     }
-  ],
-  "geometryPresentCaseCount": 405,
-  "retainedRefusalCaseCount": 187,
-  "prePlacementRefusalCaseCount": 218,
-  "countSemantics": "retainedCaseCount is the legacy alias for all geometry-present reports, including accepted cases. Accepted layouts always have geometry; retainedRefusalCaseCount = geometryPresentCaseCount - acceptedCaseCount; prePlacementRefusalCaseCount = corpusCaseCount - geometryPresentCaseCount."
+  ]
 }
