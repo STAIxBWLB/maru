@@ -248,7 +248,7 @@ fn collect_route_labels(spec: &Value, family: &str) -> BTreeMap<String, RouteLab
             let primary_lines = entry
                 .get("label")
                 .and_then(Value::as_str)
-                .filter(|label| !label.trim().is_empty())
+                .filter(|label| !label.is_empty())
                 .map(|label| label.split('\n').count())
                 .unwrap_or(0);
             (id, RouteLabelSemantic { primary_lines })

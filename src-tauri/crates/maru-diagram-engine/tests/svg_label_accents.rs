@@ -306,3 +306,29 @@ fn workflow_frame_captions_and_architecture_boundary_captions_get_semantic_accen
         assert_color_and_mutation_rejected(&svg, &geometry, &options, "boundary:1", security);
     }
 }
+
+#[test]
+fn source_primary_label_presence_preserves_nonempty_whitespace() {
+    for family in [
+        "architecture",
+        "workflow",
+        "sequence",
+        "dataflow",
+        "lifecycle",
+    ] {
+        let mut spec = fixture(family);
+        let (collection, prefix) = match family {
+            "architecture" => ("connections", "connection"),
+            "workflow" => ("edges", "edge"),
+            "sequence" => ("messages", "message"),
+            "dataflow" => ("flows", "flow"),
+            _ => ("transitions", "transition"),
+        };
+        spec[collection][0]["label"] = json!(" \n ");
+        let options = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
+        assert_eq!(
+            options.semantics.unwrap().route_labels[&format!("{prefix}:0")].primary_lines,
+            2
+        );
+    }
+}
