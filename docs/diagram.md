@@ -1906,3 +1906,26 @@ out of scope. The captures are reviewed projections, not acceptance of these
 source layouts for the product switch. Source-bound verification and screenshot
 hashes are recorded with the PR; hosted agreement and native results remain
 separate from a remote Linux reproduction.
+
+### Offline interactive viewer (T2)
+
+`src/lib/diagram/viewer/offlineViewer.ts` exports the pure
+`createOfflineViewerHtml({ svg, specJson, title? })` function. It embeds one
+engine SVG and its source spec in a standalone HTML file; it does not require
+Maru or connect to an app service. The JSON remains in an inert
+`application/json` script block, with closing-script sequences escaped for
+HTML parsing. Selected node/edge IDs and labels are displayed through
+`textContent`.
+
+The viewer supports pointer dragging, wheel zoom, toolbar zoom/fit, arrow-key
+panning, keyboard zoom/fit, and keyboard selection. Its inline runtime and
+stylesheet are authorized by fixed CSP hashes. The CSP denies network
+connections, remote scripts/styles/fonts, frames, forms, objects, and base URL
+changes. The engine SVG's local font lookup is retained; the viewer does not
+fetch or bundle font files. The JavaScript runtime source has a 12 KiB UTF-8
+budget, checked when building the HTML.
+
+Build a file from a local engine SVG and matching source spec with
+`node scripts/build-diagram-viewer.mjs <engine.svg> <spec.json> <viewer.html>`.
+Open the result directly from disk with `file://`. This viewer is not wired to
+File > Renders, export choices, or a Tauri command; that remains a later stage.
