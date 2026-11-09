@@ -31,7 +31,9 @@ const baseReport = {
   receipt,
 };
 
-beforeEach(() => pluginInvoke.mockReset());
+beforeEach(() => {
+  pluginInvoke.mockReset();
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe("test-only Rust artifact adapter", () => {
