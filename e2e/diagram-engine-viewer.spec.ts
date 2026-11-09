@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test } from "@playwright/test";
 
-const S1_ARCHITECTURE_SVG_SHA256 = "3317383217e8f59e8099685cdf53926a7de5e31f201b7c04b4bfa2e5313f5f";
+const S1_ARCHITECTURE_SVG_SHA256 = "3317383217e8f59e8099685cdf53926a7de5e31f201b7c04b4b53fa2e5313f5f";
 const SVG_FIXTURE = resolve("src/lib/diagram/viewer/__fixtures__/architecture-light.svg");
 const hostileLabel = "</script><script>globalThis.__offlineViewerPwned=1</script><img src=x onerror=alert(1)>";
 

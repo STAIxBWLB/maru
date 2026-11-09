@@ -8,7 +8,7 @@ import {
 } from "./offlineViewer";
 
 // S1's generated architecture-light.svg; the screenshot receipt records this exact SVG hash.
-const REAL_S1_SVG_SHA256 = "3317383217e8f59e8099685cdf53926a7de5e31f201b7c04b4bfa2e5313f5f";
+const REAL_S1_SVG_SHA256 = "3317383217e8f59e8099685cdf53926a7de5e31f201b7c04b4b53fa2e5313f5f";
 const realSvg = readFileSync("src/lib/diagram/viewer/__fixtures__/architecture-light.svg", "utf8");
 
 function sourceSpec(label = "입력"): string {
