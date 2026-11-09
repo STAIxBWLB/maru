@@ -1745,6 +1745,8 @@ pub(crate) fn route_geometry_diagnostics(
                 && (text(r.raw, "fromSide").is_some() || text(r.raw, "toSide").is_some()))
             && raw_path.len() >= 2
         {
+            let has_authored_route_geometry = r.raw.get("via").is_some_and(Value::is_array)
+                || text(r.raw, "route").is_some_and(|route| !route.is_empty() && route != "auto");
             for (id, tip, next, key) in [
                 (
                     r.from,
@@ -1771,7 +1773,12 @@ pub(crate) fn route_geometry_diagnostics(
                 ),
             ] {
                 if let Some(bounds) = boxes.get(id) {
-                    let requested = text(r.raw, key).or_else(|| endpoint_side(tip, *bounds));
+                    let explicit_side =
+                        text(r.raw, key).filter(|side| !side.is_empty() && *side != "auto");
+                    let inferred_side = (!has_authored_route_geometry)
+                        .then(|| endpoint_side(tip, *bounds))
+                        .flatten();
+                    let requested = explicit_side.or(inferred_side);
                     if let Some(side) = requested {
                         if !outward(tip, next, side) {
                             emit(&mut out, f, r.index, "geometry-route-quality",
