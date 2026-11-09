@@ -506,11 +506,13 @@ mod tests {
         labels: Vec<GeometryLabel>,
     ) -> GeometryDocument {
         GeometryDocument {
+            lifecycle_rail: None,
             nodes,
             containers,
             routes: Vec::new(),
             labels,
             legend: GeometryLegend {
+                title_y: None,
                 bounds: GeometryBox {
                     x: 0,
                     y: 0,

@@ -5,6 +5,7 @@ mod primitives;
 pub mod semantics;
 pub mod svg;
 mod theme;
+mod xml_gate;
 use crate::{geometry::GeometryDocument, Diagnostic, API_VERSION};
 pub use gate::check_svg_artifact;
 pub use semantics::{NodeSemantic, SemanticContext};

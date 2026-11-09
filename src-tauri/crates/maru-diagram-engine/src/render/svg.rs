@@ -396,7 +396,22 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         write!(
             s,
             "\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{}\" marker-end=\"url(#{})\"",
-            fixed(r.width.unwrap_or(96).into()),
+            r.width.map(|width| fixed(width.into())).unwrap_or_else(|| {
+                let width = if emphasis {
+                    match (semantics.family.as_str(), semantics.schema_version) {
+                        ("lifecycle", 1) => "2",
+                        ("lifecycle", _) => "1.6",
+                        _ => "1.8",
+                    }
+                } else {
+                    match semantics.family.as_str() {
+                        "architecture" => "1.5",
+                        "lifecycle" => "1.1",
+                        _ => "1.4",
+                    }
+                };
+                width.into()
+            }),
             if emphasis { "arrow-emphasis" } else { "arrow" }
         )
         .unwrap();

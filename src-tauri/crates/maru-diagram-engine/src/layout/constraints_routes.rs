@@ -2247,11 +2247,13 @@ mod tests {
         (
             spec,
             GeometryDocument {
+                lifecycle_rail: None,
                 nodes: vec![],
                 containers: vec![],
                 routes,
                 labels: vec![],
                 legend: crate::geometry::GeometryLegend {
+                    title_y: None,
                     bounds,
                     entries: vec![],
                 },

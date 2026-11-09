@@ -281,7 +281,7 @@ fn legend_width(c: &SemanticContext, key: &str) -> &'static str {
         }
     } else {
         match c.family.as_str() {
-            "sequence" | "dataflow" => "1.4",
+            "workflow" | "sequence" | "dataflow" => "1.4",
             "lifecycle" => "1.1",
             _ => "1.5",
         }
@@ -318,7 +318,16 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
         let end = if g.legend.entries.is_empty() {
             page_end
         } else {
-            page_end.min(i64::from(g.legend.bounds.y) - 22 * 64)
+            page_end.min(
+                i64::from(g.legend.title_y.ok_or_else(|| {
+                    error(
+                        "semantic-legend-space",
+                        "/legend",
+                        "legend geometry has no title baseline",
+                        "recompute layout before rendering",
+                    )
+                })?) - 22 * 64,
+            )
         };
         let timeline_end = g
             .routes
@@ -400,72 +409,36 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
             bands.entry(band).or_default().push(n);
         }
         if c.schema_version == 1 {
-            for (band, nodes) in &bands {
-                let lanes: Vec<_> = g
-                    .containers
-                    .iter()
-                    .filter(|f| {
-                        f.kind == "lane"
-                            && nodes.iter().any(|n| {
-                                c.nodes[&n.id]
-                                    .lane
-                                    .as_ref()
-                                    .is_some_and(|lane| f.id == format!("lane:{lane}"))
-                            })
-                    })
-                    .collect();
-                if let Some(first) = lanes.first() {
-                    let left = lanes.iter().map(|f| i64::from(f.bounds.x)).min().unwrap() + 12 * 64;
-                    let right = lanes
-                        .iter()
-                        .map(|f| i64::from(f.bounds.x) + i64::from(f.bounds.width))
-                        .max()
-                        .unwrap()
-                        - 12 * 64;
-                    let caption = g.labels.iter().find(|l| {
-                        l.id.as_deref() == Some(format!("container:{}:label", first.id).as_str())
-                    });
-                    let baseline = caption
-                        .and_then(|l| l.glyphs.first().map(|p| i64::from(p.position.y)))
-                        .unwrap_or(i64::from(first.bounds.y) + 22 * 64);
-                    let mut p = primitive(
-                        "lifecycle-band",
-                        band,
-                        Shape::Line {
-                            from: at(left, baseline + 12 * 64)?,
-                            to: at(right.max(left), baseline + 12 * 64)?,
-                        },
-                        Paint::Line,
-                        "0.8",
-                        Layer::Underlay,
-                    );
-                    p.dash = Some("3 8");
-                    out.push(p);
-                }
+            for band in bands.keys() {
+                let baseline = match *band {
+                    "phase" => 112,
+                    "event" => 264,
+                    _ => 436,
+                };
+                let mut p = primitive(
+                    "lifecycle-band",
+                    band,
+                    Shape::Line {
+                        from: at(72 * 64, baseline * 64)?,
+                        to: at(i64::from(g.page.bounds.width) - 72 * 64, baseline * 64)?,
+                    },
+                    Paint::Line,
+                    "0.8",
+                    Layer::Underlay,
+                );
+                p.dash = Some("3 8");
+                out.push(p);
             }
-            if let Some(main) = bands.get("phase") {
-                let mut nodes = main.clone();
-                if nodes.iter().any(|n| n.phase_order.is_none()) {
-                    return Err(error("semantic-order", "/nodes", "lifecycle phase geometry has no authored order", "recompute layout with the E3-capable producer before rendering pinned phases"));
-                }
-                nodes.sort_by(|a, b| (a.phase_order, &a.id).cmp(&(b.phase_order, &b.id)));
-                let mut points = Vec::new();
-                for node in nodes {
-                    let center = middle(node.bounds)?;
-                    if let Some(previous) = points.last().copied() {
-                        let previous: GeometryPoint = previous;
-                        if previous.y != center.y {
-                            points.push(GeometryPoint {
-                                x: center.x,
-                                y: previous.y,
-                            });
-                        }
-                    }
-                    points.push(center);
-                }
-                if points.len() == 1 {
-                    points.push(points[0]);
-                }
+            if bands.contains_key("phase") {
+                let rail = g.lifecycle_rail.as_ref().ok_or_else(|| {
+                    error(
+                        "semantic-rail",
+                        "/lifecycleRail",
+                        "main phase geometry has no reference rail",
+                        "recompute layout with the matching producer",
+                    )
+                })?;
+                let points = vec![rail.from, rail.to];
                 let mut p = primitive(
                     "lifecycle-rail",
                     "main",
@@ -479,38 +452,27 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
             }
         }
     }
-    for (entry_index, entry) in g.legend.entries.iter().enumerate() {
-        // Fit symbols in the existing trailing slot. This never moves a label
-        // or creates a second legend layout when row spacing differs by family.
-        let right = i64::from(entry.bounds.x) + i64::from(entry.bounds.width);
-        let limit = g
-            .legend
-            .entries
-            .iter()
-            .skip(entry_index + 1)
-            .filter(|next| next.bounds.y == entry.bounds.y)
-            .map(|next| i64::from(next.bounds.x))
-            .min()
-            .unwrap_or(i64::from(g.legend.bounds.x) + i64::from(g.legend.bounds.width) - 16 * 64);
-        let slot = limit - right;
-        let y = i64::from(entry.bounds.y) + i64::from(entry.bounds.height) / 2;
-        let route = c.family == "sequence" || (c.family == "dataflow" && entry.key != "database");
-        let symbol = if route {
-            (34 * 64).min(slot - 4 * 64)
-        } else if c.family == "lifecycle" && entry.key == "start" {
-            24 * 64
-        } else {
-            14 * 64
-        };
-        if symbol <= 0 || symbol > slot {
+    for entry in &g.legend.entries {
+        let bounds = entry.swatch_bounds.ok_or_else(|| {
+            error(
+                "semantic-legend-space",
+                "/legend",
+                "legend geometry has no leading swatch box",
+                "recompute layout with the matching producer",
+            )
+        })?;
+        if entry.text_bounds.is_none() {
             return Err(error(
                 "semantic-legend-space",
                 "/legend",
-                "legend geometry leaves no room for its semantic symbol",
-                "recompute legend geometry with the matching producer before rendering",
+                "legend geometry has no text box",
+                "recompute layout with the matching producer",
             ));
         }
-        let x = right + (slot - symbol) / 2;
+        let x = i64::from(bounds.x);
+        let y = i64::from(bounds.y) + i64::from(bounds.height) / 2;
+        let symbol = i64::from(bounds.width);
+        let route = c.family == "sequence" || (c.family == "dataflow" && entry.key != "database");
         if route {
             let mut p = primitive(
                 "legend-route-swatch",
@@ -566,8 +528,12 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
                 "legend-node-swatch",
                 &entry.key,
                 Shape::Rect {
-                    bounds: box_at(x, y - 288, 14 * 64, 9 * 64)?,
-                    radius: 2 * 64,
+                    bounds,
+                    radius: if c.family == "architecture" {
+                        160
+                    } else {
+                        2 * 64
+                    },
                 },
                 Paint::Node,
                 "1",

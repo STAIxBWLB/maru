@@ -206,6 +206,31 @@ fn check_defs(doc: &Document<'_>, options: &super::SvgOptions, errors: &mut Vec<
     }
 }
 
+// Independent source policies: never call the writer's dash fallback helpers.
+fn reference_dash(variant: Option<&str>) -> Option<&'static str> {
+    match variant {
+        Some("return") => Some("3 5"),
+        Some("security") => Some("5 5"),
+        Some("dashed") => Some("4 4"),
+        _ => None,
+    }
+}
+fn reference_frame_dash(kind: &str, c: &super::SemanticContext, id: &str) -> Option<&'static str> {
+    match kind {
+        "region" => Some("8 4"),
+        "security-group" | "exception-lane" => Some("4 4"),
+        "group"
+            if c.frame_variants
+                .get(id)
+                .is_some_and(|variant| variant == "security") =>
+        {
+            Some("4 4")
+        }
+        "lane" | "group" | "stage" | "segment" => Some("6 6"),
+        _ => None,
+    }
+}
+
 fn check_rect_paint(
     node: Node<'_, '_>,
     kind: &str,
@@ -861,10 +886,7 @@ pub fn check_svg_artifact(
         Ok(context) => context,
         Err(cause) => return vec![cause],
     };
-    let derived = match super::primitives::derive(geometry, options) {
-        Ok(items) => items,
-        Err(cause) => return vec![cause],
-    };
+    let derived = super::primitive_gate::expected(geometry, options);
     let doc = match Document::parse(svg) {
         Ok(doc) => doc,
         Err(cause) => {
@@ -876,7 +898,7 @@ pub fn check_svg_artifact(
             )]
         }
     };
-    let mut errors = Vec::new();
+    let mut errors = super::xml_gate::inspect(svg, &doc);
     check_safe_tree(&doc, &mut errors);
     check_unique_ids(&doc, &mut errors);
     let root = doc.root_element();
@@ -1113,8 +1135,7 @@ pub fn check_svg_artifact(
             if let Some(frame) =
                 elements(group).find(|n| n.attribute("data-kind") == Some("container-box"))
             {
-                if let Some(dash) =
-                    super::primitives::frame_dash(&container.kind, semantics, &container.id)
+                if let Some(dash) = reference_frame_dash(&container.kind, semantics, &container.id)
                 {
                     require_attr(frame, "stroke-dasharray", dash, &path, &mut errors);
                 } else if frame.attribute("stroke-dasharray").is_some() {
@@ -1222,11 +1243,32 @@ pub fn check_svg_artifact(
                 check_number(
                     polyline,
                     "stroke-width",
-                    route.width.unwrap_or(96) as f64 / 64.0,
+                    route
+                        .width
+                        .map(|width| f64::from(width) / 64.0)
+                        .unwrap_or_else(|| {
+                            if emphasis {
+                                if semantics.family == "lifecycle" {
+                                    if semantics.schema_version == 1 {
+                                        2.0
+                                    } else {
+                                        1.6
+                                    }
+                                } else {
+                                    1.8
+                                }
+                            } else {
+                                match semantics.family.as_str() {
+                                    "architecture" => 1.5,
+                                    "lifecycle" => 1.1,
+                                    _ => 1.4,
+                                }
+                            }
+                        }),
                     &path,
                     &mut errors,
                 );
-                if let Some(dash) = super::primitives::dash(route.variant.as_deref()) {
+                if let Some(dash) = reference_dash(route.variant.as_deref()) {
                     require_attr(polyline, "stroke-dasharray", dash, &path, &mut errors);
                 } else if attr(polyline, "stroke-dasharray").is_some() {
                     errors.push(diagnostic(

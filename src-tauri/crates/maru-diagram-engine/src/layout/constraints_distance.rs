@@ -428,11 +428,13 @@ mod tests {
 
     fn geometry(nodes: Vec<GeometryNode>, routes: Vec<GeometryRoute>) -> GeometryDocument {
         GeometryDocument {
+            lifecycle_rail: None,
             nodes,
             containers: Vec::<GeometryContainer>::new(),
             routes,
             labels: Vec::new(),
             legend: GeometryLegend {
+                title_y: None,
                 bounds: crate::geometry::GeometryBox {
                     x: 0,
                     y: 0,

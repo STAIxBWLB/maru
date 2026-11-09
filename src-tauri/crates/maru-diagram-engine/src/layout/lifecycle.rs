@@ -239,6 +239,26 @@ fn attach_state_semantics(scene: &mut SceneBuilder, id: &str, flags: &StateSeman
 
 pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<(), Diagnostic> {
     let version = spec.schema_version;
+    if version == 1 {
+        if let Some(column) = spec
+            .states
+            .iter()
+            .filter(|state| state.lane == "main")
+            .map(|state| state.col)
+            .max()
+        {
+            let source_x = *PHASE_COLUMNS.get(column as usize).ok_or_else(|| {
+                geometry_error(
+                    "/states",
+                    "main phase column has no reference rail endpoint",
+                )
+            })?;
+            scene.document.lifecycle_rail = Some(crate::geometry::GeometryLine {
+                from: point(154.0, PHASE_TOP + 31.0)?,
+                to: point(source_x + 38.0, PHASE_TOP + 31.0)?,
+            });
+        }
+    }
     let lane_indices: std::collections::HashMap<_, _> = spec
         .lanes
         .iter()

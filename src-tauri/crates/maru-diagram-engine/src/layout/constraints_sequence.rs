@@ -352,13 +352,10 @@ mod tests {
         assert_eq!(emitted_rows[1] - emitted_rows[0], 22 * 64);
         for (index, entry) in scene.legend.entries.iter().enumerate() {
             if index == 0 || scene.legend.entries[index - 1].bounds.y != entry.bounds.y {
-                assert_eq!(entry.bounds.x, 32 * 64);
+                assert_eq!(entry.bounds.x, 40 * 64);
             } else {
                 let previous = &scene.legend.entries[index - 1];
-                assert_eq!(
-                    entry.bounds.x,
-                    previous.bounds.right().unwrap() + (43 + 22) * 64
-                );
+                assert_eq!(entry.bounds.x, previous.bounds.right().unwrap() + 22 * 64);
             }
         }
         for entry in &scene.legend.entries {
@@ -369,6 +366,9 @@ mod tests {
                 .find(|label| label.id.as_deref() == Some(id.as_str()))
                 .unwrap();
             assert_eq!(label.font_size, 8 * 64);
+            assert_eq!(entry.swatch_bounds.unwrap().x, entry.bounds.x);
+            assert_eq!(entry.text_bounds.unwrap(), label.bounds);
+            assert_eq!(entry.text_bounds.unwrap().x, entry.bounds.x + 43 * 64);
         }
         assert!(scene.legend.bounds.bottom().unwrap() <= scene.page.bounds.bottom().unwrap());
         // At400px row width these same measured labels use2 rows in catalog

@@ -226,6 +226,12 @@ pub struct GeometryLabel {
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
 pub struct GeometryLegendEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub swatch_bounds: Option<GeometryBox>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub text_bounds: Option<GeometryBox>,
     pub key: String,
     pub label: String,
     pub bounds: GeometryBox,
@@ -235,6 +241,9 @@ pub struct GeometryLegendEntry {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct GeometryLegend {
+    #[serde(default, rename = "titleY", skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(rename = "titleY", optional = nullable))]
+    pub title_y: Option<Coord>,
     pub bounds: GeometryBox,
     pub entries: Vec<GeometryLegendEntry>,
 }
@@ -249,7 +258,22 @@ pub struct GeometryPage {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryLine {
+    pub from: GeometryPoint,
+    pub to: GeometryPoint,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct GeometryDocument {
+    #[serde(
+        default,
+        rename = "lifecycleRail",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "typegen", ts(rename = "lifecycleRail", optional = nullable))]
+    pub lifecycle_rail: Option<GeometryLine>,
     pub nodes: Vec<GeometryNode>,
     pub containers: Vec<GeometryContainer>,
     pub routes: Vec<GeometryRoute>,
@@ -513,6 +537,7 @@ pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
         GeometryLegendEntry::decl(cfg),
         GeometryLegend::decl(cfg),
         GeometryPage::decl(cfg),
+        GeometryLine::decl(cfg),
         GeometryDocument::decl(cfg),
         GeometryReport::decl(cfg),
         LayoutRequest::decl(cfg),
