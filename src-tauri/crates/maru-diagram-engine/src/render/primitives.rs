@@ -320,6 +320,26 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
         } else {
             page_end.min(i64::from(g.legend.bounds.y) - 22 * 64)
         };
+        let timeline_end = g
+            .routes
+            .iter()
+            .flat_map(|route| route.points.iter().map(|p| i64::from(p.y)))
+            .chain(
+                g.containers
+                    .iter()
+                    .filter(|frame| matches!(frame.kind.as_str(), "activation" | "segment"))
+                    .map(|frame| i64::from(frame.bounds.y) + i64::from(frame.bounds.height)),
+            )
+            .max()
+            .unwrap_or(0);
+        let end = g
+            .containers
+            .iter()
+            .filter(|frame| frame.kind == "card")
+            .map(|frame| i64::from(frame.bounds.y) - 22 * 64)
+            .min()
+            .map_or(end, |limit| end.min(limit))
+            .max(timeline_end);
         for n in &g.nodes {
             let center = middle(n.bounds)?;
             let bottom = i64::from(n.bounds.y) + i64::from(n.bounds.height);
@@ -459,19 +479,45 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
             }
         }
     }
-    for entry in &g.legend.entries {
-        // E2 places text first and reserves a trailing symbol slot. Keep every
-        // existing glyph origin, rather than applying a second legend layout.
-        let x = i64::from(entry.bounds.x) + i64::from(entry.bounds.width) + 8 * 64;
+    for (entry_index, entry) in g.legend.entries.iter().enumerate() {
+        // Fit symbols in the existing trailing slot. This never moves a label
+        // or creates a second legend layout when row spacing differs by family.
+        let right = i64::from(entry.bounds.x) + i64::from(entry.bounds.width);
+        let limit = g
+            .legend
+            .entries
+            .iter()
+            .skip(entry_index + 1)
+            .filter(|next| next.bounds.y == entry.bounds.y)
+            .map(|next| i64::from(next.bounds.x))
+            .min()
+            .unwrap_or(i64::from(g.legend.bounds.x) + i64::from(g.legend.bounds.width) - 16 * 64);
+        let slot = limit - right;
         let y = i64::from(entry.bounds.y) + i64::from(entry.bounds.height) / 2;
         let route = c.family == "sequence" || (c.family == "dataflow" && entry.key != "database");
+        let symbol = if route {
+            (34 * 64).min(slot - 4 * 64)
+        } else if c.family == "lifecycle" && entry.key == "start" {
+            24 * 64
+        } else {
+            14 * 64
+        };
+        if symbol <= 0 || symbol > slot {
+            return Err(error(
+                "semantic-legend-space",
+                "/legend",
+                "legend geometry leaves no room for its semantic symbol",
+                "recompute legend geometry with the matching producer before rendering",
+            ));
+        }
+        let x = right + (slot - symbol) / 2;
         if route {
             let mut p = primitive(
                 "legend-route-swatch",
                 &entry.key,
                 Shape::Line {
                     from: at(x, y)?,
-                    to: at(x + 34 * 64, y)?,
+                    to: at(x + symbol, y)?,
                 },
                 if entry.key == "emphasis" {
                     Paint::AccentLine

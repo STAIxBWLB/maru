@@ -1312,6 +1312,11 @@ impl SceneBuilder {
                 0
             };
             x = add(x, gap)?;
+            // Only the newly derived final entry reserves this extra separator;
+            // all pre-existing legend glyph coordinates remain unchanged.
+            if self.kind == "lifecycle" && kind == "final" {
+                x = add(x, 8 * 64)?;
+            }
             let b = self.label(
                 &format!("legend:{kind}"),
                 "legend",

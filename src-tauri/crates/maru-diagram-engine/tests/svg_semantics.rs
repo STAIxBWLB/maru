@@ -244,7 +244,7 @@ fn lifecycle_final_marker_and_radius_mutations_fail() {
 fn semantic_markers_follow_placed_pins_without_reclassifying_authored_lifecycle_order() {
     let spec = sequence_spec();
     let spec_json = spec.to_string();
-    let request = json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":maru_diagram_engine::spec_hash(&spec_json),"pins":[{"targetId":"client","targetKind":"node","position":{"x":32000,"y":6400}}]}});
+    let request = json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":maru_diagram_engine::validate_json(&spec_json).receipt.input_spec_sha256,"pins":[{"targetId":"client","targetKind":"node","position":{"x":32000,"y":6400}}]}});
     let g = layout_json(&request.to_string()).geometry.unwrap();
     let o = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
     let result = render_svg(&g, &o);
@@ -271,7 +271,7 @@ fn semantic_markers_follow_placed_pins_without_reclassifying_authored_lifecycle_
     let spec: Value =
         serde_json::from_str(include_str!("../testdata/valid-lifecycle.json")).unwrap();
     let source = spec.to_string();
-    let g=layout_json(&json!({"specJson":source,"pinSet":{"sourceSpecSha256":maru_diagram_engine::spec_hash(&source),"pins":[{"targetId":"b","targetKind":"node","position":{"x":0,"y":8064}}]}}).to_string()).geometry.unwrap();
+    let g=layout_json(&json!({"specJson":source,"pinSet":{"sourceSpecSha256":maru_diagram_engine::validate_json(&source).receipt.input_spec_sha256,"pins":[{"targetId":"b","targetKind":"node","position":{"x":0,"y":8064}}]}}).to_string()).geometry.unwrap();
     let b = g.nodes.iter().find(|n| n.id == "b").unwrap();
     let a = g.nodes.iter().find(|n| n.id == "a").unwrap();
     assert_eq!(b.final_state, Some(true));
