@@ -102,6 +102,23 @@ describe("offline engine viewer HTML", () => {
     expect(() => createOfflineViewerHtml({ svg: activeElement, specJson: realSpec })).toThrow(/refused the source SVG/i);
     const activeAttribute = realSvg.replace('role="img"', 'onload="alert(1)" role="img"');
     expect(() => createOfflineViewerHtml({ svg: activeAttribute, specJson: realSpec })).toThrow(/refused the source SVG/i);
+    const viewerIdCollision = realSvg.replace('id="maru-node-61"', 'id="selection"');
+    expect(() => createOfflineViewerHtml({ svg: viewerIdCollision, specJson: realSpec })).toThrow(/refused the source SVG/i);
+  });
+
+  it("preserves legal S1 retained zero-area boxes and empty route polylines", () => {
+    const routePoints = realSvg.match(/<polyline data-kind="route-path" points="([^"]*)"/)?.[1];
+    expect(routePoints).toBeTruthy();
+    const emptyRoute = realSvg.replace(`points="${routePoints}"`, 'points=""');
+    const retained = emptyRoute.replace(
+      /(<rect data-kind="label-bounds"[^>]*\bwidth=")[^"]+("[^>]*\bheight=")[^"]+(")/,
+      (_match, beforeWidth: string, between: string, end: string) => `${beforeWidth}0${between}0${end}`,
+    );
+    expect(retained).not.toBe(realSvg);
+    expect(() => createOfflineViewerHtml({ svg: retained, specJson: realSpec })).not.toThrow();
+
+    const zeroRoot = realSvg.replace('width="920" height="640"', 'width="0" height="640"');
+    expect(() => createOfflineViewerHtml({ svg: zeroRoot, specJson: realSpec })).toThrow(/refused the source SVG/i);
   });
 
   it("allows only the exact inline runtime and stylesheet hashes under a no-network CSP", () => {
@@ -125,7 +142,7 @@ describe("offline engine viewer HTML", () => {
 
   it("rejects malformed source JSON before producing an HTML artifact", () => {
     expect(() => createOfflineViewerHtml({ svg: realSvg, specJson: "</script><script>bad</script>" })).toThrow(
-      "The offline viewer requires a valid JSON source spec.",
+      "The offline viewer source spec is not valid JSON; repair the source JSON and retry.",
     );
   });
 });

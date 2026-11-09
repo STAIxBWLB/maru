@@ -78,13 +78,19 @@ function validPaint(value: string): boolean {
     || /^url\(#(?:arrow|arrow-emphasis|arrow-security|arrow-dashed)\)$/.test(value);
 }
 
-function validateSvgAttribute(name: string, value: string, ids: Set<string>, markerRefs: string[]): void {
+function validateSvgAttribute(element: string, name: string, value: string, ids: Set<string>, markerRefs: string[]): void {
   if (!validXmlText(value) || value.includes("<")) svgProfileError(`attribute ${name} is not safely quoted XML`);
   if (name === "xmlns" && value !== "http://www.w3.org/2000/svg") svgProfileError("SVG namespace is not the engine namespace");
   if (name === "aria-labelledby" && value !== "maru-title maru-desc") svgProfileError("root accessibility references are not engine-owned");
   if (name === "role" && !["img", "group", "listitem"].includes(value)) svgProfileError("role is outside the engine SVG profile");
   if (name === "id") {
-    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(value) || ids.has(value)) svgProfileError("element id is malformed or duplicated");
+    const rootId = element === "svg" && value === "maru-svg";
+    const titleId = element === "title" && value === "maru-title";
+    const descriptionId = element === "desc" && value === "maru-desc";
+    const markerId = element === "marker" && SVG_MARKER_IDS.has(value);
+    const encodedId = /^(?:node|route|container|legend|label|primitive)-[0-9a-f]+$/.test(value.slice("maru-".length))
+      && value.startsWith("maru-");
+    if (!(rootId || titleId || descriptionId || markerId || encodedId) || ids.has(value)) svgProfileError("element id is outside the engine namespace or duplicated");
     ids.add(value);
   }
   if (name === "data-kind" && !/^[a-z][a-z0-9-]*$/.test(value)) svgProfileError("data-kind is malformed");
@@ -113,12 +119,15 @@ function validateSvgAttribute(name: string, value: string, ids: Set<string>, mar
     if (!numericList(value, 1)) svgProfileError(`${name} is not a finite scalar`);
     const numeric = Number(value);
     if (["width", "height", "rx", "r", "stroke-width", "font-size", "markerWidth", "markerHeight"].includes(name) && numeric < 0) svgProfileError(`${name} must be nonnegative`);
-    if (["width", "height", "font-size", "markerWidth", "markerHeight"].includes(name) && numeric === 0) svgProfileError(`${name} must be positive`);
+    if ((element === "svg" && ["width", "height"].includes(name)) || ["font-size", "markerWidth", "markerHeight"].includes(name)) {
+      if (numeric === 0) svgProfileError(`${name} must be positive`);
+    }
   }
   if (name === "viewBox" && (!numericList(value, 4) || Number(value.trim().split(/[ ,]+/)[2]) <= 0 || Number(value.trim().split(/[ ,]+/)[3]) <= 0)) svgProfileError("viewBox must contain four finite values and positive dimensions");
   if (name === "points") {
     const coordinates = value.trim().split(/[ ,]+/);
-    if (!numericList(value) || coordinates.length < 4 || coordinates.length % 2 !== 0) svgProfileError("point list is outside the engine SVG profile");
+    if (value === "" && element !== "polyline") svgProfileError("only retained route polylines may have an empty point list");
+    if (value !== "" && (!numericList(value) || coordinates.length < 4 || coordinates.length % 2 !== 0)) svgProfileError("point list is outside the engine SVG profile");
   }
   if (name === "stroke-dasharray" && !numericList(value)) svgProfileError("dash pattern is outside the engine SVG profile");
   if (name === "font-weight" && !["400", "700"].includes(value)) svgProfileError("font weight is outside the pinned S1 profile");
@@ -200,7 +209,7 @@ function validateEngineSvg(svg: string): void {
       const valueEnd = svg.indexOf('"', index);
       if (valueEnd < 0) svgProfileError(`attribute ${attr} is not closed`);
       const value = svg.slice(index, valueEnd);
-      validateSvgAttribute(attr, value, ids, markerRefs);
+      validateSvgAttribute(name, attr, value, ids, markerRefs);
       values.set(attr, value);
       if (name === "marker" && attr === "id") {
         if (!SVG_MARKER_IDS.has(value)) svgProfileError("marker id is outside the pinned S1 arrow vocabulary");
@@ -413,23 +422,23 @@ function escapeScriptClosingTags(value: string): string {
 
 export function createOfflineViewerHtml(input: Readonly<OfflineViewerInput>): string {
   if (new TextEncoder().encode(input.specJson).byteLength > OFFLINE_VIEWER_SPEC_MAX_BYTES) {
-    throw new TypeError("The offline viewer source spec exceeds its 4 MiB limit.");
+    throw new TypeError("The offline viewer source spec exceeds its 4 MiB limit; reduce the source JSON to 4 MiB or less and retry.");
   }
   let source: unknown;
   try {
     source = JSON.parse(input.specJson);
   } catch (cause) {
-    throw new TypeError("The offline viewer requires a valid JSON source spec.", { cause });
+    throw new TypeError("The offline viewer source spec is not valid JSON; repair the source JSON and retry.", { cause });
   }
   if (!source || typeof source !== "object" || Array.isArray(source)) {
-    throw new TypeError("The offline viewer source spec must be a JSON object.");
+    throw new TypeError("The offline viewer source spec is not a JSON object; provide the top-level engine spec object.");
   }
   validateEngineSvg(input.svg);
   const metadata = (source as { meta?: { title?: unknown } }).meta;
   const title = input.title ?? (typeof metadata?.title === "string" ? metadata.title : "Diagram viewer");
   const runtimeBytes = new TextEncoder().encode(VIEWER_RUNTIME).byteLength;
   if (runtimeBytes > OFFLINE_VIEWER_RUNTIME_BUDGET_BYTES) {
-    throw new Error("The offline viewer runtime exceeds its 12 KiB budget.");
+    throw new Error("The offline viewer runtime exceeds its 12 KiB budget; reduce the inline viewer runtime and update its CSP hash.");
   }
   const safeSpec = escapeScriptClosingTags(input.specJson);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${VIEWER_CSP}"><title>${escapeHtmlText(title)}</title><style>${VIEWER_STYLE}</style></head><body><header class="toolbar" aria-label="Diagram viewer controls"><button type="button" data-viewer-zoom="out" aria-label="Zoom out">Zoom out</button><button type="button" data-viewer-zoom="in" aria-label="Zoom in">Zoom in</button><button type="button" data-viewer-zoom="fit" aria-label="Fit diagram">Fit</button><output id="zoom-level" aria-label="Zoom level">100%</output><output id="selection" role="status" aria-live="polite">Click a node or route to inspect it.</output></header><main id="viewport" tabindex="0" aria-label="Interactive diagram"><div id="stage">${input.svg}</div></main><script type="application/json" id="offline-viewer-source">${safeSpec}</script><script>${VIEWER_RUNTIME}</script></body></html>`;
