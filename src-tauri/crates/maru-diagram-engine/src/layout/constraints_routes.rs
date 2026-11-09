@@ -7,7 +7,7 @@ use crate::geometry::{GeometryDocument, GeometryPoint};
 use crate::layout::fixed::quantize_pixels;
 use crate::Diagnostic;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact nonfatal allowlist. Unknown or forged diagnostic codes remain errors.
 pub(crate) fn is_route_quality_notice(diagnostic: &Diagnostic) -> bool {
@@ -2583,7 +2583,10 @@ mod tests {
         let control = route_geometry_diagnostics(&unshared, &scene);
         let notices = cause(&control, "ambiguous-corridor");
         assert!(!notices.is_empty(), "{control:?}");
-        assert!(notices.iter().all(is_route_quality_notice), "{control:?}");
+        assert!(
+            notices.iter().copied().all(is_route_quality_notice),
+            "{control:?}"
+        );
         assert!(notices
             .iter()
             .all(|diagnostic| !diagnostic.message.contains("shared authored via")));
