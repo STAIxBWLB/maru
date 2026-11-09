@@ -425,10 +425,11 @@ fn relations<'a>(
                     }
                 }
             }
+            let label_id = format!("edge:{id}:label");
             let label = g
                 .labels
                 .iter()
-                .find(|l| l.target_id == id)
+                .find(|l| l.id.as_deref() == Some(label_id.as_str()))
                 .map(|l| rect(l.bounds));
             Relation {
                 index,
@@ -1874,6 +1875,53 @@ mod tests {
             .expect("layout retains a diagnostic scene")
     }
     #[test]
+    fn relationship_labels_do_not_alias_node_labels_with_the_same_source_id() {
+        let mut spec = serde_json::json!({"schema_version":1,"diagram_type":"architecture",
+            "meta":{"title":"Label identity","output":"identity.html","quality_profile":"showcase"},
+            "components":[{"id":"shared","type":"backend","label":"Source","pos":[100,100]},
+                {"id":"target","type":"database","label":"Target","pos":[480,100]}],
+            "connections":[{"id":"shared","from":"shared","to":"target","label":"Edge","labelAt":[400,300]}]});
+        assert!(crate::validate_json(&spec.to_string()).ok);
+        let clear = crate::layout::layout_json(
+            &serde_json::json!({"specJson":spec.to_string()}).to_string(),
+        );
+        assert!(clear.ok, "{:?}", clear.diagnostics);
+        let mut scene = clear.geometry.unwrap();
+        let node_label = scene
+            .labels
+            .iter_mut()
+            .find(|l| l.id.as_deref() == Some("node:shared:label"))
+            .unwrap();
+        node_label.bounds.x = 1000 * 64;
+        node_label.bounds.y = 1000 * 64;
+        let edge_label = scene
+            .labels
+            .iter_mut()
+            .find(|l| l.id.as_deref() == Some("edge:shared:label"))
+            .unwrap();
+        edge_label.bounds.x = 140 * 64;
+        edge_label.bounds.y = 120 * 64;
+        spec["connections"][0]["labelAt"] = serde_json::json!([160, 130]);
+        let diagnostics = route_geometry_diagnostics(&spec, &scene);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.code == "architecture/geometry-label-overlap"
+                    && d.path == "/connections/0"),
+            "{diagnostics:?}"
+        );
+        let overlap = crate::layout::layout_json(
+            &serde_json::json!({"specJson":spec.to_string()}).to_string(),
+        );
+        assert!(!overlap.ok);
+        assert!(overlap.geometry.is_some());
+        assert!(overlap
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "architecture/route-label-space" && d.path == "/connections/0"));
+    }
+
+    #[test]
     fn lifecycle_endpoint_side_checks_skip_explicit_via_arrays() {
         let (mut spec, geometry) = fixture(
             "lifecycle",
@@ -2105,7 +2153,7 @@ mod tests {
     }
     fn label_for(index: usize, x: i32, y: i32, w: i32, h: i32) -> crate::geometry::GeometryLabel {
         crate::geometry::GeometryLabel {
-            id: Some(format!("label{index}")),
+            id: Some(format!("edge:r{index}:label")),
             target_id: format!("r{index}"),
             text: "Label".into(),
             bounds: crate::geometry::GeometryBox {

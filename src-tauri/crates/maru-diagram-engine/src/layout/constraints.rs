@@ -595,20 +595,19 @@ fn check_boundary_title_fit(
         let Some(label_text) = text(boundary, "label") else {
             continue;
         };
-        let target = geometry.labels.iter().find(|label| {
-            label.text == label_text
-                && geometry.containers.iter().any(|container| {
-                    container.id == label.target_id
-                        && container.kind == text(boundary, "kind").unwrap_or_default()
-                })
-        });
-        let Some(title) = target else {
+        let boundary_id = format!("boundary:{index}");
+        let title_id = format!("container:{boundary_id}:label");
+        let Some(title) = geometry
+            .labels
+            .iter()
+            .find(|label| label.id.as_deref() == Some(title_id.as_str()))
+        else {
             continue;
         };
         let Some(frame) = geometry
             .containers
             .iter()
-            .find(|container| container.id == title.target_id)
+            .find(|container| container.id == boundary_id)
         else {
             continue;
         };
@@ -827,6 +826,34 @@ mod tests {
                 },
             },
         }
+    }
+
+    #[test]
+    fn duplicate_boundary_captions_are_checked_by_namespaced_identity() {
+        let spec = serde_json::json!({"schema_version":1,"diagram_type":"architecture",
+            "meta":{"title":"Boundary identity","output":"boundaries.html","quality_profile":"showcase","viewBox":[400,300]},
+            "components":[{"id":"a","type":"backend","label":"A","pos":[100,100]},
+                {"id":"b","type":"database","label":"B","pos":[500,100]}],
+            "boundaries":[{"kind":"region","label":"Repeated","wraps":["a"]},
+                {"kind":"region","label":"Repeated","wraps":["b"]}],"connections":[]});
+        let report = crate::layout::layout_json(
+            &serde_json::json!({"specJson":spec.to_string()}).to_string(),
+        );
+        assert!(report.geometry.is_some());
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "architecture/geometry-boundary-title-fit"
+                    && d.path == "/boundaries/1/label"),
+            "{:?}",
+            report.diagnostics
+        );
+        assert!(!report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "architecture/geometry-boundary-title-fit"
+                && d.path == "/boundaries/0/label"));
     }
 
     #[test]
