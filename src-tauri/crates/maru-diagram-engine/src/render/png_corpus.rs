@@ -107,12 +107,13 @@ fn fixture_sources() -> [(&'static str, &'static str, bool); 6] {
     ]
 }
 
+/// Host-owned artifact callback, with no filesystem dependency in the core.
+pub type ArtifactSink<'a> = dyn FnMut(&str, &[u8]) -> Result<(), String> + 'a;
+
 /// Emit the same manifest as `png_corpus_manifest` while streaming one PNG at
 /// a time to an optional host-owned diagnostic sink. Core generation performs
 /// no filesystem access and retains only the current scene artifact.
-pub fn png_corpus_manifest_with_sink(
-    sink: &mut dyn FnMut(&str, &[u8]) -> Result<(), String>,
-) -> Result<String, Diagnostic> {
+pub fn png_corpus_manifest_with_sink(sink: &mut ArtifactSink<'_>) -> Result<String, Diagnostic> {
     png_corpus_manifest_with_sinks(sink, &mut |_, _| Ok(()))
 }
 
@@ -121,8 +122,8 @@ pub fn png_corpus_manifest_with_sink(
 /// containing source spec, retained geometry, options, and the SVG emitted by
 /// the same high-level PNG artifact API used by native artifact commands.
 pub fn png_corpus_manifest_with_sinks(
-    png_sink: &mut dyn FnMut(&str, &[u8]) -> Result<(), String>,
-    svg_sink: &mut dyn FnMut(&str, &[u8]) -> Result<(), String>,
+    png_sink: &mut ArtifactSink<'_>,
+    svg_sink: &mut ArtifactSink<'_>,
 ) -> Result<String, Diagnostic> {
     let mut scenes = Vec::with_capacity(12);
     for (fixture_name, source, mutate_cjk) in fixture_sources() {
