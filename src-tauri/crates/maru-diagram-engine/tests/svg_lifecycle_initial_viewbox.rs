@@ -101,6 +101,15 @@ fn assert_marker_inside_page(geometry: &GeometryDocument, svg: &str) {
     assert!(center_y - radius >= view_box[1]);
     assert!(center_x + radius <= view_box[0] + view_box[2]);
     assert!(center_y + radius <= view_box[1] + view_box[3]);
+    for divider in document
+        .descendants()
+        .filter(|node| node.attribute("data-kind") == Some("lifecycle-band"))
+    {
+        let x1 = (divider.attribute("x1").unwrap().parse::<f64>().unwrap() * 64.0).round() as i32;
+        let x2 = (divider.attribute("x2").unwrap().parse::<f64>().unwrap() * 64.0).round() as i32;
+        assert!(x1 >= view_box[0]);
+        assert!(x2 <= view_box[0] + view_box[2]);
+    }
 }
 
 #[test]
@@ -135,6 +144,38 @@ fn pinned_v1_and_v2_initial_markers_extend_page_without_moving_nodes() {
             }));
         }
     }
+}
+
+#[test]
+fn containment_gate_checks_non_initial_primitives_and_arrowhead_paint() {
+    let source = spec(1);
+    let geometry = pinned_layout(&source, 0);
+    let options = SvgOptions::from_spec(&source, SvgTheme::Light).unwrap();
+
+    let mut clipped_band = geometry.clone();
+    clipped_band.page.bounds.y = 264 * 64;
+    let band_report = render_svg(&clipped_band, &options);
+    assert!(!band_report.ok);
+    assert!(band_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule.contains("primitive-page-containment")
+            && diagnostic.path.contains("lifecycle-band")
+    }));
+
+    let rail_end_x = geometry
+        .lifecycle_rail
+        .as_ref()
+        .expect("v1 main lane has a rail")
+        .to
+        .x;
+    let mut clipped_arrow = geometry;
+    // The path stroke fits, but the marker tip extends beyond its endpoint.
+    clipped_arrow.page.bounds.width = rail_end_x + 96 - clipped_arrow.page.bounds.x;
+    let arrow_report = render_svg(&clipped_arrow, &options);
+    assert!(!arrow_report.ok);
+    assert!(arrow_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule.contains("primitive-page-containment")
+            && diagnostic.path.contains("lifecycle-rail")
+    }));
 }
 
 #[cfg(feature = "render-png")]

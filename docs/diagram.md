@@ -2022,3 +2022,15 @@ including the stem's 1.4px stroke. SVG pin tests cover both lifecycle versions;
 a low-level PNG test checks visible dot pixels in both themes. These boundary
 pins retain the existing readable-area refusal and its geometry; source-bound
 native exports continue to reject refused layouts. The API remains v1.
+
+Every derived primitive now has an independent paint-containment check against
+the viewBox. The gate includes rect/circle half-strokes, default butt-cap line
+paint, and the rotated marker-end triangle (10x7 marker units, refX 9/refY 3.5,
+scaled by stroke width). It does not substitute an oversized safety margin for
+actual paint bounds. Unsupported/nonfinite paint parameters cause a distinct
+paint-model diagnostic; actual clipping causes a page-containment diagnostic.
+The current derived vocabulary uses two-point polylines and filled polygons;
+a new stroked polygon or multisegment polyline needs an independent model
+before it can pass. Lifecycle v1 band dividers use the page-relative 72px
+insets (`render-lifecycle.mjs:755`); this preserves the pinned-renderer rule
+when the retained world-space viewBox has a nonzero origin. Pins are not moved.
