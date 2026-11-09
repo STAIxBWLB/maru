@@ -1002,7 +1002,7 @@ fn resolve_legacy_asset(
         format!("hwped_bad_request: image file {path:?} is missing or cannot be resolved: {cause}; choose an existing readable file in the workspace")
     })?;
     ensure_within(&canonical_root, &resolved).map_err(|_| {
-        "hwped_bad_request: image path or symlink target escapes workspaceRoot; choose or copy an image into the workspace".to_string()
+        "hwped_bad_request: image path or symlink target is outside workspaceRoot; choose or copy an image into the workspace".to_string()
     })?;
     if !resolved.is_file() {
         return Err("hwped_bad_request: image asset is not a regular file; choose an existing image file in the workspace".to_string());
