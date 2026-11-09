@@ -139,3 +139,16 @@ export function extractEngineSvg(html: string, theme: StaticTheme = "light"): st
   }
   return text;
 }
+
+/** Sanitize a standalone Rust SVG before any application DOM use. */
+export function sanitizeEngineSvgArtifact(svgText: string, theme: StaticTheme = "light"): string {
+  if (new TextEncoder().encode(svgText).length > MAX_HTML_BYTES) {
+    throw new Error("The engine SVG exceeds the export budget; reduce the semantic diagram and retry.");
+  }
+  const parsed = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  if (parsed.querySelector("parsererror") || parsed.documentElement.localName !== "svg"
+      || parsed.documentElement.namespaceURI !== SVG_NS || [...parsed.childNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE).length !== 1) {
+    throw new Error("The Rust engine did not return one valid SVG root; regenerate the semantic diagram and retry.");
+  }
+  return extractEngineSvg(svgText, theme);
+}

@@ -1,7 +1,11 @@
 //! Pure SVG output from retained fixed-point geometry. No layout or host access.
+mod artifact;
 mod gate;
+pub use artifact::{render_artifact_json, ArtifactFormat, ArtifactReport};
 mod label_paint;
 mod legend_gate;
+#[cfg(feature = "render-png")]
+pub mod png;
 mod primitive_gate;
 mod primitives;
 pub mod semantics;

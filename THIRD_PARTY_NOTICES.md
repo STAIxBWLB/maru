@@ -41,6 +41,24 @@ The SVG feature carries two derived glyph-zero SVG paths in
 same pinned Regular/Bold OTFs as the E2 metric tables. These paths remain under
 OFL-1.1; full licence and copyright are retained in `src/metrics/data/LICENSE.OFL`
 and `src/metrics/data/NOTICE.md` within the engine crate. The source SHA-256 and units-per-em are
-recorded alongside each path. Original font binaries are remote test fixtures,
+recorded alongside each path. For SVG-only builds, original font binaries are remote test fixtures,
 not embedded in the validator or SVG. Supported scalars reference the Noto font
 family with shaping disabled; unsupported scalars draw the actual glyph zero.
+
+## PNG rasterizer and bundled fonts
+
+The optional `render-png` feature uses resvg/usvg 0.49.0 (Apache-2.0 OR MIT,
+MIT option selected), and tiny-skia/tiny-skia-path 0.12.0 (BSD-3-Clause).
+It enables text only, without system-font discovery, memory-mapped fonts,
+SVGZ or raster-image decoding. The resvg and tiny-skia copyright/licence texts
+are retained under `src-tauri/crates/maru-diagram-engine/src/render/licenses/`.
+Upstream: https://github.com/linebender/resvg/tree/v0.49.0 and
+https://github.com/linebender/tiny-skia/tree/v0.12.0.
+
+PNG builds bundle the original Noto Sans CJK KR Regular/Bold OTFs under
+`src-tauri/crates/maru-diagram-engine/src/render/fonts/`, from the same
+`f8d157532fbfaeda587e826d4cd5b21a49186f7c` revision as the metric tables.
+They remain under OFL-1.1; the full copyright/licence is retained in
+`src/metrics/data/LICENSE.OFL`. Their SHA-256 values match the metric manifest
+and are checked before loading. No installed system fonts are read. The
+validator and SVG-only builds do not include these original font binaries.

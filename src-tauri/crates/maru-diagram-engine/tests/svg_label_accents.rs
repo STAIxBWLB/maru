@@ -70,6 +70,25 @@ fn glyphs_for_target(svg: &str, target: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+fn fills_for_label_source(svg: &str, source_id: &str) -> Vec<String> {
+    let document = roxmltree::Document::parse(svg).expect("SVG is valid XML");
+    let label = document
+        .descendants()
+        .find(|node| {
+            node.attribute("data-kind") == Some("label")
+                && node.attribute("data-source-id") == Some(source_id)
+        })
+        .expect("source label exists");
+    let text = label
+        .descendants()
+        .find(|node| node.attribute("data-kind") == Some("label-text"))
+        .expect("label has a text node");
+    text.children()
+        .filter(|node| node.is_element() && node.attribute("data-kind") == Some("glyph"))
+        .map(|node| node.attribute("fill").unwrap().to_owned())
+        .collect()
+}
+
 fn first_glyph_fill_replaced(svg: &str, target: &str) -> String {
     let target_marker = format!("data-target-id=\"{target}\"");
     let target_offset = svg.find(&target_marker).expect("target label exists");
@@ -92,6 +111,13 @@ fn muted(theme: SvgTheme) -> &'static str {
     match theme {
         SvgTheme::Light => "#5b6474",
         SvgTheme::Dark => "#94a3b8",
+    }
+}
+
+fn dim(theme: SvgTheme) -> &'static str {
+    match theme {
+        SvgTheme::Light => "#9aa3b2",
+        SvgTheme::Dark => "#475569",
     }
 }
 
@@ -132,7 +158,7 @@ fn assert_color_and_mutation_rejected(
 }
 
 #[test]
-fn route_label_primary_lines_use_variant_accents_and_keep_details_muted() {
+fn route_label_primary_lines_keep_accents_and_dim_secondary_details() {
     for theme in [SvgTheme::Light, SvgTheme::Dark] {
         for variant in ["security", "emphasis", "dashed", "default", "return"] {
             let mut source = fixture("sequence");
@@ -150,7 +176,7 @@ fn route_label_primary_lines_use_variant_accents_and_keep_details_muted() {
             }
             assert_eq!(line_colors.len(), 2, "source note is a separate line");
             assert_eq!(line_colors[0].1, route_accent(theme, variant, "sequence"));
-            assert_eq!(line_colors[1].1, muted(theme));
+            assert_eq!(line_colors[1].1, dim(theme));
             assert!(check_svg_artifact(&svg, &geometry, &options).is_empty());
             if variant == "security" {
                 let changed = first_glyph_fill_replaced(&svg, "m1");
@@ -181,7 +207,7 @@ fn route_line_mapping_counts_source_scalars_across_leading_and_empty_lines() {
             line_colors[0].1,
             route_accent(theme, "security", "sequence")
         );
-        assert_eq!(line_colors[1].1, muted(theme));
+        assert_eq!(line_colors[1].1, dim(theme));
         assert!(check_svg_artifact(&svg, &geometry, &options).is_empty());
 
         let mut note_only_semantics = options.clone();
@@ -200,7 +226,7 @@ fn route_line_mapping_counts_source_scalars_across_leading_and_empty_lines() {
         let note_only = rendered.svg.expect("successful render has SVG");
         assert!(glyphs_for_target(&note_only, "m-lines")
             .iter()
-            .all(|(_, fill)| fill == muted(theme)));
+            .all(|(_, fill)| fill == dim(theme)));
         assert!(check_svg_artifact(&note_only, &geometry, &note_only_semantics).is_empty());
     }
 }
@@ -252,14 +278,73 @@ fn route_labels_use_other_family_default_arrow_and_capture_primary_line_counts()
             route_accent(theme, "default", "architecture"),
         );
 
+        let mut flow = fixture("dataflow");
+        flow["flows"][0]["label"] = json!("Primary");
+        flow["flows"][0]["classification"] = json!("Classification");
+        let (svg, geometry, options) = render(&flow, theme);
+        let glyphs = glyphs_for_target(&svg, "flow:0");
+        let mut line_colors = Vec::<(String, String)>::new();
+        for (baseline, fill) in &glyphs {
+            if !line_colors.iter().any(|(line, _)| line == baseline) {
+                line_colors.push((baseline.clone(), fill.clone()));
+            }
+        }
+        assert_eq!(line_colors.len(), 2, "classification follows primary line");
+        assert_eq!(line_colors[0].1, route_accent(theme, "default", "dataflow"));
+        assert_eq!(line_colors[1].1, dim(theme));
+        assert!(check_svg_artifact(&svg, &geometry, &options).is_empty());
+
         let mut note_only = fixture("lifecycle");
         note_only["transitions"][0]["label"] = Value::Null;
         note_only["transitions"][0]["note"] = json!("Details only");
-        let options = SvgOptions::from_spec(&note_only, theme).unwrap();
+        let (svg, geometry, options) = render(&note_only, theme);
         assert_eq!(
-            options.semantics.unwrap().route_labels["transition:0"].primary_lines,
+            options.semantics.as_ref().unwrap().route_labels["transition:0"].primary_lines,
             0
         );
+        assert_color_and_mutation_rejected(&svg, &geometry, &options, "transition:0", dim(theme));
+    }
+}
+
+#[test]
+fn secondary_frame_captions_dim_and_node_details_remain_muted_or_typed() {
+    for theme in [SvgTheme::Light, SvgTheme::Dark] {
+        let mut sequence = fixture("sequence");
+        sequence["segments"] = json!([{"from":160,"to":340,"label":"Segment"}]);
+        let (svg, geometry, options) = render(&sequence, theme);
+        assert_color_and_mutation_rejected(&svg, &geometry, &options, "segment:0", dim(theme));
+
+        let dataflow = fixture("dataflow");
+        let (svg, geometry, options) = render(&dataflow, theme);
+        assert_color_and_mutation_rejected(&svg, &geometry, &options, "stage:0", dim(theme));
+
+        let lifecycle = fixture("lifecycle");
+        let (svg, geometry, options) = render(&lifecycle, theme);
+        assert_color_and_mutation_rejected(&svg, &geometry, &options, "lane:main", dim(theme));
+
+        let mut workflow = fixture("workflow");
+        workflow["lanes"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("variant");
+        let (svg, geometry, options) = render(&workflow, theme);
+        assert_color_and_mutation_rejected(&svg, &geometry, &options, "lane:main", dim(theme));
+
+        let mut architecture = fixture("architecture");
+        architecture["components"][0]["sublabel"] = json!("Browser / Mobile");
+        architecture["components"][0]["tag"] = json!("API");
+        let (svg, geometry, options) = render(&architecture, theme);
+        assert!(check_svg_artifact(&svg, &geometry, &options).is_empty());
+        assert!(fills_for_label_source(&svg, "id:node:a:sublabel")
+            .iter()
+            .all(|fill| fill == muted(theme)));
+        let tag_color = match theme {
+            SvgTheme::Light => "#0891b2",
+            SvgTheme::Dark => "#22d3ee",
+        };
+        assert!(fills_for_label_source(&svg, "id:node:a:tag")
+            .iter()
+            .all(|fill| fill == tag_color));
     }
 }
 

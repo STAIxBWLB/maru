@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { extractEngineSvg } from "./engineSvg";
+import { extractEngineSvg, sanitizeEngineSvgArtifact } from "./engineSvg";
 
 const html = `<html data-preset="editorial-plate"><head><style>
 :root{--text:#111;font-family:system-ui} [data-theme="dark"]{--text:#eee}
@@ -36,5 +36,13 @@ describe("engine SVG static conversion", () => {
 
   it("refuses private paths in visible semantic labels", () => {
     expect(() => extractEngineSvg('<svg viewBox="0 0 10 10"><text>/Users/fixture/secret</text></svg>')).toThrow(/remove private paths/i);
+  });
+
+  it("sanitizes standalone Rust SVG with the existing DOMPurify profile before DOM use", () => {
+    const safe = sanitizeEngineSvgArtifact('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" onload="alert(1)"><script>alert(1)</script><text>한글</text><path d="M0 0L2 2" onclick="alert(2)"/></svg>', "dark");
+    expect(safe).toContain("한글");
+    expect(safe).toContain('data-theme="dark"');
+    expect(safe).not.toMatch(/script|onload|onclick/);
+    expect(() => sanitizeEngineSvgArtifact("<html><svg/></html>")).toThrow(/valid SVG root/i);
   });
 });
