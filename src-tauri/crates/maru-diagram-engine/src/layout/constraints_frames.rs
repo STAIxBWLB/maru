@@ -120,23 +120,17 @@ fn architecture_frames(spec: &Value, geometry: &GeometryDocument) -> Vec<Diagnos
         let Some(bounds) = frame(geometry, id).copied() else {
             continue;
         };
-        if let Some((width, height)) = authored_view_box {
-            let left = f64::from(bounds.x) / UNITS;
-            let top = f64::from(bounds.y) / UNITS;
-            let frame_right = right(bounds) as f64 / UNITS;
-            let frame_bottom = bottom(bounds) as f64 / UNITS;
-            if left < 0.0 || top < 0.0 || frame_right > width || frame_bottom > height {
-                diagnostics.push(diag(
-                    "architecture",
-                    "geometry-container-containment",
-                    format!("/boundaries/{index}"),
-                    format!(
-                        "boundary {:?} extends outside the authored viewBox",
-                        string(boundary, "label").unwrap_or("")
-                    ),
-                    "move the wrapped components inward or enlarge meta.viewBox",
-                ));
-            }
+        let authored_overflow = authored_view_box.is_some_and(|(width, height)| {
+            right(bounds) as f64 / UNITS > width || bottom(bounds) as f64 / UNITS > height
+        });
+        // Automatic growth repairs only the right and bottom extents; the
+        // canvas origin remains a boundary even without an authored viewBox.
+        if bounds.x < 0 || bounds.y < 0 || authored_overflow {
+            diagnostics.push(diag(
+                "architecture", "geometry-container-containment", format!("/boundaries/{index}"),
+                format!("boundary {:?} extends before the canvas origin or outside the authored viewBox",string(boundary,"label").unwrap_or("")),
+                "move wrapped components inward, reduce padding or shorten the title; enlarge meta.viewBox only for right or bottom overflow",
+            ));
         }
         let members: BTreeSet<String> = records(boundary, "wraps")
             .iter()
@@ -534,6 +528,23 @@ mod tests {
             },
             position_source: GeometryPositionSource::Automatic,
         }
+    }
+
+    #[test]
+    fn automatic_page_growth_cannot_hide_a_negative_boundary_origin() {
+        let source = serde_json::json!({"schema_version":1,"diagram_type":"architecture","meta":{"title":"Frame","output":"frame.html"},
+            "components":[{"id":"a","type":"backend","label":"A","pos":[10,100]}],
+            "boundaries":[{"kind":"region","label":"Region","wraps":["a"],"pad":30}],"connections":[]});
+        let report = crate::layout::layout_json(
+            &serde_json::json!({"specJson":source.to_string()}).to_string(),
+        );
+        assert!(!report.ok);
+        assert!(report.geometry.is_some());
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "architecture/geometry-container-containment"
+                && d.path == "/boundaries/0"));
     }
 
     #[test]

@@ -111,6 +111,7 @@ pub(crate) struct SceneBuilder {
     route_budget: Option<usize>,
     request: LayoutRequest,
     kind: String,
+    quality_profile: Option<String>,
     connections: Vec<RouteRequest>,
     routing_nodes: BTreeMap<String, GeometryBox>,
     routing_bounds: Option<Result<GeometryBox, Diagnostic>>,
@@ -163,6 +164,7 @@ impl SceneBuilder {
             route_budget: None,
             request,
             kind: kind.into(),
+            quality_profile: None,
             connections: vec![],
             routing_nodes: BTreeMap::new(),
             routing_bounds: None,
@@ -956,6 +958,31 @@ impl SceneBuilder {
             "move overlapping nodes or labels apart, or provide an unobstructed authored endpoint side")))
     }
 
+    fn label_admission_blocked(&self, bounds: GeometryBox) -> bool {
+        // Route search uses inflated obstacles, but label admission uses the
+        // format's actual 2px overlap tolerance and profile-gated title masks.
+        let overlaps = |other: GeometryBox| {
+            let right = i64::from(bounds.x) + i64::from(bounds.width);
+            let bottom = i64::from(bounds.y) + i64::from(bounds.height);
+            let other_right = i64::from(other.x) + i64::from(other.width);
+            let other_bottom = i64::from(other.y) + i64::from(other.height);
+            i64::from(bounds.x) < other_right - 2 * 64
+                && i64::from(other.x) < right - 2 * 64
+                && i64::from(bounds.y) < other_bottom - 2 * 64
+                && i64::from(other.y) < bottom - 2 * 64
+        };
+        self.document.nodes.iter().any(|node| overlaps(node.bounds))
+            || self.document.labels.iter().any(|label| {
+                let unchecked_title = self.kind == "architecture"
+                    && self.quality_profile.is_none()
+                    && label.target_id.starts_with("boundary:")
+                    || self.kind == "lifecycle"
+                        && self.quality_profile.as_deref() != Some("showcase")
+                        && label.target_id.starts_with("lane:");
+                !unchecked_title && overlaps(label.bounds)
+            })
+    }
+
     fn route_label(&mut self, r: &RouteRequest) -> Result<Vec<GeometryPoint>, Diagnostic> {
         let (points, obstacles) = self.route_points(r)?;
         if let Some(text) = r.label.as_deref().filter(|s| !s.is_empty()) {
@@ -1041,10 +1068,10 @@ impl SceneBuilder {
                     .map_err(arithmetic)?
             };
             let b = rect(position.x, position.y, w, h)?;
-            if obstacles.iter().any(|o| intersects(b, *o)) {
+            if self.label_admission_blocked(b) {
                 return Err(failure(
                     "route-label-space",
-                    "authored route label overlaps a node or label",
+                    "authored route label overlaps a node or checked label by more than 2px",
                     "move labelAt or remove the label offset override",
                 ));
             }
@@ -1081,6 +1108,7 @@ impl SceneBuilder {
             );
         self.diagnostics
             .extend(resolve_pins(&self.request, members).diagnostics);
+        self.quality_profile = meta.quality_profile.clone();
         self.connections.sort_by(|a, b| a.id.cmp(&b.id));
         self.prepare_routing();
         let mut first_routes = BTreeMap::new();
@@ -1212,7 +1240,18 @@ impl SceneBuilder {
         if meta.legend.as_ref().and_then(|l| l.mode.as_deref()) == Some("hidden") {
             kinds.clear();
         }
-        for kind in kinds {
+        // Sequence wrapping follows the renderer's authored catalog order,
+        // not alphabetical set order. Keep selection/visibility separate.
+        let mut ordered_kinds = Vec::new();
+        if self.kind == "sequence" {
+            for kind in ["emphasis", "return", "security", "dashed", "default"] {
+                if kinds.remove(kind) {
+                    ordered_kinds.push(kind.to_owned());
+                }
+            }
+        }
+        ordered_kinds.extend(kinds);
+        for kind in ordered_kinds {
             let entry = meta
                 .legend
                 .as_ref()

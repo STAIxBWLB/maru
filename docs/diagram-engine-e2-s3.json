@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": "E2 S3 geometry rules, deterministic test canvas and measurements",
-  "sdkTree": "a4a1bec4027b05226f8ee1af72c86b0c25567c1a",
+  "sdkTree": "cb1934d5baf3722f48df0055712c4c1dc89468af",
   "execution": {
     "scope": "remote Linux x64 reproduction, not hosted acceptance",
     "rust": "1.98.0",
@@ -10,7 +10,7 @@
     "hostedCi": "pending"
   },
   "checks": {
-    "coreUnit": 167,
+    "coreUnit": 176,
     "documentDifferential": 2,
     "geometryDifferential": 1,
     "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
@@ -18,8 +18,8 @@
     "sdkBoundary": "passed",
     "productIsolation": "normal JS and actual WASM exports omit scene_corpus_hashes; normal library omits canvas bridge",
     "browser": {
-      "startTime": "2026-11-09T01:42:20.249Z",
-      "duration": 16858.509000000002,
+      "startTime": "2026-11-09T02:40:34.305Z",
+      "duration": 16168.679999999998,
       "expected": 4,
       "skipped": 0,
       "unexpected": 0,
@@ -28,35 +28,36 @@
     "local": {
       "typecheck": "tsc -b passed",
       "applicableEslint": "passed",
-      "focusedVitest": 33
+      "focusedVitest": 35
     },
     "geometryBoundaries": 1,
     "metricModelControls": 3,
-    "browserRetryPolicy": "0, including CI; performance misses are not retried"
+    "browserRetryPolicy": "0, including CI; performance misses are not retried",
+    "geometryGates": 1
   },
   "sceneAgreement": {
-    "scope": "309 strict parity cases + 228 layered boundary cases + 3 seeded dense scenes; every unchanged scene repeated",
+    "scope": "309 strict parity cases + 289 layered boundary cases + 3 seeded dense scenes; every unchanged scene repeated",
     "nativeWasmBytesEqual": true,
-    "reportSha256": "e7316acce175b470a9a028662d1f596c97e6b79879ae1e0e97c567fd2a16196b",
-    "reportBytes": 149556,
-    "corpusSha256": "8805aa8d601975ab131e22411318f3e834aea5fd0263908d852381431da13376",
-    "cases": 540,
-    "successfulReports": 145,
-    "nonSuccessReports": 395,
+    "reportSha256": "26107b64cb7bf84109c9e74e49a5c442722829b3e26c30088b0ded83bd7b4ac4",
+    "reportBytes": 163053,
+    "corpusSha256": "df6ca966bb65bc27c9270bd76b23210dad401437d1c6e4b750e43cd17e7eb4c1",
+    "cases": 601,
+    "successfulReports": 208,
+    "nonSuccessReports": 393,
     "hostedLinuxMacosWindowsAndWasm": "pending"
   },
   "measurements": {
     "productionPayload": {
       "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
-      "buildMs": 20148.456948,
-      "testHarnessBuildMs": 354.6483020000014,
+      "buildMs": 20038.836162,
+      "testHarnessBuildMs": 344.93610999999873,
       "platform": "linux",
       "arch": "x64",
       "sizes": [
         {
           "name": "engine-e0.js",
           "bytes": 1307013,
-          "gzipBytes": 324219,
+          "gzipBytes": 324221,
           "path": "validation"
         },
         {
@@ -66,30 +67,30 @@
           "path": "lazy-transport"
         },
         {
-          "name": "engineGeometry-DkBvlxkD.js",
-          "bytes": 5043419,
-          "gzipBytes": 1625027,
+          "name": "engineGeometry-BEiDuLU6.js",
+          "bytes": 5065891,
+          "gzipBytes": 1640339,
           "path": "lazy-geometry-metrics"
         }
       ],
-      "gzipBytes": 324219,
-      "validationGzipBytes": 324219,
-      "lazyGeometryGzipBytes": 1625027,
+      "gzipBytes": 324221,
+      "validationGzipBytes": 324221,
+      "lazyGeometryGzipBytes": 1640339,
       "lazyTransportGzipBytes": 122,
-      "totalGzipBytes": 1949368
+      "totalGzipBytes": 1964682
     },
     "geometryCold": {
       "scope": "fresh Chromium process; exact emitted production entry already imported; cache-disabled geometry artifact HTTP fetch/parse plus bindings import and WASM compile/instantiate; no Vite transform or first layout in interval",
       "network": "same-origin loopback Node HTTP server; exact emitted artifact bytes, identity transfer without gzip or rewriting, no artificial throttling",
-      "coldLoadMs": 264.7999999523163,
+      "coldLoadMs": 252.69999998807907,
       "resources": [
         {
-          "path": "/.engine-e0/browser/engineGeometry-DkBvlxkD.js",
-          "durationMs": 10.800000011920929,
-          "transferBytes": 5043719,
-          "encodedBodyBytes": 5043419,
-          "decodedBodyBytes": 5043419,
-          "emittedFileBytes": 5043419
+          "path": "/.engine-e0/browser/engineGeometry-BEiDuLU6.js",
+          "durationMs": 10.599999964237213,
+          "transferBytes": 5066191,
+          "encodedBodyBytes": 5065891,
+          "decodedBodyBytes": 5065891,
+          "emittedFileBytes": 5065891
         }
       ]
     },
@@ -97,32 +98,32 @@
       "scope": "production wasm-layout; pre-serialized request; facade request serialization, layout+routing and scene JSON parse; validation included; 20 warm samples after one first layout",
       "nodes": 1000,
       "edges": 999,
-      "firstLayoutMs": 406.80000001192093,
+      "firstLayoutMs": 393.19999998807907,
       "durationsMs": [
-        332.2000000476837,
-        324.39999997615814,
-        323.39999997615814,
-        324.10000002384186,
-        325.5,
-        324.5,
-        321.4000000357628,
-        321.60000002384186,
-        323.89999997615814,
-        324.10000002384186,
-        326.5999999642372,
-        324,
-        323.60000002384186,
-        321.7999999523163,
-        324.60000002384186,
-        321.89999997615814,
-        321,
-        320.39999997615814,
-        321.80000001192093,
-        323.39999997615814
+        305.19999998807907,
+        301.80000001192093,
+        302.5,
+        299.89999997615814,
+        308,
+        301.9000000357628,
+        302.10000002384186,
+        318.10000002384186,
+        300.69999998807907,
+        306.89999997615814,
+        304.5999999642372,
+        299,
+        300.60000002384186,
+        301,
+        302.89999997615814,
+        302.69999998807907,
+        306.5,
+        297.89999997615814,
+        302.60000002384186,
+        312.69999998807907
       ],
-      "medianMs": 323.75,
-      "p95Ms": 326.5999999642372,
-      "maxMs": 332.2000000476837,
+      "medianMs": 302.55000001192093,
+      "p95Ms": 312.69999998807907,
+      "maxMs": 318.10000002384186,
       "targetMs": 200,
       "targetMet": false,
       "targetScope": "E4 requirement before the canvas switch",
@@ -133,59 +134,59 @@
           "nodes": 50,
           "edges": 49,
           "durationsMs": [
-            4.199999988079071,
+            4,
+            3.899999976158142,
+            4,
             4.100000023841858,
-            8.299999952316284,
+            4,
+            4.100000023841858,
+            3.899999976158142,
+            4,
+            4,
+            4,
+            4,
+            3.899999976158142,
+            4.100000023841858,
+            4.299999952316284,
+            4.300000011920929,
+            4.400000035762787,
+            4.299999952316284,
             4.200000047683716,
-            4.100000023841858,
-            4.199999988079071,
-            4.100000023841858,
-            4.199999988079071,
-            4.100000023841858,
-            4.100000023841858,
             4.099999964237213,
-            4,
-            4.199999988079071,
-            4.100000023841858,
-            4.100000023841858,
-            4.099999964237213,
-            4,
-            4.199999988079071,
-            4,
-            4.200000047683716
+            4.300000011920929
           ],
-          "medianMs": 4.100000023841858,
-          "p95Ms": 4.200000047683716,
-          "maxMs": 8.299999952316284
+          "medianMs": 4.049999982118607,
+          "p95Ms": 4.300000011920929,
+          "maxMs": 4.400000035762787
         },
         {
           "nodes": 200,
           "edges": 199,
           "durationsMs": [
-            23,
-            23.099999964237213,
-            23,
-            22.899999976158142,
-            22.900000035762787,
-            23,
-            23,
-            23.099999964237213,
-            23,
-            22.900000035762787,
-            23.099999964237213,
-            23,
-            23,
-            22.900000035762787,
-            23.30000001192093,
-            23.099999964237213,
-            23,
-            23.100000023841858,
-            23.099999964237213,
-            22.900000035762787
+            22.30000001192093,
+            21.900000035762787,
+            22,
+            21.799999952316284,
+            21.900000035762787,
+            21.899999976158142,
+            22.5,
+            22.100000023841858,
+            23.399999976158142,
+            22,
+            25.400000035762787,
+            22.19999998807907,
+            22,
+            22,
+            21.900000035762787,
+            22.30000001192093,
+            21.799999952316284,
+            21.900000035762787,
+            21.899999976158142,
+            21.899999976158142
           ],
-          "medianMs": 23,
-          "p95Ms": 23.100000023841858,
-          "maxMs": 23.30000001192093
+          "medianMs": 22,
+          "p95Ms": 23.399999976158142,
+          "maxMs": 25.400000035762787
         }
       ]
     },
@@ -194,79 +195,79 @@
         "nodes": 50,
         "bytes": 5217,
         "durationsMs": [
-          1.4000000357627869,
-          1.0999999642372131,
-          1.100000023841858,
+          1.300000011920929,
+          1.199999988079071,
           1,
-          1,
-          1,
+          1.2000000476837158,
+          0.8999999761581421,
+          0.8999999761581421,
+          0.7000000476837158,
           0.699999988079071,
+          0.5999999642372131,
+          0.6000000238418579,
+          0.6000000238418579,
+          0.5999999642372131,
           0.699999988079071,
-          0.6000000238418579,
-          0.5999999642372131,
-          0.6000000238418579,
-          0.6000000238418579,
-          0.5999999642372131,
           0.5,
           0.6000000238418579,
-          0.5,
-          0.5999999642372131,
-          0.5,
-          0.6000000238418579,
-          0.3999999761581421,
-          0.5,
           0.6000000238418579,
           0.3999999761581421,
           0.6000000238418579,
+          0.5999999642372131,
+          0.40000003576278687,
+          0.5999999642372131,
+          0.5,
+          0.40000003576278687,
+          0.5,
+          0.5,
           0.5,
           0.3999999761581421,
-          0.5,
-          0.5,
-          0.5,
-          0.40000003576278687
+          0.6000000238418579,
+          0.3999999761581421,
+          0.6000000238418579
         ],
-        "medianMs": 0.5999999940395355,
-        "p95Ms": 1.100000023841858,
-        "maxMs": 1.4000000357627869
+        "medianMs": 0.6000000238418579,
+        "p95Ms": 1.2000000476837158,
+        "maxMs": 1.300000011920929
       },
       {
         "nodes": 1000,
         "bytes": 106760,
         "durationsMs": [
-          11.199999988079071,
-          8.300000011920929,
-          8,
-          8.100000023841858,
-          7.799999952316284,
+          11.300000011920929,
+          8.5,
+          8.199999988079071,
+          7.899999976158142,
+          7.699999988079071,
+          7.5,
           7.700000047683716,
           7.699999988079071,
-          7.699999988079071,
-          7.699999988079071,
-          7.900000035762787,
-          7.699999988079071,
-          7.599999964237213,
-          7.600000023841858,
+          7.5,
           7.800000011920929,
-          7.5,
-          7.5,
           7.599999964237213,
-          7.600000023841858,
-          7.600000023841858,
           7.5,
-          7.599999964237213,
+          7.600000023841858,
+          7.399999976158142,
+          7.400000035762787,
+          7.5,
+          7.5,
+          7.299999952316284,
           7.5,
           7.400000035762787,
-          7.599999964237213,
+          7.399999976158142,
           7.5,
+          7.300000011920929,
           7.5,
+          7.300000011920929,
           7.5,
-          7.699999988079071,
-          7.5,
-          7.600000023841858
+          7.300000011920929,
+          7.299999952316284,
+          7.400000035762787,
+          7.300000011920929
         ],
-        "medianMs": 7.600000023841858,
-        "p95Ms": 8.300000011920929,
-        "maxMs": 11.199999988079071
+        "medianMs": 7.5,
+        "p95Ms": 8.5,
+        "maxMs": 11.300000011920929
       }
     ],
     "canvas": {
@@ -282,7 +283,7 @@
   },
   "budgetProposal": {
     "targetMs": 200,
-    "remoteP95Ms": 326.5999999642372,
+    "remoteP95Ms": 312.69999998807907,
     "targetMet": false,
     "proposedMs": 400,
     "status": "Owner decision 2026-11-09: accepted E2 budget 400 ms p95 in hosted Chromium",
@@ -442,18 +443,18 @@
     "E2 accepted budget is400ms p95 in hosted Chromium. The sub200ms E4 requirement remains unmet."
   ],
   "previousReproduction": {
-    "sdkTree": "b9f4528d5daf35403b30e62d865e1facdb98cc65",
-    "layoutP95Ms": 308.39999997615814,
-    "validationGzipBytes": 324220,
-    "lazyGeometryGzipBytes": 1620462,
-    "scope": "superseded source-bound reproduction before source-default alignment and boundary fixes"
+    "sdkTree": "a4a1bec4027b05226f8ee1af72c86b0c25567c1a",
+    "layoutP95Ms": 326.5999999642372,
+    "validationGzipBytes": 324219,
+    "lazyGeometryGzipBytes": 1625027,
+    "scope": "previous source-bound reproduction before the current gate/adjustment rework; not current-head acceptance"
   },
   "boundaryEvidence": {
     "scope": "separate synthetic evidence; exact layer gates both directions, model layer reports without failing; does not change AC1 membership",
     "strictParityCases": 309,
-    "boundaryCases": 228,
+    "boundaryCases": 289,
     "rendererRefusalSites": 132,
-    "exactCases": 127,
+    "exactCases": 188,
     "exactFailures": 0,
     "modelCategories": {
       "artifact-route-rounding": {
@@ -528,7 +529,7 @@
         "oracleRedEngineAdmitted": 5
       },
       "text-capacity": {
-        "agreements": 42,
+        "agreements": 43,
         "cases": 76,
         "examples": [
           {
@@ -580,8 +581,8 @@
             "oracleAccepted": true
           }
         ],
-        "oracleGreenEngineRefused": 28,
-        "oracleRedEngineAdmitted": 6
+        "oracleGreenEngineRefused": 26,
+        "oracleRedEngineAdmitted": 7
       }
     },
     "modelDifferences": [
@@ -733,22 +734,11 @@
         ]
       },
       {
-        "case": "e2-boundary-lifecycle-band-title-114.015625",
+        "case": "e2-boundary-lifecycle-band-title-113.984375",
         "category": "text-capacity",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "lifecycle/route-label-space"
-        ]
-      },
-      {
-        "case": "e2-boundary-lifecycle-label-pair-416",
-        "category": "text-capacity",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "lifecycle/route-label-space"
-        ]
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": []
       },
       {
         "case": "e2-boundary-sequence-family-label-route-above",
@@ -949,6 +939,7 @@
         "diagnosticCodes": []
       }
     ],
+    "clearMarginControls": 10,
     "authoredCoordinateRoutingRefusals": [
       {
         "case": "e2-boundary-sequence-family-label-route-above",
@@ -988,8 +979,7 @@
           "workflow/route-blocked"
         ]
       }
-    ],
-    "clearMarginControls": 10
+    ]
   },
   "hostedBaseline": {
     "runId": 42538495856,
@@ -1115,5 +1105,21 @@
       168
     ],
     "currentMeasurement": "metricModelEvidence records exact current input, node boxes and ports; no legacy placement predicate added"
+  },
+  "gateAdjustmentEvidence": {
+    "auditRows": 132,
+    "gatedRowsWithControls": 65,
+    "positiveControls": 60,
+    "gateOffControls": 57,
+    "adjustmentControls": 3,
+    "complementaryGateOnNegatives": 1,
+    "actualNegativeReferenceLinks": 45,
+    "explicitExemptions": 13,
+    "oracleAndEnginePositiveControlsPassed": true,
+    "fixtureRepairs": {
+      "gate-sequence-label-route-standard": "20 ASCII i keep exactly20 legacy text units (standard116px/showcase144px masks); narrow bundled-font ink avoids unrelated Noto endpoint occlusion",
+      "gate-sequence-label-page-standard": "17 CJK characters keep34 legacy text units: showcase236.4px mask overflows center116 by2.2px; standard188.8px and bundled-font204px masks fit the origin",
+      "gate-lifecycle-label-route-standard": "53 ASCII i keep exactly53 legacy text units and the271.7px active legacy mask; narrow bundled-font ink avoids unrelated overlap with state a"
+    }
   }
 }

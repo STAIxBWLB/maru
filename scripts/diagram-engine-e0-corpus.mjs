@@ -9,6 +9,7 @@ import { geometryComparisonFor } from "./diagram-engine-e2-comparison.mjs";
 import { generatedBoundaryCases, REFUSAL_AUDIT } from "./diagram-engine-e2-boundaries.mjs";
 import { generatedRouteBoundaryCases, ROUTE_REFUSAL_AUDIT } from "./diagram-engine-e2-route-boundaries.mjs";
 import { generatedGeometryCases } from "./diagram-engine-e2-cases.mjs";
+import { generatedGateCases, GATE_ADJUST_AUDIT } from "./diagram-engine-e2-gates.mjs";
 import { generatedCases, comparisonFor, seedFor, TYPES, RULE_TABLE, INTENDED_DIFFERENCES } from "./diagram-engine-e1-cases.mjs";
 // Raw fixtures deliberately contain invalid field values for rejection probes.
 // The loose value type is confined to this host-side mutation boundary.
@@ -143,7 +144,7 @@ export async function collectCases(publicCandidates = [], retainedPublicCases = 
     Object.assign(cases.at(-1), { expectedEngineCode: generated.expectedEngineCode,
       ...(generated.currentScope ? { currentScope: generated.currentScope } : {}) });
   }
-  for (const generated of [...generatedGeometryCases(seedFor),...generatedBoundaryCases(seedFor),...generatedRouteBoundaryCases(seedFor)]) {
+  for (const generated of [...generatedGeometryCases(seedFor),...generatedBoundaryCases(seedFor),...generatedRouteBoundaryCases(seedFor),...generatedGateCases(seedFor)]) {
     add(generated.id, generated.diagramType, generated.rule, generated.spec, { kind: "synthetic-generated" });
     const boundary = "boundary" in generated ? generated.boundary : undefined;
     Object.assign(cases.at(-1), { geometryRule: generated.geometryRule, ...(boundary ? {boundary} : {}) });
@@ -215,6 +216,7 @@ function documentOracle(corpusCase, schemaReport) {
   }
 }
 async function main() {
+  if (process.env.ARCHIFY_QUALITY_PROFILE) throw new Error("Oracle profile override would invalidate gate-control evidence; unset ARCHIFY_QUALITY_PROFILE and rerun the corpus generator.");
   const source = process.argv[2];
   const descriptors = source ? JSON.parse(readFileSync(source, "utf8")) : [];
   // No descriptor argument means refresh already admitted immutable sources,
@@ -264,6 +266,9 @@ async function main() {
     try {
       item.comparison = comparisonFor(item);
       const boundary=/** @type {any} */(item).boundary;
+      if (typeof boundary?.expectedOracleAccepted === "boolean" && (item.validityOracle ?? item.oracle).ok !== boundary.expectedOracleAccepted) {
+        comparisonFailures.push(`Renderer control ${item.id} expected accepted=${boundary.expectedOracleAccepted}, got ${(item.validityOracle ?? item.oracle).ok}: ${(item.validityOracle ?? item.oracle).diagnostics.map(d=>d.message).join("; ")}; isolate its predicate in scripts/diagram-engine-e2-gates.mjs and rerun node scripts/diagram-engine-e0-corpus.mjs.`);
+      }
       if (boundary?.layer === "model-difference") {
         // Keep the actual oracle verdict; this evidence is deliberately not an
         // AC1 parity member. Do not invent an expected engine acceptance.
@@ -305,7 +310,7 @@ async function main() {
     }
     return [type, [...recorded.values()].sort((a,b)=>a.code.localeCompare(b.code, "en"))];
   }));
-  writeFileSync(join(output, "parity.json"), `${JSON.stringify({ schemaVersion: 2, oracle: { id: pin.name, version: pin.version, revision: pin.revision }, rules: RULE_TABLE, geometryRules, rendererRefusalAudit:[...REFUSAL_AUDIT,...ROUTE_REFUSAL_AUDIT], intendedDifferences: INTENDED_DIFFERENCES, cases:cases.filter(item=>!/** @type {any} */(item).boundary), boundaryCases:cases.filter(item=>/** @type {any} */(item).boundary) }, null, 2)}\n`);
+  writeFileSync(join(output, "parity.json"), `${JSON.stringify({ schemaVersion: 2, oracle: { id: pin.name, version: pin.version, revision: pin.revision }, rules: RULE_TABLE, geometryRules, rendererRefusalAudit:[...REFUSAL_AUDIT,...ROUTE_REFUSAL_AUDIT], gateAdjustmentAudit:GATE_ADJUST_AUDIT, intendedDifferences: INTENDED_DIFFERENCES, cases:cases.filter(item=>!/** @type {any} */(item).boundary), boundaryCases:cases.filter(item=>/** @type {any} */(item).boundary) }, null, 2)}\n`);
   const { rmSync } = await import("node:fs"); rmSync(join(root, ".engine-e0/oracle-input.json"), { force: true });
   console.log(JSON.stringify({ cases: cases.length, byType: Object.fromEntries([...new Set(cases.map((c) => c.diagramType))].map((type) => [type, cases.filter((c) => c.diagramType === type).length])), byRule: Object.fromEntries([...new Set(cases.map((c) => c.rule))].map((rule) => [rule, cases.filter((c) => c.rule === rule).length])) }));
 }

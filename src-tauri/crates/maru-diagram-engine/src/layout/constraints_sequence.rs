@@ -7,7 +7,6 @@
 use crate::geometry::GeometryDocument;
 use crate::{metrics, Diagnostic};
 use serde_json::Value;
-use std::collections::BTreeMap;
 
 const UNIT: i64 = 64;
 
@@ -125,18 +124,14 @@ pub(crate) fn sequence_geometry_diagnostics(
     }
 
     // Consume the completed scene's resolved legend text rather than maintain
-    // a second catalog. Measure entries in stable key order with bundled font
-    // metrics, including explicit overrides and multiline labels.
-    let legend_entries: BTreeMap<_, _> = geometry
-        .legend
-        .entries
-        .iter()
-        .map(|entry| (entry.key.as_str(), entry))
-        .collect();
+    // a second catalog. Preserve its emitted catalog order while measuring
+    // explicit overrides and multiline labels with bundled font metrics.
+    let legend_entries = &geometry.legend.entries;
     let mut row_width = 0_i64;
     let mut row_height = 22 * UNIT;
     let mut total_row_height = 0_i64;
-    for (key, entry) in &legend_entries {
+    for entry in legend_entries {
+        let key = &entry.key;
         let mut label_width = 0_i64;
         let mut label_height = 0_i64;
         for line in entry.label.split('\n') {
@@ -295,6 +290,77 @@ mod tests {
                 |diagnostic| diagnostic.code == "sequence/geometry-legend-clearance"
                     && diagnostic.path == "/meta/viewBox/1"
             ));
+    }
+
+    fn emitted_legend_scene(source: &Value) -> GeometryDocument {
+        let request = crate::geometry::LayoutRequest {
+            spec_json: source.to_string(),
+            pin_set: None,
+        };
+        let mut builder = super::super::SceneBuilder::new(request, "sequence");
+        let typed = serde_json::from_value(source.clone()).unwrap();
+        super::super::sequence::place(&typed, &mut builder).unwrap();
+        let meta = serde_json::from_value(source["meta"].clone()).unwrap();
+        builder.finish(&meta).unwrap().0
+    }
+
+    #[test]
+    fn catalog_order_wraps_two_rows_where_alphabetical_order_needs_three() {
+        let mut source = spec();
+        source["meta"]["viewBox"] = serde_json::json!([480, 735]);
+        source["meta"]["quality_profile"] = "showcase".into();
+        source["messages"][0]["y"] = 600.into();
+        source["meta"]["legend"] = serde_json::json!({"mode":"all","entries":{
+            "emphasis":{"label":"W"},"return":{"label":"W"},"security":{"label":"W"},
+            "dashed":{"label":"W".repeat(5)},"default":{"label":"W".repeat(40)}
+        }});
+        let scene = emitted_legend_scene(&source);
+        let keys: Vec<_> = scene
+            .legend
+            .entries
+            .iter()
+            .map(|entry| entry.key.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            ["emphasis", "return", "security", "dashed", "default"]
+        );
+        // At400px row width these same measured labels use2 rows in catalog
+        // order (height724), but3 alphabetically (height746). The735px page
+        // lies between those budgets, so the old re-sort is observable.
+        let refused = |source: &Value, scene: &GeometryDocument| {
+            sequence_geometry_diagnostics(source, scene)
+                .iter()
+                .any(|diagnostic| diagnostic.code == "sequence/geometry-legend-clearance")
+        };
+        assert!(!refused(&source, &scene));
+        let mut alphabetical = scene.clone();
+        alphabetical
+            .legend
+            .entries
+            .sort_by(|left, right| left.key.cmp(&right.key));
+        assert!(refused(&source, &alphabetical));
+
+        // Explicit legend layout remains enforced with a standard profile.
+        source["meta"]["quality_profile"] = "standard".into();
+        assert!(!refused(&source, &scene));
+        assert!(refused(&source, &alphabetical));
+        source["meta"]["legend"]["mode"] = "auto".into();
+        let auto = emitted_legend_scene(&source);
+        assert_eq!(
+            auto.legend
+                .entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            ["default"]
+        );
+        assert!(!refused(&source, &auto));
+        source["meta"]["legend"]["mode"] = "hidden".into();
+        source["meta"]["viewBox"] = serde_json::json!([480, 700]);
+        let hidden = emitted_legend_scene(&source);
+        assert!(hidden.legend.entries.is_empty());
+        assert!(!refused(&source, &hidden));
     }
 
     #[test]

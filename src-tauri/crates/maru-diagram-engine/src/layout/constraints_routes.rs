@@ -869,7 +869,10 @@ fn endpoints(
     boxes: &BTreeMap<&str, Rect>,
     out: &mut BTreeMap<(usize, String, usize), Diagnostic>,
 ) {
-    if f.name == "sequence" || r.scene.len() < 2 {
+    if f.name == "sequence"
+        || f.name == "lifecycle" && r.raw.get("via").is_some_and(Value::is_array)
+        || r.scene.len() < 2
+    {
         return;
     }
     for (name, id, point, next, authored_side, fixed) in [
@@ -1670,7 +1673,8 @@ pub(crate) fn route_geometry_diagnostics(
         } else {
             &r.authored
         };
-        if (matches!(f.name, "dataflow" | "lifecycle")
+        if (f.name == "dataflow"
+            || f.name == "lifecycle" && !r.raw.get("via").is_some_and(Value::is_array)
             || f.name == "architecture"
                 && (text(r.raw, "fromSide").is_some() || text(r.raw, "toSide").is_some()))
             && raw_path.len() >= 2
@@ -1716,7 +1720,10 @@ pub(crate) fn route_geometry_diagnostics(
         source_presets(spec, f, r, &boxes, &mut out);
         page_checks(spec, f, r, geometry, &boxes, &mut out);
         detour_checks(spec, f, r, geometry, &boxes, &routes, &mut out);
-        if matches!(f.name, "architecture" | "workflow") {
+        let enforce_origin = f.name == "architecture" && showcase
+            || f.name == "workflow"
+                && spec.get("schema_version").and_then(Value::as_u64) == Some(2);
+        if enforce_origin {
             let negative_via = array(r.raw, "via")
                 .iter()
                 .filter_map(point)
@@ -1866,6 +1873,51 @@ mod tests {
             .geometry
             .expect("layout retains a diagnostic scene")
     }
+    #[test]
+    fn lifecycle_endpoint_side_checks_skip_explicit_via_arrays() {
+        let (mut spec, geometry) = fixture(
+            "lifecycle",
+            vec![json!({"fromSide":"left","toSide":"left","via":[[10,0],[90,0]]})],
+            vec![vec![(10, 0), (20, 0), (80, 0), (90, 0)]],
+        );
+        for via in [json!([[10, 0], [90, 0]]), json!([])] {
+            spec["transitions"][0]["via"] = via;
+            let diagnostics = route_geometry_diagnostics(&spec, &geometry);
+            assert!(cause(&diagnostics, "source-endpoint-side").is_empty());
+            assert!(cause(&diagnostics, "target-endpoint-side").is_empty());
+            assert!(cause(&diagnostics, "authored-endpoint-direction").is_empty());
+        }
+    }
+
+    #[test]
+    fn route_origin_refusals_follow_the_profile_and_version_gate() {
+        let (mut arch, geometry) = fixture(
+            "architecture",
+            vec![json!({"via":[[-1,30],[20,30]]})],
+            vec![vec![(-1, 30), (20, 30)]],
+        );
+        arch["meta"]["quality_profile"] = json!("standard");
+        assert!(cause(
+            &route_geometry_diagnostics(&arch, &geometry),
+            "source-origin-containment"
+        )
+        .is_empty());
+        arch["meta"]["quality_profile"] = json!("showcase");
+        assert_authored(&arch, &geometry, "source-origin-containment", 0);
+        let (mut workflow, geometry) = fixture(
+            "workflow",
+            vec![json!({"channelY":-1,"via":[[-1,30],[20,30]]})],
+            vec![vec![(-1, 30), (20, 30)]],
+        );
+        assert!(cause(
+            &route_geometry_diagnostics(&workflow, &geometry),
+            "source-origin-containment"
+        )
+        .is_empty());
+        workflow["schema_version"] = json!(2);
+        assert_authored(&workflow, &geometry, "source-origin-containment", 0);
+    }
+
     #[test]
     fn authored_micro_and_short_interior_segments_are_not_hidden_by_repair() {
         let mut dataflow = seed("dataflow");

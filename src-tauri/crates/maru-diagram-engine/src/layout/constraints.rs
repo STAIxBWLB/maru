@@ -586,7 +586,9 @@ fn check_boundary_title_fit(
     geometry: &GeometryDocument,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if text(spec.get("meta").unwrap_or(&Value::Null), "quality_profile") != Some("showcase") {
+    if !text(spec.get("meta").unwrap_or(&Value::Null), "quality_profile")
+        .is_some_and(|profile| !profile.is_empty())
+    {
         return;
     }
     for (index, boundary) in items(spec, "boundaries").iter().enumerate() {
@@ -610,10 +612,62 @@ fn check_boundary_title_fit(
         else {
             continue;
         };
-        let available = fixed(frame.bounds.width) - 16.0;
-        let required_at_minimum =
-            fixed(title.bounds.width) * 6.0 / (f64::from(title.font_size) / UNITS);
-        if required_at_minimum > available {
+        // The architecture placer reserves the renderer's 4px frame inset on
+        // each side and 10px for the title mask before this final fit check.
+        let available = fixed(frame.bounds.width) - 8.0;
+        let measured_width =
+            label_text
+                .split('\n')
+                .try_fold(0_i64, |width, line| -> Result<i64, String> {
+                    let metrics = crate::metrics::measure_text(line, 700, 6 * 64)
+                        .map_err(|error| error.message)?;
+                    let ink_right = metrics.ink.right().map_err(|error| error.to_string())?;
+                    Ok(width.max(
+                        i64::from(metrics.advance.max(ink_right)) - i64::from(metrics.ink.x.min(0)),
+                    ))
+                });
+        let measured_width = match measured_width {
+            Ok(width) => width as f64 / UNITS,
+            Err(error) => {
+                push(
+                    diagnostics,
+                    Family {
+                        name: "architecture",
+                        node_collection: "components",
+                    },
+                    "geometry-boundary-title-fit",
+                    format!("/boundaries/{index}/label"),
+                    format!(
+                        "boundary title cannot be measured within its coordinate range: {error}"
+                    ),
+                    "restore the pinned font tables or shorten the title, then retry",
+                );
+                continue;
+            }
+        };
+        let required_at_minimum = (measured_width + 10.0).max(30.0);
+        let mask_width = fixed(title.bounds.width);
+        let authored = spec
+            .get("meta")
+            .and_then(|meta| meta.get("viewBox"))
+            .and_then(Value::as_array);
+        let outside_page = title.bounds.x < 0
+            || title.bounds.y < 0
+            || authored.is_some_and(|page| {
+                page.first()
+                    .and_then(Value::as_f64)
+                    .is_some_and(|width| fixed(title.bounds.x) + mask_width > width)
+                    || page
+                        .get(1)
+                        .and_then(Value::as_f64)
+                        .is_some_and(|height| bottom(title.bounds) > height)
+            });
+        if outside_page {
+            push(diagnostics,Family{name:"architecture",node_collection:"components"},
+                "geometry-boundary-title-fit",format!("/boundaries/{index}/label"),
+                "boundary title mask extends before the canvas origin or outside its authored viewBox",
+                "move wrapped components inward or shorten the title; enlarge meta.viewBox only for right or bottom overflow");
+        } else if required_at_minimum > available {
             push(
                 diagnostics,
                 Family {
