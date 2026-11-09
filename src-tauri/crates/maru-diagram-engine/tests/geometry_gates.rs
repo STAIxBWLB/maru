@@ -1,10 +1,12 @@
-//! Gate-off controls must be positively accepted, not merely agree false/false.
+//! Keep source gate-off controls intact while refusing actual painted overflow.
 #![cfg(feature = "geometry")]
 use maru_diagram_engine::layout::layout_json;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+#[path = "support/painted_ink.rs"]
+mod painted_ink;
 #[test]
-fn every_audited_gate_control_is_recorded_and_accepted_by_both_engines() {
+fn audited_controls_preserve_source_verdicts_and_check_actual_text_bounds() {
     let corpus: Value = serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
     let audit = corpus["gateAdjustmentAudit"]
         .as_array()
@@ -41,6 +43,7 @@ fn every_audited_gate_control_is_recorded_and_accepted_by_both_engines() {
                 .contains(&row["key"]));
         }
     }
+    let mut measured_text_refusals = 0;
     for (id, case) in &controls {
         assert_eq!(
             case["geometryComparison"]["accepted"], true,
@@ -63,15 +66,18 @@ fn every_audited_gate_control_is_recorded_and_accepted_by_both_engines() {
         }
         let input = case["geometryComparison"]["inputJson"].as_str().unwrap();
         let report = layout_json(&serde_json::json!({"specJson":input}).to_string());
-        assert!(
-            report.ok,
-            "{id}: engine refused ungated control: {:?}",
-            report.diagnostics
-        );
+        painted_ink::assert_accepted_text_ink_fits(&report);
+        if !report.ok {
+            measured_text_refusals += 1;
+            painted_ink::assert_measured_ink_overflow_refusal(
+                &report,
+                case["diagramType"].as_str().unwrap(),
+            );
+        }
         assert!(report.geometry.is_some());
     }
     println!(
         "ENGINE_E2_GATES {}",
-        serde_json::json!({"auditedRows":audit.len(),"acceptedControls":controls.len()})
+        serde_json::json!({"auditedRows":audit.len(),"sourceAcceptedControls":controls.len(),"engineAcceptedControls":controls.len()-measured_text_refusals,"measuredTextRefusals":measured_text_refusals})
     );
 }

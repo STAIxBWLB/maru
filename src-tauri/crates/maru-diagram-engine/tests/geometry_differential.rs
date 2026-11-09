@@ -3,6 +3,8 @@
 use maru_diagram_engine::layout::layout_json;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
+#[path = "support/painted_ink.rs"]
+mod painted_ink;
 
 #[derive(Deserialize)]
 struct Corpus {
@@ -30,7 +32,7 @@ struct Comparison {
 }
 
 #[test]
-fn renderer_verdicts_have_equivalent_geometry_rules_and_preserve_placed_scenes() {
+fn reference_verdicts_and_actual_text_bounds_preserve_placed_scenes() {
     let corpus: Corpus = serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
     let mut failures = Vec::new();
     let mut deferred = HashSet::new();
@@ -38,11 +40,18 @@ fn renderer_verdicts_have_equivalent_geometry_rules_and_preserve_placed_scenes()
         let expected = case.geometry_comparison;
         let request = serde_json::json!({"specJson":expected.input_json});
         let report = layout_json(&request.to_string());
+        painted_ink::assert_accepted_text_ink_fits(&report);
         if report.ok != expected.accepted {
-            failures.push(format!(
-                "{}: expected ok={}, got {:?}",
-                case.id, expected.accepted, report.diagnostics
-            ));
+            if expected.accepted && !report.ok {
+                // A source-green verdict may be refused only for measured
+                // Noto ink that physically exceeds a retained node box.
+                painted_ink::assert_measured_ink_overflow_refusal(&report, &case.diagram_type);
+            } else {
+                failures.push(format!(
+                    "{}: expected ok={}, got {:?}",
+                    case.id, expected.accepted, report.diagnostics
+                ));
+            }
         }
         if expected.geometry_expected && report.geometry.is_none() {
             failures.push(format!(
