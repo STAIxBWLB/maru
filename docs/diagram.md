@@ -1925,7 +1925,7 @@ output opaque, including fractional page edges.
 
 The measurement prototype builds a real isolated Vite ES adapter with the
 WASM and fonts inlined in its separately loaded PNG module. The latest validation gate measured
-324,218 B gzip, below 400,000 B (the initial transport measurement was 324,220 B). The PNG module is 61,037,707 B raw and
+324,219 B gzip, below 400,000 B (the initial transport measurement was 324,220 B). The PNG module is 61,037,707 B raw and
 36,321,493 B gzip; its underlying WASM is 41,274,386 B raw and 30,534,736 B
 gzip. Adapter import took 1,012.9ms and initialization 3,512.1ms, totaling
 4,525.0ms before the first request. These are observed samples, not CI timing
@@ -1933,8 +1933,8 @@ assertions.
 
 | Scene | WASM first request / warm samples (ms) | Native raster cold / warm range (ms) | Registered mock IPC samples (ms) | Request / response bytes | PNG bytes |
 | --- | --- | --- | --- | --- | --- |
-| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 63.0, 13.5, 11.6, 11.5 | 693 / 51,447 | 11,088 |
-| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2338.2, 2324.2, 2354.2, 2318.5 | 130,843 / 3,998,664 | 480,455 |
+| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 62.8, 13.5, 11.3, 11.6 | 693 / 51,447 | 11,088 |
+| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2298.3, 2269.4, 2508.2, 2259.7 | 130,843 / 3,998,664 | 480,455 |
 
 The selected PNG transport is native IPC. The measured 36.3 MB gzip PNG module
 and 4.5s cold module initialization rule out the lazy WASM candidate for this
@@ -2034,3 +2034,13 @@ a new stroked polygon or multisegment polyline needs an independent model
 before it can pass. Lifecycle v1 band dividers use the page-relative 72px
 insets (`render-lifecycle.mjs:755`); this preserves the pinned-renderer rule
 when the retained world-space viewBox has a nonzero origin. Pins are not moved.
+
+The refreshed combined 623-case scene/SVG run matches exactly between Linux
+native and WASM. Relative to approved S1 `4d12957f`, no geometry hash, admission
+verdict or cause-code set changes. The SVG hashes change in 266 cases per theme;
+the writer changes are secondary `t-dim` text paint and page-origin-aware
+lifecycle band paint. `scene-hash-delta.json` lists each changed case and both
+report hashes. All 405 retained scenes pass their artifact gates in both
+themes, including the 185 refused layouts. Logical work remains 3,355,500 for
+the 1,000-node/999-route fixture, within the existing 4,194,375 ceiling. The
+new pinned-boundary regression is separate from that unchanged corpus.
