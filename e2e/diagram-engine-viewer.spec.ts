@@ -10,7 +10,7 @@ const S1_ARCHITECTURE_SVG_SHA256 = "3317383217e8f59e8099685cdf53926a7de5e31f201b
 const S1_ARCHITECTURE_SPEC_SHA256 = "ae9c9e83ca21229ed77c250e246a7d49d1f05b0899b05ca12db7e7e378a5edc3";
 const SVG_FIXTURE = resolve("src/lib/diagram/viewer/__fixtures__/architecture-light.svg");
 const SPEC_FIXTURE = resolve("src/lib/diagram/viewer/__fixtures__/architecture-light.spec.json");
-const hostileLabel = "</script><script>globalThis.__offlineViewerPwned=1</script><img src=x onerror=alert(1)>";
+const hostileLabel = "<!--<script>globalThis.__offlineViewerPwned=1</script><img src=x onerror=alert(1)>";
 
 function viewBoxNumbers(value: string | null): number[] {
   return (value ?? "").trim().split(/[ ,]+/).map(Number);

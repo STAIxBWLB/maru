@@ -416,8 +416,8 @@ function escapeHtmlText(value: string): string {
   });
 }
 
-function escapeScriptClosingTags(value: string): string {
-  return value.replace(/<\//gi, "<\\/");
+function escapeJsonScriptMarkup(value: string): string {
+  return value.replace(/</g, "\\u003c");
 }
 
 export function createOfflineViewerHtml(input: Readonly<OfflineViewerInput>): string {
@@ -440,6 +440,6 @@ export function createOfflineViewerHtml(input: Readonly<OfflineViewerInput>): st
   if (runtimeBytes > OFFLINE_VIEWER_RUNTIME_BUDGET_BYTES) {
     throw new Error("The offline viewer runtime exceeds its 12 KiB budget; reduce the inline viewer runtime and update its CSP hash.");
   }
-  const safeSpec = escapeScriptClosingTags(input.specJson);
+  const safeSpec = escapeJsonScriptMarkup(input.specJson);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${VIEWER_CSP}"><title>${escapeHtmlText(title)}</title><style>${VIEWER_STYLE}</style></head><body><header class="toolbar" aria-label="Diagram viewer controls"><button type="button" data-viewer-zoom="out" aria-label="Zoom out">Zoom out</button><button type="button" data-viewer-zoom="in" aria-label="Zoom in">Zoom in</button><button type="button" data-viewer-zoom="fit" aria-label="Fit diagram">Fit</button><output id="zoom-level" aria-label="Zoom level">100%</output><output id="selection" role="status" aria-live="polite">Click a node or route to inspect it.</output></header><main id="viewport" tabindex="0" aria-label="Interactive diagram"><div id="stage">${input.svg}</div></main><script type="application/json" id="offline-viewer-source">${safeSpec}</script><script>${VIEWER_RUNTIME}</script></body></html>`;
 }

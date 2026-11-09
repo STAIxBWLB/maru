@@ -13,7 +13,7 @@ const realSvg = readFileSync("src/lib/diagram/viewer/__fixtures__/architecture-l
 // Source data mirrors seedFor("architecture") plus the S1 screenshot script's title/subtitle/CJK label edits.
 const REAL_S1_SPEC_SHA256 = "ae9c9e83ca21229ed77c250e246a7d49d1f05b0899b05ca12db7e7e378a5edc3";
 const realSpec = readFileSync("src/lib/diagram/viewer/__fixtures__/architecture-light.spec.json", "utf8");
-const hostileLabel = "</script><script>globalThis.__viewerPwned=1</script><img src=x onerror=alert(1)>";
+const hostileLabel = "<!--<script>globalThis.__viewerPwned=1</script><img src=x onerror=alert(1)>";
 const S1_FAMILY_SVG_HASHES: Record<string, string> = {
   workflow: "8800e4f67655f6a5367cd4ed55e019893f42c18731012e12e38ed6cc85883809",
   sequence: "6a6ca57982bc10d048c7687d27d0eea900dac946598c7ad6b96d6a016442f774",
@@ -92,6 +92,7 @@ describe("offline engine viewer HTML", () => {
     expect(document.querySelectorAll("script")).toHaveLength(2);
     expect(document.querySelectorAll("img")).toHaveLength(0);
     expect(html).not.toContain("</script><script>globalThis.__viewerPwned");
+    expect(html).not.toContain("<!--<script>globalThis.__viewerPwned");
   });
 
   it("accepts URL-like aria-label text but rejects active SVG elements and attributes", () => {
