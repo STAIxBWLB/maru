@@ -4,6 +4,7 @@ mod constraints;
 mod constraints_distance;
 mod constraints_frames;
 mod constraints_routes;
+#[cfg(feature = "geometry-corpus")]
 pub(crate) use constraints_routes::is_route_quality_notice;
 mod constraints_sequence;
 mod constraints_workflow_page;
