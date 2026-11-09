@@ -909,7 +909,7 @@ enum EditOperations {
     Json(Value),
 }
 
-/// The non-file operation flags emitted by the legacy core opsToArgv adapter.
+/// The operation flags emitted by the legacy core opsToArgv adapter.
 /// CLI modes, output/report paths and ops-file selection are never edit ops.
 const LEGACY_EDIT_FLAGS: &[&str] = &[
     "--replace",
@@ -919,6 +919,8 @@ const LEGACY_EDIT_FLAGS: &[&str] = &[
     "--create-field",
     "--create-bookmark",
     "--create-hyperlink",
+    "--insert-image",
+    "--seal",
     "--set-format",
     "--set-align",
     "--insert-para",
@@ -946,13 +948,85 @@ fn validate_legacy_edit_args(argv: &[String]) -> Result<(), String> {
     }
     for pair in argv.as_chunks::<2>().0 {
         if !LEGACY_EDIT_FLAGS.contains(&pair[0].as_str()) {
-            return Err(format!("hwped_bad_request: opsArgv flag {:?} is not a permitted legacy edit operation; send opsToArgv operation flags or use the version-gated JSON ops channel for asset operations", pair[0]));
+            return Err(format!("hwped_bad_request: opsArgv flag {:?} is not a permitted legacy edit operation; send opsToArgv operation flags and use the dedicated verify/allowPartial fields instead of CLI controls", pair[0]));
         }
-        if pair[1].starts_with('-') {
-            return Err("hwped_bad_request: an opsArgv value starts with a CLI option prefix; send literal hyphen-leading values through the JSON ops channel, and pass verify/allowPartial in their dedicated fields".to_string());
+        if pair[1].starts_with('-')
+            && !pair[1]
+                .trim()
+                .parse::<f64>()
+                .is_ok_and(|value| value.is_finite())
+        {
+            return Err("hwped_bad_request: an opsArgv value starts with a CLI option prefix and is not a finite number; send literal hyphen-leading text through JSON ops, and pass verify/allowPartial in their dedicated fields".to_string());
         }
     }
     Ok(())
+}
+
+/// Match the CLI's final @size grammar without interpreting operation data.
+fn legacy_asset_size_suffix<'a>(flag: &str, value: &'a str) -> Option<(&'a str, &'a str)> {
+    let (path, size) = value.rsplit_once('@')?;
+    let is_size = if flag == "--insert-image" {
+        size.split_once(['x', 'X']).is_some_and(|(width, height)| {
+            width.trim().parse::<f32>().is_ok() && height.trim().parse::<f32>().is_ok()
+        })
+    } else {
+        size.trim()
+            .strip_suffix("mm")
+            .unwrap_or(size.trim())
+            .trim()
+            .parse::<f32>()
+            .is_ok()
+    };
+    is_size.then_some((path, &value[path.len()..]))
+}
+
+fn resolve_legacy_asset(
+    flag: &str,
+    value: &str,
+    workspace_root: Option<&str>,
+) -> Result<String, String> {
+    let (anchor, raw) = value.split_once("=>").ok_or_else(|| {
+        format!("hwped_bad_request: {flag} requires anchor=>path with an optional @size; resend the opsToArgv value")
+    })?;
+    let (path, suffix) = legacy_asset_size_suffix(flag, raw).unwrap_or((raw, ""));
+    let root = workspace_root.filter(|root| !root.trim().is_empty()).ok_or_else(|| {
+        "hwped_bad_request: image operations require workspaceRoot for path containment; provide the workspace containing the image file".to_string()
+    })?;
+    let canonical_root = crate::vault::normalize_existing_dir(root).map_err(|cause| {
+        format!("hwped_bad_request: image workspaceRoot cannot be opened: {cause}; provide an existing workspace directory")
+    })?;
+    let candidate = crate::vault::resolve_inside_vault(root, path).map_err(|_| {
+        "hwped_bad_request: image path is outside workspaceRoot; choose or copy an image into the workspace".to_string()
+    })?;
+    let resolved = candidate.canonicalize().map_err(|cause| {
+        format!("hwped_bad_request: image file {path:?} is missing or cannot be resolved: {cause}; choose an existing readable file in the workspace")
+    })?;
+    ensure_within(&canonical_root, &resolved).map_err(|_| {
+        "hwped_bad_request: image path or symlink target escapes workspaceRoot; choose or copy an image into the workspace".to_string()
+    })?;
+    if !resolved.is_file() {
+        return Err("hwped_bad_request: image asset is not a regular file; choose an existing image file in the workspace".to_string());
+    }
+    let absolute = resolved.to_str().ok_or_else(|| {
+        "hwped_bad_request: resolved image path is not UTF-8; rename the asset with a Unicode filename and retry".to_string()
+    })?;
+    if suffix.is_empty() && legacy_asset_size_suffix(flag, absolute).is_some() {
+        return Err("hwped_bad_request: resolved image filename has a size-like @suffix; rename the file or supply explicit image dimensions so the CLI selects the same file".to_string());
+    }
+    Ok(format!("{anchor}=>{absolute}{suffix}"))
+}
+
+fn prepare_legacy_edit_args(
+    mut argv: Vec<String>,
+    workspace_root: Option<&str>,
+) -> Result<Vec<String>, String> {
+    validate_legacy_edit_args(&argv)?;
+    for pair in argv.as_chunks_mut::<2>().0 {
+        if matches!(pair[0].as_str(), "--insert-image" | "--seal") {
+            pair[1] = resolve_legacy_asset(&pair[0], &pair[1], workspace_root)?;
+        }
+    }
+    Ok(argv)
 }
 
 #[cfg(test)]
@@ -971,8 +1045,7 @@ fn edit_now(
             let argv: Vec<String> = serde_json::from_value(argv).map_err(|_| {
                 "hwped_bad_request: opsArgv must be an array of strings; send --flag value pairs or use the ops JSON array".to_string()
             })?;
-            validate_legacy_edit_args(&argv)?;
-            EditOperations::Argv(argv)
+            EditOperations::Argv(prepare_legacy_edit_args(argv, workspace_root.as_deref())?)
         }
         (None, Some(ops)) if ops.is_array() => EditOperations::Json(ops),
         (None, Some(_)) => {

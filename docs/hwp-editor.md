@@ -34,15 +34,21 @@ when the bytes are already on disk, `dataBase64` otherwise.
 accepts a flat `edit-ops-v1` array, writes it to an isolated per-call `ops.json`,
 and invokes `hwp edit --ops`; this channel requires hwp-cli 0.20.0 or newer.
 Rust checks only the array envelope; the engine owns the operation grammar. Run
-addresses and half-open source WCHAR/UTF-16 `chars` ranges pass through unchanged.
-They are never converted to text selectors. Legacy clients keep sending
+addresses and half-open source WCHAR/UTF-16 `chars` ranges pass through unchanged
+and are never converted to text selectors.
+JSON image paths resolve beside the staged ops file in the temporary directory,
+so callers must supply absolute asset paths until an asset-root contract exists.
+Legacy clients keep sending
 `opsArgv` flag/value pairs and remain supported from the global 0.8.7 floor.
-The legacy channel accepts only the named non-file edit-operation flags from
-`opsToArgv`. CLI controls and file options (`--ops`, `--report`, `--output`,
-`--verify`, and `--allow-partial`) are refused. Asset operations
-`--insert-image` and `--seal` use the explicit JSON channel instead. Values
-starting with `-` also use JSON; option-like values are never spliced into
-the legacy argv. JSON requires the 0.20.0 feature floor.
+The legacy channel accepts all 28 named edit-operation flags from `opsToArgv`.
+CLI controls and file options (`--ops`, `--report`, `--output`, `--verify`, and
+`--allow-partial`) are refused. `--insert-image` and `--seal` require an existing
+file inside `workspaceRoot`: relative paths resolve there, and canonical paths
+must remain contained, including symlink targets. The bridge passes the resolved
+absolute path while preserving the anchor and optional size suffix. Missing or
+escaping assets fail with a cause and a next step. Values starting with `-` are
+accepted only when they parse as finite numbers; other hyphen-leading values use
+JSON, which requires the 0.20.0 feature floor.
 Both or neither channel, and a nonarray JSON payload, fail with
 `hwped_bad_request`. Explicit null keys are present, not an alternative spelling
 of omission, and are rejected. Temporary files are removed after output
