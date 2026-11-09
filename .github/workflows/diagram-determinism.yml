@@ -38,6 +38,9 @@ jobs:
         with:
           workspaces: src-tauri/crates -> target
           shared-key: diagram-scene-${{ matrix.os }}
+      - name: Run the complete SDK geometry and SVG regression tests on Linux
+        if: matrix.receipt == 'linux'
+        run: cargo test --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --tests -- --test-threads=2
       - name: Hash whole scenes, both SVG themes and unchanged re-layouts for the complete corpus
         shell: bash
         run: |
@@ -73,10 +76,6 @@ jobs:
         with:
           workspaces: src-tauri/crates -> target
           shared-key: diagram-scene-linux-wasm
-      - name: Run the complete SDK geometry and SVG regression tests on Linux
-        shell: bash
-        run: |
-          cargo test --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --tests -- --test-threads=2
       - name: Build the separate test-featured geometry WASM artifact
         shell: bash
         run: |

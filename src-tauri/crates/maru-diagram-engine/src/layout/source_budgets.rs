@@ -43,32 +43,15 @@ pub(crate) struct SequenceColumns {
     pub pitch: i64,
 }
 
-/// Renderer-compatible available width for each node-label role.
-///
-/// These are source admission budgets, separate from the SDK's measured Noto
-/// text width. Brand top rails reserve space only for the primary label.
-pub(crate) fn node_label_available_width(
-    family: &str,
-    role: &str,
-    width: f64,
-    has_brand: bool,
-) -> Option<f64> {
-    match role {
-        "label" if has_brand => Some(width - 48.0),
-        "label" if family == "architecture" => Some(width + 8.0),
-        "label" if matches!(family, "workflow" | "sequence" | "dataflow" | "lifecycle") => {
-            Some(width + 6.0)
-        }
-        "sublabel" | "tag"
-            if matches!(
-                family,
-                "architecture" | "workflow" | "sequence" | "dataflow" | "lifecycle"
-            ) =>
-        {
-            Some(width - 8.0)
-        }
-        _ => None,
-    }
+/// Horizontal text area used by the emitted E2 node labels. `SceneBuilder`
+/// places each text origin 12px inside the node; the text may extend to the
+/// node's right edge. Admission compares the actual Noto box with this
+/// interval, without a renderer character-count estimate or minimum-font scale.
+pub(crate) fn node_text_area_x(bounds: GeometryBox) -> (i64, i64) {
+    let inset = 12 * SCALE;
+    let left = i64::from(bounds.x) + inset;
+    let right = i64::from(bounds.x) + i64::from(bounds.width);
+    (left, right)
 }
 
 pub(crate) fn sequence_columns(
@@ -412,42 +395,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn node_label_budgets_follow_role_and_brand_rail() {
-        for (family, width, expected_primary) in [
-            ("architecture", 120.0, 128.0),
-            ("workflow", 92.0, 98.0),
-            ("sequence", 86.0, 92.0),
-            ("dataflow", 112.0, 118.0),
-            ("lifecycle", 118.0, 124.0),
-        ] {
-            assert_eq!(
-                node_label_available_width(family, "label", width, false),
-                Some(expected_primary),
-                "{family} primary"
-            );
-            assert_eq!(
-                node_label_available_width(family, "label", width, true),
-                Some(width - 48.0),
-                "{family} branded primary"
-            );
-            assert_eq!(
-                node_label_available_width(family, "sublabel", width, true),
-                Some(width - 8.0),
-                "{family} branded sublabel"
-            );
-            assert_eq!(
-                node_label_available_width(family, "tag", width, true),
-                Some(width - 8.0),
-                "{family} branded tag"
-            );
-        }
+    fn emitted_node_text_area_uses_geometry_insets_not_source_width_estimates() {
+        let narrow = GeometryBox {
+            x: 10 * SCALE as i32,
+            y: 20 * SCALE as i32,
+            width: 118 * SCALE as i32,
+            height: 60 * SCALE as i32,
+        };
+        assert_eq!(node_text_area_x(narrow), (22 * SCALE, 128 * SCALE));
         assert_eq!(
-            node_label_available_width("unknown", "label", 100.0, false),
-            None
+            node_text_area_x(narrow).1 - node_text_area_x(narrow).0,
+            106 * SCALE
         );
+
+        let wide = GeometryBox {
+            width: 220 * SCALE as i32,
+            ..narrow
+        };
         assert_eq!(
-            node_label_available_width("workflow", "unknown", 100.0, false),
-            None
+            node_text_area_x(wide).1 - node_text_area_x(wide).0,
+            208 * SCALE
         );
     }
 

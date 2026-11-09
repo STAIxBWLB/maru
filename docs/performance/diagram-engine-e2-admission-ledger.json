@@ -83011,5 +83011,21 @@
         "reason": "Pinned readable-v2 node a is x=48..144; its waypoint at x=151 makes a 7px stub below the 8px floor. E2 node a is x=46..142, giving a 9px stub for the same waypoint."
       }
     }
-  ]
+  ],
+  "priorityDisposition": {
+    "date": "2026-11-10",
+    "referenceOnly": true,
+    "mergeGate": "Maru emitted-text readability and bounded routing work; Archify parity is not a gate",
+    "notPursued": [
+      {
+        "rule": "workflow-v2-column-left-shift",
+        "disposition": "The 2px source/E2 column-position difference remains reference evidence; no source-offset matching change."
+      },
+      {
+        "rule": "lifecycle-v2-brand-minimum-font",
+        "disposition": "No 8px-versus-9px brand-rail tuning. Node-label admission now checks actual emitted boxes instead of scaling to hypothetical minimum fonts."
+      }
+    ],
+    "frozenModelDispositions": "The original case inputs, oracle verdicts, source-stamped geometry and remaining model dispositions are final reference evidence; they are not recomputed as a parity gate for the readability change."
+  }
 }

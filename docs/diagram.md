@@ -1200,6 +1200,16 @@ scene, including every successfully routed edge. Input decoding, E1 validity
 and coordinate overflow can still prevent placement. Font replacement and pin
 notices remain nonfatal. No SVG or visual-review success is implied.
 
+The current admission priority is Maru output readability, including mixed Korean
+and English. Node-label checks use the Noto box actually emitted at its resolved
+font size, within the node text area, rather than a hypothetical minimum font or
+legacy character-count budget. Resolved node rectangles have no existing Noto
+wrap/shrink pass; an overflow keeps its geometry and names the required text or
+node-size change. Archify comparisons remain reference evidence, not a merge or
+E4 admission gate. The historical model ledger below is final at its stamped
+source; the 2px workflow-column and lifecycle rail minimum-font differences are
+not pursued as compatibility work.
+
 Route-quality findings distinguish the offending geometry's provenance.
 Explicit `via` points, channel coordinates, label-position controls, endpoint
 pins and authored side assertions can produce blocking refusals. A wholly
@@ -1209,7 +1219,7 @@ retained. Authorship is checked at the offending piece: an authored side fixes
 endpoint direction but does not turn every middle corridor or an engine-chosen
 coordinate along that side into user-authored geometry. A label pin constrains
 the label, not the whole route. A mixed pair refuses at and names the authored
-route. For workflow v2, a corridor witness ending at a first/last via junction
+route. For showcase families, a corridor witness ending at a first/last via junction
 explicitly present on at least two distinct raw edges is an authored endpoint
 piece and refuses on the owning edge; an internal via does not own an upstream
 detour or a separate piece. Node, text, frame, source-budget and input errors remain blocking.

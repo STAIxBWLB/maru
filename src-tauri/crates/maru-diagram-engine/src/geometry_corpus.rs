@@ -231,6 +231,15 @@ mod tests {
         assert_eq!(report["cases"][1]["ok"], false);
         assert_eq!(report["cases"][0]["hash"].as_str().unwrap().len(), 64);
         assert_eq!(report["repeatCheck"], true);
+        assert_eq!(report["benchmarkWork"]["viaBenchmarkWork"]["nodes"], 26);
+        assert_eq!(report["benchmarkWork"]["viaBenchmarkWork"]["routes"], 1);
+        assert_eq!(report["benchmarkWork"]["viaBenchmarkWork"]["viaPoints"], 16);
+        assert!(
+            report["benchmarkWork"]["viaBenchmarkWork"]["stats"]["endpointMaskEvaluations"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
     }
 
     #[test]

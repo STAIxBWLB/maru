@@ -133,60 +133,6 @@ fn view_box(spec: &Value, family: Family) -> Option<(f64, f64)> {
     }
 }
 
-fn node_minimum_font(family: Family, role: &str, version: u64) -> f64 {
-    match (family.name, role) {
-        ("architecture", "label") => 8.0,
-        ("workflow", "label") => 9.0,
-        ("sequence", "label") => 8.0,
-        ("dataflow", "label") => 8.0,
-        ("lifecycle", "label") if version == 2 => 9.0,
-        ("lifecycle", "label") => 8.0,
-        ("lifecycle", "sublabel" | "tag") if version == 2 => 7.0,
-        ("architecture", "sublabel") => 6.0,
-        ("architecture", "tag") => 6.0,
-        ("workflow", "sublabel" | "tag") => 6.0,
-        ("sequence", "sublabel") => 6.0,
-        ("dataflow", "sublabel" | "tag") => 6.0,
-        ("lifecycle", "sublabel" | "tag") => 6.0,
-        _ => 6.0,
-    }
-}
-
-fn authored_width(family: Family, value: &Value, version: u64, spec: &Value) -> Option<f64> {
-    match family.name {
-        "architecture" => value
-            .get("size")
-            .and_then(Value::as_array)
-            .and_then(|size| size.first())
-            .and_then(Value::as_f64)
-            .or(Some(120.0)),
-        "workflow" => Some(number(value, "width").unwrap_or(92.0)),
-        "sequence" => {
-            let width = spec["meta"]["viewBox"][0].as_f64().unwrap_or(920.0);
-            let width = super::px(width).ok()?;
-            let columns = super::source_budgets::sequence_columns(
-                i64::from(width),
-                items(spec, "participants").len(),
-                text(&spec["meta"], "column_fit") == Some("spread"),
-            );
-            Some(columns.participant_width as f64 / 64.0)
-        }
-        "dataflow" => Some(number(value, "width").unwrap_or(112.0)),
-        "lifecycle" => {
-            let fallback = if version == 2 {
-                140.0
-            } else if text(value, "lane") == Some("main") || text(value, "lane") == Some("terminal")
-            {
-                118.0
-            } else {
-                126.0
-            };
-            Some(number(value, "width").unwrap_or(fallback))
-        }
-        _ => None,
-    }
-}
-
 fn label_role(label: &GeometryLabel, target_id: &str) -> Option<&'static str> {
     let prefix = format!("node:{target_id}:");
     let id = label.id.as_deref()?;
@@ -206,20 +152,19 @@ fn check_node_labels(
     nodes_by_id: &BTreeMap<String, &GeometryNode>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let version = spec
-        .get("schema_version")
-        .and_then(Value::as_u64)
-        .unwrap_or(1);
     let indices = source_indices(spec, family.node_collection);
     for (id, node) in nodes_by_id {
         let Some(index) = indices.get(id).copied() else {
             continue;
         };
         let source = &items(spec, family.node_collection)[index];
-        let Some(width) = authored_width(family, source, version, spec) else {
-            continue;
-        };
-        let has_brand = source.get("brand").is_some_and(|value| !value.is_null());
+        let (text_area_left, text_area_right) =
+            super::source_budgets::node_text_area_x(node.bounds);
+        let node_top = i64::from(node.bounds.y);
+        let node_bottom = node_top + i64::from(node.bounds.height);
+        // The E2 node producer emits fixed-size Noto lines and has no fit or
+        // wrap pass. Admission checks that actual box instead of scaling it
+        // down to a hypothetical minimum font that the scene never emitted.
         for label in geometry
             .labels
             .iter()
@@ -228,23 +173,23 @@ fn check_node_labels(
             let Some(role) = label_role(label, id) else {
                 continue;
             };
-            let Some(available) = super::source_budgets::node_label_available_width(
-                family.name,
-                role,
-                width,
-                has_brand && role == "label",
-            ) else {
-                continue;
-            };
             let font_size = f64::from(label.font_size) / UNITS;
             if font_size <= 0.0 {
                 continue;
             }
-            let min_font = node_minimum_font(family, role, version);
-            let required = fixed(label.bounds.width) * min_font / font_size;
+            let label_left = i64::from(label.bounds.x);
+            let label_right = label_left + i64::from(label.bounds.width);
+            let label_top = i64::from(label.bounds.y);
+            let label_bottom = label_top + i64::from(label.bounds.height);
+            let overflow_left = (text_area_left - label_left).max(0);
+            let overflow_right = (label_right - text_area_right).max(0);
+            let overflow_top = (node_top - label_top).max(0);
+            let overflow_bottom = (label_bottom - node_bottom).max(0);
+            let overflow_x = overflow_left.max(overflow_right);
+            let overflow_y = overflow_top.max(overflow_bottom);
             #[cfg(any(test, feature = "geometry-corpus"))]
             crate::work::record_constraint_evaluation();
-            if required > available {
+            if overflow_x > 0 || overflow_y > 0 {
                 let combined = family.name == "lifecycle"
                     && role == "sublabel"
                     && source.get("step").is_some();
@@ -260,10 +205,16 @@ fn check_node_labels(
                     "geometry-label-fit",
                     path,
                     format!(
-                        "{field} text for {:?} needs about {:.0}px at the {:.0}px minimum, but the node provides {:.0}px",
-                        id, required, min_font, available
+                        "emitted Noto {field} box for {:?} is {:.3}px wide by {:.3}px high at {:.1}px and extends {:.3}px horizontally / {:.3}px vertically beyond the node text area (available width {:.3}px)",
+                        id,
+                        fixed(label.bounds.width),
+                        fixed(label.bounds.height),
+                        font_size,
+                        overflow_x as f64 / UNITS,
+                        overflow_y as f64 / UNITS,
+                        (text_area_right - text_area_left) as f64 / UNITS
                     ),
-                    format!("shorten the {field}, or widen the node while preserving its authored text"),
+                    format!("shorten the {field} or increase the node width/height so its emitted Noto box fits inside the text area"),
                 );
             }
         }

@@ -8,15 +8,28 @@
   "baseline": {
     "astarExpandedStates": 22167,
     "routeEvaluations": 999,
-    "constraintEvaluations": 3332334
+    "constraintEvaluations": 3332334,
+    "endpointMaskEvaluations": 0
   },
   "ceiling": {
     "astarExpandedStates": 27709,
     "routeEvaluations": 1249,
-    "constraintEvaluations": 4165418
+    "constraintEvaluations": 4165418,
+    "endpointMaskEvaluations": 0
   },
   "totalBaseline": 3355500,
   "totalCeiling": 4194375,
+  "authoredVia": {
+    "fixturePath": "testdata/bench-authored-via.json",
+    "fixtureSha256": "0b0927c2e6975e89037d634c353888725104a9f7649a3db9a086de47749396b1",
+    "nodes": 26,
+    "minimumLabels": 26,
+    "routes": 1,
+    "viaPoints": 17,
+    "minimumRouteSegments": 10,
+    "endpointMaskPassesPerNodeOrLabelCeiling": 2,
+    "totalOperationsPerNodeSegmentCeiling": 256
+  },
   "scope": "deterministic logical operations, not elapsed time; normal geometry builds omit all hooks",
   "recordedCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-work"
 }
