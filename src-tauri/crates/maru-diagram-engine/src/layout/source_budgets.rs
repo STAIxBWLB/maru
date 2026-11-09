@@ -43,6 +43,34 @@ pub(crate) struct SequenceColumns {
     pub pitch: i64,
 }
 
+/// Renderer-compatible available width for each node-label role.
+///
+/// These are source admission budgets, separate from the SDK's measured Noto
+/// text width. Brand top rails reserve space only for the primary label.
+pub(crate) fn node_label_available_width(
+    family: &str,
+    role: &str,
+    width: f64,
+    has_brand: bool,
+) -> Option<f64> {
+    match role {
+        "label" if has_brand => Some(width - 48.0),
+        "label" if family == "architecture" => Some(width + 8.0),
+        "label" if matches!(family, "workflow" | "sequence" | "dataflow" | "lifecycle") => {
+            Some(width + 6.0)
+        }
+        "sublabel" | "tag"
+            if matches!(
+                family,
+                "architecture" | "workflow" | "sequence" | "dataflow" | "lifecycle"
+            ) =>
+        {
+            Some(width - 8.0)
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn sequence_columns(
     view_width: i64,
     participant_count: usize,
@@ -382,6 +410,40 @@ pub(crate) fn lifecycle_frame(spec: &Value, geometry: &GeometryDocument) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_label_budgets_follow_role_and_brand_rail() {
+        for (family, width, expected_primary) in [
+            ("architecture", 120.0, 128.0),
+            ("workflow", 92.0, 98.0),
+            ("sequence", 86.0, 92.0),
+            ("dataflow", 112.0, 118.0),
+            ("lifecycle", 118.0, 124.0),
+        ] {
+            assert_eq!(
+                node_label_available_width(family, "label", width, false),
+                Some(expected_primary),
+                "{family} primary"
+            );
+            assert_eq!(
+                node_label_available_width(family, "label", width, true),
+                Some(width - 48.0),
+                "{family} branded primary"
+            );
+            assert_eq!(
+                node_label_available_width(family, "sublabel", width, true),
+                Some(width - 8.0),
+                "{family} branded sublabel"
+            );
+            assert_eq!(
+                node_label_available_width(family, "tag", width, true),
+                Some(width - 8.0),
+                "{family} branded tag"
+            );
+        }
+        assert_eq!(node_label_available_width("unknown", "label", 100.0, false), None);
+        assert_eq!(node_label_available_width("workflow", "unknown", 100.0, false), None);
+    }
 
     #[test]
     fn fixed_sequence_columns_keep_renderer_minimums_and_spread_rounding() {

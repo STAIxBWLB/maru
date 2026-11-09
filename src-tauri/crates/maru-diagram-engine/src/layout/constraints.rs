@@ -220,13 +220,20 @@ fn check_node_labels(
             continue;
         };
         let has_brand = source.get("brand").is_some_and(|value| !value.is_null());
-        let available = width - 8.0 - if has_brand { 26.0 } else { 0.0 };
         for label in geometry
             .labels
             .iter()
             .filter(|label| label.target_id == *id)
         {
             let Some(role) = label_role(label, id) else {
+                continue;
+            };
+            let Some(available) = super::source_budgets::node_label_available_width(
+                family.name,
+                role,
+                width,
+                has_brand && role == "label",
+            ) else {
                 continue;
             };
             let font_size = f64::from(label.font_size) / UNITS;

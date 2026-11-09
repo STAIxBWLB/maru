@@ -44,6 +44,8 @@ fn exact_boundaries_agree_and_model_differences_are_reported() {
     let mut failures = Vec::new();
     let mut exact = 0;
     let mut models = BTreeMap::<String, serde_json::Value>::new();
+    let include_case_ledger = std::env::var_os("MARU_E2_BOUNDARY_CASE_LEDGER").is_some();
+    let mut model_case_ledger = Vec::new();
     for case in corpus.boundary_cases {
         let expected = case.geometry_comparison;
         let report = layout_json(&serde_json::json!({"specJson":expected.input_json}).to_string());
@@ -81,6 +83,17 @@ fn exact_boundaries_agree_and_model_differences_are_reported() {
                 }
             }
             "model-difference" => {
+                if include_case_ledger {
+                    model_case_ledger.push(serde_json::json!({
+                        "id":&case.id,
+                        "category":&case.boundary.category,
+                        "inputJson":&expected.input_json,
+                        "oracleAccepted":expected.accepted,
+                        "engineAccepted":report.ok,
+                        "diagnostics":&report.diagnostics,
+                        "geometry":&report.geometry,
+                    }));
+                }
                 let entry=models.entry(case.boundary.category).or_insert_with(||serde_json::json!({"cases":0,"agreements":0,"oracleGreenEngineRefused":0,"oracleRedEngineAdmitted":0,"examples":[]}));
                 entry["cases"] = serde_json::json!(entry["cases"].as_u64().unwrap() + 1);
                 let key = if expected.accepted == report.ok {
@@ -103,6 +116,12 @@ fn exact_boundaries_agree_and_model_differences_are_reported() {
         "ENGINE_E2_BOUNDARIES {}",
         serde_json::json!({"exactCases":exact,"exactFailures":failures.len(),"modelCategories":models})
     );
+    if include_case_ledger {
+        println!(
+            "ENGINE_E2_BOUNDARY_CASE_LEDGER {}",
+            serde_json::json!(model_case_ledger)
+        );
+    }
     assert!(
         failures.is_empty(),
         "Exact geometry boundary drift:\n{}",
