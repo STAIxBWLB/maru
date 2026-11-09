@@ -1234,7 +1234,6 @@ fn pair_quality(
 ) {
     let workflow_v2 =
         f.name == "workflow" && spec.get("schema_version").and_then(Value::as_u64) == Some(2);
-    let via_counts = raw_via_endpoint_counts(routes);
     for a in routes {
         for b in routes {
             if a.index == b.index {
@@ -1272,6 +1271,7 @@ fn pair_quality(
     if !showcase {
         return;
     }
+    let via_counts = raw_via_endpoint_counts(routes);
     arrows(f, routes, workflow_v2, out);
     for (i, a) in routes.iter().enumerate() {
         for b in routes.iter().skip(i + 1) {
