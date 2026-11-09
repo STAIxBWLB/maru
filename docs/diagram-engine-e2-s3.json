@@ -1,66 +1,87 @@
 {
   "schemaVersion": 1,
   "stage": "E2 S3 geometry rules, deterministic test canvas and measurements",
-  "sdkTree": "bc9979c89142bd6ef8b775629573e86296197101",
+  "sdkTree": "feb11af649c5cb09142871e76136fa6db967661c",
   "execution": {
     "scope": "remote Linux x64 reproduction, not hosted acceptance",
     "rust": "1.98.0",
     "cargoBuildJobs": 2,
     "browserWorkers": 1,
-    "hostedCi": "pending"
+    "hostedCi": "pending",
+    "sourceCommit": "6e0d7a54344ace4eb8b31f62cc2b2f76e91cb377",
+    "sourceScope": "committed source; final documentation-only receipt update leaves SDK tree unchanged"
   },
   "checks": {
-    "coreUnit": 186,
+    "coreUnit": 187,
     "documentDifferential": 2,
-    "geometryDifferential": 1,
-    "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
+    "geometryDifferential": 2,
+    "clippy": "passed geometry/typegen/geometry-corpus all targets -D warnings",
     "bindingDrift": "passed",
     "sdkBoundary": "passed",
     "productIsolation": "normal JS and actual WASM exports omit scene_corpus_hashes; normal library omits canvas bridge",
     "browser": {
-      "startTime": "2026-11-09T03:54:14.878Z",
-      "duration": 16259.627,
       "expected": 4,
       "skipped": 0,
       "unexpected": 0,
-      "flaky": 0
+      "flaky": 0,
+      "scope": "remote Chromium, retry 0; final source tree"
     },
     "local": {
       "typecheck": "tsc -b passed",
-      "applicableEslint": "passed",
-      "focusedVitest": 36
+      "applicableEslint": "passed; script test files are outside the ESLint config",
+      "focusedVitest": 16
     },
     "geometryBoundaries": 1,
     "metricModelControls": 3,
     "browserRetryPolicy": "0, including CI; performance misses are not retried",
     "geometryGates": 1,
-    "integrationTests": 13,
+    "integrationTests": 15,
     "sequencePinRegressions": 4,
-    "workflowPinRegressions": 1
+    "workflowPinRegressions": 1,
+    "workBudget": 1,
+    "structuralDelta": {
+      "gating": 2,
+      "scope": "counter hooks increased normalized similarity of existing distinct contained/overlaps predicates; no new predicate clone, existing bodies preserved; verbosity-only and new-symbol rows also reported"
+    },
+    "fullVerify": {
+      "command": "make verify",
+      "scope": "remote Linux x64, CPU affinity 2, CARGO_BUILD_JOBS=2 and RUST_TEST_THREADS=2; source commit with identical final SDK tree",
+      "sourceCommit": "6e0d7a54344ace4eb8b31f62cc2b2f76e91cb377",
+      "exitCode": 0,
+      "typescriptFiles": 292,
+      "typescriptTests": 2999,
+      "rustPassed": 2178,
+      "rustIgnored": 3,
+      "rustFailed": 0,
+      "fmt": "passed",
+      "clippy": "passed",
+      "frontendBuild": "passed",
+      "commandIsolation": 390
+    }
   },
   "sceneAgreement": {
-    "scope": "309 strict parity cases + 309 layered boundary cases + 3 seeded dense scenes; every unchanged scene repeated",
+    "scope": "311 strict parity cases + 309 layered boundary cases + 3 seeded dense scenes; every unchanged scene repeated",
     "nativeWasmBytesEqual": true,
-    "reportSha256": "1ecdadb8b0f96549f6b0129c7144e489d4880050bec2a9613d4c0125e433ff46",
-    "reportBytes": 168178,
-    "corpusSha256": "a2d6ae1a2af70b19187ebe000db5fd6787689d7bb669c3dd80c8b98fe897da51",
-    "cases": 621,
-    "successfulReports": 218,
+    "reportSha256": "dbce55df8d4a9a369f5753cddea5dd4316d371194839993794cbb4d21d1aff0e",
+    "reportBytes": 168995,
+    "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
+    "cases": 623,
+    "successfulReports": 220,
     "nonSuccessReports": 403,
     "hostedLinuxMacosWindowsAndWasm": "pending"
   },
   "measurements": {
     "productionPayload": {
       "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
-      "buildMs": 19857.048628999997,
-      "testHarnessBuildMs": 345.5044540000017,
+      "buildMs": 19653.542962,
+      "testHarnessBuildMs": 355.3835370000015,
       "platform": "linux",
       "arch": "x64",
       "sizes": [
         {
           "name": "engine-e0.js",
           "bytes": 1307013,
-          "gzipBytes": 324220,
+          "gzipBytes": 324219,
           "path": "validation"
         },
         {
@@ -70,30 +91,30 @@
           "path": "lazy-transport"
         },
         {
-          "name": "engineGeometry-BpT4NRC3.js",
-          "bytes": 5078595,
-          "gzipBytes": 1643894,
+          "name": "engineGeometry-nT8-DlRI.js",
+          "bytes": 5079291,
+          "gzipBytes": 1638804,
           "path": "lazy-geometry-metrics"
         }
       ],
-      "gzipBytes": 324220,
-      "validationGzipBytes": 324220,
-      "lazyGeometryGzipBytes": 1643894,
+      "gzipBytes": 324219,
+      "validationGzipBytes": 324219,
+      "lazyGeometryGzipBytes": 1638804,
       "lazyTransportGzipBytes": 122,
-      "totalGzipBytes": 1968236
+      "totalGzipBytes": 1963145
     },
     "geometryCold": {
       "scope": "fresh Chromium process; exact emitted production entry already imported; cache-disabled geometry artifact HTTP fetch/parse plus bindings import and WASM compile/instantiate; no Vite transform or first layout in interval",
       "network": "same-origin loopback Node HTTP server; exact emitted artifact bytes, identity transfer without gzip or rewriting, no artificial throttling",
-      "coldLoadMs": 259.5999999642372,
+      "coldLoadMs": 259.60000002384186,
       "resources": [
         {
-          "path": "/.engine-e0/browser/engineGeometry-BpT4NRC3.js",
-          "durationMs": 10.199999988079071,
-          "transferBytes": 5078895,
-          "encodedBodyBytes": 5078595,
-          "decodedBodyBytes": 5078595,
-          "emittedFileBytes": 5078595
+          "path": "/.engine-e0/browser/engineGeometry-nT8-DlRI.js",
+          "durationMs": 12.600000023841858,
+          "transferBytes": 5079591,
+          "encodedBodyBytes": 5079291,
+          "decodedBodyBytes": 5079291,
+          "emittedFileBytes": 5079291
         }
       ]
     },
@@ -101,32 +122,32 @@
       "scope": "production wasm-layout; pre-serialized request; facade request serialization, layout+routing and scene JSON parse; validation included; 20 warm samples after one first layout",
       "nodes": 1000,
       "edges": 999,
-      "firstLayoutMs": 389.19999998807907,
+      "firstLayoutMs": 385.9000000357628,
       "durationsMs": [
-        309.5,
-        305.5,
+        304.9000000357628,
+        303.60000002384186,
+        301.5999999642372,
+        301,
+        302.39999997615814,
+        301.60000002384186,
+        300.19999998807907,
+        300,
         301.10000002384186,
-        302,
         301.69999998807907,
-        300.4000000357628,
-        301.80000001192093,
-        299.39999997615814,
-        301.0999999642372,
-        299.80000001192093,
-        300.5999999642372,
-        298.5,
-        300.69999998807907,
-        299.5,
-        299,
-        300.5,
-        299.19999998807907,
-        301.2000000476837,
-        298.9000000357628,
-        299.5999999642372
+        301.10000002384186,
+        301.19999998807907,
+        303.80000001192093,
+        301.60000002384186,
+        303.5999999642372,
+        300,
+        300.7999999523163,
+        301.39999997615814,
+        300.39999997615814,
+        300.10000002384186
       ],
-      "medianMs": 300.5499999821186,
-      "p95Ms": 305.5,
-      "maxMs": 309.5,
+      "medianMs": 301.2999999821186,
+      "p95Ms": 303.80000001192093,
+      "maxMs": 304.9000000357628,
       "targetMs": 200,
       "targetMet": false,
       "targetScope": "E4 requirement before the canvas switch",
@@ -137,20 +158,20 @@
           "nodes": 50,
           "edges": 49,
           "durationsMs": [
+            4,
             4.100000023841858,
             4.099999964237213,
+            4,
             4.100000023841858,
-            4,
-            4,
             4,
             4,
             4.099999964237213,
-            4,
-            4,
-            4,
+            4.300000011920929,
             4.100000023841858,
+            4.099999964237213,
             4,
-            4,
+            3.899999976158142,
+            4.100000023841858,
             4.100000023841858,
             4.099999964237213,
             4,
@@ -158,38 +179,38 @@
             4,
             4
           ],
-          "medianMs": 4,
+          "medianMs": 4.099999964237213,
           "p95Ms": 4.100000023841858,
-          "maxMs": 4.100000023841858
+          "maxMs": 4.300000011920929
         },
         {
           "nodes": 200,
           "edges": 199,
           "durationsMs": [
-            22.19999998807907,
-            22,
-            22.100000023841858,
-            22.100000023841858,
-            22.099999964237213,
-            22.19999998807907,
-            22.100000023841858,
-            22,
-            26.69999998807907,
+            22.5,
+            22.400000035762787,
+            22.899999976158142,
             22.19999998807907,
             22.19999998807907,
-            22,
+            22.69999998807907,
+            23.200000047683716,
+            22.399999976158142,
+            26.600000023841858,
             22.30000001192093,
-            21.899999976158142,
-            21.899999976158142,
-            22.100000023841858,
-            22,
             22.19999998807907,
+            22.30000001192093,
+            22.19999998807907,
+            22.100000023841858,
             22.099999964237213,
-            23.100000023841858
+            22.200000047683716,
+            22.19999998807907,
+            22.19999998807907,
+            22.100000023841858,
+            22.099999964237213
           ],
-          "medianMs": 22.100000023841858,
-          "p95Ms": 23.100000023841858,
-          "maxMs": 26.69999998807907
+          "medianMs": 22.200000017881393,
+          "p95Ms": 23.200000047683716,
+          "maxMs": 26.600000023841858
         }
       ]
     },
@@ -198,79 +219,79 @@
         "nodes": 50,
         "bytes": 5217,
         "durationsMs": [
-          1.399999976158142,
-          1.100000023841858,
-          1.199999988079071,
-          0.8999999761581421,
+          1.300000011920929,
           1,
-          0.9000000357627869,
+          1.300000011920929,
+          1,
+          1,
           0.699999988079071,
-          0.699999988079071,
+          0.7000000476837158,
+          0.5999999642372131,
           0.6000000238418579,
           0.5999999642372131,
           0.6000000238418579,
-          0.5,
-          0.699999988079071,
-          0.5,
           0.6000000238418579,
           0.5999999642372131,
-          0.40000003576278687,
-          0.5999999642372131,
-          0.5,
-          0.5,
-          0.5,
-          0.5,
-          0.6000000238418579,
           0.3999999761581421,
+          0.6000000238418579,
+          0.5,
+          0.5,
+          0.5999999642372131,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
           0.5,
           0.5,
           0.40000003576278687,
           0.5,
-          0.5999999642372131,
-          0.40000003576278687
+          0.5,
+          0.5,
+          0.5,
+          0.5
         ],
-        "medianMs": 0.5999999642372131,
-        "p95Ms": 1.199999988079071,
-        "maxMs": 1.399999976158142
+        "medianMs": 0.5499999821186066,
+        "p95Ms": 1.300000011920929,
+        "maxMs": 1.300000011920929
       },
       {
         "nodes": 1000,
         "bytes": 106760,
         "durationsMs": [
-          11.300000011920929,
-          8.5,
-          8.299999952316284,
-          8.300000011920929,
-          8.100000023841858,
-          7.899999976158142,
-          7.900000035762787,
+          10.800000011920929,
           8,
-          7.899999976158142,
+          7.800000011920929,
+          7.799999952316284,
           7.600000023841858,
-          7.599999964237213,
+          7.5,
           7.300000011920929,
+          7.5,
+          7.5,
+          7.699999988079071,
           7.399999976158142,
-          7.400000035762787,
           7.300000011920929,
-          7.399999976158142,
           7.300000011920929,
           7.199999988079071,
           7.300000011920929,
           7.300000011920929,
-          7.299999952316284,
-          7.200000047683716,
-          7.299999952316284,
-          7.200000047683716,
-          7.299999952316284,
+          7.300000011920929,
+          7.199999988079071,
+          7.399999976158142,
+          7.300000011920929,
+          7.099999964237213,
+          7.5,
+          7.199999988079071,
           7.400000035762787,
+          7.399999976158142,
+          7.300000011920929,
+          7.300000011920929,
           7.199999988079071,
           7.300000011920929,
-          7.300000011920929,
-          7.199999988079071
+          7.300000011920929
         ],
-        "medianMs": 7.3499999940395355,
-        "p95Ms": 8.5,
-        "maxMs": 11.300000011920929
+        "medianMs": 7.300000011920929,
+        "p95Ms": 8,
+        "maxMs": 10.800000011920929
       }
     ],
     "canvas": {
@@ -286,16 +307,17 @@
   },
   "budgetProposal": {
     "targetMs": 200,
-    "remoteP95Ms": 305.5,
+    "remoteP95Ms": 303.80000001192093,
     "targetMet": false,
     "proposedMs": 400,
-    "status": "Owner decision 2026-11-09: accepted E2 budget 400 ms p95 in hosted Chromium",
+    "status": "Owner-approved 400 ms E2 budget reviewed from hosted samples; PR timing is reported data and deterministic work blocks regressions",
     "scope": "1000 nodes and 999 real edges, request serialization plus validation/layout/routing and scene JSON parsing; same workload, no missing-route allowance",
     "acceptedBudgetMs": 400,
     "targetScope": "E4 requirement (#552 AC6) before canvas switch",
     "ownerDecisionDate": "2026-11-09",
     "hostedBaselineBudgetMet": true,
-    "remoteBudgetMet": true
+    "remoteBudgetMet": true,
+    "perPrWallClockAssertion": false
   },
   "initialReproduction": {
     "sdkTree": "e9c7093148f46c68bf1cff3e45068dadb83de2c0",
@@ -446,15 +468,15 @@
     "E2 accepted budget is400ms p95 in hosted Chromium. The sub200ms E4 requirement remains unmet."
   ],
   "previousReproduction": {
-    "sdkTree": "cb1934d5baf3722f48df0055712c4c1dc89468af",
-    "layoutP95Ms": 312.69999998807907,
-    "validationGzipBytes": 324221,
-    "lazyGeometryGzipBytes": 1640339,
-    "scope": "previous source-bound reproduction before label-ID and K1-K5 changes; not current-head acceptance"
+    "sdkTree": "bc9979c89142bd6ef8b775629573e86296197101",
+    "layoutP95Ms": 305.5,
+    "validationGzipBytes": 324220,
+    "lazyGeometryGzipBytes": 1643894,
+    "scope": "previous source-bound reproduction before test-only logical-work instrumentation; not current-head acceptance"
   },
   "boundaryEvidence": {
     "scope": "separate synthetic evidence; exact layer gates both directions, model layer reports without failing; does not change AC1 membership",
-    "strictParityCases": 309,
+    "strictParityCases": 311,
     "boundaryCases": 309,
     "rendererRefusalSites": 132,
     "exactCases": 208,
@@ -1136,5 +1158,79 @@
     "pinChecksUsePlacedBounds": true,
     "sequencePinTests": 4,
     "workflowPinTests": 1
+  },
+  "hostedVarianceSamples": [
+    {
+      "runId": 42552702466,
+      "url": "https://github.com/STAIxBWLB/maru/actions/runs/42552702466",
+      "headCommit": "7b27f5c6a50cb1ad336f22d7801f511779843381",
+      "conclusion": "success",
+      "layoutP95Ms": 239.8,
+      "budgetMs": 400,
+      "budgetMet": true
+    },
+    {
+      "runId": 42559386644,
+      "url": "https://github.com/STAIxBWLB/maru/actions/runs/42559386644",
+      "headCommit": "ea2aa242bb2c044c14d816b81264a30623b13f81",
+      "conclusion": "failure",
+      "layoutP95Ms": 407.9,
+      "layoutMedianMs": 389.8,
+      "coldLoadMs": 410,
+      "budgetMs": 400,
+      "budgetMet": false,
+      "scope": "shared-runner variance; old per-PR wall-clock assertion failed"
+    }
+  ],
+  "deterministicWorkGate": {
+    "scope": "test/corpus feature only; checked-in unmodified bench-1000.json; counters are per-thread logical operations, not elapsed time",
+    "definitionVersion": 1,
+    "measurement": {
+      "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+      "nodes": 1000,
+      "routes": 999,
+      "stats": {
+        "astarExpandedStates": 22167,
+        "constraintEvaluations": 3332334,
+        "routeEvaluations": 999
+      },
+      "total": 3355500
+    },
+    "baseline": {
+      "astarExpandedStates": 22167,
+      "routeEvaluations": 999,
+      "constraintEvaluations": 3332334
+    },
+    "ceiling": {
+      "astarExpandedStates": 27709,
+      "routeEvaluations": 1249,
+      "constraintEvaluations": 4165418
+    },
+    "totalCeiling": 4194375,
+    "headroomPercent": 25,
+    "nativeWasmCountsIdentical": true,
+    "hostedThreeOsCounts": "pending",
+    "counted": "live A* expansions including goal, route_points calls, logical constraint predicates and collection-pair evaluations",
+    "excluded": "wall-clock time, allocation/hashbucket/lookup/glyph/sqrt internals; no hooks compiled into normal geometry builds",
+    "ceilingPath": "src-tauri/crates/maru-diagram-engine/testdata/work-budget.json",
+    "e4Requirement": "sub200ms needs a dedicated stable performance environment (#552 AC6)"
+  },
+  "lifecycleV2Regression": {
+    "sourceHelper": "source_budgets::lifecycle_state_rects",
+    "sourceScale": 128,
+    "distanceScale": 64,
+    "oracleAcceptedCases": [
+      "e2-lifecycle-geometry-route-distance-v2-cross-row-same-side-positive",
+      "e2-lifecycle-geometry-route-distance-v2-width-aware-column-positive"
+    ],
+    "coverage": "populated-lane rows, width-aware columns, shared pin overrides; original oracle verdicts retained",
+    "wideFirstColumnPx": 200,
+    "previousDuplicateModelSpanPx": 16,
+    "sharedSourceGapPx": 64
+  },
+  "followUp": {
+    "issue": 560,
+    "url": "https://github.com/STAIxBWLB/maru/issues/560",
+    "scope": "remaining model/admission case audit and genuine long-tail defects, blocks E4; no implementation in this PR"
   }
 }

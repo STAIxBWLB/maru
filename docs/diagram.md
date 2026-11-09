@@ -1239,9 +1239,10 @@ module fetch/parse, bindings import and WASM
 compile/instantiate, excluding the first layout's initialization. Warm layout
 timing includes request serialization, validation, placement, routing and scene
 JSON parsing. The 1,000-node case has 999 real relationships; missing or failed
-routes invalidate the measurement. The accepted E2 budget is strictly below
-400 ms p95; the sub-200 ms E4 requirement stays separately reported. The harness
-never retries to convert an over-budget sample into a pass.
+routes invalidate the measurement. The 400 ms E2 budget is reported as
+`budgetMet` for hosted-sample evaluation; the sub-200 ms E4 requirement stays
+separately reported for a dedicated stable performance environment. The harness
+uses retry 0 and records each sample as measured.
 
 
 Renderer compatibility includes source-format budgets, not just the auto-grown
@@ -1264,12 +1265,14 @@ obstacle-cache amplification. No route or assertion is omitted for speed.
 
 #### S3 evidence and automatic-route notices
 
-Remote reproduction at SDK tree `bc9979c8`: 186 core tests, two document
-differentials, the geometry and layered-boundary differentials, and three
-metric-model/control tests passed. The gate/adjustment coverage and five pin-regression integration tests also passed. Clippy, formatting, binding drift
-and the SDK boundary check passed. All 621 combined native/test-WASM scene
+Remote reproduction at SDK tree `feb11af6`: 187 core tests, two document
+differentials, two geometry differential/regression tests, the layered-boundary
+differential and three metric-model/control tests passed. The gate/adjustment
+coverage, logical-work ceiling and five pin-regression integration tests also
+passed. Clippy, formatting, binding drift
+and the SDK boundary check passed. All 623 combined native/test-WASM scene
 reports are byte-identical,
-including 309 AC1 parity inputs, 309 separate boundary inputs and three seeded
+including 311 AC1 parity inputs, 309 separate boundary inputs and three seeded
 dense scenes. Every expected equivalent code must exist in the family rule
 registry and be emitted, rather than accepting any one matching code. The three
 former E1 geometry deferrals now agree with the renderer. The eight public
@@ -1278,38 +1281,65 @@ evidence-stripped renderer verdicts, as in E1; no oracle-green expectation is
 replaced by an engine refusal.
 
 All four Chromium/WASM probes passed without a retry. Local typecheck,
-applicable ESLint and 36 focused tests passed. The test canvas remains isolated
-from DiagramMode. No local Cargo build/test, full verification or native suite
-was run.
+applicable ESLint and 16 focused tests passed. The test canvas remains isolated
+from DiagramMode. Remote `make verify` passed: 2,999 TypeScript tests,
+2,178 Rust tests (three ignored), fmt/clippy, frontend build and all 390
+command-isolation checks. No local Cargo build/test or native suite was run.
 
 | Remote Chromium reproduction | Result |
 | --- | --- |
-| Validation entry and static imports, gzip | 324,220 B |
-| Separate lazy geometry/metrics chunk, gzip | 1,643,894 B |
-| Exact emitted geometry HTTP response, identity bytes | 5,078,595 B |
+| Validation entry and static imports, gzip | 324,219 B |
+| Separate lazy geometry/metrics chunk, gzip | 1,638,804 B |
+| Exact emitted geometry HTTP response, identity bytes | 5,079,291 B |
 | Fresh-process lazy fetch/parse/compile/instantiate | 259.6 ms |
-| 1,000-node / 999-edge first layout | 389.2 ms |
-| Same workload, 20 warm samples, median / p95 / max | 300.55 / 305.5 / 309.5 ms |
-| Validation-only 1,000-node p95 | 8.5 ms |
+| 1,000-node / 999-edge first layout | 385.9 ms |
+| Same workload, 20 warm samples, median / p95 / max | 301.3 / 303.8 / 304.9 ms |
+| Validation-only 1,000-node p95 | 8 ms |
 
 Warm typical-size samples use 20 retained-node/edge iterations in the same
 `ENGINE_E2_PERF` record: 50 nodes/49 edges p95 **4.1 ms**, 200 nodes/199 edges p95
-**23.1 ms**. The performance group has retry 0, including on CI.
+**23.2 ms**. The performance group has retry 0, including on CI.
 
 Owner decision 2026-11-09: **E2 budget 400 ms p95** for 1,000-node layout plus
 routing in hosted Chromium. **Sub-200 ms is required in E4 (#552 AC6)** before
 the canvas switches. The 200 ms comparison remains `targetMet:false`, labelled
-"E4 requirement"; the harness refuses p95 at or above 400 ms. The hosted baseline [run 42538495856](https://github.com/STAIxBWLB/maru/actions/runs/42538495856)
-at earlier head `8802a89f` passed: layout p95 362.5 ms, median 352.2 ms,
+"E4 requirement". The harness records `budgetMs:400` and `budgetMet` without
+failing the browser suite on wall-clock timing; hosted samples evaluate the E2
+budget. The hosted baseline [run 42538495856](https://github.com/STAIxBWLB/maru/actions/runs/42538495856)
+at earlier head `8802a89f` recorded layout p95 362.5 ms, median 352.2 ms,
 first 466.9 ms, cold 297.7 ms, lazy geometry 1,578,657 B gzip, validation 324,286 B
-gzip and validation 1,000-node p95 about 9 ms. This proves the accepted E2 budget
-at that head; it is not current-head hosted acceptance.
+gzip and validation 1,000-node p95 about 9 ms. Later hosted run
+[42552702466](https://github.com/STAIxBWLB/maru/actions/runs/42552702466) at head
+`7b27f5c6` recorded layout p95 239.8 ms. Run
+[42559386644](https://github.com/STAIxBWLB/maru/actions/runs/42559386644) at head
+`ea2aa242` recorded p95 407.9 ms, median 389.8 ms and cold load 410 ms, above the
+400 ms E2 budget. The sub-200 ms E4 target still needs a dedicated stable
+performance environment and has not been established by these hosted samples.
+These runs are measurements at their recorded heads, not current-head acceptance.
 
 The previous source-bound reproduction measured
-312.7 ms p95; the current reproduction is 305.5 ms. Every node, all
-999 routed edges and every geometry check remain present. These are remote
-reproductions, not hosted acceptance: the new-head four-report OS matrix,
-Chromium timings and `ci-ok` remain pending at submission.
+305.5 ms p95; the current reproduction is 303.8 ms. Every node, all
+999 routed edges and every geometry check remain present. These source-bound
+reproductions are separate from the hosted run records above.
+
+The per-PR regression gate is deterministic logical work on the unchanged
+`bench-1000.json` fixture: live A* expansions, route evaluations and constraint
+predicate/pair evaluations. Each counter and their total have a checked-in
+ceiling of the recorded baseline plus 25% in `testdata/work-budget.json`.
+The three-OS native matrix enforces the ceiling; the fourth WASM receipt must
+match all counters exactly. Counters are thread-local and compiled only for
+tests or `geometry-corpus`, with no hooks in normal product builds. They do not
+measure allocation, hash-table probes, font internals or elapsed time. Updating
+a ceiling requires deliberate remeasurement with `geometry-work` and review.
+
+Remaining model/admission investigations are tracked in [#560](https://github.com/STAIxBWLB/maru/issues/560),
+a prerequisite for E4. The recorded model disagreements retain their individual
+oracle results and require evidence-based classification before fixes.
+
+Lifecycle v2 minimum-span checks reuse the shared source rectangles, including
+width-aware column centers, populated-lane rows and pin overrides. Two
+oracle-accepted regressions cover right-to-right cross-row transitions and a
+widened first column with a right-to-left transition.
 
 Cold loading uses a fresh Chromium process and an identity-encoded read-only
 loopback server. Response byte counts must equal the exact emitted artifacts,
