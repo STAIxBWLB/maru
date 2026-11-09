@@ -2593,6 +2593,38 @@ mod tests {
     }
 
     #[test]
+    fn shared_trunk_23_preserves_the_oracle_green_engine_refusal() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../../testdata/parity.json")).unwrap();
+        let case = corpus["boundaryCases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"].as_str() == Some("e2-boundary-workflow-v2-shared-trunk-23"))
+            .expect("pinned Oracle-green placement boundary");
+        assert_eq!(case["oracle"]["ok"], true);
+        let source_json = case["geometryComparison"]["inputJson"]
+            .as_str()
+            .expect("case retains exact compared source");
+        let report = crate::layout::layout_json(&json!({"specJson":source_json}).to_string());
+        assert!(
+            !report.ok,
+            "the shifted E2 25px shared piece is authored/fatal"
+        );
+        let scene = report.geometry.expect("refusal retains placed geometry");
+        let diagnostics =
+            route_geometry_diagnostics(&serde_json::from_str(source_json).unwrap(), &scene);
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "workflow/geometry-route-quality"
+                    && diagnostic.path == "/edges/0"
+                    && diagnostic.message.contains("shared authored via [167,119]")
+            }),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn shared_via_ownership_uses_the_actual_bent_scene_piece_and_raw_edge_count() {
         let via = (100 * U, 50 * U);
         let a_raw = json!({"via":[[100,50],[100,100]]});

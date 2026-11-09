@@ -475,7 +475,7 @@
     "scope": "previous source-bound reproduction before test-only logical-work instrumentation; not current-head acceptance"
   },
   "boundaryEvidence": {
-    "scope": "Current source-bound 9e99e2c0 boundary evidence; exact layer gates both directions, model layer reports without changing AC1 membership; full case-by-case source and measured geometry dispositions are in docs/performance/diagram-engine-e2-admission-ledger.json",
+    "scope": "Source-bound f4dcf4fe boundary export; exact layer gates both directions, model layer reports without changing AC1 membership; full per-case source and geometry dispositions are in diagram-engine-e2-admission-ledger.json",
     "strictParityCases": 311,
     "boundaryCases": 309,
     "rendererRefusalSites": 132,
@@ -522,12 +522,12 @@
             "oracleAccepted": false
           },
           {
-            "case": "e2-boundary-workflow-v2-shared-trunk-25",
+            "case": "e2-boundary-workflow-v2-shared-trunk-23",
             "diagnosticCodes": [
-              "workflow/geometry-route-quality-notice"
+              "workflow/geometry-route-quality"
             ],
-            "engineAccepted": true,
-            "oracleAccepted": false
+            "engineAccepted": false,
+            "oracleAccepted": true
           },
           {
             "case": "e2-boundary-workflow-v2-route-legend-191",
@@ -550,8 +550,8 @@
             "oracleAccepted": true
           }
         ],
-        "oracleGreenEngineRefused": 2,
-        "oracleRedEngineAdmitted": 5
+        "oracleGreenEngineRefused": 3,
+        "oracleRedEngineAdmitted": 4
       },
       "text-capacity": {
         "agreements": 49,
@@ -876,12 +876,12 @@
         "diagnosticCodes": []
       },
       {
-        "case": "e2-boundary-workflow-v2-shared-trunk-25",
+        "case": "e2-boundary-workflow-v2-shared-trunk-23",
         "category": "readable-v2-placement",
-        "oracleAccepted": false,
-        "engineAccepted": true,
+        "oracleAccepted": true,
+        "engineAccepted": false,
         "diagnosticCodes": [
-          "workflow/geometry-route-quality-notice"
+          "workflow/geometry-route-quality"
         ]
       },
       {
@@ -1412,19 +1412,19 @@
         "oracleRedEngineAdmitted": 7
       }
     },
-    "currentSourceCommit": "9e99e2c090b8",
-    "currentEngineCrateTree": "63e5850d6aedfd3a6699252ea96e57b60e8dc824",
+    "currentSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+    "currentEngineCrateTree": "d935b17a892c3f04b3f897fb30f10c8155ec9a87",
     "currentModelCounts": {
       "cases": 101,
       "agreements": 66,
-      "oracleGreenEngineRefused": 26,
-      "oracleRedEngineAdmitted": 9,
+      "oracleGreenEngineRefused": 27,
+      "oracleRedEngineAdmitted": 8,
       "originalModelDifferenceCases": 41,
       "currentMismatches": 35,
-      "unionCases": 43
+      "unionCases": 44
     },
     "currentSdkTreePath": "src-tauri/crates",
-    "currentSdkTree": "ad7a73e750bc97c3ee2c1297dd5d77d45dd9be70",
+    "currentSdkTree": "39ec098466eec80f2b1190ea981dc2e036fdf74d",
     "currentEngineCrateTreePath": "src-tauri/crates/maru-diagram-engine"
   },
   "hostedBaseline": {
@@ -1656,5 +1656,35 @@
   },
   "sdkTreePath": "src-tauri/crates",
   "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-  "engineCrateTree": "76752a25c972fc06bae8017f9ec800c87466487e"
+  "engineCrateTree": "76752a25c972fc06bae8017f9ec800c87466487e",
+  "priorVerifiedNativeWasm": {
+    "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against approved S1",
+    "sourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+    "sdkTreePath": "src-tauri/crates",
+    "sdkTree": "39ec098466eec80f2b1190ea981dc2e036fdf74d",
+    "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+    "engineCrateTree": "d935b17a892c3f04b3f897fb30f10c8155ec9a87",
+    "baseCommit": "4d12957f1e9ed7100263115fae6c2aec74976a84",
+    "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
+    "corpusCaseCount": 623,
+    "acceptedCaseCount": 216,
+    "geometryRetainedCaseCount": 405,
+    "changedSceneCaseCount": 34,
+    "changedSvgCaseCount": 7,
+    "nativeReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "wasmReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "nativeWasmReportsEqual": true,
+    "work": {
+      "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+      "nodes": 1000,
+      "routes": 999,
+      "stats": {
+        "astarExpandedStates": 22167,
+        "constraintEvaluations": 3332334,
+        "routeEvaluations": 999
+      },
+      "total": 3355500
+    },
+    "scopeNote": "Prior committed source verification at f4dcf4fe before the final shared-trunk regression and Linux CI test-step commits; retained as source-stamped evidence, not claimed as the final exact-head proof."
+  }
 }

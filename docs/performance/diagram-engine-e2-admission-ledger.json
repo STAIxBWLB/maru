@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "purpose": "Issue 560 source-bound ledger for the union of original S3 model differences and current boundary mismatches; original oracle verdicts are preserved case by case.",
-  "sourceCommit": "9e99e2c090b8",
+  "purpose": "Issue 560 source-bound ledger for the union of original S3 model differences and current mismatches; original oracle results are preserved case by case.",
+  "sourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
   "sdkTreePath": "src-tauri/crates",
-  "sdkTree": "ad7a73e750bc97c3ee2c1297dd5d77d45dd9be70",
+  "sdkTree": "39ec098466eec80f2b1190ea981dc2e036fdf74d",
   "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-  "engineCrateTree": "63e5850d6aedfd3a6699252ea96e57b60e8dc824",
+  "engineCrateTree": "d935b17a892c3f04b3f897fb30f10c8155ec9a87",
   "corpusRef": "src-tauri/crates/maru-diagram-engine/testdata/parity.json",
   "counts": {
     "originalModelDifferenceCases": 41,
     "currentMismatches": 35,
-    "unionCases": 43,
-    "currentAgreementsWithinUnion": 8
+    "unionCases": 44,
+    "currentAgreementsWithinUnion": 9
   },
   "records": [
     {
@@ -2713,11 +2713,101 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "162-175",
+              "claim": "legacy label box: max(30,textUnits*4.8+10), center labelAt, y-10, h14"
+            },
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "752-780",
+              "claim": "node overlap gate rectsOverlap(label,node,-2)"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "28-42",
+              "claim": "strict 2px-inset rectangle predicate"
+            }
+          ],
+          "sourceMath": {
+            "sourceMaskPx": {
+              "x": 125.0,
+              "y": 86.0,
+              "width": 30.0,
+              "height": 14.0
+            },
+            "obstacle": {
+              "id": "node:a",
+              "boxPx": {
+                "height": 60.0,
+                "width": 120.0,
+                "x": 80.0,
+                "y": 100.0
+              }
+            },
+            "maskVsNode": {
+              "overlapPx": {
+                "x": 30.0,
+                "y": 0.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "thresholdPx": 2,
+            "result": "pass"
+          },
+          "e2NotoMath": {
+            "candidateBoxPx": {
+              "x": 129.3828125,
+              "y": 87.0,
+              "width": 21.234375,
+              "height": 18.0
+            },
+            "fontMetric": {
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 21.234375,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 21.234375,
+                "x": 105.390625,
+                "y": 186.0
+              }
+            },
+            "obstacle": {
+              "id": "node:a",
+              "boxPx": {
+                "height": 60.0,
+                "width": 120.0,
+                "x": 80.0,
+                "y": 100.0
+              }
+            },
+            "candidateVsNode": {
+              "overlapPx": {
+                "x": 21.234375,
+                "y": 5.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "result": "refuse; measured overlap exceeds 2px"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "Source mask touches node A (case 1) or overlaps it by exactly 2px (case 3), both accepted by the source 2px inset. The Noto 18px box overlaps A by 5px / 7px; no predicate error is indicated."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "For pinned 'Call' at [140, 96], legacy mask {'x': 125.0, 'y': 86, 'width': 30, 'height': 14} clears node:a 0px horizontally; measured Noto candidate {'x': 129.3828125, 'y': 87.0, 'width': 21.234375, 'height': 18.0} overlaps that node by 21.2344px horizontally and 5px vertically."
+        "status": "intentional-noto-placement-model",
+        "reason": "Source mask touches node A (case 1) or overlaps it by exactly 2px (case 3), both accepted by the source 2px inset. The Noto 18px box overlaps A by 5px / 7px; no predicate error is indicated."
       }
     },
     {
@@ -4133,11 +4223,101 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "162-175",
+              "claim": "legacy label box: max(30,textUnits*4.8+10), center labelAt, y-10, h14"
+            },
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "752-780",
+              "claim": "node overlap gate rectsOverlap(label,node,-2)"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "28-42",
+              "claim": "strict 2px-inset rectangle predicate"
+            }
+          ],
+          "sourceMath": {
+            "sourceMaskPx": {
+              "x": 125.0,
+              "y": 88.0,
+              "width": 30.0,
+              "height": 14.0
+            },
+            "obstacle": {
+              "id": "node:a",
+              "boxPx": {
+                "height": 60.0,
+                "width": 120.0,
+                "x": 80.0,
+                "y": 100.0
+              }
+            },
+            "maskVsNode": {
+              "overlapPx": {
+                "x": 30.0,
+                "y": 2.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "thresholdPx": 2,
+            "result": "pass"
+          },
+          "e2NotoMath": {
+            "candidateBoxPx": {
+              "x": 129.3828125,
+              "y": 89.0,
+              "width": 21.234375,
+              "height": 18.0
+            },
+            "fontMetric": {
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 21.234375,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 21.234375,
+                "x": 105.390625,
+                "y": 186.0
+              }
+            },
+            "obstacle": {
+              "id": "node:a",
+              "boxPx": {
+                "height": 60.0,
+                "width": 120.0,
+                "x": 80.0,
+                "y": 100.0
+              }
+            },
+            "candidateVsNode": {
+              "overlapPx": {
+                "x": 21.234375,
+                "y": 7.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "result": "refuse; measured overlap exceeds 2px"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "Source mask touches node A (case 1) or overlaps it by exactly 2px (case 3), both accepted by the source 2px inset. The Noto 18px box overlaps A by 5px / 7px; no predicate error is indicated."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "For pinned 'Call' at [140, 98], legacy mask {'x': 125.0, 'y': 88, 'width': 30, 'height': 14} clears node:a 0px horizontally; measured Noto candidate {'x': 129.3828125, 'y': 89.0, 'width': 21.234375, 'height': 18.0} overlaps that node by 21.2344px horizontally and 7px vertically."
+        "status": "intentional-noto-placement-model",
+        "reason": "Source mask touches node A (case 1) or overlaps it by exactly 2px (case 3), both accepted by the source 2px inset. The Noto 18px box overlaps A by 5px / 7px; no predicate error is indicated."
       }
     },
     {
@@ -5776,11 +5956,128 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "162-175",
+              "claim": "legacy pair-label rectangles"
+            },
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "785-800",
+              "claim": "pairwise label collision check with 2px inset"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "28-42",
+              "claim": "strict 2px-inset overlap predicate"
+            }
+          ],
+          "sourceMath": {
+            "masks": [
+              {
+                "id": "label-one",
+                "text": "One",
+                "boxPx": {
+                  "x": 285.0,
+                  "y": 390,
+                  "width": 30,
+                  "height": 14
+                }
+              },
+              {
+                "id": "label-two",
+                "text": "Two",
+                "boxPx": {
+                  "x": 285.0,
+                  "y": 405,
+                  "width": 30,
+                  "height": 14
+                }
+              }
+            ],
+            "pair": {
+              "overlapPx": {
+                "x": 30.0,
+                "y": 0.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 1
+              }
+            },
+            "tolerancePx": 2,
+            "result": "pass"
+          },
+          "e2NotoMath": {
+            "candidates": [
+              {
+                "id": "label-one",
+                "text": "One",
+                "boxPx": {
+                  "x": 288.5625,
+                  "y": 391.0,
+                  "width": 22.875,
+                  "height": 18.0
+                },
+                "fontMetric": {
+                  "font": "noto-sans-cjk-kr",
+                  "weight": 400,
+                  "fontSizePx": 12.0,
+                  "glyphAdvancePx": 22.875,
+                  "boundsPx": {
+                    "height": 18.0,
+                    "width": 22.875,
+                    "x": 488.5625,
+                    "y": 391.0
+                  }
+                }
+              },
+              {
+                "id": "label-two",
+                "text": "Two",
+                "boxPx": {
+                  "x": 287.9609375,
+                  "y": 406.0,
+                  "width": 24.078125,
+                  "height": 18.0
+                },
+                "fontMetric": {
+                  "font": "noto-sans-cjk-kr",
+                  "weight": 400,
+                  "fontSizePx": 12.0,
+                  "glyphAdvancePx": 24.078125,
+                  "boundsPx": {
+                    "height": 18.0,
+                    "width": 24.078125,
+                    "x": 487.96875,
+                    "y": 407.0
+                  }
+                }
+              }
+            ],
+            "pair": {
+              "overlapPx": {
+                "x": 22.875,
+                "y": 3.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "tolerancePx": 2,
+            "result": "refuse; Noto vertical overlap exceeds 2px"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "Source masks leave a 1px gap; the Noto boxes overlap 3.0px vertically."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "Source authored label masks overlap by 0px vertically, within the source 2px allowance; measured Noto candidates overlap by 3px, beyond that allowance. Exact pinned and Noto boxes are recorded per label."
+        "status": "intentional-noto-placement-model",
+        "reason": "Source masks leave a 1px gap; the Noto boxes overlap 3.0px vertically."
       }
     },
     {
@@ -7426,11 +7723,128 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "162-175",
+              "claim": "legacy pair-label rectangles"
+            },
+            {
+              "path": "sidecars/archify/renderers/architecture/render-architecture.mjs",
+              "lines": "785-800",
+              "claim": "pairwise label collision check with 2px inset"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "28-42",
+              "claim": "strict 2px-inset overlap predicate"
+            }
+          ],
+          "sourceMath": {
+            "masks": [
+              {
+                "id": "label-one",
+                "text": "One",
+                "boxPx": {
+                  "x": 285.0,
+                  "y": 390,
+                  "width": 30,
+                  "height": 14
+                }
+              },
+              {
+                "id": "label-two",
+                "text": "Two",
+                "boxPx": {
+                  "x": 285.0,
+                  "y": 403,
+                  "width": 30,
+                  "height": 14
+                }
+              }
+            ],
+            "pair": {
+              "overlapPx": {
+                "x": 30.0,
+                "y": 1
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "tolerancePx": 2,
+            "result": "pass"
+          },
+          "e2NotoMath": {
+            "candidates": [
+              {
+                "id": "label-one",
+                "text": "One",
+                "boxPx": {
+                  "x": 288.5625,
+                  "y": 391.0,
+                  "width": 22.875,
+                  "height": 18.0
+                },
+                "fontMetric": {
+                  "font": "noto-sans-cjk-kr",
+                  "weight": 400,
+                  "fontSizePx": 12.0,
+                  "glyphAdvancePx": 22.875,
+                  "boundsPx": {
+                    "height": 18.0,
+                    "width": 22.875,
+                    "x": 488.5625,
+                    "y": 391.0
+                  }
+                }
+              },
+              {
+                "id": "label-two",
+                "text": "Two",
+                "boxPx": {
+                  "x": 287.9609375,
+                  "y": 404.0,
+                  "width": 24.078125,
+                  "height": 18.0
+                },
+                "fontMetric": {
+                  "font": "noto-sans-cjk-kr",
+                  "weight": 400,
+                  "fontSizePx": 12.0,
+                  "glyphAdvancePx": 24.078125,
+                  "boundsPx": {
+                    "height": 18.0,
+                    "width": 24.078125,
+                    "x": 487.96875,
+                    "y": 407.0
+                  }
+                }
+              }
+            ],
+            "pair": {
+              "overlapPx": {
+                "x": 22.875,
+                "y": 5.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "tolerancePx": 2,
+            "result": "refuse; Noto vertical overlap exceeds 2px"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "Source masks overlap 1px, within the 2px inset tolerance; the Noto boxes overlap 5.0px vertically."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "Source authored label masks overlap by 1px vertically, within the source 2px allowance; measured Noto candidates overlap by 5px, beyond that allowance. Exact pinned and Noto boxes are recorded per label."
+        "status": "intentional-noto-placement-model",
+        "reason": "Source masks overlap 1px, within the 2px inset tolerance; the Noto boxes overlap 5.0px vertically."
       }
     },
     {
@@ -10797,7 +11211,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. The pinned Noto glyph advances measure 289.734375px at 11.0px; scaling to the source minimum 6px requires 158.036932px, exceeding the role budget by 50.021307px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. Pinned Noto glyph advances measure 289.734375px at 11.0px; at the source minimum 6px they require 158.036932px, exceeding the role budget by 50.021307px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -12988,7 +13402,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(tag)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. The pinned Noto glyph advances measure 263.40625px at 10.0px; scaling to the source minimum 6px requires 158.04375px, exceeding the role budget by 50.028125px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(tag)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. Pinned Noto glyph advances measure 263.40625px at 10.0px; at the source minimum 6px they require 158.04375px, exceeding the role budget by 50.028125px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -14632,11 +15046,101 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/dataflow/render-dataflow.mjs",
+              "lines": "67-73",
+              "claim": "legacy flow label width and h16"
+            },
+            {
+              "path": "sidecars/archify/renderers/dataflow/render-dataflow.mjs",
+              "lines": "254-265",
+              "claim": "label rectangle and node overlap check"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "28-42",
+              "claim": "2px inset rectangle predicate"
+            }
+          ],
+          "sourceMath": {
+            "sourceMaskPx": {
+              "x": 83.0,
+              "y": 113,
+              "width": 34,
+              "height": 16
+            },
+            "obstacle": {
+              "id": "node:a",
+              "boxPx": {
+                "height": 58.0,
+                "width": 112.0,
+                "x": 44.0,
+                "y": 128.0
+              }
+            },
+            "maskVsNode": {
+              "overlapPx": {
+                "x": 34.0,
+                "y": 1.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "tolerancePx": 2,
+            "result": "pass; 1px vertical overlap"
+          },
+          "e2NotoMath": {
+            "candidateBoxPx": {
+              "x": 92.2265625,
+              "y": 115.0,
+              "width": 15.546875,
+              "height": 18.0
+            },
+            "fontMetric": {
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 15.546875,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 15.546875,
+                "x": 7.234375,
+                "y": 391.0
+              }
+            },
+            "obstacle": {
+              "id": "node:a",
+              "boxPx": {
+                "height": 58.0,
+                "width": 112.0,
+                "x": 44.0,
+                "y": 128.0
+              }
+            },
+            "candidateVsNode": {
+              "overlapPx": {
+                "x": 15.546875,
+                "y": 5.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "result": "refuse; 5px vertical overlap"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "Legacy mask overlaps node A by 1px; the 18px Noto box overlaps it by 5px."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "For pinned 'Go' at [100, 124], legacy mask {'x': 83.0, 'y': 113, 'width': 34, 'height': 16} clears node:a 0px horizontally; measured Noto candidate {'x': 92.2265625, 'y': 115.0, 'width': 15.546875, 'height': 18.0} overlaps that node by 15.5469px horizontally and 5px vertically."
+        "status": "intentional-noto-placement-model",
+        "reason": "Legacy mask overlaps node A by 1px; the 18px Noto box overlaps it by 5px."
       }
     },
     {
@@ -16506,11 +17010,126 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/dataflow/render-dataflow.mjs",
+              "lines": "67-73",
+              "claim": "legacy flow label width and h16"
+            },
+            {
+              "path": "sidecars/archify/renderers/dataflow/render-dataflow.mjs",
+              "lines": "254-272",
+              "claim": "node and pair collision checks"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "28-42",
+              "claim": "2px inset rectangle predicate"
+            }
+          ],
+          "sourceMath": {
+            "masks": [
+              {
+                "id": "first",
+                "boxPx": {
+                  "x": 483.0,
+                  "y": 389,
+                  "width": 34,
+                  "height": 16
+                }
+              },
+              {
+                "id": "second",
+                "boxPx": {
+                  "x": 483.0,
+                  "y": 403.015625,
+                  "width": 34,
+                  "height": 16
+                }
+              }
+            ],
+            "pair": {
+              "overlapPx": {
+                "x": 34.0,
+                "y": 1.984375
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "tolerancePx": 2,
+            "result": "pass; 1.984375px overlap leaves 0.015625px within tolerance"
+          },
+          "e2NotoMath": {
+            "candidates": [
+              {
+                "id": "first",
+                "text": "One",
+                "boxPx": {
+                  "x": 488.5625,
+                  "y": 391.0,
+                  "width": 22.875,
+                  "height": 18.0
+                },
+                "fontMetric": {
+                  "font": "noto-sans-cjk-kr",
+                  "weight": 400,
+                  "fontSizePx": 12.0,
+                  "glyphAdvancePx": 22.875,
+                  "boundsPx": {
+                    "height": 18.0,
+                    "width": 22.875,
+                    "x": 488.5625,
+                    "y": 391.0
+                  }
+                }
+              },
+              {
+                "id": "second",
+                "text": "Two",
+                "boxPx": {
+                  "x": 487.9609375,
+                  "y": 405.015625,
+                  "width": 24.078125,
+                  "height": 18.0
+                },
+                "fontMetric": {
+                  "font": "noto-sans-cjk-kr",
+                  "weight": 400,
+                  "fontSizePx": 12.0,
+                  "glyphAdvancePx": 24.078125,
+                  "boundsPx": {
+                    "height": 18.0,
+                    "width": 24.078125,
+                    "x": 487.96875,
+                    "y": 407.0
+                  }
+                }
+              }
+            ],
+            "pair": {
+              "overlapPx": {
+                "x": 22.875,
+                "y": 3.984375
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "tolerancePx": 2,
+            "result": "refuse; 3.984375px overlap exceeds tolerance"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "The case is on the source pairwise 2px inset boundary; Noto line boxes overlap by 3.984375px."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "Source authored label masks overlap by 1.98438px vertically, within the source 2px allowance; measured Noto candidates overlap by 3.98438px, beyond that allowance. Exact pinned and Noto boxes are recorded per label."
+        "status": "intentional-noto-placement-model",
+        "reason": "The case is on the source pairwise 2px inset boundary; Noto line boxes overlap by 3.984375px."
       }
     },
     {
@@ -22894,7 +23513,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(label)*6.2=20*6.2 estimates 124.0px and accepts with 0.015625px margin in 124.015625px. The pinned Noto glyph advances measure 237.90625px at 13.0px; scaling to the source minimum 8px requires 146.403846px, exceeding the role budget by 22.388221px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(label)*6.2=20*6.2 estimates 124.0px and accepts with 0.015625px margin in 124.015625px. Pinned Noto glyph advances measure 237.90625px at 13.0px; at the source minimum 8px they require 146.403846px, exceeding the role budget by 22.388221px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -24650,11 +25269,81 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "lifecycleTitleModelDecision": {
+          "sourceOracleDiagnostic": {
+            "code": "composition/label-band-title-overlap",
+            "severity": "error",
+            "message": "Transition 0 label \"Go\" overlaps lifecycle band title \"01 / Main\" — move the label with labelAt/labelDx/labelDy/labelSegment or provide more space.",
+            "subject": {
+              "diagramType": "lifecycle",
+              "collection": "transitions",
+              "index": 0,
+              "from": "a",
+              "to": "b"
+            },
+            "evidence": {
+              "labelRect": {
+                "x": 84,
+                "y": 102.984375,
+                "width": 32,
+                "height": 16
+              },
+              "bandTitle": {
+                "index": 0,
+                "band": "phase",
+                "label": "01 / Main",
+                "x": 72,
+                "y": 89,
+                "width": 55.800000000000004,
+                "height": 14,
+                "baseline": 100
+              }
+            },
+            "supportedFixes": [
+              "move the transition label with labelAt/labelDx/labelDy/labelSegment while preserving its text"
+            ]
+          },
+          "sourceCompositeTitleMaskPx": {
+            "x": 72,
+            "y": 89,
+            "width": 55.8,
+            "height": 14,
+            "text": "01 / Main"
+          },
+          "sourceTransitionMaskPx": {
+            "x": 84,
+            "y": 102.984375,
+            "width": 32,
+            "height": 16,
+            "text": "Go"
+          },
+          "sourceOverlapPx": 0.015625,
+          "e2MeasuredMainBoundsPx": {
+            "x": 23,
+            "y": 80,
+            "width": 31.0625,
+            "height": 19.5
+          },
+          "e2MeasuredGoBoundsPx": {
+            "x": 92.234375,
+            "y": 104.984375,
+            "width": 15.546875,
+            "height": 18
+          },
+          "e2GapPx": {
+            "horizontal": 38.171875,
+            "vertical": 5.484375
+          },
+          "geometryDtoHasCompositeBandTitle": false,
+          "svgVisibleTextSource": "GeometryDocument.labels only"
         }
       },
       "disposition": {
-        "status": "pending-owner-policy-ruling",
-        "reason": "Owner-directed policy decision is still pending. Preserve original oracle verdict and current measured geometry; do not waive or call this intentional until the ruling arrives."
+        "status": "measured-lifecycle-title-geometry-model-difference",
+        "reason": "The source composes visible title 01 / Main at x=72,y=89; its legacy 14px mask overlaps Go by 0.015625px. E2 retains separate measured Main (23,80,31.0625,19.5) and Go (92.234375,104.984375,15.546875,18) boxes, separated by 5.484375px. The DTO has no composed source-title record, so no source-composition predicate is added. The SVG regression verifies visible text comes only from geometry labels.",
+        "decision": "measured geometry model; no new source-composition check or duplicate title text",
+        "verificationRef": "src-tauri/crates/maru-diagram-engine/tests/lifecycle_band_title_svg.rs"
       }
     },
     {
@@ -28152,11 +28841,99 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/lifecycle/render-lifecycle.mjs",
+              "lines": "101-104",
+              "claim": "legacy transition label width"
+            },
+            {
+              "path": "sidecars/archify/renderers/lifecycle/render-lifecycle.mjs",
+              "lines": "691-704",
+              "claim": "legacy transition label box placement"
+            },
+            {
+              "path": "sidecars/archify/renderers/lifecycle/render-lifecycle.mjs",
+              "lines": "527-549",
+              "claim": "state and 4px route-clearance checks"
+            }
+          ],
+          "sourceMath": {
+            "longLabel": {
+              "x": 184.25,
+              "y": 161.015625,
+              "width": 281.5,
+              "height": 16
+            },
+            "stateA": {
+              "height": 62.0,
+              "width": 118.0,
+              "x": 35.0,
+              "y": 126.0
+            },
+            "maskVsState": {
+              "overlapPx": {
+                "x": 0.0,
+                "y": 16.0
+              },
+              "gapPx": {
+                "x": 31.25,
+                "y": 0.0
+              }
+            },
+            "firstRouteYpx": 157,
+            "legacyMaskTopToRouteGapPx": 4.015625,
+            "routeClearanceThresholdPx": 4,
+            "routeClearanceMarginPx": 0.015625,
+            "result": "pass; mask is 31.25px right of state A and 4.015625px below the route"
+          },
+          "e2NotoMath": {
+            "longLabelCandidate": {
+              "x": 35.26171875,
+              "y": 163.015625,
+              "width": 579.4765625,
+              "height": 18
+            },
+            "fontMetric": {
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12,
+              "glyphAdvancePx": 579.4765625,
+              "boundsPx": {
+                "width": 579.4765625,
+                "height": 18
+              },
+              "measurement": "same pinned Noto W glyph advance"
+            },
+            "stateA": {
+              "height": 62.0,
+              "width": 118.0,
+              "x": 35.0,
+              "y": 126.0
+            },
+            "candidateVsState": {
+              "overlapPx": {
+                "x": 117.738281,
+                "y": 18.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "routeYpx": 157,
+            "candidateTopToRouteGapPx": 6.015625,
+            "result": "refuse for node overlap; route-clearance gap itself is 6.015625px"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "Noto width expands the long label left over state A by 117.738281px; it does not violate the 4px route-label clearance. This refusal is the actual Noto/node collision."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "For pinned 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW' at [325, 172.015625], legacy mask {'x': 184.25, 'y': 161.015625, 'width': 281.5, 'height': 16} clears node:a 31.25px horizontally; measured Noto candidate {'x': 35.26171875, 'y': 163.015625, 'width': 579.4765625, 'height': 18} overlaps that node by 117.738px horizontally and 18px vertically."
+        "status": "intentional-noto-placement-model",
+        "reason": "Noto width expands the long label left over state A by 117.738281px; it does not violate the 4px route-label clearance. This refusal is the actual Noto/node collision."
       }
     },
     {
@@ -29769,11 +30546,100 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/lifecycle/render-lifecycle.mjs",
+              "lines": "101-104",
+              "claim": "legacy transition label width"
+            },
+            {
+              "path": "sidecars/archify/renderers/lifecycle/render-lifecycle.mjs",
+              "lines": "691-704",
+              "claim": "legacy label box"
+            },
+            {
+              "path": "sidecars/archify/renderers/lifecycle/render-lifecycle.mjs",
+              "lines": "527-538",
+              "claim": "state/pair overlap checks"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "28-42",
+              "claim": "2px inset predicate"
+            }
+          ],
+          "sourceMath": {
+            "legacyMaskPx": {
+              "x": 78.0,
+              "y": 111,
+              "width": 32,
+              "height": 16
+            },
+            "stateA": {
+              "height": 62.0,
+              "width": 118.0,
+              "x": 35.0,
+              "y": 126.0
+            },
+            "maskVsState": {
+              "overlapPx": {
+                "x": 32.0,
+                "y": 1.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "tolerancePx": 2,
+            "result": "pass; 1px overlap"
+          },
+          "e2NotoMath": {
+            "candidateBoxPx": {
+              "x": 86.2265625,
+              "y": 113.0,
+              "width": 15.546875,
+              "height": 18.0
+            },
+            "fontMetric": {
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 15.546875,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 15.546875,
+                "x": 7.234375,
+                "y": 391.0
+              }
+            },
+            "stateA": {
+              "height": 62.0,
+              "width": 118.0,
+              "x": 35.0,
+              "y": 126.0
+            },
+            "candidateVsState": {
+              "overlapPx": {
+                "x": 15.546875,
+                "y": 5.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "result": "refuse; 5px overlap"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "The Noto box is 18px high and overlaps state A by 5px; the 16px source box overlaps by 1px."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "For pinned 'Go' at [94, 122], legacy mask {'x': 78.0, 'y': 111, 'width': 32, 'height': 16} clears node:a 0px horizontally; measured Noto candidate {'x': 86.2265625, 'y': 113.0, 'width': 15.546875, 'height': 18.0} overlaps that node by 15.5469px horizontally and 5px vertically."
+        "status": "intentional-noto-placement-model",
+        "reason": "The Noto box is 18px high and overlaps state A by 5px; the 16px source box overlaps by 1px."
       }
     },
     {
@@ -34042,7 +34908,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. The pinned Noto glyph advances measure 289.734375px at 11.0px; scaling to the source minimum 6px requires 158.036932px, exceeding the role budget by 50.021307px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. Pinned Noto glyph advances measure 289.734375px at 11.0px; at the source minimum 6px they require 158.036932px, exceeding the role budget by 50.021307px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -36027,7 +36893,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(tag)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. The pinned Noto glyph advances measure 263.40625px at 10.0px; scaling to the source minimum 6px requires 158.04375px, exceeding the role budget by 50.028125px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(tag)*minimumFontPx*0.6=30*6*0.6 estimates 108.0px and accepts with 0.015625px margin in 108.015625px. Pinned Noto glyph advances measure 263.40625px at 10.0px; at the source minimum 6px they require 158.04375px, exceeding the role budget by 50.028125px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -37787,7 +38653,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(label)*6.2=20*6.2 estimates 124.0px and accepts with 0.015625px margin in 124.015625px. The pinned Noto glyph advances measure 237.90625px at 13.0px; scaling to the source minimum 8px requires 146.403846px, exceeding the role budget by 22.388221px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(label)*6.2=20*6.2 estimates 124.0px and accepts with 0.015625px margin in 124.015625px. Pinned Noto glyph advances measure 237.90625px at 13.0px; at the source minimum 8px they require 146.403846px, exceeding the role budget by 22.388221px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -39762,7 +40628,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=30*7*0.6 estimates 126.0px and accepts with 0.015625px margin in 126.015625px. The pinned Noto glyph advances measure 289.734375px at 11.0px; scaling to the source minimum 7px requires 184.37642px, exceeding the role budget by 58.360795px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=30*7*0.6 estimates 126.0px and accepts with 0.015625px margin in 126.015625px. Pinned Noto glyph advances measure 289.734375px at 11.0px; at the source minimum 7px they require 184.37642px, exceeding the role budget by 58.360795px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -41737,7 +42603,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(tag)*minimumFontPx*0.6=30*7*0.6 estimates 126.0px and accepts with 0.015625px margin in 126.015625px. The pinned Noto glyph advances measure 263.40625px at 10.0px; scaling to the source minimum 7px requires 184.384375px, exceeding the role budget by 58.36875px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(tag)*minimumFontPx*0.6=30*7*0.6 estimates 126.0px and accepts with 0.015625px margin in 126.015625px. Pinned Noto glyph advances measure 263.40625px at 10.0px; at the source minimum 7px they require 184.384375px, exceeding the role budget by 58.36875px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -43487,7 +44353,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(label)*6.2=20*6.2 estimates 124.0px and accepts with 0.015625px margin in 124.015625px. The pinned Noto glyph advances measure 237.90625px at 13.0px; scaling to the source minimum 9px requires 164.704327px, exceeding the role budget by 40.688702px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(label)*6.2=20*6.2 estimates 124.0px and accepts with 0.015625px margin in 124.015625px. Pinned Noto glyph advances measure 237.90625px at 13.0px; at the source minimum 9px they require 164.704327px, exceeding the role budget by 40.688702px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -44750,7 +45616,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(label)*minimumFontPx*0.6=7*8*0.6 estimates 33.6px and accepts with 4.4px margin in 38.0px. The pinned Noto glyph advances measure 83.265625px at 13.0px; scaling to the source minimum 8px requires 51.240385px, exceeding the role budget by 13.240385px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(label)*minimumFontPx*0.6=7*8*0.6 estimates 33.6px and accepts with 4.4px margin in 38.0px. Pinned Noto glyph advances measure 83.265625px at 13.0px; at the source minimum 8px they require 51.240385px, exceeding the role budget by 13.240385px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -52853,11 +53719,63 @@
             "y": 212.0
           },
           "e2RowWidthPx": 400
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "24-41",
+              "claim": "sequence legend catalog/overrides"
+            },
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "459-478",
+              "claim": "legend row width=viewBox width minus 80"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/legend.mjs",
+              "lines": "55-62",
+              "claim": "legacy entry width formula at8px and0.62em"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/legend.mjs",
+              "lines": "68-101",
+              "claim": "legacy wrap calculation"
+            }
+          ],
+          "sourceMath": {
+            "textUnitsW": 71,
+            "formula": "ceil(34px swatch +9px gap +71*8px*0.62)",
+            "rawEntryWidthPx": 395.16,
+            "roundedEntryWidthPx": 396,
+            "rowWidthPx": 400,
+            "sparePx": 4.84,
+            "result": "fits one row"
+          },
+          "e2NotoMath": {
+            "fontSizePx": 8,
+            "textBoxPx": {
+              "height": 12.0,
+              "width": 498.703125,
+              "x": 83.0,
+              "y": 212.0
+            },
+            "measuredTextWidthPx": 498.703125,
+            "swatchPlusGapPx": 43,
+            "textBudgetPx": 357,
+            "textOverflowPx": 141.703125,
+            "entryWidthPx": 542.0,
+            "rowWidthPx": 400,
+            "entryOverflowPx": 142.0,
+            "result": "refuse; actual Noto entry exceeds row width"
+          },
+          "classification": "intentional-noto-metric-model",
+          "finding": "Source legacy entry is 395.16px (396px rounded) in a 400px row; Noto text alone is 498.703125px against 357px text capacity, so the full entry overflows by 142px."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "The legacy entry estimate is 395.16px against a 400px row. E2's measured entry is 542.00px with 498.70px Noto text, wider than the same row."
+        "status": "intentional-noto-metric-model",
+        "reason": "Source legacy entry is 395.16px (396px rounded) in a 400px row; Noto text alone is 498.703125px against 357px text capacity, so the full entry overflows by 142px."
       }
     },
     {
@@ -56227,11 +57145,83 @@
             "x": 40.0,
             "y": 674.0
           }
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "49-60",
+              "claim": "source content-bottom/legend height"
+            },
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "459-478",
+              "claim": "explicit legend min-title top and baseline"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/legend.mjs",
+              "lines": "55-101",
+              "claim": "legacy width, 2-row wrap, line gap"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/legend.mjs",
+              "lines": "133-155",
+              "claim": "source legend top and entry rows"
+            }
+          ],
+          "sourceMath": {
+            "perEntryRawWidthPx": 340.6,
+            "perEntryRoundedWidthPx": 341,
+            "rowWidthPx": 400,
+            "perEntryHeadroomPx": 59,
+            "twoEntriesPlusGapPx": 704,
+            "rows": 2,
+            "contentBottomPx": 672,
+            "requiredContentGapPx": 12,
+            "viewBoxHeightPx": 790.015625,
+            "legendBaselinePx": 736.015625,
+            "titleYpx": 694.015625,
+            "titleTopPx": 684.015625,
+            "minimumTitleTopPx": 684,
+            "verticalSlackPx": 0.015625,
+            "result": "source width fits two entries as two rows; source title top clears content by 0.015625px"
+          },
+          "e2NotoMath": {
+            "measuredTextWidthPx": 421.4375,
+            "textCapacityPx": 357,
+            "textOverflowPx": 64.4375,
+            "entryWidthPx": 465.0,
+            "rowWidthPx": 400,
+            "entryOverflowPx": 65.0,
+            "geometryEntryBoxesPx": [
+              {
+                "height": 12.0,
+                "width": 465.0,
+                "x": 40.0,
+                "y": 682.0
+              },
+              {
+                "height": 12.0,
+                "width": 465.0,
+                "x": 40.0,
+                "y": 704.0
+              }
+            ],
+            "geometryLegendBoundsPx": {
+              "height": 60.0,
+              "width": 465.0,
+              "x": 40.0,
+              "y": 674.0
+            },
+            "result": "refuse on horizontal width; vertical threshold is preempted"
+          },
+          "classification": "intentional-noto-width-model-preempts-source-vertical-boundary",
+          "finding": "The source 790.015625px height is 0.015625px above its title-top requirement. E2 Noto text is 421.4375px against a 357px text budget (entry width465 vs row400), so this record does not demonstrate an E2 vertical-height error."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "Legacy entries are [340.6, 340.6]px and the source wraps them to 2 rows at page height 790.015625. E2's actual Noto entry boxes are [465.0, 465.0]px; the measured legend placement is recorded alongside the source page boundary."
+        "status": "intentional-noto-width-model-preempts-source-vertical-boundary",
+        "reason": "The source 790.015625px height is 0.015625px above its title-top requirement. E2 Noto text is 421.4375px against a 357px text budget (entry width465 vs row400), so this record does not demonstrate an E2 vertical-height error."
       }
     },
     {
@@ -57293,11 +58283,61 @@
           "actualNotoWidthPx": 337.15,
           "actualNotoCandidateLeftPx": -52.57499999999999,
           "cause": "no unobstructed Noto route label box; centered candidate extends past x=0"
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "80-98",
+              "claim": "showcase message font, label height, timeline geometry"
+            },
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "127-149",
+              "claim": "source message label formula and mask"
+            },
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "325-332",
+              "claim": "showcase canvas containment check"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/geometry.mjs",
+              "lines": "1223-1236",
+              "claim": "0.5px canvas tolerance"
+            }
+          ],
+          "sourceMath": {
+            "WTextUnits": 32,
+            "formula": "max(34px,32*6.6+12)",
+            "sourceMaskWidthPx": 223.2,
+            "centerXPx": 116,
+            "sourceMaskLeftPx": 4.4,
+            "pageLeftPx": 0.0,
+            "leftSparePx": 4.4,
+            "result": "pass; source mask is 4.4px inside the left page edge"
+          },
+          "e2NotoMath": {
+            "measuredWidthPx": 337.15,
+            "centerXPx": 116,
+            "candidateLeftPx": -52.57499999999999,
+            "candidateRightPx": 284.575,
+            "pageBoundsPx": {
+              "height": 640.0,
+              "width": 920.0,
+              "x": 0.0,
+              "y": 0.0
+            },
+            "leftOverflowPx": 52.575,
+            "result": "no centered Noto label candidate fits; box exceeds page left by 52.575px"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "Source width understates actual Noto by 113.95px; the E2 centered Noto box physically crosses the page edge."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "The legacy mask is 223.20px wide and starts at x=4.40, inside the page. The measured Noto label is 337.15px wide and its centered candidate starts at x=-52.57, outside x=0, so E2 has no unobstructed label box."
+        "status": "intentional-noto-placement-model",
+        "reason": "Source width understates actual Noto by 113.95px; the E2 centered Noto box physically crosses the page edge."
       }
     },
     {
@@ -59803,11 +60843,67 @@
             "y": 142.0
           }
         },
-        "comparison": "legacy source estimate fits; actual pinned Noto required width exceeds the measured E2 role budget"
+        "comparison": "legacy source estimate fits; actual pinned Noto required width exceeds the measured E2 role budget",
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "163-173",
+              "claim": "legacy segment-title width, fixed x, and retry placement"
+            },
+            {
+              "path": "sidecars/archify/renderers/sequence/render-sequence.mjs",
+              "lines": "334-346",
+              "claim": "source role-width budget"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/utils.mjs",
+              "lines": "233-246",
+              "claim": "ASCII W textUnits"
+            },
+            {
+              "path": "src-tauri/crates/maru-diagram-engine/src/layout/constraints_sequence.rs",
+              "lines": "114-129",
+              "claim": "E2 uses Noto measure_text at minimum role size"
+            }
+          ],
+          "sourceMath": {
+            "textUnitsW": 80,
+            "legacyMaskFormula": "80*5.2+14",
+            "legacyMaskWidthPx": 430.0,
+            "maskXpx": 56,
+            "availableWidthPx": 430.015625,
+            "rightInsetPx": 48,
+            "sparePx": 0.015625,
+            "result": "pass by 0.015625px"
+          },
+          "e2NotoMath": {
+            "labelBoxPx": {
+              "height": 13.5,
+              "width": 658.796875,
+              "x": 62.0,
+              "y": 142.0
+            },
+            "font": "noto-sans-cjk-kr",
+            "fontSizePx": 9.0,
+            "glyphAdvancePx": 658.796875,
+            "minimumFontPx": 9,
+            "requiredPaddedWidthPx": 673,
+            "availableWidthPx": 430.015625,
+            "deficitPx": 242.984375,
+            "viewBoxWidthPx": 534.015625,
+            "actualBoxRightPx": 720.796875,
+            "pageRightPx": 534.015625,
+            "boxPageOverflowPx": 186.78125,
+            "result": "refuse; actual Noto required width is 673px"
+          },
+          "classification": "intentional-noto-metric-model",
+          "finding": "Legacy estimate fits; exact pinned Noto at the source minimum is 242.984375px wider than the role budget. This is the separate text-fit model disposition."
+        }
       },
       "disposition": {
-        "status": "noto-metric-model-difference",
-        "reason": "The pinned source accepts using its legacy textUnits estimate, while E2 refuses because the actual Noto box at the source minimum exceeds this case’s role budget. Pinned Noto is authoritative for text-fit differences by owner decision mem:0efdbc07; preserve the original oracle verdict and numeric comparison."
+        "status": "intentional-noto-metric-model",
+        "reason": "Legacy estimate fits; exact pinned Noto at the source minimum is 242.984375px wider than the role budget. This is the separate text-fit model disposition."
       }
     },
     {
@@ -61381,7 +62477,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(label)*6.8=25*6.8 estimates 170.0px and accepts with 0.0px margin in 170.0px. The pinned Noto glyph advances measure 297.375px at 13.0px; scaling to the source minimum 8px requires 183.0px, exceeding the role budget by 13.0px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(label)*6.8=25*6.8 estimates 170.0px and accepts with 0.0px margin in 170.0px. Pinned Noto glyph advances measure 297.375px at 13.0px; at the source minimum 8px they require 183.0px, exceeding the role budget by 13.0px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -63351,7 +64447,7 @@
       },
       "disposition": {
         "status": "intentional-noto-metric-model-difference",
-        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=45*6*0.6 estimates 162.0px and accepts with 0.0px margin in 162.0px. The pinned Noto glyph advances measure 434.609375px at 11.0px; scaling to the source minimum 6px requires 237.059659px, exceeding the role budget by 75.059659px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
+        "reason": "Source formula textUnits(sublabel)*minimumFontPx*0.6=45*6*0.6 estimates 162.0px and accepts with 0.0px margin in 162.0px. Pinned Noto glyph advances measure 434.609375px at 11.0px; at the source minimum 6px they require 237.059659px, exceeding the role budget by 75.059659px. Owner decision mem:0efdbc07 makes Noto authoritative for text-fit differences. Original oracleTrue is preserved; no text is rewritten."
       }
     },
     {
@@ -70203,11 +71299,120 @@
               119
             ]
           ]
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "160-162",
+              "claim": "legacy workflow edge-label width"
+            },
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "4483-4502",
+              "claim": "legacy labelAt rectangle placement"
+            },
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "1462-1475",
+              "claim": "pinned source lane-header mask"
+            },
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "2482-2496",
+              "claim": "authored label-vs-lane-title check"
+            },
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "4654-4664",
+              "claim": "pinned lane title uses10px text"
+            }
+          ],
+          "sourceMath": {
+            "edgeLabelMaskPx": {
+              "x": 65.0,
+              "y": 49,
+              "width": 30,
+              "height": 14
+            },
+            "laneHeaderMaskPx": {
+              "x": 54.0,
+              "y": 64.0,
+              "width": 55.800000000000004,
+              "height": 14.0
+            },
+            "labelVsLane": {
+              "overlapPx": {
+                "x": 30.0,
+                "y": 0.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 1.0
+              }
+            },
+            "sourceDecision": "pass; label mask bottom63 is 1px above lane-header mask top64."
+          },
+          "e2NotoMath": {
+            "edgeLabelCandidatePx": {
+              "x": 69.3828125,
+              "y": 50.0,
+              "width": 21.234375,
+              "height": 18.0
+            },
+            "edgeMetric": {
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 21.234375,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 21.234375,
+                "x": 105.390625,
+                "y": 186.0
+              }
+            },
+            "laneTitleNotoBoxPx": {
+              "height": 19.5,
+              "width": 57.328125,
+              "x": 52.0,
+              "y": 58.0
+            },
+            "candidateVsLaneTitle": {
+              "overlapPx": {
+                "x": 21.234375,
+                "y": 10.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "documentTitleNotoBoxPx": {
+              "height": 36.0,
+              "width": 197.875,
+              "x": 32.0,
+              "y": 16.0
+            },
+            "candidateVsDocumentTitle": {
+              "overlapPx": {
+                "x": 21.234375,
+                "y": 2.0
+              },
+              "gapPx": {
+                "x": 0.0,
+                "y": 0.0
+              }
+            },
+            "result": "route-label-space; lane-title box overlap is 21.234375px × 10px"
+          },
+          "classification": "intentional-noto-placement-model",
+          "finding": "The source mask clears its 10px title mask by1px; the E2 12px Noto edge box overlaps the E2 lane title box by10px. The source title is10px/600 while E2 geometry is13px/700; this role-size difference is part of the measured placement model, not evidence of a wrong overlap predicate."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "The pinned source mask leaves 1px between label bottom 63 and header top 64. The E2 Noto candidate {'x': 69.3828125, 'y': 50.0, 'width': 21.234375, 'height': 18.0} overlaps the actual lane title box {'height': 19.5, 'width': 57.328125, 'x': 52.0, 'y': 58.0} by 10.0px vertically, causing the route-label refusal."
+        "status": "intentional-noto-placement-model",
+        "reason": "The source mask clears its 10px title mask by1px; the E2 12px Noto edge box overlaps the E2 lane title box by10px. The source title is10px/600 while E2 geometry is13px/700; this role-size difference is part of the measured placement model, not evidence of a wrong overlap predicate."
       }
     },
     {
@@ -73823,11 +75028,170 @@
               70
             ]
           ]
+        },
+        "independentAudit": {
+          "sourceReference": [
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "1462-1475",
+              "claim": "legacy lane-header mask formula"
+            },
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "2377-2434",
+              "claim": "authored route orientation and lane-title segment check"
+            },
+            {
+              "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+              "lines": "4654-4664",
+              "claim": "pinned 10px lane-title rendering"
+            },
+            {
+              "path": "sidecars/archify/renderers/shared/utils.mjs",
+              "lines": "233-246",
+              "claim": "ASCII W textUnits"
+            }
+          ],
+          "sourceMath": {
+            "laneHeaderMaskPx": {
+              "x": 54.0,
+              "y": 64.0,
+              "width": 55.800000000000004,
+              "height": 14.0
+            },
+            "routeVia": [
+              [
+                168,
+                119
+              ],
+              [
+                168,
+                63
+              ],
+              [
+                80,
+                63
+              ],
+              [
+                80,
+                40
+              ],
+              [
+                336,
+                40
+              ],
+              [
+                336,
+                70
+              ]
+            ],
+            "examinedSegment": {
+              "from": [
+                80,
+                63
+              ],
+              "to": [
+                80,
+                40
+              ]
+            },
+            "segmentYpx": 63,
+            "gapToSourceMaskTopPx": 1.0,
+            "segmentXInsideSourceMaskPx": 0.0,
+            "sourceDecision": "pass; route centerline is1px above the source title mask."
+          },
+          "e2NotoMath": {
+            "laneTitleBoxPx": {
+              "height": 19.5,
+              "width": 57.328125,
+              "x": 52.0,
+              "y": 58.0
+            },
+            "routeAnchorInsideBox": {
+              "point": [
+                80,
+                63
+              ],
+              "insideX": true,
+              "insideY": true,
+              "topInsetPx": 5.0
+            },
+            "segmentXInsideNotoBoxPx": 0,
+            "rawGlyphInkPx": [
+              {
+                "input": "0",
+                "inkPx": {
+                  "height": 10.0,
+                  "width": 6.546875,
+                  "x": 52.5625,
+                  "y": 63.265625
+                }
+              },
+              {
+                "input": "1",
+                "inkPx": {
+                  "height": 9.640625,
+                  "width": 5.796875,
+                  "x": 60.734375,
+                  "y": 63.4375
+                }
+              },
+              {
+                "input": "/",
+                "inkPx": {
+                  "height": 12.84375,
+                  "width": 4.515625,
+                  "x": 70.46875,
+                  "y": 62.59375
+                }
+              },
+              {
+                "input": "M",
+                "inkPx": {
+                  "height": 9.640625,
+                  "width": 8.75,
+                  "x": 79.453125,
+                  "y": 63.4375
+                }
+              },
+              {
+                "input": "a",
+                "inkPx": {
+                  "height": 7.65625,
+                  "width": 6.109375,
+                  "x": 90.015625,
+                  "y": 65.609375
+                }
+              },
+              {
+                "input": "i",
+                "inkPx": {
+                  "height": 10.546875,
+                  "width": 2.21875,
+                  "x": 97.921875,
+                  "y": 62.53125
+                }
+              },
+              {
+                "input": "n",
+                "inkPx": {
+                  "height": 7.46875,
+                  "width": 6.375,
+                  "x": 102.015625,
+                  "y": 65.609375
+                }
+              }
+            ],
+            "centerlineGlyphIntersections": [],
+            "result": "route anchor lies inside measured box; horizontal leg traverses the measured title box; captured Noto glyph ink includes the i glyph at y=63."
+          },
+          "classification": "intentional-noto-placement-model-no-waiver",
+          "finding": "This is not a blanket false-positive: source header mask starts at y64, but E2 places the Noto title at x52,y58,w57.328125,h19.5. The authored y63 route is1px above the source mask yet crosses E2 geometry and captured glyph ink. E2 title style is13px/700 versus the source10px/600; no source contract in this audit says those measured bounds may be waived."
         }
       },
       "disposition": {
-        "status": "noto-mask-or-placement-model-difference",
-        "reason": "Pinned source lane-title top is 64px and via point [80, 63] is 1px above it. E2's measured title line box spans y=58.0..77.5px, so the authored via lies inside the current Noto title obstacle."
+        "status": "intentional-noto-placement-model-no-waiver",
+        "reason": "This is not a blanket false-positive: source header mask starts at y64, but E2 places the Noto title at x52,y58,w57.328125,h19.5. The authored y63 route is1px above the source mask yet crosses E2 geometry and captured glyph ink. E2 title style is13px/700 versus the source10px/600; no source contract in this audit says those measured bounds may be waived."
       }
     },
     {
@@ -75648,9 +77012,1995 @@
       }
     },
     {
+      "id": "e2-boundary-workflow-v2-shared-trunk-23",
+      "originalS3ModelDifference": false,
+      "currentMismatch": true,
+      "corpusCaseRef": "src-tauri/crates/maru-diagram-engine/testdata/parity.json#/boundaryCases/e2-boundary-workflow-v2-shared-trunk-23",
+      "source": {
+        "inputSha256": "1d32c400894f10d8c9a839bfa34bffdc134e5ade590cd581ccd2e02d746e27c8",
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"id\":\"trunk-one\",\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[167,119],[167,70],[264,70],[264,119]]},{\"id\":\"trunk-two\",\"from\":\"a\",\"to\":\"c\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[167,119],[167,170],[504,170],[504,119]]}]}",
+        "spec": {
+          "schema_version": 2,
+          "diagram_type": "workflow",
+          "meta": {
+            "title": "workflow fixture",
+            "output": "fixture.html",
+            "quality_profile": "showcase"
+          },
+          "lanes": [
+            {
+              "id": "main",
+              "label": "Main"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "a",
+              "lane": "main",
+              "col": 0,
+              "type": "frontend",
+              "label": "A",
+              "width": 96,
+              "height": 48
+            },
+            {
+              "id": "b",
+              "lane": "main",
+              "col": 2,
+              "type": "backend",
+              "label": "B",
+              "width": 96,
+              "height": 48
+            },
+            {
+              "id": "c",
+              "lane": "main",
+              "col": 4,
+              "type": "backend",
+              "label": "C",
+              "width": 96,
+              "height": 48
+            }
+          ],
+          "edges": [
+            {
+              "id": "trunk-one",
+              "from": "a",
+              "to": "b",
+              "fromSide": "right",
+              "toSide": "left",
+              "via": [
+                [
+                  167,
+                  119
+                ],
+                [
+                  167,
+                  70
+                ],
+                [
+                  264,
+                  70
+                ],
+                [
+                  264,
+                  119
+                ]
+              ]
+            },
+            {
+              "id": "trunk-two",
+              "from": "a",
+              "to": "c",
+              "fromSide": "right",
+              "toSide": "left",
+              "via": [
+                [
+                  167,
+                  119
+                ],
+                [
+                  167,
+                  170
+                ],
+                [
+                  504,
+                  170
+                ],
+                [
+                  504,
+                  119
+                ]
+              ]
+            }
+          ]
+        },
+        "origin": {
+          "kind": "synthetic-generated"
+        }
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "boundary": {
+        "cause": "short-workflow-trunk-exemption",
+        "threshold": 24,
+        "value": 23,
+        "authorship": "via",
+        "measurement": {
+          "sourcePort": [
+            144,
+            119
+          ],
+          "overlapPx": 23
+        },
+        "observedProbe": "accepted",
+        "layer": "model-difference",
+        "category": "readable-v2-placement",
+        "preemptionPolicy": "retain and report any unrelated oracle refusal; do not count a preempted case as this threshold's proof",
+        "oracleVerdict": "pending-host-oracle",
+        "source": "synthetic-original"
+      },
+      "geometryRule": "workflow/geometry-route-quality",
+      "pinnedSourceRefs": [
+        {
+          "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+          "line": "1941-2080",
+          "cause": "v2 explicit pair pin conflicts",
+          "expression": "label-route4; label-label -2; proper crossing; corridor8"
+        },
+        {
+          "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+          "line": "2087-2106",
+          "cause": "v2 preset/channel compatibility",
+          "expression": "preset supports authored channel field"
+        },
+        {
+          "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+          "line": "2280-2300",
+          "cause": "v2 finite and nonzero pinned segments",
+          "expression": "finite coordinates; segment != zero"
+        },
+        {
+          "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+          "line": "2301-2337",
+          "cause": "v2 orthogonal pin segments and min lengths",
+          "expression": "axis aligned; direct>=28, endpoints>=8, interior>=16"
+        },
+        {
+          "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+          "line": "2338-2378",
+          "cause": "v2 channel preservation and preset family",
+          "expression": "via path contains authored channel; route fits preset family"
+        },
+        {
+          "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+          "line": "2413-2448",
+          "cause": "v2 route legend/scene-label/frame clearance",
+          "expression": "route avoids legend, title rails and frame border"
+        },
+        {
+          "path": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
+          "line": "2674-2759",
+          "cause": "shared route gates",
+          "expression": "endpoint/node/crossing/corridor/arrow/border/rhythm"
+        },
+        {
+          "path": "sidecars/archify/renderers/workflow/render-workflow.mjs",
+          "line": "24-26",
+          "cause": "compiled error propagation",
+          "expression": "compiled.ok false => throw original diagnostics"
+        }
+      ],
+      "engine": {
+        "accepted": false,
+        "diagnostics": [
+          {
+            "code": "workflow/geometry-route-quality",
+            "fix": "move shared authored via [167,119] so its first/last endpoint pieces do not share a corridor",
+            "message": "authored relationship 0 [ambiguous-corridor]: relationships 0 and 1 share at least 8px of a corridor at shared authored via [167,119]; authored route \"trunk-one\"",
+            "path": "/edges/0",
+            "rule": "geometry-v1/ambiguous-corridor"
+          }
+        ],
+        "geometry": {
+          "containers": [
+            {
+              "bounds": {
+                "height": 6656,
+                "width": 40960,
+                "x": 2560,
+                "y": 3328
+              },
+              "id": "lane:main",
+              "kind": "lane"
+            }
+          ],
+          "labels": [
+            {
+              "bounds": {
+                "height": 1248,
+                "width": 3669,
+                "x": 3328,
+                "y": 3712
+              },
+              "font": {
+                "fontSha256": "26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 700
+              },
+              "fontSize": 832,
+              "glyphs": [
+                {
+                  "advance": 491,
+                  "glyphId": 17,
+                  "ignored": false,
+                  "ink": {
+                    "height": 640,
+                    "width": 419,
+                    "x": 3364,
+                    "y": 4049
+                  },
+                  "input": "0",
+                  "position": {
+                    "x": 3328,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 491,
+                  "glyphId": 18,
+                  "ignored": false,
+                  "ink": {
+                    "height": 617,
+                    "width": 371,
+                    "x": 3887,
+                    "y": 4060
+                  },
+                  "input": "1",
+                  "position": {
+                    "x": 3819,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 189,
+                  "glyphId": 1,
+                  "ignored": false,
+                  "ink": {
+                    "height": 0,
+                    "width": 0,
+                    "x": 3328,
+                    "y": 4677
+                  },
+                  "input": " ",
+                  "position": {
+                    "x": 4310,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 322,
+                  "glyphId": 16,
+                  "ignored": false,
+                  "ink": {
+                    "height": 822,
+                    "width": 289,
+                    "x": 4510,
+                    "y": 4006
+                  },
+                  "input": "/",
+                  "position": {
+                    "x": 4499,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 188,
+                  "glyphId": 1,
+                  "ignored": false,
+                  "ink": {
+                    "height": 0,
+                    "width": 0,
+                    "x": 3328,
+                    "y": 4677
+                  },
+                  "input": " ",
+                  "position": {
+                    "x": 4821,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 710,
+                  "glyphId": 46,
+                  "ignored": false,
+                  "ink": {
+                    "height": 617,
+                    "width": 560,
+                    "x": 5085,
+                    "y": 4060
+                  },
+                  "input": "M",
+                  "position": {
+                    "x": 5009,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 492,
+                  "glyphId": 66,
+                  "ignored": false,
+                  "ink": {
+                    "height": 490,
+                    "width": 391,
+                    "x": 5761,
+                    "y": 4199
+                  },
+                  "input": "a",
+                  "position": {
+                    "x": 5719,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 253,
+                  "glyphId": 74,
+                  "ignored": false,
+                  "ink": {
+                    "height": 675,
+                    "width": 142,
+                    "x": 6267,
+                    "y": 4002
+                  },
+                  "input": "i",
+                  "position": {
+                    "x": 6211,
+                    "y": 4677
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 533,
+                  "glyphId": 79,
+                  "ignored": false,
+                  "ink": {
+                    "height": 478,
+                    "width": 408,
+                    "x": 6529,
+                    "y": 4199
+                  },
+                  "input": "n",
+                  "position": {
+                    "x": 6464,
+                    "y": 4677
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "container:lane:main:label",
+              "targetId": "lane:main",
+              "text": "01 / Main"
+            },
+            {
+              "bounds": {
+                "height": 1152,
+                "width": 3093,
+                "x": 11328,
+                "y": 12928
+              },
+              "font": {
+                "fontSha256": "6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 400
+              },
+              "fontSize": 768,
+              "glyphs": [
+                {
+                  "advance": 475,
+                  "glyphId": 67,
+                  "ignored": false,
+                  "ink": {
+                    "height": 622,
+                    "width": 366,
+                    "x": 11398,
+                    "y": 13207
+                  },
+                  "input": "b",
+                  "position": {
+                    "x": 11328,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 432,
+                  "glyphId": 66,
+                  "ignored": false,
+                  "ink": {
+                    "height": 438,
+                    "width": 327,
+                    "x": 11847,
+                    "y": 13391
+                  },
+                  "input": "a",
+                  "position": {
+                    "x": 11803,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 392,
+                  "glyphId": 68,
+                  "ignored": false,
+                  "ink": {
+                    "height": 438,
+                    "width": 332,
+                    "x": 12274,
+                    "y": 13391
+                  },
+                  "input": "c",
+                  "position": {
+                    "x": 12235,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 424,
+                  "glyphId": 76,
+                  "ignored": false,
+                  "ink": {
+                    "height": 612,
+                    "width": 346,
+                    "x": 12697,
+                    "y": 13207
+                  },
+                  "input": "k",
+                  "position": {
+                    "x": 12627,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 425,
+                  "glyphId": 70,
+                  "ignored": false,
+                  "ink": {
+                    "height": 438,
+                    "width": 354,
+                    "x": 13090,
+                    "y": 13391
+                  },
+                  "input": "e",
+                  "position": {
+                    "x": 13051,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 469,
+                  "glyphId": 79,
+                  "ignored": false,
+                  "ink": {
+                    "height": 428,
+                    "width": 335,
+                    "x": 13546,
+                    "y": 13391
+                  },
+                  "input": "n",
+                  "position": {
+                    "x": 13476,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 476,
+                  "glyphId": 69,
+                  "ignored": false,
+                  "ink": {
+                    "height": 622,
+                    "width": 366,
+                    "x": 13985,
+                    "y": 13207
+                  },
+                  "input": "d",
+                  "position": {
+                    "x": 13945,
+                    "y": 13819
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "legend:backend",
+              "targetId": "legend",
+              "text": "backend"
+            },
+            {
+              "bounds": {
+                "height": 1152,
+                "width": 3141,
+                "x": 3968,
+                "y": 12928
+              },
+              "font": {
+                "fontSha256": "6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 400
+              },
+              "fontSize": 768,
+              "glyphs": [
+                {
+                  "advance": 250,
+                  "glyphId": 71,
+                  "ignored": false,
+                  "ink": {
+                    "height": 622,
+                    "width": 249,
+                    "x": 3993,
+                    "y": 13197
+                  },
+                  "input": "f",
+                  "position": {
+                    "x": 3968,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 298,
+                  "glyphId": 83,
+                  "ignored": false,
+                  "ink": {
+                    "height": 428,
+                    "width": 230,
+                    "x": 4288,
+                    "y": 13391
+                  },
+                  "input": "r",
+                  "position": {
+                    "x": 4218,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 465,
+                  "glyphId": 80,
+                  "ignored": false,
+                  "ink": {
+                    "height": 438,
+                    "width": 387,
+                    "x": 4555,
+                    "y": 13391
+                  },
+                  "input": "o",
+                  "position": {
+                    "x": 4516,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 468,
+                  "glyphId": 79,
+                  "ignored": false,
+                  "ink": {
+                    "height": 428,
+                    "width": 334,
+                    "x": 5051,
+                    "y": 13391
+                  },
+                  "input": "n",
+                  "position": {
+                    "x": 4981,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 290,
+                  "glyphId": 85,
+                  "ignored": false,
+                  "ink": {
+                    "height": 545,
+                    "width": 259,
+                    "x": 5470,
+                    "y": 13284
+                  },
+                  "input": "t",
+                  "position": {
+                    "x": 5449,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 425,
+                  "glyphId": 70,
+                  "ignored": false,
+                  "ink": {
+                    "height": 438,
+                    "width": 355,
+                    "x": 5778,
+                    "y": 13391
+                  },
+                  "input": "e",
+                  "position": {
+                    "x": 5739,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 469,
+                  "glyphId": 79,
+                  "ignored": false,
+                  "ink": {
+                    "height": 428,
+                    "width": 334,
+                    "x": 6235,
+                    "y": 13391
+                  },
+                  "input": "n",
+                  "position": {
+                    "x": 6164,
+                    "y": 13819
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 476,
+                  "glyphId": 69,
+                  "ignored": false,
+                  "ink": {
+                    "height": 622,
+                    "width": 366,
+                    "x": 6673,
+                    "y": 13207
+                  },
+                  "input": "d",
+                  "position": {
+                    "x": 6633,
+                    "y": 13819
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "legend:frontend",
+              "targetId": "legend",
+              "text": "frontend"
+            },
+            {
+              "bounds": {
+                "height": 1152,
+                "width": 2782,
+                "x": 2560,
+                "y": 11648
+              },
+              "font": {
+                "fontSha256": "26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 700
+              },
+              "fontSize": 768,
+              "glyphs": [
+                {
+                  "advance": 444,
+                  "glyphId": 45,
+                  "ignored": false,
+                  "ink": {
+                    "height": 570,
+                    "width": 346,
+                    "x": 2629,
+                    "y": 11969
+                  },
+                  "input": "L",
+                  "position": {
+                    "x": 2560,
+                    "y": 12539
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 446,
+                  "glyphId": 70,
+                  "ignored": false,
+                  "ink": {
+                    "height": 452,
+                    "width": 381,
+                    "x": 3037,
+                    "y": 12098
+                  },
+                  "input": "e",
+                  "position": {
+                    "x": 3004,
+                    "y": 12539
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 459,
+                  "glyphId": 72,
+                  "ignored": false,
+                  "ink": {
+                    "height": 628,
+                    "width": 414,
+                    "x": 3483,
+                    "y": 12098
+                  },
+                  "input": "g",
+                  "position": {
+                    "x": 3450,
+                    "y": 12539
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 446,
+                  "glyphId": 70,
+                  "ignored": false,
+                  "ink": {
+                    "height": 452,
+                    "width": 381,
+                    "x": 3942,
+                    "y": 12098
+                  },
+                  "input": "e",
+                  "position": {
+                    "x": 3909,
+                    "y": 12539
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 492,
+                  "glyphId": 79,
+                  "ignored": false,
+                  "ink": {
+                    "height": 441,
+                    "width": 377,
+                    "x": 4415,
+                    "y": 12098
+                  },
+                  "input": "n",
+                  "position": {
+                    "x": 4355,
+                    "y": 12539
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 495,
+                  "glyphId": 69,
+                  "ignored": false,
+                  "ink": {
+                    "height": 624,
+                    "width": 399,
+                    "x": 4883,
+                    "y": 11926
+                  },
+                  "input": "d",
+                  "position": {
+                    "x": 4847,
+                    "y": 12539
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "legend:title",
+              "targetId": "legend",
+              "text": "Legend"
+            },
+            {
+              "bounds": {
+                "height": 1248,
+                "width": 545,
+                "x": 3708,
+                "y": 6592
+              },
+              "font": {
+                "fontSha256": "26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 700
+              },
+              "fontSize": 832,
+              "glyphs": [
+                {
+                  "advance": 533,
+                  "glyphId": 34,
+                  "ignored": false,
+                  "ink": {
+                    "height": 617,
+                    "width": 541,
+                    "x": 3708,
+                    "y": 6940
+                  },
+                  "input": "A",
+                  "position": {
+                    "x": 3712,
+                    "y": 7557
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "node:a:label",
+              "targetId": "a",
+              "text": "A"
+            },
+            {
+              "bounds": {
+                "height": 1248,
+                "width": 567,
+                "x": 19072,
+                "y": 6592
+              },
+              "font": {
+                "fontSha256": "26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 700
+              },
+              "fontSize": 832,
+              "glyphs": [
+                {
+                  "advance": 567,
+                  "glyphId": 35,
+                  "ignored": false,
+                  "ink": {
+                    "height": 617,
+                    "width": 459,
+                    "x": 19147,
+                    "y": 6940
+                  },
+                  "input": "B",
+                  "position": {
+                    "x": 19072,
+                    "y": 7557
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "node:b:label",
+              "targetId": "b",
+              "text": "B"
+            },
+            {
+              "bounds": {
+                "height": 1248,
+                "width": 546,
+                "x": 34432,
+                "y": 6592
+              },
+              "font": {
+                "fontSha256": "26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 700
+              },
+              "fontSize": 832,
+              "glyphs": [
+                {
+                  "advance": 546,
+                  "glyphId": 36,
+                  "ignored": false,
+                  "ink": {
+                    "height": 640,
+                    "width": 480,
+                    "x": 34476,
+                    "y": 6929
+                  },
+                  "input": "C",
+                  "position": {
+                    "x": 34432,
+                    "y": 7557
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "node:c:label",
+              "targetId": "c",
+              "text": "C"
+            },
+            {
+              "bounds": {
+                "height": 2304,
+                "width": 12664,
+                "x": 2048,
+                "y": 1024
+              },
+              "font": {
+                "fontSha256": "26d0c6748500a0444844280b308f5b62c7ae92ac6c6ac88148e502dd211eb52a",
+                "id": "noto-sans-cjk-kr",
+                "license": "OFL-1.1",
+                "revision": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+                "unitsPerEm": 1000,
+                "weight": 700
+              },
+              "fontSize": 1536,
+              "glyphs": [
+                {
+                  "advance": 1326,
+                  "glyphId": 88,
+                  "ignored": false,
+                  "ink": {
+                    "height": 861,
+                    "width": 1240,
+                    "x": 2091,
+                    "y": 1945
+                  },
+                  "input": "w",
+                  "position": {
+                    "x": 2048,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 961,
+                  "glyphId": 80,
+                  "ignored": false,
+                  "ink": {
+                    "height": 904,
+                    "width": 827,
+                    "x": 3441,
+                    "y": 1924
+                  },
+                  "input": "o",
+                  "position": {
+                    "x": 3374,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 670,
+                  "glyphId": 83,
+                  "ignored": false,
+                  "ink": {
+                    "height": 882,
+                    "width": 551,
+                    "x": 4456,
+                    "y": 1924
+                  },
+                  "input": "r",
+                  "position": {
+                    "x": 4335,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 928,
+                  "glyphId": 76,
+                  "ignored": false,
+                  "ink": {
+                    "height": 1226,
+                    "width": 798,
+                    "x": 5126,
+                    "y": 1580
+                  },
+                  "input": "k",
+                  "position": {
+                    "x": 5005,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 571,
+                  "glyphId": 71,
+                  "ignored": false,
+                  "ink": {
+                    "height": 1248,
+                    "width": 580,
+                    "x": 5975,
+                    "y": 1558
+                  },
+                  "input": "f",
+                  "position": {
+                    "x": 5933,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 484,
+                  "glyphId": 77,
+                  "ignored": false,
+                  "ink": {
+                    "height": 1248,
+                    "width": 329,
+                    "x": 6625,
+                    "y": 1580
+                  },
+                  "input": "l",
+                  "position": {
+                    "x": 6504,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 961,
+                  "glyphId": 80,
+                  "ignored": false,
+                  "ink": {
+                    "height": 904,
+                    "width": 827,
+                    "x": 7055,
+                    "y": 1924
+                  },
+                  "input": "o",
+                  "position": {
+                    "x": 6988,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 1326,
+                  "glyphId": 88,
+                  "ignored": false,
+                  "ink": {
+                    "height": 861,
+                    "width": 1240,
+                    "x": 7992,
+                    "y": 1945
+                  },
+                  "input": "w",
+                  "position": {
+                    "x": 7949,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 349,
+                  "glyphId": 1,
+                  "ignored": false,
+                  "ink": {
+                    "height": 0,
+                    "width": 0,
+                    "x": 2048,
+                    "y": 2806
+                  },
+                  "input": " ",
+                  "position": {
+                    "x": 9275,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 571,
+                  "glyphId": 71,
+                  "ignored": false,
+                  "ink": {
+                    "height": 1248,
+                    "width": 580,
+                    "x": 9666,
+                    "y": 1558
+                  },
+                  "input": "f",
+                  "position": {
+                    "x": 9624,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 467,
+                  "glyphId": 74,
+                  "ignored": false,
+                  "ink": {
+                    "height": 1246,
+                    "width": 262,
+                    "x": 10299,
+                    "y": 1560
+                  },
+                  "input": "i",
+                  "position": {
+                    "x": 10195,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 863,
+                  "glyphId": 89,
+                  "ignored": false,
+                  "ink": {
+                    "height": 861,
+                    "width": 815,
+                    "x": 10686,
+                    "y": 1945
+                  },
+                  "input": "x",
+                  "position": {
+                    "x": 10662,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 647,
+                  "glyphId": 85,
+                  "ignored": false,
+                  "ink": {
+                    "height": 1115,
+                    "width": 588,
+                    "x": 11557,
+                    "y": 1713
+                  },
+                  "input": "t",
+                  "position": {
+                    "x": 11525,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 978,
+                  "glyphId": 86,
+                  "ignored": false,
+                  "ink": {
+                    "height": 883,
+                    "width": 748,
+                    "x": 12283,
+                    "y": 1945
+                  },
+                  "input": "u",
+                  "position": {
+                    "x": 12172,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 670,
+                  "glyphId": 83,
+                  "ignored": false,
+                  "ink": {
+                    "height": 882,
+                    "width": 551,
+                    "x": 13271,
+                    "y": 1924
+                  },
+                  "input": "r",
+                  "position": {
+                    "x": 13150,
+                    "y": 2806
+                  },
+                  "replaced": false
+                },
+                {
+                  "advance": 892,
+                  "glyphId": 70,
+                  "ignored": false,
+                  "ink": {
+                    "height": 904,
+                    "width": 761,
+                    "x": 13887,
+                    "y": 1924
+                  },
+                  "input": "e",
+                  "position": {
+                    "x": 13820,
+                    "y": 2806
+                  },
+                  "replaced": false
+                }
+              ],
+              "id": "title",
+              "targetId": "document",
+              "text": "workflow fixture"
+            }
+          ],
+          "legend": {
+            "bounds": {
+              "height": 2176,
+              "width": 13248,
+              "x": 2560,
+              "y": 12416
+            },
+            "contentBounds": {
+              "height": 3456,
+              "width": 14272,
+              "x": 2048,
+              "y": 11136
+            },
+            "entries": [
+              {
+                "bounds": {
+                  "height": 1152,
+                  "width": 5952,
+                  "x": 2560,
+                  "y": 12928
+                },
+                "key": "frontend",
+                "label": "frontend",
+                "swatchBounds": {
+                  "height": 576,
+                  "width": 896,
+                  "x": 2560,
+                  "y": 13307
+                },
+                "textBounds": {
+                  "height": 1152,
+                  "width": 3141,
+                  "x": 3968,
+                  "y": 12928
+                }
+              },
+              {
+                "bounds": {
+                  "height": 1152,
+                  "width": 5888,
+                  "x": 9920,
+                  "y": 12928
+                },
+                "key": "backend",
+                "label": "backend",
+                "swatchBounds": {
+                  "height": 576,
+                  "width": 896,
+                  "x": 9920,
+                  "y": 13307
+                },
+                "textBounds": {
+                  "height": 1152,
+                  "width": 3093,
+                  "x": 11328,
+                  "y": 12928
+                }
+              }
+            ],
+            "titleY": 12539
+          },
+          "nodes": [
+            {
+              "bounds": {
+                "height": 3072,
+                "width": 6144,
+                "x": 2944,
+                "y": 6080
+              },
+              "id": "a",
+              "positionSource": "automatic"
+            },
+            {
+              "bounds": {
+                "height": 3072,
+                "width": 6144,
+                "x": 18304,
+                "y": 6080
+              },
+              "id": "b",
+              "positionSource": "automatic"
+            },
+            {
+              "bounds": {
+                "height": 3072,
+                "width": 6144,
+                "x": 33664,
+                "y": 6080
+              },
+              "id": "c",
+              "positionSource": "automatic"
+            }
+          ],
+          "page": {
+            "bounds": {
+              "height": 40960,
+              "width": 58880,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "routes": [
+            {
+              "from": "a",
+              "id": "trunk-one",
+              "points": [
+                {
+                  "x": 9088,
+                  "y": 7616
+                },
+                {
+                  "x": 9600,
+                  "y": 7616
+                },
+                {
+                  "x": 10688,
+                  "y": 7616
+                },
+                {
+                  "x": 10688,
+                  "y": 4480
+                },
+                {
+                  "x": 16896,
+                  "y": 4480
+                },
+                {
+                  "x": 16896,
+                  "y": 7616
+                },
+                {
+                  "x": 17792,
+                  "y": 7616
+                },
+                {
+                  "x": 18304,
+                  "y": 7616
+                }
+              ],
+              "role": null,
+              "to": "b",
+              "variant": null,
+              "width": null
+            },
+            {
+              "from": "a",
+              "id": "trunk-two",
+              "points": [
+                {
+                  "x": 9088,
+                  "y": 7616
+                },
+                {
+                  "x": 9600,
+                  "y": 7616
+                },
+                {
+                  "x": 10688,
+                  "y": 7616
+                },
+                {
+                  "x": 10688,
+                  "y": 10880
+                },
+                {
+                  "x": 32256,
+                  "y": 10880
+                },
+                {
+                  "x": 32256,
+                  "y": 7616
+                },
+                {
+                  "x": 33152,
+                  "y": 7616
+                },
+                {
+                  "x": 33664,
+                  "y": 7616
+                }
+              ],
+              "role": null,
+              "to": "c",
+              "variant": null,
+              "width": null
+            }
+          ]
+        }
+      },
+      "numericGeometryEvidence": {
+        "fixedPointUnitsPerPx": 64,
+        "nodes": [
+          {
+            "id": "a",
+            "boundsPx": {
+              "height": 48.0,
+              "width": 96.0,
+              "x": 46.0,
+              "y": 95.0
+            }
+          },
+          {
+            "id": "b",
+            "boundsPx": {
+              "height": 48.0,
+              "width": 96.0,
+              "x": 286.0,
+              "y": 95.0
+            }
+          },
+          {
+            "id": "c",
+            "boundsPx": {
+              "height": 48.0,
+              "width": 96.0,
+              "x": 526.0,
+              "y": 95.0
+            }
+          }
+        ],
+        "containers": [
+          {
+            "id": "lane:main",
+            "kind": "lane",
+            "boundsPx": {
+              "height": 104.0,
+              "width": 640.0,
+              "x": 40.0,
+              "y": 52.0
+            }
+          }
+        ],
+        "labels": [
+          {
+            "id": "container:lane:main:label",
+            "text": "01 / Main",
+            "font": "noto-sans-cjk-kr",
+            "weight": 700,
+            "fontSizePx": 13.0,
+            "glyphAdvancePx": 57.328125,
+            "boundsPx": {
+              "height": 19.5,
+              "width": 57.328125,
+              "x": 52.0,
+              "y": 58.0
+            }
+          },
+          {
+            "id": "legend:backend",
+            "text": "backend",
+            "font": "noto-sans-cjk-kr",
+            "weight": 400,
+            "fontSizePx": 12.0,
+            "glyphAdvancePx": 48.328125,
+            "boundsPx": {
+              "height": 18.0,
+              "width": 48.328125,
+              "x": 177.0,
+              "y": 202.0
+            }
+          },
+          {
+            "id": "legend:frontend",
+            "text": "frontend",
+            "font": "noto-sans-cjk-kr",
+            "weight": 400,
+            "fontSizePx": 12.0,
+            "glyphAdvancePx": 49.078125,
+            "boundsPx": {
+              "height": 18.0,
+              "width": 49.078125,
+              "x": 62.0,
+              "y": 202.0
+            }
+          },
+          {
+            "id": "legend:title",
+            "text": "Legend",
+            "font": "noto-sans-cjk-kr",
+            "weight": 700,
+            "fontSizePx": 12.0,
+            "glyphAdvancePx": 43.46875,
+            "boundsPx": {
+              "height": 18.0,
+              "width": 43.46875,
+              "x": 40.0,
+              "y": 182.0
+            }
+          },
+          {
+            "id": "node:a:label",
+            "text": "A",
+            "font": "noto-sans-cjk-kr",
+            "weight": 700,
+            "fontSizePx": 13.0,
+            "glyphAdvancePx": 8.328125,
+            "boundsPx": {
+              "height": 19.5,
+              "width": 8.515625,
+              "x": 57.9375,
+              "y": 103.0
+            }
+          },
+          {
+            "id": "node:b:label",
+            "text": "B",
+            "font": "noto-sans-cjk-kr",
+            "weight": 700,
+            "fontSizePx": 13.0,
+            "glyphAdvancePx": 8.859375,
+            "boundsPx": {
+              "height": 19.5,
+              "width": 8.859375,
+              "x": 298.0,
+              "y": 103.0
+            }
+          },
+          {
+            "id": "node:c:label",
+            "text": "C",
+            "font": "noto-sans-cjk-kr",
+            "weight": 700,
+            "fontSizePx": 13.0,
+            "glyphAdvancePx": 8.53125,
+            "boundsPx": {
+              "height": 19.5,
+              "width": 8.53125,
+              "x": 538.0,
+              "y": 103.0
+            }
+          },
+          {
+            "id": "title",
+            "text": "workflow fixture",
+            "font": "noto-sans-cjk-kr",
+            "weight": 700,
+            "fontSizePx": 24.0,
+            "glyphAdvancePx": 197.875,
+            "boundsPx": {
+              "height": 36.0,
+              "width": 197.875,
+              "x": 32.0,
+              "y": 16.0
+            }
+          }
+        ],
+        "routes": [
+          {
+            "id": "trunk-one",
+            "pointsPx": [
+              {
+                "x": 142.0,
+                "y": 119.0
+              },
+              {
+                "x": 150.0,
+                "y": 119.0
+              },
+              {
+                "x": 167.0,
+                "y": 119.0
+              },
+              {
+                "x": 167.0,
+                "y": 70.0
+              },
+              {
+                "x": 264.0,
+                "y": 70.0
+              },
+              {
+                "x": 264.0,
+                "y": 119.0
+              },
+              {
+                "x": 278.0,
+                "y": 119.0
+              },
+              {
+                "x": 286.0,
+                "y": 119.0
+              }
+            ],
+            "strokeWidthPx": null
+          },
+          {
+            "id": "trunk-two",
+            "pointsPx": [
+              {
+                "x": 142.0,
+                "y": 119.0
+              },
+              {
+                "x": 150.0,
+                "y": 119.0
+              },
+              {
+                "x": 167.0,
+                "y": 119.0
+              },
+              {
+                "x": 167.0,
+                "y": 170.0
+              },
+              {
+                "x": 504.0,
+                "y": 170.0
+              },
+              {
+                "x": 504.0,
+                "y": 119.0
+              },
+              {
+                "x": 518.0,
+                "y": 119.0
+              },
+              {
+                "x": 526.0,
+                "y": 119.0
+              }
+            ],
+            "strokeWidthPx": null
+          }
+        ],
+        "legendBoundsPx": {
+          "height": 34.0,
+          "width": 207.0,
+          "x": 40.0,
+          "y": 194.0
+        },
+        "pageBoundsPx": {
+          "height": 640.0,
+          "width": 920.0,
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      "numericSourceVsEngineEvidence": {
+        "kind": "source-mask-or-placement",
+        "sourceBoundary": {
+          "cause": "short-workflow-trunk-exemption",
+          "threshold": 24,
+          "value": 23,
+          "authorship": "via",
+          "measurement": {
+            "sourcePort": [
+              144,
+              119
+            ],
+            "overlapPx": 23
+          },
+          "observedProbe": "accepted",
+          "layer": "model-difference",
+          "category": "readable-v2-placement",
+          "preemptionPolicy": "retain and report any unrelated oracle refusal; do not count a preempted case as this threshold's proof",
+          "oracleVerdict": "pending-host-oracle",
+          "source": "synthetic-original"
+        },
+        "engineDiagnostic": {
+          "code": "workflow/geometry-route-quality",
+          "fix": "move shared authored via [167,119] so its first/last endpoint pieces do not share a corridor",
+          "message": "authored relationship 0 [ambiguous-corridor]: relationships 0 and 1 share at least 8px of a corridor at shared authored via [167,119]; authored route \"trunk-one\"",
+          "path": "/edges/0",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        "authoredLabelMaskComparison": {
+          "labels": []
+        },
+        "currentGeometrySummary": {
+          "fixedPointUnitsPerPx": 64,
+          "nodes": [
+            {
+              "id": "a",
+              "boundsPx": {
+                "height": 48.0,
+                "width": 96.0,
+                "x": 46.0,
+                "y": 95.0
+              }
+            },
+            {
+              "id": "b",
+              "boundsPx": {
+                "height": 48.0,
+                "width": 96.0,
+                "x": 286.0,
+                "y": 95.0
+              }
+            },
+            {
+              "id": "c",
+              "boundsPx": {
+                "height": 48.0,
+                "width": 96.0,
+                "x": 526.0,
+                "y": 95.0
+              }
+            }
+          ],
+          "containers": [
+            {
+              "id": "lane:main",
+              "kind": "lane",
+              "boundsPx": {
+                "height": 104.0,
+                "width": 640.0,
+                "x": 40.0,
+                "y": 52.0
+              }
+            }
+          ],
+          "labels": [
+            {
+              "id": "container:lane:main:label",
+              "text": "01 / Main",
+              "font": "noto-sans-cjk-kr",
+              "weight": 700,
+              "fontSizePx": 13.0,
+              "glyphAdvancePx": 57.328125,
+              "boundsPx": {
+                "height": 19.5,
+                "width": 57.328125,
+                "x": 52.0,
+                "y": 58.0
+              }
+            },
+            {
+              "id": "legend:backend",
+              "text": "backend",
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 48.328125,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 48.328125,
+                "x": 177.0,
+                "y": 202.0
+              }
+            },
+            {
+              "id": "legend:frontend",
+              "text": "frontend",
+              "font": "noto-sans-cjk-kr",
+              "weight": 400,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 49.078125,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 49.078125,
+                "x": 62.0,
+                "y": 202.0
+              }
+            },
+            {
+              "id": "legend:title",
+              "text": "Legend",
+              "font": "noto-sans-cjk-kr",
+              "weight": 700,
+              "fontSizePx": 12.0,
+              "glyphAdvancePx": 43.46875,
+              "boundsPx": {
+                "height": 18.0,
+                "width": 43.46875,
+                "x": 40.0,
+                "y": 182.0
+              }
+            },
+            {
+              "id": "node:a:label",
+              "text": "A",
+              "font": "noto-sans-cjk-kr",
+              "weight": 700,
+              "fontSizePx": 13.0,
+              "glyphAdvancePx": 8.328125,
+              "boundsPx": {
+                "height": 19.5,
+                "width": 8.515625,
+                "x": 57.9375,
+                "y": 103.0
+              }
+            },
+            {
+              "id": "node:b:label",
+              "text": "B",
+              "font": "noto-sans-cjk-kr",
+              "weight": 700,
+              "fontSizePx": 13.0,
+              "glyphAdvancePx": 8.859375,
+              "boundsPx": {
+                "height": 19.5,
+                "width": 8.859375,
+                "x": 298.0,
+                "y": 103.0
+              }
+            },
+            {
+              "id": "node:c:label",
+              "text": "C",
+              "font": "noto-sans-cjk-kr",
+              "weight": 700,
+              "fontSizePx": 13.0,
+              "glyphAdvancePx": 8.53125,
+              "boundsPx": {
+                "height": 19.5,
+                "width": 8.53125,
+                "x": 538.0,
+                "y": 103.0
+              }
+            },
+            {
+              "id": "title",
+              "text": "workflow fixture",
+              "font": "noto-sans-cjk-kr",
+              "weight": 700,
+              "fontSizePx": 24.0,
+              "glyphAdvancePx": 197.875,
+              "boundsPx": {
+                "height": 36.0,
+                "width": 197.875,
+                "x": 32.0,
+                "y": 16.0
+              }
+            }
+          ],
+          "routes": [
+            {
+              "id": "trunk-one",
+              "pointsPx": [
+                {
+                  "x": 142.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 150.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 167.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 167.0,
+                  "y": 70.0
+                },
+                {
+                  "x": 264.0,
+                  "y": 70.0
+                },
+                {
+                  "x": 264.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 278.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 286.0,
+                  "y": 119.0
+                }
+              ],
+              "strokeWidthPx": null
+            },
+            {
+              "id": "trunk-two",
+              "pointsPx": [
+                {
+                  "x": 142.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 150.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 167.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 167.0,
+                  "y": 170.0
+                },
+                {
+                  "x": 504.0,
+                  "y": 170.0
+                },
+                {
+                  "x": 504.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 518.0,
+                  "y": 119.0
+                },
+                {
+                  "x": 526.0,
+                  "y": 119.0
+                }
+              ],
+              "strokeWidthPx": null
+            }
+          ],
+          "legendBoundsPx": {
+            "height": 34.0,
+            "width": 207.0,
+            "x": 40.0,
+            "y": 194.0
+          },
+          "pageBoundsPx": {
+            "height": 640.0,
+            "width": 920.0,
+            "x": 0.0,
+            "y": 0.0
+          }
+        },
+        "sharedViaThresholdComparison": {
+          "rawEdges": [
+            "trunk-one",
+            "trunk-two"
+          ],
+          "sharedRawVia": [
+            167,
+            119
+          ],
+          "sourcePortPx": [
+            144,
+            119
+          ],
+          "sourceFirstPiecePx": [
+            [
+              144,
+              119
+            ],
+            [
+              167,
+              119
+            ]
+          ],
+          "sourceSharedApproachPx": 23,
+          "sourceSameStyleTrunkExemptionMaxPx": 24,
+          "sourceOracleAccepted": true,
+          "e2GeometryPortPx": [
+            142,
+            119
+          ],
+          "e2SceneApproachPx": [
+            [
+              142,
+              119
+            ],
+            [
+              167,
+              119
+            ]
+          ],
+          "e2SceneSharedApproachPx": 25,
+          "currentDiagnosticCodes": [
+            "workflow/geometry-route-quality"
+          ],
+          "rule": "explicitly shared first via endpoint owns only the actual clipped scene piece ending at that raw via"
+        }
+      },
+      "disposition": {
+        "status": "source-engine-placement-threshold-difference",
+        "reason": "The oracle accepts the 23px source approach from port [144,119] to shared via [167,119], within its 24px trunk exemption. E2 starts at [142,119], making the scene approach 25px; the owner rule correctly treats the actual witness ending at this raw shared via as authored/fatal. Preserve OracleTrue and the measured placement-driven refusal; this case is a current-only mismatch, not a waived oracle record."
+      }
+    },
+    {
       "id": "e2-boundary-workflow-v2-shared-trunk-25",
       "originalS3ModelDifference": true,
-      "currentMismatch": true,
+      "currentMismatch": false,
       "corpusCaseRef": "src-tauri/crates/maru-diagram-engine/testdata/parity.json#/boundaryCases/e2-boundary-workflow-v2-shared-trunk-25",
       "source": {
         "inputSha256": "ff11d26ed8adadb1b67853bcb97280ae1c8aee01d56fa8f546a785f5bbcd56ce",
@@ -75873,12 +79223,12 @@
         }
       ],
       "engine": {
-        "accepted": true,
+        "accepted": false,
         "diagnostics": [
           {
-            "code": "workflow/geometry-route-quality-notice",
-            "fix": "add via points or an explicit channel to control this route",
-            "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 0 and 1 share at least 8px of a corridor",
+            "code": "workflow/geometry-route-quality",
+            "fix": "move shared authored via [169,119] so its first/last endpoint pieces do not share a corridor",
+            "message": "authored relationship 0 [ambiguous-corridor]: relationships 0 and 1 share at least 8px of a corridor at shared authored via [169,119]; authored route \"trunk-one\"",
             "path": "/edges/0",
             "rule": "geometry-v1/ambiguous-corridor"
           }
@@ -77366,9 +80716,9 @@
           "source": "synthetic-original"
         },
         "engineDiagnostic": {
-          "code": "workflow/geometry-route-quality-notice",
-          "fix": "add via points or an explicit channel to control this route",
-          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 0 and 1 share at least 8px of a corridor",
+          "code": "workflow/geometry-route-quality",
+          "fix": "move shared authored via [169,119] so its first/last endpoint pieces do not share a corridor",
+          "message": "authored relationship 0 [ambiguous-corridor]: relationships 0 and 1 share at least 8px of a corridor at shared authored via [169,119]; authored route \"trunk-one\"",
           "path": "/edges/0",
           "rule": "geometry-v1/ambiguous-corridor"
         },
@@ -77622,11 +80972,58 @@
             "x": 0.0,
             "y": 0.0
           }
+        },
+        "sharedViaThresholdComparison": {
+          "rawEdges": [
+            "trunk-one",
+            "trunk-two"
+          ],
+          "sharedRawVia": [
+            169,
+            119
+          ],
+          "sourcePortPx": [
+            144,
+            119
+          ],
+          "sourceFirstPiecePx": [
+            [
+              144,
+              119
+            ],
+            [
+              169,
+              119
+            ]
+          ],
+          "sourceSharedApproachPx": 25,
+          "sourceSameStyleTrunkExemptionMaxPx": 24,
+          "sourceOracleAccepted": false,
+          "e2GeometryPortPx": [
+            142,
+            119
+          ],
+          "e2SceneApproachPx": [
+            [
+              142,
+              119
+            ],
+            [
+              169,
+              119
+            ]
+          ],
+          "e2SceneSharedApproachPx": 27,
+          "currentDiagnosticCodes": [
+            "workflow/geometry-route-quality"
+          ],
+          "rule": "explicitly shared first via endpoint owns only the actual clipped scene piece ending at that raw via"
         }
       },
       "disposition": {
-        "status": "pending-owner-policy-ruling",
-        "reason": "Owner-directed policy decision is still pending. Preserve original oracle verdict and current measured geometry; do not waive or call this intentional until the ruling arrives."
+        "status": "fixed-by-shared-via-junction-provenance",
+        "reason": "The owner ruling makes this source witness fatal: both raw edges explicitly end their first via piece at [169,119], and the clipped actual scene witness ends there. The final f4dc export confirms original oracleFalse and engineFalse.",
+        "fixEvidence": "The diagnostic names the via coordinate and asks to move that shared junction; the same-geometry test removing the second raw via returns a notice."
       }
     },
     {
