@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against approved S1",
-  "sourceCommit": "af582230b41f5f34c9620da463eb6fd40af2c2c0",
+  "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against merged E3 S2 main",
+  "sourceCommit": "b97d6d54d3e7b906316aa24c78fd4df79a6a4675",
   "sdkTreePath": "src-tauri/crates",
-  "sdkTree": "4b02633660fbc471e7daa9a3024064e11bba6cb7",
+  "sdkTree": "3a6928cd0bb6d6dcbed714e95f4f88abb7128c04",
   "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-  "engineCrateTree": "58022b926f0b2656379037c8a78b64d6c6ea77c1",
-  "baseCommit": "4d12957f1e9ed7100263115fae6c2aec74976a84",
+  "engineCrateTree": "a25d052df95005d99d0ec1d1fadcf5da32b4680e",
+  "baseCommit": "010180e23a7191dddfc72a7c74fa0745c74cb7bf",
   "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
   "corpusCaseCount": 623,
-  "acceptedCaseCount": 216,
+  "acceptedCaseCount": 218,
   "retainedCaseCount": 405,
   "baselineWork": {
     "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
@@ -29,15 +29,71 @@
     "stats": {
       "astarExpandedStates": 22167,
       "constraintEvaluations": 3332334,
+      "endpointMaskEvaluations": 0,
       "routeEvaluations": 999
     },
-    "total": 3355500
+    "total": 3355500,
+    "viaBenchmarkWork": {
+      "fixtureSha256": "f667c96790d8e93aafeeec5ff2efb54a8d72c07dbf0f2ed1e87ae0b6c1b28b34",
+      "labels": 29,
+      "nodes": 26,
+      "routeSegments": 20,
+      "routes": 1,
+      "stats": {
+        "astarExpandedStates": 0,
+        "constraintEvaluations": 1278,
+        "endpointMaskEvaluations": 53,
+        "routeEvaluations": 1
+      },
+      "total": 1332,
+      "viaPoints": 17
+    }
   },
-  "nativeReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
-  "wasmReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+  "nativeReportSha256": "9b8a3111700764bec807d16d390ca27f1b1d1ab8ae493c2309ea32b996abcfa2",
+  "wasmReportSha256": "9b8a3111700764bec807d16d390ca27f1b1d1ab8ae493c2309ea32b996abcfa2",
   "changes": [
     {
+      "id": "public-01",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [
+        "architecture/geometry-route-quality-notice"
+      ],
+      "codes": [
+        "architecture/geometry-label-fit",
+        "architecture/geometry-route-quality-notice"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
       "id": "e2-architecture-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "architecture/geometry-label-fit"
+      ],
+      "codes": [
+        "architecture/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-architecture-geometry-label-fit-detail",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "architecture/geometry-label-fit"
+      ],
+      "codes": [
+        "architecture/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-architecture-geometry-label-fit-tag",
       "oldAccepted": false,
       "accepted": false,
       "oldCodes": [
@@ -63,7 +119,46 @@
       "svgChanged": []
     },
     {
+      "id": "e2-workflow-geometry-label-fit-detail",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "workflow/geometry-label-fit"
+      ],
+      "codes": [
+        "workflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-workflow-geometry-label-fit-tag",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "workflow/geometry-label-fit"
+      ],
+      "codes": [
+        "workflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
       "id": "e2-sequence-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-sequence-geometry-label-fit-detail",
       "oldAccepted": false,
       "accepted": false,
       "oldCodes": [
@@ -89,7 +184,59 @@
       "svgChanged": []
     },
     {
+      "id": "e2-dataflow-geometry-label-fit-detail",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-dataflow-geometry-label-fit-tag",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
       "id": "e2-lifecycle-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-lifecycle-geometry-label-fit-detail",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-lifecycle-geometry-label-fit-tag",
       "oldAccepted": false,
       "accepted": false,
       "oldCodes": [
@@ -128,6 +275,58 @@
       "svgChanged": []
     },
     {
+      "id": "e2-boundary-dataflow-detail-width-sublabel-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-detail-width-sublabel-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-detail-width-tag-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-detail-width-tag-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
       "id": "e2-boundary-lifecycle-v1-primary-width-below",
       "oldAccepted": false,
       "accepted": false,
@@ -142,6 +341,58 @@
     },
     {
       "id": "e2-boundary-lifecycle-v1-primary-width-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v1-detail-width-sublabel-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v1-detail-width-sublabel-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v1-detail-width-tag-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v1-detail-width-tag-above",
       "oldAccepted": false,
       "accepted": false,
       "oldCodes": [
@@ -180,6 +431,32 @@
       "svgChanged": []
     },
     {
+      "id": "e2-boundary-sequence-spread-sublabel-header-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-sequence-spread-sublabel-header-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
       "id": "e2-boundary-lifecycle-v2-primary-width-below",
       "oldAccepted": false,
       "accepted": false,
@@ -206,21 +483,51 @@
       "svgChanged": []
     },
     {
-      "id": "e2-boundary-dataflow-brand-rail-71",
-      "oldAccepted": true,
+      "id": "e2-boundary-lifecycle-v2-detail-width-sublabel-below",
+      "oldAccepted": false,
       "accepted": false,
-      "oldCodes": [],
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
       "codes": [
-        "dataflow/geometry-label-fit"
+        "lifecycle/geometry-label-fit"
       ],
       "sceneChanged": true,
       "svgChanged": []
     },
     {
-      "id": "e2-boundary-lifecycle-brand-rail-71",
-      "oldAccepted": true,
+      "id": "e2-boundary-lifecycle-v2-detail-width-sublabel-above",
+      "oldAccepted": false,
       "accepted": false,
-      "oldCodes": [],
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v2-detail-width-tag-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v2-detail-width-tag-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
       "codes": [
         "lifecycle/geometry-label-fit"
       ],
@@ -434,34 +741,12 @@
       "svgChanged": []
     },
     {
-      "id": "e2-boundary-architecture-brand-rail-71",
+      "id": "gate-sequence-brand-absent",
       "oldAccepted": true,
       "accepted": false,
       "oldCodes": [],
       "codes": [
-        "architecture/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-workflow-brand-rail-71",
-      "oldAccepted": true,
-      "accepted": false,
-      "oldCodes": [],
-      "codes": [
-        "workflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-workflow-brand-rail-73",
-      "oldAccepted": true,
-      "accepted": false,
-      "oldCodes": [],
-      "codes": [
-        "workflow/geometry-label-fit"
+        "sequence/geometry-label-fit"
       ],
       "sceneChanged": true,
       "svgChanged": []
@@ -477,6 +762,21 @@
         "light",
         "dark"
       ]
+    },
+    {
+      "id": "dense-workflow-seed-5502027",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [],
+      "codes": [
+        "workflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
     }
-  ]
+  ],
+  "geometryPresentCaseCount": 405,
+  "retainedRefusalCaseCount": 187,
+  "prePlacementRefusalCaseCount": 218,
+  "countSemantics": "retainedCaseCount is the legacy alias for all geometry-present reports, including accepted cases. Accepted layouts always have geometry; retainedRefusalCaseCount = geometryPresentCaseCount - acceptedCaseCount; prePlacementRefusalCaseCount = corpusCaseCount - geometryPresentCaseCount."
 }

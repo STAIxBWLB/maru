@@ -1200,15 +1200,37 @@ scene, including every successfully routed edge. Input decoding, E1 validity
 and coordinate overflow can still prevent placement. Font replacement and pin
 notices remain nonfatal. No SVG or visual-review success is implied.
 
-The current admission priority is Maru output readability, including mixed Korean
-and English. Node-label checks use the Noto box actually emitted at its resolved
-font size, within the node text area, rather than a hypothetical minimum font or
-legacy character-count budget. Resolved node rectangles have no existing Noto
-wrap/shrink pass; an overflow keeps its geometry and names the required text or
-node-size change. Archify comparisons remain reference evidence, not a merge or
-E4 admission gate. The historical model ledger below is final at its stamped
-source; the 2px workflow-column and lifecycle rail minimum-font differences are
-not pursued as compatibility work.
+The [owner scope update](https://github.com/STAIxBWLB/maru/issues/560#issuecomment-6751241103)
+prioritizes readability of emitted text, including mixed Korean and English. Label-fit checks compare nonzero positioned glyph ink from
+the resolved Noto font at the actual font size against node bounds. Line leading
+and whitespace are not paint; glyph bearings may use available text padding.
+This measures the visible output rather than legacy character counts or a
+hypothetical minimum-font model. There is no node auto-fit, wrap or shrink pass,
+so an overflow is an actionable refusal that retains geometry and names the text
+or node-size change needed to fit. Two independently checked source-green cases
+show the rule: `public-01` detail text overflows by 3.531px at 11px, and
+`gate-sequence-brand-absent` overflows by 2.812px at 13px. Their original source
+verdicts remain unchanged. The 2px workflow-column boundary and 8px/9px
+lifecycle rail case are not pursued as compatibility work. Archify comparisons
+remain reference evidence, not a merge or E4 admission gate.
+
+The authored-via work probe at source `b97d6d54` measured 26 nodes, 29 labels, 17
+via points, 20 route segments, 53 endpoint-mask candidate evaluations and total
+logical work of 1,332. Endpoint node/label masks are precomputed once per route;
+the fixture ceiling is `2*(N+L)` candidate evaluations.
+The existing 1,000-node fixture and its 3,355,500 logical-work baseline remain
+unchanged. These focused fixture measurements do not replace the integrated
+native/WASM result: the current implementation, scene/SVG and work evidence are recorded in
+the [determinism receipt](performance/diagram-engine-e2-admission-determinism.json).
+
+That merged-S2 verification compares 623 cases against main `010180e2`: native
+and WASM scene/SVG/work reports match byte for byte. There are 218 accepted
+cases, 405 geometry-present cases (including accepted ones), 187 retained
+refusals and 218 pre-placement refusals. The receipt lists 55 changed report
+hashes and seven changed SVG scenes. The SVG changes are the endpoint-mask and
+route-label corrections from the initial implementation; actual text checks and
+provenance diagnostics also change report hashes without moving SVG geometry.
+No workflow-column shift or lifecycle compatibility font adjustment is added.
 
 Route-quality findings distinguish the offending geometry's provenance.
 Explicit `via` points, channel coordinates, label-position controls, endpoint
@@ -1227,8 +1249,8 @@ A routing failure with no path or an exhausted search budget still follows S2's
 per-edge error contract; a successfully generated low-quality path is the
 notice case. Unknown diagnostic codes do not acquire notice status. The engine keeps the
 scene in both quality outcomes. Corpus notices are recorded per case/rule in
-the same native/WASM determinism reports; no oracle-green document is waived
-into an expected engine refusal.
+the same native/WASM determinism reports. Original oracle verdicts stay intact;
+actual emitted text overflow is independently refused with retained geometry.
 
 The canvas adapter is an isolated test consumer, not the E4 product switch.
 Only an explicit `meta.pinned === true` or `locked === true` flag becomes a pin;
@@ -1372,9 +1394,13 @@ stored in the source-bound JSON receipt and native/WASM reports.
 | `public-06` | `geometry-v1/ambiguous-corridor` | 7 | Yes |
 | `public-06` | `geometry-v1/short-interior-segment` | 1 | Yes |
 
-#### Layered boundary evidence
+#### Historical layered boundary evidence
 
-The exact layer passes in both directions: **208 cases, zero mismatches**.
+The following comparison and model figures are historical at their stamped
+sources. They preserve the final case dispositions; current admission uses the
+actual glyph-ink rule above and the refreshed implementation receipt.
+
+At that historical snapshot, the exact layer passed in both directions: **208 cases, zero mismatches**.
 It covers shared readable-area, page, margin, spacing, reserve and spread-width
 quantities, plus source-format defaults and placement constants. Source checks
 use 1/128px intermediates when half of an authored 1/64px dimension is needed;
@@ -1395,13 +1421,12 @@ shared-via provenance change and its strict regression.
 | `readable-v2-placement` | 15 | 8 | 3 | 4 | `e2-boundary-workflow-v2-arrow-spacing-8`; `e2-boundary-workflow-v2-shared-trunk-23` |
 | `text-capacity` | 76 | 49 | 24 | 3 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
 
-The 12 primary/detail role-fit cases now have per-case source formulas, widths,
+The historical 12 primary/detail role-fit cases have per-case source formulas, widths,
 font sizes, glyph-advance sums, and Noto widths scaled to the source minimum in
 the ledger. Source estimates fit their budgets by 0px to 4.4px while Noto
 exceeds the role budget by 13px to 75.059659px; each recorded Noto box
-matches its glyph advances within 1/64px. Pinned Noto geometry is authoritative
-for these text-fit
-checks. The separate sequence segment-title case records a 430px legacy estimate
+matches its glyph advances within 1/64px. This minimum-font analysis is preserved for provenance; the current check
+uses positioned Noto ink at its actual emitted size instead. The separate sequence segment-title case records a 430px legacy estimate
 and a 673px Noto requirement against a 430px frame.
 
 The measured `f4dcf4fe` audit preserves the original 41 model-difference cases
@@ -1414,18 +1439,19 @@ oracle-green/engine-refused, and 8 are oracle-red/engine-admitted. The
 records exact source inputs, original oracle results, current geometry and
 diagnostics, numeric boundary evidence, source references, and dispositions.
 These counts and per-case dispositions are stamped to `f4dcf4fe`. The prior
-native/WASM run at that head covered 623 cases (216 accepted, 405 retained),
+native/WASM run at that head covered 623 cases (216 accepted, 405 with geometry present),
 changed 34 scenes and 7 SVGs, and produced matching report hashes; its work
 receipt is preserved in [diagram-engine-e2-s3.json](diagram-engine-e2-s3.json).
-The final implementation run at `af582230`, including that regression and the
+The pre-rescope implementation run at `af582230`, including that regression and the
 Linux test-workflow step, passed SDK fmt, clippy and all engine tests. Its
 623-case native/WASM reports remain identical, with the same 34 changed whole-scene
 hashes and 7 changed SVGs against approved S1. Whole-scene hashes include diagnostics;
 a changed hash does not by itself imply moved coordinates. The exact changed IDs,
 source commit and both explicitly named tree paths are in the
-[final determinism receipt](performance/diagram-engine-e2-admission-determinism.json).
-Logical work remains 3,355,500, below the 4,194,375 ceiling. Of 407 refusals, 405
-retain geometry; the other two stop at hard validation before layout.
+[historical determinism receipt](https://github.com/STAIxBWLB/maru/blob/af444200ec86a584dcf8eb1db5e7decb744595dd/docs/performance/diagram-engine-e2-admission-determinism.json).
+Logical work remains 3,355,500, below the 4,194,375 ceiling. The old receipt's `retainedCaseCount` counted all geometry-present reports, including
+accepted ones; it was not a retained-refusal count. The refreshed receipt names
+these quantities separately.
 The dataflow authored-via cases `e2-boundary-dataflow-label-route-3` and
 `e2-boundary-dataflow-label-route-5` and sequence case
 `e2-boundary-sequence-family-label-route-above` now pass with retained
