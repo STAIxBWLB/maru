@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -47,6 +47,45 @@ function classifyThroughCli(files: unknown[], event: { pull_request: { changed_f
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+describe("CI sparse-checkout policy", () => {
+  it("keeps the trusted policy free of static, dynamic and side-effect relative imports", () => {
+    const source = readFileSync(policyPath, "utf8");
+    expect(source).not.toMatch(/\bfrom\s*["']\.\.?\//);
+    expect(source).not.toMatch(/\bimport\s*\(\s*["']\.\.?\//);
+    expect(source).not.toMatch(/\bimport\s*["']\.\.?\//);
+  });
+
+  it("runs both decision and aggregate with only the policy file checked out", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "maru-ci-policy-sparse-")));
+    try {
+      const isolatedPolicy = join(root, "ci-policy.mjs");
+      writeFileSync(isolatedPolicy, readFileSync(policyPath, "utf8"));
+      const filesPath = join(root, "files.json");
+      const eventPath = join(root, "event.json");
+      writeFileSync(filesPath, JSON.stringify([[{ filename: "src/lib/diagram/engineSvg.ts" }]]));
+      writeFileSync(eventPath, JSON.stringify({ pull_request: { changed_files: 1, labels: [] } }));
+      const env = {
+        PATH: process.env.PATH ?? "", HOME: root, USERPROFILE: root,
+        TMPDIR: root, TEMP: root, TMP: root,
+        ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+      };
+      const decision = spawnSync(process.execPath, [isolatedPolicy, "classify", filesPath, eventPath], {
+        cwd: root, encoding: "utf8", env,
+      });
+      expect(decision.status, decision.stderr).toBe(0);
+      expect(JSON.parse(decision.stdout)).toMatchObject({ run_geometry: true, run_native: true });
+      const aggregate = spawnSync(process.execPath, [isolatedPolicy, "aggregate"], {
+        cwd: root, encoding: "utf8", env: { ...env, CI_NEEDS_JSON: JSON.stringify(needs()) },
+      });
+      expect(aggregate.status, aggregate.stderr).toBe(0);
+      expect(aggregate.stdout).toContain("CI jobs passed with only decision-authorized skips");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("PR change classification", () => {
   it("allows docs-only changes to skip full verify, Playwright, and native compile", () => {

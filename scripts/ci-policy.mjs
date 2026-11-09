@@ -2,7 +2,15 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ENGINE_E3_ARTIFACT_PATHS } from "./diagram-engine-e0-paths.mjs";
+// This file is the sole trusted input in the decision and aggregate sparse checkouts.
+export const ENGINE_E3_ARTIFACT_PATHS = Object.freeze([
+  "src/lib/diagram/engineArtifactForTest.ts",
+  "src/lib/diagram/engineSvg.ts",
+  "src/lib/diagram/verifiedExport.ts",
+  "src/lib/diagram/export.ts",
+  "src/lib/diagram/renders.ts",
+  "src/lib/nativeE2eBridge.ts",
+]);
 
 export const NATIVE_PREFIXES = [
   "e2e-native/", "src-tauri/crates/", "src-tauri/src/terminal/", "src-tauri/capabilities/",
