@@ -1930,8 +1930,9 @@ panning, keyboard zoom/fit, and keyboard selection. Its inline runtime and
 stylesheet are authorized by fixed CSP hashes. The CSP denies network
 connections, remote scripts/styles/fonts, frames, forms, objects, and base URL
 changes. The engine SVG's local font lookup is retained; the viewer does not
-fetch or bundle font files. The JavaScript runtime source has a 12 KiB UTF-8
-budget, checked when building the HTML.
+fetch or bundle font files; if Noto Sans CJK KR is unavailable, a system font
+fallback may overflow the measured text geometry. The JavaScript runtime source
+has a 12 KiB UTF-8 budget, checked when building the HTML.
 
 Build a file from a local engine SVG and matching source spec with
 `node scripts/build-diagram-viewer.mjs <engine.svg> <spec.json> <viewer.html>`.

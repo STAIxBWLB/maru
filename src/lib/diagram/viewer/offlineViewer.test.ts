@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import {
   createOfflineViewerHtml,
@@ -47,6 +48,35 @@ function screenshotSpecFor(family: string): { specJson: string; nodes: Screensho
   return { specJson: JSON.stringify(spec), nodes };
 }
 
+function s1SharedNodeEdgeIdFixture(): { svg: string; specJson: string } {
+  // Synthetic collision derived from the pinned S1 SVG: retain the rendered
+  // geometry and replace only the node/edge identity metadata with "shared".
+  const svg = realSvg
+    .replace('data-source-id="a" role="group" aria-label="입력 (frontend)"', 'data-source-id="shared" role="group" aria-label="입력 (frontend)"')
+    .replace('data-source-id="id:connection:0" role="group" aria-label="a → b"', 'data-source-id="id:shared" role="group" aria-label="a → b"')
+    .replace('data-source-id="id:node:a:label" data-target-id="a"', 'data-source-id="id:node:shared:label" data-target-id="shared"')
+    .replace('data-source-id="id:edge:connection:0:label" data-target-id="connection:0"', 'data-source-id="id:edge:shared:label" data-target-id="shared"');
+  const spec = JSON.parse(realSpec);
+  spec.components[0].id = "shared";
+  spec.connections[0].id = "shared";
+  spec.connections[0].from = "shared";
+  return { svg, specJson: JSON.stringify(spec) };
+}
+
+function runViewerRuntime(html: string): JSDOM {
+  const match = html.match(/<script>([\s\S]*?)<\/script><\/body>/);
+  if (!match) throw new Error("offline viewer runtime script is missing");
+  const dom = new JSDOM(html.replace(`<script>${match[1]}</script>`, ""), { runScripts: "outside-only" });
+  const svg = dom.window.document.querySelector("svg");
+  const viewBox = (svg?.getAttribute("viewBox") ?? "0 0 1 1").split(/[ ,]+/).map(Number);
+  if (!svg) throw new Error("offline viewer SVG is missing");
+  Object.defineProperty(svg, "viewBox", {
+    value: { baseVal: { x: viewBox[0], y: viewBox[1], width: viewBox[2], height: viewBox[3] } },
+  });
+  dom.window.eval(match[1]!);
+  return dom;
+}
+
 describe("offline engine viewer HTML", () => {
   it("uses the byte-pinned S1 renderer fixture and is deterministic", () => {
     expect(createHash("sha256").update(realSvg).digest("hex")).toBe(REAL_S1_SVG_SHA256);
@@ -59,6 +89,24 @@ describe("offline engine viewer HTML", () => {
     expect(svgDocument.querySelector('[data-kind="label"][data-target-id="connection:0"]')?.getAttribute("aria-label")).toBe(source.connections[0].label);
     const input = { svg: realSvg, specJson: realSpec };
     expect(createOfflineViewerHtml(input)).toBe(createOfflineViewerHtml(input));
+  });
+
+  it("routes colliding node and edge labels by their explicit source identity", () => {
+    const fixture = s1SharedNodeEdgeIdFixture();
+    const html = createOfflineViewerHtml(fixture);
+    const dom = runViewerRuntime(html);
+    const { document, KeyboardEvent } = dom.window;
+    const nodeLabel = document.querySelector('[data-source-id="id:node:shared:label"]')!;
+    const edgeLabel = document.querySelector('[data-source-id="id:edge:shared:label"]')!;
+
+    nodeLabel.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(document.getElementById("selection")?.textContent).toBe("node shared - 입력");
+    expect(document.querySelector('[data-kind="node"][data-source-id="shared"]')?.getAttribute("data-viewer-selected")).toBe("true");
+
+    edgeLabel.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(document.getElementById("selection")?.textContent).toBe("edge shared - Call");
+    expect(document.querySelector('[data-kind="route"][data-source-id="id:shared"]')?.getAttribute("data-viewer-selected")).toBe("true");
+    dom.window.close();
   });
 
   it.each(Object.entries(S1_FAMILY_SVG_HASHES))("accepts the generated S1 %s SVG profile", (family, expectedHash) => {

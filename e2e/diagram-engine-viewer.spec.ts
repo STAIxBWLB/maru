@@ -19,6 +19,47 @@ function viewBoxNumbers(value: string | null): number[] {
 test.describe("standalone engine diagram viewer", () => {
   test.describe.configure({ retries: 0 });
 
+  test("clicks colliding node and edge labels using their source identity in a synthetic S1-derived file", async ({ page }) => {
+    // Synthetic collision derived from the pinned S1 SVG: retain its geometry
+    // and replace only node/edge identity metadata and the matching source IDs.
+    const svg = readFileSync(SVG_FIXTURE, "utf8")
+      .replace('data-source-id="a" role="group" aria-label="입력 (frontend)"', 'data-source-id="shared" role="group" aria-label="입력 (frontend)"')
+      .replace('data-source-id="id:connection:0" role="group" aria-label="a → b"', 'data-source-id="id:shared" role="group" aria-label="a → b"')
+      .replace('data-source-id="id:node:a:label" data-target-id="a"', 'data-source-id="id:node:shared:label" data-target-id="shared"')
+      .replace('data-source-id="id:edge:connection:0:label" data-target-id="connection:0"', 'data-source-id="id:edge:shared:label" data-target-id="shared"');
+    const spec = JSON.parse(readFileSync(SPEC_FIXTURE, "utf8"));
+    spec.components[0].id = "shared";
+    spec.connections[0].id = "shared";
+    spec.connections[0].from = "shared";
+    const temp = mkdtempSync(join(tmpdir(), "maru-offline-viewer-shared-id-"));
+    const svgPath = join(temp, "synthetic-s1.svg");
+    const specPath = join(temp, "synthetic-s1.json");
+    const filePath = join(temp, "viewer.html");
+    writeFileSync(svgPath, svg, "utf8");
+    writeFileSync(specPath, JSON.stringify(spec), "utf8");
+    const buildOutput = execFileSync(process.execPath, [
+      join(process.cwd(), "scripts/build-diagram-viewer.mjs"), svgPath, specPath, filePath,
+    ], { encoding: "utf8" });
+    expect(buildOutput).toContain("OFFLINE_DIAGRAM_VIEWER");
+    const fileUrl = pathToFileURL(filePath).href;
+    const attempts: string[] = [];
+    try {
+      await page.route("**/*", async (route) => {
+        if (route.request().url() === fileUrl) await route.continue();
+        else { attempts.push(route.request().url()); await route.abort(); }
+      });
+      await page.goto(fileUrl);
+      const status = page.locator("#selection");
+      await page.locator('svg [data-kind="label"][data-source-id="id:node:shared:label"] text[data-kind="label-text"]').click({ force: true });
+      await expect(status).toHaveText("node shared - 입력");
+      await page.locator('svg [data-kind="label"][data-source-id="id:edge:shared:label"] text[data-kind="label-text"]').click({ force: true });
+      await expect(status).toHaveText("edge shared - Call");
+      expect(attempts).toEqual([]);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
   test("opens a file:// artifact offline and supports pointer, wheel and keyboard controls", async ({ page }) => {
     const svg = readFileSync(SVG_FIXTURE, "utf8");
     expect(createHash("sha256").update(svg).digest("hex")).toBe(S1_ARCHITECTURE_SVG_SHA256);
