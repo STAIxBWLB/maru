@@ -441,8 +441,14 @@ mod tests {
                 "{family} branded tag"
             );
         }
-        assert_eq!(node_label_available_width("unknown", "label", 100.0, false), None);
-        assert_eq!(node_label_available_width("workflow", "unknown", 100.0, false), None);
+        assert_eq!(
+            node_label_available_width("unknown", "label", 100.0, false),
+            None
+        );
+        assert_eq!(
+            node_label_available_width("workflow", "unknown", 100.0, false),
+            None
+        );
     }
 
     #[test]
