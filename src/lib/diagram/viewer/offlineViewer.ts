@@ -321,7 +321,7 @@ const VIEWER_RUNTIME = String.raw`
       return targets.find(function(target){
         if(target.getAttribute("data-kind")!=="route")return false;
         var info=routeInfo(sourceIdFor(target));
-        return info.id===id||"id:"+info.id===id;
+        return info.id===id;
       })||null;
     }
     return null;
@@ -408,7 +408,7 @@ const VIEWER_RUNTIME = String.raw`
 })();
 `;
 
-const VIEWER_CSP = "default-src 'none'; script-src 'sha256-izTfcrZXdYHERJZ1CZ+CvvmlzNJVoKnRYOodE9ySJ1A='; style-src 'sha256-dPMqwh+nPnXPHCb2QAZjrDqlQmY+r+i9jn+Y2SeA+gY='; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'";
+const VIEWER_CSP = "default-src 'none'; script-src 'sha256-vUZeCRSC3dHiKIRdCsPC5BOX57AP8Gq2wgzhu9Q1nTA='; style-src 'sha256-dPMqwh+nPnXPHCb2QAZjrDqlQmY+r+i9jn+Y2SeA+gY='; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'";
 
 function escapeHtmlText(value: string): string {
   return value.replace(/[&<>]/g, (character) => {
