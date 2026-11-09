@@ -1658,3 +1658,251 @@ new source, or add an oracle-compatible placement solver. Geometry rules use
 the engine's own positions. An authored destination side owns an incoming-arrow
 face collision; the same side does not invent a collision when the actual tips
 are far enough apart.
+
+## Render
+
+### E3 S1 contract
+
+`render-svg` writes deterministic SVG from an E2 `GeometryDocument`, theme,
+source title/description and a coordinate-free `SemanticContext`. The context
+reads only family/version and per-id node type/lane or frame variant. It never
+reads source positions, rows, columns, message times or viewBox coordinates.
+`SvgOptions::from_spec` prepares it natively; the isolated WASM request takes
+`geometry`, `options` and the matching `specJson` snapshot. The writer does not
+place nodes, move glyphs, reroute edges or change geometry admission rules.
+
+A refused layout still renders its retained geometry. SVG `ok:true` means its
+artifact matches that scene, not that the input passed layout admission. PNG,
+output receipts, the offline viewer and the product switch are separate stages.
+No new Tauri command is registered; command isolation stays at 390.
+
+Array order, attribute order and source-id encoding are stable. Coordinates are
+exact terminating decimals of signed 1/64px units, with no timestamps, random
+ids, locale formatting or unordered traversal. SVG ids namespace and hex-encode
+the E2 UTF-8 source ids; node, container, route and `edge:{id}:label` identities
+cannot collide with each other or root metadata. Anonymous identities have a
+separate ordinal namespace. Route groups retain supplied role/variant tags.
+
+### Semantic projection
+
+Meaning-bearing elements are distinct from styling. Per-kind component fill and
+stroke tokens live once in `render/theme.rs`, for light and dark themes; nodes
+and corresponding legend swatches use the same token. An opaque node mask keeps
+underlaid rails and routes from showing through the translucent kind fill.
+Lifecycle kinds alias the component tokens using the pinned type-class mapping.
+Component types, route variants and frame kinds retain their distinct semantic
+color and pattern mappings in the Maru light/dark theme. Shadow, gradient, icon,
+brand-mark, card decoration and interaction behavior remain viewer styling; card
+text remains in the retained text geometry. Decorative card dots/icons/brands
+remain out of scope under #543.
+
+E3 derives semantic primitives from retained E2 geometry and semantics; it does
+not run a second placement model. Sequence lifelines start at participant-box
+bottom centres. Their end uses the page footer reserve, clamps above the measured
+legend title by 22px when present, stops 22px above a card, and still reaches the
+last message, activation or segment. These are explicit layout adaptations for
+E2's retained boxes. Existing E2 container boxes supply lanes, exception lanes,
+groups, phases, dataflow stages, sequence segments and activation bars. These
+retained frames provide standalone grouping geometry; lifecycle v1, for example,
+uses the lane records to classify bands even though the pinned SVG draws bands
+and states instead of lane rectangles. The workflow phase span follows its
+retained phase box centerline. Edge dash meaning is preserved: return 3,5;
+security 5,5; dashed 4,4.
+
+Lifecycle initial markers, final double borders, V1 rail and populated band
+dividers are rendered separately. The V1 rail comes from the producer's retained
+`lifecycleRail` endpoints: (154,157) to (`phaseXs[maxCol]+38`,157). It can point
+left for column 0 but must remain nonzero, including a singleton main phase.
+V1 band dividers use x=72 through page width minus 72, at y=112, 264 or 436 for
+the populated phase, event or outcome band. V2 has no V1 rail/dividers. Two additive,
+optional API-v1 node fields preserve semantics that cannot be recovered from
+pin-adjusted positions: `finalState` and `phaseOrder`. The lifecycle producer
+computes final classification and authored phase ordinal while the source order
+is available; SVG never rereads grid coordinates. Old geometry still decodes;
+lifecycle rendering asks for a fresh matching layout if these semantics are
+missing. Node/route coordinates and glyph positions are unchanged. Lifecycle
+scene hashes deliberately change for these fields and the derived final legend.
+
+When lifecycle legend output is nonempty and a final state exists, the producer
+appends a derived `final` entry. It does not add `final` to the authorable input
+vocabulary. Entries now reserve their leading swatch slot, gap and measured text;
+row placement changes deliberately with the corrected footprint.
+Symbols precede their labels in explicit E2 leading swatch boxes. The producer
+stores separate swatch and text bounds; route samples use their 34px reference
+width, and the node/start/final symbols use their family dimensions. E2 measures
+label text with the pinned Noto metrics instead of reusing Archify's 0.62-em text
+estimate. Legend rows use x=40, 22px inter-item gaps and a minimum 22px row pitch
+(long multiline text grows its row) for all families;
+sequence legend labels retain E2 sizes of 8px (other families 12px) and weight
+400, rather than the renderer's 10px/500 presentation. Headers use pinned 700
+rather than 650. E2 has only the reviewed 400/700 metric tables; these font-model
+choices are explicit intended changes, not writer fallbacks. Hidden and empty legends have no entries or swatches.
+
+### Per-family semantic coverage
+
+| Family | Pinned semantic element | S1 disposition |
+| --- | --- | --- |
+| All | Title/subtitle, node/edge/frame text, notes, tags, classifications and optional cards supplied by E2 | Rendered at the supplied boxes, baselines, sizes and glyph positions |
+| Architecture | Component rectangles and opaque masks; directed connections and variant patterns; region/security boundary frames; legend | Rendered, including per-kind node/swatch tokens and distinct boundary patterns |
+| Workflow | Component nodes; lane and exception-lane frames; phase headers/span lines; group/security-group frames; directed edges, role/variant tags and legend | Rendered from E2 boxes and per-id semantic variants |
+| Workflow | Distinct decision/terminal shapes | Not applicable: accepted `WorkflowNode.type` is COMPONENT_TYPES and has no shape vocabulary; pinned `renderNode` is rect rx6. No topology inference or schema expansion |
+| Sequence | Participant headers/masks, lifelines, activation bars, segment frames/captions, messages, return/security/dashed styles and legend samples | Rendered. Lifelines start at placed box bottoms; their end respects timeline content, cards, page footer and measured legend-title clearance |
+| Dataflow | Component nodes/masks; stage frames; flow paths, line styles, classifications and legend | Rendered; database node and swatch share the same kind token |
+| Lifecycle | State rectangles/masks/type tokens; initial dot/stem/head; final double border; lane frames and labels; V1 band dividers and implied rail; transitions and legend | Rendered. Final classification and phase order remain authored semantics under pins |
+| Lifecycle V2 | V1 implied rail/dividers | Not applicable, matching the pinned renderer; supplied lane captions remain visible in E2's horizontal glyph layout rather than legacy vertical text |
+| Legend | Present/all/hidden selection, labels and semantic symbols, including derived lifecycle final | Rendered from E2's explicit leading swatch and text boxes; wrapping and row footprint use E2's measured label geometry |
+| Styling/viewer | Shadows, gradients, brands/icons, animation/focus badges and interaction chrome | Intended change/out of scope under #543; semantic component tokens, shapes/frames, paths, markers, labels and source identities remain |
+
+### Accessibility and font policy
+
+The root is `role="img"` with source-derived `<title>`, `<desc>` and
+`aria-labelledby`. Node groups name their text, semantic kind and final status;
+containers and directed edges have roles/labels. Label groups retain original
+text in `aria-label`, including line separators and unsupported scalars. All
+untrusted XML text/attributes are escaped; illegal XML controls are diagnosed.
+Source strings never become element names, CSS rules or external URLs.
+
+Mapped scalars use `Noto Sans CJK KR, sans-serif`, weights 400/700, with shaping,
+kerning and ligatures disabled and `text-rendering="geometricPrecision"`. Every
+scalar has its E2 origin, so the browser cannot invent wrapping or spacing.
+S1 does not embed original font binaries or a per-document subset: a subsetter
+would add another binary-processing dependency and size surface before S2's
+rasterization measurement. Stack-only SVG bytes are deterministic; physical
+text fidelity requires the pinned font. Fallback pixels are not claimed to
+match E2 metrics. The separate renderer/parser never enters the validation
+artifact or its 400,000 B gzip budget.
+
+Unsupported nonignorables draw the actual pinned font glyph-zero outline, never
+the original scalar through platform fallback. Default-ignorables paint nothing.
+`render/notdef.json` retains source hashes and units-per-em; Linux-only
+`diagram-engine-e3-fonts.mjs` and `export-notdef` derive/check it from the same
+immutable OTFs as E2. OFL and roxmltree MIT notices are retained and indexed in
+`THIRD_PARTY_NOTICES.md`.
+
+The screenshot harness verifies both original OTF hashes and font loading, then
+checks browser-parsed selection frames, glyph origins, font size/weight and
+scalar advances within 1/64px. Browser `getBBox()` is separately recorded:
+[SVG 2 §8.10](https://www.w3.org/TR/SVG2/coords.html#BoundingBoxes) defines text
+bounds using full glyph cells, not E2's line/advance-plus-ink frames. Their
+measured difference is not used to widen a shared-quantity threshold or create
+a new geometry admission rule. Captures prove the intended font was loaded;
+they are not native-app proof or byte/pixel comparison with Archify.
+
+### Artifact and determinism gates
+
+Optional roxmltree 0.21.1 independently reparses the artifact. The gate checks
+root metadata, namespace, unique identities, counts/ownership/hierarchy per kind,
+rectangles, actual route points/width, font/text/glyph data, actual glyph-zero
+paths, node/swatch kind-token mapping, and every semantic primitive's geometry,
+paint, pattern and complete root paint order (page, frames, underlays, activations,
+routes, masks/nodes, legend, overlays and labels). Node masks must precede their
+bodies. CSS/reference checks apply only to paint or URL attributes; literal
+`@import` or `url(...)` captions remain text. Numeric comparisons allow at most 1/64px and
+reject nonfinite values. XML declarations, processing instructions (including
+external stylesheets), comments, DTDs, CDATA, unexpected text, scripts, foreign
+paint, external references,
+unrecognized transforms and unexpected attributes fail with a cause and fix.
+The request/artifact limit is 16 MiB. The checker computes route fallback and
+primitive expectations independently of the writer. Degenerate projection
+fixtures cover a singleton participant with no messages, an empty legend, one
+stage, a single main lifecycle state, and tiny final boxes. Cardinalities below
+E1 minimums remain refused; those projection tests reduce a DTO at the writer
+seam instead of expanding input admission. Transparent label/legend-entry rectangles
+are selection frames, not substitutes for the positioned glyph checks.
+
+The four-report `diagram-determinism` workflow retains E2 geometry/refusal hashes
+and work ceilings and adds light/dark SVG SHA-256, byte count and artifact gates
+for all retained scenes, including `ok:false` layouts. No-geometry records
+explicitly carry `svg:null`; the comparator verifies that this agrees with the
+retention flag. Native Linux/macOS/Windows and actual WASM must match all fields.
+The isolated test facade owns the `wasm-render` artifact; normal JS/WASM exports
+exclude SVG/corpus tooling and there is no product export/canvas switch.
+
+### Pinned visual and semantic references
+
+Constants were read as references; no renderer code is imported/copied into the
+SDK. E2 geometry and semantic primitives are authoritative. The gate compares
+derived SVG primitive kind, owner, shape, paint, stroke, dash, arrow and layer to
+an independent reference derivation from the same retained DTO. `gate.rs` also
+checks emitted node/frame radii, markers, labels and glyphs. The table records
+defaults and derived values so their family/version conditions and source basis
+remain reviewable.
+
+| Quantity/meaning | Reference value or rule | Pinned source |
+| --- | --- | --- |
+| Component type fill/stroke, light/dark | Seven semantic token pairs; lifecycle aliases retain the same mapping | `sidecars/archify/assets/template.html:175-209,218-250`; `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:175-183` |
+| Route stroke default | Explicit E2 width wins; missing width: architecture 1.5px, workflow/sequence/dataflow 1.4px, lifecycle 1.1px; emphasis 1.8px except lifecycle v1 2px and v2 1.6px | E3 writer `render/svg.rs`; independent primitive reference `render/primitive_gate.rs`; Archify architecture `render-architecture.mjs:858`; workflow `workflow-compiler.mjs:4721`; sequence `render-sequence.mjs:447`; dataflow `render-dataflow.mjs:457`; lifecycle `render-lifecycle.mjs:825` |
+| Route and frame dash defaults | Route return 3,5; security 5,5; dashed 4,4. Frames: region 8,4; security/exception 4,4; lane/group/stage/segment 6,6; otherwise solid | E3 `render/primitives.rs`; Archify `assets/template.html:4151-4154,4695-4697`; sequence `render-sequence.mjs:24-29,447-448`; workflow `workflow-compiler.mjs:4658-4663` |
+| Workflow phase span | Midline of retained phase bounds, x from frame left to right; 1.1px, variant dash/accent | E3 `render/primitives.rs`; Archify `workflow/workflow-compiler.mjs:4666-4672`; artifact gate `render/primitive_gate.rs` |
+| Sequence lifeline | Participant center x; starts at box bottom; 0.8px dash3,7; end is page bottom minus65, clamped to measured legend title minus22 and card top minus22, but not above last message/activation/segment | E3 `render/primitives.rs`; Archify `sequence/render-sequence.mjs:92-94,398-406`; artifact gate `render/primitive_gate.rs` |
+| Lifecycle initial marker | Dot radius4.5; 1.4px stem, from dot edge to 6px before tip; head extends 7px left and 3.5px above/below tip | E3 `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:850-865`; artifact gate `render/primitive_gate.rs` |
+| Lifecycle final border | Final-state box inset is min(3px, quarter of smaller dimension), radius4, stroke1; tiny boxes retain the clamped/possibly zero-size inset as an invalid-but-preserved geometry case | E3 `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:789-790`; artifact gate `render/primitive_gate.rs` |
+| Lifecycle v1 bands | Populated bands only; x=72 through page width minus72; y=112 phase, 264 event, 436 outcome; 0.8px dash3,8 | E3 `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:745-756`; artifact gate `render/primitive_gate.rs` |
+| Lifecycle v1 rail | Producer DTO endpoints: (154,157) to (`phaseXs[maxCol]+38`,157); arrow, 2.2px; may point left in column0 but endpoints must differ. V2 omits rail and bands | E3 producer `layout/lifecycle.rs`; E3 primitive `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:884-893`; artifact gate `render/primitive_gate.rs` |
+| Legend catalog and empty/hidden behavior | Family catalog order; hidden clears entries; final appended only for nonempty lifecycle legend with a final state; empty legend has no bounds/title/swatches | E2 `layout/mod.rs`; Archify sequence catalog `sequence/render-sequence.mjs:24-40`; lifecycle `render-lifecycle.mjs:297-311`; footprint empty case `shared/legend.mjs:75-76` |
+| Legend footprint and text | Start x=40 for every family; item and row gaps 22px; route swatch width34/gap9, lifecycle start26 slot/24px drawn width, final16, ordinary node14/gap8; labels measured with Noto metrics. Sequence font8px; other families12px. This intentionally replaces the sidecar's 0.62-em text estimate while preserving the footprint composition | E2 `layout/mod.rs`; Archify `shared/legend.mjs:7-10,55-100`; artifact gate `render/primitive_gate.rs` |
+| Legend header | Producer retains the title baseline 20px above the first entry baseline; header has its own Noto 12px/700 label box, entry selection frame excludes it. Default caption Legend, locale ko uses 범례 | Archify `shared/legend.mjs:130-150,194-212`; producer `layout/mod.rs`, independent label/glyph gate |
+| Legend symbol bounds | Symbols use explicit leading `swatch_bounds`; each entry must also retain `text_bounds`. Architecture swatch16x10/radius2.5 starts at text baseline minus9; ordinary/start/final paint bounds14x9 (start24x9) begin at baseline minus8; ordinary radius2; route samples sit at baseline minus3 | E2 `layout/mod.rs`; E3 `render/primitives.rs`; Archify architecture `render-architecture.mjs:930`; workflow `workflow-compiler.mjs:4749`; dataflow `render-dataflow.mjs:500-502`; lifecycle `render-lifecycle.mjs:850-865`; artifact gate `render/primitive_gate.rs` |
+| Legend placement and insufficient space | Swatch precedes text; a too-small supplied footprint is rejected. Empty/hidden legend contributes no swatches | E3 `render/primitives.rs`; E3 `render/primitive_gate.rs`; Archify `shared/legend.mjs:75-76,117-129,145-154` |
+| Container radii and strokes | region12; lane/segment/stage10; group9; security-group/exception-lane8; phase4 backing mask with no stroke; activation3; unknown kind6; ordinary frame stroke1 | E3 `render/svg.rs`; Archify workflow `workflow-compiler.mjs:4658-4685,4670-4672`; sequence `render-sequence.mjs:391,410`; dataflow `render-dataflow.mjs:417` |
+| Node rectangles | lifecycle radius7; other families radius6; 1.5px stroke; masks are opaque and have no stroke | E3 `render/svg.rs`; Archify architecture `render-architecture.mjs:898-901`; lifecycle `render-lifecycle.mjs:801-804`; artifact gate `render/gate.rs` |
+| Legend frame/content bounds | No visible enclosing legend frame. E2 retains legacy `legend.bounds` for layout budgeting and an optional invisible `contentBounds` over title, entries, swatches and text, inflated by8px for paint/arrowhead clearance | E2 `layout/mod.rs`; Archify `shared/legend.mjs:194-216`; E3 `render/svg.rs`; legend gate `render/legend_gate.rs` |
+| Arrow marker | 10x7, ref(9,3.5), triangle (0,0),(10,3.5),(0,7); units follow stroke width | E3 `render/svg.rs`; Archify `shared/utils.mjs:14-25`; artifact gate `render/gate.rs` |
+| Route width and glyph0 scale | Route supplied width is retained; absent width uses the family/version defaults above. Replaced glyph outline scale is font size divided by pinned units-per-em | E3 `render/svg.rs`; artifact gates `render/gate.rs`, `render/primitive_gate.rs` |
+| Labels and glyphs | E2 font identity, weight, size, positions and input scalars are emitted directly. Route primary lines use effective variant color, route details use muted color, workflow/architecture frame captions use frame accents, and node tags use node-kind tokens; other labels use weight-based text/muted defaults | E3 `render/label_paint.rs`; Archify architecture `render-architecture.mjs:872-901`, workflow `workflow-compiler.mjs:4660-4686,4704-4715,4727-4735`, sequence `render-sequence.mjs:434-450`, dataflow `render-dataflow.mjs:436-450,461-471`, lifecycle `render-lifecycle.mjs:774-804,836-847`; artifact gate `render/gate.rs` |
+| Accessibility fallbacks | Missing node label text falls back to target id; missing semantic caption kind falls back to `node`; these values affect aria labels only. Required semantic records fail context validation | E3 `render/primitives.rs`; `render/mod.rs`; `render/primitives.rs` |
+| Empty sequence content fallback | No route/frame timeline extent uses 0; final lifeline end is still clamped to at least each participant bottom. No nodes means no lifeline primitives | E3 `render/primitives.rs`; independent artifact expectation `render/primitive_gate.rs` |
+| SVG metadata defaults | Absent title/description use `Diagram` / `Diagram geometry`; these are accessible metadata, not geometry. SVG string-write `unwrap` calls are infallible `String` writes; semantic `expect` calls rely on the context gate | E3 `render/mod.rs`; `render/svg.rs`; `render/primitives.rs` |
+| Complete paint ordering | Background before frames, semantic underlays before activation bars/routes/nodes, masks before node bodies, legend/overlays before label glyphs; semantic primitives retain relative ordering too | Writer projection contract; independent artifact gate `render/primitive_gate.rs::check_paint_order`, mutation tests `tests/svg_paint_order.rs`; source sequence lifelines/activations `sequence/render-sequence.mjs:398-410` |
+| Artifact gate empty/default handling | Missing route points parse as empty and fail expected point checks; missing text nodes count as empty; absent expected primitive counts are zero. These are checker defaults, not output defaults | E3 `render/gate.rs`; `render/primitive_gate.rs` |
+
+### Effective values and fallback audit
+
+The rules below cover every accepted renderer fallback over `variant`, `type`,
+`kind`, style and width. `||`/`??` defensive paths for malformed input are not
+accepted semantic fallbacks: family schemas reject those values, and E3 either
+fails closed or applies the documented output-safe fallback. Source coordinate
+layout remains outside the SVG writer; it consumes E2 boxes, routes, labels,
+swatches and retained semantics.
+
+| Effective value or fallback chain | Family and branch | Pinned source and E3 rule | Gate/disposition |
+| --- | --- | --- | --- |
+| Arrow class: authored variant or `default`, then class-map `default` if key is unknown | Architecture connections; workflow phase/edge; sequence message; dataflow flow; lifecycle transition | Archify map `shared/geometry.mjs:1784-1789`; call sites architecture `render-architecture.mjs:856`, workflow `workflow-compiler.mjs:4669,4719`, sequence `render-sequence.mjs:446`, dataflow `render-dataflow.mjs:455`, lifecycle `render-lifecycle.mjs:811-828`. Missing route variant yields default in E3; lifecycle E2 routes retain the effective value from the producer. | Valid variants are schema-limited (`common.rs:17`, `sequence.rs:19`). Missing-variant is an accepted default branch; unknown-variant is invalid source and fails E1 enum validation. `tests/svg_fallback_admission.rs` covers all-family rejection and accepted default/variant branches. |
+| Lifecycle effective transition variant: explicit variant wins; otherwise only v2 forward main-lane edge -> emphasis; remaining v1/v2 edges -> default | Lifecycle v1/v2 | Archify inference applies only in v2 (`lifecycle/render-lifecycle.mjs:811-819`); E2 producer `layout/lifecycle.rs`; E3 raw authored override retained at `render/semantics.rs`. E2 retains `phaseOrder` for main states in both versions, but does not infer v1 route emphasis. | E3 independent reference derives from raw override + lane/order (`render/gate.rs`). `tests/svg_effective_lifecycle.rs` covers explicit/implicit, pin/no-pin, v1/v2 and tamper rejection. |
+| Route stroke/marker color: emphasis token; security token; dashed/database token; otherwise default arrow token | All five families; sequence `return` uses default arrow color/marker plus return dash | Archify classes `shared/geometry.mjs:1784-1808`, CSS `assets/template.html:4150-4160`; E3 `render/svg.rs`. Emphasis is 1.8px except lifecycle v1 2px/v2 1.6px; ordinary architecture 1.5px, workflow/sequence/dataflow 1.4px, lifecycle 1.1px. | `render/gate.rs` independently checks route marker/color/dash/width. `tests/svg_semantic_styles.rs` covers accepted security/dashed route and phase paint in both themes; invalid variants are rejected as above. |
+| Route width: explicit positive width, else family/version/variant default | Architecture, workflow, sequence, dataflow, lifecycle | Archify architecture `render-architecture.mjs:858`; workflow `workflow-compiler.mjs:4721`; sequence `render-sequence.mjs:447`; dataflow `render-dataflow.mjs:457`; lifecycle `render-lifecycle.mjs:825`. E3 `render/svg.rs` applies the same defaults to retained geometry. | Independent width expectation `render/gate.rs`. Zero-width is schema-invalid (relationship width minimum0.5 in `common.schema.json:59`); test zero only at malformed-input seam if needed. |
+| Node kind paint: `componentFill[type]`/`componentText[type]`, else external/muted | Architecture, workflow, sequence participants, dataflow; ordinary/fallback lifecycle state type maps to neutral/external | Archify architecture `render-architecture.mjs:882-883`; workflow `workflow-compiler.mjs:4690-4691`; sequence `render-sequence.mjs:376`; dataflow `render-dataflow.mjs:422-423`; lifecycle `render-lifecycle.mjs:175-195,760-761`. E3 theme aliases lifecycle kinds to the same component token pairs (`render/theme.rs`). | Accepted component/state enums are restricted to mapped kinds (`common.rs:8-17`; sequence `sequence.rs:10-19`; lifecycle `lifecycle.rs:9-11`). `tests/svg_fallback_admission.rs` rejects unknown types across all five families; E3 also rejects unknown theme kinds in `render/primitives.rs`. External/neutral fallback is malformed-input defense, not accepted-output parity. |
+| Legend swatch kind: mapped component/state token, else external | Architecture, workflow, lifecycle; dataflow database uses its component token | Archify architecture `render-architecture.mjs:930`, workflow `workflow-compiler.mjs:4749`, lifecycle `render-lifecycle.mjs:865`; E3 uses the same theme mapping and explicit leading `swatch_bounds` (`render/primitives.rs`). | Legend kind is validated before paint; unsupported-kind fallback is invalid-input only. `render/primitive_gate.rs` checks primitive identity, kind paint and bounds. |
+| Sequence activation kind: known explicit activation type, else known participant type, else external | Sequence activation bar and its mask/body | Archify `sequence/render-sequence.mjs:421-427`; E3 `activation_kind` uses the same ordered fallback (`render/svg.rs`) and paints mask before kind body (`:435-457`). | Explicit type and absent-type/participant fallback are accepted branches (`tests/svg_activation_kinds.rs`). Invalid activation values are direct-context seam cases only (`:103-139`). Missing semantic activation record fails closed (`render/gate.rs`). |
+| Structural frame kind/variant paint | Architecture region/security-group; workflow lane, exception-lane, group/security-group, phase; sequence segment; dataflow stage; lifecycle retained lanes/cards | Archify architecture `render-architecture.mjs:841-844`; workflow `workflow-compiler.mjs:4657-4686`; sequence `render-sequence.mjs:409-417`; dataflow `render-dataflow.mjs:414-418`; lifecycle v1 bands and state output `render-lifecycle.mjs:736-756,896-926`. E3 frame style resolves region/security/exception/security-group explicitly, then ordinary lane treatment for other retained grouping frames (`render/theme.rs`); frame dash is independently derived in `render/primitives.rs`. | Frame paint/dash checks in `render/gate.rs`. Workflow phase uses source `c-mask` fill with no stroke behind the variant-colored span (`workflow-compiler.mjs:4666-4672`); E3 paints the retained phase box as that mask treatment. Lifecycle lane/card/group rectangles are deliberate standalone grouping adaptations. Unknown-frame lane fallback is a malformed-DTO seam (`tests/svg_semantic_styles.rs`); accepted frame kinds are enumerated. |
+| Route-label color: primary label lines follow effective route variant; secondary lines/notes use muted; default and sequence return retain default/muted colors | Architecture, workflow, sequence, dataflow, lifecycle | Archify architecture `render-architecture.mjs:872-878`; workflow `workflow-compiler.mjs:4727-4735`; sequence `render-sequence.mjs:434-441`; dataflow `render-dataflow.mjs:461-471`; lifecycle `render-lifecycle.mjs:836-847`. E3 retains effective route override, route identity and primary line count in `render/semantics.rs`; independent color mapping lives in `render/label_paint.rs`. | `render/gate.rs` compares glyph colors against the independent label paint derivation. Existing fixture coverage: `tests/svg_label_accents.rs`. Label color does not alter E2 glyph positions or font metrics. |
+| Frame-caption color: semantic exception/security/emphasis/dashed accent, otherwise muted | Workflow lane/phase/group captions; architecture region/security boundary captions | Archify workflow `workflow-compiler.mjs:4660-4672,4682-4686`; architecture boundary labels `render-architecture.mjs:841-844`. E3 label paint derives by frame identity and variant in `render/label_paint.rs`. | Checked per glyph through `render/gate.rs`; variant/default label branches are exercised in `tests/svg_label_accents.rs`. |
+| Node-tag color: node/state kind text token | Architecture, workflow, dataflow, lifecycle; sequence has no node tag field | Archify architecture `render-architecture.mjs:890-892`; workflow `workflow-compiler.mjs:4704-4705`; dataflow `render-dataflow.mjs:436-437`; lifecycle `render-lifecycle.mjs:774-775`. E3 maps label id `node:{id}:tag` back to its semantic kind in `render/label_paint.rs` and its independent reference paint path. | Artifact gate compares per-glyph colors. Existing kind-token label fixture: `tests/svg_label_identity.rs`; this is an accent token, while tag text/geometry remain E2-supplied. |
+| Lifecycle node dimensions/offsets: explicit positive width/height, else v1 lane-specific dimensions or v2 140x64; missing/falsy offset -> 0 in reference | Lifecycle v1/v2 | Archify `lifecycle/render-lifecycle.mjs:91-98,206-227`; E2 resolves missing values before emitting boxes (`layout/lifecycle.rs`). | Accepted schema minima width48/height36 (`lifecycle.schema.json:182-189`), so zero/falsy dimension fallback is invalid-input defense only. E3 writer consumes retained node bounds. |
+| Caption fallback: semantic label, then target id; missing semantic kind -> `node` | Accessibility group label only; no visual glyph/text change | E3 `render/primitives.rs`; `render/mod.rs`. Required source semantic nodes/types are otherwise rejected (`render/primitives.rs`). | `render/gate.rs` independently reconstructs node captions. Missing label/kind fallback is accessibility-only; required metadata mismatch fails. |
+| Legend kind/label: present/all/hidden selection; per-key label override, else key; derived lifecycle `final` only when visible entries exist and a final state exists | All families | E2 catalog resolution and label fallback `layout/mod.rs`; Archify family catalogs, e.g. sequence `render-sequence.mjs:24-40`, lifecycle `render-lifecycle.mjs:291-311`, and empty footprint `shared/legend.mjs:75-76`. | E2 retains explicit leading `swatch_bounds`, `text_bounds`, `title_y`, `content_bounds`; writer rejects missing per-entry bounds. Hidden/empty means no visible swatches. `legend.bounds` stays in the old layout budget; `content_bounds` is invisible paint coverage only. |
+| Node/route widths, text boxes and layout sizes | Explicit source value, else family default where accepted; width-style fallbacks above | Archify workflow node width `workflow-compiler.mjs:942`; dataflow node width `render-dataflow.mjs:95`; lifecycle dimensions `render-lifecycle.mjs:212-227`; sequence message label width `render-sequence.mjs:430-440`. | Layout resolves accepted defaults before E3. `||` treating zero as absent is not an accepted-input branch where schemas require positive dimensions (`lifecycle.schema.json:182-189`; `common.schema.json:59`). Explicit route widths >=0.5 are covered by `tests/svg_route_widths.rs`; no zero-width acceptance is claimed. |
+
+### Rendered elements and deliberate omissions
+
+| Element | Current projection and reference | Disposition |
+| --- | --- | --- |
+| `legend.bounds` and `content_bounds` | No SVG rectangle is emitted for either. The legacy bounds continue to budget the existing page; `content_bounds` encloses title, entries, text and swatch paint with an 8px reserve (`layout/mod.rs`; `svg.rs:333-345`). | `content_bounds` is invisible geometry for artifact containment. Do not restore the visible rounded legend frame. |
+| `label-bounds` and `legend-entry-box` | Transparent, no-stroke rectangles retain E2 selection geometry (`svg.rs:535-549,565-573`). | Invisible accessibility/selection metadata; expected by the SVG artifact gate. |
+| `node-mask` and `activation-mask` | Opaque masks precede the kind-painted node/activation body (`svg.rs:435-457,515-534`). | Required visual behavior; source node and activation masks are retained. |
+| Lifecycle lane, card and other retained grouping frames | E2-supplied containers remain read-only geometry; the SVG projects them as standalone frames even where the sidecar presents a band, external card, or grouping outside the SVG. | Intentional standalone grouping adaptation; no source-coordinate lookup or repositioning in the writer. The lifecycle v1 source band still has no lane rectangle (`render-lifecycle.mjs:736-756,896-926`). |
+| Background | E3 emits a solid theme page rect (`svg.rs:384-387`); each family renderer uses its background grid (`architecture/render-architecture.mjs:948-954`; workflow `workflow-compiler.mjs:4761-4780`; sequence `render-sequence.mjs:487-492`; dataflow `render-dataflow.mjs:511-516`; lifecycle `render-lifecycle.mjs:902-907`). | Intentional standalone theme background instead of the sidecar grid. |
+| Cards and decorative marks | Retained card text remains in the text geometry. Card dots, icons, brands, sigils, shadows, animation and interaction chrome are not painted by E3. | Decorative omissions remain out of scope under #543; do not claim card decoration fidelity. |
+| Unsupported glyphs | E3 draws a `.notdef` outline generated from the pinned font (`svg.rs:591-608`) rather than asking the platform fallback font. | Intentional deterministic unsupported-scalar behavior; glyph size uses pinned font units-per-em. |
+| Lifecycle v1/v2 band and rail | E3 renders v1 populated bands and producer-supplied rail; v2 omits both. | Matches the pinned version behavior; E2 lane containers remain separately available for standalone grouping. |
+
+### Reviewed geometry limitation
+
+The ten captures retain E2 geometry. Workflow/dataflow subtitle frames overlap
+lane/stage captions before SVG serialization; [#561](https://github.com/STAIxBWLB/maru/issues/561)
+tracks the source placement gap as an E4 blocker. S1 does not hide labels or add
+coordinate overrides, as agreed. #560's label-capacity role correction remains
+out of scope. The captures are reviewed projections, not acceptance of these
+source layouts for the product switch. Source-bound verification and screenshot
+hashes are recorded with the PR; hosted agreement and native results remain
+separate from a remote Linux reproduction.

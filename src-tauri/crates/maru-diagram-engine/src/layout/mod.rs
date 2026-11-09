@@ -137,11 +137,14 @@ impl SceneBuilder {
             .unwrap_or_default();
         Self {
             document: GeometryDocument {
+                lifecycle_rail: None,
                 nodes: vec![],
                 containers: vec![],
                 routes: vec![],
                 labels: vec![],
                 legend: GeometryLegend {
+                    content_bounds: None,
+                    title_y: None,
                     bounds: GeometryBox {
                         x: 0,
                         y: 0,
@@ -313,6 +316,8 @@ impl SceneBuilder {
         bounds.right().map_err(arithmetic)?;
         bounds.bottom().map_err(arithmetic)?;
         self.document.nodes.push(GeometryNode {
+            final_state: None,
+            phase_order: None,
             id: id.into(),
             bounds,
             position_source: source,
@@ -1209,14 +1214,10 @@ impl SceneBuilder {
             extent = extent.union(rect(p.x, p.y, 0, 0)?).map_err(arithmetic)?;
         }
         let legend_y = add(extent.bottom().map_err(arithmetic)?, 32 * 64)?;
-        let row_start_x = 32 * 64;
+        let row_start_x = 40 * 64;
         let sequence_legend = self.kind == "sequence";
         let legend_font_size = if sequence_legend { 8 * 64 } else { 12 * 64 };
-        let row_width_limit = if sequence_legend {
-            px(meta.view_box.unwrap_or([920.0, 640.0])[0])? - 80 * 64
-        } else {
-            i32::MAX
-        };
+        let row_width_limit = px(meta.view_box.unwrap_or([920.0, 640.0])[0])? - 80 * 64;
         let mut x = row_start_x;
         let mut row_y = legend_y;
         let mut entries = vec![];
@@ -1236,6 +1237,7 @@ impl SceneBuilder {
         } else {
             self.kinds.values().cloned().collect()
         };
+        let present = kinds.clone();
         if meta.legend.as_ref().and_then(|l| l.mode.as_deref()) == Some("all") {
             kinds.extend(
                 common::legend_keys(&self.kind)
@@ -1254,17 +1256,51 @@ impl SceneBuilder {
         if meta.legend.as_ref().and_then(|l| l.mode.as_deref()) == Some("hidden") {
             kinds.clear();
         }
-        // Sequence wrapping follows the renderer's authored catalog order,
-        // not alphabetical set order. Keep selection/visibility separate.
+        // Pinned catalog order, with per-entry overrides applied below.
+        let catalog: &[&str] = match self.kind.as_str() {
+            "architecture" => &[
+                "frontend",
+                "backend",
+                "database",
+                "cloud",
+                "security",
+                "messagebus",
+                "external",
+            ],
+            "workflow" => &[
+                "frontend",
+                "backend",
+                "security",
+                "messagebus",
+                "database",
+                "cloud",
+                "external",
+            ],
+            "sequence" => &["emphasis", "return", "security", "dashed", "default"],
+            "dataflow" => &["emphasis", "security", "dashed", "database", "default"],
+            _ => &[
+                "start", "active", "waiting", "decision", "success", "failure", "neutral",
+                "external",
+            ],
+        };
         let mut ordered_kinds = Vec::new();
-        if self.kind == "sequence" {
-            for kind in ["emphasis", "return", "security", "dashed", "default"] {
-                if kinds.remove(kind) {
-                    ordered_kinds.push(kind.to_owned());
-                }
+        for kind in catalog {
+            if kinds.remove(*kind) {
+                ordered_kinds.push((*kind).to_owned());
             }
         }
         ordered_kinds.extend(kinds);
+        if self.kind == "lifecycle"
+            && !ordered_kinds.is_empty()
+            && self
+                .document
+                .nodes
+                .iter()
+                .any(|node| node.final_state == Some(true))
+            && !ordered_kinds.iter().any(|kind| kind == "final")
+        {
+            ordered_kinds.push("final".into());
+        }
         for kind in ordered_kinds {
             let entry = meta
                 .legend
@@ -1276,39 +1312,78 @@ impl SceneBuilder {
             }
             let label = entry.and_then(|e| e.label.as_deref()).unwrap_or(&kind);
             let (w, h) = self.text_size(label, 400, legend_font_size)?;
-            let item_width = add(w, if sequence_legend { 43 * 64 } else { 32 * 64 })?;
-            let gap = if sequence_legend && x != row_start_x {
-                22 * 64
+            let route = self.kind == "sequence" || (self.kind == "dataflow" && kind != "database");
+            let slot_width = if route {
+                34
+            } else if self.kind == "lifecycle" && kind == "start" {
+                26
+            } else if self.kind == "lifecycle" && kind == "final" {
+                16
             } else {
-                0
+                14
             };
-            if sequence_legend
-                && x != row_start_x
-                && add(x - row_start_x, add(gap, item_width)?)? > row_width_limit
-            {
-                total_row_height = add(total_row_height, row_height)?;
-                row_y = add(row_y, row_height)?;
-                row_height = 22 * 64;
+            let swatch_gap = if route { 9 } else { 8 };
+            // Same footprint composition as legendFootprint; Noto metrics remain
+            // authoritative for the text term instead of the oracle's em model.
+            let interactive = !route && kind != "final" && present.contains(&kind);
+            let item_width = add(
+                w,
+                (slot_width + swatch_gap + if interactive { 21 } else { 0 }) * 64,
+            )?;
+            let item_width = add(item_width, 63)? / 64 * 64;
+            let gap = if x != row_start_x { 22 * 64 } else { 0 };
+            if x != row_start_x && add(x - row_start_x, add(gap, item_width)?)? > row_width_limit {
+                total_row_height = add(total_row_height, row_height.max(22 * 64))?;
+                row_y = add(row_y, row_height.max(22 * 64))?;
+                row_height = if sequence_legend { 22 * 64 } else { 0 };
                 x = row_start_x;
-            }
-            let gap = if sequence_legend && x != row_start_x {
-                gap
             } else {
-                0
-            };
-            x = add(x, gap)?;
+                x = add(x, gap)?;
+            }
             let b = self.label(
                 &format!("legend:{kind}"),
                 "legend",
                 label,
-                GeometryPoint { x, y: row_y },
+                GeometryPoint {
+                    x: add(x, (slot_width + swatch_gap) * 64)?,
+                    y: row_y,
+                },
                 400,
                 legend_font_size,
             )?;
+            let (swatch_width, swatch_height) = if self.kind == "architecture" {
+                (16, 10)
+            } else if route {
+                (34, 0)
+            } else if self.kind == "lifecycle" && kind == "start" {
+                (24, 9)
+            } else {
+                (14, 9)
+            };
+            let swatch_bounds = rect(
+                x,
+                add(
+                    add(
+                        row_y,
+                        metrics::measure_text("", 400, legend_font_size)?.ascender,
+                    )?,
+                    -(if self.kind == "architecture" {
+                        9
+                    } else if route {
+                        3
+                    } else {
+                        8
+                    }) * 64,
+                )?,
+                swatch_width * 64,
+                swatch_height * 64,
+            )?;
             entries.push(GeometryLegendEntry {
+                swatch_bounds: Some(swatch_bounds),
+                text_bounds: Some(b),
                 key: kind.clone(),
                 label: label.into(),
-                bounds: b,
+                bounds: rect(x, row_y, item_width, h.max(swatch_height * 64))?,
             });
             row_height = row_height.max(h);
             x = add(x, item_width)?;
@@ -1317,14 +1392,75 @@ impl SceneBuilder {
         if !entries.is_empty() {
             total_row_height = add(total_row_height, row_height)?;
         }
+        let title_y = if entries.is_empty() {
+            None
+        } else {
+            let title = if meta.locale.as_deref() == Some("ko") {
+                "범례"
+            } else {
+                "Legend"
+            };
+            // Header baseline is 20px above the first row baseline. The
+            // selection frame encloses entries; the header has its own label box.
+            let title_baseline = add(
+                add(
+                    legend_y,
+                    metrics::measure_text("", 400, legend_font_size)?.ascender,
+                )?,
+                -20 * 64,
+            )?;
+            let title_top = add(
+                title_baseline,
+                -metrics::measure_text(title, 700, 12 * 64)?.ascender,
+            )?;
+            self.label(
+                "legend:title",
+                "legend",
+                title,
+                GeometryPoint {
+                    x: row_start_x,
+                    y: title_top,
+                },
+                700,
+                12 * 64,
+            )?;
+            Some(title_baseline)
+        };
+        let content_bounds = if entries.is_empty() {
+            None
+        } else {
+            let mut bounds = entries[0].bounds;
+            for entry in &entries {
+                for part in [Some(entry.bounds), entry.swatch_bounds, entry.text_bounds]
+                    .into_iter()
+                    .flatten()
+                {
+                    bounds = bounds.union(part).map_err(arithmetic)?;
+                }
+            }
+            for label in self.document.labels.iter().filter(|label| {
+                label.target_id == "legend"
+                    && label
+                        .id
+                        .as_ref()
+                        .is_some_and(|id| id.starts_with("legend:"))
+            }) {
+                bounds = bounds.union(label.bounds).map_err(arithmetic)?;
+            }
+            // Logical bounds only: cover stroke widths and local arrowheads;
+            // the reference renderer does not draw an enclosing legend frame.
+            Some(inflate(bounds, 8 * 64)?)
+        };
         self.document.legend = GeometryLegend {
+            content_bounds,
+            title_y,
             bounds: if entries.is_empty() {
                 rect(0, 0, 0, 0)?
             } else {
                 rect(
-                    16 * 64,
+                    row_start_x,
                     add(legend_y, -8 * 64)?,
-                    max_row_right.max(32 * 64),
+                    max_row_right - row_start_x,
                     add(total_row_height, 16 * 64)?,
                 )?
             },
@@ -1652,7 +1788,15 @@ mod tests {
             let report = layout(&spec.to_string());
             assert!(report.ok, "{:?}", report.diagnostics);
             let scene = report.geometry.unwrap();
-            let expected: BTreeSet<_> = common::legend_keys(&kind).into_iter().collect();
+            let mut expected: BTreeSet<_> = common::legend_keys(&kind).into_iter().collect();
+            if kind == "lifecycle"
+                && scene
+                    .nodes
+                    .iter()
+                    .any(|node| node.final_state == Some(true))
+            {
+                expected.insert("final");
+            }
             assert_eq!(
                 scene
                     .legend

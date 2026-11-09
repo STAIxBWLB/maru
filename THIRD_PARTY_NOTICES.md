@@ -24,3 +24,23 @@ Unicode 17.0.0 `DerivedCoreProperties.txt`. The source and version are recorded
 in `src-tauri/crates/maru-diagram-engine/src/metrics/README.md`; the accompanying
 Unicode License V3 copyright and permission notice is retained in
 `src-tauri/crates/maru-diagram-engine/src/metrics/UNICODE-LICENSE.txt`.
+
+## roxmltree 0.21.1
+
+The optional `render-svg` feature uses roxmltree 0.21.1 for independent SVG XML
+artifact parsing. It is licensed under MIT OR Apache-2.0. Upstream source and
+complete licences: https://github.com/RazrFalcon/roxmltree/tree/v0.21.1
+(`LICENSE-MIT`, `LICENSE-APACHE`). Maru selects the MIT option; the complete
+MIT copyright and licence are retained in the engine at
+`src/render/licenses/roxmltree-MIT.txt`. It is not enabled by the default validator.
+
+## Noto Sans CJK KR glyph-zero outlines
+
+The SVG feature carries two derived glyph-zero SVG paths in
+`src-tauri/crates/maru-diagram-engine/src/render/notdef.json`, generated from the
+same pinned Regular/Bold OTFs as the E2 metric tables. These paths remain under
+OFL-1.1; full licence and copyright are retained in `src/metrics/data/LICENSE.OFL`
+and `src/metrics/data/NOTICE.md` within the engine crate. The source SHA-256 and units-per-em are
+recorded alongside each path. Original font binaries are remote test fixtures,
+not embedded in the validator or SVG. Supported scalars reference the Noto font
+family with shaping disabled; unsupported scalars draw the actual glyph zero.

@@ -7,6 +7,7 @@ export interface GeometryFoundation {
 }
 export interface GeometryEngine extends GeometryFoundation {
   layout(input: LayoutRequest): GeometryReport;
+  renderSvgForTest(geometry: import("../../../src-tauri/crates/maru-diagram-engine/bindings/engine").GeometryDocument, options: import("./engineSvgForTest").SvgOptions, specJson: string): Promise<import("./engineSvgForTest").SvgReport>;
   /** Available only in the separately built isolated test library. */
   layoutCanvasForTest(doc: DiagramDoc, datasetId: string): Promise<EngineCanvasPreview>;
 }
@@ -20,7 +21,11 @@ export async function loadGeometryEngine(): Promise<GeometryEngine> {
   await bindings.default({ module_or_path: wasmUrl });
   const measure = bindings.measure_text_json as (text: string, weight: number, size: number) => string;
   const layout = bindings.layout_json as (input: string) => string;
-  const engine: GeometryEngine = { async layoutCanvasForTest(doc, datasetId) {
+  const engine: GeometryEngine = { async renderSvgForTest(geometry, options, specJson) {
+    if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") throw new Error("SVG preview is disabled; build the isolated E3 test library and retry.");
+    const { renderSvgForTest } = await import("./engineSvgForTest");
+    return renderSvgForTest(geometry, options, specJson);
+  }, async layoutCanvasForTest(doc, datasetId) {
     if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") {
       throw new Error("Engine canvas preview is disabled in this build; build the isolated engine-e0 test library with VITE_ENGINE_GEOMETRY_TEST=1 and retry.");
     }

@@ -94,7 +94,15 @@ export type GeometryBox = { x: number, y: number, width: number, height: number,
 
 export type FontIdentity = { id: string, revision: string, fontSha256: string, weight: number, unitsPerEm: number, license: string, };
 
-export type GeometryNode = { id: string, bounds: GeometryBox,
+export type GeometryNode = {
+/**
+ * Optional semantic classification; coordinates and API version are unchanged.
+ */
+finalState?: boolean | null,
+/**
+ * Authored main-lane column, for both versions, independent of pinned positions.
+ */
+phaseOrder?: number | null, id: string, bounds: GeometryBox,
 /**
  * Future placement resolution order is planned pin, authored position,
  * then automatic placement.
@@ -109,13 +117,19 @@ export type GeometryGlyph = { glyphId: number, input: string, position: Geometry
 
 export type GeometryLabel = { id?: string | null, targetId: string, text: string, bounds: GeometryBox, font: FontIdentity, fontSize: number, glyphs: Array<GeometryGlyph>, };
 
-export type GeometryLegendEntry = { key: string, label: string, bounds: GeometryBox, };
+export type GeometryLegendEntry = { swatchBounds?: GeometryBox | null, textBounds?: GeometryBox | null, key: string, label: string, bounds: GeometryBox, };
 
-export type GeometryLegend = { bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
+export type GeometryLegend = {
+/**
+ * Invisible extent of every legend label and painted primitive.
+ */
+contentBounds?: GeometryBox | null, titleY?: number | null, bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
 
 export type GeometryPage = { bounds: GeometryBox, };
 
-export type GeometryDocument = { nodes: Array<GeometryNode>, containers: Array<GeometryContainer>, routes: Array<GeometryRoute>, labels: Array<GeometryLabel>, legend: GeometryLegend, page: GeometryPage, };
+export type GeometryLine = { from: GeometryPoint, to: GeometryPoint, };
+
+export type GeometryDocument = { lifecycleRail?: GeometryLine | null, nodes: Array<GeometryNode>, containers: Array<GeometryContainer>, routes: Array<GeometryRoute>, labels: Array<GeometryLabel>, legend: GeometryLegend, page: GeometryPage, };
 
 export type GeometryReport = { apiVersion: number, ok: boolean, geometry?: GeometryDocument | null, diagnostics: Array<Diagnostic>, receipt: EngineReceipt, };
 

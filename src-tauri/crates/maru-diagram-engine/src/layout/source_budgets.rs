@@ -429,11 +429,14 @@ mod tests {
     fn empty_geometry() -> GeometryDocument {
         use crate::geometry::{GeometryBox, GeometryContainer, GeometryLegend, GeometryPage};
         GeometryDocument {
+            lifecycle_rail: None,
             nodes: Vec::new(),
             containers: Vec::<GeometryContainer>::new(),
             routes: Vec::new(),
             labels: Vec::new(),
             legend: GeometryLegend {
+                content_bounds: None,
+                title_y: None,
                 bounds: GeometryBox {
                     x: 0,
                     y: 0,

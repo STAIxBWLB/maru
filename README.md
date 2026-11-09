@@ -659,7 +659,8 @@ SDK/toolchain/geometry-harness changes also select the reusable Linux/macOS/Wind
 scene determinism matrix, required by `ci-ok`. It compares whole-scene geometry
 and refusal diagnostics across Linux, macOS, Windows and the Linux WASM build,
 including an unchanged re-layout check for every parity-corpus record and
-three seeded 200-node stress scenes. Renderer
+three seeded 200-node stress scenes. The E3 SVG slice also compares both theme
+hashes and artifact gates for all retained scenes, including refused layouts. Renderer
 constraint parity and layout performance are separate E2 gates.
 Version-changing PRs use `make release-checks`. Docs-only and `.planning/**`
 changes skip builds; performance evidence JSON remains validation input. Native

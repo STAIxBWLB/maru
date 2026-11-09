@@ -174,8 +174,103 @@ fn empty_lane_top(
     }
 }
 
+type StateSemanticFlags<'a> = std::collections::BTreeMap<&'a str, (bool, Option<u32>)>;
+fn state_semantic_flags(spec: &LifecycleSpec) -> StateSemanticFlags<'_> {
+    let version = spec.schema_version;
+    // Preserve final-state and authored-column meaning before source inputs are
+    // discarded. The SVG projection must not infer either from pinned positions.
+    let outgoing: std::collections::BTreeSet<_> = spec
+        .transitions
+        .iter()
+        .map(|edge| edge.from.as_str())
+        .collect();
+    let last_main = spec
+        .states
+        .iter()
+        .filter(|state| state.lane == "main")
+        .map(|state| state.col)
+        .max();
+    let final_states: std::collections::BTreeMap<_, _> = spec
+        .states
+        .iter()
+        .map(|state| {
+            (
+                state.id.as_str(),
+                !outgoing.contains(state.id.as_str())
+                    && (version == 2 || state.lane != "main" || Some(state.col) == last_main),
+            )
+        })
+        .collect();
+    spec.states
+        .iter()
+        .map(|state| {
+            let ordinal = if state.lane == "main" {
+                // Retain authored column identity for both schema versions.
+                // It is independent of pin-adjusted placement and lets the
+                // SVG projection recover forward-main transition semantics.
+                Some(state.col)
+            } else {
+                None
+            };
+            (
+                state.id.as_str(),
+                (final_states[state.id.as_str()], ordinal),
+            )
+        })
+        .collect()
+}
+
+fn effective_transition_variant(
+    spec: &LifecycleSpec,
+    transition: &crate::lifecycle::LifecycleTransition,
+) -> String {
+    if let Some(variant) = &transition.variant {
+        return variant.clone();
+    }
+    if spec.schema_version == 2 {
+        if let (Some(from), Some(to)) = (
+            spec.states.iter().find(|state| state.id == transition.from),
+            spec.states.iter().find(|state| state.id == transition.to),
+        ) {
+            if from.lane == "main" && to.lane == "main" && to.col > from.col {
+                return "emphasis".into();
+            }
+        }
+    }
+    "default".into()
+}
+fn attach_state_semantics(scene: &mut SceneBuilder, id: &str, flags: &StateSemanticFlags<'_>) {
+    if let Some(node) = scene.document.nodes.last_mut().filter(|node| node.id == id) {
+        let &(final_state, phase_order) = flags
+            .get(id)
+            .expect("every placed state has classified semantics");
+        node.final_state = Some(final_state);
+        node.phase_order = phase_order;
+    }
+}
+
 pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<(), Diagnostic> {
     let version = spec.schema_version;
+    if version == 1 {
+        if let Some(column) = spec
+            .states
+            .iter()
+            .filter(|state| state.lane == "main")
+            .map(|state| state.col)
+            .max()
+        {
+            let source_x = *PHASE_COLUMNS.get(column as usize).ok_or_else(|| {
+                geometry_error(
+                    "/states",
+                    "main phase column has no reference rail endpoint",
+                )
+            })?;
+            scene.document.lifecycle_rail = Some(crate::geometry::GeometryLine {
+                from: point(154.0, PHASE_TOP + 31.0)?,
+                to: point(source_x + 38.0, PHASE_TOP + 31.0)?,
+            });
+        }
+    }
     let lane_indices: std::collections::HashMap<_, _> = spec
         .lanes
         .iter()
@@ -196,6 +291,8 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
         })
         .fold(0.0_f64, f64::max);
     let total_width = max_right.max(980.0);
+
+    let semantic_flags = state_semantic_flags(spec);
 
     for (index, state) in spec.states.iter().enumerate() {
         let _lane = *lane_indices.get(state.lane.as_str()).ok_or_else(|| {
@@ -221,7 +318,7 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             (None, Some(step)) => Some(step.to_owned()),
             (None, None) => None,
         };
-        scene.add_node(
+        let placed = scene.add_node(
             &state.id,
             &state.state_type,
             &state.label,
@@ -230,7 +327,9 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             None,
             auto,
             Some([width, height]),
-        )?;
+        );
+        attach_state_semantics(scene, &state.id, &semantic_flags);
+        placed?;
     }
 
     for (index, lane) in spec.lanes.iter().enumerate() {
@@ -328,7 +427,7 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
                 transition.label_segment,
                 &format!("{path}/labelSegment"),
             )?,
-            variant: transition.variant.clone(),
+            variant: Some(effective_transition_variant(spec, transition)),
             width: transition
                 .width
                 .map(px)

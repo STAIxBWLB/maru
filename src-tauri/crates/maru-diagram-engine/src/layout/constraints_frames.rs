@@ -506,11 +506,14 @@ mod tests {
         labels: Vec<GeometryLabel>,
     ) -> GeometryDocument {
         GeometryDocument {
+            lifecycle_rail: None,
             nodes,
             containers,
             routes: Vec::new(),
             labels,
             legend: GeometryLegend {
+                content_bounds: None,
+                title_y: None,
                 bounds: GeometryBox {
                     x: 0,
                     y: 0,
@@ -532,6 +535,8 @@ mod tests {
 
     fn node(id: &str, x: i32, y: i32, width: i32, height: i32) -> GeometryNode {
         GeometryNode {
+            final_state: None,
+            phase_order: None,
             id: id.into(),
             bounds: GeometryBox {
                 x,

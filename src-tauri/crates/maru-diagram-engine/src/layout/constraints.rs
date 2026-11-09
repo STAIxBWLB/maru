@@ -814,11 +814,14 @@ mod tests {
 
     fn empty_geometry() -> GeometryDocument {
         GeometryDocument {
+            lifecycle_rail: None,
             nodes: Vec::new(),
             containers: Vec::new(),
             routes: Vec::new(),
             labels: Vec::new(),
             legend: GeometryLegend {
+                content_bounds: None,
+                title_y: None,
                 bounds: GeometryBox {
                     x: 0,
                     y: 0,

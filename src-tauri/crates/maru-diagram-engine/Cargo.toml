@@ -15,12 +15,15 @@ wasm = ["dep:wasm-bindgen"]
 typegen = ["dep:ts-rs"]
 geometry = []
 # Test/CI corpus tooling is never linked by the normal lazy geometry build.
-geometry-corpus = ["geometry"]
+geometry-corpus = ["geometry", "render-svg"]
+render-svg = ["geometry", "dep:roxmltree"]
+wasm-render = ["wasm-layout", "render-svg"]
 wasm-layout = ["geometry", "dep:wasm-bindgen"]
 font-tools = ["dep:ttf-parser"]
 bindgen-web = ["wasm", "dep:wasm-bindgen-cli-support"]
 
 [dependencies]
+roxmltree = { version = "=0.21.1", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_path_to_error = "0.1"
@@ -54,3 +57,8 @@ required-features = ["geometry-corpus"]
 name = "geometry-work"
 path = "src/bin/geometry_work.rs"
 required-features = ["geometry-corpus"]
+
+[[bin]]
+name = "export-notdef"
+path = "src/bin/export_notdef.rs"
+required-features = ["font-tools"]

@@ -46,9 +46,20 @@ function validateReport(report, expected, index) {
       || workValues.some((n) => n === 0) || work.total !== workValues.reduce((sum, n) => sum + n, 0)) {
     throw new Error(`${label} has no valid deterministic1000-node work receipt; rebuild all OS/WASM reports with geometry-corpus before comparing them.`);
   }
+  if (report.svgHashVersion !== 1) throw new Error(`${label} has no SVG hash contract; regenerate all native/WASM reports with E3 artifact gates.`);
   for (let caseIndex = 0; caseIndex < expected.caseCount; caseIndex += 1) {
     if (!/^[a-f0-9]{64}$/.test(report.cases[caseIndex]?.hash ?? "")) {
       throw new Error(`${label} case hash is missing or malformed at index ${caseIndex}; regenerate every corpus hash with the SDK harness.`);
+    }
+    const svg = report.cases[caseIndex].svg;
+    if (typeof report.cases[caseIndex].geometryRetained !== "boolean"
+        || (svg !== null) !== report.cases[caseIndex].geometryRetained
+        || (report.cases[caseIndex].ok === true && !report.cases[caseIndex].geometryRetained)) {
+      throw new Error(`${label} omits SVG for retained geometry; regenerate SVG for rejected as well as accepted scene reports.`);
+    }
+    if (svg !== null && (!svg || ["light", "dark"].some((theme) => !/^[a-f0-9]{64}$/.test(svg[theme]?.hash ?? "")
+        || svg[theme].artifactGate !== true || !Number.isSafeInteger(svg[theme].bytes) || svg[theme].bytes <= 0))) {
+      throw new Error(`${label} case SVG hash or artifact gate is missing; regenerate both light/dark retained-scene SVG reports.`);
     }
     if (report.cases[caseIndex]?.id !== expected.caseIds[caseIndex]) {
       throw new Error(`${label} case order/IDs differ at index ${caseIndex}; regenerate the report from the current corpus order.`);

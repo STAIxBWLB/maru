@@ -354,6 +354,23 @@ jobs:
           MARU_ENGINE_E0: '1'
         run: pnpm exec playwright test e2e/engine-e0.spec.ts --workers=1
 
+      - name: Capture both engine SVG themes with pinned CJK fonts
+        if: steps.engine_e0.outputs.needed == 'true'
+        env:
+          CARGO_BUILD_JOBS: 2
+        run: |
+          node scripts/diagram-engine-e3-fonts.mjs --check
+          node scripts/diagram-engine-e3-screenshots.mjs
+
+      - name: Upload engine SVG visual review evidence
+        if: steps.engine_e0.outputs.needed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagram-e3-svg-screenshots
+          path: .engine-e2/e3-screenshots/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Run e2e
         run: make test-e2e
 

@@ -23,7 +23,8 @@ export const NATIVE_FILES = [
 export function needsGeometryDeterminism(paths) {
   return paths.some((name) => name.startsWith("src-tauri/crates/")
     || name.startsWith("scripts/diagram-engine-e2")
-    || ["rust-toolchain.toml", "src/lib/diagram/engineGeometry.ts", ".github/workflows/diagram-determinism.yml", ".github/workflows/ci.yml", "scripts/ci-policy.mjs"].includes(name));
+    || name.startsWith("scripts/diagram-engine-e3")
+    || ["rust-toolchain.toml", "src/lib/diagram/engineGeometry.ts", "src/lib/diagram/engineSvgForTest.ts", ".github/workflows/diagram-determinism.yml", ".github/workflows/ci.yml", "scripts/ci-policy.mjs"].includes(name));
 }
 
 // Compare responses expose at most 300 files. At the cap, preserve the costly
