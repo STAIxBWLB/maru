@@ -10,13 +10,14 @@ const corpus = corpusContract(corpusText);
 const report = (caseIds = corpus.caseIds, extra = {}) => ({
   apiVersion: 1,
   scope: "whole-scene-geometry",
+  svgHashVersion: 1,
   repeatCheck: true,
   corpusSha256: corpus.corpusSha256,
   corpusCaseCount: caseIds.length,
   fontManifestSha256: "font-manifest",
   benchmarkWork: { fixtureSha256: "a".repeat(64), nodes: 1000, routes: 999,
     stats: { astarExpandedStates: 2, routeEvaluations: 999, constraintEvaluations: 3000 }, total: 4001 },
-  cases: caseIds.map((id) => ({ id, hash: createHash("sha256").update(id).digest("hex") })),
+  cases: caseIds.map((id) => ({ id, hash: createHash("sha256").update(id).digest("hex"), svg: {light: {hash:"c".repeat(64),bytes:10,artifactGate:true},dark: {hash:"d".repeat(64),bytes:11,artifactGate:true}} })),
   ...extra,
 });
 const four = () => [report(), report(), report(), report()];
@@ -61,6 +62,15 @@ describe("cross-platform whole-scene receipt comparison", () => {
     changed.benchmarkWork.stats.constraintEvaluations += 1;
     changed.benchmarkWork.total += 1;
     expect(() => compare([report(), changed, report(), report()])).toThrow("manifest metadata");
+  });
+
+  it("requires both per-theme SVG hashes and successful artifact gates", () => {
+    const missing = report();
+    missing.cases[0]!.svg.light.hash = "";
+    expect(() => compare([missing, report(), report(), report()])).toThrow("SVG hash");
+    const changed = report();
+    changed.cases[0]!.svg.dark.hash = "e".repeat(64);
+    expect(() => compare([report(), changed, report(), report()])).toThrow("arch-one");
   });
 
   it("fails closed for malformed corpus JSON and malformed report records", () => {

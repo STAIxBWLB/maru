@@ -35,6 +35,9 @@ if (action === "types") {
   // Corpus hashing belongs only to the dedicated CI test build, never the
   // normal layout artifact whose bytes and cold load the browser measures.
   run(process.execPath, [join(root, "scripts/diagram-engine-e2-wasm-hashes.mjs"), "--assert-product", join(root, "src/lib/diagram/__generated__/engine-geometry")]);
+  // E3 SVG is a separate test-only artifact; validation and measured normal geometry stay unchanged.
+  sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-render", "--target", "wasm32-unknown-unknown"]);
+  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", join(sdk, "target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm"), join(root, "src/lib/diagram/__generated__/engine-render")]);
   // Build the real browser facade, including generated assets, with Vite's
   // library pipeline. Its output is the artifact the browser measurement loads.
   const { build } = await import("vite");
@@ -50,7 +53,7 @@ if (action === "types") {
   const payload = payloadReport(outputs.filter((item) => item.type === "chunk"));
   if (payload.validationGzipBytes > 400_000) throw new Error(`Validation payload is ${payload.validationGzipBytes} gzip bytes, above 400000; move geometry dependencies behind the lazy boundary before merging.`);
   if (!payload.lazyGeometryGzipBytes) throw new Error("Geometry metric chunk is missing; keep its WASM URLs inside the dynamic engineGeometry module and rebuild.");
-  if (outputs.some((chunk) => chunk.type === "chunk" && chunk.name.includes("engineGeometryCanvas"))) throw new Error("Test canvas bridge leaked into the normal product artifact; keep its feature guard false in production.");
+  if (outputs.some((chunk) => chunk.type === "chunk" && (chunk.name.includes("engineGeometryCanvas") || chunk.name === "engineSvgForTest"))) throw new Error("Test canvas bridge leaked into the normal product artifact; keep its feature guard false in production.");
   const productBuildMs = performance.now() - before;
   const testBuildStarted = performance.now();
   // A separate isolated test artifact enables the adapter; its bytes are not

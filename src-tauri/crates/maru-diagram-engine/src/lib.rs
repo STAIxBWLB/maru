@@ -18,6 +18,8 @@ pub mod layout;
 pub mod lifecycle;
 #[cfg(feature = "geometry")]
 pub mod metrics;
+#[cfg(feature = "render-svg")]
+pub mod render;
 #[cfg(feature = "geometry")]
 pub mod routing;
 pub mod rules;
@@ -387,6 +389,12 @@ pub fn scene_corpus_hashes_wasm(input: &str) -> String {
         Ok(report) => report,
         Err(diagnostic) => serde_json::json!({"error":diagnostic}).to_string(),
     }
+}
+
+#[cfg(feature = "wasm-render")]
+#[wasm_bindgen(js_name = render_scene_svg)]
+pub fn render_scene_svg_wasm(input: &str) -> String {
+    serde_json::to_string(&render::render_svg_json(input)).expect("integer SVG report serializes")
 }
 
 #[cfg(feature = "typegen")]

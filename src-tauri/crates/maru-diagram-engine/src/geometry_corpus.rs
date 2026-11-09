@@ -128,7 +128,7 @@ pub fn scene_corpus_hashes(input: &str) -> Result<String, Diagnostic> {
                 "restore the serialized JSON input for this corpus case",
             )
         })?;
-        serde_json::from_str::<Value>(spec_json).map_err(|cause| {
+        let spec = serde_json::from_str::<Value>(spec_json).map_err(|cause| {
             error(
                 "input",
                 &input_path,
@@ -152,11 +152,41 @@ pub fn scene_corpus_hashes(input: &str) -> Result<String, Diagnostic> {
             .filter(|d| crate::layout::is_route_quality_notice(d))
             .map(|d| json!({"code":d.code,"rule":d.rule,"path":d.path,"message":d.message}))
             .collect();
-        hashes.push(json!({ "id": id, "ok": first.ok, "diagnosticCodes":codes,"routeQualityNotices":notices,"hash": crate::spec_hash(&first_bytes) }));
+        let svg = if let Some(geometry) = &first.geometry {
+            let mut themes = serde_json::Map::new();
+            for theme in [
+                crate::render::SvgTheme::Light,
+                crate::render::SvgTheme::Dark,
+            ] {
+                let options = crate::render::SvgOptions::from_spec(&spec, theme);
+                let first_svg = crate::render::render_svg(geometry, &options);
+                let second_svg = crate::render::render_svg(geometry, &options);
+                if !first_svg.ok || !second_svg.ok || first_svg.svg != second_svg.svg {
+                    return Err(error("svg", &case_path, format!("case {id:?} {} SVG failed its artifact/repeat gate: {:?}", theme.name(), first_svg.diagnostics), "repair deterministic SVG output and its artifact gate while preserving retained geometry"));
+                }
+                let bytes = first_svg.svg.as_deref().ok_or_else(|| {
+                    error(
+                        "svg",
+                        &case_path,
+                        "successful SVG report omitted its artifact",
+                        "restore the SVG report contract",
+                    )
+                })?;
+                themes.insert(
+                    theme.name().into(),
+                    json!({"hash":crate::spec_hash(bytes),"bytes":bytes.len(),"artifactGate":true}),
+                );
+            }
+            Some(themes)
+        } else {
+            None
+        };
+        hashes.push(json!({ "id": id, "ok": first.ok, "diagnosticCodes":codes,"routeQualityNotices":notices,"hash": crate::spec_hash(&first_bytes), "svg": svg }));
     }
     let report = json!({
         "apiVersion": crate::API_VERSION,
         "scope": "whole-scene-geometry",
+        "svgHashVersion": 1,
         "corpusSha256": crate::spec_hash(input),
         "corpusCaseCount": cases.len(),
         "acceptedCaseCount": accepted,

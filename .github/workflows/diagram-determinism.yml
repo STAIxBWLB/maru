@@ -38,7 +38,7 @@ jobs:
         with:
           workspaces: src-tauri/crates -> target
           shared-key: diagram-scene-${{ matrix.os }}
-      - name: Hash whole scenes and unchanged re-layouts for the complete corpus
+      - name: Hash whole scenes, both SVG themes and unchanged re-layouts for the complete corpus
         shell: bash
         run: |
           mkdir -p .engine-e2/determinism
@@ -78,7 +78,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           export MARU_DIAGRAM_ENGINE_REVISION=$(git rev-parse HEAD:src-tauri/crates)
-          cargo build --locked --release --lib --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features wasm-layout,geometry-corpus --target wasm32-unknown-unknown
+          cargo build --locked --release --lib --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features wasm-render,geometry-corpus --target wasm32-unknown-unknown
           cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features bindgen-web --bin bindgen-web -- src-tauri/crates/target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm .engine-e2/wasm-test
       - name: Hash whole scenes through WASM without a Node engine override
         run: node scripts/diagram-engine-e2-wasm-hashes.mjs .engine-e2/determinism-corpus.json .engine-e2/determinism/wasm-linux.json .engine-e2/wasm-test
@@ -116,5 +116,5 @@ jobs:
         with:
           pattern: diagram-scene-*
           path: .engine-e2/determinism
-      - name: Require three native and one WASM whole-scene report to agree
+      - name: Require three native and one WASM scene/SVG report to agree
         run: node scripts/diagram-engine-e2-determinism.mjs .engine-e2/determinism .engine-e2/determinism-corpus.json

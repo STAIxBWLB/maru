@@ -1658,3 +1658,115 @@ new source, or add an oracle-compatible placement solver. Geometry rules use
 the engine's own positions. An authored destination side owns an incoming-arrow
 face collision; the same side does not invent a collision when the actual tips
 are far enough apart.
+
+## Render
+
+### E3 S1 SVG contract
+
+The optional `render-svg` feature writes SVG from an E2 `GeometryDocument` and
+`SvgOptions` (theme, title, description). It never places nodes, routes edges,
+reflows labels or reruns geometry admission. A retained scene can be rendered
+when its layout report has `ok:false`; SVG success means the artifact matches
+that scene, not that the source document passed admission. PNG, output receipts,
+the offline viewer and the product switch remain separate stages.
+
+The writer preserves scene array order and emits attributes in fixed order.
+All geometry numbers are exact terminating decimals of the signed 1/64px
+coordinates; there is no locale, timestamp, random id or unordered map walk.
+Element ids combine their geometry category with the hexadecimal UTF-8 bytes
+of the E2 source id, so nodes, routes and namespaced labels cannot collide with
+each other or root metadata. Anonymous route/label ids use a separate ordinal
+namespace. No application or Archify source is linked into the SDK.
+
+The geometry DTO carries boxes, routes and positioned glyphs but does not carry
+semantic node shapes, brand marks or node-type colors. S1 therefore uses a
+common rounded node box and neutral theme palette rather than inventing semantic
+properties from ids or rereading the source spec. Container kinds resolve the
+visual radius only. Every supplied box, route width, glyph baseline and label
+font size is consumed unchanged. Transparent label and legend-entry rectangles
+are geometry/selection frames; they neither mask text nor replace glyph checks.
+Legend labels are the existing E2 labels, not a second independently laid-out
+text layer.
+
+### Themes and accessibility
+
+`render/theme.rs` is the single light/dark token source. The SVG root has
+`role="img"`, a source-derived `<title>` and `<desc>`, and `aria-labelledby`.
+Node/container groups carry source captions and roles; edge groups identify
+both endpoints. Label groups retain original source text in `aria-label`,
+including line separators and unsupported characters, while the paint uses the
+positioned glyph stream. All dynamic XML text/attributes are escaped, illegal
+XML 1.0 controls are diagnosed, and source strings never become element names,
+style rules or external URLs.
+
+### Font decision
+
+S1 uses the explicit `Noto Sans CJK KR, sans-serif` family stack for mapped
+scalars, with kerning, ligatures and contextual/localized shaping disabled.
+Each scalar is emitted at the E2 glyph position, so the browser does not invent
+wrapping or spacing. Original font binaries and per-document subsets are not
+embedded: a subsetter would introduce another binary-processing dependency and
+output-size surface before S2 measures rasterization. The optional renderer
+and its XML parser stay outside the validation artifact and its 400,000 B gzip
+budget. Stack-only SVG bytes are deterministic; physical text fidelity requires
+the pinned font, and fallback pixels are not claimed to match E2 metrics.
+
+Unsupported nonignorable scalars never reach platform fallback. They draw the
+actual pinned font's glyph 0 path at the E2 origin and scale; default-ignorables
+paint nothing. `render/notdef.json` records both source hashes and units-per-em.
+The Linux-only `diagram-engine-e3-fonts.mjs`/`export-notdef` tool derives those
+paths from the same immutable OTFs as E2; `--check` detects drift. OFL notices
+remain beside the metric data and are linked in `THIRD_PARTY_NOTICES.md`.
+
+The screenshot harness loads both pinned original OTFs outside the SVG, verifies
+their hashes and font load, then checks physical SVG label bounds. This proves
+that captured CJK output used the intended fonts; it does not bundle those
+fonts into the SVG or prove native-app rendering.
+
+### Artifact gate and determinism
+
+The renderer reparses its output with optional roxmltree 0.21.1 (MIT option,
+complete licence retained in `render/licenses`). The gate independently checks
+actual XML elements, global id uniqueness, expected per-kind counts and parent
+relationships, page/node/container/label/legend rectangles, route points/width,
+source text, font identity/size/weight, each painted glyph position, and actual
+glyph-zero paths. Coordinate comparisons allow at most 1/64px; NaN/infinite
+numbers and missing/extra paint fail. Only the writer's static SVG vocabulary,
+local marker references and fixed theme/style attributes are accepted. DTDs,
+scripts, external content and unrecognized transformations are refused. A failed
+gate returns diagnostics naming the cause and next step, never a successful
+receipt or a silent omission. The request/artifact limit is 16 MiB.
+
+The existing four-report `diagram-determinism` workflow retains E2 whole-scene
+hashes and logical-work ceilings and adds light/dark SVG SHA-256, byte length
+and artifact-gate results for every retained corpus scene. Refused layouts with
+geometry participate. Scenes with no geometry explicitly carry `svg:null`.
+Native Linux/macOS/Windows and actual WASM must agree on all report fields.
+The separate `wasm-render` build is reached only by the isolated test facade;
+there is no Tauri command, product export or canvas switch in S1.
+
+### Pinned visual references
+
+These constants were read as references from the pinned renderer; its code is
+not imported or copied. Layout/label budgets are E2 inputs, not new SVG rules.
+The #560 label-capacity correction remains outside this slice.
+
+| Visual quantity used | S1 value/source | Pinned reference |
+| --- | --- | --- |
+| Common node radius/stroke | 6px / 1.5px | `sidecars/archify/renderers/architecture/render-architecture.mjs:898-901`; workflow `workflow-compiler.mjs:4711-4714`; dataflow `render-dataflow.mjs:421-451` |
+| Region/security frame radius | 12px / 8px, 1px stroke | `sidecars/archify/renderers/architecture/render-architecture.mjs:841-845` |
+| Lane/group radius | 10px / 9px, 1px stroke | `sidecars/archify/renderers/workflow/workflow-compiler.mjs:4658-4663,4685-4686` |
+| Stage/segment/activation radius | 10px / 10px / 3px | `sidecars/archify/renderers/dataflow/render-dataflow.mjs:79-88,417`; sequence `render-sequence.mjs:389-394,421-427` |
+| Arrow marker | 10x7, reference (9,3.5), triangle (0,0),(10,3.5),(0,7) | `sidecars/archify/renderers/shared/utils.mjs:14-25` |
+| Default/emphasis path width | supplied E2 width; 1.5px only when absent | `sidecars/archify/renderers/architecture/render-architecture.mjs:855-865`; other family widths already resolved by E2 |
+| Return/dashed pattern | 3px,5px | `sidecars/archify/renderers/sequence/render-sequence.mjs:444-454` |
+| Text size, weight, baseline and offsets | supplied E2 font identity and positioned glyphs; no 600/650-weight substitution | E2 `layout/mod.rs:195-271`; pinned visual labels in architecture `render-architecture.mjs:847-901`, sequence `render-sequence.mjs:413-450`, dataflow `render-dataflow.mjs:425-470`, lifecycle `render-lifecycle.mjs:754-846` |
+| Palette | named neutral background/text/lane/arrow and backend accent tokens | `sidecars/archify/assets/template.html:175-209,218-250` |
+| Legend text/order/bounds | supplied E2 legend entries and labels; no new legend padding or swatch layout | E2 `layout/mod.rs:1204-1330`; pinned legend typography `sidecars/archify/renderers/shared/legend.mjs:195-213` |
+
+### S1 verification evidence
+
+Source-bound Rust/WASM and screenshot results are recorded with the PR.
+Hosted four-platform agreement, native-suite coverage and final-head CI remain
+separate from a remote Linux reproduction; screenshots are reviewed visually,
+not compared byte-for-byte with Archify.

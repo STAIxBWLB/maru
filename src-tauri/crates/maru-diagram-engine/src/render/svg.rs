@@ -1,0 +1,367 @@
+//! Stable SVG syntax; array order is the E2 scene order, never a map traversal.
+use super::{error, SvgOptions, FONT_FAMILY, MAX_SVG_BYTES};
+use crate::geometry::{GeometryBox, GeometryDocument, GeometryLabel, GeometryRoute};
+use crate::Diagnostic;
+use serde::Deserialize;
+use std::fmt::Write;
+
+/// Exact terminating fixed-point decimal, including negative fractions.
+pub(crate) fn fixed(value: i64) -> String {
+    decimal(value, 64, 6)
+}
+fn decimal(value: i64, denominator: i64, digits: u32) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let n = i128::from(value).abs();
+    let d = i128::from(denominator);
+    let whole = n / d;
+    let remainder = n % d;
+    if remainder == 0 {
+        return format!("{sign}{whole}");
+    }
+    let fraction = format!(
+        "{:0width$}",
+        remainder * 10_i128.pow(digits) / d,
+        width = digits as usize
+    );
+    format!("{sign}{whole}.{}", fraction.trim_end_matches('0'))
+}
+pub(crate) fn scale(size: i32, upem: u16) -> String {
+    decimal(i64::from(size), 64 * i64::from(upem), 9)
+}
+pub(crate) fn id(kind: &str, source: &str) -> String {
+    let mut value = format!("maru-{kind}-");
+    for byte in source.bytes() {
+        write!(value, "{byte:02x}").expect("String writes cannot fail");
+    }
+    value
+}
+pub(crate) fn label_key(label: &GeometryLabel, index: usize) -> String {
+    label
+        .id
+        .as_ref()
+        .map_or_else(|| format!("index:{index}"), |id| format!("id:{id}"))
+}
+pub(crate) fn route_key(route: &GeometryRoute, index: usize) -> String {
+    route
+        .id
+        .as_ref()
+        .map_or_else(|| format!("index:{index}"), |id| format!("id:{id}"))
+}
+fn escaped(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\r', "&#13;")
+        .replace('\n', "&#10;")
+        .replace('\t', "&#9;")
+}
+fn valid_xml(value: &str) -> bool {
+    value.chars().all(|c| {
+        matches!(c, '\t' | '\n' | '\r') || {
+            let n = c as u32;
+            (32..=55295).contains(&n)
+                || (57344..=65533).contains(&n)
+                || (65536..=1114111).contains(&n)
+        }
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Notdef {
+    pub path: String,
+    pub units_per_em: u16,
+    pub source_sha256: String,
+}
+pub(crate) fn notdef(weight: u16) -> Result<Notdef, Diagnostic> {
+    let value: serde_json::Value =
+        serde_json::from_str(include_str!("notdef.json")).map_err(|cause| {
+            error(
+                "font-data",
+                "/font",
+                format!("glyph 0 outline data is invalid: {cause}"),
+                "regenerate the pinned outline data with diagram-engine-e3-fonts.mjs",
+            )
+        })?;
+    serde_json::from_value(value[weight.to_string()].clone()).map_err(|cause| {
+        error(
+            "font-weight",
+            "/font",
+            format!("glyph 0 outline is missing for weight {weight}: {cause}"),
+            "use the pinned Noto weights 400 or 700 and regenerate outline data",
+        )
+    })
+}
+fn rect(
+    out: &mut String,
+    kind: &str,
+    b: GeometryBox,
+    radius: i64,
+    fill: &str,
+    stroke: &str,
+    width: &str,
+) {
+    write!(out,"<rect data-kind=\"{kind}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{width}\"/>",fixed(b.x.into()),fixed(b.y.into()),fixed(b.width.into()),fixed(b.height.into()),fixed(radius)).unwrap();
+}
+fn caption(g: &GeometryDocument, target: &str) -> String {
+    let labels: Vec<_> = g
+        .labels
+        .iter()
+        .filter(|l| {
+            l.target_id == target
+                && !l.text.is_empty()
+                && l.id.as_ref().is_some_and(|id| {
+                    id.starts_with(&format!("node:{target}:"))
+                        || id.starts_with(&format!("container:{target}:"))
+                })
+        })
+        .map(|l| l.text.as_str())
+        .collect();
+    if labels.is_empty() {
+        target.into()
+    } else {
+        labels.join("; ")
+    }
+}
+fn validate(g: &GeometryDocument, o: &SvgOptions) -> Result<(), Diagnostic> {
+    let texts = std::iter::once(o.title.as_str())
+        .chain(std::iter::once(o.description.as_str()))
+        .chain(g.nodes.iter().map(|n| n.id.as_str()))
+        .chain(
+            g.containers
+                .iter()
+                .flat_map(|c| [c.id.as_str(), c.kind.as_str()]),
+        )
+        .chain(
+            g.routes
+                .iter()
+                .flat_map(|r| [r.from.as_str(), r.to.as_str()]),
+        )
+        .chain(
+            g.labels
+                .iter()
+                .flat_map(|l| [l.text.as_str(), l.target_id.as_str()]),
+        )
+        .chain(
+            g.legend
+                .entries
+                .iter()
+                .flat_map(|e| [e.key.as_str(), e.label.as_str()]),
+        );
+    if texts.into_iter().any(|s| !valid_xml(s)) {
+        return Err(error(
+            "xml-text",
+            "/",
+            "scene text contains a character forbidden by XML 1.0",
+            "remove XML control characters from ids and visible text before rendering",
+        ));
+    }
+    if o.title.trim().is_empty() || o.description.trim().is_empty() {
+        return Err(error(
+            "accessibility",
+            "/options",
+            "SVG title or description is empty",
+            "provide a nonempty title and description from the document metadata",
+        ));
+    }
+    if g.page.bounds.width <= 0 || g.page.bounds.height <= 0 {
+        return Err(error(
+            "page",
+            "/page",
+            "SVG page has nonpositive dimensions",
+            "provide a retained layout with positive page width and height",
+        ));
+    }
+    for l in &g.labels {
+        let font = crate::metrics::font_identity(l.font.weight)?;
+        if font != l.font || l.font_size <= 0 {
+            return Err(error(
+                "font",
+                "/labels",
+                "a label does not use the pinned font identity or has nonpositive size",
+                "render geometry with the matching Noto metric tables and a positive font size",
+            ));
+        }
+        let original = l.text.replace('\n', "");
+        let glyph_text: String = l.glyphs.iter().map(|glyph| glyph.input.as_str()).collect();
+        if original != glyph_text {
+            return Err(error(
+                "glyph-text",
+                "/labels",
+                "label glyph inputs do not reconstruct its source text",
+                "regenerate the scene with the pinned text metrics before rendering",
+            ));
+        }
+    }
+    Ok(())
+}
+pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diagnostic> {
+    validate(g, o)?;
+    let t = o.theme.tokens();
+    let b = g.page.bounds;
+    let mut s = String::new();
+    write!(s,"<svg xmlns=\"http://www.w3.org/2000/svg\" id=\"maru-svg\" role=\"img\" aria-labelledby=\"maru-title maru-desc\" viewBox=\"{} {} {} {}\" width=\"{}\" height=\"{}\" data-theme=\"{}\"><title id=\"maru-title\">{}</title><desc id=\"maru-desc\">{}</desc>",fixed(b.x.into()),fixed(b.y.into()),fixed(b.width.into()),fixed(b.height.into()),fixed(b.width.into()),fixed(b.height.into()),o.theme.name(),escaped(&o.title),escaped(&o.description)).unwrap();
+    rect(&mut s, "page", b, 0, t.background, "none", "0");
+    s.push_str("<defs>");
+    for (key, color) in [("arrow", t.arrow), ("arrow-emphasis", t.emphasis)] {
+        write!(s,"<marker id=\"{key}\" markerWidth=\"10\" markerHeight=\"7\" refX=\"9\" refY=\"3.5\" orient=\"auto\" markerUnits=\"strokeWidth\"><polygon points=\"0,0 10,3.5 0,7\" fill=\"{color}\"/></marker>").unwrap();
+    }
+    s.push_str("</defs>");
+    for c in &g.containers {
+        let radius = match c.kind.as_str() {
+            "region" => 12,
+            "lane" | "segment" | "stage" => 10,
+            "group" => 9,
+            "security-group" => 8,
+            "activation" => 3,
+            _ => 6,
+        };
+        write!(s,"<g id=\"{}\" data-kind=\"container\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("container",&c.id),escaped(&c.id),escaped(&caption(g,&c.id))).unwrap();
+        rect(
+            &mut s,
+            "container-box",
+            c.bounds,
+            radius * 64,
+            t.lane_fill,
+            t.lane_stroke,
+            "1",
+        );
+        s.push_str("</g>");
+    }
+    // Routes precede opaque node boxes so endpoint stubs cannot paint through them.
+    for (i, r) in g.routes.iter().enumerate() {
+        let key = route_key(r, i);
+        let emphasis = r.variant.as_deref() == Some("emphasis");
+        let color = if emphasis { t.emphasis } else { t.arrow };
+        write!(s,"<g id=\"{}\" data-kind=\"route\" data-source-id=\"{}\" role=\"group\" aria-label=\"{} → {}\"><polyline data-kind=\"route-path\" points=\"",id("route",&key),escaped(&key),escaped(&r.from),escaped(&r.to)).unwrap();
+        for (j, p) in r.points.iter().enumerate() {
+            if j > 0 {
+                s.push(' ');
+            }
+            write!(s, "{},{}", fixed(p.x.into()), fixed(p.y.into())).unwrap();
+        }
+        write!(
+            s,
+            "\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{}\" marker-end=\"url(#{})\"",
+            fixed(r.width.unwrap_or(96).into()),
+            if emphasis { "arrow-emphasis" } else { "arrow" }
+        )
+        .unwrap();
+        if r.variant.as_deref() == Some("dashed") || r.variant.as_deref() == Some("return") {
+            s.push_str(" stroke-dasharray=\"3 5\"");
+        }
+        s.push_str("/></g>");
+    }
+    for n in &g.nodes {
+        write!(s,"<g id=\"{}\" data-kind=\"node\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("node",&n.id),escaped(&n.id),escaped(&caption(g,&n.id))).unwrap();
+        rect(
+            &mut s,
+            "node-box",
+            n.bounds,
+            6 * 64,
+            t.node_fill,
+            t.node_stroke,
+            "1.5",
+        );
+        s.push_str("</g>");
+    }
+    rect(
+        &mut s,
+        "legend-box",
+        g.legend.bounds,
+        6 * 64,
+        t.lane_fill,
+        t.lane_stroke,
+        "1",
+    );
+    for e in &g.legend.entries {
+        write!(
+            s,
+            "<g id=\"{}\" data-kind=\"legend-entry\" role=\"listitem\" aria-label=\"{}\">",
+            id("legend", &e.key),
+            escaped(&e.label)
+        )
+        .unwrap();
+        rect(&mut s, "legend-entry-box", e.bounds, 0, "none", "none", "0");
+        s.push_str("</g>");
+    }
+    for (i, l) in g.labels.iter().enumerate() {
+        let key = label_key(l, i);
+        let color = if l.font.weight == 700 {
+            t.text
+        } else {
+            t.muted
+        };
+        write!(s,"<g id=\"{}\" data-kind=\"label\" data-source-id=\"{}\" data-target-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("label",&key),escaped(&key),escaped(&l.target_id),escaped(&l.text)).unwrap();
+        rect(&mut s, "label-bounds", l.bounds, 0, "none", "none", "0");
+        write!(s,"<text data-kind=\"label-text\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" font-kerning=\"none\" font-variant-ligatures=\"none\" style=\"font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0\" xml:space=\"preserve\" fill=\"{color}\" aria-hidden=\"true\">",fixed(l.font_size.into()),l.font.weight).unwrap();
+        for (j, p) in l
+            .glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !p.ignored && !p.replaced)
+        {
+            write!(
+                s,
+                "<tspan data-kind=\"glyph\" data-index=\"{j}\" x=\"{}\" y=\"{}\">{}</tspan>",
+                fixed(p.position.x.into()),
+                fixed(p.position.y.into()),
+                escaped(&p.input)
+            )
+            .unwrap();
+        }
+        s.push_str("</text>");
+        for (j, p) in l
+            .glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !p.ignored && p.replaced)
+        {
+            let outline = notdef(l.font.weight)?;
+            if outline.units_per_em != l.font.units_per_em
+                || outline.source_sha256 != l.font.font_sha256
+            {
+                return Err(error(
+                    "font-outline",
+                    "/font",
+                    "glyph0 outline and label font identities differ",
+                    "regenerate glyph0 data from the pinned font sources before rendering",
+                ));
+            }
+            write!(s,"<path data-kind=\"notdef\" data-index=\"{j}\" d=\"{}\" transform=\"translate({} {}) scale({} -{})\" fill=\"{color}\" aria-hidden=\"true\"/>",outline.path,fixed(p.position.x.into()),fixed(p.position.y.into()),scale(l.font_size,outline.units_per_em),scale(l.font_size,outline.units_per_em)).unwrap();
+        }
+        s.push_str("</g>");
+        if s.len() > MAX_SVG_BYTES {
+            return Err(error(
+                "size",
+                "/",
+                "SVG exceeds the 16 MiB artifact limit",
+                "split the scene into smaller diagrams before rendering",
+            ));
+        }
+    }
+    s.push_str("</svg>");
+    if s.len() > MAX_SVG_BYTES {
+        return Err(error(
+            "size",
+            "/",
+            "SVG exceeds the 16 MiB artifact limit",
+            "split the scene into smaller diagrams before rendering",
+        ));
+    }
+    Ok(s)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fixed_decimals_are_exact_for_signed_limits() {
+        for n in [i32::MIN, -65, -1, 0, 1, 65, i32::MAX] {
+            let s = fixed(n.into());
+            assert_eq!(s.parse::<f64>().unwrap() * 64.0, f64::from(n));
+        }
+        assert_eq!(scale(1, 1000), "0.000015625");
+    }
+}
