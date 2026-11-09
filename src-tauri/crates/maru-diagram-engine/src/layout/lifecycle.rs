@@ -177,9 +177,8 @@ fn empty_lane_top(
 type StateSemanticFlags<'a> = std::collections::BTreeMap<&'a str, (bool, Option<u32>)>;
 fn state_semantic_flags(spec: &LifecycleSpec) -> StateSemanticFlags<'_> {
     let version = spec.schema_version;
-    // Preserve final-state meaning before authored column ordering is discarded.
-    // The SVG projection does not need to read source coordinates or infer finals
-    // from pin-adjusted positions.
+    // Preserve final-state and authored-column meaning before source inputs are
+    // discarded. The SVG projection must not infer either from pinned positions.
     let outgoing: std::collections::BTreeSet<_> = spec
         .transitions
         .iter()
@@ -191,16 +190,6 @@ fn state_semantic_flags(spec: &LifecycleSpec) -> StateSemanticFlags<'_> {
         .filter(|state| state.lane == "main")
         .map(|state| state.col)
         .max();
-    let phase_order: std::collections::BTreeMap<_, _> = spec
-        .states
-        .iter()
-        .filter(|state| state.lane == "main")
-        .map(|state| state.col)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .enumerate()
-        .map(|(rank, col)| (col, rank as u32))
-        .collect();
     let final_states: std::collections::BTreeMap<_, _> = spec
         .states
         .iter()
@@ -215,8 +204,11 @@ fn state_semantic_flags(spec: &LifecycleSpec) -> StateSemanticFlags<'_> {
     spec.states
         .iter()
         .map(|state| {
-            let ordinal = if version == 1 && state.lane == "main" {
-                phase_order.get(&state.col).copied()
+            let ordinal = if state.lane == "main" {
+                // Retain authored column identity for both schema versions.
+                // It is independent of pin-adjusted placement and lets the
+                // SVG projection recover forward-main transition semantics.
+                Some(state.col)
             } else {
                 None
             };
@@ -226,6 +218,26 @@ fn state_semantic_flags(spec: &LifecycleSpec) -> StateSemanticFlags<'_> {
             )
         })
         .collect()
+}
+
+fn effective_transition_variant(
+    spec: &LifecycleSpec,
+    transition: &crate::lifecycle::LifecycleTransition,
+) -> String {
+    if let Some(variant) = &transition.variant {
+        return variant.clone();
+    }
+    if spec.schema_version == 2 {
+        if let (Some(from), Some(to)) = (
+            spec.states.iter().find(|state| state.id == transition.from),
+            spec.states.iter().find(|state| state.id == transition.to),
+        ) {
+            if from.lane == "main" && to.lane == "main" && to.col > from.col {
+                return "emphasis".into();
+            }
+        }
+    }
+    "default".into()
 }
 fn attach_state_semantics(scene: &mut SceneBuilder, id: &str, flags: &StateSemanticFlags<'_>) {
     if let Some(node) = scene.document.nodes.last_mut().filter(|node| node.id == id) {
@@ -415,7 +427,7 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
                 transition.label_segment,
                 &format!("{path}/labelSegment"),
             )?,
-            variant: transition.variant.clone(),
+            variant: Some(effective_transition_variant(spec, transition)),
             width: transition
                 .width
                 .map(px)

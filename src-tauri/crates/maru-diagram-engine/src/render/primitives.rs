@@ -30,6 +30,8 @@ pub(crate) enum Layer {
 pub(crate) enum Paint {
     Line,
     AccentLine,
+    SecurityLine,
+    DashedLine,
     Node,
     OutlineNode,
     AccentFill,
@@ -150,6 +152,14 @@ pub(crate) fn dash(variant: Option<&str>) -> Option<&'static str> {
         Some("security") => Some("5 5"),
         Some("dashed") => Some("4 4"),
         _ => None,
+    }
+}
+fn variant_paint(variant: Option<&str>) -> Paint {
+    match variant {
+        Some("emphasis") => Paint::AccentLine,
+        Some("security") => Paint::SecurityLine,
+        Some("dashed") => Paint::DashedLine,
+        _ => Paint::Line,
     }
 }
 pub(crate) fn frame_dash(kind: &str, c: &SemanticContext, id: &str) -> Option<&'static str> {
@@ -301,11 +311,7 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
                     from: at(frame.bounds.x.into(), y)?,
                     to: at(i64::from(frame.bounds.x) + i64::from(frame.bounds.width), y)?,
                 },
-                if variant == Some("emphasis") {
-                    Paint::AccentLine
-                } else {
-                    Paint::Line
-                },
+                variant_paint(variant),
                 "1.1",
                 Layer::Underlay,
             );
@@ -481,11 +487,7 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
                     from: at(x, y)?,
                     to: at(x + symbol, y)?,
                 },
-                if entry.key == "emphasis" {
-                    Paint::AccentLine
-                } else {
-                    Paint::Line
-                },
+                variant_paint(Some(&entry.key)),
                 legend_width(c, &entry.key),
                 Layer::Overlay,
             );

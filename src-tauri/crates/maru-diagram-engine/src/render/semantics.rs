@@ -13,6 +13,13 @@ pub struct SemanticContext {
     pub nodes: BTreeMap<String, NodeSemantic>,
     #[serde(default)]
     pub frame_variants: BTreeMap<String, String>,
+    #[serde(default)]
+    pub activations: BTreeMap<String, ActivationSemantic>,
+    /// Authored transition override, keyed by the producer's stable route id.
+    #[serde(default)]
+    pub lifecycle_variants: BTreeMap<String, Option<String>>,
+    #[serde(default)]
+    pub route_labels: BTreeMap<String, RouteLabelSemantic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -21,6 +28,19 @@ pub struct NodeSemantic {
     pub kind: String,
     #[serde(default)]
     pub lane: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActivationSemantic {
+    pub explicit_type: Option<String>,
+    pub participant_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RouteLabelSemantic {
+    pub primary_lines: usize,
 }
 
 impl SemanticContext {
@@ -165,14 +185,136 @@ impl SemanticContext {
         } else {
             BTreeMap::new()
         };
+        let activations = if family == "sequence" {
+            collect_activation_semantics(spec)?
+        } else {
+            BTreeMap::new()
+        };
 
+        let mut lifecycle_variants = BTreeMap::new();
+        if family == "lifecycle" {
+            if let Some(transitions) = spec.get("transitions").and_then(Value::as_array) {
+                let ids = crate::layout::allocate_route_ids(
+                    "transition",
+                    transitions
+                        .iter()
+                        .map(|edge| edge.get("id").and_then(Value::as_str)),
+                );
+                for (edge, id) in transitions.iter().zip(ids) {
+                    lifecycle_variants.insert(
+                        id,
+                        edge.get("variant")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                    );
+                }
+            }
+        }
+        let route_labels = collect_route_labels(spec, family);
         Ok(Self {
             family: family.to_owned(),
             schema_version,
             nodes,
             frame_variants,
+            activations,
+            lifecycle_variants,
+            route_labels,
         })
     }
+}
+
+fn collect_route_labels(spec: &Value, family: &str) -> BTreeMap<String, RouteLabelSemantic> {
+    let (collection, prefix) = match family {
+        "architecture" => ("connections", "connection"),
+        "workflow" => ("edges", "edge"),
+        "sequence" => ("messages", "message"),
+        "dataflow" => ("flows", "flow"),
+        "lifecycle" => ("transitions", "transition"),
+        _ => return BTreeMap::new(),
+    };
+    let Some(entries) = spec.get(collection).and_then(Value::as_array) else {
+        return BTreeMap::new();
+    };
+    let ids = crate::layout::allocate_route_ids(
+        prefix,
+        entries
+            .iter()
+            .map(|entry| entry.get("id").and_then(Value::as_str)),
+    );
+    entries
+        .iter()
+        .zip(ids)
+        .map(|(entry, id)| {
+            let primary_lines = entry
+                .get("label")
+                .and_then(Value::as_str)
+                .filter(|label| !label.trim().is_empty())
+                .map(|label| label.split('\n').count())
+                .unwrap_or(0);
+            (id, RouteLabelSemantic { primary_lines })
+        })
+        .collect()
+}
+
+fn collect_activation_semantics(
+    spec: &Value,
+) -> Result<BTreeMap<String, ActivationSemantic>, Diagnostic> {
+    let Some(value) = spec.get("activations") else {
+        return Ok(BTreeMap::new());
+    };
+    let entries = value.as_array().ok_or_else(|| {
+        super::error(
+            "semantic",
+            "/activations",
+            "sequence activations are not an array",
+            "provide the accepted sequence activation collection",
+        )
+    })?;
+
+    // Read participant types from the source collection itself. These raw
+    // values let both SVG passes apply the accepted component-type fallback
+    // independently, without relying on a presentation default.
+    let participant_types: BTreeMap<&str, &str> = spec
+        .get("participants")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|participant| {
+            Some((
+                participant.get("id")?.as_str()?,
+                participant.get("type")?.as_str()?,
+            ))
+        })
+        .collect();
+
+    let mut activations = BTreeMap::new();
+    for (index, activation) in entries.iter().enumerate() {
+        let object = activation.as_object().ok_or_else(|| {
+            super::error(
+                "semantic",
+                &format!("/activations/{index}"),
+                "sequence activation is not an object",
+                "provide each activation as an object with a participant id",
+            )
+        })?;
+        let explicit_type = object
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let participant_type = object
+            .get("participant")
+            .and_then(Value::as_str)
+            .and_then(|id| participant_types.get(id))
+            .map(|kind| (*kind).to_owned());
+        activations.insert(
+            format!("activation:{index}"),
+            ActivationSemantic {
+                explicit_type,
+                participant_type,
+            },
+        );
+    }
+    Ok(activations)
 }
 
 fn collect_frame_variants(

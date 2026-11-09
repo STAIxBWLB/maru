@@ -155,7 +155,7 @@ pub struct GeometryNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub final_state: Option<bool>,
-    /// Authored phase ordinal, separate from pin-adjusted x/y coordinates.
+    /// Authored main-lane column, for both versions, independent of pinned positions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub phase_order: Option<u32>,
@@ -241,6 +241,14 @@ pub struct GeometryLegendEntry {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct GeometryLegend {
+    /// Invisible extent of every legend label and painted primitive.
+    #[serde(
+        default,
+        rename = "contentBounds",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "typegen", ts(rename = "contentBounds", optional = nullable))]
+    pub content_bounds: Option<GeometryBox>,
     #[serde(default, rename = "titleY", skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(rename = "titleY", optional = nullable))]
     pub title_y: Option<Coord>,

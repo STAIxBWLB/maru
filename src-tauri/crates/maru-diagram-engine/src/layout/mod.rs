@@ -143,6 +143,7 @@ impl SceneBuilder {
                 routes: vec![],
                 labels: vec![],
                 legend: GeometryLegend {
+                    content_bounds: None,
                     title_y: None,
                     bounds: GeometryBox {
                         x: 0,
@@ -1425,7 +1426,32 @@ impl SceneBuilder {
             )?;
             Some(title_baseline)
         };
+        let content_bounds = if entries.is_empty() {
+            None
+        } else {
+            let mut bounds = entries[0].bounds;
+            for entry in &entries {
+                for part in [Some(entry.bounds), entry.swatch_bounds, entry.text_bounds]
+                    .into_iter()
+                    .flatten()
+                {
+                    bounds = bounds.union(part).map_err(arithmetic)?;
+                }
+            }
+            for label in self
+                .document
+                .labels
+                .iter()
+                .filter(|label| label.target_id == "legend")
+            {
+                bounds = bounds.union(label.bounds).map_err(arithmetic)?;
+            }
+            // Logical bounds only: cover stroke widths and local arrowheads;
+            // the reference renderer does not draw an enclosing legend frame.
+            Some(inflate(bounds, 8 * 64)?)
+        };
         self.document.legend = GeometryLegend {
+            content_bounds,
             title_y,
             bounds: if entries.is_empty() {
                 rect(0, 0, 0, 0)?

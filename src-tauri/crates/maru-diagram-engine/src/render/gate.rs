@@ -168,7 +168,26 @@ fn check_defs(doc: &Document<'_>, options: &super::SvgOptions, errors: &mut Vec<
             "place marker definitions directly under the SVG root",
         ));
     }
-    for (id, color) in [("arrow", tokens.arrow), ("arrow-emphasis", tokens.emphasis)] {
+    for (id, color) in [
+        ("arrow", tokens.arrow),
+        ("arrow-emphasis", tokens.emphasis),
+        (
+            "arrow-security",
+            options
+                .theme
+                .kind("security")
+                .expect("security token")
+                .stroke,
+        ),
+        (
+            "arrow-dashed",
+            options
+                .theme
+                .kind("database")
+                .expect("database token")
+                .stroke,
+        ),
+    ] {
         let path = format!("/svg/defs/marker[@id={id:?}]");
         let Some(marker) = elements(defs)
             .find(|node| node.tag_name().name() == "marker" && node.attribute("id") == Some(id))
@@ -227,7 +246,8 @@ fn reference_frame_dash(kind: &str, c: &super::SemanticContext, id: &str) -> Opt
             Some("4 4")
         }
         "lane" | "group" | "stage" | "segment" => Some("6 6"),
-        _ => None,
+        "phase" | "card" | "activation" => None,
+        _ => Some("6 6"),
     }
 }
 
@@ -251,6 +271,122 @@ fn reference_node_caption(
     }
 }
 
+fn reference_route_variant(
+    g: &GeometryDocument,
+    c: &super::SemanticContext,
+    route: &crate::geometry::GeometryRoute,
+    key: &str,
+    errors: &mut Vec<Diagnostic>,
+) -> String {
+    if c.family != "lifecycle" {
+        return route.variant.clone().unwrap_or_else(|| "default".into());
+    }
+    let Some(explicit) = c.lifecycle_variants.get(key) else {
+        errors.push(diagnostic(
+            "route-source",
+            "/options/semantics/lifecycleVariants",
+            "lifecycle route lacks its authored variant record",
+            "provide the matching source spec and semantic context",
+        ));
+        return "default".into();
+    };
+    if let Some(value) = explicit.as_deref().filter(|value| !value.is_empty()) {
+        return value.into();
+    }
+    if c.schema_version == 2 {
+        let from = g.nodes.iter().find(|node| node.id == route.from);
+        let to = g.nodes.iter().find(|node| node.id == route.to);
+        let main = |id: &str| {
+            c.nodes
+                .get(id)
+                .is_some_and(|node| node.lane.as_deref() == Some("main"))
+        };
+        if main(&route.from) && main(&route.to) {
+            match (
+                from.and_then(|node| node.phase_order),
+                to.and_then(|node| node.phase_order),
+            ) {
+                (Some(a), Some(b)) if b > a => return "emphasis".into(),
+                (Some(_), Some(_)) => {}
+                _ => errors.push(diagnostic(
+                    "route-order",
+                    "/nodes",
+                    "main-lane state lacks authored order metadata",
+                    "recompute lifecycle layout before SVG projection",
+                )),
+            }
+        }
+    }
+    "default".into()
+}
+fn check_container_paint(
+    node: Node<'_, '_>,
+    container: &crate::geometry::GeometryContainer,
+    c: &super::SemanticContext,
+    o: &super::SvgOptions,
+    radius: i64,
+    path: &str,
+    errors: &mut Vec<Diagnostic>,
+) {
+    let tokens = o.theme.tokens();
+    let (fill, stroke) = if container.kind == "activation" {
+        if let Some(source) = c.activations.get(&container.id) {
+            let kind = [
+                source.explicit_type.as_deref(),
+                source.participant_type.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .find(|kind| crate::common::COMPONENT_TYPES.contains(kind))
+            .unwrap_or("external");
+            let paint = o.theme.kind(kind).expect("accepted component token");
+            (paint.fill, paint.stroke)
+        } else {
+            errors.push(diagnostic(
+                "activation-source",
+                path,
+                "activation lacks its matching source type record",
+                "provide the source activation semantics before projecting geometry",
+            ));
+            (tokens.lane_fill, tokens.lane_stroke)
+        }
+    } else if container.kind == "phase" {
+        (tokens.mask, "none")
+    } else if container.kind == "region" {
+        (
+            "rgba(251,191,36,0.05)",
+            o.theme.kind("cloud").expect("cloud token").stroke,
+        )
+    } else if matches!(container.kind.as_str(), "security-group" | "exception-lane")
+        || (container.kind == "group"
+            && c.frame_variants
+                .get(&container.id)
+                .is_some_and(|variant| variant == "security"))
+    {
+        (
+            "transparent",
+            o.theme.kind("security").expect("security token").stroke,
+        )
+    } else {
+        (
+            match o.theme {
+                super::SvgTheme::Light => "rgba(248,250,252,0.65)",
+                super::SvgTheme::Dark => "rgba(15,23,42,0.22)",
+            },
+            tokens.lane_stroke,
+        )
+    };
+    require_attr(node, "fill", fill, path, errors);
+    require_attr(node, "stroke", stroke, path, errors);
+    require_attr(
+        node,
+        "stroke-width",
+        if container.kind == "phase" { "0" } else { "1" },
+        path,
+        errors,
+    );
+    check_number(node, "rx", radius as f64 / 64.0, path, errors);
+}
 fn check_rect_paint(
     node: Node<'_, '_>,
     kind: &str,
@@ -297,7 +433,7 @@ fn check_rect_paint(
             let color = node_color.expect("checked above");
             (color.fill, color.stroke, "1.5", radius)
         }
-        "node-mask" => (tokens.mask, "none", "0", radius),
+        "node-mask" | "activation-mask" => (tokens.mask, "none", "0", radius),
         "legend-box" => (tokens.lane_fill, tokens.lane_stroke, "1", radius),
         "legend-entry-box" | "label-bounds" => ("none", "none", "0", radius),
         _ => return,
@@ -337,6 +473,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
         "node-mask",
         "container",
         "container-box",
+        "activation-mask",
         "route",
         "route-path",
         "label",
@@ -432,7 +569,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "aria-hidden",
             ],
         ),
-        ("tspan", &["data-kind", "data-index", "x", "y"]),
+        ("tspan", &["data-kind", "data-index", "x", "y", "fill"]),
         (
             "path",
             &[
@@ -530,7 +667,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
         if let Some(kind) = node.attribute("data-kind") {
             let expected_parent = match kind {
                 "node-box" | "node-mask" => Some("node"),
-                "container-box" => Some("container"),
+                "container-box" | "activation-mask" => Some("container"),
                 "route-path" => Some("route"),
                 "label-bounds" | "label-text" | "notdef" => Some("label"),
                 "glyph" => Some("label-text"),
@@ -929,6 +1066,7 @@ pub fn check_svg_artifact(
     };
     let mut errors = super::xml_gate::inspect(svg, &doc);
     check_safe_tree(&doc, &mut errors);
+    errors.extend(super::legend_gate::check(geometry, &derived));
     check_unique_ids(&doc, &mut errors);
     let root = doc.root_element();
     if root.tag_name().name() != "svg" || root.tag_name().namespace() != Some(SVG_NS) {
@@ -1025,10 +1163,18 @@ pub fn check_svg_artifact(
 
     let mut expected_counts = BTreeMap::from([
         ("page", 1),
-        ("legend-box", 1),
+        ("legend-box", 0),
         ("node", geometry.nodes.len()),
         ("node-box", geometry.nodes.len()),
         ("node-mask", geometry.nodes.len()),
+        (
+            "activation-mask",
+            geometry
+                .containers
+                .iter()
+                .filter(|container| container.kind == "activation")
+                .count(),
+        ),
         ("container", geometry.containers.len()),
         ("container-box", geometry.containers.len()),
         ("route", geometry.routes.len()),
@@ -1057,11 +1203,11 @@ pub fn check_svg_artifact(
         check_count(&doc, kind, expected, &mut errors);
     }
     check_tag_count(&doc, "defs", 1, &mut errors);
-    check_tag_count(&doc, "marker", 2, &mut errors);
+    check_tag_count(&doc, "marker", 4, &mut errors);
     check_tag_count(
         &doc,
         "polygon",
-        2 + derived
+        4 + derived
             .iter()
             .filter(|p| matches!(p.shape, super::primitives::Shape::Polygon { .. }))
             .count(),
@@ -1072,17 +1218,6 @@ pub fn check_svg_artifact(
     if let Some(page) = first_kind(&doc, "page", "data-kind", &mut errors) {
         check_box(page, geometry.page.bounds, "/page", &mut errors);
         check_rect_paint(page, "page", 0, options, "/page", &mut errors);
-    }
-    if let Some(legend) = first_kind(&doc, "legend-box", "data-kind", &mut errors) {
-        check_box(legend, geometry.legend.bounds, "/legend", &mut errors);
-        check_rect_paint(
-            legend,
-            "legend-box",
-            6 * 64,
-            options,
-            "/legend",
-            &mut errors,
-        );
     }
     for (index, node) in geometry.nodes.iter().enumerate() {
         let path = format!("/nodes/{index}");
@@ -1189,14 +1324,47 @@ pub fn check_svg_artifact(
                     "activation" => 3,
                     _ => 6,
                 } * 64;
-                check_rect_paint(
+                check_container_paint(
                     box_node,
-                    "container-box",
-                    radius,
+                    container,
+                    semantics,
                     options,
+                    radius,
                     &path,
                     &mut errors,
                 );
+                if container.kind == "activation" {
+                    check_child_box(
+                        group,
+                        "activation-mask",
+                        container.bounds,
+                        &path,
+                        &mut errors,
+                    );
+                    if let Some(mask) = elements(group)
+                        .find(|node| node.attribute("data-kind") == Some("activation-mask"))
+                    {
+                        check_rect_paint(
+                            mask,
+                            "activation-mask",
+                            3 * 64,
+                            options,
+                            &path,
+                            &mut errors,
+                        );
+                    }
+                    let order: Vec<_> = elements(group)
+                        .map(|node| node.attribute("data-kind").unwrap_or_default())
+                        .collect();
+                    if order != ["activation-mask", "container-box"] {
+                        errors.push(diagnostic(
+                            "activation-order",
+                            &path,
+                            "activation mask does not precede its kind-painted body",
+                            "restore the source activation mask before its body",
+                        ));
+                    }
+                }
             }
         } else {
             errors.push(diagnostic(
@@ -1209,8 +1377,30 @@ pub fn check_svg_artifact(
     }
     for (index, route) in geometry.routes.iter().enumerate() {
         let key = super::svg::route_key(route, index);
+        if route.width.is_some_and(|width| width <= 0) {
+            errors.push(diagnostic(
+                "route-width",
+                &format!("/routes/{index}"),
+                "route stroke width is not positive",
+                "restore a positive retained width or use its family default",
+            ));
+        }
+
         let path = format!("/routes/{index}");
         let id = super::svg::id("route", &key);
+        let effective_variant =
+            reference_route_variant(geometry, semantics, route, &key, &mut errors);
+        if semantics.family == "lifecycle"
+            && route.variant.as_deref() != Some(effective_variant.as_str())
+        {
+            errors.push(diagnostic(
+                "effective-variant",
+                &path,
+                "retained lifecycle variant disagrees with authored override and phase order",
+                "derive the effective lifecycle variant in the producer before rendering",
+            ));
+        }
+
         if let Some(group) = kind_nodes(&doc, "route")
             .into_iter()
             .find(|item| item.attribute("id") == Some(id.as_str()))
@@ -1245,15 +1435,28 @@ pub fn check_svg_artifact(
                 require_tag(polyline, "polyline", &path, &mut errors);
                 check_points(polyline, &route.points, &path, &mut errors);
                 let tokens = options.theme.tokens();
-                let emphasis = route.variant.as_deref() == Some("emphasis");
+                let emphasis = effective_variant == "emphasis";
                 require_attr(polyline, "fill", "none", &path, &mut errors);
                 require_attr(
                     polyline,
                     "stroke",
-                    if emphasis {
-                        tokens.emphasis
-                    } else {
-                        tokens.arrow
+                    match effective_variant.as_str() {
+                        "emphasis" => tokens.emphasis,
+                        "security" => {
+                            options
+                                .theme
+                                .kind("security")
+                                .expect("security token")
+                                .stroke
+                        }
+                        "dashed" => {
+                            options
+                                .theme
+                                .kind("database")
+                                .expect("database token")
+                                .stroke
+                        }
+                        _ => tokens.arrow,
                     },
                     &path,
                     &mut errors,
@@ -1261,10 +1464,11 @@ pub fn check_svg_artifact(
                 require_attr(
                     polyline,
                     "marker-end",
-                    if emphasis {
-                        "url(#arrow-emphasis)"
-                    } else {
-                        "url(#arrow)"
+                    match effective_variant.as_str() {
+                        "emphasis" => "url(#arrow-emphasis)",
+                        "security" => "url(#arrow-security)",
+                        "dashed" => "url(#arrow-dashed)",
+                        _ => "url(#arrow)",
                     },
                     &path,
                     &mut errors,
@@ -1297,7 +1501,7 @@ pub fn check_svg_artifact(
                     &path,
                     &mut errors,
                 );
-                if let Some(dash) = reference_dash(route.variant.as_deref()) {
+                if let Some(dash) = reference_dash(Some(effective_variant.as_str())) {
                     require_attr(polyline, "stroke-dasharray", dash, &path, &mut errors);
                 } else if attr(polyline, "stroke-dasharray").is_some() {
                     errors.push(diagnostic(
@@ -1343,11 +1547,15 @@ pub fn check_svg_artifact(
                 );
             }
             let tokens = options.theme.tokens();
-            let color = if label.font.weight == 700 {
-                tokens.text
-            } else {
-                tokens.muted
-            };
+            let colors = super::label_paint::reference_colors(geometry, options, label);
+            let color = colors
+                .first()
+                .copied()
+                .unwrap_or(if label.font.weight == 700 {
+                    tokens.text
+                } else {
+                    tokens.muted
+                });
             if let Some(text) =
                 elements(group).find(|node| node.attribute("data-kind") == Some("label-text"))
             {
@@ -1358,6 +1566,23 @@ pub fn check_svg_artifact(
                     &format!("/labels/{index}"),
                     &mut errors,
                 );
+                for glyph in
+                    elements(text).filter(|node| node.attribute("data-kind") == Some("glyph"))
+                {
+                    if let Some(index) = glyph
+                        .attribute("data-index")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .filter(|index| *index < colors.len())
+                    {
+                        require_attr(
+                            glyph,
+                            "fill",
+                            colors[index],
+                            &format!("/labels/{index}"),
+                            &mut errors,
+                        );
+                    }
+                }
                 require_attr(
                     text,
                     "aria-hidden",
@@ -1369,6 +1594,11 @@ pub fn check_svg_artifact(
             for path_node in
                 elements(group).filter(|node| node.attribute("data-kind") == Some("notdef"))
             {
+                let color = path_node
+                    .attribute("data-index")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .and_then(|index| colors.get(index).copied())
+                    .unwrap_or(color);
                 require_attr(
                     path_node,
                     "fill",

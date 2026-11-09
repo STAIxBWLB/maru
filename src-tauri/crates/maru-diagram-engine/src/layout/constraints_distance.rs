@@ -434,6 +434,7 @@ mod tests {
             routes,
             labels: Vec::new(),
             legend: GeometryLegend {
+                content_bounds: None,
                 title_y: None,
                 bounds: crate::geometry::GeometryBox {
                     x: 0,

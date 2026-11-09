@@ -1,5 +1,7 @@
 //! Pure SVG output from retained fixed-point geometry. No layout or host access.
 mod gate;
+mod label_paint;
+mod legend_gate;
 mod primitive_gate;
 mod primitives;
 pub mod semantics;

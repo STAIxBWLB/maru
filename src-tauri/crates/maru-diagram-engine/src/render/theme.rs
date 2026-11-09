@@ -55,6 +55,12 @@ pub(crate) struct KindTokens {
     pub fill: &'static str,
     pub stroke: &'static str,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FrameTokens {
+    pub fill: &'static str,
+    pub stroke: &'static str,
+    pub dash: &'static str,
+}
 const DARK_KINDS: [KindTokens; 7] = [
     KindTokens {
         fill: "rgba(8,51,68,0.4)",
@@ -132,6 +138,39 @@ impl SvgTheme {
             Self::Dark => &DARK_KINDS[index],
         })
     }
+
+    /// Resolve structural styles; unknown internal descriptors use neutral lane
+    /// presentation, while source validation rejects unknown authored kinds.
+    pub(crate) fn frame(self, kind: &str, variant: Option<&str>) -> FrameTokens {
+        match kind {
+            "region" => FrameTokens {
+                fill: "rgba(251,191,36,0.05)",
+                stroke: self.kind("cloud").expect("cloud theme token").stroke,
+                dash: "8 4",
+            },
+            "security-group" | "exception-lane" => FrameTokens {
+                fill: "transparent",
+                stroke: self.kind("security").expect("security theme token").stroke,
+                dash: "4 4",
+            },
+            "group" if variant == Some("security") => FrameTokens {
+                fill: "transparent",
+                stroke: self.kind("security").expect("security theme token").stroke,
+                dash: "4 4",
+            },
+            _ => FrameTokens {
+                fill: match self {
+                    Self::Light => "rgba(248,250,252,0.65)",
+                    Self::Dark => "rgba(15,23,42,0.22)",
+                },
+                stroke: match self {
+                    Self::Light => "#cbd5e1",
+                    Self::Dark => "#334155",
+                },
+                dash: "6 6",
+            },
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -161,6 +200,26 @@ mod tests {
                 theme.kind("database").unwrap().fill
             );
             assert!(theme.kind("unknown").is_none());
+        }
+    }
+
+    #[test]
+    fn structural_frames_use_pinned_semantic_tokens_in_both_themes() {
+        for theme in [SvgTheme::Light, SvgTheme::Dark] {
+            let region = theme.frame("region", None);
+            assert_eq!(region.fill, "rgba(251,191,36,0.05)");
+            assert_eq!(region.stroke, theme.kind("cloud").unwrap().stroke);
+            assert_eq!(region.dash, "8 4");
+
+            let security = theme.frame("group", Some("security"));
+            assert_eq!(security.fill, "transparent");
+            assert_eq!(security.stroke, theme.kind("security").unwrap().stroke);
+            assert_eq!(security.dash, "4 4");
+
+            let ordinary = theme.frame("lane", None);
+            assert!(ordinary.fill.starts_with("rgba("));
+            assert_eq!(ordinary.dash, "6 6");
+            assert_eq!(theme.frame("malformed", None), ordinary);
         }
     }
 }

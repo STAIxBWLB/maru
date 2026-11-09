@@ -39,6 +39,15 @@ fn reference_dash(variant: Option<&str>) -> Option<&'static str> {
     }
 }
 
+fn reference_variant_paint(variant: Option<&str>) -> Paint {
+    match variant {
+        Some("emphasis") => Paint::AccentLine,
+        Some("security") => Paint::SecurityLine,
+        Some("dashed") => Paint::DashedLine,
+        _ => Paint::Line,
+    }
+}
+
 fn point(x: i64, y: i64) -> GeometryPoint {
     GeometryPoint {
         x: x as i32,
@@ -153,11 +162,7 @@ pub(crate) fn expected(g: &GeometryDocument, options: &SvgOptions) -> Vec<Primit
                 &frame.id,
                 point(i64::from(frame.bounds.x), y),
                 point(i64::from(frame.bounds.x) + i64::from(frame.bounds.width), y),
-                if variant == Some("emphasis") {
-                    Paint::AccentLine
-                } else {
-                    Paint::Line
-                },
+                reference_variant_paint(variant),
                 "1.1",
                 Layer::Underlay,
             );
@@ -306,11 +311,7 @@ pub(crate) fn expected(g: &GeometryDocument, options: &SvgOptions) -> Vec<Primit
                 &entry.key,
                 point(x, y),
                 point(x + width, y),
-                if entry.key == "emphasis" {
-                    Paint::AccentLine
-                } else {
-                    Paint::Line
-                },
+                reference_variant_paint(Some(&entry.key)),
                 reference_width(&c.family, c.schema_version, &entry.key),
                 Layer::Overlay,
             );
@@ -473,6 +474,22 @@ fn expected_paint(primitive: &Primitive, options: &SvgOptions) -> (&'static str,
     match primitive.paint {
         Paint::Line => ("none", theme.arrow),
         Paint::AccentLine => ("none", theme.emphasis),
+        Paint::SecurityLine => (
+            "none",
+            options
+                .theme
+                .kind("security")
+                .expect("security theme token")
+                .stroke,
+        ),
+        Paint::DashedLine => (
+            "none",
+            options
+                .theme
+                .kind("database")
+                .expect("database theme token")
+                .stroke,
+        ),
         Paint::Node => {
             let color = options.theme.kind(kind).expect("kind validated");
             (color.fill, color.stroke)
@@ -593,10 +610,11 @@ fn validate_one(
         ));
     }
     let arrow = if primitive.arrow {
-        Some(if primitive.paint == Paint::AccentLine {
-            "url(#arrow-emphasis)"
-        } else {
-            "url(#arrow)"
+        Some(match primitive.paint {
+            Paint::AccentLine => "url(#arrow-emphasis)",
+            Paint::SecurityLine => "url(#arrow-security)",
+            Paint::DashedLine => "url(#arrow-dashed)",
+            _ => "url(#arrow)",
         })
     } else {
         None
@@ -701,7 +719,6 @@ fn check_paint_order(
             .iter()
             .map(|node| element_id("node", &node.id)),
     );
-    expected.push("kind:legend-box".to_owned());
     expected.extend(
         geometry
             .legend

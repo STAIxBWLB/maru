@@ -40,11 +40,19 @@ fn render_with_route(
     variant: Option<&str>,
     width: Option<i32>,
 ) -> (String, GeometryDocument, SvgOptions) {
-    let mut geometry = layout(spec);
+    let mut source = spec.clone();
+    let collection = match source["diagram_type"].as_str().unwrap() {
+        "architecture" => "connections",
+        "workflow" => "edges",
+        "sequence" => "messages",
+        "dataflow" => "flows",
+        _ => "transitions",
+    };
+    source[collection][0]["variant"] = json!(variant.unwrap_or("default"));
+    let mut geometry = layout(&source);
     let route = geometry.routes.first_mut().expect("fixture has a route");
-    route.variant = variant.map(str::to_owned);
     route.width = width;
-    let options = SvgOptions::from_spec(spec, SvgTheme::Light).expect("fixture has semantics");
+    let options = SvgOptions::from_spec(&source, SvgTheme::Light).expect("fixture has semantics");
     let report = render_svg(&geometry, &options);
     assert!(report.ok, "route render failed: {:?}", report.diagnostics);
     (
