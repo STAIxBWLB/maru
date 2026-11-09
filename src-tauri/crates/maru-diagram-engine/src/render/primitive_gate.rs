@@ -637,6 +637,130 @@ fn validate_one(
     }
 }
 
+fn identity_token(node: Node<'_, '_>) -> String {
+    if let Some(id) = node.attribute("id") {
+        format!("id:{id}")
+    } else if let Some(kind) = node.attribute("data-kind") {
+        format!("kind:{kind}")
+    } else {
+        format!("tag:{}", node.tag_name().name())
+    }
+}
+
+fn element_id(kind: &str, source: &str) -> String {
+    format!("id:{}", svg::id(kind, source))
+}
+
+fn check_paint_order(
+    doc: &Document<'_>,
+    geometry: &GeometryDocument,
+    primitives: &[Primitive],
+    errors: &mut Vec<Diagnostic>,
+) {
+    let mut expected = vec![
+        "id:maru-title".to_owned(),
+        "id:maru-desc".to_owned(),
+        "kind:page".to_owned(),
+        "tag:defs".to_owned(),
+    ];
+    expected.extend(
+        geometry
+            .containers
+            .iter()
+            .filter(|container| container.kind != "activation")
+            .map(|container| element_id("container", &container.id)),
+    );
+    expected.extend(
+        primitives
+            .iter()
+            .filter(|primitive| primitive.layer == Layer::Underlay)
+            .map(|primitive| {
+                element_id(
+                    "primitive",
+                    &format!("{}:{}", primitive.kind, primitive.owner),
+                )
+            }),
+    );
+    expected.extend(
+        geometry
+            .containers
+            .iter()
+            .filter(|container| container.kind == "activation")
+            .map(|container| element_id("container", &container.id)),
+    );
+    expected.extend(
+        geometry
+            .routes
+            .iter()
+            .enumerate()
+            .map(|(index, route)| element_id("route", &svg::route_key(route, index))),
+    );
+    expected.extend(
+        geometry
+            .nodes
+            .iter()
+            .map(|node| element_id("node", &node.id)),
+    );
+    expected.push("kind:legend-box".to_owned());
+    expected.extend(
+        geometry
+            .legend
+            .entries
+            .iter()
+            .map(|entry| element_id("legend", &entry.key)),
+    );
+    expected.extend(
+        primitives
+            .iter()
+            .filter(|primitive| primitive.layer == Layer::Overlay)
+            .map(|primitive| {
+                element_id(
+                    "primitive",
+                    &format!("{}:{}", primitive.kind, primitive.owner),
+                )
+            }),
+    );
+    expected.extend(
+        geometry
+            .labels
+            .iter()
+            .enumerate()
+            .map(|(index, label)| element_id("label", &svg::label_key(label, index))),
+    );
+    let actual: Vec<_> = doc
+        .root_element()
+        .children()
+        .filter(|child| child.is_element())
+        .map(identity_token)
+        .collect();
+    if actual != expected {
+        errors.push(fail(
+            "paint-order",
+            "/svg",
+            "SVG root elements do not follow the geometry-backed paint sequence",
+        ));
+    }
+
+    for node in doc
+        .descendants()
+        .filter(|node| node.is_element() && node.attribute("data-kind") == Some("node"))
+    {
+        let children: Vec<_> = elements(node)
+            .map(|child| child.attribute("data-kind").unwrap_or_default())
+            .collect();
+        if children != ["node-mask", "node-box"] {
+            errors.push(fail(
+                "node-paint-order",
+                &format!(
+                    "/nodes/{}",
+                    node.attribute("data-source-id").unwrap_or_default()
+                ),
+                "opaque node mask must paint before its node body",
+            ));
+        }
+    }
+}
+
 /// Check primitive SVG elements against the semantic model derived from source geometry.
 pub(crate) fn check_primitives(
     doc: &Document<'_>,
@@ -645,6 +769,7 @@ pub(crate) fn check_primitives(
 ) -> Vec<Diagnostic> {
     let mut errors = Vec::new();
     let expected = expected(geometry, options);
+    check_paint_order(doc, geometry, &expected, &mut errors);
     for entry in &geometry.legend.entries {
         if entry.swatch_bounds.is_none() || entry.text_bounds.is_none() {
             errors.push(fail(

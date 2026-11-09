@@ -504,16 +504,21 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                     "remove unrecognized transforms, paint overrides, and metadata attributes",
                 ));
             }
-            if name.len() > 2
+            let event_handler = name.len() > 2
                 && name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
-                && name.as_bytes()[2].is_ascii_alphabetic()
-                || (matches!(name, "href" | "xlink:href")
-                    && !(value.is_empty() || value.starts_with('#')))
-                || value.contains("@import")
-                || value
-                    .match_indices("url(")
-                    .any(|(offset, _)| !value[offset..].starts_with("url(#"))
-            {
+                && name.as_bytes()[2].is_ascii_alphabetic();
+            let external_href = matches!(name, "href" | "xlink:href")
+                && !(value.is_empty() || value.starts_with('#'));
+            let interprets_paint_or_url = matches!(
+                name,
+                "fill" | "stroke" | "style" | "marker-end" | "filter" | "clip-path" | "mask"
+            );
+            let unsafe_paint_value = interprets_paint_or_url
+                && (value.contains("@import")
+                    || value
+                        .match_indices("url(")
+                        .any(|(offset, _)| !value[offset..].starts_with("url(#")));
+            if event_handler || external_href || unsafe_paint_value {
                 errors.push(diagnostic(
                     "unsafe-attribute",
                     "/svg",

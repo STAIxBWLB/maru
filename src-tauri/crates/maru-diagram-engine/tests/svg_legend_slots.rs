@@ -36,6 +36,21 @@ fn each_family_places_its_swatch_before_text_and_reserves_the_source_slot() {
                 (14, 8)
             };
             assert_eq!(swatch.x, entry.bounds.x);
+            let label = g
+                .labels
+                .iter()
+                .find(|label| label.id.as_deref() == Some(format!("legend:{}", entry.key).as_str()))
+                .unwrap();
+            let baseline = label.glyphs[0].position.y;
+            let vertical_offset = if family == "architecture" {
+                9
+            } else if route {
+                3
+            } else {
+                8
+            };
+            assert_eq!(swatch.y, baseline - vertical_offset * 64);
+
             assert_eq!(
                 text.x,
                 swatch.x + (slot + gap) * 64,

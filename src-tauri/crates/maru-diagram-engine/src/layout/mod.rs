@@ -1361,7 +1361,19 @@ impl SceneBuilder {
             };
             let swatch_bounds = rect(
                 x,
-                add(row_y, (h - swatch_height * 64) / 2)?,
+                add(
+                    add(
+                        row_y,
+                        metrics::measure_text("", 400, legend_font_size)?.ascender,
+                    )?,
+                    -(if self.kind == "architecture" {
+                        9
+                    } else if route {
+                        3
+                    } else {
+                        8
+                    }) * 64,
+                )?,
                 swatch_width * 64,
                 swatch_height * 64,
             )?;

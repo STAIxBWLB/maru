@@ -1726,7 +1726,8 @@ Symbols precede their labels in explicit E2 leading swatch boxes. The producer
 stores separate swatch and text bounds; route samples use their 34px reference
 width, and the node/start/final symbols use their family dimensions. E2 measures
 label text with the pinned Noto metrics instead of reusing Archify's 0.62-em text
-estimate. Legend rows use x=40, 22px inter-item and row spacing for all families;
+estimate. Legend rows use x=40, 22px inter-item gaps and a minimum 22px row pitch
+(long multiline text grows its row) for all families;
 sequence legend labels use 8px and other families use 12px, an intentional E2
 font-metrics choice. Hidden and empty legends have no entries or swatches.
 
@@ -1786,7 +1787,10 @@ Optional roxmltree 0.21.1 independently reparses the artifact. The gate checks
 root metadata, namespace, unique identities, counts/ownership/hierarchy per kind,
 rectangles, actual route points/width, font/text/glyph data, actual glyph-zero
 paths, node/swatch kind-token mapping, and every semantic primitive's geometry,
-paint, pattern and layer order. Numeric comparisons allow at most 1/64px and
+paint, pattern and complete root paint order (page, frames, underlays, activations,
+routes, masks/nodes, legend, overlays and labels). Node masks must precede their
+bodies. CSS/reference checks apply only to paint or URL attributes; literal
+`@import` or `url(...)` captions remain text. Numeric comparisons allow at most 1/64px and
 reject nonfinite values. XML declarations, processing instructions (including
 external stylesheets), comments, DTDs, CDATA, unexpected text, scripts, foreign
 paint, external references,
@@ -1830,7 +1834,8 @@ remain reviewable.
 | Lifecycle v1 rail | Producer DTO endpoints: (154,157) to (`phaseXs[maxCol]+38`,157); arrow, 2.2px; may point left in column0 but endpoints must differ. V2 omits rail and bands | E3 producer `layout/lifecycle.rs:256`; E3 primitive `render/primitives.rs:433-453`; Archify `lifecycle/render-lifecycle.mjs:884-893`; artifact gate `render/primitive_gate.rs:269-290,655-675` |
 | Legend catalog and empty/hidden behavior | Family catalog order; hidden clears entries; final appended only for nonempty lifecycle legend with a final state; empty legend has no bounds/title/swatches | E2 `layout/mod.rs:1226-1302,1379-1417`; Archify sequence catalog `sequence/render-sequence.mjs:24-40`; lifecycle `render-lifecycle.mjs:297-311`; footprint empty case `shared/legend.mjs:75-76` |
 | Legend footprint and text | Start x=40 for every family; item and row gaps 22px; route swatch width34/gap9, lifecycle start26 slot/24px drawn width, final16, ordinary node14/gap8; labels measured with Noto metrics. Sequence font8px; other families12px. This intentionally replaces the sidecar's 0.62-em text estimate while preserving the footprint composition | E2 `layout/mod.rs:1215-1224,1313-1376`; Archify `shared/legend.mjs:7-10,55-100`; artifact gate `render/primitive_gate.rs:293-369,638-653` |
-| Legend symbol bounds | Symbols use explicit leading `swatch_bounds`; each entry must also retain `text_bounds`. Architecture swatch16x10/radius2.5; other ordinary nodes14x9/radius2; route samples use the supplied width; start/final use structural markers | E2 `layout/mod.rs:1313-1373`; E3 `render/primitives.rs:456-543`; Archify architecture `render-architecture.mjs:930`; workflow `workflow-compiler.mjs:4749`; dataflow `render-dataflow.mjs:500-502`; lifecycle `render-lifecycle.mjs:850-865`; artifact gate `render/primitive_gate.rs:293-369,646-653` |
+| Legend header | Producer retains the title baseline 20px above the first entry baseline; header has its own Noto 12px/700 label box, entry selection frame excludes it. Default caption Legend, locale ko uses 범례 | Archify `shared/legend.mjs:130-150,194-212`; producer `layout/mod.rs`, independent label/glyph gate |
+| Legend symbol bounds | Symbols use explicit leading `swatch_bounds`; each entry must also retain `text_bounds`. Architecture swatch16x10/radius2.5 starts at text baseline minus9; ordinary/start/final paint bounds14x9 (start24x9) begin at baseline minus8; ordinary radius2; route samples sit at baseline minus3 | E2 `layout/mod.rs:1313-1373`; E3 `render/primitives.rs:456-543`; Archify architecture `render-architecture.mjs:930`; workflow `workflow-compiler.mjs:4749`; dataflow `render-dataflow.mjs:500-502`; lifecycle `render-lifecycle.mjs:850-865`; artifact gate `render/primitive_gate.rs:293-369,646-653` |
 | Legend placement and insufficient space | Swatch precedes text; a too-small supplied footprint is rejected. Empty/hidden legend contributes no swatches | E3 `render/primitives.rs:456-543`; E3 `render/primitive_gate.rs:646-653`; Archify `shared/legend.mjs:75-76,117-129,145-154` |
 | Container radii and strokes | region12; lane/segment/stage10; group9; security-group/exception-lane8; phase4; activation3; unknown kind6; 1px stroke | E3 `render/svg.rs:338-374`; Archify workflow `workflow-compiler.mjs:4658-4685`; sequence `render-sequence.mjs:391,410`; dataflow `render-dataflow.mjs:417` |
 | Node rectangles | lifecycle radius7; other families radius6; 1.5px stroke; masks are opaque and have no stroke | E3 `render/svg.rs:423-449`; Archify architecture `render-architecture.mjs:898-901`; lifecycle `render-lifecycle.mjs:801-804`; artifact gate `render/gate.rs:248-263` |
@@ -1841,6 +1846,7 @@ remain reviewable.
 | Accessibility fallbacks | Missing node label text falls back to target id; missing semantic caption kind falls back to `node`; these values affect aria labels only. Required semantic records fail context validation | E3 `render/primitives.rs:548-578`; `render/mod.rs:33-40`; `render/primitives.rs:86-145` |
 | Empty sequence content fallback | No route/frame timeline extent uses 0; final lifeline end is still clamped to at least each participant bottom. No nodes means no lifeline primitives | E3 `render/primitives.rs:332-367`; independent artifact expectation `render/primitive_gate.rs:171-205` |
 | SVG metadata defaults | Absent title/description use `Diagram` / `Diagram geometry`; these are accessible metadata, not geometry. SVG string-write `unwrap` calls are infallible `String` writes; semantic `expect` calls rely on the context gate | E3 `render/mod.rs:33-41`; `render/svg.rs:34,144-152,330-336,423-434`; `render/primitives.rs:86-145` |
+| Complete paint ordering | Background before frames, semantic underlays before activation bars/routes/nodes, masks before node bodies, legend/overlays before label glyphs; semantic primitives retain relative ordering too | Writer projection contract; independent artifact gate `render/primitive_gate.rs::check_paint_order`, mutation tests `tests/svg_paint_order.rs`; source sequence lifelines/activations `sequence/render-sequence.mjs:398-410` |
 | Artifact gate empty/default handling | Missing route points parse as empty and fail expected point checks; missing text nodes count as empty; absent expected primitive counts are zero. These are checker defaults, not output defaults | E3 `render/gate.rs:96-114,680-700`; `render/primitive_gate.rs:695-718` |
 
 ### Reviewed geometry limitation
