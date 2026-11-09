@@ -1,0 +1,407 @@
+{
+  "schemaVersion": 1,
+  "stage": "E2 S3 geometry rules, deterministic test canvas and measurements",
+  "sdkTree": "6849d221230549482ed591ad17d9aec73b5944ee",
+  "execution": {
+    "scope": "remote Linux x64 reproduction, not hosted acceptance",
+    "rust": "1.98.0",
+    "cargoBuildJobs": 2,
+    "browserWorkers": 1,
+    "hostedCi": "pending"
+  },
+  "checks": {
+    "coreUnit": 150,
+    "documentDifferential": 2,
+    "geometryDifferential": 1,
+    "clippy": "passed geometry/typegen/geometry-corpus lib -D warnings",
+    "bindingDrift": "passed",
+    "sdkBoundary": "passed",
+    "productIsolation": "normal JS and actual WASM exports omit scene_corpus_hashes; normal library omits canvas bridge",
+    "browser": {
+      "startTime": "2026-11-08T23:58:22.154Z",
+      "duration": 15457.649,
+      "expected": 4,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "local": {
+      "typecheck": "tsc -b passed",
+      "applicableEslint": "passed",
+      "focusedVitest": 32
+    }
+  },
+  "sceneAgreement": {
+    "scope": "all 309 parity cases plus three seeded dense scenes; every unchanged scene repeated",
+    "nativeWasmBytesEqual": true,
+    "reportSha256": "498e1f04832a9308229d4c7d0049bb232cd194d6e2091c421f0fc6590416836d",
+    "reportBytes": 90941,
+    "corpusSha256": "b6ba9cb43a890d5fb03550edd90f30bbf2a460c61712d73bb96c51bf25f32f34",
+    "cases": 312,
+    "successfulReports": 45,
+    "nonSuccessReports": 267,
+    "hostedLinuxMacosWindowsAndWasm": "pending"
+  },
+  "measurements": {
+    "productionPayload": {
+      "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
+      "buildMs": 18976.89758,
+      "testHarnessBuildMs": 350.3022810000002,
+      "platform": "linux",
+      "arch": "x64",
+      "sizes": [
+        {
+          "name": "engine-e0.js",
+          "bytes": 1307013,
+          "gzipBytes": 324220,
+          "path": "validation"
+        },
+        {
+          "name": "core-B2rNBH2e.js",
+          "bytes": 114,
+          "gzipBytes": 122,
+          "path": "lazy-transport"
+        },
+        {
+          "name": "engineGeometry-BD6JonDg.js",
+          "bytes": 4866035,
+          "gzipBytes": 1578645,
+          "path": "lazy-geometry-metrics"
+        }
+      ],
+      "gzipBytes": 324220,
+      "validationGzipBytes": 324220,
+      "lazyGeometryGzipBytes": 1578645,
+      "lazyTransportGzipBytes": 122,
+      "totalGzipBytes": 1902987
+    },
+    "geometryCold": {
+      "scope": "fresh Chromium process; exact emitted production entry already imported; cache-disabled geometry artifact HTTP fetch/parse plus bindings import and WASM compile/instantiate; no Vite transform or first layout in interval",
+      "network": "same-origin loopback Node HTTP server; exact emitted artifact bytes, identity transfer without gzip or rewriting, no artificial throttling",
+      "coldLoadMs": 249,
+      "resources": [
+        {
+          "path": "/.engine-e0/browser/engineGeometry-BD6JonDg.js",
+          "durationMs": 11.399999976158142,
+          "transferBytes": 4866335,
+          "encodedBodyBytes": 4866035,
+          "decodedBodyBytes": 4866035,
+          "emittedFileBytes": 4866035
+        }
+      ]
+    },
+    "layout": {
+      "scope": "production wasm-layout; pre-serialized request; facade request serialization, layout+routing and scene JSON parse; validation included; 20 warm samples after one first layout",
+      "nodes": 1000,
+      "edges": 999,
+      "firstLayoutMs": 396.89999997615814,
+      "durationsMs": [
+        318,
+        317.60000002384186,
+        309.60000002384186,
+        309,
+        310.5999999642372,
+        308.69999998807907,
+        313.80000001192093,
+        307.69999998807907,
+        311.89999997615814,
+        310.7000000476837,
+        309,
+        308.7999999523163,
+        309.39999997615814,
+        307.9000000357628,
+        312.89999997615814,
+        308.5999999642372,
+        309.30000001192093,
+        311.60000002384186,
+        307.10000002384186,
+        306.5999999642372
+      ],
+      "medianMs": 309.34999999403954,
+      "p95Ms": 317.60000002384186,
+      "maxMs": 318,
+      "targetMs": 200,
+      "targetMet": false
+    },
+    "validation": [
+      {
+        "nodes": 50,
+        "medianMs": 0.5999999940395355,
+        "p95Ms": 1.100000023841858,
+        "maxMs": 1.5,
+        "durationsMs": [
+          1.5,
+          1.100000023841858,
+          1.0999999642372131,
+          1.100000023841858,
+          0.8999999761581421,
+          0.9000000357627869,
+          0.5999999642372131,
+          0.699999988079071,
+          0.6000000238418579,
+          0.5,
+          0.699999988079071,
+          0.5,
+          0.699999988079071,
+          0.7000000476837158,
+          0.3999999761581421,
+          0.699999988079071,
+          0.5,
+          0.6000000238418579,
+          0.5,
+          0.5999999642372131,
+          0.5,
+          0.5,
+          0.5,
+          0.5,
+          0.6000000238418579,
+          0.5,
+          0.3999999761581421,
+          0.6000000238418579,
+          0.5,
+          0.5
+        ]
+      },
+      {
+        "nodes": 1000,
+        "medianMs": 7.799999952316284,
+        "p95Ms": 8.600000023841858,
+        "maxMs": 11.299999952316284,
+        "durationsMs": [
+          11.299999952316284,
+          8.600000023841858,
+          8.300000011920929,
+          8.199999988079071,
+          8,
+          7.800000011920929,
+          7.899999976158142,
+          7.900000035762787,
+          7.799999952316284,
+          8,
+          7.800000011920929,
+          7.699999988079071,
+          7.900000035762787,
+          7.699999988079071,
+          7.799999952316284,
+          7.800000011920929,
+          7.699999988079071,
+          7.700000047683716,
+          7.699999988079071,
+          7.699999988079071,
+          7.600000023841858,
+          7.799999952316284,
+          7.700000047683716,
+          7.799999952316284,
+          7.700000047683716,
+          7.599999964237213,
+          7.800000011920929,
+          7.699999988079071,
+          7.800000011920929,
+          7.600000023841858
+        ]
+      }
+    ],
+    "canvas": {
+      "nodes": 2,
+      "routedEdges": 1,
+      "pinnedSource": "a",
+      "x": "620.25",
+      "y": "300.5",
+      "retained": true,
+      "mutationFree": true,
+      "scope": "test-only coordinate preview, not DiagramMode/history or the E3 artifact renderer"
+    }
+  },
+  "budgetProposal": {
+    "targetMs": 200,
+    "remoteP95Ms": 317.60000002384186,
+    "targetMet": false,
+    "proposedMs": 400,
+    "status": "proposal only; hosted figures and owner acceptance pending",
+    "scope": "1000 nodes and 999 real edges, request serialization plus validation/layout/routing and scene JSON parsing; same workload, no missing-route allowance"
+  },
+  "initialReproduction": {
+    "sdkTree": "e9c7093148f46c68bf1cff3e45068dadb83de2c0",
+    "scope": "initial implementation before immutable-obstacle/path reuse and later provenance changes; same warm layout workload, not a controlled cache-only microbenchmark",
+    "layoutP95Ms": 571.7999999523163,
+    "initialViteColdNotAcceptanceMs": 542.9000000357628,
+    "note": "The initial Vite-served geometry response was rewritten to about 13 MB; it is superseded by the final exact-byte static-server/fresh-process cold measurement."
+  },
+  "routeQualityNoticePolicy": "Authored offending pieces refuse; generated pieces receive exact-allowlisted nonfatal notices. Mixed findings identify the authored route. Original oracle verdicts remain unchanged.",
+  "routeQualityNotices": [
+    {
+      "case": "public-01",
+      "accepted": true,
+      "findings": [
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 0 and 2 share at least 8px of a corridor",
+          "path": "/connections/0",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 3 and 7 share at least 8px of a corridor",
+          "path": "/connections/3",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 4 and 6 share at least 8px of a corridor",
+          "path": "/connections/4",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 4 and 8 share at least 8px of a corridor",
+          "path": "/connections/4",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [arrowhead-collision]: relationships 4 and 8 have overlapping incoming arrow markers at their shared target",
+          "path": "/connections/4",
+          "rule": "geometry-v1/arrowhead-collision"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 6 and 8 share at least 8px of a corridor",
+          "path": "/connections/6",
+          "rule": "geometry-v1/ambiguous-corridor"
+        }
+      ]
+    },
+    {
+      "case": "public-02",
+      "accepted": true,
+      "findings": [
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 4 and 5 share at least 8px of a corridor",
+          "path": "/connections/4",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 4 and 7 share at least 8px of a corridor",
+          "path": "/connections/4",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 5 and 7 share at least 8px of a corridor",
+          "path": "/connections/5",
+          "rule": "geometry-v1/ambiguous-corridor"
+        }
+      ]
+    },
+    {
+      "case": "public-05",
+      "accepted": true,
+      "findings": [
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 2 and 4 share at least 8px of a corridor",
+          "path": "/connections/2",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 2 and 5 share at least 8px of a corridor",
+          "path": "/connections/2",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 4 and 5 share at least 8px of a corridor",
+          "path": "/connections/4",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 9 and 11 share at least 8px of a corridor",
+          "path": "/connections/9",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 9 and 12 share at least 8px of a corridor",
+          "path": "/connections/9",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [arrowhead-collision]: relationships 9 and 11 have overlapping incoming arrow markers at their shared target",
+          "path": "/connections/9",
+          "rule": "geometry-v1/arrowhead-collision"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [micro-segment]: relationship 10 has a 2.453125px micro-segment at segment 1",
+          "path": "/connections/10",
+          "rule": "geometry-v1/micro-segment"
+        }
+      ]
+    },
+    {
+      "case": "public-06",
+      "accepted": true,
+      "findings": [
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 0 and 2 share at least 8px of a corridor",
+          "path": "/connections/0",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 3 and 4 share at least 8px of a corridor",
+          "path": "/connections/3",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 3 and 13 share at least 8px of a corridor",
+          "path": "/connections/3",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 4 and 5 share at least 8px of a corridor",
+          "path": "/connections/4",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 4 and 13 share at least 8px of a corridor",
+          "path": "/connections/4",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 7 and 8 share at least 8px of a corridor",
+          "path": "/connections/7",
+          "rule": "geometry-v1/ambiguous-corridor"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [arrowhead-collision]: relationships 7 and 8 have overlapping incoming arrow markers at their shared target",
+          "path": "/connections/7",
+          "rule": "geometry-v1/arrowhead-collision"
+        },
+        {
+          "code": "architecture/geometry-route-quality-notice",
+          "message": "engine-generated route/label geometry [ambiguous-corridor]: relationships 9 and 11 share at least 8px of a corridor",
+          "path": "/connections/9",
+          "rule": "geometry-v1/ambiguous-corridor"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "No product canvas or semanticApply switch; existing pinned Archify gate remains until E4.",
+    "Geometry only; no E3 SVG/PNG output or visual-review claim.",
+    "Native/WASM agreement here is one remote Linux reproduction; the hosted four-report OS matrix is required.",
+    "The 200 ms layout target is missed; the 400 ms proposal is not an accepted budget."
+  ]
+}

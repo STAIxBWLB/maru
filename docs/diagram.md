@@ -1260,3 +1260,60 @@ failures, pins and more stroke widths than the cache admits. At most eight
 clearance variants and 65,536 first-pass points are retained; other requests
 use the original computation so width diversity cannot create an unbounded
 obstacle-cache amplification. No route or assertion is omitted for speed.
+
+#### S3 evidence and automatic-route notices
+
+Remote reproduction at SDK tree `6849d221`: 150 core tests, two document
+differentials and the geometry differential passed, together with clippy,
+binding drift and the SDK boundary check. All 312 combined native/test-WASM
+scene reports are byte-identical. The 309 parity cases keep the original
+full-renderer verdicts, including all three former E1 geometry deferrals.
+There are no oracle-green/engine-red expectation waivers. Four browser probes
+passed with no retry; the new canvas consumer remains isolated from DiagramMode.
+
+| Remote Chromium reproduction | Result |
+| --- | --- |
+| Validation entry and static imports, gzip | 324,220 B |
+| Separate lazy geometry/metrics chunk, gzip | 1,578,645 B |
+| Exact emitted geometry HTTP response, identity bytes | 4,866,035 B |
+| Fresh-process lazy fetch/parse/compile/instantiate | 249 ms |
+| 1,000-node / 999-edge first layout | 396.9 ms |
+| Same workload, 20 warm samples, median / p95 / max | 309.35 / 317.6 / 318 ms |
+| Validation-only 1,000-node p95 | 8.6 ms |
+
+The **200 ms layout target is missed**. The proposed end-to-end budget is
+**400 ms**, pending hosted measurements and owner acceptance; it is not an
+approved relaxation. The initial implementation measured 571.8 ms p95 on this
+remote workload. The optimized run keeps all nodes, all 999 orthogonal routes
+and every geometry check; it neither drops work nor retries for a passing time.
+These remote figures are reproductions. Hosted Chromium numbers, the hosted
+four-report determinism gate and `ci-ok` remain pending at submission.
+
+Cold-load measurement uses a fresh Chromium process and a read-only loopback
+server that serves exact compiled bytes with identity encoding. Encoded and
+decoded response sizes must match the emitted file. This replaces the initial
+Vite-rewritten response; Vite transform/sourcemap bytes are not labelled as
+the product payload or used for the final cold interval. Browser startup and
+first layout are outside that interval; the first layout is recorded separately.
+
+The following corpus inputs remain accepted. Their generated quality defects
+are visible notices, not document refusals. Authored violations and mixed
+pairs remain blocking and point to the authored input. The native/WASM reports
+carry the same per-rule notice inventory.
+
+| Case | Automatic rule | Notices | Input accepted |
+| --- | --- | --- | --- |
+| `public-01` | `geometry-v1/ambiguous-corridor` | 5 | Yes |
+| `public-01` | `geometry-v1/arrowhead-collision` | 1 | Yes |
+| `public-02` | `geometry-v1/ambiguous-corridor` | 3 | Yes |
+| `public-05` | `geometry-v1/ambiguous-corridor` | 5 | Yes |
+| `public-05` | `geometry-v1/arrowhead-collision` | 1 | Yes |
+| `public-05` | `geometry-v1/micro-segment` | 1 | Yes |
+| `public-06` | `geometry-v1/ambiguous-corridor` | 7 | Yes |
+| `public-06` | `geometry-v1/arrowhead-collision` | 1 | Yes |
+
+Source-bound samples, hashes, scopes, the full notice paths and budget status
+are recorded in [diagram-engine-e2-s3.json](diagram-engine-e2-s3.json). The
+ordinary source-format geometry budgets, including minimum port spans and v1
+lifecycle band columns, still refuse with a source path, cause and repair.
+Architecture/Lifecycle loop positives prevent a node-center-distance shortcut.
