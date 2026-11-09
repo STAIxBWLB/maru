@@ -199,7 +199,8 @@ fn automatic_self_edge_keeps_distinct_ports_and_avoids_an_unrelated_participant(
         .iter()
         .find(|route| route.id.as_deref() == Some("self"))
         .unwrap();
-    assert_ne!(route.from, route.to);
+    assert_eq!(route.from, "a");
+    assert_eq!(route.to, "a");
     assert!(route.points.len() >= 3);
     assert_ne!(
         route.points.first(),
