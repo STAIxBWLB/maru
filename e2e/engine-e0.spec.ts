@@ -79,7 +79,7 @@ test.describe("independent engine WebAssembly spike", () => {
     const blockedSpec = JSON.parse(readFileSync("src-tauri/crates/maru-diagram-engine/testdata/partial-route.json", "utf8"));
     await page.goto("/");
     const proof = await page.evaluate(async ({ specs, blockedSpec }) => {
-      type Scene = { nodes: Array<{ id: string; bounds: { x: number; y: number }; positionSource: string }>; routes: Array<{ id?: string; points: Array<{ x: number; y: number }> }>; labels: unknown[] };
+      type Scene = { nodes: Array<{ id: string; bounds: { x: number; y: number }; positionSource: string }>; routes: Array<{ id?: string; points: Array<{ x: number; y: number }> }>; labels: unknown[]; page: { contentOffset?: { x: number; y: number } | null } };
       type Report = { ok: boolean; geometry?: Scene; diagnostics: Array<{ code: string; path: string; message: string; fix: string }>; receipt: { inputSpecSha256: string } };
       const modulePath = "/.engine-e0/browser/engine-e0.js";
       const { loadGeometryEngine } = await import(/* @vite-ignore */ modulePath) as { loadGeometryEngine(): Promise<{ layout(input: unknown): Report }> };
@@ -92,13 +92,19 @@ test.describe("independent engine WebAssembly spike", () => {
         const again = engine.layout({ specJson: original });
         if (JSON.stringify(first.geometry) !== JSON.stringify(again.geometry)) throw new Error("Unchanged scene layout differed; inspect stable ordering and fixed arithmetic.");
         const selected = first.geometry.nodes[0]!;
+        // A pin is an authored source position while the scene is emitted below
+        // the page's header band, so convert through `page.contentOffset`
+        // instead of writing the emitted canvas position back (maru#561).
+        const offset = first.geometry.page.contentOffset ?? { x: 0, y: 0 };
+        const pin = { x: selected.bounds.x - offset.x, y: selected.bounds.y - offset.y };
         const edited = structuredClone(spec); edited.meta.title = "Unrelated title edit";
-        const retained = engine.layout({ specJson: JSON.stringify(edited), pinSet: { sourceSpecSha256: first.receipt.inputSpecSha256, pins: [{ targetId: selected.id, targetKind: "node", position: { x: selected.bounds.x, y: selected.bounds.y } }] } });
+        const retained = engine.layout({ specJson: JSON.stringify(edited), pinSet: { sourceSpecSha256: first.receipt.inputSpecSha256, pins: [{ targetId: selected.id, targetKind: "node", position: pin }] } });
         if (!retained.ok || !retained.geometry) throw new Error(`Pinned scene failed: ${JSON.stringify(retained.diagnostics)}; inspect pin resolution before changing the fixture.`);
         const node = retained.geometry.nodes.find((node) => node.id === selected.id)!;
-        if (node.bounds.x !== selected.bounds.x || node.bounds.y !== selected.bounds.y || node.positionSource !== "plannedPin") throw new Error("A surviving member pin moved after an unrelated edit; repair pin precedence.");
+        const after = retained.geometry.page.contentOffset ?? { x: 0, y: 0 };
+        if (node.bounds.x !== pin.x + after.x || node.bounds.y !== pin.y + after.y || node.positionSource !== "plannedPin") throw new Error("A surviving member pin moved after an unrelated edit; repair pin precedence.");
         const orthogonal = retained.geometry.routes.every((route) => route.points.every((point, index, points) => index === 0 || point.x === points[index - 1]!.x || point.y === points[index - 1]!.y));
-        proof.push({ type: spec.diagram_type, version: spec.schema_version, nodes: retained.geometry.nodes.length, routes: retained.geometry.routes.length, orthogonal });
+        proof.push({ type: spec.diagram_type, version: spec.schema_version, nodes: retained.geometry.nodes.length, routes: retained.geometry.routes.length, orthogonal, offsetY: offset.y, pinY: pin.y });
       }
       const invalid = engine.layout({ specJson: "[]" });
       if (invalid.ok || invalid.geometry) throw new Error("Invalid spec returned scene geometry; keep the E1 gate before placement.");
