@@ -75,6 +75,12 @@ with `hwp_parse_failed` when the artifact is missing, malformed, or does not
 cover every rendered page. `options.layout: false` and automatic rendering on
 older supported binaries do not request metadata and omit both `layout` and
 `notes`, preserving the legacy image-only response shape.
+If an optional layout pass exits nonzero, the bridge retries once without layout
+in a fresh output directory and returns a `layout_metadata_unavailable` note on
+success. A subsequent SVG-to-PNG fallback keeps layout disabled. Explicit
+`layout:true` keeps CLI failures fatal. A failed JSON/layout command invalidates
+the selected binary's cached version, so the next call re-probes a manager shim
+whose selected engine changed without changing the shim's path or mtime.
 
 `hwped_capabilities` always reports the detected version and base editing
 availability. It includes `editOps: "v1"` only when the detected binary meets

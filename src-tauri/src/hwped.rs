@@ -264,6 +264,27 @@ struct CachedVersion {
     version: String,
 }
 
+type VersionCache = BTreeMap<(PathBuf, PathBuf), CachedVersion>;
+static VERSIONS: OnceLock<Mutex<VersionCache>> = OnceLock::new();
+
+fn invalidate_version(bin: &Path) {
+    if let Some(cache) = VERSIONS.get() {
+        if let Ok(mut versions) = cache.lock() {
+            versions.retain(|(logical, _), _| logical.as_path() != bin);
+        }
+    }
+}
+
+/// A manager shim may change its selected engine without changing its mtime.
+/// Preserve the command error, but make the next feature call re-probe it.
+fn run_hwp_feature_ok(bin: &Path, args: &[OsString]) -> Result<Vec<u8>, String> {
+    let result = run_hwp_ok(bin, args);
+    if matches!(&result, Err(error) if error.starts_with("hwp_failed:")) {
+        invalidate_version(bin);
+    }
+    result
+}
+
 #[cfg(any(windows, test))]
 fn windows_metadata_target(bin: &Path, is_file: impl Fn(&Path) -> bool) -> PathBuf {
     if bin
@@ -297,8 +318,6 @@ fn version_metadata_path(bin: &Path) -> PathBuf {
 /// Re-probe each logical invocation when its canonical executable is replaced.
 /// The caller's path is used for execution so symlink shims retain argv[0].
 fn ensure_version(bin: &Path) -> Result<String, String> {
-    static VERSIONS: OnceLock<Mutex<BTreeMap<(PathBuf, PathBuf), CachedVersion>>> = OnceLock::new();
-
     let metadata_path = version_metadata_path(bin);
     let canonical_path =
         std::fs::canonicalize(&metadata_path).unwrap_or_else(|_| bin.to_path_buf());
@@ -358,6 +377,10 @@ fn ensure_version(bin: &Path) -> Result<String, String> {
 #[cfg(test)]
 #[path = "hwped/version_tests.rs"]
 mod version_tests;
+
+#[cfg(all(test, unix))]
+#[path = "hwped/retry_tests.rs"]
+mod retry_tests;
 
 /// Legacy failures retain their original string wire shape. New feature
 /// refusals use the app's structured IPC error without flattening its code.
@@ -679,7 +702,11 @@ fn render_attempt(
             layout_path.as_os_str().to_os_string(),
         ]);
     }
-    run_hwp_ok(bin, &args)?;
+    if include_layout {
+        run_hwp_feature_ok(bin, &args)?;
+    } else {
+        run_hwp_ok(bin, &args)?;
+    }
     let mut notes = Vec::new();
     let mut layouts = match layout_mode {
         LayoutMetadataMode::Disabled => None,
@@ -804,6 +831,46 @@ fn render_attempt(
     Ok((images, notes))
 }
 
+fn render_with_layout_fallback(
+    bin: &Path,
+    dir: &Path,
+    input: &Path,
+    format: &str,
+    pages: &str,
+    dpi: u32,
+    layout_mode: LayoutMetadataMode,
+) -> Result<(Vec<HwpedRenderPage>, Vec<HwpedRenderNote>), String> {
+    // Each attempt has its own output directory: partially written pages or
+    // layout files from a failed CLI pass must not leak into a successful retry.
+    let attempt = tempfile::tempdir_in(dir).map_err(|error| {
+        format!("hwp_stage_failed: cannot create render attempt directory: {error}; check temporary storage permissions and free space, then retry")
+    })?;
+    match render_attempt(bin, attempt.path(), input, format, pages, dpi, layout_mode) {
+        Err(error)
+            if layout_mode == LayoutMetadataMode::Optional && error.starts_with("hwp_failed:") =>
+        {
+            let retry = tempfile::tempdir_in(dir).map_err(|cause| {
+                format!("hwp_stage_failed: cannot create image-only render retry directory: {cause}; check temporary storage permissions and free space, then retry")
+            })?;
+            let (images, mut notes) = render_attempt(
+                bin,
+                retry.path(),
+                input,
+                format,
+                pages,
+                dpi,
+                LayoutMetadataMode::Disabled,
+            )?;
+            notes.push(HwpedRenderNote {
+                code: "layout_metadata_unavailable".to_string(),
+                message: format!("optional layout render failed; image-only retry succeeded: {error}; continue viewing the returned images, or request layout:true to diagnose the layout failure"),
+            });
+            Ok((images, notes))
+        }
+        result => result,
+    }
+}
+
 fn render_now(
     document: HwpedDocumentRef,
     options: HwpedRenderOptions,
@@ -841,7 +908,7 @@ fn render_now(
     }
     let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
-    match render_attempt(
+    match render_with_layout_fallback(
         &bin,
         tmp.path(),
         &input,
@@ -853,8 +920,28 @@ fn render_now(
         Ok((pages, notes)) => Ok(HwpedRenderResponse { pages, notes }),
         // SVG is the default; fall back to PNG when the renderer refuses.
         Err(err) if requested == "svg" && err.starts_with("hwp_failed:") => {
-            let (pages, notes) =
-                render_attempt(&bin, tmp.path(), &input, "png", &pages, dpi, layout_mode)?;
+            // Optional layout already failed and its image-only SVG retry did
+            // too. Do not re-enable layout when trying the other image format.
+            let fallback_mode = if layout_mode == LayoutMetadataMode::Optional {
+                LayoutMetadataMode::Disabled
+            } else {
+                layout_mode
+            };
+            let (pages, mut notes) = render_with_layout_fallback(
+                &bin,
+                tmp.path(),
+                &input,
+                "png",
+                &pages,
+                dpi,
+                fallback_mode,
+            )?;
+            if layout_mode == LayoutMetadataMode::Optional {
+                notes.push(HwpedRenderNote {
+                    code: "layout_metadata_unavailable".to_string(),
+                    message: format!("optional layout render failed; image-only PNG fallback succeeded: {err}; continue viewing the returned images, or request layout:true to diagnose the layout failure"),
+                });
+            }
             Ok(HwpedRenderResponse { pages, notes })
         }
         Err(err) => Err(err.into()),
@@ -1057,7 +1144,8 @@ fn edit_now(
     };
     let bin = hwp_bin()?;
     let version = ensure_version(&bin)?;
-    if matches!(operations, EditOperations::Json(_)) {
+    let json_ops = matches!(operations, EditOperations::Json(_));
+    if json_ops {
         require_feature_version(&version, "JSON edit ops")?;
     }
     let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
@@ -1089,7 +1177,11 @@ fn edit_now(
     if allow_partial == Some(true) {
         args.push(OsString::from("--allow-partial"));
     }
-    run_hwp_ok(&bin, &args)?;
+    if json_ops {
+        run_hwp_feature_ok(&bin, &args)?;
+    } else {
+        run_hwp_ok(&bin, &args)?;
+    }
     let data = std::fs::read(&output).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     Ok(HwpedEditResponse {
         name: document.name,
@@ -2104,6 +2196,67 @@ esac
             let args = std::fs::read_to_string(bin_dir.join("render-args")).unwrap();
             assert!(!args.contains("--layout-json"), "{args}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn optional_layout_is_not_reenabled_during_svg_to_png_fallback() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let binary = home.root.path().join("hwp");
+        crate::test_support::write_executable_fixture(
+            &binary,
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo 'hwp 0.20.0' ;;
+  render)
+    printf '%s\n' "$*" >> "$(dirname "$0")/render-args"
+    out=""; format=""; report=""; layout=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -o) shift; out="$1" ;;
+        --format) shift; format="$1" ;;
+        --report) shift; report="$1" ;;
+        --layout-json) shift; layout="$1" ;;
+      esac
+      shift
+    done
+    if [ "$format" = svg ] || [ -n "$layout" ]; then
+      echo 'fixture renderer failure' >&2; exit 7
+    fi
+    printf 'fixture image bytes' > "$out"
+    printf '{"selected_pages":[1]}' > "$report" ;;
+  *) exit 2 ;;
+esac
+"#,
+            0o755,
+        )
+        .unwrap();
+        let _env = EnvGuard::set("MARU_HWP_BIN", &binary);
+        let result = run(hwped_render(
+            HwpedDocumentRef {
+                name: "fallback.hwpx".to_string(),
+                path: None,
+                data_base64: Some(BASE64.encode(b"fixture document")),
+            },
+            None,
+            None,
+        ))
+        .unwrap();
+        assert_eq!(result.pages.len(), 1);
+        assert_eq!(result.pages[0].format, "png");
+        assert!(result.pages[0].layout.is_none());
+        assert_eq!(result.notes.len(), 1);
+        assert_eq!(result.notes[0].code, "layout_metadata_unavailable");
+        let args = std::fs::read_to_string(home.root.path().join("render-args")).unwrap();
+        let attempts: Vec<_> = args.lines().collect();
+        assert_eq!(
+            attempts.len(),
+            3,
+            "one optional attempt, image-only retry and PNG fallback: {args}"
+        );
+        assert!(attempts[0].contains("--format svg") && attempts[0].contains("--layout-json"));
+        assert!(attempts[1].contains("--format svg") && !attempts[1].contains("--layout-json"));
+        assert!(attempts[2].contains("--format png") && !attempts[2].contains("--layout-json"));
     }
 
     #[cfg(unix)]
