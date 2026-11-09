@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(report["repeatCheck"], true);
         assert_eq!(report["benchmarkWork"]["viaBenchmarkWork"]["nodes"], 26);
         assert_eq!(report["benchmarkWork"]["viaBenchmarkWork"]["routes"], 1);
-        assert_eq!(report["benchmarkWork"]["viaBenchmarkWork"]["viaPoints"], 16);
+        assert_eq!(report["benchmarkWork"]["viaBenchmarkWork"]["viaPoints"], 17);
         assert!(
             report["benchmarkWork"]["viaBenchmarkWork"]["stats"]["endpointMaskEvaluations"]
                 .as_u64()

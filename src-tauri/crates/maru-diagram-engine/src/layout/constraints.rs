@@ -179,18 +179,34 @@ fn check_node_labels(
             if font_size <= 0.0 {
                 continue;
             }
-            let label_left = i64::from(label.bounds.x);
-            let label_right = label_left + i64::from(label.bounds.width);
-            let label_top = i64::from(label.bounds.y);
-            let label_bottom = label_top + i64::from(label.bounds.height);
+            // Line-box leading and whitespace advances do not paint pixels.
+            // Judge the positioned glyph ink emitted by the Noto producer.
+            let ink = label
+                .glyphs
+                .iter()
+                .filter(|glyph| glyph.ink.width > 0 && glyph.ink.height > 0)
+                .map(|glyph| {
+                    let left = i64::from(glyph.ink.x);
+                    let top = i64::from(glyph.ink.y);
+                    (
+                        left,
+                        top,
+                        left + i64::from(glyph.ink.width),
+                        top + i64::from(glyph.ink.height),
+                    )
+                })
+                .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)));
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
+            let Some((label_left, label_top, label_right, label_bottom)) = ink else {
+                continue;
+            };
             let overflow_left = (text_area_left - label_left).max(0);
             let overflow_right = (label_right - text_area_right).max(0);
             let overflow_top = (node_top - label_top).max(0);
             let overflow_bottom = (label_bottom - node_bottom).max(0);
             let overflow_x = overflow_left.max(overflow_right);
             let overflow_y = overflow_top.max(overflow_bottom);
-            #[cfg(any(test, feature = "geometry-corpus"))]
-            crate::work::record_constraint_evaluation();
             if overflow_x > 0 || overflow_y > 0 {
                 let combined = family.name == "lifecycle"
                     && role == "sublabel"
@@ -209,8 +225,8 @@ fn check_node_labels(
                     format!(
                         "emitted Noto {field} box for {:?} is {:.3}px wide by {:.3}px high at {:.1}px and extends {:.3}px horizontally / {:.3}px vertically beyond the node text area (available width {:.3}px)",
                         id,
-                        fixed(label.bounds.width),
-                        fixed(label.bounds.height),
+                        (label_right - label_left) as f64 / UNITS,
+                        (label_bottom - label_top) as f64 / UNITS,
                         font_size,
                         overflow_x as f64 / UNITS,
                         overflow_y as f64 / UNITS,

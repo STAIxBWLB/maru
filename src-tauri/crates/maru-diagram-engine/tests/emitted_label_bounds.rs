@@ -3,8 +3,8 @@
 use maru_diagram_engine::layout::layout_json;
 use serde_json::{json, Value};
 
-fn report(label: &str, width: f64) -> maru_diagram_engine::geometry::GeometryReport {
-    let spec: Value = json!({
+fn spec(label: &str, width: f64) -> Value {
+    json!({
         "schema_version": 1,
         "diagram_type": "dataflow",
         "meta": {"title": "Text bounds", "output": "text-bounds.html", "viewBox": [940, 720]},
@@ -14,8 +14,11 @@ fn report(label: &str, width: f64) -> maru_diagram_engine::geometry::GeometryRep
             {"id": "b", "type": "backend", "label": "Output", "stage": 0, "row": 1}
         ],
         "flows": []
-    });
-    layout_json(&json!({"specJson": spec.to_string()}).to_string())
+    })
+}
+
+fn report(label: &str, width: f64) -> maru_diagram_engine::geometry::GeometryReport {
+    layout_json(&json!({"specJson": spec(label, width).to_string()}).to_string())
 }
 
 fn assert_refused_for_emitted_box(report: &maru_diagram_engine::geometry::GeometryReport) {
@@ -105,4 +108,35 @@ fn font_ink_bearings_may_use_node_padding_without_overflowing_the_node() {
         label.bounds.x >= node.bounds.x,
         "the ink stays inside the actual node"
     );
+}
+
+#[test]
+fn unpainted_line_leading_does_not_refuse_visible_text_inside_the_node() {
+    let mut input = spec("A", 118.0);
+    input["nodes"][0]["sublabel"] = json!("Browser");
+    input["nodes"][0]["tag"] = json!("Source");
+    let result = layout_json(&json!({"specJson": input.to_string()}).to_string());
+    assert!(result.ok, "{:?}", result.diagnostics);
+    let geometry = result.geometry.unwrap();
+    let node = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+    let labels: Vec<_> = geometry
+        .labels
+        .iter()
+        .filter(|label| label.target_id == "a")
+        .collect();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.bounds.y + label.bounds.height > node.bounds.y + node.bounds.height),
+        "fixture must exercise nonpainting line leading"
+    );
+    for glyph in labels
+        .iter()
+        .flat_map(|label| &label.glyphs)
+        .filter(|glyph| glyph.ink.width > 0 && glyph.ink.height > 0)
+    {
+        assert!(glyph.ink.x >= node.bounds.x && glyph.ink.y >= node.bounds.y);
+        assert!(glyph.ink.x + glyph.ink.width <= node.bounds.x + node.bounds.width);
+        assert!(glyph.ink.y + glyph.ink.height <= node.bounds.y + node.bounds.height);
+    }
 }
