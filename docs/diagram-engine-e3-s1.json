@@ -884,7 +884,10 @@
         "attachment": "https://github.com/user-attachments/assets/585a3eaa-5850-4ff4-b61b-bed1e9060039",
         "reviewed": true
       }
-    ]
+    ],
+    "captureSourceCommit": "84ac33cd1730f0d3f041d72ad0b956cb4fbf34ed",
+    "svgContentRevalidatedAt": "6c23155e2439a2e1eaa8cc3f0632fd2fd77285a8",
+    "revalidation": "all 10 final-candidate SVG hashes equal the reviewed uploaded captures; final browser frame/origin/advance gates passed again"
   },
   "visualReview": {
     "scope": "reviewed 10 actual engine SVG captures, not Archify pixel comparison or native app proof",
