@@ -254,7 +254,7 @@ fn ensure_version(bin: &Path) -> Result<&'static str, String> {
             };
             if !version_at_least(version, MIN_VERSION) {
                 return Err(format!(
-                    "hwp_version: hwp {}.{}.{} is too old; >= {}.{}.{} required ({}); update hwp-cli or point MARU_HWP_BIN to a supported binary",
+                    "hwp_version: hwp {}.{}.{} is too old; >= {}.{}.{} required ({}); update hwp-cli or point MARU_HWP_BIN to a supported binary, then restart Maru",
                     version.0,
                     version.1,
                     version.2,
@@ -690,6 +690,24 @@ fn safe_output_name(name: &str, fallback_ext: &str) -> String {
     }
 }
 
+/// Preserve raw key presence: Tauri's Option decoder otherwise collapses null
+/// into absence, which would allow a request containing both edit channels.
+#[derive(Debug)]
+pub struct HwpedEditArgument(Option<Value>);
+
+impl<'de, R: tauri::Runtime> tauri::ipc::CommandArg<'de, R> for HwpedEditArgument {
+    fn from_command(
+        command: tauri::ipc::CommandItem<'de, R>,
+    ) -> Result<Self, tauri::ipc::InvokeError> {
+        match command.message.payload() {
+            tauri::ipc::InvokeBody::Json(payload) if payload.is_object() => {
+                Ok(Self(payload.get(command.key).cloned()))
+            }
+            _ => Err("hwped_bad_request: edit arguments must be a JSON object; send exactly one of ops or opsArgv".into()),
+        }
+    }
+}
+
 enum EditOperations {
     Argv(Vec<String>),
     Json(Value),
@@ -697,7 +715,7 @@ enum EditOperations {
 
 fn edit_now(
     document: HwpedDocumentRef,
-    ops_argv: Option<Vec<String>>,
+    ops_argv: Option<Value>,
     ops: Option<Value>,
     verify: Option<bool>,
     allow_partial: Option<bool>,
@@ -705,6 +723,9 @@ fn edit_now(
 ) -> Result<HwpedEditResponse, String> {
     let operations = match (ops_argv, ops) {
         (Some(argv), None) => {
+            let argv: Vec<String> = serde_json::from_value(argv).map_err(|_| {
+                "hwped_bad_request: opsArgv must be an array of strings; send --flag value pairs or use the ops JSON array".to_string()
+            })?;
             if !argv.len().is_multiple_of(2)
                 || argv
                     .iter()
@@ -881,8 +902,8 @@ pub async fn hwped_render(
 #[tauri::command]
 pub async fn hwped_edit(
     document: HwpedDocumentRef,
-    ops_argv: Option<Vec<String>>,
-    ops: Option<Value>,
+    ops_argv: HwpedEditArgument,
+    ops: HwpedEditArgument,
     verify: Option<bool>,
     allow_partial: Option<bool>,
     workspace_root: Option<String>,
@@ -892,8 +913,8 @@ pub async fn hwped_edit(
         PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_edit");
         edit_now(
             document,
-            ops_argv,
-            ops,
+            ops_argv.0,
+            ops.0,
             verify,
             allow_partial,
             workspace_root,
@@ -957,13 +978,13 @@ mod tests {
             path: None,
             data_base64: None,
         };
-        for (argv, ops) in [(None, None), (Some(vec![]), Some(serde_json::json!([])))] {
+        for (argv, ops) in [
+            (None, None),
+            (Some(serde_json::json!([])), Some(serde_json::json!([]))),
+        ] {
             let error = edit_now(document(), argv, ops, None, None, None).unwrap_err();
             assert!(error.starts_with("hwped_bad_request:"), "{error}");
-            assert!(
-                error.contains("opsArgv") && error.contains("ops"),
-                "{error}"
-            );
+            assert!(error.contains("ops and opsArgv"), "{error}");
             assert!(error.contains("exactly one"), "{error}");
         }
         for ops in [
@@ -1253,6 +1274,25 @@ mod phase08_21 {
         path.to_string_lossy().into_owned()
     }
 
+    async fn edit_request(
+        document: HwpedDocumentRef,
+        ops_argv: Option<Vec<String>>,
+        ops: Option<Value>,
+        verify: Option<bool>,
+        allow_partial: Option<bool>,
+        workspace_root: Option<String>,
+    ) -> Result<HwpedEditResponse, String> {
+        super::hwped_edit(
+            document,
+            HwpedEditArgument(ops_argv.map(|argv| serde_json::json!(argv))),
+            HwpedEditArgument(ops),
+            verify,
+            allow_partial,
+            workspace_root,
+        )
+        .await
+    }
+
     fn doc_with_path(path: &str) -> HwpedDocumentRef {
         HwpedDocumentRef {
             name: "문서.hwpx".to_string(),
@@ -1328,7 +1368,7 @@ esac
         boundary_hwped(
             std::env::temp_dir(),
             "hwped_edit",
-            hwped_edit(
+            edit_request(
                 doc_with_path("docs/a.hwpx"),
                 Some(vec!["--replace".to_string(), "x".to_string()]),
                 None,
@@ -1497,12 +1537,23 @@ esac
             serde_json::json!({"document":document}),
             serde_json::json!({"document":document, "ops":[], "opsArgv":[]}),
             serde_json::json!({"document":document, "ops":{"not":"array"}}),
+            serde_json::json!({"document":document, "ops":null}),
+            serde_json::json!({"document":document, "opsArgv":null}),
+            serde_json::json!({"document":document, "ops":null, "opsArgv":null}),
+            serde_json::json!({"document":document, "ops":null, "opsArgv":["--replace","x"]}),
+            serde_json::json!({"document":document, "ops":[], "opsArgv":null}),
+            serde_json::json!({"document":document, "opsArgv":[true]}),
         ] {
+            let both_present = payload.get("ops").is_some() && payload.get("opsArgv").is_some();
             let error = invoke(payload).unwrap_err();
-            assert!(
-                error.as_str().unwrap().starts_with("hwped_bad_request:"),
-                "{error}"
-            );
+            let message = error.as_str().unwrap();
+            assert!(message.starts_with("hwped_bad_request:"), "{error}");
+            if both_present {
+                assert!(
+                    message.contains("ops and opsArgv") && message.contains("exactly one"),
+                    "{error}"
+                );
+            }
         }
     }
 
@@ -1524,7 +1575,7 @@ esac
         ];
         let mut previous_ops_file = None;
         for ops in payloads {
-            let edited = run(hwped_edit(
+            let edited = run(edit_request(
                 doc_with_path("docs/a.hwpx"),
                 None,
                 Some(ops.clone()),
@@ -1607,7 +1658,7 @@ esac
             path: Some(text(&input)),
             data_base64: None,
         };
-        let edited = run(hwped_edit(document(), None, Some(ops), None, None, None)).unwrap();
+        let edited = run(edit_request(document(), None, Some(ops), None, None, None)).unwrap();
         let output = root.join("edited.hwpx");
         std::fs::write(&output, BASE64.decode(edited.data_base64).unwrap()).unwrap();
         let after = read_ir(&output);
@@ -1682,7 +1733,7 @@ esac
         assert_eq!(rendered.pages[0].height, 50);
         assert_eq!(rendered.pages[0].format, "svg");
 
-        let edited = run(hwped_edit(
+        let edited = run(edit_request(
             doc_with_path("docs/a.hwpx"),
             Some(vec!["--replace".to_string(), "본문".to_string()]),
             None,
@@ -1724,7 +1775,7 @@ esac
             "v1"
         );
 
-        assert!(run(hwped_edit(
+        assert!(run(edit_request(
             doc_with_path("docs/a.hwpx"),
             Some(vec!["--replace".to_string()]),
             None,

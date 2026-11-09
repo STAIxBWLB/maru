@@ -35,7 +35,8 @@ and invokes `hwp edit --ops`. Rust checks only the array envelope; the engine
 owns the operation grammar. Run addresses and half-open source WCHAR/UTF-16
 `chars` ranges pass through unchanged. They are never converted to text selectors.
 Legacy clients keep sending `opsArgv` flag/value pairs. Both or neither channel,
-and a nonarray JSON payload, fail with `hwped_bad_request`. Temporary files are
+and a nonarray JSON payload, fail with `hwped_bad_request`. Explicit null keys
+are present, not an alternative spelling of omission, and are rejected. Temporary files are
 removed after output readback, and edits return new bytes without overwriting
 the input document.
 
@@ -44,8 +45,8 @@ version `1.x`. Each returned page receives its matching `layout` by actual
 page number, containing `width_pt`, `height_pt`, `rows` and `truncated`.
 Point coordinates are independent of image DPI. Row order, repeated segment IDs,
 nullable boxes and source-character ranges are preserved. Source ranges are not
-Markdown offsets and must not be used to slice JS text. A missing artifact omits
-`layout` for older engines; a present but malformed or incomplete artifact fails
+Markdown offsets and must not be used to slice JS text. A missing optional artifact omits
+`layout`; a present but malformed or incomplete artifact fails
 with `hwp_parse_failed`, rather than being presented as empty measured geometry.
 
 The Rust channel and capability are the first milestone of [#563](https://github.com/STAIxBWLB/maru/issues/563).
