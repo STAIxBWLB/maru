@@ -33626,8 +33626,8 @@
       "id": "e2-lifecycle-geometry-route-distance-v2-width-aware-column-positive",
       "diagramType": "lifecycle",
       "rule": "geometry-route-distance",
-      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":240},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
-      "inputSha256": "4610d7d0cf4186af956c53a5fc4c217237457d63596b66efd49704ae9aae0121",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":200},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
+      "inputSha256": "6f6a703bb03b289d6fcfc992897a23e3e888f381240263c1d31d0daeeb8bf290",
       "origin": {
         "kind": "synthetic-generated"
       },
@@ -33649,7 +33649,7 @@
         "scope": "schema and nongeometry engineering-profile validity"
       },
       "comparison": {
-        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":240},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":200},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
         "accepted": true,
         "equivalentCodes": [],
         "oracleLayer": "document-profile",
@@ -33658,7 +33658,7 @@
         }
       },
       "geometryComparison": {
-        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":240},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":200},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
         "accepted": true,
         "equivalentCodes": [],
         "layer": "renderer",

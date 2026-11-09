@@ -67,9 +67,9 @@ export function generatedGeometryCases(seedFor) {
   });
   add("lifecycle", "geometry-route-distance", "v2-width-aware-column-positive", (s) => {
     s.schema_version = 2;
-    s.states[0].width = 240;
+    s.states[0].width = 200;
     // Source columns leave a 64px edge gap even when the first column grows.
-    // A fixed-pitch duplicate model incorrectly makes the port span 14px.
+    // A fixed-pitch duplicate model incorrectly makes the port span 16px.
     s.transitions = [{ from: "a", to: "b", fromSide: "right", toSide: "left" }];
   });
   for (const version of [1,2]) add("lifecycle", "geometry-state-column", `band-version-${version}`, (s) => {
