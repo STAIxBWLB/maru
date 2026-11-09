@@ -1530,8 +1530,9 @@ fn open_existing_claim_lock(path: &Path) -> Result<File, String> {
 /// Test-only rendezvous for the blocking claim-lock wait. A test that holds a
 /// claim lock otherwise has no way to know that another caller has actually
 /// reached the wait rather than not having started; a sleep there proves
-/// nothing about the order locks are taken in. Release builds carry none of
-/// this.
+/// nothing about the order locks are taken in. In-process callers use the
+/// channel, a writer in another process uses the marker file. Release builds
+/// carry none of this.
 #[cfg(test)]
 pub(crate) mod claim_lock_wait {
     use std::collections::HashMap;
@@ -1559,6 +1560,20 @@ pub(crate) mod claim_lock_wait {
 
     /// Called inside the wait itself, immediately before the blocking call.
     pub(crate) fn announce(path: &Path) {
+        // A fixture that must know a *separate* process is in the wait cannot
+        // use the channel above, which lives in this process: it names a marker
+        // file through the environment instead, and the child writes it here.
+        if let Some(marker) = std::env::var_os("MARU_CLAIM_LOCK_MARKER") {
+            use std::io::Write;
+            let marker = PathBuf::from(marker);
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&marker)
+            {
+                file.write_all(b"wait\n").ok();
+            }
+        }
         let Some(watchers) = WATCHERS.get() else {
             return;
         };

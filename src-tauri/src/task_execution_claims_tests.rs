@@ -1058,6 +1058,10 @@ fn another_process_write_waits_for_the_claim_lock_and_fences_the_spawn() {
         let held = guard_task_mutation(&f.work, &f.path).unwrap().unwrap();
         let run = format!("run-{kind}");
         let raw = serde_json::to_string(&(f.work.clone(), kind.to_string(), run.clone())).unwrap();
+        // The child is a separate process, so the in-process claim_lock_wait
+        // channel cannot reach it: it writes this marker from inside the wait
+        // instead.
+        let waiting = f.work.join(format!("claim-wait-{run}"));
         let child = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -1065,6 +1069,7 @@ fn another_process_write_waits_for_the_claim_lock_and_fences_the_spawn() {
                 "--nocapture",
             ])
             .env("MARU_TASK_WRITE_FIXTURE", raw)
+            .env("MARU_CLAIM_LOCK_MARKER", &waiting)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -1078,9 +1083,17 @@ fn another_process_write_waits_for_the_claim_lock_and_fences_the_spawn() {
             std::thread::sleep(Duration::from_millis(10));
         }
         fs::write(f.work.join("go"), "go").unwrap();
-        // Holding the claim lock is the whole test: no amount of host load can
-        // make a blocked writer commit, so this window has no false positive.
-        std::thread::sleep(Duration::from_millis(400));
+        // Only the claim-lock wait writes the marker, so this is proof the
+        // writer is past its own guard and is about to block: holding the claim
+        // lock is then the whole test, and no amount of host load can make such
+        // a writer commit.
+        while !waiting.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{kind} writer never reached the claim-lock wait; if it does not take that lock, this is the failure"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(
             !f.work.join(format!("done-{run}")).exists(),
             "{kind} write committed while another owner held the claim lock"
