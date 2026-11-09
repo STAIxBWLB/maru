@@ -96,7 +96,7 @@ describe("verified native engine artifact test adapter", () => {
     expect(result.svgForDom).toContain("한글");
     expect(result.svgForDom).toContain('aria-label="한글 도식"');
     expect(result.svgForDom).toContain('data-kind="artifact"');
-    expect(result.bytes).toEqual(format === "svg" ? new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" data-kind="artifact" aria-label="한글 도식"><text>한글</text></svg>') : new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]));
+    expect(Array.from(result.bytes)).toEqual(Array.from(format === "svg" ? new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" data-kind="artifact" aria-label="한글 도식"><text>한글</text></svg>') : new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])));
   });
 
   it.each(forgedReceiptMutations)("rejects forged %s receipts", async (_name, mutate) => {
@@ -161,7 +161,7 @@ describe("verified native engine artifact test adapter", () => {
       report.diagnostics = [{ code: "render/failure", message: "missing path, rule, and fix" }];
     });
     await expect(exportVerifiedEngineArtifactForTest({ doc, format: "svg", host: malformedDiagnostic }))
-      .rejects.toThrow(/incompatible report/i);
+      .rejects.toThrow(/artifact report has an incompatible shape/i);
   });
 
   it("checks cancellation after hashing and before calling the native host", async () => {
