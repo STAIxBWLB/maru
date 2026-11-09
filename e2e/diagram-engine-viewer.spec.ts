@@ -117,7 +117,6 @@ test.describe("standalone engine diagram viewer", () => {
   });
 
   test("keeps a hostile source label inert and displays the label from the engine SVG", async ({ page }) => {
-    const svg = readFileSync(SVG_FIXTURE, "utf8");
     const source = JSON.parse(readFileSync(SPEC_FIXTURE, "utf8"));
     source.components[0].label = hostileLabel;
     const temp = mkdtempSync(join(tmpdir(), "maru-offline-hostile-spec-"));
