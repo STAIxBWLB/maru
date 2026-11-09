@@ -63,5 +63,18 @@ fn each_family_places_its_swatch_before_text_and_reserves_the_source_slot() {
         let options = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
         let svg = render_svg(&g, &options);
         assert!(svg.ok, "{:?}", svg.diagnostics);
+        let mut invalid = g.clone();
+        invalid.legend.entries[0]
+            .swatch_bounds
+            .as_mut()
+            .unwrap()
+            .width = -1;
+        let rejected = render_svg(&invalid, &options);
+        assert!(!rejected.ok);
+        assert!(rejected.svg.is_none());
+        assert!(rejected
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.is_empty() && !diagnostic.fix.is_empty()));
     }
 }

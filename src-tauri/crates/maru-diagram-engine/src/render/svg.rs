@@ -288,6 +288,11 @@ fn validate(g: &GeometryDocument, o: &SvgOptions) -> Result<(), Diagnostic> {
         .chain(g.containers.iter().map(|c| c.bounds))
         .chain(g.labels.iter().map(|l| l.bounds))
         .chain(std::iter::once(g.legend.bounds))
+        .chain(g.legend.entries.iter().flat_map(|entry| {
+            [Some(entry.bounds), entry.swatch_bounds, entry.text_bounds]
+                .into_iter()
+                .flatten()
+        }))
     {
         if b.width < 0 || b.height < 0 || b.right().is_err() || b.bottom().is_err() {
             return Err(error(
