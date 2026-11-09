@@ -158,8 +158,10 @@ fn check_node_labels(
             continue;
         };
         let source = &items(spec, family.node_collection)[index];
-        let (text_area_left, text_area_right) =
-            super::source_budgets::node_text_area_x(node.bounds);
+        // Font bearings may extend left of the 12px text origin while still
+        // remaining safely inside the node padding. The origin is not a clip.
+        let text_area_left = i64::from(node.bounds.x);
+        let text_area_right = text_area_left + i64::from(node.bounds.width);
         let node_top = i64::from(node.bounds.y);
         let node_bottom = node_top + i64::from(node.bounds.height);
         // The E2 node producer emits fixed-size Noto lines and has no fit or
@@ -212,7 +214,7 @@ fn check_node_labels(
                         font_size,
                         overflow_x as f64 / UNITS,
                         overflow_y as f64 / UNITS,
-                        (text_area_right - text_area_left) as f64 / UNITS
+                        (text_area_right - label_left.max(text_area_left)).max(0) as f64 / UNITS
                     ),
                     format!("shorten the {field} or increase the node width/height so its emitted Noto box fits inside the text area"),
                 );

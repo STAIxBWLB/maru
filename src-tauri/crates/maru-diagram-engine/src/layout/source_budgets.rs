@@ -1,6 +1,6 @@
 //! Source-sized canvas budgets used by renderer-compatibility refusals.
 
-use crate::geometry::{GeometryBox, GeometryDocument, GeometryNode, GeometryPositionSource};
+use crate::geometry::{GeometryDocument, GeometryNode, GeometryPositionSource};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -41,17 +41,6 @@ pub(crate) struct SequenceColumns {
     pub participant_width: i64,
     pub first_center: i64,
     pub pitch: i64,
-}
-
-/// Horizontal text area used by the emitted E2 node labels. `SceneBuilder`
-/// places each text origin 12px inside the node; the text may extend to the
-/// node's right edge. Admission compares the actual Noto box with this
-/// interval, without a renderer character-count estimate or minimum-font scale.
-pub(crate) fn node_text_area_x(bounds: GeometryBox) -> (i64, i64) {
-    let inset = 12 * SCALE;
-    let left = i64::from(bounds.x) + inset;
-    let right = i64::from(bounds.x) + i64::from(bounds.width);
-    (left, right)
 }
 
 pub(crate) fn sequence_columns(
@@ -393,30 +382,6 @@ pub(crate) fn lifecycle_frame(spec: &Value, geometry: &GeometryDocument) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn emitted_node_text_area_uses_geometry_insets_not_source_width_estimates() {
-        let narrow = GeometryBox {
-            x: 10 * SCALE as i32,
-            y: 20 * SCALE as i32,
-            width: 118 * SCALE as i32,
-            height: 60 * SCALE as i32,
-        };
-        assert_eq!(node_text_area_x(narrow), (22 * SCALE, 128 * SCALE));
-        assert_eq!(
-            node_text_area_x(narrow).1 - node_text_area_x(narrow).0,
-            106 * SCALE
-        );
-
-        let wide = GeometryBox {
-            width: 220 * SCALE as i32,
-            ..narrow
-        };
-        assert_eq!(
-            node_text_area_x(wide).1 - node_text_area_x(wide).0,
-            208 * SCALE
-        );
-    }
 
     #[test]
     fn fixed_sequence_columns_keep_renderer_minimums_and_spread_rounding() {

@@ -27,7 +27,7 @@ fn assert_refused_for_emitted_box(report: &maru_diagram_engine::geometry::Geomet
         .iter()
         .find(|label| label.id.as_deref() == Some("node:a:label"))
         .unwrap();
-    let area_left = i64::from(node.bounds.x) + 12 * 64;
+    let area_left = i64::from(node.bounds.x);
     let area_right = i64::from(node.bounds.x) + i64::from(node.bounds.width);
     assert!(
         i64::from(label.bounds.x) + i64::from(label.bounds.width) > area_right,
@@ -57,7 +57,7 @@ fn assert_emitted_box_fits(report: &maru_diagram_engine::geometry::GeometryRepor
         .iter()
         .find(|label| label.id.as_deref() == Some("node:a:label"))
         .unwrap();
-    let area_left = i64::from(node.bounds.x) + 12 * 64;
+    let area_left = i64::from(node.bounds.x);
     let area_right = i64::from(node.bounds.x) + i64::from(node.bounds.width);
     assert!(i64::from(label.bounds.x) >= area_left);
     assert!(i64::from(label.bounds.x) + i64::from(label.bounds.width) <= area_right);
@@ -84,4 +84,25 @@ fn equal_length_latin_glyph_classes_have_distinct_physical_widths() {
     assert_emitted_box_fits(&report(&narrow_i, 118.0));
     assert_refused_for_emitted_box(&report(&wide_w, 118.0));
     assert_emitted_box_fits(&report(&wide_w, 340.0));
+}
+
+#[test]
+fn font_ink_bearings_may_use_node_padding_without_overflowing_the_node() {
+    let report = report("A", 118.0);
+    assert_emitted_box_fits(&report);
+    let geometry = report.geometry.unwrap();
+    let node = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+    let label = geometry
+        .labels
+        .iter()
+        .find(|label| label.id.as_deref() == Some("node:a:label"))
+        .unwrap();
+    assert!(
+        label.bounds.x < node.bounds.x + 12 * 64,
+        "this fixture must exercise ink left of the text origin"
+    );
+    assert!(
+        label.bounds.x >= node.bounds.x,
+        "the ink stays inside the actual node"
+    );
 }
