@@ -1690,7 +1690,8 @@ stroke tokens live once in `render/theme.rs`, for light and dark themes; nodes
 and corresponding legend swatches use the same token. An opaque node mask keeps
 underlaid rails and routes from showing through the translucent kind fill.
 Lifecycle kinds alias the component tokens using the pinned type-class mapping.
-Colors for components are semantic; shadows, gradients, brand marks, icons and
+Component colors are semantic; frame/edge palettes use neutral/emphasis tokens
+while retaining distinct patterns. Shadows, gradients, brand marks, icons and
 animation/focus badges are omitted styling or viewer concerns.
 
 The geometry-only primitive model derives sequence lifelines from participant
@@ -1794,19 +1795,17 @@ SDK. Layout quantities are E2 inputs, not duplicated source placement models.
 
 | Quantity/meaning | Reference value or rule | Pinned source |
 | --- | --- | --- |
-| Component type fill/stroke, light/dark | Seven semantic token pairs; lifecycle aliases retain the same mapping | `sidecars/archify/assets/template.html:175-209,218-250`; `renderers/lifecycle/render-lifecycle.mjs:175-183` |
-| Component/participant/workflow node radius and stroke | 6px / 1.5px; workflow decision/terminal vocabulary absent | `renderers/architecture/render-architecture.mjs:898-901`; `renderers/workflow/workflow-compiler.mjs:4689-4715` |
-| Lifecycle outer/final border and initial marker | Outer radius 7; final inset 3/radius4/stroke1; initial dot radius4.5, incoming arrow/stem | `renderers/lifecycle/render-lifecycle.mjs:781-804,851-865` |
-| Region/security/exception frame | Radius 12/8/8; source patterns 8,4 and 4,4 | `renderers/architecture/render-architecture.mjs:841-845`; workflow `workflow-compiler.mjs:4654-4663`; template `:4695-4697` |
-| Lane/group/phase/stage/segment/activation | Radius 10/9/4/10/10/3; source frames and phase span | workflow `workflow-compiler.mjs:4665-4686`; dataflow `render-dataflow.mjs:79-88,417`; sequence `render-sequence.mjs:389-427` |
-| Arrow marker | 10x7, ref(9,3.5), triangle (0,0),(10,3.5),(0,7) | `renderers/shared/utils.mjs:14-25` |
-| Edge meaning patterns | Return 3,5; security 5,5; dashed 4,4 | sequence `render-sequence.mjs:444-454`; template `:4151-4154` |
-| Lifeline extent/pattern | Bottom-centre projection, page footer65, legend clearance22; stroke0.8, dash3,7; covers message/activation/segment extent | sequence `render-sequence.mjs:76-98,398-406` |
-| Lifecycle classification/bands/rail | Authored final rule, V1 rail2.2 and band0.8/dash3,8, no V1 rail in V2 | lifecycle `render-lifecycle.mjs:271-280,736-756,880-893` |
-| Legend symbols | Node14x9/radius2; line sample max34; initial pseudo-state/final double outline | dataflow `render-dataflow.mjs:497-502`; sequence `render-sequence.mjs:459-477`; lifecycle `render-lifecycle.mjs:851-865` |
-| Label font sizes, baselines and offsets | Supplied E2 metric identity and positioned glyphs; no legacy 600/650 substitution | E2 `layout/mod.rs` text/legend producers; reference labels in architecture `:847-901`, sequence `:413-450`, dataflow `:425-470`, lifecycle `:754-846` |
-
-Paths shortened in the last table are under `sidecars/archify/`.
+| Component type fill/stroke, light/dark | Seven semantic token pairs; lifecycle aliases retain the same mapping | `sidecars/archify/assets/template.html:175-209,218-250`; `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:175-183` |
+| Component/participant/workflow node radius and stroke | 6px / 1.5px; workflow decision/terminal vocabulary absent | `sidecars/archify/renderers/architecture/render-architecture.mjs:898-901`; `sidecars/archify/renderers/workflow/workflow-compiler.mjs:4689-4715` |
+| Lifecycle outer/final border and initial marker | Outer radius 7; final inset 3/radius4/stroke1; initial dot radius4.5, incoming arrow/stem | `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:781-804,851-865` |
+| Region/security/exception frame | Radius 12/8/8; source patterns 8,4 and 4,4 | `sidecars/archify/renderers/architecture/render-architecture.mjs:841-845`; workflow `sidecars/archify/renderers/workflow/workflow-compiler.mjs:4654-4663`; `sidecars/archify/assets/template.html:4695-4697` |
+| Lane/group/phase/stage/segment/activation | Radius 10/9/4/10/10/3; source frames and phase span | workflow `sidecars/archify/renderers/workflow/workflow-compiler.mjs:4665-4686`; dataflow `sidecars/archify/renderers/dataflow/render-dataflow.mjs:79-88,417`; sequence `sidecars/archify/renderers/sequence/render-sequence.mjs:389-427` |
+| Arrow marker | 10x7, ref(9,3.5), triangle (0,0),(10,3.5),(0,7) | `sidecars/archify/renderers/shared/utils.mjs:14-25` |
+| Edge meaning patterns | Return 3,5; security 5,5; dashed 4,4 | sequence `sidecars/archify/renderers/sequence/render-sequence.mjs:444-454`; `sidecars/archify/assets/template.html:4151-4154` |
+| Lifeline extent/pattern | Bottom-centre projection, page footer65, legend clearance22; stroke0.8, dash3,7; covers message/activation/segment extent | sequence `sidecars/archify/renderers/sequence/render-sequence.mjs:76-98,398-406` |
+| Lifecycle classification/bands/rail | Authored final rule, V1 rail2.2 and band0.8/dash3,8, no V1 rail in V2 | lifecycle `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:271-280,736-756,880-893` |
+| Legend symbols | Node14x9/radius2; line sample max34; initial pseudo-state/final double outline | dataflow `sidecars/archify/renderers/dataflow/render-dataflow.mjs:497-502`; sequence `sidecars/archify/renderers/sequence/render-sequence.mjs:459-477`; lifecycle `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:851-865` |
+| Label font sizes, baselines and offsets | Supplied E2 metric identity and positioned glyphs; no legacy 600/650 substitution | E2 `layout/mod.rs` text/legend producers; reference labels in `sidecars/archify/renderers/architecture/render-architecture.mjs:847-901`, `sidecars/archify/renderers/sequence/render-sequence.mjs:413-450`, `sidecars/archify/renderers/dataflow/render-dataflow.mjs:425-470`, `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:754-846` |
 
 ### Reviewed geometry limitation
 
