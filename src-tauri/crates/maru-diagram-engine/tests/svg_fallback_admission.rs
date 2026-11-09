@@ -126,8 +126,22 @@ fn route_style(
     };
     match variant.unwrap_or("default") {
         "emphasis" => (emphasis, "url(#arrow-emphasis)", None),
-        "security" => (arrow, "url(#arrow)", Some("5 5")),
-        "dashed" => (arrow, "url(#arrow)", Some("4 4")),
+        "security" => (
+            match theme {
+                SvgTheme::Light => "#e11d48",
+                SvgTheme::Dark => "#fb7185",
+            },
+            "url(#arrow-security)",
+            Some("5 5"),
+        ),
+        "dashed" => (
+            match theme {
+                SvgTheme::Light => "#7c3aed",
+                SvgTheme::Dark => "#a78bfa",
+            },
+            "url(#arrow-dashed)",
+            Some("4 4"),
+        ),
         "return" => (arrow, "url(#arrow)", Some("3 5")),
         _ => (arrow, "url(#arrow)", None),
     }

@@ -120,3 +120,23 @@ fn label_moved_before_frames_is_rejected() {
     changed.insert_str(at, &group);
     rejected(&changed, &geometry, &options);
 }
+
+#[test]
+fn workflow_phase_mask_after_span_is_required() {
+    let mut spec: Value =
+        serde_json::from_str(include_str!("../testdata/valid-workflow.json")).unwrap();
+    spec["phases"] = json!([{"id":"p","label":"Phase","fromCol":0,"toCol":1}]);
+    let g = layout_json(&json!({"specJson":spec.to_string()}).to_string())
+        .geometry
+        .unwrap();
+    let o = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
+    let result = render_svg(&g, &o);
+    assert!(result.ok, "{:?}", result.diagnostics);
+    let svg = result.svg.unwrap();
+    let marker = "data-kind=\"container\" data-source-id=\"phase:p\"";
+    let (mut moved, mask) = remove_fragment(&svg, marker, true);
+    let span = moved.find("data-kind=\"workflow-phase-span\"").unwrap();
+    let at = moved[..span].rfind('<').unwrap();
+    moved.insert_str(at, &mask);
+    rejected(&moved, &g, &o);
+}

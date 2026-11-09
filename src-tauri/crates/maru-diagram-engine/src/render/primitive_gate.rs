@@ -685,7 +685,7 @@ fn check_paint_order(
         geometry
             .containers
             .iter()
-            .filter(|container| container.kind != "activation")
+            .filter(|container| !matches!(container.kind.as_str(), "activation" | "phase"))
             .map(|container| element_id("container", &container.id)),
     );
     expected.extend(
@@ -703,7 +703,7 @@ fn check_paint_order(
         geometry
             .containers
             .iter()
-            .filter(|container| container.kind == "activation")
+            .filter(|container| matches!(container.kind.as_str(), "activation" | "phase"))
             .map(|container| element_id("container", &container.id)),
     );
     expected.extend(

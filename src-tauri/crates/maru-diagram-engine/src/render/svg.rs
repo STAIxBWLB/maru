@@ -412,7 +412,11 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         write!(s,"<marker id=\"{key}\" markerWidth=\"10\" markerHeight=\"7\" refX=\"9\" refY=\"3.5\" orient=\"auto\" markerUnits=\"strokeWidth\"><polygon points=\"0,0 10,3.5 0,7\" fill=\"{color}\"/></marker>").unwrap();
     }
     s.push_str("</defs>");
-    for c in g.containers.iter().filter(|c| c.kind != "activation") {
+    for c in g
+        .containers
+        .iter()
+        .filter(|c| !matches!(c.kind.as_str(), "activation" | "phase"))
+    {
         let radius = match c.kind.as_str() {
             "region" => 12,
             "lane" | "segment" | "stage" => 10,
@@ -451,28 +455,43 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
     {
         write_primitive(&mut s, p, &t, o);
     }
-    for c in g.containers.iter().filter(|c| c.kind == "activation") {
+    for c in g
+        .containers
+        .iter()
+        .filter(|c| matches!(c.kind.as_str(), "activation" | "phase"))
+    {
         write!(s,"<g id=\"{}\" data-kind=\"container\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("container",&c.id),escaped(&c.id),escaped(&caption(g,&c.id))).unwrap();
-        let token = o
-            .theme
-            .kind(activation_kind(semantics, &c.id)?)
-            .expect("component token");
-        rect(
-            &mut s,
-            "activation-mask",
-            c.bounds,
-            3 * 64,
-            (t.mask, "none", "0"),
-            None,
-        );
-        rect(
-            &mut s,
-            "container-box",
-            c.bounds,
-            3 * 64,
-            (token.fill, token.stroke, "1"),
-            super::primitives::frame_dash(&c.kind, semantics, &c.id),
-        );
+        if c.kind == "phase" {
+            rect(
+                &mut s,
+                "container-box",
+                c.bounds,
+                4 * 64,
+                (t.mask, "none", "0"),
+                None,
+            );
+        } else {
+            let token = o
+                .theme
+                .kind(activation_kind(semantics, &c.id)?)
+                .expect("component token");
+            rect(
+                &mut s,
+                "activation-mask",
+                c.bounds,
+                3 * 64,
+                (t.mask, "none", "0"),
+                None,
+            );
+            rect(
+                &mut s,
+                "container-box",
+                c.bounds,
+                3 * 64,
+                (token.fill, token.stroke, "1"),
+                super::primitives::frame_dash(&c.kind, semantics, &c.id),
+            );
+        }
         s.push_str("</g>");
     }
     // Routes precede opaque node boxes so endpoint stubs cannot paint through them.
