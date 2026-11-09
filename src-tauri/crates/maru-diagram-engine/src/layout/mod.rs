@@ -65,6 +65,157 @@ fn inflate(b: GeometryBox, p: Coord) -> Result<GeometryBox, Diagnostic> {
     )
 }
 
+/// Space a standalone SVG keeps between the emitted header band (title plus
+/// optional subtitle) and the first content band below it.
+pub(crate) const HEADER_GAP: Coord = 12 * 64;
+
+fn is_header_label(label: &GeometryLabel) -> bool {
+    matches!(label.id.as_deref(), Some("title") | Some("subtitle"))
+}
+
+/// The bottom of the emitted header band, plus the gap that follows it, or 0
+/// when the document carries no header text.
+///
+/// The pinned renderers keep the title (`<h1>`) and the subtitle
+/// (`<p class="subtitle">`) in the page template outside the SVG
+/// (`sidecars/archify/renderers/shared/utils.mjs`, `applyTemplate`), so their
+/// own coordinates start at the band top: workflow `laneY: 52`
+/// (`workflow-compiler.mjs:107`), dataflow stage `y=46`
+/// (`render-dataflow.mjs`). A Maru SVG carries the header inside its own
+/// coordinate space, so the source drawing moves below the measured band. The
+/// band is measured from the pinned font metrics rather than assumed, because
+/// CJK and multi-line labels are taller than the text length suggests. maru#561.
+pub(crate) fn header_floor(geometry: &GeometryDocument) -> Result<Coord, Diagnostic> {
+    let mut floor: Option<Coord> = None;
+    for label in geometry
+        .labels
+        .iter()
+        .filter(|label| is_header_label(label))
+    {
+        let bottom = label.bounds.bottom().map_err(arithmetic)?;
+        floor = Some(floor.map_or(bottom, |current: Coord| current.max(bottom)));
+    }
+    match floor {
+        Some(bottom) if bottom > 0 => add(bottom, HEADER_GAP),
+        _ => Ok(0),
+    }
+}
+
+/// How far the completed source drawing moves down to clear the emitted header
+/// band. The band is added above the drawing, so nothing the source drew in its
+/// own top margin ends up under the header. Families that do not reserve it
+/// return 0.
+pub(crate) fn header_shift(geometry: &GeometryDocument, kind: &str) -> Result<Coord, Diagnostic> {
+    match kind {
+        "workflow" | "dataflow" => header_floor(geometry),
+        _ => Ok(0),
+    }
+}
+
+/// Move the finished source drawing below the emitted header band.
+///
+/// Placement, routing and every geometry rule run on the pinned source drawing,
+/// where authored coordinates, pins and the source budgets all agree. The header
+/// band is Maru page chrome above that drawing, so the shift happens once here:
+/// a rigid translation of every source-derived box, route and glyph that leaves
+/// the header labels in place and grows the page by the same amount. Translation
+/// preserves every source-relative predicate (corridor, spacing, clearance,
+/// label fit), which is why the recorded corpus verdicts do not move.
+fn translate_drawing(geometry: &mut GeometryDocument, shift: Coord) -> Result<(), Diagnostic> {
+    if shift == 0 {
+        return Ok(());
+    }
+    for node in &mut geometry.nodes {
+        node.bounds = node
+            .bounds
+            .checked_translate(0, shift)
+            .map_err(arithmetic)?;
+    }
+    for frame in &mut geometry.containers {
+        frame.bounds = frame
+            .bounds
+            .checked_translate(0, shift)
+            .map_err(arithmetic)?;
+    }
+    for route in &mut geometry.routes {
+        for point in &mut route.points {
+            *point = point.checked_translate(0, shift).map_err(arithmetic)?;
+        }
+    }
+    for label in geometry
+        .labels
+        .iter_mut()
+        .filter(|label| !is_header_label(label))
+    {
+        label.bounds = label
+            .bounds
+            .checked_translate(0, shift)
+            .map_err(arithmetic)?;
+        for glyph in &mut label.glyphs {
+            glyph.position = glyph
+                .position
+                .checked_translate(0, shift)
+                .map_err(arithmetic)?;
+            glyph.ink = glyph.ink.checked_translate(0, shift).map_err(arithmetic)?;
+        }
+    }
+    let legend = &mut geometry.legend;
+    legend.bounds = legend
+        .bounds
+        .checked_translate(0, shift)
+        .map_err(arithmetic)?;
+    if let Some(bounds) = legend.content_bounds {
+        legend.content_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
+    }
+    legend.title_y = match legend.title_y {
+        Some(y) => Some(add(y, shift)?),
+        None => None,
+    };
+    for entry in &mut legend.entries {
+        entry.bounds = entry
+            .bounds
+            .checked_translate(0, shift)
+            .map_err(arithmetic)?;
+        if let Some(bounds) = entry.swatch_bounds {
+            entry.swatch_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
+        }
+        if let Some(bounds) = entry.text_bounds {
+            entry.text_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
+        }
+    }
+    // The page keeps its origin and grows by the band, which also covers the
+    // header the drawing moved away from.
+    geometry.page.bounds.height = add(geometry.page.bounds.height, shift)?;
+    if let Some(line) = geometry.lifecycle_rail.as_mut() {
+        line.from = line.from.checked_translate(0, shift).map_err(arithmetic)?;
+        line.to = line.to.checked_translate(0, shift).map_err(arithmetic)?;
+    }
+    Ok(())
+}
+
+/// Label-box assertions the family tests make about the header band.
+#[cfg(test)]
+pub(crate) mod header_support {
+    use crate::geometry::{GeometryBox, GeometryDocument, GeometryLabel};
+
+    pub(crate) fn label<'a>(geometry: &'a GeometryDocument, id: &str) -> &'a GeometryLabel {
+        geometry
+            .labels
+            .iter()
+            .find(|label| label.id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("missing label {id}"))
+    }
+
+    /// True when the two measured label boxes share any area: the one property a
+    /// header band has to guarantee for every caption below it.
+    pub(crate) fn overlap(left: GeometryBox, right: GeometryBox) -> bool {
+        left.x < right.x + right.width
+            && right.x < left.x + left.width
+            && left.y < right.y + right.height
+            && right.y < left.y + left.height
+    }
+}
+
 /// Preserve authored names and reserve them all before naming anonymous routes.
 /// Source ordinals, not these display IDs, own failure and diagnostic state.
 pub(crate) fn allocate_route_ids<'a>(
@@ -183,6 +334,18 @@ impl SceneBuilder {
     }
     pub(crate) fn pinned_position(&self, id: &str) -> Option<GeometryPoint> {
         self.pins.get(id).map(|p| p.position)
+    }
+    /// Move every pin into another coordinate space. Placement and the geometry
+    /// rules work in the source drawing's space, and the finished drawing moves
+    /// below the header band as one rigid step (maru#561).
+    pub(crate) fn shift_pins(&mut self, dy: Coord) -> Result<(), Diagnostic> {
+        if dy == 0 {
+            return Ok(());
+        }
+        for pin in self.pins.values_mut() {
+            pin.position.y = add(pin.position.y, dy)?;
+        }
+        Ok(())
     }
     pub(crate) fn node_bounds(&self, id: &str) -> Option<GeometryBox> {
         self.routing_nodes.get(id).copied().or_else(|| {
@@ -1619,6 +1782,12 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
                 12 * 64,
             )?;
         }
+        // The header band is emitted first, into this scene's own coordinates.
+        // A pin is a canvas position, so it is converted into the source
+        // drawing's space here: the drawing moves below the band later, which
+        // returns every pin to the exact position the user set (maru#561).
+        let band = header_shift(&scene.document, &kind)?;
+        scene.shift_pins(band.checked_neg().unwrap_or(0))?;
         match kind.as_str() {
             "architecture" => architecture::place(&typed(&spec)?, &mut scene)?,
             "workflow" => workflow::place(&typed(&spec)?, &mut scene)?,
@@ -1636,7 +1805,7 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
         scene.finish(&meta)
     })();
     match result {
-        Ok((geometry, mut diagnostics, mut ok)) => {
+        Ok((mut geometry, mut diagnostics, mut ok)) => {
             let mut geometry_errors = constraints::geometry_diagnostics(&spec, &geometry);
             if kind == "sequence" {
                 geometry_errors.extend(constraints_sequence::sequence_geometry_diagnostics(
@@ -1661,6 +1830,20 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
                 ok = false;
             }
             diagnostics.extend(geometry_errors);
+            // Every source-relative rule above has now judged the pinned source
+            // drawing. The emitted header band is page chrome above it, so the
+            // finished drawing moves below the band in one rigid step (maru#561).
+            let shift = header_shift(&geometry, &kind);
+            let translated = shift.and_then(|shift| translate_drawing(&mut geometry, shift));
+            if let Err(diagnostic) = translated {
+                return GeometryReport {
+                    api_version: 1,
+                    ok: false,
+                    geometry: None,
+                    diagnostics: vec![diagnostic],
+                    receipt: validity.receipt,
+                };
+            }
             let mut receipt = validity.receipt;
             receipt.engine_output_sha256 = Some(crate::spec_hash(
                 &serde_json::to_string(&geometry).expect("integer geometry serializes"),
@@ -2164,6 +2347,9 @@ mod tests {
             };
             let base = layout(input);
             assert!(base.ok);
+            // The direct builder path below has no emitted header, so authored
+            // coordinates stay in the source drawing's space (maru#561).
+            let band = header_shift(base.geometry.as_ref().unwrap(), &kind).unwrap();
             let node = base
                 .geometry
                 .unwrap()
@@ -2185,7 +2371,7 @@ mod tests {
             } else {
                 blocked["via"] = serde_json::json!([[
                     f64::from(node.bounds.x) / 64.0 + 10.0,
-                    f64::from(node.bounds.y) / 64.0 + 10.0
+                    f64::from(node.bounds.y - band) / 64.0 + 10.0
                 ]]);
                 None
             };
@@ -2278,9 +2464,22 @@ mod tests {
             let source = preset_audit_spec(kind);
             let baseline = layout(&source.to_string());
             assert!(baseline.ok);
+            // Authored channels are source-drawing coordinates, and the emitted
+            // scene sits below the header band: convert the scene-derived
+            // expectations back into that space (maru#561).
+            let band = header_shift(baseline.geometry.as_ref().unwrap(), kind).unwrap();
             let nodes = baseline.geometry.unwrap().nodes;
-            let a = nodes.iter().find(|n| n.id == "a").unwrap().bounds;
-            let b = nodes.iter().find(|n| n.id == "b").unwrap().bounds;
+            let place = |id: &str| {
+                nodes
+                    .iter()
+                    .find(|n| n.id == id)
+                    .unwrap()
+                    .bounds
+                    .checked_translate(0, -band)
+                    .unwrap()
+            };
+            let a = place("a");
+            let b = place("b");
             let gapx = fixed::checked_midpoint(a.right().unwrap(), b.x).unwrap();
             let gapy = fixed::checked_midpoint(a.bottom().unwrap(), b.y).unwrap();
             let collection = match kind {
@@ -2357,7 +2556,7 @@ mod tests {
                                 route.points.iter().any(|p| if override_axis.0 == 'x' {
                                     p.x == override_axis.1
                                 } else {
-                                    p.y == override_axis.1
+                                    p.y == override_axis.1 + band
                                 }),
                                 "{kind}/{preset} ignored override"
                             );

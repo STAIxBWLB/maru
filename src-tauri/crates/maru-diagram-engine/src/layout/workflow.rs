@@ -274,6 +274,8 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
 
 #[cfg(test)]
 mod tests {
+    use crate::layout::header_support::{label, overlap};
+
     fn layout(spec: &str) -> crate::geometry::GeometryReport {
         let request = serde_json::json!({ "specJson": spec });
         crate::layout::layout_json(&request.to_string())
@@ -317,12 +319,117 @@ mod tests {
         let nodes = report.geometry.unwrap().nodes;
         let first = nodes.iter().find(|node| node.id == "first").unwrap();
         let fourth = nodes.iter().find(|node| node.id == "fourth").unwrap();
-        assert_eq!((first.bounds.x, first.bounds.y), (42 * 64, 93 * 64));
+        // The lane stack keeps the pinned geometry and the emitted header band
+        // moves it down: a one-line 24px title ends at 52, plus the 12px gap, is
+        // a 64px band above the pinned y=93 first row (maru#561).
+        assert_eq!((first.bounds.x, first.bounds.y), (42 * 64, 157 * 64));
         assert_eq!(
             (first.bounds.width, first.bounds.height),
             (92 * 64, 52 * 64)
         );
-        assert_eq!((fourth.bounds.x, fourth.bounds.y), (384 * 64, 93 * 64));
+        assert_eq!((fourth.bounds.x, fourth.bounds.y), (384 * 64, 157 * 64));
+    }
+
+    fn header_spec(subtitle: &str) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 2,
+            "diagram_type": "workflow",
+            "meta": {
+                "title": "마루 workflow 렌더",
+                "subtitle": subtitle,
+                "output": "workflow.html",
+            },
+            "lanes": [{ "id": "main", "label": "메인 흐름" }],
+            "phases": [{ "id": "build", "label": "빌드 단계", "fromCol": 0, "toCol": 1 }],
+            "groups": [{ "id": "review", "label": "검토", "lane": "main", "fromCol": 2, "toCol": 2 }],
+            "nodes": [
+                { "id": "a", "lane": "main", "col": 0, "type": "frontend", "label": "입력" },
+                { "id": "b", "lane": "main", "col": 2, "type": "backend", "label": "출력" },
+            ],
+            "edges": [{ "id": "ab", "from": "a", "to": "b", "role": "main" }],
+            "mainPath": ["a", "b"],
+        })
+    }
+
+    fn assert_header_clear(spec: &serde_json::Value) -> crate::geometry::GeometryDocument {
+        let report = layout(&spec.to_string());
+        assert!(report.ok, "{:?}", report.diagnostics);
+        let geometry = report.geometry.unwrap();
+        let header = [label(&geometry, "title"), label(&geometry, "subtitle")];
+        for caption in [
+            "container:lane:main:label",
+            "container:phase:build:label",
+            "container:group:review:label",
+        ] {
+            let caption = label(&geometry, caption);
+            for header in header {
+                assert!(
+                    !overlap(header.bounds, caption.bounds),
+                    "header {:?} overlaps caption {:?}: {:?} vs {:?}",
+                    header.text,
+                    caption.text,
+                    header.bounds,
+                    caption.bounds,
+                );
+            }
+        }
+        for header in header {
+            assert!(
+                header.bounds.y >= 0 && header.bounds.height > 0,
+                "header {:?} has no measured box",
+                header.text
+            );
+        }
+        geometry
+    }
+
+    /// maru#561: the title and subtitle are emitted into the SVG's own
+    /// coordinates, so the producer reserves their measured band before the
+    /// lane stack. A CJK subtitle and a multi-line subtitle must both clear the
+    /// lane, phase and group captions, and nothing in the SVG writer moves.
+    #[test]
+    fn header_subtitle_clears_lane_phase_and_group_captions() {
+        let geometry = assert_header_clear(&header_spec("결정적 SVG · 접근성 검증"));
+        // The lane caption sits below the measured header, not over it.
+        let title = label(&geometry, "title").bounds;
+        let subtitle = label(&geometry, "subtitle").bounds;
+        let lane = label(&geometry, "container:lane:main:label").bounds;
+        assert!(lane.y >= subtitle.y + subtitle.height, "{lane:?}");
+        assert!(lane.y >= title.y + title.height, "{lane:?}");
+        // Light and dark both render the same reserved geometry.
+        #[cfg(feature = "render-svg")]
+        for theme in [
+            crate::render::SvgTheme::Light,
+            crate::render::SvgTheme::Dark,
+        ] {
+            let options = crate::render::SvgOptions::from_spec(
+                &header_spec("결정적 SVG · 접근성 검증"),
+                theme,
+            )
+            .unwrap();
+            let report = crate::render::render_svg(&geometry, &options);
+            assert!(report.ok, "{theme:?}: {:?}", report.diagnostics);
+            let svg = report.svg.unwrap();
+            assert!(
+                svg.contains("결정적 SVG · 접근성 검증"),
+                "{theme:?} lost the subtitle"
+            );
+            assert!(svg.contains("메인 흐름"), "{theme:?} lost the lane caption");
+        }
+    }
+
+    #[test]
+    fn a_multi_line_header_reserves_every_line() {
+        let single = assert_header_clear(&header_spec("결정적 SVG · 접근성 검증"));
+        let multi = assert_header_clear(&header_spec("결정적 SVG\n접근성 검증\n다국어 라벨"));
+        let lane = |geometry: &crate::geometry::GeometryDocument| {
+            label(geometry, "container:lane:main:label").bounds.y
+        };
+        assert!(
+            lane(&multi) > lane(&single),
+            "a three-line subtitle must reserve more band than a one-line subtitle"
+        );
+        assert!(label(&multi, "subtitle").bounds.height > label(&single, "subtitle").bounds.height);
     }
 
     #[test]
@@ -346,7 +453,7 @@ mod tests {
                 "pins": [{
                     "targetId": "pinned",
                     "targetKind": "node",
-                    "position": {"x": 120 * 64, "y": 100 * 64}
+                    "position": {"x": 120 * 64, "y": 152 * 64}
                 }]
             }
         });
@@ -363,6 +470,9 @@ mod tests {
             node.position_source,
             crate::geometry::GeometryPositionSource::PlannedPin
         );
-        assert_eq!((node.bounds.x, node.bounds.y), (120 * 64, 100 * 64));
+        // A pin is a canvas position: it is converted into the source drawing's
+        // space for the lane rules and returned exactly after the header band
+        // moves the drawing (maru#561).
+        assert_eq!((node.bounds.x, node.bounds.y), (120 * 64, 152 * 64));
     }
 }

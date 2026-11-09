@@ -138,6 +138,7 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::header_support::{label, overlap};
 
     fn spec() -> serde_json::Value {
         serde_json::json!({
@@ -230,7 +231,9 @@ mod tests {
     fn dataflow_layout_uses_rows_offsets_and_actual_stage_bounds() {
         let geometry = layout(&spec(), None);
         let node = geometry.nodes.iter().find(|node| node.id == "b").unwrap();
-        assert_eq!(node.bounds.y, px(254.0).unwrap());
+        // Row 1 (128 + 114) plus the 12px offset, plus the 64px header band the
+        // drawing moves below (maru#561).
+        assert_eq!(node.bounds.y, px(318.0).unwrap());
         let stage = geometry
             .containers
             .iter()
@@ -301,7 +304,10 @@ mod tests {
     fn default_nodes_and_stage_frames_use_documented_geometry() {
         let geometry = layout(&spec(), None);
         let first = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
-        assert_eq!((first.bounds.x, first.bounds.y), (44 * 64, 128 * 64));
+        // The drawing moves below the emitted header band: a one-line 24px title
+        // ends at 52, plus the 12px gap, is a 64px band above the pinned y=46
+        // stage top and the y=128 first row (maru#561).
+        assert_eq!((first.bounds.x, first.bounds.y), (44 * 64, 192 * 64));
         assert_eq!(
             (first.bounds.width, first.bounds.height),
             (112 * 64, 58 * 64)
@@ -311,11 +317,86 @@ mod tests {
             .iter()
             .find(|container| container.id == "stage:0")
             .unwrap();
-        assert_eq!((stage.bounds.x, stage.bounds.y), (16 * 64, 46 * 64));
+        assert_eq!((stage.bounds.x, stage.bounds.y), (16 * 64, 110 * 64));
         assert_eq!(
             (stage.bounds.width, stage.bounds.height),
             (168 * 64, 600 * 64)
         );
+        // The pinned stage body keeps its internal spacing exactly.
+        assert_eq!(first.bounds.y - stage.bounds.y, (128 - 46) * 64);
+    }
+
+    fn header_spec(subtitle: &str) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "diagram_type": "dataflow",
+            "meta": {
+                "title": "마루 dataflow 렌더",
+                "subtitle": subtitle,
+                "output": "dataflow.html",
+            },
+            "stages": [{ "label": "입력 단계" }, { "label": "출력 단계" }],
+            "nodes": [
+                { "id": "a", "type": "frontend", "label": "수집", "stage": 0, "row": 0 },
+                { "id": "b", "type": "backend", "label": "전달", "stage": 1, "row": 0 },
+            ],
+            "flows": [{ "id": "ab", "from": "a", "to": "b", "label": "데이터" }],
+        })
+    }
+
+    /// maru#561: the stage band's caption is the first thing under the emitted
+    /// header, so the band and the node rows translate by the measured band
+    /// together. A CJK subtitle and a multi-line subtitle both clear the
+    /// caption, the pinned caption-to-row spacing survives, and the SVG writer
+    /// is not involved.
+    #[test]
+    fn header_subtitle_clears_stage_captions() {
+        for subtitle in ["결정적 SVG · 접근성 검증", "결정적 SVG\n접근성 검증"] {
+            let source = header_spec(subtitle);
+            let geometry = layout(&source, None);
+            let header = [label(&geometry, "title"), label(&geometry, "subtitle")];
+            for id in ["container:stage:0:label", "container:stage:1:label"] {
+                let caption = label(&geometry, id);
+                for header in header {
+                    assert!(
+                        !overlap(header.bounds, caption.bounds),
+                        "header {:?} overlaps the stage caption {:?}: {:?} vs {:?}",
+                        header.text,
+                        caption.text,
+                        header.bounds,
+                        caption.bounds,
+                    );
+                }
+            }
+            // The band and the first row move by the same measured amount, so a
+            // top-channel corridor between the caption and the row survives.
+            let stage = geometry
+                .containers
+                .iter()
+                .find(|container| container.id == "stage:0")
+                .unwrap();
+            let first = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+            assert!(stage.bounds.y >= 46 * 64, "{subtitle:?}");
+            assert_eq!(
+                first.bounds.y - stage.bounds.y,
+                (128 - 46) * 64,
+                "{subtitle:?}: the stage body must keep its internal spacing"
+            );
+            #[cfg(feature = "render-svg")]
+            for theme in [
+                crate::render::SvgTheme::Light,
+                crate::render::SvgTheme::Dark,
+            ] {
+                let options = crate::render::SvgOptions::from_spec(&source, theme).unwrap();
+                let report = crate::render::render_svg(&geometry, &options);
+                assert!(report.ok, "{theme:?}: {:?}", report.diagnostics);
+                let svg = report.svg.unwrap();
+                assert!(
+                    svg.contains("입력 단계"),
+                    "{theme:?} lost the stage caption"
+                );
+            }
+        }
     }
 
     #[test]
