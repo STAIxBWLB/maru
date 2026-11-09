@@ -40,7 +40,7 @@ The SVG feature carries two derived glyph-zero SVG paths in
 `src-tauri/crates/maru-diagram-engine/src/render/notdef.json`, generated from the
 same pinned Regular/Bold OTFs as the E2 metric tables. These paths remain under
 OFL-1.1; full licence and copyright are retained in `src/metrics/data/LICENSE.OFL`
-and `NOTICE.md` within the engine crate. The source SHA-256 and units-per-em are
+and `src/metrics/data/NOTICE.md` within the engine crate. The source SHA-256 and units-per-em are
 recorded alongside each path. Original font binaries are remote test fixtures,
 not embedded in the validator or SVG. Supported scalars reference the Noto font
 family with shaping disabled; unsupported scalars draw the actual glyph zero.

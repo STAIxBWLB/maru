@@ -1703,7 +1703,8 @@ style rules or external URLs.
 
 S1 uses the explicit `Noto Sans CJK KR, sans-serif` family stack for mapped
 scalars, with kerning, ligatures and contextual/localized shaping disabled.
-Each scalar is emitted at the E2 glyph position, so the browser does not invent
+`text-rendering="geometricPrecision"` disables pixel-grid fitting that otherwise
+changed measured scalar advances. Each scalar is emitted at the E2 glyph position, so the browser does not invent
 wrapping or spacing. Original font binaries and per-document subsets are not
 embedded: a subsetter would introduce another binary-processing dependency and
 output-size surface before S2 measures rasterization. The optional renderer
@@ -1777,3 +1778,10 @@ Source-bound Rust/WASM and screenshot results are recorded with the PR.
 Hosted four-platform agreement, native-suite coverage and final-head CI remain
 separate from a remote Linux reproduction; screenshots are reviewed visually,
 not compared byte-for-byte with Archify.
+
+Visual review of the ten S1 captures found an existing E2 header-placement gap:
+workflow and dataflow subtitle frames overlap lane/stage captions before SVG
+serialization. [#561](https://github.com/STAIxBWLB/maru/issues/561) tracks it as
+an E4 blocker. The captures retain that geometry; the SVG writer does not hide
+labels or add a type-specific placement override. This is a reviewed projection,
+not acceptance of those overlapping source layouts for the product switch.
