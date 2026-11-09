@@ -122,7 +122,7 @@ fn assert_variants_and_gate(
             .descendants()
             .find(|node| {
                 node.attribute("data-kind") == Some("route")
-                    && node.attribute("data-source-id") == Some(id)
+                    && node.attribute("data-source-id") == Some(format!("id:{id}").as_str())
             })
             .unwrap_or_else(|| panic!("missing rendered transition {id}"));
         assert_eq!(route.attribute("data-route-variant"), Some(variant));

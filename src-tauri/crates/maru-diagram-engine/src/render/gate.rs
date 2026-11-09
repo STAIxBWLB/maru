@@ -281,7 +281,7 @@ fn reference_route_variant(
     if c.family != "lifecycle" {
         return route.variant.clone().unwrap_or_else(|| "default".into());
     }
-    let Some(explicit) = c.lifecycle_variants.get(key) else {
+    let Some(explicit) = c.lifecycle_variants.get(route.id.as_deref().unwrap_or(key)) else {
         errors.push(diagnostic(
             "route-source",
             "/options/semantics/lifecycleVariants",

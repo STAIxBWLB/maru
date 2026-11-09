@@ -90,6 +90,16 @@ pub(crate) fn colors(
         None
     };
 
+    let tag_color = if label.id.as_deref() == Some(format!("node:{}:tag", label.target_id).as_str())
+    {
+        semantics
+            .nodes
+            .get(&label.target_id)
+            .and_then(|node| options.theme.kind(&node.kind))
+            .map(|kind| kind.stroke)
+    } else {
+        None
+    };
     let source_line_lengths: Vec<usize> = label
         .text
         .split('\n')
@@ -114,7 +124,7 @@ pub(crate) fn colors(
                 }
                 return tokens.muted;
             }
-            frame_color.unwrap_or_else(|| {
+            tag_color.or(frame_color).unwrap_or_else(|| {
                 if label.font.weight == 700 {
                     tokens.text
                 } else {
@@ -251,6 +261,13 @@ pub(crate) fn reference_colors(
         _ => None,
     };
 
+    let expected_tag = label
+        .id
+        .as_ref()
+        .filter(|id| id.as_str() == format!("node:{}:tag", label.target_id))
+        .and_then(|_| semantics.nodes.get(label.target_id.as_str()))
+        .and_then(|node| options.theme.kind(node.kind.as_str()))
+        .map(|token| token.stroke);
     let source_line_sizes: Vec<usize> = label
         .text
         .split('\n')
@@ -270,7 +287,7 @@ pub(crate) fn reference_colors(
         let color = match route_primary {
             Some((primary_lines, color)) if current_line < primary_lines => color,
             Some(_) => tokens.muted,
-            None => frame_color.unwrap_or_else(|| {
+            None => expected_tag.or(frame_color).unwrap_or_else(|| {
                 if label.font.weight == 700 {
                     tokens.text
                 } else {

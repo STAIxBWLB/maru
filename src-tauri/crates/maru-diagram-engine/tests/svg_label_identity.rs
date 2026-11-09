@@ -44,3 +44,34 @@ fn semantic_label_colors_follow_namespaced_roles_not_colliding_source_ids() {
         }
     }
 }
+
+#[test]
+fn node_tag_uses_its_kind_token_in_both_themes() {
+    let mut spec: Value =
+        serde_json::from_str(include_str!("../testdata/valid-architecture.json")).unwrap();
+    spec["components"][0]["tag"] = json!("Public");
+    let g = layout_json(&json!({"specJson":spec.to_string()}).to_string())
+        .geometry
+        .unwrap();
+    for (theme, stroke) in [(SvgTheme::Light, "#0891b2"), (SvgTheme::Dark, "#22d3ee")] {
+        let options = SvgOptions::from_spec(&spec, theme).unwrap();
+        let rendered = render_svg(&g, &options);
+        assert!(rendered.ok, "{:?}", rendered.diagnostics);
+        let svg = rendered.svg.unwrap();
+        let doc = roxmltree::Document::parse(&svg).unwrap();
+        let tag = doc
+            .descendants()
+            .find(|node| {
+                node.attribute("data-kind") == Some("label")
+                    && node.attribute("data-source-id") == Some("id:node:a:tag")
+            })
+            .unwrap();
+        assert_eq!(
+            tag.descendants()
+                .find(|node| node.attribute("data-kind") == Some("glyph"))
+                .unwrap()
+                .attribute("fill"),
+            Some(stroke)
+        );
+    }
+}

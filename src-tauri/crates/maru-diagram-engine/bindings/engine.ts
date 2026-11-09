@@ -100,7 +100,7 @@ export type GeometryNode = {
  */
 finalState?: boolean | null,
 /**
- * Authored phase ordinal, separate from pin-adjusted x/y coordinates.
+ * Authored main-lane column, for both versions, independent of pinned positions.
  */
 phaseOrder?: number | null, id: string, bounds: GeometryBox,
 /**
@@ -119,7 +119,11 @@ export type GeometryLabel = { id?: string | null, targetId: string, text: string
 
 export type GeometryLegendEntry = { swatchBounds?: GeometryBox | null, textBounds?: GeometryBox | null, key: string, label: string, bounds: GeometryBox, };
 
-export type GeometryLegend = { titleY?: number | null, bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
+export type GeometryLegend = {
+/**
+ * Invisible extent of every legend label and painted primitive.
+ */
+contentBounds?: GeometryBox | null, titleY?: number | null, bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
 
 export type GeometryPage = { bounds: GeometryBox, };
 
