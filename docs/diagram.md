@@ -1719,9 +1719,16 @@ paths from the same immutable OTFs as E2; `--check` detects drift. OFL notices
 remain beside the metric data and are linked in `THIRD_PARTY_NOTICES.md`.
 
 The screenshot harness loads both pinned original OTFs outside the SVG, verifies
-their hashes and font load, then checks physical SVG label bounds. This proves
+their hashes and font load, then checks browser-parsed selection frames, glyph origins, font size/weight
+and scalar advances within 1/64px. This proves
 that captured CJK output used the intended fonts; it does not bundle those
-fonts into the SVG or prove native-app rendering.
+fonts into the SVG or prove native-app rendering. Browser group `getBBox()` is
+recorded separately: [SVG 2 §8.10](https://www.w3.org/TR/SVG2/coords.html#BoundingBoxes)
+defines text bounds using full glyph cells, while E2 label frames combine
+advance/line metrics and outward-rounded ink. Equating these quantities produced
+a measured 5/64px top-cell difference even with exact glyph origins. The harness
+does not widen a shared-quantity tolerance or turn that difference into a new
+geometry admission rule.
 
 ### Artifact gate and determinism
 

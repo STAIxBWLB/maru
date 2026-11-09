@@ -50,14 +50,28 @@ try{
     document.body.innerHTML=first.svg;
     const root=document.querySelector("svg");if(root.getAttribute("role")!=="img"||root.querySelector("title").textContent!==options.title)throw new Error("SVG accessibility root differs from source metadata");
     const labels=Array.from(root.querySelectorAll('[data-kind="label"]'));
-    const visibleBounds=labels.map(l=>{if(!(l instanceof SVGGraphicsElement))throw new Error("Label is not an SVG graphics element");const b=l.getBBox();return {x:b.x,y:b.y,width:b.width,height:b.height};});
-    // The glyph positions are checked structurally by Rust. Browser bounds are
-    // additional physical-font proof, not a replacement for that artifact gate.
+    const typographicBounds=labels.map(l=>{if(!(l instanceof SVGGraphicsElement))throw new Error("Label is not an SVG graphics element");const b=l.getBBox();return {x:b.x,y:b.y,width:b.width,height:b.height};});
+    // SVG2 8.10 text bounds use full glyph cells, not the E2 ink/line box.
+    // Compare quantities with the same definition, without widening 1/64px.
     for(let i=0;i<labels.length;i++){
-      const expected=scene.geometry.labels[i].bounds,actual=visibleBounds[i];
-      if(["x","y","width","height"].some(k=>Math.abs(actual[k]-expected[k]/64)>1/64+0.001))throw new Error(`Actual SVG text bounds differ at label ${i}: ${JSON.stringify({actual,expected})}`);
+      const expected=scene.geometry.labels[i];
+      const frame=labels[i].querySelector('[data-kind="label-bounds"]');
+      if(!(frame instanceof SVGGraphicsElement))throw new Error("SVG label selection frame is missing");
+      const actual=frame.getBBox();
+      if(["x","y","width","height"].some(k=>Math.abs(actual[k]-expected.bounds[k]/64)>1/64))throw new Error(`SVG frame differs at label ${i}`);
+      const painted=Array.from(labels[i].querySelectorAll('[data-kind="glyph"]'));
+      const glyphs=expected.glyphs.filter(g=>!g.ignored&&!g.replaced);
+      if(painted.length!==glyphs.length)throw new Error("SVG painted glyph count differs from geometry");
+      for(let j=0;j<painted.length;j++){
+        const element=painted[j],glyph=glyphs[j];
+        if(!(element instanceof SVGTextContentElement))throw new Error("Visible glyph is not SVG text");
+        const style=getComputedStyle(element);
+        if(Math.abs(parseFloat(style.fontSize)-expected.fontSize/64)>1/64||Number(style.fontWeight)!==expected.font.weight)throw new Error("Browser text font differs from geometry");
+        if(Math.abs(Number(element.getAttribute("x"))-glyph.position.x/64)>1/64||Math.abs(Number(element.getAttribute("y"))-glyph.position.y/64)>1/64)throw new Error("Browser glyph origin differs from geometry");
+        if(Math.abs(element.getComputedTextLength()-glyph.advance/64)>1/64)throw new Error(`Pinned-font scalar advance differs at label ${i}, glyph ${j}`);
+      }
     }
-    return {svg:first.svg,nodes:scene.geometry.nodes.length,routes:scene.geometry.routes.length,labels:labels.length,width:scene.geometry.page.bounds.width/64,height:scene.geometry.page.bounds.height/64,fontLoaded:true};
+    return {svg:first.svg,nodes:scene.geometry.nodes.length,routes:scene.geometry.routes.length,labels:labels.length,width:scene.geometry.page.bounds.width/64,height:scene.geometry.page.bounds.height/64,fontLoaded:true,physicalScalarAdvancesChecked:true,typographicBounds};
    },{spec,theme});
    await page.setViewportSize({width:Math.ceil(captured.width),height:Math.ceil(captured.height)});
    const stem=`${type}-${theme}`;writeFileSync(join(output,`${stem}.svg`),captured.svg);await page.screenshot({path:join(output,`${stem}.png`),fullPage:true});

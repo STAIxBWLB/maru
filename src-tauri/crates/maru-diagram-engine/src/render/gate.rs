@@ -8,13 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
 fn diagnostic(rule: &str, path: &str, cause: impl Into<String>, fix: &str) -> Diagnostic {
-    Diagnostic {
-        code: format!("document/svg-artifact-{rule}"),
-        path: path.to_owned(),
-        rule: format!("geometry-v1/svg-artifact-{rule}"),
-        message: cause.into(),
-        fix: fix.to_owned(),
-    }
+    super::error(&format!("artifact-{rule}"), path, cause, fix)
 }
 
 fn attr<'a, 'input>(node: Node<'a, 'input>, name: &str) -> Option<&'a str> {
