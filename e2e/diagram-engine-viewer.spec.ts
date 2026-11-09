@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { expect, test } from "@playwright/test";
 
 const S1_ARCHITECTURE_SVG_SHA256 = "3317383217e8f59e8099685cdf53926a7de5e31f201b7c04b4bfa2e5313f5f";
-const SVG_FIXTURE = new URL("../src/lib/diagram/viewer/__fixtures__/architecture-light.svg", import.meta.url);
+const SVG_FIXTURE = resolve("src/lib/diagram/viewer/__fixtures__/architecture-light.svg");
 const hostileLabel = "</script><script>globalThis.__offlineViewerPwned=1</script><img src=x onerror=alert(1)>";
 
 function matchingSpec(): string {
@@ -45,7 +45,7 @@ test.describe("standalone engine diagram viewer", () => {
     writeFileSync(specPath, matchingSpec(), "utf8");
     const buildOutput = execFileSync(process.execPath, [
       join(process.cwd(), "scripts/build-diagram-viewer.mjs"),
-      fileURLToPath(SVG_FIXTURE),
+      SVG_FIXTURE,
       specPath,
       filePath,
     ], { encoding: "utf8" });
