@@ -11,6 +11,7 @@ const SVG_FIXTURE = new URL("../src/lib/diagram/viewer/__fixtures__/architecture
 const hostileLabel = "</script><script>globalThis.__offlineViewerPwned=1</script><img src=x onerror=alert(1)>";
 
 function matchingSpec(): string {
+  // Mirrors the screenshot fixture's architecture seed and its CJK label edits.
   return JSON.stringify({
     schema_version: 1,
     diagram_type: "architecture",

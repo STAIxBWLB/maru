@@ -1,6 +1,6 @@
+// @vitest-environment jsdom
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import {
   createOfflineViewerHtml,
@@ -12,6 +12,8 @@ const REAL_S1_SVG_SHA256 = "3317383217e8f59e8099685cdf53926a7de5e31f201b7c04b4bf
 const realSvg = readFileSync(new URL("./__fixtures__/architecture-light.svg", import.meta.url), "utf8");
 
 function sourceSpec(label = "입력"): string {
+  // Reproduces seedFor("architecture") plus the title, subtitle and CJK labels
+  // applied by scripts/diagram-engine-e3-screenshots.mjs.
   return JSON.stringify({
     schema_version: 1,
     diagram_type: "architecture",
@@ -43,8 +45,7 @@ describe("offline engine viewer HTML", () => {
       specJson: sourceSpec(hostileLabel),
       title: `Viewer <img src=x onerror="alert(2)">`,
     });
-    const dom = new JSDOM(html);
-    const { document } = dom.window;
+    const document = new DOMParser().parseFromString(html, "text/html");
     const source = document.getElementById("offline-viewer-source");
     expect(source?.getAttribute("type")).toBe("application/json");
     expect(JSON.parse(source?.textContent ?? "{}").components[0].label).toBe(hostileLabel);
@@ -52,7 +53,6 @@ describe("offline engine viewer HTML", () => {
     expect(document.querySelectorAll("script")).toHaveLength(2);
     expect(document.querySelectorAll("img")).toHaveLength(0);
     expect(html).not.toContain("</script><script>globalThis.__viewerPwned");
-    dom.window.close();
   });
 
   it("allows only the exact inline runtime and stylesheet hashes under a no-network CSP", () => {
