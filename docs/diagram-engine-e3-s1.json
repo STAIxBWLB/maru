@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "stage": "E3 S1 deterministic SVG semantic projection and structural artifact gates",
-  "sourceCommit": "6c23155e2439a2e1eaa8cc3f0632fd2fd77285a8",
-  "sdkTree": "eda362a737eb2a706b5a0c5a539a03cbc0210786",
+  "sourceCommit": "b38f728579bcda1517c48fdcb32af612cb167729",
+  "sdkTree": "d92b0e6294212e68bee1a0b9e5f394b643385012",
   "sourceScope": "committed implementation; subsequent documentation/evidence-only changes keep the SDK tree identical",
   "checks": {
     "sdkUnit": 195,
-    "sdkIntegrations": 25,
+    "sdkIntegrations": 42,
     "clippy": "all targets geometry,typegen,geometry-corpus,font-tools -D warnings passed",
     "format": "passed",
     "bindings": "Rust generated and drift check passed",
@@ -37,20 +37,16 @@
       "eslint": "applicable files passed",
       "focusedVitest": 18
     },
-    "structuralScan": {
-      "existingAlgorithmRegressions": 0,
-      "lexicalWarnings": [
-        {
-          "symbols": "elements | scene_node",
-          "normalizedTokens": 22
-        },
-        {
-          "symbols": "layout_json_wasm | render_scene_svg_wasm",
-          "normalizedTokens": 21
-        }
-      ],
-      "scope": "small protocol/iterator adapters; reported without suppressions or metric-driven abstraction"
-    }
+    "systematicAudit": "Pinned defaults and independent derivations enumerated in docs/diagram.md; producer degenerate projection and artifact mutations tested",
+    "reviewRegressions": [
+      "E1 leading family swatch slot and baseline offsets",
+      "E2 PI/comment/declaration/DTD/CDATA/unexpected text rejection",
+      "E3 family/version/emphasis width and explicit override",
+      "E4 single main phase nonzero reference rail",
+      "literal CSS-like source text stays text",
+      "full root paint order and mask-before-body",
+      "negative explicit legend box refuses with cause/fix"
+    ]
   },
   "agreement": {
     "scope": "one remote Linux native/WASM reproduction; hosted 4-report acceptance pending",
@@ -59,8 +55,8 @@
     "themesPerScene": 2,
     "renderedRejectedScenes": 185,
     "bytesIdentical": true,
-    "reportSha256": "693036a0869787bb00ec0bf32e73484a232bd7038461dbb3db189092153d7ed9",
-    "reportBytes": 342166,
+    "reportSha256": "591bccc25522621c69e7bc37cae562a1d7c016330b4463b8c5993ac04c5889d8",
+    "reportBytes": 342262,
     "work": {
       "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
       "nodes": 1000,
@@ -75,15 +71,15 @@
   },
   "payload": {
     "scope": "actual emitted ES graph; validation entry plus static imports, separately lazy geometry metrics and IPC transport; assets inlined; gzip level9 per file",
-    "buildMs": 36141.86447,
-    "testHarnessBuildMs": 524.4128179999971,
+    "buildMs": 36371.819847,
+    "testHarnessBuildMs": 519.8111419999987,
     "platform": "linux",
     "arch": "x64",
     "sizes": [
       {
         "name": "engine-e0.js",
         "bytes": 1307013,
-        "gzipBytes": 324218,
+        "gzipBytes": 324219,
         "path": "validation"
       },
       {
@@ -93,17 +89,17 @@
         "path": "lazy-transport"
       },
       {
-        "name": "engineGeometry-C2dOh7Gp.js",
-        "bytes": 5183305,
-        "gzipBytes": 1669245,
+        "name": "engineGeometry-C2mWlGwU.js",
+        "bytes": 5187629,
+        "gzipBytes": 1670889,
         "path": "lazy-geometry-metrics"
       }
     ],
-    "gzipBytes": 324218,
-    "validationGzipBytes": 324218,
-    "lazyGeometryGzipBytes": 1669245,
+    "gzipBytes": 324219,
+    "validationGzipBytes": 324219,
+    "lazyGeometryGzipBytes": 1670889,
     "lazyTransportGzipBytes": 122,
-    "totalGzipBytes": 1993585
+    "totalGzipBytes": 1995230
   },
   "fontChoice": {
     "knownScalars": "Noto Sans CJK KR family stack, per-glyph origins, geometricPrecision, shaping disabled",
@@ -121,7 +117,21 @@
     "lifeHashesDeliberatelyUpdated": true,
     "geometryAdmissionRulesChanged": false,
     "workflowShapes": "rect rx6; decision/terminal N/A in current accepted schema, no inference or expansion",
-    "componentColors": "per-kind light/dark node and legend tokens verified by artifact gate"
+    "componentColors": "per-kind light/dark node and legend tokens verified by artifact gate",
+    "additiveGeometryFields": {
+      "document": [
+        "lifecycleRail"
+      ],
+      "legend": [
+        "titleY"
+      ],
+      "legendEntry": [
+        "swatchBounds",
+        "textBounds"
+      ]
+    },
+    "legend": "leading source-family slot, explicit paint/text/footprint bounds; native Noto text model, catalog order and 22px row/item gaps; hashes deliberately refreshed",
+    "independentGate": "Expected widths/dashes, primitive coordinates and full paint order are independent from writer derivation"
   },
   "screenshots": {
     "scope": "actual Rust/WASM SVG, pinned source fonts loaded in isolated Chromium, not a native app or Archify pixel comparison",
@@ -131,7 +141,7 @@
         "theme": "light",
         "nodes": 2,
         "routes": 1,
-        "labels": 7,
+        "labels": 8,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -144,15 +154,21 @@
             "height": 18
           },
           {
-            "x": 32,
+            "x": 177,
             "y": 172,
             "width": 48.34375,
             "height": 18
           },
           {
-            "x": 112.328125,
+            "x": 62,
             "y": 172,
             "width": 49.09375,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 152,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -180,9 +196,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "93d041f92b5c10e1a819f80c64608bfcc6a555bdd88fca58c77613db8b1f641b",
-        "pngSha256": "34c5824d11a05b7245dffb1c748b3b416d228b72c80d42652a36dbfc5d27516a",
-        "attachment": "https://github.com/user-attachments/assets/8bb3df51-864d-4f4b-a130-291bdaf6a4f4",
+        "svgSha256": "d91c0e75a344ef693b2460fce1641d6c9a59d0df5ee2e0760bc5c1d7c0e4e5a6",
+        "pngSha256": "98ff51cab53bd104d981ad79f727d4ec643fe02b118d913aa0f0461725dda3ad",
+        "attachment": "https://github.com/user-attachments/assets/637aeaab-3c71-4325-8f59-36fd8e1eacaa",
         "reviewed": true
       },
       {
@@ -190,7 +206,7 @@
         "theme": "dark",
         "nodes": 2,
         "routes": 1,
-        "labels": 7,
+        "labels": 8,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -203,15 +219,21 @@
             "height": 18
           },
           {
-            "x": 32,
+            "x": 177,
             "y": 172,
             "width": 48.34375,
             "height": 18
           },
           {
-            "x": 112.328125,
+            "x": 62,
             "y": 172,
             "width": 49.09375,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 152,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -239,9 +261,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "c646e533bfc340024f2d667b029543d8205aacafb0575fd26ea621e5cc8d7076",
-        "pngSha256": "3a5292a399df18e2fd0514ec3777794d36d81e530e95ab744d6bf3d165da53e1",
-        "attachment": "https://github.com/user-attachments/assets/b7a7a25a-4a74-49c9-9675-39e7c1c32ca4",
+        "svgSha256": "6b5fc552b10b97fd8510011d160b83d35e1a2d1a71846632452d7b498a0afcc9",
+        "pngSha256": "b6a9f24771574111e06203cac6cca46fca3dc30801c0185f8a43458b558482a5",
+        "attachment": "https://github.com/user-attachments/assets/85b2d8d0-56be-448e-b429-148ecebd3f55",
         "reviewed": true
       },
       {
@@ -249,7 +271,7 @@
         "theme": "light",
         "nodes": 3,
         "routes": 2,
-        "labels": 8,
+        "labels": 9,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -262,15 +284,21 @@
             "height": 19.5
           },
           {
-            "x": 32,
+            "x": 177,
             "y": 188,
             "width": 48.34375,
             "height": 18
           },
           {
-            "x": 112.328125,
+            "x": 62,
             "y": 188,
             "width": 49.09375,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 168,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -304,9 +332,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "022c89bd36762384cd25cd53e66614f524f14bbdb9b87bbc5af74965fa172da7",
-        "pngSha256": "515b8cde5313f90fb2508bc9b3b97ef69dbd343f7349e25b20d75daab944c0fa",
-        "attachment": "https://github.com/user-attachments/assets/fcb80bc9-0cee-4f74-8e35-1d6821abb3bc",
+        "svgSha256": "0b2ae0e179d6e461aa510ea5f6d141c9888cd85fbebf45216cb8ccaec2e00867",
+        "pngSha256": "509bbf63d8286416757b854a709feb4d2cb86899f95acdc4b7381b790d0d1b08",
+        "attachment": "https://github.com/user-attachments/assets/80cbb7bd-6401-4e16-b748-6b43934dbb5f",
         "reviewed": true
       },
       {
@@ -314,7 +342,7 @@
         "theme": "dark",
         "nodes": 3,
         "routes": 2,
-        "labels": 8,
+        "labels": 9,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -327,15 +355,21 @@
             "height": 19.5
           },
           {
-            "x": 32,
+            "x": 177,
             "y": 188,
             "width": 48.34375,
             "height": 18
           },
           {
-            "x": 112.328125,
+            "x": 62,
             "y": 188,
             "width": 49.09375,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 168,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -369,9 +403,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "9b1187ff1da8551d720d54d422169599143f79af709c0f2117583cc2613b26c9",
-        "pngSha256": "e0d8da22cf4244a9875fa6c44f96a22f384f9c8ec71c590b9209cf7325add2fd",
-        "attachment": "https://github.com/user-attachments/assets/93384c71-af9e-44c5-b93b-100008e90c82",
+        "svgSha256": "20ddc538bce74269537f9def090d5b428c758790d5f5f7ac22fd8d7b0ce9c376",
+        "pngSha256": "da57e67395d60b697392b31267a767ac7cd7f46ad13e9bbfc682cd294eeb89fc",
+        "attachment": "https://github.com/user-attachments/assets/f027f9e6-162b-4dee-99d8-39386d37a87b",
         "reviewed": true
       },
       {
@@ -379,7 +413,7 @@
         "theme": "light",
         "nodes": 2,
         "routes": 2,
-        "labels": 9,
+        "labels": 10,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -404,16 +438,22 @@
             "height": 18
           },
           {
-            "x": 120.390625,
+            "x": 172,
             "y": 332,
             "width": 26.65625,
             "height": 12.28125
           },
           {
-            "x": 32,
+            "x": 83,
             "y": 332,
             "width": 23.515625,
             "height": 12.28125
+          },
+          {
+            "x": 40,
+            "y": 307.359375,
+            "width": 43.46875,
+            "height": 18
           },
           {
             "x": 31,
@@ -440,9 +480,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "f732d02bbafe8d432d7c41880e2a6d0d4b18da51867b03fb31b56c8f619a86ea",
-        "pngSha256": "4ba2c3848889eb833fea03e324cf5014797568afb8d5c5118d2a2e7a400b15b3",
-        "attachment": "https://github.com/user-attachments/assets/c4f83794-aa0b-497a-b13a-a260161c885b",
+        "svgSha256": "671218c9397bb39cafd4ff7fab0c40f4cbc0194f89bf442594176b9745aad37d",
+        "pngSha256": "0964868fc3077fc63965816fe8831a611cafbc7fc2e434a4ef715e2bdd322fe6",
+        "attachment": "https://github.com/user-attachments/assets/13e0a8b1-2487-460c-bba2-789e76b179e7",
         "reviewed": true
       },
       {
@@ -450,7 +490,7 @@
         "theme": "dark",
         "nodes": 2,
         "routes": 2,
-        "labels": 9,
+        "labels": 10,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -475,16 +515,22 @@
             "height": 18
           },
           {
-            "x": 120.390625,
+            "x": 172,
             "y": 332,
             "width": 26.65625,
             "height": 12.28125
           },
           {
-            "x": 32,
+            "x": 83,
             "y": 332,
             "width": 23.515625,
             "height": 12.28125
+          },
+          {
+            "x": 40,
+            "y": 307.359375,
+            "width": 43.46875,
+            "height": 18
           },
           {
             "x": 31,
@@ -511,9 +557,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "153416679f610de4d5996d8b408786f1501b83756c5f062012e1446bf728fa76",
-        "pngSha256": "0f51a9e718b4c8cff56160701167679d9a3af40560ecd2461e03e617f7193230",
-        "attachment": "https://github.com/user-attachments/assets/21a84fc0-a32f-4a7a-af29-6eadfab6c525",
+        "svgSha256": "0dd3b5207fdd4ae59b33ae5bc6225c26ab4b4926d15e815c7b244855b1134e37",
+        "pngSha256": "acfd8b1d4b56b7939e378d1b6ec83f36fa39ee3b6f219a2018ff06d73a138f62",
+        "attachment": "https://github.com/user-attachments/assets/cb29d4a6-bc57-4841-b46a-934f4b4a5267",
         "reviewed": true
       },
       {
@@ -521,7 +567,7 @@
         "theme": "light",
         "nodes": 3,
         "routes": 2,
-        "labels": 13,
+        "labels": 14,
         "width": 920,
         "height": 752,
         "fontLoaded": true,
@@ -558,21 +604,27 @@
             "height": 18
           },
           {
-            "x": 32,
+            "x": 83,
             "y": 678,
             "width": 41.203125,
             "height": 18
           },
           {
-            "x": 105.1875,
+            "x": 169,
             "y": 678,
             "width": 52.265625,
             "height": 18
           },
           {
-            "x": 189.09375,
+            "x": 307,
             "y": 678,
             "width": 40.4375,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 658,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -606,9 +658,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "99f5c670446ee6a420e4a2fd271ae1e2cda2b9864c080d4a4f7366d8f2657603",
-        "pngSha256": "4566cd2380bebccf4b28de01671a541fb7fd89187f3b6e3b48be856d777b3573",
-        "attachment": "https://github.com/user-attachments/assets/f0d4ec60-27b6-4510-a1cc-cbc6ead96a7b",
+        "svgSha256": "c6f19c999c9e32c948974abd8efbb291e78803ea08c874bd6d11966ab903d029",
+        "pngSha256": "9e9cd3e3c8306d7a69a0cbbeb0e6724f1ebff638c706b52af0c056e201beef81",
+        "attachment": "https://github.com/user-attachments/assets/896cf2b3-6b0d-4d00-95b6-c05253beb047",
         "reviewed": true
       },
       {
@@ -616,7 +668,7 @@
         "theme": "dark",
         "nodes": 3,
         "routes": 2,
-        "labels": 13,
+        "labels": 14,
         "width": 920,
         "height": 752,
         "fontLoaded": true,
@@ -653,21 +705,27 @@
             "height": 18
           },
           {
-            "x": 32,
+            "x": 83,
             "y": 678,
             "width": 41.203125,
             "height": 18
           },
           {
-            "x": 105.1875,
+            "x": 169,
             "y": 678,
             "width": 52.265625,
             "height": 18
           },
           {
-            "x": 189.09375,
+            "x": 307,
             "y": 678,
             "width": 40.4375,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 658,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -701,9 +759,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "6ed26931dc4a6a10e73175f547ee7c41a07dac2821155ccd2a1b3f93a11bd139",
-        "pngSha256": "b67802aa4171bf61d6306acf53dc4411867b8a453228cbfb78e82ed6c5205220",
-        "attachment": "https://github.com/user-attachments/assets/9f5ac6b3-3ba5-4122-9bda-96f44885385c",
+        "svgSha256": "8e5e52baaecaab6b159847fa29679f0f7fe44840757752a75119a9d3edc059fb",
+        "pngSha256": "5d0050597decdf5604506e87bbb55d2dd86e7db70c0ecf1ab3d9ea1cf5e02f25",
+        "attachment": "https://github.com/user-attachments/assets/0009c597-38b7-469b-8447-f0e36a717ca6",
         "reviewed": true
       },
       {
@@ -711,7 +769,7 @@
         "theme": "light",
         "nodes": 3,
         "routes": 2,
-        "labels": 12,
+        "labels": 13,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -736,27 +794,33 @@
             "height": 18
           },
           {
-            "x": 32,
+            "x": 166,
             "y": 244,
             "width": 33.953125,
             "height": 18
           },
           {
-            "x": 238.6875,
+            "x": 376,
             "y": 244,
             "width": 24.703125,
             "height": 18
           },
           {
-            "x": 97.59375,
+            "x": 74,
             "y": 244,
             "width": 26.546875,
             "height": 18
           },
           {
-            "x": 155.671875,
+            "x": 265,
             "y": 244,
             "width": 43.40625,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 224,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -790,9 +854,9 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "23d1771070cbcc07f8492aabdc4116f933e1c1febdfea166b6a71a7153c88ef3",
-        "pngSha256": "e27e9aec58b8e8a7c2c40aa0884ae4db3b454e82d7001a4d1bd7e141959dbd65",
-        "attachment": "https://github.com/user-attachments/assets/e57b4462-66ce-440b-bbc5-fff6daffd182",
+        "svgSha256": "a59f4d0d10bab5083b7933d596542a5eba53ed1e8debf3ee3d1c45c645b5ee70",
+        "pngSha256": "aa35af80252467433a5f5154d75dd1df0559f68c6ad5c6c07ad40922a99c1ba8",
+        "attachment": "https://github.com/user-attachments/assets/6b5ed6a9-4414-471f-9746-e0e1985e448b",
         "reviewed": true
       },
       {
@@ -800,7 +864,7 @@
         "theme": "dark",
         "nodes": 3,
         "routes": 2,
-        "labels": 12,
+        "labels": 13,
         "width": 920,
         "height": 640,
         "fontLoaded": true,
@@ -825,27 +889,33 @@
             "height": 18
           },
           {
-            "x": 32,
+            "x": 166,
             "y": 244,
             "width": 33.953125,
             "height": 18
           },
           {
-            "x": 238.6875,
+            "x": 376,
             "y": 244,
             "width": 24.703125,
             "height": 18
           },
           {
-            "x": 97.59375,
+            "x": 74,
             "y": 244,
             "width": 26.546875,
             "height": 18
           },
           {
-            "x": 155.671875,
+            "x": 265,
             "y": 244,
             "width": 43.40625,
+            "height": 18
+          },
+          {
+            "x": 40,
+            "y": 224,
+            "width": 43.46875,
             "height": 18
           },
           {
@@ -879,15 +949,20 @@
             "height": 36.15625
           }
         ],
-        "svgSha256": "c96ce632881e4e255a8d531fa8b600a17b8c79ca398eb7c9e12b8ba37d70ea5c",
-        "pngSha256": "37824227fe2a64bb6fb02cc3411d5e25d179d9df1c75be8d71f35d7653399d70",
-        "attachment": "https://github.com/user-attachments/assets/585a3eaa-5850-4ff4-b61b-bed1e9060039",
+        "svgSha256": "16b75164cd14298d847b12662e8fe1e36342895a661d681a44938b8a76cb91c9",
+        "pngSha256": "adb201aa5108404436253f185c01e88e37610b96b5c633dad3b239a309c40d63",
+        "attachment": "https://github.com/user-attachments/assets/a8560ca0-c6d9-4e96-8b86-a4972f8217e7",
         "reviewed": true
       }
     ],
-    "captureSourceCommit": "84ac33cd1730f0d3f041d72ad0b956cb4fbf34ed",
-    "svgContentRevalidatedAt": "6c23155e2439a2e1eaa8cc3f0632fd2fd77285a8",
-    "revalidation": "all 10 final-candidate SVG hashes equal the reviewed uploaded captures; final browser frame/origin/advance gates passed again"
+    "captureSourceCommit": "b38f728579bcda1517c48fdcb32af612cb167729",
+    "svgContentRevalidatedAt": "b38f728579bcda1517c48fdcb32af612cb167729",
+    "revalidation": "Fresh captures at the verified SDK tree; all 10 PNGs inspected; SVG hashes matched the remote capture receipt",
+    "attachmentReadback": {
+      "count": 10,
+      "allLoadedAtOriginalDimensions": true,
+      "allMatchNewUploadUrls": true
+    }
   },
   "visualReview": {
     "scope": "reviewed 10 actual engine SVG captures, not Archify pixel comparison or native app proof",
