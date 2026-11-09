@@ -124,7 +124,7 @@ pub(crate) fn colors(
                 }
                 return tokens.muted;
             }
-            tag_color.or(frame_color).unwrap_or_else(|| {
+            tag_color.or(frame_color).unwrap_or({
                 if label.font.weight == 700 {
                     tokens.text
                 } else {
@@ -287,7 +287,7 @@ pub(crate) fn reference_colors(
         let color = match route_primary {
             Some((primary_lines, color)) if current_line < primary_lines => color,
             Some(_) => tokens.muted,
-            None => expected_tag.or(frame_color).unwrap_or_else(|| {
+            None => expected_tag.or(frame_color).unwrap_or({
                 if label.font.weight == 700 {
                     tokens.text
                 } else {
