@@ -6,6 +6,7 @@ mod constraints_frames;
 mod constraints_routes;
 pub(crate) use constraints_routes::is_route_quality_notice;
 mod constraints_sequence;
+mod constraints_workflow_page;
 mod dataflow;
 pub mod fixed;
 mod lifecycle;
@@ -1206,9 +1207,20 @@ impl SceneBuilder {
             extent = extent.union(rect(p.x, p.y, 0, 0)?).map_err(arithmetic)?;
         }
         let legend_y = add(extent.bottom().map_err(arithmetic)?, 32 * 64)?;
-        let mut x = 32 * 64;
+        let row_start_x = 32 * 64;
+        let sequence_legend = self.kind == "sequence";
+        let legend_font_size = if sequence_legend { 8 * 64 } else { 12 * 64 };
+        let row_width_limit = if sequence_legend {
+            px(meta.view_box.unwrap_or([920.0, 640.0])[0])? - 80 * 64
+        } else {
+            i32::MAX
+        };
+        let mut x = row_start_x;
+        let mut row_y = legend_y;
         let mut entries = vec![];
-        let mut legend_height = 0;
+        let mut row_height = if sequence_legend { 22 * 64 } else { 0 };
+        let mut total_row_height = 0;
+        let mut max_row_right = row_start_x;
         let mut kinds: BTreeSet<String> = if self.kind == "sequence" || self.kind == "dataflow" {
             let mut entries: BTreeSet<_> = self
                 .connections
@@ -1261,22 +1273,47 @@ impl SceneBuilder {
                 continue;
             }
             let label = entry.and_then(|e| e.label.as_deref()).unwrap_or(&kind);
-            let (w, h) = self.text_size(label, 400, 12 * 64)?;
+            let (w, h) = self.text_size(label, 400, legend_font_size)?;
+            let item_width = add(w, if sequence_legend { 43 * 64 } else { 32 * 64 })?;
+            let gap = if sequence_legend && x != row_start_x {
+                22 * 64
+            } else {
+                0
+            };
+            if sequence_legend
+                && x != row_start_x
+                && add(x - row_start_x, add(gap, item_width)?)? > row_width_limit
+            {
+                total_row_height = add(total_row_height, row_height)?;
+                row_y = add(row_y, row_height)?;
+                row_height = 22 * 64;
+                x = row_start_x;
+            }
+            let gap = if sequence_legend && x != row_start_x {
+                gap
+            } else {
+                0
+            };
+            x = add(x, gap)?;
             let b = self.label(
                 &format!("legend:{kind}"),
                 "legend",
                 label,
-                GeometryPoint { x, y: legend_y },
+                GeometryPoint { x, y: row_y },
                 400,
-                12 * 64,
+                legend_font_size,
             )?;
             entries.push(GeometryLegendEntry {
                 key: kind.clone(),
                 label: label.into(),
                 bounds: b,
             });
-            x = add(x, add(w, 32 * 64)?)?;
-            legend_height = legend_height.max(h);
+            row_height = row_height.max(h);
+            x = add(x, item_width)?;
+            max_row_right = max_row_right.max(x);
+        }
+        if !entries.is_empty() {
+            total_row_height = add(total_row_height, row_height)?;
         }
         self.document.legend = GeometryLegend {
             bounds: if entries.is_empty() {
@@ -1285,8 +1322,8 @@ impl SceneBuilder {
                 rect(
                     16 * 64,
                     add(legend_y, -8 * 64)?,
-                    x.max(32 * 64),
-                    add(legend_height, 16 * 64)?,
+                    max_row_right.max(32 * 64),
+                    add(total_row_height, 16 * 64)?,
                 )?
             },
             entries,

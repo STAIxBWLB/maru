@@ -8,6 +8,7 @@ import { stripTypeScriptTypes } from "node:module";
 import { geometryComparisonFor } from "./diagram-engine-e2-comparison.mjs";
 import { generatedBoundaryCases, REFUSAL_AUDIT } from "./diagram-engine-e2-boundaries.mjs";
 import { generatedRouteBoundaryCases, ROUTE_REFUSAL_AUDIT } from "./diagram-engine-e2-route-boundaries.mjs";
+import { generatedPageCases } from "./diagram-engine-e2-page-cases.mjs";
 import { generatedGeometryCases } from "./diagram-engine-e2-cases.mjs";
 import { generatedGateCases, GATE_ADJUST_AUDIT } from "./diagram-engine-e2-gates.mjs";
 import { generatedCases, comparisonFor, seedFor, TYPES, RULE_TABLE, INTENDED_DIFFERENCES } from "./diagram-engine-e1-cases.mjs";
@@ -144,7 +145,7 @@ export async function collectCases(publicCandidates = [], retainedPublicCases = 
     Object.assign(cases.at(-1), { expectedEngineCode: generated.expectedEngineCode,
       ...(generated.currentScope ? { currentScope: generated.currentScope } : {}) });
   }
-  for (const generated of [...generatedGeometryCases(seedFor),...generatedBoundaryCases(seedFor),...generatedRouteBoundaryCases(seedFor),...generatedGateCases(seedFor)]) {
+  for (const generated of [...generatedGeometryCases(seedFor),...generatedBoundaryCases(seedFor),...generatedRouteBoundaryCases(seedFor),...generatedGateCases(seedFor),...generatedPageCases(seedFor)]) {
     add(generated.id, generated.diagramType, generated.rule, generated.spec, { kind: "synthetic-generated" });
     const boundary = "boundary" in generated ? generated.boundary : undefined;
     Object.assign(cases.at(-1), { geometryRule: generated.geometryRule, ...(boundary ? {boundary} : {}) });

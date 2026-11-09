@@ -47,25 +47,24 @@ pub(crate) fn sequence_geometry_diagnostics(
         .and_then(Value::as_array)
         .and_then(|page| Some((coord(page.first()?)?, coord(page.get(1)?)?)));
     let width = authored.map_or(920 * UNIT, |page| page.0);
-    let participants = items(spec, "participants");
-    let count = i64::try_from(participants.len()).unwrap_or(i64::MAX / (244 * UNIT));
-    if count > 0 {
-        // Fixed columns reserve a header half-width at the final center. In
-        // spread mode the end margin and minimum pitch remain hard budgets.
-        let spread = meta.get("column_fit").and_then(Value::as_str) == Some("spread");
-        let columns = super::source_budgets::sequence_columns(width, participants.len(), spread);
-        let (header_width, first_center, pitch) = (
-            columns.participant_width,
-            columns.first_center,
-            columns.pitch,
-        );
-        let required = first_center
-            .saturating_add((count - 1).saturating_mul(pitch))
-            .saturating_add(header_width / 2 + 40 * UNIT);
-        if required > width {
-            push(&mut diagnostics, "geometry-participant-canvas-width", "/participants".into(),
-                format!("participant columns require {} pixels but the sequence page is {} pixels wide", (required + UNIT - 1) / UNIT, width / UNIT),
-                "increase meta.viewBox[0], use fewer participants, or review the column_fit setting");
+    let placed_headers: std::collections::BTreeMap<_, _> = geometry
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.bounds))
+        .collect();
+    for (index, participant) in items(spec, "participants").iter().enumerate() {
+        let Some(id) = participant.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(bounds) = placed_headers.get(id) else {
+            continue;
+        };
+        let left = i64::from(bounds.x);
+        let required_right = left + i64::from(bounds.width) + 40 * UNIT;
+        if left < 0 || required_right > width {
+            push(&mut diagnostics, "geometry-participant-canvas-width", format!("/participants/{index}"),
+                format!("placed participant {id:?} starts at {:.3}px and needs {:.3}px of page width including its40px right reserve, but the page is {:.3}px wide", left as f64 / UNIT as f64, required_right as f64 / UNIT as f64, width as f64 / UNIT as f64),
+                "move its retained pin inside the page, remove the pin for automatic placement, or increase meta.viewBox[0]");
         }
     }
 
@@ -137,8 +136,12 @@ pub(crate) fn sequence_geometry_diagnostics(
         for line in entry.label.split('\n') {
             match metrics::measure_text(line, 400, 8 * 64) {
                 Ok(measured) => {
-                    label_width =
-                        label_width.max(i64::from(measured.advance.max(measured.ink.width)));
+                    let ink_right = i64::from(measured.ink.x) + i64::from(measured.ink.width);
+                    let ink_left = i64::from(measured.ink.x).min(0);
+                    let measured_width = i64::from(measured.advance)
+                        .max(ink_right)
+                        .saturating_sub(ink_left);
+                    label_width = label_width.max(measured_width);
                     label_height += (i64::from(measured.ascender) - i64::from(measured.descender))
                         .max(12 * UNIT);
                 }
@@ -325,6 +328,37 @@ mod tests {
             keys,
             ["emphasis", "return", "security", "dashed", "default"]
         );
+        let mut emitted_rows: Vec<_> = scene
+            .legend
+            .entries
+            .iter()
+            .map(|entry| entry.bounds.y)
+            .collect();
+        emitted_rows.sort_unstable();
+        emitted_rows.dedup();
+        assert_eq!(emitted_rows.len(), 2);
+        assert_eq!(emitted_rows[1] - emitted_rows[0], 22 * 64);
+        for (index, entry) in scene.legend.entries.iter().enumerate() {
+            if index == 0 || scene.legend.entries[index - 1].bounds.y != entry.bounds.y {
+                assert_eq!(entry.bounds.x, 32 * 64);
+            } else {
+                let previous = &scene.legend.entries[index - 1];
+                assert_eq!(
+                    entry.bounds.x,
+                    previous.bounds.right().unwrap() + (43 + 22) * 64
+                );
+            }
+        }
+        for entry in &scene.legend.entries {
+            let id = format!("legend:{}", entry.key);
+            let label = scene
+                .labels
+                .iter()
+                .find(|label| label.id.as_deref() == Some(id.as_str()))
+                .unwrap();
+            assert_eq!(label.font_size, 8 * 64);
+        }
+        assert!(scene.legend.bounds.bottom().unwrap() <= scene.page.bounds.bottom().unwrap());
         // At400px row width these same measured labels use2 rows in catalog
         // order (height724), but3 alphabetically (height746). The735px page
         // lies between those budgets, so the old re-sort is observable.
@@ -372,8 +406,13 @@ mod tests {
             .extend((0..7).map(
                 |index| serde_json::json!({"id":format!("p{index}"),"type":"backend","label":"P"}),
             ));
-        assert!(codes(&source).contains(&"sequence/geometry-participant-canvas-width".into()));
+        let has_header_refusal = |source: &Value| {
+            sequence_geometry_diagnostics(source, &emitted_legend_scene(source))
+                .iter()
+                .any(|diagnostic| diagnostic.code == "sequence/geometry-participant-canvas-width")
+        };
+        assert!(has_header_refusal(&source));
         source["meta"]["viewBox"] = serde_json::json!([1200, 760]);
-        assert!(!codes(&source).contains(&"sequence/geometry-participant-canvas-width".into()));
+        assert!(!has_header_refusal(&source));
     }
 }

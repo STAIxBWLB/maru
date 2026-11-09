@@ -407,52 +407,41 @@ pub(crate) fn source_distance_diagnostics(
             }
         }
         "sequence" => {
-            let participants = records(spec, "participants");
-            let participant_indices: HashMap<_, _> = participants
-                .iter()
-                .enumerate()
-                .filter_map(|(index, participant)| string(participant, "id").map(|id| (id, index)))
-                .collect();
-            let messages = records(spec, "messages");
-            for (index, message) in messages.iter().enumerate() {
+            let participants = node_rects(geometry);
+            for (index, message) in records(spec, "messages").iter().enumerate() {
                 let (Some(from), Some(to)) = (string(message, "from"), string(message, "to"))
                 else {
                     continue;
                 };
-                let (Some(from_column), Some(to_column)) =
-                    (participant_indices.get(from), participant_indices.get(to))
-                else {
-                    continue;
-                };
-                let spread =
-                    spec.get("meta").and_then(|meta| string(meta, "column_fit")) == Some("spread");
-                let view_width = spec
-                    .get("meta")
-                    .and_then(|meta| meta.get("viewBox"))
-                    .and_then(Value::as_array)
-                    .and_then(|view| view.first())
-                    .and_then(Value::as_f64)
-                    .unwrap_or(920.0);
-                let columns = super::source_budgets::sequence_columns(
-                    point(view_width).unwrap_or(920 * SCALE),
-                    participants.len(),
-                    spread,
-                );
-                let gap = columns.pitch;
-                let delta = (*from_column as i64 - *to_column as i64).abs();
-                let span_fixed = i128::from(delta) * i128::from(gap);
-                let minimum = i128::from(60 * SCALE);
-                if span_fixed * span_fixed < minimum * minimum {
-                    diagnostics.push(Diagnostic {
-                        code: "sequence/geometry-route-distance".into(),
-                        path: format!("/messages/{index}"),
-                        rule: "geometry-v1/source-port-span".into(),
-                        message: format!(
-                            "message endpoints span less than the 60px renderer minimum (source columns {from_column} and {to_column})"
-                        ),
-                        fix: "send the message between separate participants with at least 60px of column distance".into(),
+                // The lifeline port sits at the placed header's center. Its
+                // x coordinate includes the actual width and every retained
+                // pin/authored placement; source ordinals are not positions.
+                let centers = participants
+                    .get(from)
+                    .zip(participants.get(to))
+                    .map(|(from, to)| {
+                        (
+                            i64::from(from.bounds.x) + i64::from(from.bounds.width) / 2,
+                            i64::from(to.bounds.x) + i64::from(to.bounds.width) / 2,
+                        )
                     });
-                }
+                let (start_x, end_x) = match centers {
+                    Some(centers) => centers,
+                    // Self identity alone proves a zero horizontal span. Do
+                    // not invent positions when a partial scene lacks nodes.
+                    None if from == to => (0, 0),
+                    None => continue,
+                };
+                let y = number(message, "y").and_then(point).unwrap_or(0);
+                emit_short_span(
+                    &mut diagnostics,
+                    "sequence",
+                    "messages",
+                    index,
+                    Port { x: start_x, y },
+                    Port { x: end_x, y },
+                    60,
+                );
             }
         }
         _ => {}

@@ -1,5 +1,6 @@
 // Geometry-only oracle mappings. No renderer implementation or SDK code is used.
 const signatures = {
+  "geometry-viewbox-capacity": /workflow(?: v2)? viewbox(?!-origin)[^\n]*(?:small|short|narrow|require|need|minimum)|^legend exceeds viewbox/i,
   "geometry-column-capacity": /under the fixed-v1 layout/i,
   "geometry-route-quality": /(?:micro.segment|short[^\n]*segment|border[^\n]*run|runs along[^\n]*border|explicit geometry[^\n]*(?:orthogonal|non-zero|route preset|channel pin|16px interior|8px endpoint))/i,
   "geometry-route-viewbox": /(?:Connection[^\n]*extends outside the viewBox|explicit geometry[^\n]*viewBox-origin containment)/i,
@@ -24,6 +25,7 @@ const signatures = {
   "geometry-segment-label-fit": /segment[^\n]*label[^\n]*exceeds[^\n]*available width/i,
 };
 const families = {
+  "geometry-viewbox-capacity": ["workflow"],
   "fixed-row-slots": ["dataflow"], "stage-canvas-width": ["dataflow"],
   "reserved-main-lane": ["lifecycle"], "geometry-state-column": ["lifecycle"],
   "geometry-message-time": ["sequence"], "geometry-message-spacing": ["sequence"],
@@ -49,6 +51,7 @@ export function geometryComparisonFor(item) {
   };
   const messages = oracle.diagnostics.map((diagnostic) => diagnostic.message ?? "").join("\n");
   const oracleCodes = {
+    "geometry-viewbox-capacity": ["workflow/viewbox-capacity"],
     "geometry-route-quality": ["composition/micro-segment", "composition/short-interior-segment", "composition/container-border-run", "composition/ambiguous-corridor", "composition/arrowhead-collision", "composition/proper-crossing", "composition/excessive-route-detour", "clean-flow/endpoint-side-direction"],
     "geometry-route-clearance": ["composition/label-route-clearance", "clean-flow/edge-through-node"],
     "geometry-label-viewbox": ["composition/label-canvas-containment"],

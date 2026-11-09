@@ -108,7 +108,7 @@ fn box_inside_view(bounds: GeometryBox, width: f64, height: f64) -> bool {
         && bottom(bounds) <= height
 }
 
-fn view_box(spec: &Value, family: Family, geometry: &GeometryDocument) -> Option<(f64, f64)> {
+fn view_box(spec: &Value, family: Family) -> Option<(f64, f64)> {
     let authored = spec
         .get("meta")
         .and_then(|meta| meta.get("viewBox"))
@@ -116,17 +116,10 @@ fn view_box(spec: &Value, family: Family, geometry: &GeometryDocument) -> Option
         .filter(|value| value.len() == 2)
         .and_then(|value| Some((value[0].as_f64()?, value[1].as_f64()?)));
     if let Some((width, height)) = authored {
-        if family.name == "architecture" && spec.get("layout").is_some() {
-            return Some((
-                width.max(right(geometry.page.bounds)),
-                height.max(bottom(geometry.page.bounds)),
-            ));
-        }
         return Some((width, height));
     }
     match family.name {
         "dataflow" => Some((940.0, 720.0)),
-        "sequence" => Some((920.0, (fixed(geometry.page.bounds.height)).max(760.0))),
         "lifecycle" if spec.get("schema_version").and_then(Value::as_u64) == Some(1) => {
             Some((980.0, 660.0))
         }
@@ -375,13 +368,17 @@ fn check_node_viewbox(
         }
         return;
     }
-    // Workflow and sequence renderers grow or reflow their default canvases;
-    // their pinned renderer refusals are covered by their own lane/time rules.
-    if family.name == "workflow" || family.name == "sequence" {
+    if family.name == "workflow" {
+        diagnostics.extend(super::constraints_workflow_page::workflow_page_diagnostics(
+            spec, geometry,
+        ));
         return;
     }
-    let (width, height) =
-        view_box(spec, family, geometry).unwrap_or((f64::INFINITY, f64::INFINITY));
+    // Sequence timeline/range rules own its source canvas budget.
+    if family.name == "sequence" {
+        return;
+    }
+    let (width, height) = view_box(spec, family).unwrap_or((f64::INFINITY, f64::INFINITY));
     let indices = source_indices(spec, family.node_collection);
     for (id, node) in nodes_by_id {
         if box_inside_view(node.bounds, width, height) {
@@ -449,55 +446,66 @@ fn check_workflow_lane(
     }
 }
 
-fn check_workflow_column_capacity(spec: &Value, diagnostics: &mut Vec<Diagnostic>) {
+fn check_workflow_column_capacity(
+    spec: &Value,
+    geometry: &GeometryDocument,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if spec["schema_version"].as_u64() != Some(1) {
         return;
     }
-    let nodes: BTreeMap<_, _> = items(spec, "nodes")
+    let sources: BTreeMap<_, _> = items(spec, "nodes")
         .iter()
         .filter_map(|node| text(node, "id").map(|id| (id, node)))
         .collect();
-    let centers = [88_i64, 220, 300, 430, 500, 625];
+    let placed: BTreeMap<_, _> = geometry
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.bounds))
+        .collect();
     for (index, edge) in items(spec, "edges").iter().enumerate() {
-        let (Some(from), Some(to)) = (
-            text(edge, "from").and_then(|id| nodes.get(id)),
-            text(edge, "to").and_then(|id| nodes.get(id)),
+        let (Some(from_id), Some(to_id)) = (text(edge, "from"), text(edge, "to")) else {
+            continue;
+        };
+        let (Some(from), Some(to), Some(a), Some(b)) = (
+            sources.get(from_id),
+            sources.get(to_id),
+            placed.get(from_id),
+            placed.get(to_id),
         ) else {
             continue;
         };
-        if from["lane"] != to["lane"] || from["col"] == to["col"] {
+        if from["lane"] != to["lane"] {
             continue;
         }
-        let (Some(a), Some(b)) = (
-            from["col"]
-                .as_u64()
-                .and_then(|col| centers.get(col as usize)),
-            to["col"].as_u64().and_then(|col| centers.get(col as usize)),
-        ) else {
-            continue;
-        };
-        let (Ok(w1), Ok(w2), Ok(h1), Ok(h2), Ok(y1), Ok(y2)) = (
-            super::px(number(from, "width").unwrap_or(92.0)),
-            super::px(number(to, "width").unwrap_or(92.0)),
-            super::px(number(from, "height").unwrap_or(52.0)),
-            super::px(number(to, "height").unwrap_or(52.0)),
-            super::px(number(from, "yOffset").unwrap_or(0.0)),
-            super::px(number(to, "yOffset").unwrap_or(0.0)),
-        ) else {
-            continue;
-        };
-        if 2 * (i64::from(y1) - i64::from(y2)).abs() >= i64::from(h1) + i64::from(h2) + 16 * 64 {
+        let center_x = |bounds: &GeometryBox| 2 * i64::from(bounds.x) + i64::from(bounds.width);
+        let center_y = |bounds: &GeometryBox| 2 * i64::from(bounds.y) + i64::from(bounds.height);
+        if center_x(a) == center_x(b) {
             continue;
         }
-        let direct = !edge.get("via").is_some_and(|value| value.is_array())
+        if (center_y(a) - center_y(b)).abs() >= i64::from(a.height) + i64::from(b.height) + 16 * 64
+        {
+            continue;
+        }
+        let direct = !edge.get("via").is_some_and(Value::is_array)
             && text(edge, "route").is_none_or(|route| route == "auto" || route == "straight")
-            && y1 == y2;
+            && center_y(a) == center_y(b);
         let required = if direct { 28 } else { 8 };
-        let clearance = 2 * (a - b).abs() * 64 - i64::from(w1) - i64::from(w2);
+        let clearance = (center_x(a) - center_x(b)).abs() - i64::from(a.width) - i64::from(b.width);
         if clearance < 2 * required * 64 {
-            push(diagnostics,Family{name:"workflow",node_collection:"nodes"},"geometry-column-capacity",format!("/edges/{index}"),
-                format!("fixed-v1 columns leave less than {required}px of source clearance"),
-                "reduce declared node widths, choose different columns or use a schema-version-2 layout");
+            push(
+                diagnostics,
+                Family {
+                    name: "workflow",
+                    node_collection: "nodes",
+                },
+                "geometry-column-capacity",
+                format!("/edges/{index}"),
+                format!(
+                    "placed fixed-v1 nodes leave less than {required}px of horizontal clearance"
+                ),
+                "move pinned nodes apart, reduce their widths, or choose a schema-version-2 layout",
+            );
         }
     }
 }
@@ -687,65 +695,39 @@ fn check_sequence_spacing(
     geometry: &GeometryDocument,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let participants = items(spec, "participants");
-    let participant_index: BTreeMap<_, _> = participants
-        .iter()
-        .enumerate()
-        .filter_map(|(index, participant)| text(participant, "id").map(|id| (id, index)))
-        .collect();
     let participant_bounds: BTreeMap<_, _> = geometry
         .nodes
         .iter()
         .map(|node| (node.id.as_str(), node.bounds))
         .collect();
+    let span = |message: &Value| {
+        let from = participant_bounds.get(text(message, "from")?)?;
+        let to = participant_bounds.get(text(message, "to")?)?;
+        let from_x = i64::from(from.x) + i64::from(from.width) / 2;
+        let to_x = i64::from(to.x) + i64::from(to.width) / 2;
+        Some((from_x.min(to_x), from_x.max(to_x)))
+    };
     let messages = items(spec, "messages");
-    for left_index in 0..messages.len() {
-        let Some(left_from) = text(&messages[left_index], "from") else {
+    for (left_index, left_message) in messages.iter().enumerate() {
+        let Some(left_y) = number(left_message, "y").and_then(|y| super::px(y).ok()) else {
             continue;
         };
-        let Some(left_to) = text(&messages[left_index], "to") else {
-            continue;
-        };
-        let Some(left_y) = number(&messages[left_index], "y") else {
-            continue;
-        };
-        let Some(left_from_index) = participant_index.get(left_from).copied() else {
-            continue;
-        };
-        let Some(left_to_index) = participant_index.get(left_to).copied() else {
+        let Some(left_span) = span(left_message) else {
             continue;
         };
         for (right_index, right_message) in messages.iter().enumerate().skip(left_index + 1) {
-            let Some(right_y) = number(right_message, "y") else {
+            let Some(right_y) = number(right_message, "y").and_then(|y| super::px(y).ok()) else {
                 continue;
             };
-            if (right_y - left_y).abs() >= 28.0 {
+            if (i64::from(right_y) - i64::from(left_y)).abs() >= 28 * 64 {
                 continue;
             }
-            let right_from = text(right_message, "from").unwrap_or_default();
-            let right_to = text(right_message, "to").unwrap_or_default();
-            let Some(right_from_index) = participant_index.get(right_from).copied() else {
+            let Some(right_span) = span(right_message) else {
                 continue;
             };
-            let Some(right_to_index) = participant_index.get(right_to).copied() else {
-                continue;
-            };
-            let left_span = (
-                left_from_index.min(left_to_index),
-                left_from_index.max(left_to_index),
-            );
-            let right_span = (
-                right_from_index.min(right_to_index),
-                right_from_index.max(right_to_index),
-            );
             if left_span.0 >= right_span.1 || right_span.0 >= left_span.1 {
                 continue;
             }
-            // Confirm both messages have retained route geometry before refusing.
-            let _same_canvas = participant_bounds.contains_key(left_from)
-                && participant_bounds.contains_key(left_to)
-                && participant_bounds.contains_key(right_from)
-                && participant_bounds.contains_key(right_to);
             push(
                 diagnostics,
                 Family {
@@ -754,8 +736,8 @@ fn check_sequence_spacing(
                 },
                 "geometry-message-spacing",
                 format!("/messages/{right_index}/y"),
-                format!("messages at y={left_y:.0} and y={right_y:.0} share horizontal space with less than 28px of vertical separation"),
-                "separate their y values or shorten their labels",
+                format!("messages at y={:.3} and y={:.3} share placed horizontal space with less than 28px of vertical separation", fixed(left_y), fixed(right_y)),
+                "separate their y values or move the pinned participants so the message spans do not overlap",
             );
         }
     }
@@ -780,7 +762,7 @@ pub(crate) fn geometry_diagnostics(spec: &Value, geometry: &GeometryDocument) ->
     match family.name {
         "workflow" => {
             check_workflow_lane(spec, geometry, &mut diagnostics);
-            check_workflow_column_capacity(spec, &mut diagnostics);
+            check_workflow_column_capacity(spec, geometry, &mut diagnostics);
         }
         "dataflow" => check_dataflow(spec, geometry, &mut diagnostics),
         "lifecycle" => {
@@ -825,6 +807,30 @@ mod tests {
                     height: 0,
                 },
             },
+        }
+    }
+
+    #[test]
+    fn architecture_grid_checks_the_authored_page_not_its_grown_diagnostic_page() {
+        for (row, col) in [(1, 0), (0, 2)] {
+            let spec = serde_json::json!({"schema_version":1,"diagram_type":"architecture",
+                "meta":{"title":"Grid bounds","output":"grid.html","viewBox":[320,240]},
+                "layout":{"mode":"grid","cols":3},
+                "components":[{"id":"a","type":"backend","label":"A","row":row,"col":col}],"connections":[]});
+            let report = crate::layout::layout_json(
+                &serde_json::json!({"specJson":spec.to_string()}).to_string(),
+            );
+            assert!(!report.ok);
+            assert!(report.geometry.is_some());
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code == "architecture/geometry-node-viewbox"
+                        && d.path == "/components/0"),
+                "{:?}",
+                report.diagnostics
+            );
         }
     }
 

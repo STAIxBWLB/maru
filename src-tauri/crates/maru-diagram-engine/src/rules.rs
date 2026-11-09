@@ -39,6 +39,7 @@ pub fn geometry_rule_codes(kind: &str) -> Vec<String> {
         ],
         "workflow" => &[
             "geometry-route-viewbox",
+            "geometry-viewbox-capacity",
             "geometry-column-capacity",
             "geometry-node-overlap",
             "geometry-node-lane",

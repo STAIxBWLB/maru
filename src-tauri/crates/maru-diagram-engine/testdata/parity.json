@@ -709,7 +709,9 @@
       {
         "code": "architecture/geometry-node-viewbox",
         "cases": [
-          "e2-architecture-geometry-node-viewbox-origin"
+          "e2-architecture-geometry-node-viewbox-origin",
+          "e2-page-architecture-grid-bottom-240",
+          "e2-page-architecture-grid-right-320"
         ],
         "oracleCodes": [
           "layout/constraint"
@@ -747,7 +749,10 @@
           "e2-boundary-architecture-detour-ratio-above",
           "e2-boundary-architecture-detour-excess-201",
           "e2-boundary-architecture-detour-empty-97",
-          "e2-boundary-architecture-profile-rhythm-showcase"
+          "e2-boundary-architecture-profile-rhythm-showcase",
+          "e2-page-architecture-source-stub-7",
+          "e2-page-architecture-target-stub-7",
+          "e2-page-architecture-interior-15"
         ],
         "oracleCodes": [
           "clean-flow/endpoint-side-direction",
@@ -868,6 +873,18 @@
         ],
         "oracleCodes": [
           "workflow/explicit-pin-conflict"
+        ]
+      },
+      {
+        "code": "workflow/geometry-viewbox-capacity",
+        "cases": [
+          "e2-page-workflow-v1-bottom-341",
+          "e2-page-workflow-v2-route-right-700",
+          "e2-page-workflow-v2-label-bottom-300"
+        ],
+        "oracleCodes": [
+          "layout/constraint",
+          "workflow/viewbox-capacity"
         ]
       }
     ],
@@ -1045,7 +1062,8 @@
       {
         "code": "dataflow/geometry-label-viewbox",
         "cases": [
-          "e2-boundary-dataflow-label-canvas-15"
+          "e2-boundary-dataflow-label-canvas-15",
+          "e2-page-dataflow-default-label-right-1100"
         ],
         "oracleCodes": [
           "composition/label-canvas-containment"
@@ -1165,7 +1183,8 @@
       {
         "code": "lifecycle/geometry-label-viewbox",
         "cases": [
-          "e2-boundary-lifecycle-label-canvas-15"
+          "e2-boundary-lifecycle-label-canvas-15",
+          "e2-page-lifecycle-default-label-right-1100"
         ],
         "oracleCodes": [
           "composition/label-canvas-containment"
@@ -2061,7 +2080,7 @@
       "renderer": "sidecars/archify/renderers/architecture/render-architecture.mjs",
       "location": "585-617",
       "cause": "boundary canvas containment",
-      "engineCode": "architecture/geometry-boundary-viewbox",
+      "engineCode": "architecture/geometry-container-containment",
       "expression": "boundary contained in origin-zero page",
       "threshold": 0,
       "coverage": "existing frame cases; no isolated route boundary"
@@ -2311,7 +2330,7 @@
       "renderer": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
       "location": "2801-2829",
       "cause": "label-route and v1 page/legend containment",
-      "engineCode": "workflow/geometry-route-clearance",
+      "engineCode": "workflow/geometry-route-clearance; workflow/geometry-viewbox-capacity",
       "expression": "label-route4; lane right+16; legendY+18<=page",
       "threshold": {
         "route": 4,
@@ -2333,7 +2352,7 @@
       "renderer": "sidecars/archify/renderers/workflow/workflow-compiler.mjs",
       "location": "3803,3878,4258,4606,4639,4836",
       "cause": "v2 feasibility, preset conflict, capacity, bounded solver",
-      "engineCode": "workflow/geometry-route-quality",
+      "engineCode": "workflow/geometry-route-quality; workflow/geometry-viewbox-capacity",
       "expression": "feasible sides/pins/ranks/lanes/page; finite planning budget",
       "threshold": {
         "direct": 28,
@@ -54570,6 +54589,1449 @@
         "equivalentCodes": [
           "architecture/geometry-label-viewbox"
         ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-grid-bottom-240",
+      "diagramType": "architecture",
+      "rule": "geometry-node-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":1,\"col\":0}],\"connections\":[]}",
+      "inputSha256": "5aadd9a731e597379c8a49919b19668e43c0c721a926c61317f24b6fd14f0fe0",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-node-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Component \"a\" falls outside the viewBox 320x240 — adjust pos/size or set a larger meta.viewBox.",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- Component \"a\" falls outside the viewBox 320x240 — adjust pos/size or set a larger meta.viewBox."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":1,\"col\":0}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":1,\"col\":0}],\"connections\":[]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "architecture/geometry-node-viewbox"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-grid-bottom-244",
+      "diagramType": "architecture",
+      "rule": "geometry-node-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,244]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":1,\"col\":0}],\"connections\":[]}",
+      "inputSha256": "0a5226d44c5d72acc2bee5d7e9d741bf9a15281a19f31bb8281d927edb895d18",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-node-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,244]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":1,\"col\":0}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,244]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":1,\"col\":0}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-grid-right-320",
+      "diagramType": "architecture",
+      "rule": "geometry-node-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":0,\"col\":2}],\"connections\":[]}",
+      "inputSha256": "50b67d0217ba6817d981877869fabb749f0da2d313c2b0f3f8de8e05883e4389",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-node-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Component \"a\" falls outside the viewBox 320x240 — adjust pos/size or set a larger meta.viewBox.",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- Component \"a\" falls outside the viewBox 320x240 — adjust pos/size or set a larger meta.viewBox."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":0,\"col\":2}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[320,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":0,\"col\":2}],\"connections\":[]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "architecture/geometry-node-viewbox"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-grid-right-480",
+      "diagramType": "architecture",
+      "rule": "geometry-node-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[480,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":0,\"col\":2}],\"connections\":[]}",
+      "inputSha256": "341ecf0e1b42c01ccbc4f882b97801cfc6e372bbbb1db7547e8bd487e7a716f1",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-node-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[480,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":0,\"col\":2}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"viewBox\":[480,240]},\"layout\":{\"mode\":\"grid\",\"cols\":3},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"row\":0,\"col\":2}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-workflow-v1-bottom-341",
+      "diagramType": "workflow",
+      "rule": "geometry-viewbox-capacity",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,341]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"other\",\"label\":\"Other\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"role\":\"main\"},{\"from\":\"b\",\"to\":\"c\",\"role\":\"main\"}]}",
+      "inputSha256": "9a0d4e7e25795e7220f4118cacdc706a00bd7da6b1447e80969a386a531b9bbf",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-viewbox-capacity",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Legend exceeds viewBox height 341 — set meta.viewBox[1] to at least 342.",
+            "subject": {
+              "diagramType": "workflow"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Workflow layout validation failed:\n- Legend exceeds viewBox height 341 — set meta.viewBox[1] to at least 342."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,341]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"other\",\"label\":\"Other\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"role\":\"main\"},{\"from\":\"b\",\"to\":\"c\",\"role\":\"main\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,341]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"other\",\"label\":\"Other\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"role\":\"main\"},{\"from\":\"b\",\"to\":\"c\",\"role\":\"main\"}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "workflow/geometry-viewbox-capacity"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-workflow-v1-bottom-343",
+      "diagramType": "workflow",
+      "rule": "geometry-viewbox-capacity",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,343]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"other\",\"label\":\"Other\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"role\":\"main\"},{\"from\":\"b\",\"to\":\"c\",\"role\":\"main\"}]}",
+      "inputSha256": "0374bbda956b727609e8b6e0c98f0da3795db60b4b92374ff3180d5a4d4da29a",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-viewbox-capacity",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,343]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"other\",\"label\":\"Other\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"role\":\"main\"},{\"from\":\"b\",\"to\":\"c\",\"role\":\"main\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,343]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"other\",\"label\":\"Other\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"role\":\"main\"},{\"from\":\"b\",\"to\":\"c\",\"role\":\"main\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-workflow-v2-route-right-700",
+      "diagramType": "workflow",
+      "rule": "geometry-viewbox-capacity",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[168,119],[168,70],[750,70],[750,170],[264,170],[264,119]]}]}",
+      "inputSha256": "fcc2cfaa0de1b4fed5ee5858580e2d32d409856b88b881f0174251038b353518",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-viewbox-capacity",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "workflow/viewbox-capacity"
+        ],
+        "diagnostics": [
+          {
+            "code": "workflow/viewbox-capacity",
+            "severity": "error",
+            "message": "Workflow viewBox 700×800 cannot contain the readable-v2 layout; minimum 770×280.",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/meta/viewBox"
+            },
+            "evidence": {
+              "actualViewBox": [
+                700,
+                800
+              ],
+              "requiredViewBox": [
+                770,
+                280
+              ],
+              "contentBounds": [
+                20,
+                27,
+                754,
+                218
+              ],
+              "contributors": [
+                "legend title",
+                "workflow top padding",
+                "workflow lanes",
+                "legend",
+                "node a width 96px"
+              ]
+            },
+            "supportedFixes": [
+              "set meta.viewBox to at least [770, 280]",
+              "omit meta.viewBox so the compiler can use its measured intrinsic canvas"
+            ]
+          }
+        ],
+        "error": "Workflow viewBox 700×800 cannot contain the readable-v2 layout; minimum 770×280."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[168,119],[168,70],[750,70],[750,170],[264,170],[264,119]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[700,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[168,119],[168,70],[750,70],[750,170],[264,170],[264,119]]}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "workflow/geometry-viewbox-capacity"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-workflow-v2-route-right-800",
+      "diagramType": "workflow",
+      "rule": "geometry-viewbox-capacity",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[168,119],[168,70],[750,70],[750,170],[264,170],[264,119]]}]}",
+      "inputSha256": "e7f070cd03b66c3e23749402734b824b11eb0514e27c42ecf4236eb2d328d7f8",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-viewbox-capacity",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[168,119],[168,70],[750,70],[750,170],[264,170],[264,119]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[168,119],[168,70],[750,70],[750,170],[264,170],[264,119]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-workflow-v2-label-bottom-300",
+      "diagramType": "workflow",
+      "rule": "geometry-viewbox-capacity",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,300]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[500,400]}]}",
+      "inputSha256": "dc03337822d4891caa7cc4552cf293b178c547a050f7776acb3e5619ced0c780",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-viewbox-capacity",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "workflow/viewbox-capacity"
+        ],
+        "diagnostics": [
+          {
+            "code": "workflow/viewbox-capacity",
+            "severity": "error",
+            "message": "Workflow viewBox 800×300 cannot contain the readable-v2 layout; minimum 770×422.",
+            "subject": {
+              "diagramType": "workflow",
+              "path": "/meta/viewBox"
+            },
+            "evidence": {
+              "actualViewBox": [
+                800,
+                300
+              ],
+              "requiredViewBox": [
+                770,
+                422
+              ],
+              "contentBounds": [
+                20,
+                27,
+                754,
+                404
+              ],
+              "contributors": [
+                "legend title",
+                "workflow top padding",
+                "workflow lanes",
+                "edge 0 label mask",
+                "node a width 96px"
+              ]
+            },
+            "supportedFixes": [
+              "set meta.viewBox to at least [770, 422]",
+              "omit meta.viewBox so the compiler can use its measured intrinsic canvas"
+            ]
+          }
+        ],
+        "error": "Workflow viewBox 800×300 cannot contain the readable-v2 layout; minimum 770×422."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,300]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[500,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,300]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[500,400]}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "workflow/geometry-viewbox-capacity"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-workflow-v2-label-bottom-800",
+      "diagramType": "workflow",
+      "rule": "geometry-viewbox-capacity",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[500,400]}]}",
+      "inputSha256": "b22d91bc663de443938493f15c53da3832c2b55160570d43de0c763337dce04e",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-viewbox-capacity",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[500,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"viewBox\":[800,800]},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[500,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-dataflow-default-label-right-900",
+      "diagramType": "dataflow",
+      "rule": "geometry-label-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[900,400]}]}",
+      "inputSha256": "da62cee660aea592d63045897a0bf8d89cc45103a01cbdfab4a1835848c562f6",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "dataflow/geometry-label-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[900,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[900,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-dataflow-default-label-right-1100",
+      "diagramType": "dataflow",
+      "rule": "geometry-label-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[1100,400]}]}",
+      "inputSha256": "686713fe5a4cdc22f3535d763bc7695b1ef14dc61e8ec439fea458606dd18da8",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "dataflow/geometry-label-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "composition/label-canvas-containment"
+        ],
+        "diagnostics": [
+          {
+            "code": "composition/label-canvas-containment",
+            "severity": "error",
+            "message": "[composition/label-canvas-containment] showcase dataflow label \"Call\" on flows[0] \"a\" -> \"b\" extends past the right edge by 177px (label rect [1083, 389, 34, 16]; viewBox 940x720) — if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox.",
+            "subject": {
+              "diagramType": "dataflow",
+              "collection": "flows",
+              "index": 0,
+              "from": "a",
+              "to": "b"
+            },
+            "evidence": {
+              "label": "Call",
+              "labelRect": {
+                "x": 1083,
+                "y": 389,
+                "width": 34,
+                "height": 16
+              },
+              "viewBox": [
+                940,
+                720
+              ],
+              "overflowPx": {
+                "right": 177
+              },
+              "tolerancePx": 0.5
+            },
+            "supportedFixes": [
+              "if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox"
+            ]
+          }
+        ],
+        "error": "Data-flow layout validation failed:\n- [composition/label-canvas-containment] showcase dataflow label \"Call\" on flows[0] \"a\" -> \"b\" extends past the right edge by 177px (label rect [1083, 389, 34, 16]; viewBox 940x720) — if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[1100,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[1100,400]}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "dataflow/geometry-label-viewbox"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-lifecycle-default-label-right-900",
+      "diagramType": "lifecycle",
+      "rule": "geometry-label-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[900,400]}]}",
+      "inputSha256": "b2ea03cd5954dbe868a53c700f566b4981cfd1dbe2bdc44ec6656692ac256968",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "lifecycle/geometry-label-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[900,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[900,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-lifecycle-default-label-right-1100",
+      "diagramType": "lifecycle",
+      "rule": "geometry-label-viewbox",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[1100,400]}]}",
+      "inputSha256": "b391ef5e58607437964dd9d2d0e822fb493e0005f32034e15a115012b9696749",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "lifecycle/geometry-label-viewbox",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "composition/label-canvas-containment"
+        ],
+        "diagnostics": [
+          {
+            "code": "composition/label-canvas-containment",
+            "severity": "error",
+            "message": "[composition/label-canvas-containment] showcase lifecycle label \"Call\" on transitions[0] \"a\" -> \"b\" extends past the right edge by 136px (label rect [1084, 389, 32, 16]; viewBox 980x660) — if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox.",
+            "subject": {
+              "diagramType": "lifecycle",
+              "collection": "transitions",
+              "index": 0,
+              "from": "a",
+              "to": "b"
+            },
+            "evidence": {
+              "label": "Call",
+              "labelRect": {
+                "x": 1084,
+                "y": 389,
+                "width": 32,
+                "height": 16
+              },
+              "viewBox": [
+                980,
+                660
+              ],
+              "overflowPx": {
+                "right": 136
+              },
+              "tolerancePx": 0.5
+            },
+            "supportedFixes": [
+              "if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox"
+            ]
+          }
+        ],
+        "error": "Lifecycle layout validation failed:\n- [composition/label-canvas-containment] showcase lifecycle label \"Call\" on transitions[0] \"a\" -> \"b\" extends past the right edge by 136px (label rect [1084, 389, 32, 16]; viewBox 980x660) — if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[1100,400]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Call\",\"labelAt\":[1100,400]}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "lifecycle/geometry-label-viewbox"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-source-stub-7",
+      "diagramType": "architecture",
+      "rule": "geometry-route-quality",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[207,130],[207,180],[400,180],[400,130]]}]}",
+      "inputSha256": "6d4de308d096f18551db903fe19dd628f0f918f86333c2ad335ced6e2957e608",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-route-quality",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "composition/micro-segment"
+        ],
+        "diagnostics": [
+          {
+            "code": "composition/micro-segment",
+            "severity": "error",
+            "message": "[composition/micro-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 7px source-stub segment 0 [200, 130] -> [207, 130] that is below the 8px micro-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read.",
+            "subject": {
+              "diagramType": "architecture",
+              "collection": "connections",
+              "index": 0,
+              "from": "a",
+              "to": "b"
+            },
+            "evidence": {
+              "segmentIndex": 0,
+              "position": "source-stub",
+              "lengthPx": 7,
+              "minimumPx": 8,
+              "from": [
+                200,
+                130
+              ],
+              "to": [
+                207,
+                130
+              ]
+            },
+            "supportedFixes": [
+              "if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read"
+            ]
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- [composition/micro-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 7px source-stub segment 0 [200, 130] -> [207, 130] that is below the 8px micro-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[207,130],[207,180],[400,180],[400,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[207,130],[207,180],[400,180],[400,130]]}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "architecture/geometry-route-quality"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-target-stub-7",
+      "diagramType": "architecture",
+      "rule": "geometry-route-quality",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,180],[473,180],[473,130]]}]}",
+      "inputSha256": "f505d1f06b7cb78b08f662b33a5cf38f4ddc481e5d8f2826fa974f5624fe83e8",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-route-quality",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "composition/micro-segment"
+        ],
+        "diagnostics": [
+          {
+            "code": "composition/micro-segment",
+            "severity": "error",
+            "message": "[composition/micro-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 7px target-stub segment 4 [473, 130] -> [480, 130] that is below the 8px micro-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read.",
+            "subject": {
+              "diagramType": "architecture",
+              "collection": "connections",
+              "index": 0,
+              "from": "a",
+              "to": "b"
+            },
+            "evidence": {
+              "segmentIndex": 4,
+              "position": "target-stub",
+              "lengthPx": 7,
+              "minimumPx": 8,
+              "from": [
+                473,
+                130
+              ],
+              "to": [
+                480,
+                130
+              ]
+            },
+            "supportedFixes": [
+              "if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read"
+            ]
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- [composition/micro-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 7px target-stub segment 4 [473, 130] -> [480, 130] that is below the 8px micro-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,180],[473,180],[473,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,180],[473,180],[473,130]]}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "architecture/geometry-route-quality"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-source-stub-9",
+      "diagramType": "architecture",
+      "rule": "geometry-route-quality",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[209,130],[209,180],[400,180],[400,130]]}]}",
+      "inputSha256": "38cfad4ce5950c15d2fcf93205c27bb9b5e4636fa5199c8b40a79e0beecf0e46",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-route-quality",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[209,130],[209,180],[400,180],[400,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[209,130],[209,180],[400,180],[400,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-target-stub-9",
+      "diagramType": "architecture",
+      "rule": "geometry-route-quality",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,180],[471,180],[471,130]]}]}",
+      "inputSha256": "1795060b06be399e83726baed40678ed42c3ca2418d75d9a3f590bd4281ffddb",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-route-quality",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,180],[471,180],[471,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,180],[471,180],[471,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-interior-15",
+      "diagramType": "architecture",
+      "rule": "geometry-route-quality",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,145],[400,145],[400,130]]}]}",
+      "inputSha256": "00ee53707a8573054548858b583ca208b09edfc1ceb8f8d54c3c1a01af6abf41",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-route-quality",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": false,
+        "expectedEngineAccepted": false,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "composition/short-interior-segment",
+          "composition/short-interior-segment"
+        ],
+        "diagnostics": [
+          {
+            "code": "composition/short-interior-segment",
+            "severity": "error",
+            "message": "[composition/short-interior-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 15px interior segment 1 [280, 130] -> [280, 145] that is below the 16px interior-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read.",
+            "subject": {
+              "diagramType": "architecture",
+              "collection": "connections",
+              "index": 0,
+              "from": "a",
+              "to": "b"
+            },
+            "evidence": {
+              "segmentIndex": 1,
+              "position": "interior",
+              "lengthPx": 15,
+              "minimumPx": 16,
+              "from": [
+                280,
+                130
+              ],
+              "to": [
+                280,
+                145
+              ]
+            },
+            "supportedFixes": [
+              "if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read"
+            ]
+          },
+          {
+            "code": "composition/short-interior-segment",
+            "severity": "error",
+            "message": "[composition/short-interior-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 15px interior segment 3 [400, 145] -> [400, 130] that is below the 16px interior-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read.",
+            "subject": {
+              "diagramType": "architecture",
+              "collection": "connections",
+              "index": 0,
+              "from": "a",
+              "to": "b"
+            },
+            "evidence": {
+              "segmentIndex": 3,
+              "position": "interior",
+              "lengthPx": 15,
+              "minimumPx": 16,
+              "from": [
+                400,
+                145
+              ],
+              "to": [
+                400,
+                130
+              ]
+            },
+            "supportedFixes": [
+              "if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read"
+            ]
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- [composition/short-interior-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 15px interior segment 1 [280, 130] -> [280, 145] that is below the 16px interior-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read.\n- [composition/short-interior-segment] showcase architecture connections[0] \"a\" -> \"b\" has a 15px interior segment 3 [400, 145] -> [400, 130] that is below the 16px interior-segment floor — if the authored via/fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and move route/via points into a wider corridor or move the component so every turn has room to read."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,145],[400,145],[400,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,145],[400,145],[400,130]]}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "architecture/geometry-route-quality"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-page-architecture-interior-17",
+      "diagramType": "architecture",
+      "rule": "geometry-route-quality",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,147],[400,147],[400,130]]}]}",
+      "inputSha256": "2c5591f5161f7d637d4f2a31c7048242a0755b70e9c550146acbf5d64e458245",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-route-quality",
+      "boundary": {
+        "layer": "exact",
+        "category": "page-source-regression",
+        "expectedOracleAccepted": true,
+        "expectedEngineAccepted": true,
+        "gateOnNegativeRefs": [],
+        "coveredAuditSites": [],
+        "expression": "evaluate authored or fixed-default source bounds against resolved content, never the auto-grown diagnostic page"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,147],[400,147],[400,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\",\"viewBox\":[900,600]},\"components\":[{\"id\":\"a\",\"type\":\"backend\",\"label\":\"A\",\"pos\":[100,100],\"size\":[100,60]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[480,100],\"size\":[100,60]}],\"connections\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\",\"via\":[[280,130],[280,147],[400,147],[400,130]]}]}",
+        "accepted": true,
+        "equivalentCodes": [],
         "layer": "renderer",
         "geometryExpected": true
       },

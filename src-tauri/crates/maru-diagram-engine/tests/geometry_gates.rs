@@ -14,7 +14,12 @@ fn every_audited_gate_control_is_recorded_and_accepted_by_both_engines() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|c| c["boundary"]["expectedOracleAccepted"] == true)
+        .filter(|c| {
+            matches!(
+                c["boundary"]["category"].as_str(),
+                Some("ungated-control" | "adjustment-control")
+            )
+        })
         .map(|c| (c["id"].as_str().unwrap(), c))
         .collect();
     assert!(!controls.is_empty());

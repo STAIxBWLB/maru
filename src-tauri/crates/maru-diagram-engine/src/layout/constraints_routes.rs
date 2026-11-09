@@ -244,6 +244,7 @@ struct Relation<'a> {
     owned_channel_x: Option<i64>,
     owned_channel_y: Option<i64>,
     authored: Vec<Point>,
+    authored_includes_ports: bool,
     reference: Vec<Point>,
     label: Option<Rect>,
     reference_label: Option<Rect>,
@@ -345,6 +346,7 @@ fn relations<'a>(
             let via: Vec<_> = array(raw, "via").iter().filter_map(point).collect();
             let mut reference = Vec::new();
             let mut authored = via.clone();
+            let mut authored_includes_ports = false;
             if let (Some(a), Some(b)) = (boxes.get(from), boxes.get(to)) {
                 if f.name == "architecture"
                     && !via.is_empty()
@@ -355,6 +357,7 @@ fn relations<'a>(
                     authored = vec![start];
                     authored.extend(via.iter().copied());
                     authored.push(end);
+                    authored_includes_ports = true;
                 }
                 if f.name == "dataflow"
                     || (f.name == "lifecycle"
@@ -455,6 +458,7 @@ fn relations<'a>(
                 owned_channel_x,
                 owned_channel_y,
                 authored: normalize(&authored),
+                authored_includes_ports,
                 reference,
                 label,
                 reference_label: raw_label(raw, f),
@@ -537,9 +541,15 @@ fn rhythm(
             continue;
         }
         let micro = n < 8 * U;
-        let interior = (matches!(domain, Domain::Authored) && r.reference.is_empty()
-            || i > 0 && i + 2 < points.len())
-            && n < 16 * U;
+        // First/last segments are stubs only when the path includes physical
+        // ports. A via-only list still contains interior segments at its ends.
+        let complete = !matches!(domain, Domain::Authored)
+            || r.authored_includes_ports
+            || !r.reference.is_empty();
+        let source_stub = i == 0 && (complete || points.first() == r.scene_raw.first());
+        let target_stub =
+            i + 2 == points.len() && (complete || points.last() == r.scene_raw.last());
+        let interior = !source_stub && !target_stub && n < 16 * U;
         if micro || interior {
             let cause = if micro {
                 "micro-segment"
@@ -1444,15 +1454,26 @@ fn page_checks(
 ) {
     let showcase = spec.get("meta").and_then(|m| text(m, "quality_profile")) == Some("showcase");
     let page = array(spec.get("meta").unwrap_or(&Value::Null), "viewBox");
+    let source_page =
+        super::constraints_workflow_page::workflow_source_page(spec, g).or_else(|| match f.name {
+            "dataflow" => Some([940 * U, 720 * U]),
+            "lifecycle" if spec.get("schema_version").and_then(Value::as_u64) == Some(1) => {
+                Some([980 * U, 660 * U])
+            }
+            "sequence" => Some([920 * U, i64::from(g.page.bounds.height)]),
+            _ => None,
+        });
     let width = page
         .first()
         .and_then(Value::as_f64)
         .and_then(q)
+        .or_else(|| source_page.map(|size| size[0]))
         .unwrap_or(i64::from(g.page.bounds.width));
     let height = page
         .get(1)
         .and_then(Value::as_f64)
         .and_then(q)
+        .or_else(|| source_page.map(|size| size[1]))
         .unwrap_or(i64::from(g.page.bounds.height));
     if showcase && f.name == "architecture" {
         let points = asserted_path(r, boxes);
@@ -1480,13 +1501,15 @@ fn page_checks(
     if !showcase && !v2 {
         return;
     }
-    // Readable-v2 grows around labels; only its origin is an immutable page
-    // boundary. Other renderers use the shared half-pixel clipping tolerance.
+    // Readable-v2 may grow only when the source omitted its page. An authored
+    // viewBox remains a hard right/bottom budget, including outside showcase.
+    let grow_v2 = v2 && page.is_empty();
     let tolerance = if v2 { 0 } else { U / 2 };
     for label in [r.label, r.reference_label].into_iter().flatten() {
         if label.x >= -tolerance
             && label.y >= -tolerance
-            && (v2 || label.right() <= width + tolerance && label.bottom() <= height + tolerance)
+            && (grow_v2
+                || label.right() <= width + tolerance && label.bottom() <= height + tolerance)
         {
             continue;
         }
@@ -1874,6 +1897,49 @@ mod tests {
             .geometry
             .expect("layout retains a diagnostic scene")
     }
+    #[test]
+    fn architecture_rhythm_separates_source_target_and_interior_segments() {
+        for (points, cause) in [
+            (vec![(0, 0), (9, 0), (9, 20), (29, 20)], None),
+            (vec![(0, 0), (20, 0), (20, 20), (29, 20)], None),
+            (vec![(0, 0), (8, 0), (8, 16), (16, 16)], None),
+            (
+                vec![(0, 0), (7, 0), (7, 20), (27, 20)],
+                Some("micro-segment"),
+            ),
+            (
+                vec![(0, 0), (20, 0), (20, 20), (27, 20)],
+                Some("micro-segment"),
+            ),
+            (
+                vec![(0, 0), (20, 0), (20, 15), (40, 15)],
+                Some("short-interior-segment"),
+            ),
+        ] {
+            let (spec, scene) = fixture(
+                "architecture",
+                vec![serde_json::json!({"via":points})],
+                vec![points],
+            );
+            let diagnostics = route_geometry_diagnostics(&spec, &scene);
+            let rhythm = diagnostics
+                .iter()
+                .filter(|d| {
+                    d.rule.ends_with("/micro-segment")
+                        || d.rule.ends_with("/short-interior-segment")
+                })
+                .collect::<Vec<_>>();
+            if let Some(expected) = cause {
+                assert!(
+                    rhythm.iter().any(|d| d.rule.ends_with(expected)),
+                    "{diagnostics:?}"
+                );
+            } else {
+                assert!(rhythm.is_empty(), "{diagnostics:?}");
+            }
+        }
+    }
+
     #[test]
     fn relationship_labels_do_not_alias_node_labels_with_the_same_source_id() {
         let mut spec = serde_json::json!({"schema_version":1,"diagram_type":"architecture",
