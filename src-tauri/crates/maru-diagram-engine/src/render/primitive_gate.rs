@@ -655,6 +655,62 @@ fn validate_one(
     }
 }
 
+fn initial_marker_within_page(primitive: &Primitive, page: crate::geometry::GeometryBox) -> bool {
+    let (mut left, mut top, mut right, mut bottom) = match &primitive.shape {
+        Shape::Circle { center, radius } => (
+            i64::from(center.x) - i64::from(*radius),
+            i64::from(center.y) - i64::from(*radius),
+            i64::from(center.x) + i64::from(*radius),
+            i64::from(center.y) + i64::from(*radius),
+        ),
+        Shape::Line { from, to } => (
+            i64::from(from.x.min(to.x)),
+            i64::from(from.y.min(to.y)),
+            i64::from(from.x.max(to.x)),
+            i64::from(from.y.max(to.y)),
+        ),
+        Shape::Polyline { points } | Shape::Polygon { points } => {
+            let Some(first) = points.first() else {
+                return false;
+            };
+            let (mut left, mut top, mut right, mut bottom) = (
+                i64::from(first.x),
+                i64::from(first.y),
+                i64::from(first.x),
+                i64::from(first.y),
+            );
+            for point in &points[1..] {
+                left = left.min(i64::from(point.x));
+                top = top.min(i64::from(point.y));
+                right = right.max(i64::from(point.x));
+                bottom = bottom.max(i64::from(point.y));
+            }
+            (left, top, right, bottom)
+        }
+        Shape::Rect { bounds, .. } => (
+            i64::from(bounds.x),
+            i64::from(bounds.y),
+            i64::from(bounds.x) + i64::from(bounds.width),
+            i64::from(bounds.y) + i64::from(bounds.height),
+        ),
+    };
+    // Initial dots/heads have no stroke; the pinned initial stem is 1.4px.
+    // Round its half-stroke outward in 1/64px units. Unknown paint is a refusal.
+    let half_stroke = match primitive.stroke {
+        "0" => 0,
+        "1.4" => 45,
+        _ => return false,
+    };
+    left -= half_stroke;
+    top -= half_stroke;
+    right += half_stroke;
+    bottom += half_stroke;
+    left >= i64::from(page.x)
+        && top >= i64::from(page.y)
+        && right <= i64::from(page.x) + i64::from(page.width)
+        && bottom <= i64::from(page.y) + i64::from(page.height)
+}
+
 fn identity_token(node: Node<'_, '_>) -> String {
     if let Some(id) = node.attribute("id") {
         format!("id:{id}")
@@ -861,6 +917,16 @@ pub(crate) fn check_primitives(
         }
     }
     for primitive in &expected {
+        if primitive.kind.starts_with("lifecycle-initial-")
+            && !initial_marker_within_page(primitive, geometry.page.bounds)
+        {
+            errors.push(error(
+                "primitive-page-containment",
+                &format!("/svg/primitives/{}/{}", primitive.kind, primitive.owner),
+                "lifecycle initial marker extends beyond the SVG viewBox and will be clipped",
+                "recompute the page extent to contain the marker without moving pinned nodes",
+            ));
+        }
         let id = svg::id(
             "primitive",
             &format!("{}:{}", primitive.kind, primitive.owner),

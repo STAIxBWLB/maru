@@ -2011,3 +2011,12 @@ matching source, geometry and theme, then compares UTF-8 SVG bytes directly
 with the SVG returned by the native source-to-PNG path and checks its receipt
 hash. A mismatch refuses the parity gate. Fixture geometry is test input only;
 the public native PNG command continues to accept source specs exclusively.
+
+Lifecycle start markers also contribute to the producer's page extent. The
+pinned source uses a dot at node x minus 22px, radius 4.5px, followed by the
+initial stem and head (`render-lifecycle.mjs:784-786,851-853`). The producer
+includes that paint footprint even when the start node is pinned at x=0 or
+negative x; node and pin coordinates stay unchanged. The artifact gate derives
+the marker shapes independently and refuses a viewBox that clips their paint,
+including the stem's 1.4px stroke. SVG pin tests cover both lifecycle versions;
+a PNG test checks the visible dot pixels in both themes. The API remains v1.
