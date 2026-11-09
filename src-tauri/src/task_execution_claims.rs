@@ -20,6 +20,7 @@ use crate::vault::{
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -171,6 +172,7 @@ pub(crate) struct Admission {
 /// Ordinary tasks receive no guard and create no claim infrastructure.
 pub(crate) struct TaskMutationGuard {
     work: PathBuf,
+    source: PathBuf,
     claim: TaskExecutionClaim,
     claim_path: PathBuf,
     task_lock_path: PathBuf,
@@ -180,6 +182,12 @@ pub(crate) struct TaskMutationGuard {
 impl TaskMutationGuard {
     pub(crate) fn paths(&self) -> Vec<PathBuf> {
         vec![self.claim_path.clone(), self.task_lock_path.clone()]
+    }
+
+    /// The canonical note this guard locked the claim for. Batch callers match
+    /// receipts to guards by this path.
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
     }
 
     pub(crate) fn check(&self, lease: &PathTransactionLease, source: &Path) -> Result<(), String> {
@@ -281,7 +289,7 @@ fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn action_error(code: &str, path: &Path, cause: &str, next: &str) -> String {
+pub(crate) fn action_error(code: &str, path: &Path, cause: &str, next: &str) -> String {
     format!("{code}: path={} cause={cause}; next={next}", display(path))
 }
 
@@ -1726,13 +1734,17 @@ fn active_claim_for_other_request(
     write_claim(roots, lease, claim, lock)
 }
 
-/// Coordination guard for the existing managed Markdown mutation wrappers.
-/// A note without an active task claim receives only the path bootstrap lock;
-/// no taskId or claim is written for an ordinary note.
-pub(crate) fn guard_task_mutation(
-    work: &Path,
-    source: &Path,
-) -> Result<Option<TaskMutationGuard>, String> {
+/// One source note that already carries an existing claim, resolved without
+/// taking any lock. `guard_task_mutations` needs the task id up front so it can
+/// order several claim locks before acquiring the first one.
+struct ClaimTarget {
+    work: PathBuf,
+    roots: WorkspaceRoots,
+    source: PathBuf,
+    claim: TaskExecutionClaim,
+}
+
+fn claim_target(work: &Path, source: &Path) -> Result<Option<ClaimTarget>, String> {
     let work = normalize_existing_dir(&display(work))?;
     let roots = WorkspaceRoots {
         work: work.clone(),
@@ -1777,10 +1789,19 @@ pub(crate) fn guard_task_mutation(
             "open the original workspace and retry",
         ));
     }
-    let task_lock_path = task_lock_path(&roots, &claim.task_id);
+    Ok(Some(ClaimTarget {
+        work,
+        roots,
+        source: path,
+        claim,
+    }))
+}
+
+fn lock_target(target: ClaimTarget) -> Result<TaskMutationGuard, String> {
+    let task_lock_path = task_lock_path(&target.roots, &target.claim.task_id);
     let task_lock = open_existing_claim_lock(&task_lock_path)?;
-    let file = claim_path(&roots, &claim.task_id);
-    let current = read_claim(&file, &claim.task_id)?.ok_or_else(|| {
+    let file = claim_path(&target.roots, &target.claim.task_id);
+    let current = read_claim(&file, &target.claim.task_id)?.ok_or_else(|| {
         action_error(
             "task_execution_claim_missing",
             &file,
@@ -1788,13 +1809,72 @@ pub(crate) fn guard_task_mutation(
             "refresh the task and retry",
         )
     })?;
-    Ok(Some(TaskMutationGuard {
-        work,
+    Ok(TaskMutationGuard {
+        work: target.work,
+        source: target.source,
         claim: current,
         claim_path: file,
         task_lock_path,
         task_lock,
-    }))
+    })
+}
+
+/// Coordination guard for the existing managed Markdown mutation wrappers.
+/// A note without an active task claim receives only the path bootstrap lock;
+/// no taskId or claim is written for an ordinary note.
+pub(crate) fn guard_task_mutation(
+    work: &Path,
+    source: &Path,
+) -> Result<Option<TaskMutationGuard>, String> {
+    match claim_target(work, source)? {
+        Some(target) => lock_target(target).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Read-only probe for a note that already carries a claim. Batch writers use
+/// it while holding their lease to refuse a claim they can no longer lock
+/// without inverting the lock order.
+pub(crate) fn has_task_claim(work: &Path, source: &Path) -> Result<bool, String> {
+    Ok(claim_target(work, source)?.is_some())
+}
+
+/// Take the existing claim lock of every opted-in note in a batch, in one
+/// stable order (ascending task id), before the caller takes its path lease.
+/// Two processes scanning the same batch directory would otherwise be free to
+/// take the same claim locks in opposite orders and deadlock. Sources without
+/// a claim (ordinary notes, non-opt-in tasks, absent claim infrastructure) are
+/// skipped, so an ordinary batch acquires nothing. Repeat sources that share a
+/// task id are locked once: the same lock file is not reentrant.
+pub(crate) fn guard_task_mutations(
+    work: &Path,
+    sources: &[PathBuf],
+) -> Result<Vec<TaskMutationGuard>, String> {
+    let mut targets = Vec::new();
+    let mut seen = BTreeSet::new();
+    for source in sources {
+        if let Some(target) = claim_target(work, source)? {
+            if seen.insert(target.claim.task_id.clone()) {
+                targets.push(target);
+            }
+        }
+    }
+    targets.sort_by_key(|target| target.claim.task_id.clone());
+    let mut guards = Vec::with_capacity(targets.len());
+    for target in targets {
+        let ordered = target.claim.task_id.clone();
+        let guard = lock_target(target)?;
+        if guard.claim.task_id != ordered {
+            return Err(action_error(
+                "task_execution_batch_order_changed",
+                &guard.claim_path,
+                "claim changed owner while batch locks were taken",
+                "re-run the batch so every claim is locked in the current order",
+            ));
+        }
+        guards.push(guard);
+    }
+    Ok(guards)
 }
 
 /// Acquire or replay the single active task claim. No timer can take over an

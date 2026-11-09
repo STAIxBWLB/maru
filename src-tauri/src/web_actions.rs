@@ -27,6 +27,9 @@ use crate::atomic_file::{
 use crate::document::revision_for;
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::ipc_error::{IpcError, TODAY_CONFLICT, WEB_ACTION_REPAIR_CONFLICT};
+use crate::task_execution_claims::{
+    action_error, guard_task_mutations, has_task_claim, TaskMutationGuard,
+};
 use crate::tasks::{
     normalize_task_frontmatter_aliases, string_field, task_display_title, yaml_to_json, TaskBucket,
 };
@@ -781,6 +784,37 @@ fn queue_upsert(
     Ok(())
 }
 
+/// Find the claim guard `web_actions_apply` took for this note before its
+/// lease. A completion whose claim appeared after that scan cannot be locked
+/// any more without taking a claim lock while the lease is held, so it is
+/// refused instead of applied.
+fn batch_claim_guard<'a>(
+    guards: &'a mut [TaskMutationGuard],
+    work: &Path,
+    note: &Path,
+) -> Result<Option<&'a mut TaskMutationGuard>, String> {
+    let canonical = note.canonicalize().map_err(|err| {
+        action_error(
+            "task_execution_path_invalid",
+            note,
+            &err.to_string(),
+            "refresh the task path and retry",
+        )
+    })?;
+    if let Some(index) = guards.iter().position(|guard| guard.source() == canonical) {
+        return Ok(Some(&mut guards[index]));
+    }
+    if has_task_claim(work, note)? {
+        return Err(action_error(
+            "task_execution_claim_unlocked",
+            note,
+            "claim appeared after the batch took its claim locks",
+            "re-run web actions apply so the claim is locked before the write",
+        ));
+    }
+    Ok(None)
+}
+
 /// Apply one validated receipt. Returns the state to report.
 ///
 /// Replay safety uses two checks because they cover different crash windows:
@@ -795,6 +829,7 @@ fn apply_receipt(
     receipt: &Receipt,
     default_task_list_id: Option<&str>,
     now_iso: &str,
+    guards: &mut [TaskMutationGuard],
 ) -> Result<WebActionState, String> {
     if ledger_has(work, &receipt.id) || has_web_action(work, &receipt.id)? {
         return Ok(WebActionState::Skipped);
@@ -827,6 +862,7 @@ fn apply_receipt(
                 .unwrap_or_else(|| receipt.requested_at.clone());
             let done = string_field(&frontmatter, "done")
                 .unwrap_or_else(|| completed_at.get(..10).unwrap_or(&completed_at).to_string());
+            let claim = batch_claim_guard(guards, work, &note)?;
             task_transition_in_transaction(
                 lease,
                 work_path.to_string(),
@@ -841,6 +877,7 @@ fn apply_receipt(
                     web_action_id: Some(receipt.id.clone()),
                     payload: serde_json::json!({}),
                 },
+                claim,
             )
             .map_err(|e| e.to_string())?;
             ledger_append(work, receipt, now_iso)?;
@@ -1251,9 +1288,39 @@ pub fn web_actions_apply(
     let admission = PathTransactionRequest::new(paths)?
         .require_parent(&work)?
         .with_workspace_registry()?;
+    // Claim locks first, sorted by task id, for every opted-in note this batch
+    // will complete. The batch may not take one later: its own lease is held.
+    let claims = batch_claim_sources(&work_path, &work)?;
+    let mut guards = guard_task_mutations(&work, &claims)?;
     with_path_transactions(admission, |lease| {
-        web_actions_apply_in_transaction(lease, work_path, now_iso, default_task_list_id)
+        web_actions_apply_in_transaction(
+            lease,
+            work_path,
+            now_iso,
+            default_task_list_id,
+            &mut guards,
+        )
     })
+}
+
+/// The notes of the pending batch that a completion would mutate. Read
+/// without locking so the caller can order its claim locks; a receipt that
+/// disappears or fails to parse here is left to the loop, which reports it.
+fn batch_claim_sources(work_path: &str, work: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut sources = Vec::new();
+    for path in pending_receipt_files(work) {
+        let Ok(receipt) = load_receipt(work, &path) else {
+            continue;
+        };
+        if receipt.operation != WebActionOperation::Complete {
+            continue;
+        }
+        let note = resolve_inside_vault(work_path, &receipt.task_path)?;
+        if note.is_file() {
+            sources.push(note);
+        }
+    }
+    Ok(sources)
 }
 
 pub(crate) fn web_actions_apply_in_transaction(
@@ -1261,6 +1328,7 @@ pub(crate) fn web_actions_apply_in_transaction(
     work_path: String,
     now_iso: String,
     default_task_list_id: Option<String>,
+    guards: &mut [TaskMutationGuard],
 ) -> Result<WebActionsOutcome, String> {
     let work = normalize_existing_dir(&work_path)?;
     let mut paths = vec![
@@ -1307,6 +1375,7 @@ pub(crate) fn web_actions_apply_in_transaction(
             &receipt,
             default_task_list_id.as_deref(),
             &now_iso,
+            guards,
         ) {
             Ok(state) => {
                 move_to_applied(&work, &path)?;

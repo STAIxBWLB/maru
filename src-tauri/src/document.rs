@@ -196,7 +196,15 @@ pub fn save_document(
 ) -> Result<DocumentPayload, IpcError> {
     let vault = resolve_inside_vault(&vault_path, ".")?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
-    let request = PathTransactionRequest::new(vec![path, vault.join(".maru/versions")])?
+    // Lock order is claim lock, then path lease: an opted-in task's claim must
+    // not change between the provider's source check and this write. Ordinary
+    // notes get `None` and keep their previous behaviour.
+    let mut claim = crate::task_execution_claims::guard_task_mutation(&vault, &path)?;
+    let mut paths = vec![path, vault.join(".maru/versions")];
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
+    let request = PathTransactionRequest::new(paths)?
         .with_workspace_registry()?
         .require_parent(&vault)?;
     // Keep structured inner conflicts; admission failures remain display-only.
@@ -207,6 +215,7 @@ pub fn save_document(
             document_path,
             content,
             expected_revision,
+            claim.as_mut(),
         ))
     })?
 }
@@ -217,11 +226,15 @@ pub(crate) fn save_document_in_transaction(
     document_path: String,
     content: String,
     expected_revision: Option<String>,
+    mut claim: Option<&mut crate::task_execution_claims::TaskMutationGuard>,
 ) -> Result<DocumentPayload, IpcError> {
     lease.ensure_workspace_registry()?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
     let vault = resolve_inside_vault(&vault_path, ".")?;
     lease.ensure_covered(vec![path.clone(), vault.join(".maru/versions")])?;
+    if let Some(guard) = &claim {
+        guard.check(lease, &path)?;
+    }
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     validate_managed_write(&vault_path, &document_path, &content)?;
@@ -278,6 +291,11 @@ pub(crate) fn save_document_in_transaction(
         }
     }
     write_atomic(&path, content.as_bytes())?;
+    // The claim follows the note it locked: a body edit moves an Active claim
+    // to NeedsReview so the provider cannot adopt into a changed source.
+    if let Some(guard) = claim.as_mut() {
+        guard.after_mutation(lease, &path)?;
+    }
     read_document(vault_path, path.to_string_lossy().to_string()).map_err(Into::into)
 }
 
@@ -293,7 +311,13 @@ pub fn update_frontmatter_field(
 ) -> Result<DocumentPayload, IpcError> {
     let vault = resolve_inside_vault(&vault_path, ".")?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
-    let request = PathTransactionRequest::new(vec![path, vault.join(".maru/versions")])?
+    // Same claim-before-lease order as `save_document`.
+    let mut claim = crate::task_execution_claims::guard_task_mutation(&vault, &path)?;
+    let mut paths = vec![path, vault.join(".maru/versions")];
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
+    let request = PathTransactionRequest::new(paths)?
         .with_workspace_registry()?
         .require_parent(&vault)?;
     // Keep structured inner conflicts; admission failures remain display-only.
@@ -305,6 +329,7 @@ pub fn update_frontmatter_field(
             key,
             value,
             expected_revision,
+            claim.as_mut(),
         ))
     })?
 }
@@ -316,6 +341,7 @@ pub(crate) fn update_frontmatter_field_in_transaction(
     key: String,
     value: Option<FieldInput>,
     expected_revision: Option<String>,
+    mut claim: Option<&mut crate::task_execution_claims::TaskMutationGuard>,
 ) -> Result<DocumentPayload, IpcError> {
     lease.ensure_workspace_registry()?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
@@ -331,6 +357,9 @@ pub(crate) fn update_frontmatter_field_in_transaction(
     }
     let vault = resolve_inside_vault(&vault_path, ".")?;
     lease.ensure_covered(vec![path.clone(), vault.join(".maru/versions")])?;
+    if let Some(guard) = &claim {
+        guard.check(lease, &path)?;
+    }
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     let original =
@@ -356,6 +385,9 @@ pub(crate) fn update_frontmatter_field_in_transaction(
             )?;
         }
         write_atomic(&path, updated.as_bytes())?;
+        if let Some(guard) = claim.as_mut() {
+            guard.after_mutation(lease, &path)?;
+        }
     }
     read_document(vault_path, path.to_string_lossy().to_string()).map_err(Into::into)
 }
