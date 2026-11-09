@@ -2,7 +2,7 @@
 
 Maru hosts the [hwp-editor](https://github.com/STAIxBWLB/hwp-editor) engine
 bridge: six Tauri commands (`src-tauri/src/hwped.rs`) that spawn the `hwp`
-binary (hwp-cli >= 0.20.0) behind the editor's `HwpEngine` contract. This is a
+binary (hwp-cli >= 0.8.7) behind the editor's `HwpEngine` contract. This is a
 backend milestone; the published-engine UI migration follows the release
 gate described below.
 
@@ -10,20 +10,21 @@ gate described below.
 
 All commands are async wrappers over blocking spawns (`spawn_blocking`,
 following `check_gws_auth`). Fixed argv, no shell, 60s timeout, 32MB stdout
-cap. The 0.20.0 minimum matches the upstream CLI engine and includes both
-`--ops` and `--layout-json`; older accepted binaries lacked these flags. This is
-separate from compatibility with older JS clients that use `opsArgv`. The worker
-boundary mirrors the Node CliEngine (`packages/server/src/cli-engine.ts` in
-hwp-editor).
+cap. The global hwp-cli floor is 0.8.7, which keeps read, compose, validate,
+render without layout metadata, and legacy `opsArgv` edits available. The JSON
+`--ops` channel and render `--layout-json` require hwp-cli 0.20.0. This feature
+floor is separate from global binary compatibility and from compatibility with
+older JS clients that use `opsArgv`. The worker boundary mirrors the Node
+CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 
 | Command | CLI invocation | Returns |
 |---|---|---|
 | `hwped_read` | `hwp cat <in> --format markdown --with-segments` | CatEnvelope JSON |
-| `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report --layout-json <file>` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }] }` |
+| `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report [--layout-json <file>]` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }] }` |
 | `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial]` | `{ name, dataBase64 }` |
 | `hwped_compose` | `hwp compose <spec.json> -o <out> --report` | `{ name, dataBase64, report? }` |
 | `hwped_validate` | `hwp validate <in> --json` (exit 1 = invalid, report still parsed) | `{ valid, errors }` |
-| `hwped_capabilities` | `hwp --version` (enforces >= 0.20.0, memoized) | `{ version, editable, formats, editOps: "v1" }` |
+| `hwped_capabilities` | `hwp --version` (enforces >= 0.8.7, memoized) | `{ version, editable, formats, editOps?: "v1" }` |
 
 Documents cross the bridge as `HwpedDocumentRef`: a workspace `path`
 (relative paths are resolved against `workspaceRoot` with an escape guard)
@@ -31,31 +32,42 @@ when the bytes are already on disk, `dataBase64` otherwise.
 
 `hwped_edit` takes exactly one of `ops` and `opsArgv`. The JSON `ops` channel
 accepts a flat `edit-ops-v1` array, writes it to an isolated per-call `ops.json`,
-and invokes `hwp edit --ops`. Rust checks only the array envelope; the engine
-owns the operation grammar. Run addresses and half-open source WCHAR/UTF-16
-`chars` ranges pass through unchanged. They are never converted to text selectors.
-Legacy clients keep sending `opsArgv` flag/value pairs. Both or neither channel,
-and a nonarray JSON payload, fail with `hwped_bad_request`. Explicit null keys
-are present, not an alternative spelling of omission, and are rejected. Temporary files are
-removed after output readback, and edits return new bytes without overwriting
-the input document.
+and invokes `hwp edit --ops`; this channel requires hwp-cli 0.20.0 or newer.
+Rust checks only the array envelope; the engine owns the operation grammar. Run
+addresses and half-open source WCHAR/UTF-16 `chars` ranges pass through unchanged.
+They are never converted to text selectors. Legacy clients keep sending
+`opsArgv` flag/value pairs and remain supported from the global 0.8.7 floor.
+Both or neither channel, and a nonarray JSON payload, fail with
+`hwped_bad_request`. Explicit null keys are present, not an alternative spelling
+of omission, and are rejected. Temporary files are removed after output
+readback, and edits return new bytes without overwriting the input document.
 
 `hwped_render` requests an optional `hwp-render-layout-v1` artifact with schema
-version `1.x`. Each returned page receives its matching `layout` by actual
-page number, containing `width_pt`, `height_pt`, `rows` and `truncated`.
-Point coordinates are independent of image DPI. Row order, repeated segment IDs,
-nullable boxes and source-character ranges are preserved. Source ranges are not
-Markdown offsets and must not be used to slice JS text. A missing optional artifact omits
-`layout`; a present but malformed or incomplete artifact fails
-with `hwp_parse_failed`, rather than being presented as empty measured geometry.
+version `1.x` automatically when the binary supports it. `options.layout: false`
+disables that request; `options.layout: true` explicitly requires hwp-cli 0.20.0
+or newer and returns a structured feature-version error on an older binary. Each
+returned page receives its matching `layout` by actual page number, containing
+`width_pt`, `height_pt`, `rows` and `truncated`. Point coordinates are
+independent of image DPI. Row order, repeated segment IDs, nullable boxes and
+source-character ranges are preserved. Source ranges are not Markdown offsets
+and must not be used to slice JS text. A missing optional artifact omits
+`layout`; a present but malformed or incomplete artifact fails with
+`hwp_parse_failed`, rather than being presented as empty measured geometry.
+
+`hwped_capabilities` always reports the detected version and base editing
+availability. It includes `editOps: "v1"` only when the detected binary meets
+the 0.20.0 feature floor; older accepted binaries omit that capability.
 
 The Rust channel and capability are the first milestone of [#563](https://github.com/STAIxBWLB/maru/issues/563).
 The frontend switch to published `createTauriEngine`, editor mount and theme-token
 mapping wait for the core release that reads `capabilities.editOps`. Existing
 Maru wrappers continue using the legacy channel until that migration.
 
-Errors are prefixed strings (`cli_missing:`, `hwp_timeout:`, `hwp_failed:`,
-`hwp_parse_failed:`, `hwped_bad_request:`), matching the `gws` convention.
+Most errors remain prefixed strings (`cli_missing:`, `hwp_timeout:`,
+`hwp_failed:`, `hwp_parse_failed:`, `hwped_bad_request:`), matching the `gws`
+convention. Feature-version refusals from JSON edit or explicitly requested
+layout use the structured IPC error shape so callers can branch on the code;
+the message includes the detected version, required minimum, and upgrade action.
 
 ## Binary resolution
 
