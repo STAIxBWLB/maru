@@ -8,6 +8,7 @@ use maru_diagram_engine::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::io::Write;
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 2 {
@@ -52,9 +53,19 @@ fn run() -> Result<(), String> {
         }
         warm.push(t.elapsed().as_secs_f64() * 1000.0);
     }
-    std::fs::write(&args[1], &first.bytes).map_err(|cause| {
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&args[1])
+        .map_err(|cause| {
+            format!(
+                "cannot create PNG {}: {cause}; choose a new writable artifact path; existing files are never overwritten",
+                args[1]
+            )
+        })?;
+    output.write_all(&first.bytes).map_err(|cause| {
         format!(
-            "cannot write PNG {}: {cause}; provide a writable artifact path",
+            "cannot write PNG {}: {cause}; remove the incomplete artifact and retry at a writable new path",
             args[1]
         )
     })?;
