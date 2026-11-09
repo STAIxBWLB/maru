@@ -110,6 +110,9 @@ fn route_and_legend_variant_paints_match_both_themes() {
 fn workflow_phase_variant_uses_route_semantic_color_in_both_themes() {
     let mut spec: Value =
         serde_json::from_str(include_str!("../testdata/valid-workflow.json")).unwrap();
+    for node in spec["nodes"].as_array_mut().unwrap() {
+        node["width"] = json!(80);
+    }
     spec["phases"] = json!([
         {"id":"secure", "label":"Secure", "fromCol":0, "toCol":1, "variant":"security"},
         {"id":"async", "label":"Async", "fromCol":3, "toCol":4, "variant":"dashed"}

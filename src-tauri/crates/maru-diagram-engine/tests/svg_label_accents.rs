@@ -268,6 +268,9 @@ fn workflow_frame_captions_and_architecture_boundary_captions_get_semantic_accen
     for theme in [SvgTheme::Light, SvgTheme::Dark] {
         let mut workflow = fixture("workflow");
         workflow["lanes"][0]["variant"] = json!("exception");
+        for node in workflow["nodes"].as_array_mut().unwrap() {
+            node["width"] = json!(64);
+        }
         workflow["phases"] = json!([{
             "id":"p", "label":"Phase", "fromCol":0, "toCol":4, "variant":"security"
         }]);

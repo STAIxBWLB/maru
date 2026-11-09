@@ -125,6 +125,9 @@ fn label_moved_before_frames_is_rejected() {
 fn workflow_phase_mask_after_span_is_required() {
     let mut spec: Value =
         serde_json::from_str(include_str!("../testdata/valid-workflow.json")).unwrap();
+    for node in spec["nodes"].as_array_mut().unwrap() {
+        node["width"] = json!(80);
+    }
     spec["phases"] = json!([{"id":"p","label":"Phase","fromCol":0,"toCol":1}]);
     let g = layout_json(&json!({"specJson":spec.to_string()}).to_string())
         .geometry

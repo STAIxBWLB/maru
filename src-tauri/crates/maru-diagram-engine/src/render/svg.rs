@@ -436,12 +436,8 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             "container-box",
             c.bounds,
             radius * 64,
-            if c.kind == "phase" {
-                (t.mask, "none", "0")
-            } else {
-                (frame.fill, frame.stroke, "1")
-            },
-            if matches!(c.kind.as_str(), "phase" | "card") {
+            (frame.fill, frame.stroke, "1"),
+            if c.kind == "card" {
                 None
             } else {
                 super::primitives::frame_dash(&c.kind, semantics, &c.id).or(Some(frame.dash))

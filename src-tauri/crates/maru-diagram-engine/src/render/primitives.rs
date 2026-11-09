@@ -115,6 +115,21 @@ pub(crate) fn context<'a>(
             ));
         }
     }
+    for label in &g.labels {
+        if label.id.as_deref() == Some(format!("edge:{}:label", label.target_id).as_str())
+            && g.routes
+                .iter()
+                .any(|route| route.id.as_deref() == Some(label.target_id.as_str()))
+            && !c.route_labels.contains_key(&label.target_id)
+        {
+            return Err(error(
+                "label-source",
+                "/options/semantics/routeLabels",
+                "route label lacks its matching primary/detail semantic record",
+                "provide the matching source spec to retain label role and variant accents",
+            ));
+        }
+    }
     for n in &g.nodes {
         if c.nodes
             .get(&n.id)

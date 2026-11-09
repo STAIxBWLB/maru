@@ -75,3 +75,20 @@ fn node_tag_uses_its_kind_token_in_both_themes() {
         );
     }
 }
+
+#[test]
+fn missing_route_label_semantics_fails_closed() {
+    let spec: Value =
+        serde_json::from_str(include_str!("../testdata/valid-architecture.json")).unwrap();
+    let g = layout_json(&json!({"specJson":spec.to_string()}).to_string())
+        .geometry
+        .unwrap();
+    let mut options = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
+    options.semantics.as_mut().unwrap().route_labels.clear();
+    let result = render_svg(&g, &options);
+    assert!(!result.ok);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "document/svg-label-source"));
+}
