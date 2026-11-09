@@ -5,6 +5,234 @@ export interface OfflineViewerInput {
 }
 
 export const OFFLINE_VIEWER_RUNTIME_BUDGET_BYTES = 12 * 1024;
+export const OFFLINE_VIEWER_SVG_MAX_BYTES = 16 * 1024 * 1024;
+export const OFFLINE_VIEWER_SPEC_MAX_BYTES = 4 * 1024 * 1024;
+
+const SVG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
+  svg: new Set(["xmlns", "id", "role", "aria-labelledby", "viewBox", "width", "height", "data-theme"]),
+  title: new Set(["id"]),
+  desc: new Set(["id"]),
+  defs: new Set(),
+  marker: new Set(["id", "markerWidth", "markerHeight", "refX", "refY", "orient", "markerUnits"]),
+  g: new Set(["id", "data-kind", "data-source-id", "data-target-id", "data-route-role", "data-route-variant", "role", "aria-label"]),
+  rect: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "x", "y", "width", "height", "rx", "fill", "stroke", "stroke-width", "stroke-dasharray"]),
+  polyline: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "data-index", "points", "fill", "stroke", "stroke-width", "stroke-dasharray", "marker-end"]),
+  line: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "x1", "y1", "x2", "y2", "fill", "stroke", "stroke-width", "stroke-dasharray", "marker-end"]),
+  polygon: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "points", "fill", "stroke", "stroke-width"]),
+  circle: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "cx", "cy", "r", "fill", "stroke", "stroke-width"]),
+  path: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "data-index", "d", "transform", "fill", "stroke", "stroke-width"]),
+  text: new Set(["data-kind", "font-family", "font-size", "font-weight", "font-kerning", "font-variant-ligatures", "text-rendering", "style", "xml:space", "fill", "aria-hidden"]),
+  tspan: new Set(["data-kind", "data-index", "x", "y", "fill"]),
+};
+const SVG_LEAF_TAGS = new Set(["rect", "polyline", "line", "polygon", "circle", "path"]);
+const SVG_CHILDREN: Readonly<Record<string, ReadonlySet<string>>> = {
+  svg: new Set(["title", "desc", "rect", "defs", "g", "polyline", "line", "polygon", "circle", "path"]),
+  defs: new Set(["marker"]),
+  marker: new Set(["polygon"]),
+  g: new Set(["g", "rect", "polyline", "line", "polygon", "circle", "path", "text"]),
+  text: new Set(["tspan"]),
+};
+const SVG_REQUIRED_ATTRIBUTES: Readonly<Record<string, readonly string[]>> = {
+  svg: ["xmlns", "id", "role", "aria-labelledby", "viewBox", "width", "height", "data-theme"],
+  title: ["id"],
+  desc: ["id"],
+  defs: [],
+  marker: ["id", "markerWidth", "markerHeight", "refX", "refY", "orient", "markerUnits"],
+  g: ["id", "data-kind", "role", "aria-label"],
+  rect: ["data-kind", "x", "y", "width", "height", "rx", "fill", "stroke", "stroke-width"],
+  polyline: ["data-kind", "points", "fill", "stroke", "stroke-width"],
+  line: ["data-kind", "x1", "y1", "x2", "y2", "fill", "stroke", "stroke-width"],
+  polygon: ["points", "fill"],
+  circle: ["cx", "cy", "r", "fill", "stroke", "stroke-width"],
+  path: ["data-kind", "data-index", "d", "transform", "fill", "aria-hidden"],
+  text: ["data-kind", "font-family", "font-size", "font-weight", "font-kerning", "font-variant-ligatures", "text-rendering", "style", "xml:space", "fill", "aria-hidden"],
+  tspan: ["data-kind", "data-index", "x", "y", "fill"],
+};
+const SVG_STYLE_ATTRIBUTE = "font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0";
+const SVG_MARKER_IDS = new Set(["arrow", "arrow-emphasis", "arrow-security", "arrow-dashed"]);
+
+function svgProfileError(reason: string): never {
+  throw new TypeError(`The offline viewer refused the source SVG: ${reason}; provide the single SVG artifact from the pinned S1 engine.`);
+}
+
+function validXmlText(value: string): boolean {
+  if (/&(?!amp;|lt;|gt;|quot;|#9;|#10;|#13;)/.test(value)) return false;
+  for (const character of value) {
+    const code = character.codePointAt(0)!;
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) return false;
+    if ((code >= 0xd800 && code <= 0xdfff) || (code & 0xffff) >= 0xfffe) return false;
+  }
+  return true;
+}
+
+function numericList(value: string, count?: number): boolean {
+  if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)(?:[ ,]+-?(?:\d+(?:\.\d+)?|\.\d+))*$/.test(value)) return false;
+  const values = value.trim().split(/[ ,]+/).map(Number);
+  return values.every(Number.isFinite) && (count === undefined || values.length === count);
+}
+
+function validPaint(value: string): boolean {
+  return value === "none" || value === "transparent"
+    || /^#[0-9a-fA-F]{3,8}$/.test(value)
+    || /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/.test(value)
+    || /^url\(#(?:arrow|arrow-emphasis|arrow-security|arrow-dashed)\)$/.test(value);
+}
+
+function validateSvgAttribute(name: string, value: string, ids: Set<string>, markerRefs: string[]): void {
+  if (!validXmlText(value) || value.includes("<")) svgProfileError(`attribute ${name} is not safely quoted XML`);
+  if (name === "xmlns" && value !== "http://www.w3.org/2000/svg") svgProfileError("SVG namespace is not the engine namespace");
+  if (name === "aria-labelledby" && value !== "maru-title maru-desc") svgProfileError("root accessibility references are not engine-owned");
+  if (name === "role" && !["img", "group", "listitem"].includes(value)) svgProfileError("role is outside the engine SVG profile");
+  if (name === "id") {
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(value) || ids.has(value)) svgProfileError("element id is malformed or duplicated");
+    ids.add(value);
+  }
+  if (name === "data-kind" && !/^[a-z][a-z0-9-]*$/.test(value)) svgProfileError("data-kind is malformed");
+  if (["data-source-id", "data-target-id", "data-route-role", "data-route-variant"].includes(name) && value.length > 4096) svgProfileError(`${name} exceeds the engine metadata limit`);
+  if (name === "data-theme" && value !== "light" && value !== "dark") svgProfileError("theme is outside the engine SVG profile");
+  if (name === "aria-hidden" && value !== "true") svgProfileError("aria-hidden must be true for engine-only glyphs");
+  if (name === "font-family" && value !== "Noto Sans CJK KR, sans-serif") svgProfileError("font family is outside the pinned S1 profile");
+  if (name === "font-kerning" && value !== "none") svgProfileError("font kerning must remain disabled");
+  if (name === "font-variant-ligatures" && value !== "none") svgProfileError("font ligatures must remain disabled");
+  if (name === "text-rendering" && value !== "geometricPrecision") svgProfileError("text rendering mode is outside the pinned S1 profile");
+  if (name === "style" && value !== SVG_STYLE_ATTRIBUTE) svgProfileError("inline text style is outside the pinned S1 profile");
+  if (name === "xml:space" && value !== "preserve") svgProfileError("XML whitespace handling is outside the pinned S1 profile");
+  if (name === "orient" && value !== "auto") svgProfileError("marker orientation is outside the pinned S1 profile");
+  if (name === "markerUnits" && value !== "strokeWidth") svgProfileError("marker units are outside the pinned S1 profile");
+  if (name === "markerWidth" && value !== "10") svgProfileError("marker width is outside the pinned S1 profile");
+  if (name === "markerHeight" && value !== "7") svgProfileError("marker height is outside the pinned S1 profile");
+  if (name === "refX" && value !== "9") svgProfileError("marker refX is outside the pinned S1 profile");
+  if (name === "refY" && value !== "3.5") svgProfileError("marker refY is outside the pinned S1 profile");
+  if (name === "marker-end") {
+    const match = /^url\(#([A-Za-z0-9_-]+)\)$/.exec(value);
+    if (!match || !SVG_MARKER_IDS.has(match[1]!)) svgProfileError("marker reference must be a local engine arrow definition");
+    markerRefs.push(match[1]!);
+  }
+  if (["fill", "stroke"].includes(name) && !validPaint(value)) svgProfileError(`${name} paint is not a local engine color`);
+  if (["x", "y", "x1", "y1", "x2", "y2", "width", "height", "rx", "cx", "cy", "r", "stroke-width", "font-size", "markerWidth", "markerHeight", "refX", "refY"].includes(name)) {
+    if (!numericList(value, 1)) svgProfileError(`${name} is not a finite scalar`);
+    const numeric = Number(value);
+    if (["width", "height", "rx", "r", "stroke-width", "font-size", "markerWidth", "markerHeight"].includes(name) && numeric < 0) svgProfileError(`${name} must be nonnegative`);
+    if (["width", "height", "font-size", "markerWidth", "markerHeight"].includes(name) && numeric === 0) svgProfileError(`${name} must be positive`);
+  }
+  if (name === "viewBox" && (!numericList(value, 4) || Number(value.trim().split(/[ ,]+/)[2]) <= 0 || Number(value.trim().split(/[ ,]+/)[3]) <= 0)) svgProfileError("viewBox must contain four finite values and positive dimensions");
+  if (name === "points") {
+    const coordinates = value.trim().split(/[ ,]+/);
+    if (!numericList(value) || coordinates.length < 4 || coordinates.length % 2 !== 0) svgProfileError("point list is outside the engine SVG profile");
+  }
+  if (name === "stroke-dasharray" && !numericList(value)) svgProfileError("dash pattern is outside the engine SVG profile");
+  if (name === "font-weight" && !["400", "700"].includes(value)) svgProfileError("font weight is outside the pinned S1 profile");
+  if (name === "data-index" && !/^\d+$/.test(value)) svgProfileError("glyph index is malformed");
+  if (name === "d" && !/^[MmLlHhVvCcSsQqTtAaZz0-9+.,\s-]+$/.test(value)) svgProfileError("glyph outline path contains unsupported syntax");
+  if (name === "transform" && !/^translate\(-?(?:\d+(?:\.\d+)?|\.\d+)\s+-?(?:\d+(?:\.\d+)?|\.\d+)\)\s+scale\(-?(?:\d+(?:\.\d+)?|\.\d+)\s+-?(?:\d+(?:\.\d+)?|\.\d+)\)$/.test(value)) svgProfileError("glyph transform is outside the pinned S1 profile");
+}
+
+/** Accept the fixed, inert S1 SVG vocabulary and reject HTML or active content. */
+function validateEngineSvg(svg: string): void {
+  if (new TextEncoder().encode(svg).byteLength > OFFLINE_VIEWER_SVG_MAX_BYTES) svgProfileError("SVG exceeds the 16 MiB artifact limit");
+  const stack: string[] = [];
+  const ids = new Set<string>();
+  const markerIds = new Set<string>();
+  const markerRefs: string[] = [];
+  let index = 0;
+  let elements = 0;
+  let rootSeen = false;
+  let rootClosed = false;
+  let titleCount = 0;
+  let descCount = 0;
+  while (index < svg.length) {
+    if (svg[index] !== "<") {
+      const end = svg.indexOf("<", index);
+      const text = svg.slice(index, end < 0 ? svg.length : end);
+      if (!validXmlText(text)) svgProfileError("text contains an invalid XML entity or control character");
+      if (stack.length === 0 && text.length !== 0) svgProfileError("content appears outside the SVG root");
+      if (stack.at(-1) !== "title" && stack.at(-1) !== "desc" && stack.at(-1) !== "tspan" && text.trim() !== "") svgProfileError("text appears outside a permitted text element");
+      index = end < 0 ? svg.length : end;
+      continue;
+    }
+    if (svg.startsWith("<!", index) || svg.startsWith("<?", index)) svgProfileError("XML declarations, comments, and doctypes are not accepted");
+    if (svg.startsWith("</", index)) {
+      const close = /^<\/([A-Za-z][A-Za-z0-9-]*)\s*>/.exec(svg.slice(index));
+      if (!close || stack.pop() !== close[1]) svgProfileError("SVG elements are not strictly balanced");
+      index += close[0].length;
+      if (stack.length === 0) rootClosed = true;
+      continue;
+    }
+    const nameMatch = /^<([A-Za-z][A-Za-z0-9-]*)/.exec(svg.slice(index));
+    if (!nameMatch) svgProfileError("SVG tag name is malformed");
+    const name = nameMatch[1]!;
+    const allowedAttributes = SVG_ATTRIBUTES[name];
+    if (!allowedAttributes) svgProfileError(`element <${name}> is outside the pinned S1 SVG profile`);
+    if (!rootSeen) {
+      if (name !== "svg") svgProfileError("artifact must begin with one SVG root element");
+      rootSeen = true;
+    } else if (rootClosed) {
+      svgProfileError("artifact contains content after the SVG root");
+    }
+    if (stack.length > 0 && !SVG_CHILDREN[stack.at(-1)!]?.has(name)) svgProfileError(`element <${name}> is not permitted inside <${stack.at(-1)}>`);
+    index += nameMatch[0].length;
+    const attrs = new Set<string>();
+    const values = new Map<string, string>();
+    let selfClosing = false;
+    while (index < svg.length) {
+      while (/\s/.test(svg[index] ?? "")) index += 1;
+      if (svg.startsWith("/>", index)) {
+        selfClosing = true;
+        index += 2;
+        break;
+      }
+      if (svg[index] === ">") {
+        index += 1;
+        break;
+      }
+      const attrMatch = /^[A-Za-z_:][A-Za-z0-9:_.-]*/.exec(svg.slice(index));
+      if (!attrMatch) svgProfileError(`attribute syntax on <${name}> is malformed`);
+      const attr = attrMatch[0];
+      if (!allowedAttributes.has(attr) || attrs.has(attr)) svgProfileError(`attribute ${attr} is not allowed or is duplicated on <${name}>`);
+      attrs.add(attr);
+      index += attr.length;
+      while (/\s/.test(svg[index] ?? "")) index += 1;
+      if (svg[index] !== "=") svgProfileError(`attribute ${attr} has no quoted value`);
+      index += 1;
+      while (/\s/.test(svg[index] ?? "")) index += 1;
+      if (svg[index] !== '"') svgProfileError(`attribute ${attr} must use a double-quoted value`);
+      index += 1;
+      const valueEnd = svg.indexOf('"', index);
+      if (valueEnd < 0) svgProfileError(`attribute ${attr} is not closed`);
+      const value = svg.slice(index, valueEnd);
+      validateSvgAttribute(attr, value, ids, markerRefs);
+      values.set(attr, value);
+      if (name === "marker" && attr === "id") {
+        if (!SVG_MARKER_IDS.has(value)) svgProfileError("marker id is outside the pinned S1 arrow vocabulary");
+        markerIds.add(value);
+      }
+      index = valueEnd + 1;
+    }
+    elements += 1;
+    if (elements > 250_000) svgProfileError("SVG exceeds the element-count limit");
+    if (name === "title") titleCount += 1;
+    if (name === "desc") descCount += 1;
+    if (SVG_REQUIRED_ATTRIBUTES[name]!.some((attribute) => !attrs.has(attribute))) svgProfileError(`<${name}> is missing required engine attributes`);
+    if (name === "g" && values.get("data-kind") !== "legend-entry" && !attrs.has("data-source-id")) svgProfileError("semantic SVG group is missing its source id");
+    if (name === "g" && values.get("data-kind") === "label" && !attrs.has("data-target-id")) svgProfileError("label group is missing its target id");
+    if (name === "svg") {
+      if (selfClosing || values.get("id") !== "maru-svg" || values.get("xmlns") !== "http://www.w3.org/2000/svg" || values.get("role") !== "img" || values.get("aria-labelledby") !== "maru-title maru-desc") svgProfileError("SVG root is missing required engine attributes");
+      if (svg.slice(0, index).match(/<svg\b/g)?.length !== 1) svgProfileError("artifact must contain exactly one SVG root");
+    }
+    if (name === "title" && values.get("id") !== "maru-title") svgProfileError("SVG title id is outside the engine accessibility profile");
+    if (name === "desc" && values.get("id") !== "maru-desc") svgProfileError("SVG description id is outside the engine accessibility profile");
+    if (selfClosing) {
+      if (!SVG_LEAF_TAGS.has(name)) svgProfileError(`element <${name}> must be explicitly closed`);
+    } else {
+      if (SVG_LEAF_TAGS.has(name)) svgProfileError(`leaf element <${name}> must be self-closing`);
+      stack.push(name);
+      if (stack.length > 64) svgProfileError("SVG nesting exceeds the profile depth limit");
+    }
+  }
+  if (!rootSeen || !rootClosed || stack.length !== 0 || titleCount !== 1 || descCount !== 1) svgProfileError("artifact must have one balanced SVG root, title, and description");
+  if ([...SVG_MARKER_IDS].some((id) => !markerIds.has(id))) svgProfileError("engine arrow definitions are incomplete");
+  if (markerRefs.some((id) => !markerIds.has(id))) svgProfileError("marker reference does not resolve to a local engine definition");
+}
 
 const VIEWER_STYLE = `
 :root{color-scheme:light dark;font:14px/1.4 system-ui,sans-serif;background:#f4f5f7;color:#111827}
@@ -34,27 +262,9 @@ const VIEWER_RUNTIME = String.raw`
   var svg=document.querySelector("#stage > svg");
   var status=document.getElementById("selection");
   var zoomLevel=document.getElementById("zoom-level");
-  var source=document.getElementById("offline-viewer-source");
-  if(!viewport||!svg||!status||!zoomLevel||!source)return;
+  if(!viewport||!svg||!status||!zoomLevel)return;
 
-  var spec=JSON.parse(source.textContent||"{}");
-  var collections={architecture:"components",workflow:"nodes",sequence:"participants",dataflow:"nodes",lifecycle:"states"};
-  var relationCollections={architecture:"connections",workflow:"edges",sequence:"messages",dataflow:"flows",lifecycle:"transitions"};
-  var routePrefixes={architecture:"connection",workflow:"edge",sequence:"message",dataflow:"flow",lifecycle:"transition"};
-  var nodes=new Map();
-  var relations=new Map();
-  var nodeRows=Array.isArray(spec[collections[spec.diagram_type]])?spec[collections[spec.diagram_type]]:[];
-  nodeRows.forEach(function(row){if(row&&typeof row.id==="string")nodes.set(row.id,row);});
-  var relationRows=Array.isArray(spec[relationCollections[spec.diagram_type]])?spec[relationCollections[spec.diagram_type]]:[];
-  var prefix=routePrefixes[spec.diagram_type]||"edge";
-  var used=new Set(relationRows.map(function(row){return row&&typeof row.id==="string"?row.id:null;}).filter(Boolean));
-  relationRows.forEach(function(row,index){
-    if(!row||typeof row!=="object")return;
-    var id=typeof row.id==="string"?row.id:prefix+":"+index;
-    if(typeof row.id!=="string")while(used.has(id))id+=":generated";
-    used.add(id);
-    relations.set(id,row);
-  });
+  var labelGroups=Array.from(svg.querySelectorAll('[data-kind="label"]'));
 
   var initial=svg.viewBox.baseVal;
   var original={x:initial.x,y:initial.y,width:initial.width,height:initial.height};
@@ -80,7 +290,15 @@ const VIEWER_RUNTIME = String.raw`
   }
   function routeInfo(sourceId){
     var routeId=sourceId.indexOf("id:")===0?sourceId.slice(3):sourceId;
-    return {id:routeId,row:relations.get(routeId)};
+    return {id:routeId};
+  }
+  function labelForTarget(target){
+    var kind=target.getAttribute("data-kind");
+    var sourceId=sourceIdFor(target);
+    var routeId=kind==="route"?routeInfo(sourceId).id:sourceId;
+    var labelSourceId=kind==="route"?"id:edge:"+routeId+":label":"id:node:"+sourceId+":label";
+    var label=labelGroups.find(function(group){return group.getAttribute("data-source-id")===labelSourceId;});
+    return (label&&label.getAttribute("aria-label"))||target.getAttribute("aria-label")||"";
   }
   function targetForLabel(label){
     if(!label)return null;
@@ -110,15 +328,7 @@ const VIEWER_RUNTIME = String.raw`
     var kind=target.getAttribute("data-kind")==="route"?"edge":"node";
     var rawId=sourceIdFor(target);
     var id=kind==="edge"?routeInfo(rawId).id:rawId;
-    var row=kind==="edge"?routeInfo(rawId).row:nodes.get(id);
-    var label=row&&typeof row.label==="string"?row.label:"";
-    if(kind==="edge"&&!label){
-      var from=row&&typeof row.from==="string"?row.from:"";
-      var to=row&&typeof row.to==="string"?row.to:"";
-      label=from&&to?from+" -> "+to:"(unlabelled)";
-    }
-    if(kind==="edge"&&row&&typeof row.note==="string"&&row.note)label=label+"; "+row.note;
-    if(!label&&row&&typeof row.label!=="string")label="(unlabelled)";
+    var label=labelForTarget(target)||"(unlabelled)";
     status.textContent=kind+" "+id+" - "+label;
   }
   function screenToSvg(x,y,matrix){
@@ -184,7 +394,7 @@ const VIEWER_RUNTIME = String.raw`
 })();
 `;
 
-const VIEWER_CSP = "default-src 'none'; script-src 'sha256-9b/Jc5IKTIOUnWnGH4VE+WWBQkwNDsSUNIYonYnuxi8='; style-src 'sha256-dPMqwh+nPnXPHCb2QAZjrDqlQmY+r+i9jn+Y2SeA+gY='; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'";
+const VIEWER_CSP = "default-src 'none'; script-src 'sha256-qFeS9FU2CAnDeDKPRnTT3Fo9v9ur7J6tyXxwTadGvuk='; style-src 'sha256-dPMqwh+nPnXPHCb2QAZjrDqlQmY+r+i9jn+Y2SeA+gY='; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'";
 
 function escapeHtmlText(value: string): string {
   return value.replace(/[&<>]/g, (character) => {
@@ -202,6 +412,9 @@ function escapeScriptClosingTags(value: string): string {
 }
 
 export function createOfflineViewerHtml(input: Readonly<OfflineViewerInput>): string {
+  if (new TextEncoder().encode(input.specJson).byteLength > OFFLINE_VIEWER_SPEC_MAX_BYTES) {
+    throw new TypeError("The offline viewer source spec exceeds its 4 MiB limit.");
+  }
   let source: unknown;
   try {
     source = JSON.parse(input.specJson);
@@ -211,6 +424,7 @@ export function createOfflineViewerHtml(input: Readonly<OfflineViewerInput>): st
   if (!source || typeof source !== "object" || Array.isArray(source)) {
     throw new TypeError("The offline viewer source spec must be a JSON object.");
   }
+  validateEngineSvg(input.svg);
   const metadata = (source as { meta?: { title?: unknown } }).meta;
   const title = input.title ?? (typeof metadata?.title === "string" ? metadata.title : "Diagram viewer");
   const runtimeBytes = new TextEncoder().encode(VIEWER_RUNTIME).byteLength;

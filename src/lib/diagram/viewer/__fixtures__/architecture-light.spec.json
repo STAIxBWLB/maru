@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "마루 architecture 렌더",
+    "output": "fixture.html",
+    "subtitle": "결정적 SVG · 접근성 검증"
+  },
+  "layout": {
+    "mode": "grid",
+    "cols": 4
+  },
+  "components": [
+    {
+      "id": "a",
+      "type": "frontend",
+      "label": "입력",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "b",
+      "type": "backend",
+      "label": "처리",
+      "row": 0,
+      "col": 1
+    }
+  ],
+  "connections": [
+    {
+      "from": "a",
+      "to": "b",
+      "label": "Call"
+    }
+  ]
+}

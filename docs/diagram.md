@@ -1915,7 +1915,15 @@ engine SVG and its source spec in a standalone HTML file; it does not require
 Maru or connect to an app service. The JSON remains in an inert
 `application/json` script block, with closing-script sequences escaped for
 HTML parsing. Selected node/edge IDs and labels are displayed through
-`textContent`.
+`textContent`; selection labels come from the engine SVG's own metadata, never
+from source-spec text. The spec remains an inert payload for the later caller
+stage.
+
+Before interpolation, the builder bounds SVG/spec sizes and validates one
+balanced S1 SVG root against its fixed tag/attribute profile. Links, active
+content, external paint URLs and unknown elements/attributes are refused;
+only local engine arrow markers are accepted. Quoted attribute values are
+checked by attribute meaning, so URL-like label text remains inert metadata.
 
 The viewer supports pointer dragging, wheel zoom, toolbar zoom/fit, arrow-key
 panning, keyboard zoom/fit, and keyboard selection. Its inline runtime and
