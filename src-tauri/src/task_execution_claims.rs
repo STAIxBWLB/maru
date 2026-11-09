@@ -20,6 +20,7 @@ use crate::vault::{
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -171,6 +172,7 @@ pub(crate) struct Admission {
 /// Ordinary tasks receive no guard and create no claim infrastructure.
 pub(crate) struct TaskMutationGuard {
     work: PathBuf,
+    source: PathBuf,
     claim: TaskExecutionClaim,
     claim_path: PathBuf,
     task_lock_path: PathBuf,
@@ -180,6 +182,12 @@ pub(crate) struct TaskMutationGuard {
 impl TaskMutationGuard {
     pub(crate) fn paths(&self) -> Vec<PathBuf> {
         vec![self.claim_path.clone(), self.task_lock_path.clone()]
+    }
+
+    /// The canonical note this guard locked the claim for. Batch callers match
+    /// receipts to guards by this path.
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
     }
 
     pub(crate) fn check(&self, lease: &PathTransactionLease, source: &Path) -> Result<(), String> {
@@ -281,7 +289,7 @@ fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn action_error(code: &str, path: &Path, cause: &str, next: &str) -> String {
+pub(crate) fn action_error(code: &str, path: &Path, cause: &str, next: &str) -> String {
     format!("{code}: path={} cause={cause}; next={next}", display(path))
 }
 
@@ -1505,6 +1513,8 @@ fn open_existing_claim_lock(path: &Path) -> Result<File, String> {
             )
         })?;
     verify_lock_identity(&file, path)?;
+    #[cfg(test)]
+    claim_lock_wait::announce(path);
     file.lock().map_err(|error| {
         action_error(
             "task_execution_lock_failed",
@@ -1515,6 +1525,66 @@ fn open_existing_claim_lock(path: &Path) -> Result<File, String> {
     })?;
     verify_lock_identity(&file, path)?;
     Ok(file)
+}
+
+/// Test-only rendezvous for the blocking claim-lock wait. A test that holds a
+/// claim lock otherwise has no way to know that another caller has actually
+/// reached the wait rather than not having started; a sleep there proves
+/// nothing about the order locks are taken in. In-process callers use the
+/// channel, a writer in another process uses the marker file. Release builds
+/// carry none of this.
+#[cfg(test)]
+pub(crate) mod claim_lock_wait {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::{mpsc, Mutex, OnceLock};
+
+    type Watchers = Mutex<HashMap<PathBuf, Vec<mpsc::Sender<()>>>>;
+
+    static WATCHERS: OnceLock<Watchers> = OnceLock::new();
+
+    fn key(path: &Path) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    /// Fires once when the next caller reaches `path`'s claim-lock wait.
+    pub(crate) fn watch(path: &Path) -> mpsc::Receiver<()> {
+        let (sender, receiver) = mpsc::channel();
+        let mut watchers = WATCHERS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        watchers.entry(key(path)).or_default().push(sender);
+        receiver
+    }
+
+    /// Called inside the wait itself, immediately before the blocking call.
+    pub(crate) fn announce(path: &Path) {
+        // A fixture that must know a *separate* process is in the wait cannot
+        // use the channel above, which lives in this process: it names a marker
+        // file through the environment instead, and the child writes it here.
+        if let Some(marker) = std::env::var_os("MARU_CLAIM_LOCK_MARKER") {
+            use std::io::Write;
+            let marker = PathBuf::from(marker);
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&marker)
+            {
+                file.write_all(b"wait\n").ok();
+            }
+        }
+        let Some(watchers) = WATCHERS.get() else {
+            return;
+        };
+        let senders = watchers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&key(path));
+        for sender in senders.unwrap_or_default() {
+            sender.send(()).ok();
+        }
+    }
 }
 
 fn with_claim_identity<T>(
@@ -1726,13 +1796,17 @@ fn active_claim_for_other_request(
     write_claim(roots, lease, claim, lock)
 }
 
-/// Coordination guard for the existing managed Markdown mutation wrappers.
-/// A note without an active task claim receives only the path bootstrap lock;
-/// no taskId or claim is written for an ordinary note.
-pub(crate) fn guard_task_mutation(
-    work: &Path,
-    source: &Path,
-) -> Result<Option<TaskMutationGuard>, String> {
+/// One source note that already carries an existing claim, resolved without
+/// taking any lock. `lock_task_claims` needs the task id up front so it can
+/// order several claim locks before acquiring the first one.
+struct ClaimTarget {
+    work: PathBuf,
+    roots: WorkspaceRoots,
+    source: PathBuf,
+    claim: TaskExecutionClaim,
+}
+
+fn claim_target(work: &Path, source: &Path) -> Result<Option<ClaimTarget>, String> {
     let work = normalize_existing_dir(&display(work))?;
     let roots = WorkspaceRoots {
         work: work.clone(),
@@ -1777,10 +1851,19 @@ pub(crate) fn guard_task_mutation(
             "open the original workspace and retry",
         ));
     }
-    let task_lock_path = task_lock_path(&roots, &claim.task_id);
+    Ok(Some(ClaimTarget {
+        work,
+        roots,
+        source: path,
+        claim,
+    }))
+}
+
+fn lock_target(target: ClaimTarget) -> Result<TaskMutationGuard, String> {
+    let task_lock_path = task_lock_path(&target.roots, &target.claim.task_id);
     let task_lock = open_existing_claim_lock(&task_lock_path)?;
-    let file = claim_path(&roots, &claim.task_id);
-    let current = read_claim(&file, &claim.task_id)?.ok_or_else(|| {
+    let file = claim_path(&target.roots, &target.claim.task_id);
+    let current = read_claim(&file, &target.claim.task_id)?.ok_or_else(|| {
         action_error(
             "task_execution_claim_missing",
             &file,
@@ -1788,13 +1871,129 @@ pub(crate) fn guard_task_mutation(
             "refresh the task and retry",
         )
     })?;
-    Ok(Some(TaskMutationGuard {
-        work,
+    Ok(TaskMutationGuard {
+        work: target.work,
+        source: target.source,
         claim: current,
         claim_path: file,
         task_lock_path,
         task_lock,
-    }))
+    })
+}
+
+/// Coordination guard for the existing managed Markdown mutation wrappers.
+/// A note without an active task claim receives only the path bootstrap lock;
+/// no taskId or claim is written for an ordinary note.
+pub(crate) fn guard_task_mutation(
+    work: &Path,
+    source: &Path,
+) -> Result<Option<TaskMutationGuard>, String> {
+    match claim_target(work, source)? {
+        Some(target) => lock_target(target).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Read-only probe for a note that already carries a claim. Batch writers use
+/// it while holding their lease to refuse a claim they can no longer lock
+/// without inverting the lock order.
+pub(crate) fn has_task_claim(work: &Path, source: &Path) -> Result<bool, String> {
+    Ok(claim_target(work, source)?.is_some())
+}
+
+/// Claim locks a batch took before its path lease, plus the claims it could not
+/// lock. One unreadable note must not abort a batch whose other notes are
+/// independent, so a failure is carried here and reported against the item it
+/// belongs to instead of failing the whole call.
+pub(crate) struct BatchClaimLocks {
+    guards: Vec<TaskMutationGuard>,
+    failures: Vec<(PathBuf, String)>,
+}
+
+impl BatchClaimLocks {
+    /// The refusal recorded for `source`, if its claim could not be locked.
+    pub(crate) fn failure_for(&self, source: &Path) -> Option<&str> {
+        let canonical = source
+            .canonicalize()
+            .unwrap_or_else(|_| source.to_path_buf());
+        self.failures
+            .iter()
+            .find(|(failed, _)| *failed == canonical || failed == source)
+            .map(|(_, error)| error.as_str())
+    }
+
+    /// Take the guard locked for `source`, leaving the others in place.
+    pub(crate) fn guard_for(&mut self, source: &Path) -> Option<&mut TaskMutationGuard> {
+        let canonical = source
+            .canonicalize()
+            .unwrap_or_else(|_| source.to_path_buf());
+        let index = self
+            .guards
+            .iter()
+            .position(|guard| guard.source() == canonical || guard.source() == source)?;
+        self.guards.get_mut(index)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn locked_count(&self) -> usize {
+        self.guards.len()
+    }
+}
+
+/// Take the existing claim lock of every opted-in note in a batch, in one
+/// stable order (ascending task id), before the caller takes its path lease.
+/// Two processes scanning the same batch directory would otherwise be free to
+/// take the same claim locks in opposite orders and deadlock. Sources without
+/// a claim (ordinary notes, non-opt-in tasks, absent claim infrastructure) are
+/// skipped, so an ordinary batch acquires nothing. Repeat sources that share a
+/// task id are locked once: the same lock file is not reentrant.
+pub(crate) fn lock_task_claims(work: &Path, sources: &[PathBuf]) -> BatchClaimLocks {
+    let mut targets = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut failures = Vec::new();
+    for source in sources {
+        match claim_target(work, source) {
+            Ok(Some(target)) => {
+                if seen.insert(target.claim.task_id.clone()) {
+                    targets.push(target);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => failures.push((source.clone(), error)),
+        }
+    }
+    targets.sort_by_key(|target| target.claim.task_id.clone());
+    let mut guards = Vec::with_capacity(targets.len());
+    for target in targets {
+        let claim_id = target.claim.task_id.clone();
+        let source = target.source.clone();
+        let guard = match lock_target(target) {
+            Ok(guard) => guard,
+            Err(error) => {
+                failures.push((source, error));
+                continue;
+            }
+        };
+        // The scan resolved this claim from the note's own identity, which is
+        // also what ordered the locks. A note that changed its taskId while the
+        // batch was locking no longer matches the lock taken for it, so the
+        // caller is told that this source's claim is not held: the one thing
+        // the scan cannot promise by the time the batch writes.
+        if task_id_from_path_bounded(&source).as_deref() == Some(claim_id.as_str()) {
+            guards.push(guard);
+        } else {
+            failures.push((
+                source.clone(),
+                action_error(
+                    "task_execution_batch_order_changed",
+                    &source,
+                    "the note no longer carries the taskId this batch locked for it",
+                    "re-run the batch so every claim is locked in the current order",
+                ),
+            ));
+        }
+    }
+    BatchClaimLocks { guards, failures }
 }
 
 /// Acquire or replay the single active task claim. No timer can take over an
