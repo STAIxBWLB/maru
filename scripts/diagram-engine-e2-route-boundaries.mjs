@@ -171,9 +171,9 @@ export function generatedRouteBoundaryCases(seedFor) {
     s.connections[0].via=[[140,120+depth],[540,120+depth],[540,140+depth],[140,140+depth],[140,160+depth],[540,160+depth]];
   });
   // The observed auto face slots are7px apart. Widths6/7 and8/7 make the
-  // two marker half-width sums6/8px. A declared side fixes orientation only;
-  // generated face coordinates remain notices under the provenance contract.
-  for(const markerWidth of [6,8]) add("workflow",`v2-arrow-spacing-${markerWidth}`,"geometry-route-quality",{cause:"arrowhead-collision",threshold:7,value:markerWidth,authorship:"toSide-orientation-only",measurement:{tips:[[288,119],[288,126]],tipDistancePx:7,minimumPx:markerWidth},expectedPolicy:"generated face-coordinate collision is a notice, not an authored-coordinate refusal"},s=>{
+  // two marker half-width sums6/8px. A collision on an authored destination
+  // face is owned; differing engine slot placement is separately reported.
+  for(const markerWidth of [6,8]) add("workflow",`v2-arrow-spacing-${markerWidth}`,"geometry-route-quality",{cause:"arrowhead-collision",threshold:7,value:markerWidth,authorship:"toSide",measurement:{tips:[[288,119],[288,126]],tipDistancePx:7,minimumPx:markerWidth},expectedPolicy:"an actual engine collision on an authored face refuses; separated engine tips are a placement-model difference"},s=>{
     s.schema_version=2;s.meta.quality_profile="showcase";s.lanes.push({id:"other",label:"Other"});
     s.nodes[1].lane="other";s.nodes[1].col=0;s.nodes[2].col=2;
     s.edges=[{id:"incoming-one",from:"a",to:"c",toSide:"left",width:markerWidth/7},
@@ -202,7 +202,7 @@ export function generatedRouteBoundaryCases(seedFor) {
     s.schema_version=2;s.edges=[{from:"a",to:"b",fromSide:"right",toSide:"left",channelX:keep?200:201,via:[[200,119],[200,170],[264,170],[264,119]]}];
   });
   for(const compatible of [false,true]) add("workflow",`v2-preset-${compatible?"compatible":"conflict"}`,"geometry-route-quality",{cause:"route-preset-compatibility",authorship:"route+channel"},s=>{
-    s.schema_version=2;s.edges=[{from:"a",to:"b",route:"bottom-channel",...(compatible?{channelY:200}:{channelX:200})}];
+    s.schema_version=2;s.edges=[{from:"a",to:"b",route:"bottom-channel",...(compatible?{channelY:160}:{channelX:160})}];
   });
   // Individually observed compileWorkflow receipts preserve the144,119 source
   // port:23px is accepted;25px is a measured ambiguous-corridor refusal.

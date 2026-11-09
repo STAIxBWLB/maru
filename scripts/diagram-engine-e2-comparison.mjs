@@ -3,7 +3,7 @@ const signatures = {
   "geometry-column-capacity": /under the fixed-v1 layout/i,
   "geometry-route-quality": /(?:micro.segment|short[^\n]*segment|border[^\n]*run|runs along[^\n]*border|explicit geometry[^\n]*(?:orthogonal|non-zero|route preset|channel pin|16px interior|8px endpoint))/i,
   "geometry-route-viewbox": /(?:Connection[^\n]*extends outside the viewBox|explicit geometry[^\n]*viewBox-origin containment)/i,
-  "geometry-route-clearance": /(?:label[^\n]*route[^\n]*clearance|label[^\n]*too close[^\n]*route)/i,
+  "geometry-route-clearance": /(?:label[^\n]*route[^\n]*clearance|label[^\n]*too close[^\n]*route|explicit geometry[^\n]*lane\/phase\/group label clearance)/i,
   "geometry-legend-clearance": /(?:legend[^\n]*(?:needs|clearance|requires)|content[^\n]*ends[^\n]*legend)/i,
   "geometry-label-viewbox": /(?:label[^\n]*(?:extends past|canvas containment)|explicit geometry[^\n]*label[^\n]*viewBox-origin)/i,
   "geometry-label-overlap": /(?:explicit geometry[^\n]*edge-label (?:node|legend|lane\/phase\/group) clearance|labels?[^\n]*overlaps?[^\n]*(?:state|node|component|label)|labels[^\n]*overlap)/i,
@@ -49,7 +49,7 @@ export function geometryComparisonFor(item) {
   };
   const messages = oracle.diagnostics.map((diagnostic) => diagnostic.message ?? "").join("\n");
   const oracleCodes = {
-    "geometry-route-quality": ["composition/micro-segment", "composition/short-interior-segment", "composition/container-border-run", "composition/ambiguous-corridor", "composition/proper-crossing", "composition/excessive-route-detour", "clean-flow/endpoint-side-direction"],
+    "geometry-route-quality": ["composition/micro-segment", "composition/short-interior-segment", "composition/container-border-run", "composition/ambiguous-corridor", "composition/arrowhead-collision", "composition/proper-crossing", "composition/excessive-route-detour", "clean-flow/endpoint-side-direction"],
     "geometry-route-clearance": ["composition/label-route-clearance", "clean-flow/edge-through-node"],
     "geometry-label-viewbox": ["composition/label-canvas-containment"],
   };

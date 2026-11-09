@@ -914,7 +914,12 @@ fn tip_authored(r: &Relation<'_>) -> bool {
     }
     let tip = *r.scene.last().unwrap();
     let previous = r.scene[r.scene.len() - 2];
-    if r.via.contains(&tip) || r.to_anchor == Some(tip) {
+    // A chosen destination face owns a collision on that face even when the
+    // engine selected the individual slot along it.
+    if text(r.raw, "toSide").is_some_and(|side| matches!(side, "left" | "right" | "top" | "bottom"))
+        || r.via.contains(&tip)
+        || r.to_anchor == Some(tip)
+    {
         return true;
     }
     let (x, y) = active_channels(r);
@@ -2254,8 +2259,8 @@ mod tests {
         }
     }
     #[test]
-    fn automatic_arrow_face_slots_are_not_owned_by_a_to_side() {
-        let (mut spec, g) = fixture(
+    fn arrow_face_slot_collision_is_owned_by_an_authored_destination_side() {
+        let (mut spec, mut g) = fixture(
             "workflow",
             vec![
                 json!({"to":"target","toSide":"left"}),
@@ -2267,9 +2272,25 @@ mod tests {
             ],
         );
         spec["schema_version"] = json!(2);
+        spec["edges"][0]["width"] = json!(8);
+        spec["edges"][1]["width"] = json!(7);
+        assert_authored(&spec, &g, "arrowhead-collision", 0);
+        spec["edges"][0]["toSide"] = Value::Null;
+        assert_authored(&spec, &g, "arrowhead-collision", 1);
+        spec["edges"][1]["toSide"] = Value::Null;
         assert_notice(&spec, &g, "arrowhead-collision");
         spec["edges"][1]["via"] = json!([[100, 4]]);
         assert_authored(&spec, &g, "arrowhead-collision", 1);
+        // Authored faces do not invent an oracle-only slot collision.
+        spec["edges"][1]["toSide"] = json!("left");
+        for point in &mut g.routes[1].points {
+            point.y = 100 * 64;
+        }
+        assert!(cause(
+            &route_geometry_diagnostics(&spec, &g),
+            "arrowhead-collision"
+        )
+        .is_empty());
     }
     #[test]
     fn a_generated_border_run_is_a_notice_but_an_authored_channel_is_refused() {

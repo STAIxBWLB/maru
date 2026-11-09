@@ -680,6 +680,7 @@
           "e2-architecture-geometry-label-fit-primary",
           "e2-architecture-geometry-label-fit-detail",
           "e2-architecture-geometry-label-fit-tag",
+          "e2-boundary-architecture-clear-margin-text-1",
           "e2-boundary-architecture-brand-rail-71"
         ],
         "oracleCodes": [
@@ -775,6 +776,7 @@
           "e2-workflow-geometry-label-fit-primary",
           "e2-workflow-geometry-label-fit-detail",
           "e2-workflow-geometry-label-fit-tag",
+          "e2-boundary-workflow-clear-margin-text-1",
           "e2-boundary-workflow-brand-rail-71",
           "e2-boundary-workflow-brand-rail-73"
         ],
@@ -820,8 +822,18 @@
         ]
       },
       {
+        "code": "workflow/geometry-route-clearance",
+        "cases": [
+          "e2-boundary-workflow-v2-route-lane-title-65"
+        ],
+        "oracleCodes": [
+          "workflow/explicit-pin-conflict"
+        ]
+      },
+      {
         "code": "workflow/geometry-route-quality",
         "cases": [
+          "e2-boundary-workflow-v2-arrow-spacing-8",
           "e2-boundary-workflow-v1-turn-7",
           "e2-boundary-workflow-v1-turn-15",
           "e2-boundary-workflow-v2-turn-7",
@@ -834,6 +846,7 @@
         ],
         "oracleCodes": [
           "composition/ambiguous-corridor",
+          "composition/arrowhead-collision",
           "composition/micro-segment",
           "composition/short-interior-segment",
           "workflow/explicit-pin-conflict"
@@ -857,7 +870,8 @@
           "e2-sequence-geometry-label-fit-detail",
           "e2-boundary-sequence-spread-primary-header-below",
           "e2-boundary-sequence-spread-sublabel-header-below",
-          "e2-boundary-sequence-brand-rail-9"
+          "e2-boundary-sequence-brand-rail-9",
+          "e2-boundary-sequence-clear-margin-text-1"
         ],
         "oracleCodes": [
           "layout/constraint"
@@ -870,6 +884,15 @@
         ],
         "oracleCodes": [
           "layout/constraint"
+        ]
+      },
+      {
+        "code": "sequence/geometry-label-viewbox",
+        "cases": [
+          "e2-boundary-sequence-message-label-canvas-34"
+        ],
+        "oracleCodes": [
+          "composition/label-canvas-containment"
         ]
       },
       {
@@ -992,7 +1015,8 @@
           "e2-boundary-dataflow-primary-width-below",
           "e2-boundary-dataflow-detail-width-sublabel-below",
           "e2-boundary-dataflow-detail-width-tag-below",
-          "e2-boundary-dataflow-brand-rail-71"
+          "e2-boundary-dataflow-brand-rail-71",
+          "e2-boundary-dataflow-clear-margin-text-1"
         ],
         "oracleCodes": [
           "layout/constraint"
@@ -1007,6 +1031,15 @@
         ],
         "oracleCodes": [
           "layout/constraint"
+        ]
+      },
+      {
+        "code": "dataflow/geometry-label-viewbox",
+        "cases": [
+          "e2-boundary-dataflow-label-canvas-15"
+        ],
+        "oracleCodes": [
+          "composition/label-canvas-containment"
         ]
       },
       {
@@ -1100,7 +1133,8 @@
           "e2-boundary-lifecycle-v2-primary-width-below",
           "e2-boundary-lifecycle-v2-detail-width-sublabel-below",
           "e2-boundary-lifecycle-v2-detail-width-tag-below",
-          "e2-boundary-lifecycle-brand-rail-71"
+          "e2-boundary-lifecycle-brand-rail-71",
+          "e2-boundary-lifecycle-clear-margin-text-1"
         ],
         "oracleCodes": [
           "layout/constraint"
@@ -1117,6 +1151,15 @@
         "oracleCodes": [
           "composition/label-band-title-overlap",
           "layout/constraint"
+        ]
+      },
+      {
+        "code": "lifecycle/geometry-label-viewbox",
+        "cases": [
+          "e2-boundary-lifecycle-label-canvas-15"
+        ],
+        "oracleCodes": [
+          "composition/label-canvas-containment"
         ]
       },
       {
@@ -1371,7 +1414,7 @@
       "renderer": "sequence",
       "location": 325,
       "cause": "message label canvas containment",
-      "engineCode": "sequence/geometry-label-overlap",
+      "engineCode": "sequence/geometry-label-viewbox",
       "expression": "showcase label overflow <=0.5px",
       "coverage": "generated-boundary",
       "reason": "e2-boundary-sequence-message-label-canvas-32/34; model text-capacity"
@@ -1651,7 +1694,7 @@
       "renderer": "dataflow",
       "location": 285,
       "cause": "label canvas overflow",
-      "engineCode": "dataflow/geometry-label-overlap",
+      "engineCode": "dataflow/geometry-label-viewbox",
       "expression": "showcase label overflow <=.5px",
       "coverage": "generated-boundary",
       "reason": "e2-boundary-dataflow-label-canvas-15/18; model text-capacity"
@@ -1920,7 +1963,7 @@
       "renderer": "lifecycle",
       "location": 550,
       "cause": "label canvas overflow",
-      "engineCode": "lifecycle/geometry-label-overlap",
+      "engineCode": "lifecycle/geometry-label-viewbox",
       "expression": "showcase label overflow <=.5px",
       "coverage": "generated-boundary",
       "reason": "e2-boundary-lifecycle-label-canvas-15/18; model text-capacity"
@@ -38564,16 +38607,16 @@
     {
       "id": "e2-boundary-dataflow-label-canvas-15",
       "diagramType": "dataflow",
-      "rule": "geometry-label-overlap",
+      "rule": "geometry-label-viewbox",
       "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Go\",\"labelAt\":[15,400]}]}",
       "inputSha256": "dab395ed565dbccde70ca591f213f87fa4cd5cdedc177826b21bb3a233c41b8c",
       "origin": {
         "kind": "synthetic-generated"
       },
-      "geometryRule": "dataflow/geometry-label-overlap",
+      "geometryRule": "dataflow/geometry-label-viewbox",
       "boundary": {
         "renderer": "dataflow",
-        "rule": "geometry-label-overlap",
+        "rule": "geometry-label-viewbox",
         "expression": "showcase label center minus half width may overflow at most.5px",
         "threshold": 16.5,
         "unit": "px",
@@ -38645,10 +38688,11 @@
       "geometryComparison": {
         "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Go\",\"labelAt\":[15,400]}]}",
         "accepted": false,
-        "equivalentCodes": [],
-        "geometryExpected": true,
-        "layer": "model-difference",
-        "mappingError": "Error: Geometry probe e2-boundary-dataflow-label-canvas-15 does not produce its claimed renderer cause dataflow/geometry-label-overlap: [composition/label-canvas-containment] showcase dataflow label \"Go\" on flows[0] \"a\" -> \"b\" extends past the left edge by 2px (label rect [-2, 389, 34, 16]; viewBox 940x720) — if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox.; repair its synthetic input or map the specific oracle diagnostic."
+        "equivalentCodes": [
+          "dataflow/geometry-label-viewbox"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
       },
       "currentScope": {
         "kind": "document-validity"
@@ -38657,16 +38701,16 @@
     {
       "id": "e2-boundary-dataflow-label-canvas-18",
       "diagramType": "dataflow",
-      "rule": "geometry-label-overlap",
+      "rule": "geometry-label-viewbox",
       "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\",\"stage\":0,\"row\":0},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Go\",\"labelAt\":[18,400]}]}",
       "inputSha256": "c3f02518e4a5630a5ce8e937ff305b49c2cf48c0fb2b1cc063324cfd2dd9cf6b",
       "origin": {
         "kind": "synthetic-generated"
       },
-      "geometryRule": "dataflow/geometry-label-overlap",
+      "geometryRule": "dataflow/geometry-label-viewbox",
       "boundary": {
         "renderer": "dataflow",
-        "rule": "geometry-label-overlap",
+        "rule": "geometry-label-viewbox",
         "expression": "showcase label center minus half width may overflow at most.5px",
         "threshold": 16.5,
         "unit": "px",
@@ -38713,16 +38757,16 @@
     {
       "id": "e2-boundary-lifecycle-label-canvas-15",
       "diagramType": "lifecycle",
-      "rule": "geometry-label-overlap",
+      "rule": "geometry-label-viewbox",
       "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Go\",\"labelAt\":[15,400]}]}",
       "inputSha256": "5a71d0a64d1a86cfa53238bad39d183a8e9ff1d83ec70f4fa0d905816f3e562e",
       "origin": {
         "kind": "synthetic-generated"
       },
-      "geometryRule": "lifecycle/geometry-label-overlap",
+      "geometryRule": "lifecycle/geometry-label-viewbox",
       "boundary": {
         "renderer": "lifecycle",
-        "rule": "geometry-label-overlap",
+        "rule": "geometry-label-viewbox",
         "expression": "showcase label center minus half width may overflow at most.5px",
         "threshold": 15.5,
         "unit": "px",
@@ -38794,10 +38838,11 @@
       "geometryComparison": {
         "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Go\",\"labelAt\":[15,400]}]}",
         "accepted": false,
-        "equivalentCodes": [],
-        "geometryExpected": true,
-        "layer": "model-difference",
-        "mappingError": "Error: Geometry probe e2-boundary-lifecycle-label-canvas-15 does not produce its claimed renderer cause lifecycle/geometry-label-overlap: [composition/label-canvas-containment] showcase lifecycle label \"Go\" on transitions[0] \"a\" -> \"b\" extends past the left edge by 1px (label rect [-1, 389, 32, 16]; viewBox 980x660) — if the authored labelAt are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust labelAt, labelDx, labelDy, or labelSegment; otherwise enlarge meta.viewBox.; repair its synthetic input or map the specific oracle diagnostic."
+        "equivalentCodes": [
+          "lifecycle/geometry-label-viewbox"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
       },
       "currentScope": {
         "kind": "document-validity"
@@ -38806,16 +38851,16 @@
     {
       "id": "e2-boundary-lifecycle-label-canvas-18",
       "diagramType": "lifecycle",
-      "rule": "geometry-label-overlap",
+      "rule": "geometry-label-viewbox",
       "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"Go\",\"labelAt\":[18,400]}]}",
       "inputSha256": "5bd23db8ba3c077d75189c408f0c4215fe2c8d244b9042b7bedf2a2ce55dd4d3",
       "origin": {
         "kind": "synthetic-generated"
       },
-      "geometryRule": "lifecycle/geometry-label-overlap",
+      "geometryRule": "lifecycle/geometry-label-viewbox",
       "boundary": {
         "renderer": "lifecycle",
-        "rule": "geometry-label-overlap",
+        "rule": "geometry-label-viewbox",
         "expression": "showcase label center minus half width may overflow at most.5px",
         "threshold": 15.5,
         "unit": "px",
@@ -38862,16 +38907,16 @@
     {
       "id": "e2-boundary-sequence-message-label-canvas-32",
       "diagramType": "sequence",
-      "rule": "geometry-label-overlap",
+      "rule": "geometry-label-viewbox",
       "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":180,\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"}]}",
       "inputSha256": "850562d7629722d908637acb24f9bb2a5945467057e6d8d193c44432e9b3ee42",
       "origin": {
         "kind": "synthetic-generated"
       },
-      "geometryRule": "sequence/geometry-label-overlap",
+      "geometryRule": "sequence/geometry-label-viewbox",
       "boundary": {
         "renderer": "sequence",
-        "rule": "geometry-label-overlap",
+        "rule": "geometry-label-viewbox",
         "expression": "showcase long message label expands past left canvas edge",
         "threshold": 33,
         "unit": "px",
@@ -38918,16 +38963,16 @@
     {
       "id": "e2-boundary-sequence-message-label-canvas-34",
       "diagramType": "sequence",
-      "rule": "geometry-label-overlap",
+      "rule": "geometry-label-viewbox",
       "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":180,\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"}]}",
       "inputSha256": "4a9ac7e0e3967f135428d5e311b3fbc1afd1a4e528eafa4416ed443c7d6abda3",
       "origin": {
         "kind": "synthetic-generated"
       },
-      "geometryRule": "sequence/geometry-label-overlap",
+      "geometryRule": "sequence/geometry-label-viewbox",
       "boundary": {
         "renderer": "sequence",
-        "rule": "geometry-label-overlap",
+        "rule": "geometry-label-viewbox",
         "expression": "showcase long message label expands past left canvas edge",
         "threshold": 33,
         "unit": "px",
@@ -38999,10 +39044,11 @@
       "geometryComparison": {
         "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":180,\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"}]}",
         "accepted": false,
-        "equivalentCodes": [],
-        "geometryExpected": true,
-        "layer": "model-difference",
-        "mappingError": "Error: Geometry probe e2-boundary-sequence-message-label-canvas-34 does not produce its claimed renderer cause sequence/geometry-label-overlap: [composition/label-canvas-containment] showcase sequence label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" on messages[0] \"a\" -> \"b\" extends past the left edge by 2.2px (label rect [-2, 160, 236, 18]; viewBox 920x760) — shorten the label, reorder participants, or enlarge meta.viewBox.; repair its synthetic input or map the specific oracle diagnostic."
+        "equivalentCodes": [
+          "sequence/geometry-label-viewbox"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
       },
       "currentScope": {
         "kind": "document-validity"
@@ -40845,6 +40891,646 @@
         "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"viewBox\":[480,790.015625],\"quality_profile\":\"showcase\",\"legend\":{\"entries\":{\"default\":{\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"},\"return\":{\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"visible\":true}}}},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"A\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":650,\"label\":\"Call\",\"note\":\"Detail\"}]}",
         "accepted": true,
         "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-architecture-clear-margin-text-0",
+      "diagramType": "architecture",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\"},\"components\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\",\"pos\":[100,140],\"size\":[240,100]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[500,140],\"size\":[120,72]}],\"connections\":[]}",
+      "inputSha256": "66783dfbef6e4b314104cd762f97a8f159a1b29850370664822a5baf81bcf084",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-label-fit",
+      "boundary": {
+        "renderer": "architecture",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "below",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\"},\"components\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\",\"pos\":[100,140],\"size\":[240,100]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[500,140],\"size\":[120,72]}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\"},\"components\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\",\"pos\":[100,140],\"size\":[240,100]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[500,140],\"size\":[120,72]}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-architecture-clear-margin-text-1",
+      "diagramType": "architecture",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\"},\"components\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"pos\":[100,140],\"size\":[80,100]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[500,140],\"size\":[120,72]}],\"connections\":[]}",
+      "inputSha256": "d5e42fbb55717c30968c36b925bcd66f932f0bbc29fd719df8a6568b66fe24c3",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "architecture/geometry-label-fit",
+      "boundary": {
+        "renderer": "architecture",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "above",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~528px) is wider than component \"a\" (80px) — shorten the label or widen size.",
+            "subject": {
+              "diagramType": "architecture"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Architecture layout validation failed:\n- Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~528px) is wider than component \"a\" (80px) — shorten the label or widen size."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\"},\"components\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"pos\":[100,140],\"size\":[80,100]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[500,140],\"size\":[120,72]}],\"connections\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"architecture\",\"meta\":{\"title\":\"architecture fixture\",\"output\":\"fixture.html\"},\"components\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"pos\":[100,140],\"size\":[80,100]},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"pos\":[500,140],\"size\":[120,72]}],\"connections\":[]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "architecture/geometry-label-fit"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-workflow-clear-margin-text-0",
+      "diagramType": "workflow",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":2,\"type\":\"frontend\",\"label\":\"OK\",\"width\":160,\"height\":72}],\"edges\":[]}",
+      "inputSha256": "4376ac809ab7b00aa1322122399eaa5ad51b8b08173bb8cbe9902876fd78f565",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-label-fit",
+      "boundary": {
+        "renderer": "workflow",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "below",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":2,\"type\":\"frontend\",\"label\":\"OK\",\"width\":160,\"height\":72}],\"edges\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":2,\"type\":\"frontend\",\"label\":\"OK\",\"width\":160,\"height\":72}],\"edges\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-workflow-clear-margin-text-1",
+      "diagramType": "workflow",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":2,\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"width\":80,\"height\":72}],\"edges\":[]}",
+      "inputSha256": "d585c031d10e177effab7222708edfefd384957d843386f442c7d24e1613483f",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "workflow/geometry-label-fit",
+      "boundary": {
+        "renderer": "workflow",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "above",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~544px) is wider than node \"a\" (80px) — shorten the label or increase node.width.",
+            "subject": {
+              "diagramType": "workflow"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Workflow layout validation failed:\n- Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~544px) is wider than node \"a\" (80px) — shorten the label or increase node.width."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":2,\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"width\":80,\"height\":72}],\"edges\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":2,\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"width\":80,\"height\":72}],\"edges\":[]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "workflow/geometry-label-fit"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-sequence-clear-margin-text-0",
+      "diagramType": "sequence",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"viewBox\":[920,760],\"column_fit\":\"spread\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":300,\"label\":\"Call\"}]}",
+      "inputSha256": "fca6b257e2c2652a57e289eb96e40002f31dd380fd06f1b49e47be3bb44917ee",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "sequence/geometry-label-fit",
+      "boundary": {
+        "renderer": "sequence",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "below",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"viewBox\":[920,760],\"column_fit\":\"spread\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":300,\"label\":\"Call\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"viewBox\":[920,760],\"column_fit\":\"spread\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":300,\"label\":\"Call\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-sequence-clear-margin-text-1",
+      "diagramType": "sequence",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"viewBox\":[920,760],\"column_fit\":\"fixed\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":300,\"label\":\"Call\"}]}",
+      "inputSha256": "a0136e32cb32e125f017715c1a725962b87acaedb215ff10ce5125460e85aa76",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "sequence/geometry-label-fit",
+      "boundary": {
+        "renderer": "sequence",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "above",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~544px) is wider than the 86px participant box — shorten it.",
+            "subject": {
+              "diagramType": "sequence"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Sequence layout validation failed:\n- Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~544px) is wider than the 86px participant box — shorten it."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"viewBox\":[920,760],\"column_fit\":\"fixed\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":300,\"label\":\"Call\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"sequence\",\"meta\":{\"title\":\"sequence fixture\",\"output\":\"fixture.html\",\"viewBox\":[920,760],\"column_fit\":\"fixed\"},\"participants\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\"},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\"}],\"messages\":[{\"from\":\"a\",\"to\":\"b\",\"y\":300,\"label\":\"Call\"}]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "sequence/geometry-label-fit"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-dataflow-clear-margin-text-0",
+      "diagramType": "dataflow",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\",\"stage\":0,\"row\":0,\"width\":140,\"height\":72},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[]}",
+      "inputSha256": "c0e41f69745d6b040503252ad444f8d0442895eb901af123ae504417f684a2d7",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "dataflow/geometry-label-fit",
+      "boundary": {
+        "renderer": "dataflow",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "below",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\",\"stage\":0,\"row\":0,\"width\":140,\"height\":72},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"OK\",\"stage\":0,\"row\":0,\"width\":140,\"height\":72},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-dataflow-clear-margin-text-1",
+      "diagramType": "dataflow",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"stage\":0,\"row\":0,\"width\":80,\"height\":72},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[]}",
+      "inputSha256": "5f719e79f2584986d7760fb8c8e8ae82165c2b1d8b53f35cb91bf0129baffdf9",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "dataflow/geometry-label-fit",
+      "boundary": {
+        "renderer": "dataflow",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "above",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~496px) is wider than node \"a\" (80px) — shorten the label or increase node.width.",
+            "subject": {
+              "diagramType": "dataflow"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Data-flow layout validation failed:\n- Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~496px) is wider than node \"a\" (80px) — shorten the label or increase node.width."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"stage\":0,\"row\":0,\"width\":80,\"height\":72},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"dataflow\",\"meta\":{\"title\":\"dataflow fixture\",\"output\":\"fixture.html\"},\"stages\":[{\"label\":\"Input\"},{\"label\":\"Output\"}],\"nodes\":[{\"id\":\"a\",\"type\":\"frontend\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"stage\":0,\"row\":0,\"width\":80,\"height\":72},{\"id\":\"b\",\"type\":\"backend\",\"label\":\"B\",\"stage\":1,\"row\":0}],\"flows\":[]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "dataflow/geometry-label-fit"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-lifecycle-clear-margin-text-0",
+      "diagramType": "lifecycle",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"OK\",\"lane\":\"main\",\"col\":0,\"width\":120,\"height\":72},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[]}",
+      "inputSha256": "a2e0abccf61b38191747ebc194ad206dfd5f2f35c673ff58ad5c6c535b4d7e94",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "lifecycle/geometry-label-fit",
+      "boundary": {
+        "renderer": "lifecycle",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "below",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"OK\",\"lane\":\"main\",\"col\":0,\"width\":120,\"height\":72},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"OK\",\"lane\":\"main\",\"col\":0,\"width\":120,\"height\":72},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-boundary-lifecycle-clear-margin-text-1",
+      "diagramType": "lifecycle",
+      "rule": "geometry-label-fit",
+      "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"lane\":\"main\",\"col\":0,\"width\":80,\"height\":72},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[]}",
+      "inputSha256": "7dac2fcd413e3f39716684e9fde041e740ac516cf658654c78cd0893c53c3000",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "lifecycle/geometry-label-fit",
+      "boundary": {
+        "renderer": "lifecycle",
+        "rule": "geometry-label-fit",
+        "expression": "separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",
+        "threshold": 0.5,
+        "unit": "fixture-mode",
+        "side": "above",
+        "layer": "model-difference",
+        "category": "text-capacity"
+      },
+      "oracle": {
+        "ok": false,
+        "codes": [
+          "layout/constraint"
+        ],
+        "diagnostics": [
+          {
+            "code": "layout/constraint",
+            "severity": "error",
+            "message": "Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~496px) is wider than state \"a\" (80px) — shorten the label or increase state.width.",
+            "subject": {
+              "diagramType": "lifecycle"
+            },
+            "evidence": {},
+            "supportedFixes": []
+          }
+        ],
+        "error": "Lifecycle layout validation failed:\n- Label \"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\" (~496px) is wider than state \"a\" (80px) — shorten the label or increase state.width."
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"lane\":\"main\",\"col\":0,\"width\":80,\"height\":72},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\",\"lane\":\"main\",\"col\":0,\"width\":80,\"height\":72},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[]}",
+        "accepted": false,
+        "equivalentCodes": [
+          "lifecycle/geometry-label-fit"
+        ],
         "layer": "renderer",
         "geometryExpected": true
       },
@@ -44246,7 +44932,7 @@
         "cause": "arrowhead-collision",
         "threshold": 7,
         "value": 6,
-        "authorship": "toSide-orientation-only",
+        "authorship": "toSide",
         "measurement": {
           "tips": [
             [
@@ -44261,7 +44947,7 @@
           "tipDistancePx": 7,
           "minimumPx": 6
         },
-        "expectedPolicy": "generated face-coordinate collision is a notice, not an authored-coordinate refusal",
+        "expectedPolicy": "an actual engine collision on an authored face refuses; separated engine tips are a placement-model difference",
         "layer": "model-difference",
         "category": "readable-v2-placement",
         "preemptionPolicy": "retain and report any unrelated oracle refusal; do not count a preempted case as this threshold's proof",
@@ -44318,7 +45004,7 @@
         "cause": "arrowhead-collision",
         "threshold": 7,
         "value": 8,
-        "authorship": "toSide-orientation-only",
+        "authorship": "toSide",
         "measurement": {
           "tips": [
             [
@@ -44333,7 +45019,7 @@
           "tipDistancePx": 7,
           "minimumPx": 8
         },
-        "expectedPolicy": "generated face-coordinate collision is a notice, not an authored-coordinate refusal",
+        "expectedPolicy": "an actual engine collision on an authored face refuses; separated engine tips are a placement-model difference",
         "layer": "model-difference",
         "category": "readable-v2-placement",
         "preemptionPolicy": "retain and report any unrelated oracle refusal; do not count a preempted case as this threshold's proof",
@@ -44391,10 +45077,11 @@
       "geometryComparison": {
         "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\",\"quality_profile\":\"showcase\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"other\",\"label\":\"Other\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"other\",\"col\":0,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"id\":\"incoming-one\",\"from\":\"a\",\"to\":\"c\",\"toSide\":\"left\",\"width\":1.1428571428571428},{\"id\":\"incoming-two\",\"from\":\"b\",\"to\":\"c\",\"toSide\":\"left\",\"width\":1.1428571428571428}]}",
         "accepted": false,
-        "equivalentCodes": [],
-        "geometryExpected": true,
-        "layer": "model-difference",
-        "mappingError": "Error: Geometry probe e2-boundary-workflow-v2-arrow-spacing-8 does not produce its claimed renderer cause workflow/geometry-route-quality: [composition/arrowhead-collision] workflow arrows \"incoming-one\" and \"incoming-two\" overlap at their destination (clearance 7px; minimum 8px).; repair its synthetic input or map the specific oracle diagnostic."
+        "equivalentCodes": [
+          "workflow/geometry-route-quality"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
       },
       "currentScope": {
         "kind": "document-validity"
@@ -45896,8 +46583,8 @@
       "id": "e2-boundary-workflow-v2-preset-conflict",
       "diagramType": "workflow",
       "rule": "geometry-route-quality",
-      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelX\":200}]}",
-      "inputSha256": "034d16d1e6f226827503e05d0fd6357661b1b5c1c69ccfb145667c08287524c9",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelX\":160}]}",
+      "inputSha256": "4ce6b96d7d10a0b496c8262382690d8e2b19d3c15c42de18b03adda32708068a",
       "origin": {
         "kind": "synthetic-generated"
       },
@@ -45939,7 +46626,7 @@
                   "edge": "a->b",
                   "field": "channelX",
                   "path": "/edges/0/channelX",
-                  "value": 200
+                  "value": 160
                 }
               ]
             },
@@ -45962,7 +46649,7 @@
         "scope": "schema and nongeometry engineering-profile validity"
       },
       "comparison": {
-        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelX\":200}]}",
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelX\":160}]}",
         "accepted": true,
         "equivalentCodes": [],
         "oracleLayer": "document-profile",
@@ -45971,7 +46658,7 @@
         }
       },
       "geometryComparison": {
-        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelX\":200}]}",
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelX\":160}]}",
         "accepted": false,
         "equivalentCodes": [
           "workflow/geometry-route-quality"
@@ -45987,8 +46674,8 @@
       "id": "e2-boundary-workflow-v2-preset-compatible",
       "diagramType": "workflow",
       "rule": "geometry-route-quality",
-      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelY\":200}]}",
-      "inputSha256": "c33bbe7116ebb7a004de7fe38348c14f3dbe75750c1b1569fb785269086986cc",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelY\":160}]}",
+      "inputSha256": "921af5284fe219d0986e1c347498ad9ef6b931da0f6407834849e19fe645d039",
       "origin": {
         "kind": "synthetic-generated"
       },
@@ -46003,64 +46690,9 @@
         "source": "synthetic-original"
       },
       "oracle": {
-        "ok": false,
-        "codes": [
-          "workflow/explicit-pin-conflict"
-        ],
-        "diagnostics": [
-          {
-            "code": "workflow/explicit-pin-conflict",
-            "severity": "error",
-            "message": "Workflow edge \"a->b\" has explicit geometry that violates legend clearance.",
-            "subject": {
-              "diagramType": "workflow",
-              "edge": null,
-              "from": "a",
-              "to": "b",
-              "path": "/edges/0/channelY"
-            },
-            "evidence": {
-              "invariant": "legend clearance",
-              "conflictingPins": [
-                {
-                  "edge": "a->b",
-                  "field": "channelY",
-                  "path": "/edges/0/channelY",
-                  "value": 200
-                }
-              ],
-              "points": [
-                [
-                  96,
-                  143
-                ],
-                [
-                  96,
-                  200
-                ],
-                [
-                  336,
-                  200
-                ],
-                [
-                  336,
-                  143
-                ]
-              ],
-              "legendObstacle": {
-                "kind": "backend",
-                "x": 101,
-                "y": 190,
-                "width": 91,
-                "height": 14
-              }
-            },
-            "supportedFixes": [
-              "remove channelY from edge \"a->b\" so readable-v2 can replan the remaining explicit route assertions"
-            ]
-          }
-        ],
-        "error": "Workflow edge \"a->b\" has explicit geometry that violates legend clearance."
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
       },
       "schemaOracle": {
         "ok": true,
@@ -46074,7 +46706,7 @@
         "scope": "schema and nongeometry engineering-profile validity"
       },
       "comparison": {
-        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelY\":200}]}",
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelY\":160}]}",
         "accepted": true,
         "equivalentCodes": [],
         "oracleLayer": "document-profile",
@@ -46083,12 +46715,11 @@
         }
       },
       "geometryComparison": {
-        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelY\":200}]}",
-        "accepted": false,
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"route\":\"bottom-channel\",\"channelY\":160}]}",
+        "accepted": true,
         "equivalentCodes": [],
-        "geometryExpected": true,
-        "layer": "model-difference",
-        "mappingError": "Error: Geometry probe e2-boundary-workflow-v2-preset-compatible does not produce its claimed renderer cause workflow/geometry-route-quality: Workflow edge \"a->b\" has explicit geometry that violates legend clearance.; repair its synthetic input or map the specific oracle diagnostic."
+        "layer": "renderer",
+        "geometryExpected": true
       },
       "currentScope": {
         "kind": "document-validity"
@@ -47058,10 +47689,11 @@
       "geometryComparison": {
         "inputJson": "{\"schema_version\":2,\"diagram_type\":\"workflow\",\"meta\":{\"title\":\"workflow fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"nodes\":[{\"id\":\"a\",\"lane\":\"main\",\"col\":0,\"type\":\"frontend\",\"label\":\"A\",\"width\":96,\"height\":48},{\"id\":\"b\",\"lane\":\"main\",\"col\":2,\"type\":\"backend\",\"label\":\"B\",\"width\":96,\"height\":48},{\"id\":\"c\",\"lane\":\"main\",\"col\":4,\"type\":\"backend\",\"label\":\"C\",\"width\":96,\"height\":48}],\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"top\",\"via\":[[168,119],[168,65],[80,65],[80,40],[336,40],[336,70]]}]}",
         "accepted": false,
-        "equivalentCodes": [],
-        "geometryExpected": true,
-        "layer": "model-difference",
-        "mappingError": "Error: Geometry probe e2-boundary-workflow-v2-route-lane-title-65 does not produce its claimed renderer cause workflow/geometry-route-clearance: Workflow edge \"a->b\" has explicit geometry that violates lane/phase/group label clearance.; repair its synthetic input or map the specific oracle diagnostic."
+        "equivalentCodes": [
+          "workflow/geometry-route-clearance"
+        ],
+        "layer": "renderer",
+        "geometryExpected": true
       },
       "currentScope": {
         "kind": "document-validity"

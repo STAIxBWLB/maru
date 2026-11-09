@@ -735,6 +735,96 @@ impl SceneBuilder {
             && r.from_y.is_none()
             && r.to_y.is_none()
             && matches!(r.route.as_deref(), None | Some("auto") | Some("straight"));
+        // Target-face slots are a pure function of the whole source graph,
+        // not label-placement order. An authored side keeps its orientation;
+        // only the otherwise automatic coordinate along that face is spread.
+        let target_face = r.to_side.as_deref().unwrap_or(default_sides.1);
+        let face_vertical = matches!(target_face, "left" | "right");
+        let face_span = if face_vertical { to.height } else { to.width };
+        let face_origin = if face_vertical { to.y } else { to.x };
+        let mut incoming = Vec::new();
+        if automatic_ports {
+            for peer in self.connections.iter().filter(|peer| peer.to == r.to) {
+                let Some(source) = self.node_bounds(&peer.from) else {
+                    continue;
+                };
+                let peer_dx = i64::from(to.x) + i64::from(to.width) / 2
+                    - i64::from(source.x)
+                    - i64::from(source.width) / 2;
+                let peer_dy = i64::from(to.y) + i64::from(to.height) / 2
+                    - i64::from(source.y)
+                    - i64::from(source.height) / 2;
+                let inferred = if peer.from == peer.to {
+                    "bottom"
+                } else if peer.from_y.is_none() && peer_dy.abs() > peer_dx.abs() {
+                    if peer_dy >= 0 {
+                        "top"
+                    } else {
+                        "bottom"
+                    }
+                } else if peer_dx >= 0 {
+                    "left"
+                } else {
+                    "right"
+                };
+                let face = peer.to_side.as_deref().unwrap_or(inferred);
+                if face != target_face {
+                    continue;
+                }
+                let movable = peer.waypoints.is_empty()
+                    && peer.channel_x.is_none()
+                    && peer.channel_y.is_none()
+                    && peer.from_y.is_none()
+                    && peer.to_y.is_none()
+                    && matches!(
+                        peer.route.as_deref(),
+                        None | Some("auto") | Some("straight")
+                    );
+                let stroke = peer
+                    .width
+                    .unwrap_or(if peer.variant.as_deref() == Some("emphasis") {
+                        115
+                    } else {
+                        96
+                    });
+                incoming.push((peer.source_index, movable, stroke));
+            }
+        }
+        incoming.sort_by_key(|entry| entry.0);
+        let mut target_reservations = Vec::new();
+        if incoming.len() > 1 {
+            for (rank, (ordinal, movable, stroke)) in incoming.iter().enumerate() {
+                let along = if *movable {
+                    i32::try_from(
+                        i64::from(face_span) * (rank as i64 + 1) / (incoming.len() as i64 + 1),
+                    )
+                    .map_err(|_| {
+                        failure(
+                            "coordinate",
+                            "target slot exceeds the coordinate range",
+                            "reduce node dimensions or incoming edge count",
+                        )
+                    })?
+                } else {
+                    face_span / 2
+                };
+                let coordinate = add(face_origin, along)?;
+                if *ordinal == r.source_index {
+                    let shift =
+                        fixed::checked_sub(coordinate, if face_vertical { z.y } else { z.x })
+                            .map_err(arithmetic)?;
+                    let (sx, sy) = if face_vertical {
+                        (0, shift)
+                    } else {
+                        (shift, 0)
+                    };
+                    z = z.checked_translate(sx, sy).map_err(arithmetic)?;
+                    end = end.checked_translate(sx, sy).map_err(arithmetic)?;
+                } else {
+                    target_reservations.push((coordinate, *stroke));
+                }
+            }
+        }
         let segment_clear = |tip, outside| {
             !self
                 .document
@@ -801,8 +891,32 @@ impl SceneBuilder {
         let mut last_error = None;
         for (tip, source) in from_candidates {
             for &(target_tip, target) in &to_candidates {
+                let same_target_face = match target_face {
+                    "left" => target_tip.x == to.x,
+                    "right" => target_tip.x == to.right().map_err(arithmetic)?,
+                    "top" => target_tip.y == to.y,
+                    _ => target_tip.y == to.bottom().map_err(arithmetic)?,
+                };
+                let our_stroke = r
+                    .width
+                    .unwrap_or(if r.variant.as_deref() == Some("emphasis") {
+                        115
+                    } else {
+                        96
+                    });
+                let crowded = same_target_face
+                    && target_reservations.iter().any(|(coordinate, stroke)| {
+                        let along = if face_vertical {
+                            target_tip.y
+                        } else {
+                            target_tip.x
+                        };
+                        (i64::from(along) - i64::from(*coordinate)).abs() * 2
+                            < 7 * (i64::from(our_stroke) + i64::from(*stroke))
+                    });
                 if automatic_ports
-                    && (!segment_clear(tip, source)
+                    && (crowded
+                        || !segment_clear(tip, source)
                         || !segment_clear(target_tip, target)
                         || r.from == r.to && tip == target_tip)
                 {
@@ -2222,6 +2336,32 @@ mod tests {
                 geometry.routes.iter().all(|route| !route.points.is_empty()),
                 "{id}: some original relationships vanished"
             );
+            if id == "public-05" {
+                let tip = |name: &str| {
+                    *geometry
+                        .routes
+                        .iter()
+                        .find(|route| route.id.as_deref() == Some(name))
+                        .unwrap()
+                        .points
+                        .last()
+                        .unwrap()
+                };
+                let a = tip("commands-to-fs");
+                let b = tip("mcp-to-fs");
+                let target = geometry
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == "fs")
+                    .unwrap()
+                    .bounds;
+                assert_eq!(a.x, target.x);
+                assert_eq!(b.x, target.x);
+                assert!(
+                    (i64::from(a.y) - i64::from(b.y)).abs() >= 11 * 64,
+                    "same authored left face must retain separate arrow slots"
+                );
+            }
         }
     }
 }

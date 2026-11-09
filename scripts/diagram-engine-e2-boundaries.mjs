@@ -34,7 +34,7 @@ export function generatedBoundaryCases(seedFor) {
       const sampleLayer = artifactRounding ? "model-difference" : layer;
       const sampleCategory = artifactRounding ? "artifact-route-rounding" : category;
       cases.push({id:`e2-boundary-${type}-${name}-${value}`,diagramType:type,rule,geometryRule:`${type}/${rule}`,spec,
-        boundary:{renderer:type,rule,expression,threshold,unit:name==="physical-crossing"?"fixture-mode":name==="brand-rail"&&type==="sequence"?"characters":"px",side:value<threshold?"below":value>threshold?"above":"equal",layer:sampleLayer,category:sampleCategory,
+        boundary:{renderer:type,rule,expression,threshold,unit:name==="physical-crossing"||name==="clear-margin-text"?"fixture-mode":name==="brand-rail"&&type==="sequence"?"characters":"px",side:value<threshold?"below":value>threshold?"above":"equal",layer:sampleLayer,category:sampleCategory,
           ...(artifactRounding?{note:"Lifecycle7px source corridor is preempted by final-artifact rounded SVG corner proper-crossing at[183.9,338.6]; retain the oracle trace and do not count either lifecycle case as isolated8px threshold proof. Exact shared predicate proof is architecture corridor7/9."}:{})}});
     }
   }
@@ -122,10 +122,10 @@ export function generatedBoundaryCases(seedFor) {
       }
     });
   }
-  for (const type of ["dataflow","lifecycle"]) samples(type,"geometry-label-overlap","label-canvas",[15,18],type==="dataflow"?16.5:15.5,"showcase label center minus half width may overflow at most.5px",(s,v)=>{
+  for (const type of ["dataflow","lifecycle"]) samples(type,"geometry-label-viewbox","label-canvas",[15,18],type==="dataflow"?16.5:15.5,"showcase label center minus half width may overflow at most.5px",(s,v)=>{
     s.meta.quality_profile="showcase";const edge=s[type==="dataflow"?"flows":"transitions"][0];edge.label="Go";edge.labelAt=[v,400];
   },"model-difference","text-capacity");
-  samples("sequence","geometry-label-overlap","message-label-canvas",[32,34],33,"showcase long message label expands past left canvas edge",(s,v)=>{s.meta.quality_profile="showcase";s.messages[0].label="W".repeat(v);},"model-difference","text-capacity");
+  samples("sequence","geometry-label-viewbox","message-label-canvas",[32,34],33,"showcase long message label expands past left canvas edge",(s,v)=>{s.meta.quality_profile="showcase";s.messages[0].label="W".repeat(v);},"model-difference","text-capacity");
   samples("lifecycle","geometry-label-overlap","band-title",[114-1/64,114+1/64],114,"main band title bottom103 versus transition label top=centerY-11",(s,v)=>{s.meta.quality_profile="showcase";s.transitions[0].label="Go";s.transitions[0].labelAt=[100,v];},"model-difference","text-capacity");
   samples("lifecycle","geometry-label-overlap","label-pair",[412,416],414,"two16px label masks with2px inset around centerY400",(s,v)=>{s.transitions=[{id:"first",from:"a",to:"b",label:"One",labelAt:[500,400]},{id:"second",from:"a",to:"b",label:"Two",labelAt:[500,v]}];},"model-difference","text-capacity");
   samples("dataflow","geometry-route-quality","endpoint-direction",[0,1],.5,"declared right source side: rightward stub versus border-tangent first segment",(s,v)=>{Object.assign(s.flows[0],{fromSide:"right",toSide:"left",via:v?[[156,200],[240,200],[240,157]]:[[180,157],[180,200],[240,200],[240,157]],labelAt:[700,500]});});
@@ -141,6 +141,21 @@ export function generatedBoundaryCases(seedFor) {
   samples("sequence","geometry-label-overlap","label-pair",[194-1/64,194+1/64],194,"tangent arrow spans: second label top(y-20) versus first label bottom176 minus2px inset",(s,v)=>{s.participants.push({id:"c",type:"backend",label:"C"});s.messages=[{from:"a",to:"b",y:180,label:"W".repeat(20)},{from:"b",to:"c",y:v,label:"W".repeat(20)}];},"model-difference","text-capacity");
   samples("sequence","geometry-legend-clearance","legend-wrap-label-width",[71,73],72,"explicit W legend override at8px: label width plus43px swatch <=400px row",(s,v)=>{s.meta.viewBox=[480,760];s.meta.legend={entries:{default:{label:"W".repeat(v)}}};},"model-difference","text-capacity");
   samples("sequence","geometry-legend-clearance","legend-wrap-overrides",[790-1/64,790+1/64],790,"two60 W override entries wrap to2 legacy rows: note content672 +96 +22",(s,v)=>{s.meta.viewBox=[480,v];s.meta.quality_profile="showcase";s.messages[0].y=650;s.messages[0].note="Detail";s.meta.legend={entries:{default:{label:"W".repeat(60)},return:{label:"W".repeat(60),visible:true}}};},"model-difference","text-capacity");
+  for(const type of ["architecture","workflow","sequence","dataflow","lifecycle"]) samples(type,"geometry-label-fit","clear-margin-text",[0,1],.5,"separated capacity controls: short OK in a generous source-safe node versus80 W in a narrow node",(s,v)=>{
+    const label=v?"W".repeat(80):"OK";
+    if(type==="architecture") {
+      delete s.layout;s.components.forEach((node,index)=>{delete node.row;delete node.col;node.pos=[100+index*400,140];node.size=[120,72];});
+      s.components[0].label=label;s.components[0].size=[v?80:240,100];s.connections=[];
+    } else if(type==="workflow") {
+      s.nodes=[{...s.nodes[0],label,col:2,width:v?80:160,height:72}];s.edges=[];
+    } else if(type==="sequence") {
+      s.participants[0].label=label;s.meta.viewBox=[920,760];s.meta.column_fit=v?"fixed":"spread";s.messages[0].y=300;
+    } else if(type==="dataflow") {
+      Object.assign(s.nodes[0],{label,width:v?80:140,height:72});s.flows=[];
+    } else {
+      Object.assign(s.states[0],{label,width:v?80:120,height:72});s.transitions=[];
+    }
+  },"model-difference","text-capacity");
   return cases;
 }
 
@@ -164,7 +179,7 @@ const inventory = [
   ["sequence",298,"message row crowding","geometry-message-spacing","overlapping horizontal span requires deltaY >=28","generated-boundary"],
   ["sequence",311,"message label overlap","geometry-label-overlap","message label masks do not overlap at inset-2","existing-synthetic","same-time case rejects; independent label-only span fixture remains a gap"],
   ["sequence",315,"label near another route","geometry-route-clearance","showcase label-to-other-route clearance >=4","delegated-shared","single dataflow clearance boundary generated; sequence-specific endpoint case remains a gap"],
-  ["sequence",325,"message label canvas containment","geometry-label-overlap","showcase label overflow <=0.5px","coverage-gap","needs a long message label with authored page, separate from primary participant label-fit"],
+  ["sequence",325,"message label canvas containment","geometry-label-viewbox","showcase label overflow <=0.5px","coverage-gap","needs a long message label with authored page, separate from primary participant label-fit"],
   ["sequence",336,"reversed segment range","range-order","segment.to > segment.from","E1-covered"],
   ["sequence",339,"segment canvas range","geometry-segment-range","from>=72 and to<=authored height-45","generated-boundary"],
   ["sequence",345,"segment title fit","geometry-segment-label-fit","label width +104 <= page width","generated-boundary"],
@@ -197,7 +212,7 @@ const inventory = [
   ["dataflow",264,"label overlaps node","geometry-label-overlap","label/node inset overlap forbidden","existing-synthetic","lifecycle label-node actual probe; dataflow-specific threshold not isolated"],
   ["dataflow",271,"label pairs overlap","geometry-label-overlap","label pair inset-2 overlap forbidden","generated-boundary"],
   ["dataflow",275,"label route clearance","geometry-route-clearance","showcase label/other-route distance >=4","generated-boundary"],
-  ["dataflow",285,"label canvas overflow","geometry-label-overlap","showcase label overflow <=.5px","coverage-gap","authored labelAt negative/large positive boundary needed"],
+  ["dataflow",285,"label canvas overflow","geometry-label-viewbox","showcase label overflow <=.5px","coverage-gap","authored labelAt negative/large positive boundary needed"],
   ["dataflow",295,"stages exceed page width","stage-canvas-width","last stage center +84+24 <=width","generated-boundary"],
   ["dataflow",299,"aggregate dataflow refusal","aggregate","any accumulated problem","aggregation-only"],
   ["lifecycle",351,"duplicate state ids","duplicate-id","unique state.id","E1-covered"],
@@ -228,7 +243,7 @@ const inventory = [
   ["lifecycle",530,"label overlaps state","geometry-label-overlap","label/state inset overlap forbidden","existing-synthetic","actual labelAt94,150 rejection; threshold fixture remains to add"],
   ["lifecycle",537,"label pairs overlap","geometry-label-overlap","label pair inset-2 overlap forbidden","coverage-gap","two transition labels at same point; boundary analogous to dataflow but unisolated"],
   ["lifecycle",541,"label route clearance","geometry-route-clearance","showcase label/other-route distance >=4","delegated-shared","dataflow boundary covers shared predicate; lifecycle-specific source geometry still needs probe"],
-  ["lifecycle",550,"label canvas overflow","geometry-label-overlap","showcase label overflow <=.5px","coverage-gap","explicit labelAt border tolerance pair needed"],
+  ["lifecycle",550,"label canvas overflow","geometry-label-viewbox","showcase label overflow <=.5px","coverage-gap","explicit labelAt border tolerance pair needed"],
   ["lifecycle",559,"aggregate lifecycle refusal","aggregate","any accumulated problem","aggregation-only"],
 ];
 

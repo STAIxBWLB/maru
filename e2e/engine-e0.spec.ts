@@ -70,6 +70,8 @@ async function startEngineArtifactServer(directory: string) {
 
 const enabled = process.env.MARU_ENGINE_E0 === "1";
 test.describe("independent engine WebAssembly spike", () => {
+  // A timing regression must fail the gate instead of passing on a retry.
+  test.describe.configure({ retries: 0 });
   test.skip(!enabled, "Build the isolated WASM spike with node scripts/diagram-engine-e0.mjs wasm and set MARU_ENGINE_E0=1.");
   test("lays out all families repeatably and retains pins in actual lazy WASM", async ({ page }) => {
     const specs = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"].map((kind) => JSON.parse(readFileSync(`src-tauri/crates/maru-diagram-engine/testdata/valid-${kind}.json`, "utf8")) as { diagram_type: string; schema_version: number; meta: { title: string } });
@@ -157,12 +159,12 @@ test.describe("independent engine WebAssembly spike", () => {
         const firstStart = performance.now();
         const first = engine.layout(input);
         const firstLayoutMs = performance.now() - firstStart;
-        const check = (report: Report) => {
+        const check = (report: Report, count = 1000) => {
           if (!report.ok || !report.geometry) throw new Error(`The routed benchmark was refused: ${JSON.stringify(report.diagnostics)}; fix the geometry fixture or engine before reporting latency.`);
-          if (report.geometry.nodes.length !== 1000 || report.geometry.routes.length !== 999
+          if (report.geometry.nodes.length !== count || report.geometry.routes.length !== count - 1
               || report.geometry.routes.some((route) => route.points.length < 2
                 || route.points.some((point, index, points) => index > 0 && point.x !== points[index - 1]!.x && point.y !== points[index - 1]!.y))) {
-            throw new Error("The layout benchmark omitted nodes, routes or orthogonal geometry; restore the 1000-node/999-edge chain before measuring.");
+            throw new Error("The layout benchmark omitted nodes, routes or orthogonal geometry; restore every node and relationship in the measured chain before measuring.");
           }
         };
         check(first);
@@ -176,9 +178,26 @@ test.describe("independent engine WebAssembly spike", () => {
         const sorted = [...durationsMs].sort((a, b) => a - b);
         const medianMs = (sorted[9]! + sorted[10]!) / 2;
         const p95Ms = sorted[Math.ceil(sorted.length * 0.95) - 1]!;
+        const typicalSamples = [];
+        for (const count of [50, 200]) {
+          const smallSpec = { ...spec, components: spec.components.slice(0, count), connections: spec.connections.slice(0, count - 1) };
+          const smallInput = { specJson: JSON.stringify(smallSpec) };
+          check(engine.layout(smallInput), count);
+          const samples = [];
+          for (let index = 0; index < 20; index += 1) {
+            const started = performance.now();
+            const report = engine.layout(smallInput);
+            samples.push(performance.now() - started);
+            check(report, count);
+          }
+          const ordered = [...samples].sort((a, b) => a - b);
+          typicalSamples.push({ nodes: count, edges: count - 1, durationsMs: samples,
+            medianMs: (ordered[9]! + ordered[10]!) / 2,
+            p95Ms: ordered[Math.ceil(ordered.length * 0.95) - 1]!, maxMs: ordered.at(-1)! });
+        }
         return {
           cold: { scope: "fresh Chromium process; exact emitted production entry already imported; cache-disabled geometry artifact HTTP fetch/parse plus bindings import and WASM compile/instantiate; no Vite transform or first layout in interval", network: "same-origin loopback Node HTTP server; exact emitted artifact bytes, identity transfer without gzip or rewriting, no artificial throttling", coldLoadMs, resources },
-          layout: { scope: "production wasm-layout; pre-serialized request; facade request serialization, layout+routing and scene JSON parse; validation included; 20 warm samples after one first layout", nodes: 1000, edges: 999, firstLayoutMs, durationsMs, medianMs, p95Ms, maxMs: sorted[sorted.length - 1]!, targetMs: 200, targetMet: p95Ms < 200 },
+          layout: { scope: "production wasm-layout; pre-serialized request; facade request serialization, layout+routing and scene JSON parse; validation included; 20 warm samples after one first layout", nodes: 1000, edges: 999, firstLayoutMs, durationsMs, medianMs, p95Ms, maxMs: sorted[sorted.length - 1]!, targetMs: 200, targetMet: p95Ms < 200, targetScope: "E4 requirement before the canvas switch", budgetMs: 400, budgetMet: p95Ms < 400, typicalSamples },
         };
       }, benchmark);
       await cdp.detach();
@@ -196,11 +215,13 @@ test.describe("independent engine WebAssembly spike", () => {
         return { ...resource, emittedFileBytes };
       });
       const receipt = { ...measured, cold: { ...measured.cold, resources } };
-      // The owner may approve a measured budget above the target. Reporting a
-      // miss is required; silently replacing it with a pass or retry is not.
+      // Owner decision 2026-11-09: E2 gates at 400ms; the 200ms E4 target
+      // remains reported independently, with no retry for a passing sample.
       console.log(`ENGINE_E2_COLD ${JSON.stringify(receipt.cold)}`);
       console.log(`ENGINE_E2_PERF ${JSON.stringify(measured.layout)}`);
       await test.info().attach("engine-e2-performance.json", { body: JSON.stringify(receipt, null, 2), contentType: "application/json" });
+      expect(measured.layout.typicalSamples.map((sample) => sample.nodes)).toEqual([50, 200]);
+      expect(measured.layout.p95Ms, "Layout+routing p95 must stay below the owner-approved 400 ms E2 budget; inspect the scene workload and routing profile").toBeLessThan(400);
     } finally {
       try { await coldBrowser?.close(); } finally { await artifactServer.close(); }
     }
