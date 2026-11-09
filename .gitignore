@@ -96,3 +96,5 @@ src/lib/diagram/__generated__/engine-e0/
 src/lib/diagram/__generated__/engine-geometry/
 
 src/lib/diagram/__generated__/engine-render/
+
+src/lib/diagram/__generated__/engine-png/

@@ -8,6 +8,10 @@ description = "Tauri 2 adapter for the standalone Maru diagram engine"
 links = "tauri-plugin-maru-diagram"
 build = "build.rs"
 
+[features]
+default = []
+png = ["maru-diagram-engine/render-png"]
+
 [dependencies]
 maru-diagram-engine = { path = "../maru-diagram-engine" }
 serde = { version = "1", features = ["derive"] }

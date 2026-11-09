@@ -4,6 +4,7 @@ mod constraints;
 mod constraints_distance;
 mod constraints_frames;
 mod constraints_routes;
+#[cfg(feature = "geometry-corpus")]
 pub(crate) use constraints_routes::is_route_quality_notice;
 mod constraints_sequence;
 mod constraints_workflow_page;
@@ -1212,6 +1213,27 @@ impl SceneBuilder {
         }
         for p in self.document.routes.iter().flat_map(|r| &r.points) {
             extent = extent.union(rect(p.x, p.y, 0, 0)?).map_err(arithmetic)?;
+        }
+        if self.kind == "lifecycle" {
+            // Pinned render-lifecycle.mjs:784-786,851-853: x-22px, radius 4.5px.
+            const INITIAL_DOT_RADIUS: Coord = 288;
+            const INITIAL_DOT_OFFSET_X: Coord = 22 * 64;
+            for node in self
+                .document
+                .nodes
+                .iter()
+                .filter(|node| self.kinds.get(&node.id).is_some_and(|kind| kind == "start"))
+            {
+                let center_x = add(node.bounds.x, -INITIAL_DOT_OFFSET_X)?;
+                let center_y = add(node.bounds.y, node.bounds.height / 2)?;
+                let marker_bounds = rect(
+                    add(center_x, -INITIAL_DOT_RADIUS)?,
+                    add(center_y, -INITIAL_DOT_RADIUS)?,
+                    2 * INITIAL_DOT_RADIUS,
+                    2 * INITIAL_DOT_RADIUS,
+                )?;
+                extent = extent.union(marker_bounds).map_err(arithmetic)?;
+            }
         }
         let legend_y = add(extent.bottom().map_err(arithmetic)?, 32 * 64)?;
         let row_start_x = 40 * 64;

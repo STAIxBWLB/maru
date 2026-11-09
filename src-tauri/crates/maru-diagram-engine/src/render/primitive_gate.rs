@@ -259,8 +259,8 @@ pub(crate) fn expected(g: &GeometryDocument, options: &SvgOptions) -> Vec<Primit
                     "outcome" => 436 * 64,
                     _ => continue,
                 };
-                let left = 72 * 64;
-                let right = i64::from(g.page.bounds.width) - 72 * 64;
+                let left = i64::from(g.page.bounds.x) + 72 * 64;
+                let right = i64::from(g.page.bounds.x) + i64::from(g.page.bounds.width) - 72 * 64;
                 let mut p = line_primitive(
                     "lifecycle-band",
                     band,
@@ -655,6 +655,218 @@ fn validate_one(
     }
 }
 
+fn point_bounds(point: GeometryPoint) -> (f64, f64, f64, f64) {
+    (
+        f64::from(point.x),
+        f64::from(point.y),
+        f64::from(point.x),
+        f64::from(point.y),
+    )
+}
+
+fn merge_bounds(
+    left: &mut f64,
+    top: &mut f64,
+    right: &mut f64,
+    bottom: &mut f64,
+    next: (f64, f64, f64, f64),
+) -> Result<(), &'static str> {
+    if ![next.0, next.1, next.2, next.3]
+        .iter()
+        .all(|coordinate| coordinate.is_finite())
+    {
+        return Err("paint coordinates are not finite");
+    }
+    *left = (*left).min(next.0);
+    *top = (*top).min(next.1);
+    *right = (*right).max(next.2);
+    *bottom = (*bottom).max(next.3);
+    Ok(())
+}
+
+fn exact_line_stroke_bounds(
+    from: GeometryPoint,
+    to: GeometryPoint,
+    half_stroke: f64,
+) -> Result<(f64, f64, f64, f64), &'static str> {
+    let dx = f64::from(to.x) - f64::from(from.x);
+    let dy = f64::from(to.y) - f64::from(from.y);
+    let length = dx.hypot(dy);
+    if !length.is_finite() {
+        return Err("line paint coordinates are not finite");
+    }
+    if length == 0.0 || half_stroke == 0.0 {
+        return Ok((
+            f64::from(from.x.min(to.x)),
+            f64::from(from.y.min(to.y)),
+            f64::from(from.x.max(to.x)),
+            f64::from(from.y.max(to.y)),
+        ));
+    }
+    let normal_x = -dy / length * half_stroke;
+    let normal_y = dx / length * half_stroke;
+    let mut left = f64::INFINITY;
+    let mut top = f64::INFINITY;
+    let mut right = f64::NEG_INFINITY;
+    let mut bottom = f64::NEG_INFINITY;
+    for point in [from, to] {
+        for sign in [-1.0, 1.0] {
+            let x = f64::from(point.x) + sign * normal_x;
+            let y = f64::from(point.y) + sign * normal_y;
+            if !x.is_finite() || !y.is_finite() {
+                return Err("line stroke bounds are not finite");
+            }
+            left = left.min(x);
+            top = top.min(y);
+            right = right.max(x);
+            bottom = bottom.max(y);
+        }
+    }
+    Ok((left, top, right, bottom))
+}
+
+fn primitive_paint_bounds(primitive: &Primitive) -> Result<(f64, f64, f64, f64), &'static str> {
+    let stroke_px = primitive
+        .stroke
+        .parse::<f64>()
+        .map_err(|_| "primitive stroke width is not numeric")?;
+    if !stroke_px.is_finite() || stroke_px < 0.0 {
+        return Err("primitive stroke width is not finite and nonnegative");
+    }
+    let stroke_units = stroke_px * 64.0;
+    if !stroke_units.is_finite() || stroke_units > i64::MAX as f64 / 16.0 {
+        return Err("primitive stroke width exceeds the finite paint model");
+    }
+    let half_stroke = stroke_units / 2.0;
+    let mut bounds = match &primitive.shape {
+        Shape::Rect { bounds, .. } => (
+            f64::from(bounds.x) - half_stroke,
+            f64::from(bounds.y) - half_stroke,
+            f64::from(bounds.x) + f64::from(bounds.width) + half_stroke,
+            f64::from(bounds.y) + f64::from(bounds.height) + half_stroke,
+        ),
+        Shape::Circle { center, radius } => {
+            let radius = f64::from(*radius) + half_stroke;
+            (
+                f64::from(center.x) - radius,
+                f64::from(center.y) - radius,
+                f64::from(center.x) + radius,
+                f64::from(center.y) + radius,
+            )
+        }
+        Shape::Line { from, to } => exact_line_stroke_bounds(*from, *to, half_stroke)?,
+        Shape::Polyline { points } if points.len() == 2 => {
+            exact_line_stroke_bounds(points[0], points[1], half_stroke)?
+        }
+        Shape::Polyline { points } if half_stroke == 0.0 => {
+            let first = *points
+                .first()
+                .ok_or("empty polyline has no finite paint bounds")?;
+            let mut bounds = point_bounds(first);
+            for point in &points[1..] {
+                merge_bounds(
+                    &mut bounds.0,
+                    &mut bounds.1,
+                    &mut bounds.2,
+                    &mut bounds.3,
+                    point_bounds(*point),
+                )?;
+            }
+            bounds
+        }
+        Shape::Polyline { .. } => {
+            return Err("exact bounds for a stroked multi-segment polyline are unsupported");
+        }
+        Shape::Polygon { points } if half_stroke == 0.0 => {
+            let first = *points
+                .first()
+                .ok_or("empty polygon has no finite paint bounds")?;
+            let mut bounds = point_bounds(first);
+            for point in &points[1..] {
+                merge_bounds(
+                    &mut bounds.0,
+                    &mut bounds.1,
+                    &mut bounds.2,
+                    &mut bounds.3,
+                    point_bounds(*point),
+                )?;
+            }
+            bounds
+        }
+        Shape::Polygon { .. } => {
+            return Err("exact bounds for a stroked polygon are unsupported");
+        }
+    };
+    if ![bounds.0, bounds.1, bounds.2, bounds.3]
+        .iter()
+        .all(|coordinate| coordinate.is_finite())
+    {
+        return Err("primitive shape paint bounds are not finite");
+    }
+    if bounds.0 > bounds.2 || bounds.1 > bounds.3 {
+        return Err("primitive shape bounds are reversed");
+    }
+
+    if primitive.arrow && stroke_units > 0.0 {
+        // Writer marker points are (0,0), (10,3.5), (0,7), with refX=9,
+        // refY=3.5, markerUnits=strokeWidth and orient=auto.
+        let (previous, tip) = match &primitive.shape {
+            Shape::Line { from, to } => (*from, *to),
+            Shape::Polyline { points } => {
+                let pair = points
+                    .windows(2)
+                    .rev()
+                    .find(|pair| pair[0] != pair[1])
+                    .ok_or("arrow marker path has no direction")?;
+                (pair[0], pair[1])
+            }
+            Shape::Rect { .. } | Shape::Circle { .. } | Shape::Polygon { .. } => {
+                return Err("arrow marker is attached to a non-line primitive");
+            }
+        };
+        let dx = f64::from(tip.x) - f64::from(previous.x);
+        let dy = f64::from(tip.y) - f64::from(previous.y);
+        let length = dx.hypot(dy);
+        if !length.is_finite() || length == 0.0 {
+            return Err("arrow marker path has no finite direction");
+        }
+        let ux = dx / length;
+        let uy = dy / length;
+        for (local_x, local_y) in [(-9.0, -3.5), (1.0, 0.0), (-9.0, 3.5)] {
+            let x = f64::from(tip.x) + stroke_units * (local_x * ux - local_y * uy);
+            let y = f64::from(tip.y) + stroke_units * (local_x * uy + local_y * ux);
+            merge_bounds(
+                &mut bounds.0,
+                &mut bounds.1,
+                &mut bounds.2,
+                &mut bounds.3,
+                (x, y, x, y),
+            )?;
+        }
+    } else if primitive.arrow && stroke_units == 0.0 {
+        // A zero-width marker has no painted area; still reject unsupported
+        // path types rather than silently guessing an orientation.
+        if !matches!(
+            &primitive.shape,
+            Shape::Line { .. } | Shape::Polyline { .. }
+        ) {
+            return Err("zero-width arrow marker is attached to a non-line primitive");
+        }
+    }
+    Ok(bounds)
+}
+
+fn primitive_paint_within_page(
+    primitive: &Primitive,
+    page: crate::geometry::GeometryBox,
+) -> Result<bool, &'static str> {
+    let bounds = primitive_paint_bounds(primitive)?;
+    Ok(bounds.0 >= f64::from(page.x)
+        && bounds.1 >= f64::from(page.y)
+        && bounds.2 <= f64::from(page.x) + f64::from(page.width)
+        && bounds.3 <= f64::from(page.y) + f64::from(page.height))
+}
+
 fn identity_token(node: Node<'_, '_>) -> String {
     if let Some(id) = node.attribute("id") {
         format!("id:{id}")
@@ -861,6 +1073,22 @@ pub(crate) fn check_primitives(
         }
     }
     for primitive in &expected {
+        let primitive_path = format!("/svg/primitives/{}/{}", primitive.kind, primitive.owner);
+        match primitive_paint_within_page(primitive, geometry.page.bounds) {
+            Ok(true) => {}
+            Ok(false) => errors.push(error(
+                "primitive-page-containment",
+                &primitive_path,
+                "derived primitive paint extends beyond the SVG viewBox and will be clipped",
+                "recompute the page extent to contain every primitive stroke and arrowhead",
+            )),
+            Err(cause) => errors.push(error(
+                "primitive-paint-model",
+                &primitive_path,
+                cause,
+                "repair the primitive stroke, shape or arrow model before rendering",
+            )),
+        }
         let id = svg::id(
             "primitive",
             &format!("{}:{}", primitive.kind, primitive.owner),
@@ -901,4 +1129,59 @@ pub(crate) fn check_primitives(
         ));
     }
     errors
+}
+
+#[cfg(test)]
+mod containment_tests {
+    use super::*;
+
+    fn arrow_line(stroke: &'static str, arrow: bool) -> Primitive {
+        Primitive {
+            kind: "containment-test-line",
+            owner: "line".into(),
+            shape: Shape::Polyline {
+                points: vec![point(0, 0), point(640, 0)],
+            },
+            paint: Paint::Line,
+            stroke,
+            dash: None,
+            arrow,
+            layer: Layer::Underlay,
+        }
+    }
+
+    #[test]
+    fn exact_half_stroke_fits_and_arrowhead_is_checked_separately() {
+        let page = crate::geometry::GeometryBox {
+            x: 0,
+            y: -500,
+            width: 640,
+            height: 1000,
+        };
+        assert_eq!(
+            primitive_paint_within_page(&arrow_line("2.2", false), page),
+            Ok(true),
+            "the exact half-stroke fits at all page edges"
+        );
+        assert_eq!(
+            primitive_paint_within_page(&arrow_line("2.2", true), page),
+            Ok(false),
+            "the endpoint line fits but its scaled marker tip extends past the page"
+        );
+    }
+
+    #[test]
+    fn nonfinite_stroke_width_fails_closed_with_a_paint_model_error() {
+        let error = primitive_paint_within_page(
+            &arrow_line("NaN", false),
+            crate::geometry::GeometryBox {
+                x: 0,
+                y: -100,
+                width: 700,
+                height: 200,
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("finite and nonnegative"));
+    }
 }

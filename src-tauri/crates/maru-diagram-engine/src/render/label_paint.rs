@@ -63,8 +63,12 @@ pub(crate) fn colors(
                     .frame_variants
                     .get(&container.id)
                     .map(String::as_str);
-                if container.kind == "lane" && variant == Some("exception") {
-                    return options.theme.kind("security").map(|kind| kind.stroke);
+                if container.kind == "lane" {
+                    return if variant == Some("exception") {
+                        options.theme.kind("security").map(|kind| kind.stroke)
+                    } else {
+                        Some(tokens.dim)
+                    };
                 }
                 Some(match variant {
                     Some("security") => options.theme.kind("security")?.stroke,
@@ -83,6 +87,19 @@ pub(crate) fn colors(
                 "region" => options.theme.kind("cloud").map(|kind| kind.stroke),
                 _ => None,
             })
+    } else if is_frame {
+        geometry
+            .containers
+            .iter()
+            .find(|container| container.id == label.target_id)
+            .and_then(
+                |container| match (semantics.family.as_str(), container.kind.as_str()) {
+                    ("sequence", "segment")
+                    | ("dataflow", "stage")
+                    | ("lifecycle", "lane" | "band") => Some(tokens.dim),
+                    _ => None,
+                },
+            )
     } else {
         None
     };
@@ -119,7 +136,7 @@ pub(crate) fn colors(
                 if line_index < primary_lines {
                     return color;
                 }
-                return tokens.muted;
+                return tokens.dim;
             }
             tag_color.or(frame_color).unwrap_or({
                 if label.font.weight == 700 {
@@ -234,6 +251,8 @@ pub(crate) fn reference_colors(
                     .map(String::as_str);
                 if container.kind == "lane" && frame_variant == Some("exception") {
                     options.theme.kind("security").map(|kind| kind.stroke)
+                } else if container.kind == "lane" {
+                    Some(tokens.dim)
                 } else {
                     Some(match frame_variant {
                         Some("security") => options.theme.kind("security")?.stroke,
@@ -255,6 +274,18 @@ pub(crate) fn reference_colors(
                 };
                 options.theme.kind(component).map(|kind| kind.stroke)
             }),
+        "sequence" | "dataflow" | "lifecycle" => geometry
+            .containers
+            .iter()
+            .find(|container| container.id == label.target_id)
+            .and_then(
+                |container| match (semantics.family.as_str(), container.kind.as_str()) {
+                    ("sequence", "segment")
+                    | ("dataflow", "stage")
+                    | ("lifecycle", "lane" | "band") => Some(tokens.dim),
+                    _ => None,
+                },
+            ),
         _ => None,
     };
 
@@ -283,7 +314,7 @@ pub(crate) fn reference_colors(
         consumed_scalars += glyph.input.chars().count();
         let color = match route_primary {
             Some((primary_lines, color)) if current_line < primary_lines => color,
-            Some(_) => tokens.muted,
+            Some(_) => tokens.dim,
             None => expected_tag.or(frame_color).unwrap_or({
                 if label.font.weight == 700 {
                     tokens.text
