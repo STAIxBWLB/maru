@@ -45,8 +45,22 @@ fn pinned_layout(source: &Value, start_x: i32) -> GeometryDocument {
         }
     });
     let report = layout_json(&request.to_string());
-    assert!(report.ok, "fixture layout failed: {:?}", report.diagnostics);
-    report.geometry.expect("successful layout has geometry")
+    // Boundary pins retain geometry while the existing lifecycle readable-area
+    // rule refuses their source placement. Rendering must preserve that geometry.
+    assert!(
+        !report.ok,
+        "boundary pin unexpectedly bypassed the E2 refusal"
+    );
+    assert!(!report.diagnostics.is_empty());
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code == "lifecycle/geometry-node-viewbox"),
+        "unexpected fixture diagnostics: {:?}",
+        report.diagnostics
+    );
+    report.geometry.expect("refused layout retains geometry")
 }
 
 fn assert_marker_inside_page(geometry: &GeometryDocument, svg: &str) {

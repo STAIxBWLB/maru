@@ -2019,4 +2019,6 @@ includes that paint footprint even when the start node is pinned at x=0 or
 negative x; node and pin coordinates stay unchanged. The artifact gate derives
 the marker shapes independently and refuses a viewBox that clips their paint,
 including the stem's 1.4px stroke. SVG pin tests cover both lifecycle versions;
-a PNG test checks the visible dot pixels in both themes. The API remains v1.
+a low-level PNG test checks visible dot pixels in both themes. These boundary
+pins retain the existing readable-area refusal and its geometry; source-bound
+native exports continue to reject refused layouts. The API remains v1.
