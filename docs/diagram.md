@@ -1935,5 +1935,7 @@ budget, checked when building the HTML.
 
 Build a file from a local engine SVG and matching source spec with
 `node scripts/build-diagram-viewer.mjs <engine.svg> <spec.json> <viewer.html>`.
-Open the result directly from disk with `file://`. This viewer is not wired to
+The CLI creates the output exclusively and refuses existing file/symlink/hardlink
+targets, so it cannot overwrite either input through an alias. Open the result
+directly from disk with `file://`. This viewer is not wired to
 File > Renders, export choices, or a Tauri command; that remains a later stage.

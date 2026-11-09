@@ -52,8 +52,11 @@ const html = createOfflineViewerHtml({
   specJson: readInput(specPath, "source spec", OFFLINE_VIEWER_SPEC_MAX_BYTES),
 });
 try {
-  writeFileSync(outputPath, html, { encoding: "utf8" });
+  writeFileSync(outputPath, html, { encoding: "utf8", flag: "wx" });
 } catch (cause) {
+  if (cause && typeof cause === "object" && "code" in cause && cause.code === "EEXIST") {
+    throw new Error("The offline viewer output already exists or aliases an existing file; choose a new unused .html path. Existing files are never overwritten.", { cause });
+  }
   throw new Error("Cannot write the offline viewer output; choose a writable .html path and retry.", { cause });
 }
 const digest = createHash("sha256").update(html, "utf8").digest("hex");
