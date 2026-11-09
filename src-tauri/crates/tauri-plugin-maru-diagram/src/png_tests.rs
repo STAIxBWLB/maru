@@ -122,6 +122,13 @@ fn png_ipc_worker_receipts_and_real_fixture_evidence() {
     let evidence = json!({"schemaVersion":1,"scope":"Tauri MockRuntime registered IPC -> awaited spawn_blocking; no real WebView/OS transport claim","pluginCommandsObserved":observed,"pluginCommandCount":observed.len(),"command":"plugin:maru-diagram|render_png","differentWorkerThread":true,"hostFilesystemAccess":"none; fixture host panics on any access","singleInFlight":busy_observed,"cases":cases});
     println!("PNG_IPC_EVIDENCE {}", evidence);
     if let Ok(output) = std::env::var("MARU_PNG_IPC_EVIDENCE") {
+        let output = PathBuf::from(output);
+        if let Some(parent) = output
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).expect("create requested fixture evidence directory");
+        }
         std::fs::write(output, serde_json::to_vec_pretty(&evidence).unwrap())
             .expect("write requested fixture evidence file");
     }
