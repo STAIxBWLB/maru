@@ -148,6 +148,9 @@ jobs:
           shared-key: diagram-png-${{ matrix.os }}
       - name: Check PNG bounds, decoded pixels, receipts and refusal contracts
         run: cargo test --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features render-png --test png_contract -- --test-threads=2
+      - name: Execute all SVG integration suites with PNG enabled
+        if: matrix.receipt == 'native-linux'
+        run: node scripts/diagram-engine-e3-integration-coverage.mjs
       - name: Render all pinned scenes twice and record PNG, pixels, SVG and font pins
         shell: bash
         run: |

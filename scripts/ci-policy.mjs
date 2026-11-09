@@ -2,6 +2,7 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { ENGINE_E3_ARTIFACT_PATHS } from "./diagram-engine-e0-paths.mjs";
 
 export const NATIVE_PREFIXES = [
   "e2e-native/", "src-tauri/crates/", "src-tauri/src/terminal/", "src-tauri/capabilities/",
@@ -14,16 +15,19 @@ export const NATIVE_FILES = [
   "src-tauri/src/paths.rs", "src-tauri/src/terminal_hooks.rs",
   "src-tauri/build.rs", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock",
   "package.json", "pnpm-lock.yaml", "src/App.tsx", "src/lib/menu.ts", "src/lib/windowLayout.ts",
-  "src/lib/useDestructiveActionGuard.ts", "src/lib/siteView.ts", "src/lib/nativeE2eBridge.ts",
+  "src/lib/useDestructiveActionGuard.ts", "src/lib/siteView.ts", ...ENGINE_E3_ARTIFACT_PATHS,
   "src/components/NativeTerminalView.tsx", "src/components/TerminalPanel.tsx",
   "src/components/skills/SkillEditorWindow.tsx", ".github/workflows/ci.yml",
   ".github/workflows/native-e2e.yml", "scripts/ci-policy.mjs",
+  "scripts/diagram-engine-e0-paths.mjs", "scripts/diagram-engine-e3-integration-coverage.mjs",
 ];
 
 export function needsGeometryDeterminism(paths) {
   return paths.some((name) => name.startsWith("src-tauri/crates/")
     || name.startsWith("scripts/diagram-engine-e2")
     || name.startsWith("scripts/diagram-engine-e3")
+    || name.startsWith("scripts/diagram-engine-e0")
+    || ENGINE_E3_ARTIFACT_PATHS.includes(name)
     || ["rust-toolchain.toml", "src/lib/diagram/engineGeometry.ts", "src/lib/diagram/engineSvgForTest.ts", ".github/workflows/diagram-determinism.yml", ".github/workflows/ci.yml", "scripts/ci-policy.mjs"].includes(name));
 }
 

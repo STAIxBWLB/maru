@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { classifyPrChanges, evaluateCiJobs, isDocsOnlyPath, geometryForPushComparison } from "./ci-policy.mjs";
+import { ENGINE_E3_ARTIFACT_PATHS, isE0SelectedPath } from "./diagram-engine-e0-paths.mjs";
 
 const policyPath = resolve(process.cwd(), "scripts/ci-policy.mjs");
 const decisionOutputs = {
@@ -71,6 +72,42 @@ describe("PR change classification", () => {
       const decision = classifyPrChanges([file]);
       expect(decision.run_geometry, file).toBe(true);
       expect(decision.run_full, file).toBe(true);
+    }
+  });
+
+  it("selects both geometry and native gates and the E0 build for every artifact adapter", () => {
+    const paths = [
+      "src/lib/diagram/engineArtifactForTest.ts",
+      "src/lib/diagram/engineSvg.ts",
+      "src/lib/diagram/verifiedExport.ts",
+      "src/lib/diagram/export.ts",
+      "src/lib/diagram/renders.ts",
+      "src/lib/nativeE2eBridge.ts",
+    ];
+    expect(ENGINE_E3_ARTIFACT_PATHS).toEqual(paths);
+    for (const path of paths) {
+      const decision = classifyPrChanges([path]);
+      expect(decision.run_geometry, path).toBe(true);
+      expect(decision.run_native, path).toBe(true);
+      expect(decision.run_native_compile, path).toBe(false);
+      expect(isE0SelectedPath(path), path).toBe(true);
+    }
+    expect(classifyPrChanges(["scripts/diagram-engine-e0-paths.mjs"]).run_geometry).toBe(true);
+    expect(isE0SelectedPath("scripts/diagram-engine-e0-paths.mjs")).toBe(true);
+    expect(isE0SelectedPath("src/lib/diagram/types.ts")).toBe(false);
+  });
+
+  it("runs both costly gates when an E0/E3 selection or coverage harness changes", () => {
+    for (const path of [
+      "scripts/diagram-engine-e0-paths.mjs",
+      "scripts/diagram-engine-e3-integration-coverage.mjs",
+    ]) {
+      expect(classifyPrChanges([path]), path).toMatchObject({
+        run_geometry: true,
+        run_native: true,
+        run_native_compile: false,
+      });
+      expect(isE0SelectedPath(path), path).toBe(true);
     }
   });
 
