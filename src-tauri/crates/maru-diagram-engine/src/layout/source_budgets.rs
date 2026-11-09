@@ -1,6 +1,6 @@
 //! Source-sized canvas budgets used by renderer-compatibility refusals.
 
-use crate::geometry::{GeometryDocument, GeometryNode, GeometryPositionSource};
+use crate::geometry::{GeometryBox, GeometryDocument, GeometryNode, GeometryPositionSource};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
