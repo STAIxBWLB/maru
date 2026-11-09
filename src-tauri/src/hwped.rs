@@ -5,14 +5,14 @@
 //! uses (hwp-editor `packages/server/src/cli-engine.ts`):
 //!
 //!   hwped_read         hwp cat <in> --format markdown --with-segments
-//!   hwped_render       hwp render <in> -o page.<fmt> --format <fmt> --pages <p> --dpi <d> --report <r>
-//!   hwped_edit         hwp edit <in> -o <out> <opsArgv...> [--verify] [--allow-partial]
+//!   hwped_render       hwp render <in> -o page.<fmt> --format <fmt> --pages <p> --dpi <d> --report <r> --layout-json <l>
+//!   hwped_edit         hwp edit <in> -o <out> (--ops <json> | <opsArgv...>) [--verify] [--allow-partial]
 //!   hwped_compose      hwp compose <spec.json> -o <out> --report
 //!   hwped_validate     hwp validate <in> --json   (exit 1 still prints the report)
-//!   hwped_capabilities hwp --version (>= 0.8.7 required)
+//!   hwped_capabilities hwp --version (>= 0.20.0 required)
 //!
-//! The JS side does the EditOp -> argv mapping (`opsToArgv`) and sends argv
-//! fragments, so this module owns no op grammar. Documents cross the bridge
+//! JSON edit arrays are staged per call; legacy clients can still send argv
+//! fragments (`opsToArgv`). This module owns no op grammar. Documents cross the bridge
 //! as workspace paths when they are already on disk, base64 bytes otherwise.
 //! If render latency ever justifies it, a resident `hwp mcp` process is the
 //! documented follow-up (docs/hwp-editor.md) — deliberately not implemented
@@ -24,6 +24,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,7 +42,7 @@ use crate::win_process::NoWindow;
 const HWP_TIMEOUT: Duration = Duration::from_secs(60);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
 const STDERR_LIMIT: usize = 1024 * 1024;
-const MIN_VERSION: (u64, u64, u64) = (0, 8, 7);
+const MIN_VERSION: (u64, u64, u64) = (0, 20, 0);
 
 /// Document reference crossing the bridge (JS `TauriDocumentRef`).
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +70,33 @@ pub struct HwpedRenderOptions {
     pub format: Option<String>,
 }
 
+/// Geometry in points; source_chars remain source WCHAR offsets, never JS slices.
+#[derive(Debug, Clone, Serialize)]
+pub struct HwpedPageLayout {
+    pub width_pt: f64,
+    pub height_pt: f64,
+    /// Preserve row order, repeated segment IDs and nullable box/range fields.
+    pub rows: Vec<Value>,
+    pub truncated: bool,
+}
+
+#[derive(Deserialize)]
+struct RenderLayoutArtifact {
+    contract: String,
+    schema_version: String,
+    truncated: bool,
+    selected_pages: Vec<u32>,
+    pages: Vec<RenderLayoutPage>,
+}
+
+#[derive(Deserialize)]
+struct RenderLayoutPage {
+    page: u32,
+    width_pt: f64,
+    height_pt: f64,
+    rows: Vec<Value>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HwpedRenderPage {
@@ -78,6 +106,8 @@ pub struct HwpedRenderPage {
     pub dpi: u32,
     pub format: String,
     pub data_base64: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<HwpedPageLayout>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,6 +145,8 @@ pub struct HwpedValidationReport {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HwpedCapabilities {
+    #[serde(rename = "editOps")]
+    pub edit_ops: &'static str,
     pub version: String,
     pub editable: bool,
     pub formats: Vec<String>,
@@ -132,7 +164,7 @@ fn find_hwp_tool() -> Option<PathBuf> {
 
 fn hwp_bin() -> Result<PathBuf, String> {
     find_hwp_tool().ok_or_else(|| {
-        "cli_missing: hwp binary not found. Install hwp-cli >= 0.8.7 or set MARU_HWP_BIN"
+        "cli_missing: hwp binary not found. Install hwp-cli >= 0.20.0 or set MARU_HWP_BIN"
             .to_string()
     })
 }
@@ -222,7 +254,7 @@ fn ensure_version(bin: &Path) -> Result<&'static str, String> {
             };
             if !version_at_least(version, MIN_VERSION) {
                 return Err(format!(
-                    "hwp_version: hwp {}.{}.{} is too old; >= {}.{}.{} required ({})",
+                    "hwp_version: hwp {}.{}.{} is too old; >= {}.{}.{} required ({}); update hwp-cli or point MARU_HWP_BIN to a supported binary",
                     version.0,
                     version.1,
                     version.2,
@@ -352,6 +384,143 @@ fn svg_size(source: &str) -> Option<(u32, u32)> {
     Some((attr("width")?, attr("height")?))
 }
 
+fn invalid_render_layout(cause: impl std::fmt::Display) -> String {
+    format!("hwp_parse_failed: invalid render layout metadata: {cause}; use hwp-cli that emits hwp-render-layout-v1 schema 1.x and render again")
+}
+
+fn validate_layout_row(row: &Value) -> Result<(), String> {
+    if !row
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.is_empty())
+    {
+        return Err(invalid_render_layout("row.id must be a nonempty string"));
+    }
+    if !row
+        .get("kind")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| matches!(kind, "para" | "table" | "cell" | "bookmark"))
+    {
+        return Err(invalid_render_layout("row.kind is unsupported"));
+    }
+    match row.get("box") {
+        Some(Value::Null) => {}
+        Some(box_) => {
+            let coordinates = ["x0", "y0", "x1", "y1"].map(|key| {
+                box_.get(key)
+                    .and_then(Value::as_f64)
+                    .filter(|value| value.is_finite())
+            });
+            let [Some(x0), Some(y0), Some(x1), Some(y1)] = coordinates else {
+                return Err(invalid_render_layout(
+                    "row.box requires four finite coordinates or null",
+                ));
+            };
+            if x0 > x1 || y0 > y1 {
+                return Err(invalid_render_layout("row.box coordinates must be ordered"));
+            }
+        }
+        None => {
+            return Err(invalid_render_layout(
+                "row.box is missing; emit a box or null",
+            ))
+        }
+    }
+    match row.get("source_chars") {
+        Some(Value::Null) => {}
+        Some(range) => {
+            let offset = |key| {
+                range
+                    .get(key)
+                    .and_then(Value::as_u64)
+                    .filter(|value| *value <= 9_007_199_254_740_991)
+            };
+            let (Some(start), Some(end)) = (offset("start"), offset("end")) else {
+                return Err(invalid_render_layout(
+                    "row.source_chars requires nonnegative safe integer offsets or null",
+                ));
+            };
+            if start > end {
+                return Err(invalid_render_layout(
+                    "row.source_chars offsets must be ordered",
+                ));
+            }
+        }
+        None => {
+            return Err(invalid_render_layout(
+                "row.source_chars is missing; emit a range or null",
+            ))
+        }
+    }
+    Ok(())
+}
+
+fn parse_render_layouts(bytes: &[u8]) -> Result<BTreeMap<u32, HwpedPageLayout>, String> {
+    let artifact: RenderLayoutArtifact =
+        serde_json::from_slice(bytes).map_err(invalid_render_layout)?;
+    let minor = artifact.schema_version.strip_prefix("1.").unwrap_or("");
+    if artifact.contract != "hwp-render-layout-v1"
+        || minor.is_empty()
+        || !minor.chars().all(|c| c.is_ascii_digit())
+    {
+        return Err(invalid_render_layout(
+            "expected hwp-render-layout-v1 contract and schema_version 1.x",
+        ));
+    }
+    let selected: BTreeSet<_> = artifact.selected_pages.iter().copied().collect();
+    if selected.is_empty()
+        || selected.contains(&0)
+        || selected.len() != artifact.selected_pages.len()
+    {
+        return Err(invalid_render_layout(
+            "selected_pages must contain unique positive page numbers",
+        ));
+    }
+    let mut layouts = BTreeMap::new();
+    for page in artifact.pages {
+        if !selected.contains(&page.page) || layouts.contains_key(&page.page) {
+            return Err(invalid_render_layout(
+                "layout pages must uniquely match selected_pages",
+            ));
+        }
+        if !page.width_pt.is_finite()
+            || page.width_pt <= 0.0
+            || !page.height_pt.is_finite()
+            || page.height_pt <= 0.0
+        {
+            return Err(invalid_render_layout(
+                "page dimensions must be positive finite points",
+            ));
+        }
+        for row in &page.rows {
+            validate_layout_row(row)?;
+        }
+        layouts.insert(
+            page.page,
+            HwpedPageLayout {
+                width_pt: page.width_pt,
+                height_pt: page.height_pt,
+                rows: page.rows,
+                truncated: artifact.truncated,
+            },
+        );
+    }
+    if layouts.len() != selected.len() {
+        return Err(invalid_render_layout(
+            "layout pages must account for every selected page",
+        ));
+    }
+    Ok(layouts)
+}
+
+fn read_render_layouts(file: &Path) -> Result<Option<BTreeMap<u32, HwpedPageLayout>>, String> {
+    match std::fs::read(file) {
+        Ok(bytes) => parse_render_layouts(&bytes).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("hwp_stage_failed: could not read render layout metadata: {error}; check temporary storage permissions and render again")),
+    }
+}
+
 fn render_attempt(
     bin: &Path,
     dir: &Path,
@@ -362,6 +531,7 @@ fn render_attempt(
 ) -> Result<Vec<HwpedRenderPage>, String> {
     let out_base = dir.join(format!("page.{format}"));
     let report_path = dir.join(format!("render-report-{format}.json"));
+    let layout_path = dir.join(format!("render-layout-{format}.json"));
     run_hwp_ok(
         bin,
         &[
@@ -377,8 +547,11 @@ fn render_attempt(
             OsString::from(dpi.to_string()),
             OsString::from("--report"),
             report_path.as_os_str().to_os_string(),
+            OsString::from("--layout-json"),
+            layout_path.as_os_str().to_os_string(),
         ],
     )?;
+    let layouts = read_render_layouts(&layout_path)?;
     // Multi-page renders land as page-<n>.<ext>; a single selected page keeps
     // the exact -o name. The report's selected_pages pins page numbers.
     let prefix = format!("page.{format}");
@@ -437,6 +610,16 @@ fn render_attempt(
             dpi,
             format: format.to_string(),
             data_base64: BASE64.encode(&data),
+            layout: layouts
+                .as_ref()
+                .map(|layouts| {
+                    layouts.get(&page).cloned().ok_or_else(|| {
+                        invalid_render_layout(format!(
+                            "rendered page {page} is missing from layout metadata"
+                        ))
+                    })
+                })
+                .transpose()?,
         });
     }
     Ok(images)
@@ -507,24 +690,41 @@ fn safe_output_name(name: &str, fallback_ext: &str) -> String {
     }
 }
 
+enum EditOperations {
+    Argv(Vec<String>),
+    Json(Value),
+}
+
 fn edit_now(
     document: HwpedDocumentRef,
-    ops_argv: Vec<String>,
+    ops_argv: Option<Vec<String>>,
+    ops: Option<Value>,
     verify: Option<bool>,
     allow_partial: Option<bool>,
     workspace_root: Option<String>,
 ) -> Result<HwpedEditResponse, String> {
+    let operations = match (ops_argv, ops) {
+        (Some(argv), None) => {
+            if !argv.len().is_multiple_of(2)
+                || argv
+                    .iter()
+                    .step_by(2)
+                    .any(|argument| !argument.starts_with("--"))
+            {
+                return Err("hwped_bad_request: opsArgv must be --flag value pairs (opsToArgv output); send valid pairs or use the ops JSON array".to_string());
+            }
+            EditOperations::Argv(argv)
+        }
+        (None, Some(ops)) if ops.is_array() => EditOperations::Json(ops),
+        (None, Some(_)) => {
+            return Err("hwped_bad_request: ops must be a JSON array; send an edit-ops-v1 array or use opsArgv instead".to_string());
+        }
+        _ => {
+            return Err("hwped_bad_request: exactly one of ops and opsArgv is required; send one field and omit the other".to_string());
+        }
+    };
     let bin = hwp_bin()?;
     ensure_version(&bin)?;
-    // opsArgv arrives as JS-side opsToArgv output: flag/value pairs. The
-    // sanity check catches malformed calls; argv injection is impossible
-    // because spawning never goes through a shell.
-    if !ops_argv.len().is_multiple_of(2) || ops_argv.iter().step_by(2).any(|a| !a.starts_with("--"))
-    {
-        return Err(
-            "hwped_bad_request: opsArgv must be --flag value pairs (opsToArgv output)".to_string(),
-        );
-    }
     let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     let ext = sniff_extension(&document.name);
@@ -535,7 +735,19 @@ fn edit_now(
         OsString::from("-o"),
         output.clone().into_os_string(),
     ];
-    args.extend(ops_argv.into_iter().map(OsString::from));
+    match operations {
+        EditOperations::Argv(argv) => args.extend(argv.into_iter().map(OsString::from)),
+        EditOperations::Json(ops) => {
+            let ops_file = tmp.path().join("ops.json");
+            let bytes = serde_json::to_vec(&ops).map_err(|err| {
+                format!("hwp_stage_failed: could not encode edit operations JSON: {err}; check the operation payload and retry")
+            })?;
+            std::fs::write(&ops_file, bytes).map_err(|err| {
+                format!("hwp_stage_failed: could not write the per-call edit operations file: {err}; check temporary storage permissions and free space, then retry")
+            })?;
+            args.extend([OsString::from("--ops"), ops_file.into_os_string()]);
+        }
+    }
     if verify != Some(false) {
         args.push(OsString::from("--verify"));
     }
@@ -630,6 +842,7 @@ fn capabilities_now() -> Result<HwpedCapabilities, String> {
     let bin = hwp_bin()?;
     let version = ensure_version(&bin)?;
     Ok(HwpedCapabilities {
+        edit_ops: "v1",
         version: version.to_string(),
         editable: true,
         formats: vec!["hwp".to_string(), "hwpx".to_string()],
@@ -668,7 +881,8 @@ pub async fn hwped_render(
 #[tauri::command]
 pub async fn hwped_edit(
     document: HwpedDocumentRef,
-    ops_argv: Vec<String>,
+    ops_argv: Option<Vec<String>>,
+    ops: Option<Value>,
     verify: Option<bool>,
     allow_partial: Option<bool>,
     workspace_root: Option<String>,
@@ -676,7 +890,14 @@ pub async fn hwped_edit(
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(test)]
         PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_edit");
-        edit_now(document, ops_argv, verify, allow_partial, workspace_root)
+        edit_now(
+            document,
+            ops_argv,
+            ops,
+            verify,
+            allow_partial,
+            workspace_root,
+        )
     })
     .await
     .map_err(|err| format!("hwped_task_failed: {err}"))?
@@ -727,6 +948,43 @@ mod tests {
         assert_eq!(parse_version(b"hwp 0.8.7"), Some((0, 8, 7)));
         assert_eq!(parse_version(b"hwp-cli v1.2.3 (build)"), Some((1, 2, 3)));
         assert_eq!(parse_version(b"no version here"), None);
+    }
+
+    #[test]
+    fn edit_channel_rejects_both_neither_and_nonarray_json_before_cli_lookup() {
+        let document = || HwpedDocumentRef {
+            name: "문서.hwpx".to_string(),
+            path: None,
+            data_base64: None,
+        };
+        for (argv, ops) in [(None, None), (Some(vec![]), Some(serde_json::json!([])))] {
+            let error = edit_now(document(), argv, ops, None, None, None).unwrap_err();
+            assert!(error.starts_with("hwped_bad_request:"), "{error}");
+            assert!(
+                error.contains("opsArgv") && error.contains("ops"),
+                "{error}"
+            );
+            assert!(error.contains("exactly one"), "{error}");
+        }
+        for ops in [
+            Value::Null,
+            serde_json::json!({}),
+            serde_json::json!("not an array"),
+            serde_json::json!(7),
+        ] {
+            let error = edit_now(document(), None, Some(ops), None, None, None).unwrap_err();
+            assert!(
+                error.starts_with("hwped_bad_request: ops must be a JSON array"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn json_and_layout_flags_require_the_supported_cli_floor() {
+        assert!(!version_at_least((0, 19, 99), MIN_VERSION));
+        assert!(version_at_least((0, 20, 0), MIN_VERSION));
+        assert!(version_at_least((1, 3, 1), MIN_VERSION));
     }
 
     #[test]
@@ -797,6 +1055,96 @@ mod tests {
         let staged = stage_document(tmp.path(), &doc, None).unwrap();
         assert_eq!(std::fs::read(&staged).unwrap(), b"payload");
         assert!(staged.ends_with("in.hwpx"));
+    }
+
+    pub(super) fn layout_artifact() -> Value {
+        serde_json::json!({
+            "contract":"hwp-render-layout-v1", "schema_version":"1.0", "truncated":true,
+            "selected_pages":[2,5],
+            "pages":[
+                {"page":5,"width_pt":500.0,"height_pt":700.0,"rows":[]},
+                {"page":2,"width_pt":200.0,"height_pt":300.0,"rows":[
+                    {"id":"same", "kind":"para", "box":{"x0":1,"y0":2,"x1":10,"y1":12}, "source_chars":{"start":2,"end":4}},
+                    {"id":"same", "kind":"para", "box":null, "source_chars":null}
+                ]}
+            ]
+        })
+    }
+
+    #[test]
+    fn layout_metadata_preserves_actual_pages_duplicate_rows_and_nullable_geometry() {
+        let source = layout_artifact();
+        let layouts = parse_render_layouts(&serde_json::to_vec(&source).unwrap()).unwrap();
+        assert_eq!(layouts.keys().copied().collect::<Vec<_>>(), vec![2, 5]);
+        let page = serde_json::to_value(&layouts[&2]).unwrap();
+        assert_eq!(page["width_pt"], 200.0);
+        assert_eq!(page["height_pt"], 300.0);
+        assert_eq!(page["truncated"], true);
+        assert_eq!(page["rows"], source["pages"][1]["rows"]);
+        assert_eq!(
+            layouts[&5].rows.len(),
+            0,
+            "empty measured geometry is not absent metadata"
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(read_render_layouts(&tmp.path().join("absent.json"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn present_malformed_layout_metadata_is_a_parse_failure() {
+        let valid = layout_artifact();
+        let mut cases = vec![serde_json::json!(null), serde_json::json!({})];
+        for (pointer, value) in [
+            ("/contract", serde_json::json!("other")),
+            ("/schema_version", serde_json::json!("2.0")),
+            ("/schema_version", serde_json::json!("1.")),
+            ("/truncated", serde_json::json!("true")),
+            ("/selected_pages", serde_json::json!([2, 2])),
+            ("/selected_pages", serde_json::json!([0, 5])),
+            ("/pages/0/page", serde_json::json!(2)),
+            ("/pages/0/width_pt", serde_json::json!(0)),
+            ("/pages/0/height_pt", serde_json::json!(-1)),
+            ("/pages/1/rows/0/kind", serde_json::json!("unsupported")),
+            ("/pages/1/rows/0/id", serde_json::json!("")),
+            (
+                "/pages/1/rows/0/box",
+                serde_json::json!({"x0":10,"y0":0,"x1":1,"y1":1}),
+            ),
+            (
+                "/pages/1/rows/0/source_chars",
+                serde_json::json!({"start":4,"end":2}),
+            ),
+            (
+                "/pages/1/rows/0/source_chars",
+                serde_json::json!({"start":-1,"end":2}),
+            ),
+        ] {
+            let mut source = valid.clone();
+            *source.pointer_mut(pointer).unwrap() = value;
+            cases.push(source);
+        }
+        let mut missing_page = valid.clone();
+        missing_page["pages"].as_array_mut().unwrap().pop();
+        cases.push(missing_page);
+        let mut missing_box = valid.clone();
+        missing_box["pages"][1]["rows"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("box");
+        cases.push(missing_box);
+        for source in cases {
+            let error = parse_render_layouts(&serde_json::to_vec(&source).unwrap()).unwrap_err();
+            assert!(error.starts_with("hwp_parse_failed:"), "{error}");
+            assert!(error.contains("render again"), "{error}");
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("malformed.json");
+        std::fs::write(&file, b"{").unwrap();
+        assert!(read_render_layouts(&file)
+            .unwrap_err()
+            .starts_with("hwp_parse_failed:"));
     }
 
     #[test]
@@ -913,14 +1261,14 @@ mod phase08_21 {
         }
     }
 
-    /// Fake hwp-cli >= 0.8.7: version probe plus every subcommand the six
+    /// Fake hwp-cli >= 0.20.0: version probe plus every subcommand the six
     /// wrappers spawn, with fixed argv parsing (no shell interpolation).
     #[cfg(unix)]
     fn fake_hwp(dir: &Path) -> PathBuf {
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
 case "$1" in
-  --version) echo "hwp 0.9.0" ;;
+  --version) echo "hwp 0.20.0" ;;
   cat) echo '{"title":"문서","segments":[{"text":"본문"}]}' ;;
   render)
     out=""; report=""
@@ -933,13 +1281,21 @@ case "$1" in
     printf '<svg width="100pt" height="50pt"></svg>' > "$out"
     printf '{"selected_pages":[1]}' > "$report" ;;
   edit)
-    out=""
+    out=""; ops=""; verify=0; partial=0
     while [ "$#" -gt 0 ]; do
       if [ "$1" = "-o" ]; then shift; out="$1"; fi
+      if [ "$1" = "--ops" ]; then shift; ops="$1"; fi
+      if [ "$1" = "--verify" ]; then verify=1; fi
+      if [ "$1" = "--allow-partial" ]; then partial=1; fi
       shift
     done
     [ -n "$out" ] || exit 2
-    printf 'edited' > "$out" ;;
+    if [ -n "$ops" ]; then
+      printf '%s\n%s\n%s\n' "$ops" "$verify" "$partial" > "$out"
+      cat "$ops" >> "$out"
+    else
+      printf 'edited' > "$out"
+    fi ;;
   compose)
     out=""
     while [ "$#" -gt 0 ]; do
@@ -974,7 +1330,8 @@ esac
             "hwped_edit",
             hwped_edit(
                 doc_with_path("docs/a.hwpx"),
-                vec!["--replace".to_string(), "x".to_string()],
+                Some(vec!["--replace".to_string(), "x".to_string()]),
+                None,
                 None,
                 None,
                 Some("/tmp".to_string()),
@@ -994,6 +1351,308 @@ esac
             std::env::temp_dir(),
             "hwped_capabilities",
             hwped_capabilities(),
+        );
+    }
+
+    #[cfg(unix)]
+    fn fake_layout_hwp(dir: &Path, artifact: Option<&[u8]>) -> PathBuf {
+        let binary = dir.join("hwp");
+        if let Some(bytes) = artifact {
+            std::fs::write(dir.join("layout-fixture.json"), bytes).unwrap();
+        }
+        let script = r#"#!/bin/sh
+case "$1" in
+  --version) echo "hwp 0.20.0" ;;
+  render)
+    out=""; report=""; layout=""
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "-o" ]; then shift; out="$1"; fi
+      if [ "$1" = "--report" ]; then shift; report="$1"; fi
+      if [ "$1" = "--layout-json" ]; then shift; layout="$1"; fi
+      shift
+    done
+    [ -n "$out" ] && [ -n "$report" ] && [ -n "$layout" ] || exit 2
+    dir=$(dirname "$out")
+    printf '<svg width="200pt" height="300pt"></svg>' > "$dir/page-2.svg"
+    printf '<svg width="500pt" height="700pt"></svg>' > "$dir/page-5.svg"
+    printf '{"selected_pages":[2,5]}' > "$report"
+    fixture="$(dirname "$0")/layout-fixture.json"
+    if [ -f "$fixture" ]; then cp "$fixture" "$layout"; fi ;;
+  *) exit 2 ;;
+esac
+"#;
+        crate::test_support::write_executable_fixture(&binary, script, 0o755).unwrap();
+        binary
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn render_layout_rows_follow_page_numbers_and_missing_artifacts_stay_optional() {
+        for artifact in [
+            Some(serde_json::to_vec(&super::tests::layout_artifact()).unwrap()),
+            None,
+            Some(b"{".to_vec()),
+        ] {
+            let home = crate::atomic_file::phase08_06::Home::new();
+            let bin_dir = home.root.path().join("bin");
+            std::fs::create_dir_all(&bin_dir).unwrap();
+            let _env = EnvGuard::set(
+                "MARU_HWP_BIN",
+                &fake_layout_hwp(&bin_dir, artifact.as_deref()),
+            );
+            let document = HwpedDocumentRef {
+                name: "문서.hwpx".to_string(),
+                path: None,
+                data_base64: Some(BASE64.encode(b"document")),
+            };
+            let rendered = run(hwped_render(document, None, None));
+            if artifact.as_deref() == Some(b"{".as_slice()) {
+                assert!(rendered.unwrap_err().starts_with("hwp_parse_failed:"));
+                continue;
+            }
+            let rendered = rendered.unwrap();
+            assert_eq!(
+                rendered
+                    .pages
+                    .iter()
+                    .map(|page| page.page)
+                    .collect::<Vec<_>>(),
+                vec![2, 5]
+            );
+            if artifact.is_some() {
+                assert_eq!(rendered.pages[0].layout.as_ref().unwrap().width_pt, 200.0);
+                assert_eq!(rendered.pages[1].layout.as_ref().unwrap().width_pt, 500.0);
+                assert_eq!(rendered.pages[0].layout.as_ref().unwrap().rows.len(), 2);
+                assert!(rendered.pages[0].layout.as_ref().unwrap().truncated);
+            } else {
+                for page in rendered.pages {
+                    assert!(page.layout.is_none());
+                    assert!(serde_json::to_value(page).unwrap().get("layout").is_none());
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn edit_json_and_legacy_channels_cross_the_real_tauri_argument_decoder() {
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::test::{get_ipc_response, INVOKE_KEY};
+        use tauri::webview::InvokeRequest;
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set("MARU_HWP_BIN", &fake_hwp(&bin_dir));
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context.runtime_authority_mut().__allow_command(
+            "hwped_edit".to_string(),
+            tauri::utils::acl::ExecutionContext::Local,
+        );
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![hwped_edit])
+            .build(context)
+            .unwrap();
+        let view = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let invoke = |payload| {
+            get_ipc_response(
+                &view,
+                InvokeRequest {
+                    cmd: "hwped_edit".to_string(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: view.url().unwrap(),
+                    body: InvokeBody::Json(payload),
+                    headers: Default::default(),
+                    invoke_key: INVOKE_KEY.to_string(),
+                },
+            )
+        };
+        let document = serde_json::json!({"name":"문서.hwpx", "dataBase64":BASE64.encode(b"original document")});
+        let ops = serde_json::json!([{"op":"set_format", "address":{"at":{"section":0,"paragraph":0,"run":1}}, "chars":[1,3], "bold":"on"}]);
+        let response = invoke(serde_json::json!({"document":document, "ops":ops}))
+            .unwrap()
+            .deserialize::<Value>()
+            .unwrap();
+        let bytes = BASE64
+            .decode(response["dataBase64"].as_str().unwrap())
+            .unwrap();
+        let captured = String::from_utf8(bytes).unwrap();
+        let fields: Vec<_> = captured.splitn(4, '\n').collect();
+        assert_eq!(serde_json::from_str::<Value>(fields[3]).unwrap(), ops);
+        assert_eq!(fields[1], "1", "the default verification flag is preserved");
+        let legacy =
+            invoke(serde_json::json!({"document":document, "opsArgv":["--replace","본문"]}))
+                .unwrap()
+                .deserialize::<Value>()
+                .unwrap();
+        assert_eq!(
+            BASE64
+                .decode(legacy["dataBase64"].as_str().unwrap())
+                .unwrap(),
+            b"edited"
+        );
+        for payload in [
+            serde_json::json!({"document":document}),
+            serde_json::json!({"document":document, "ops":[], "opsArgv":[]}),
+            serde_json::json!({"document":document, "ops":{"not":"array"}}),
+        ] {
+            let error = invoke(payload).unwrap_err();
+            assert!(
+                error.as_str().unwrap().starts_with("hwped_bad_request:"),
+                "{error}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn json_edit_channel_preserves_addresses_and_uses_isolated_temporary_files() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.hwpx"), b"original document").unwrap();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set("MARU_HWP_BIN", &fake_hwp(&bin_dir));
+        let payloads = [
+            serde_json::json!([{"op":"set_format", "address":{"at":{"section":0,"paragraph":0,"run":1}}, "chars":[1,3], "bold":"on", "text":"같은 문구"}]),
+            // The engine, rather than this host, owns every op and its grammar.
+            serde_json::json!([{"future_op":{"text":"그대로 전달"}}, false, 1]),
+            serde_json::json!([]),
+        ];
+        let mut previous_ops_file = None;
+        for ops in payloads {
+            let edited = run(hwped_edit(
+                doc_with_path("docs/a.hwpx"),
+                None,
+                Some(ops.clone()),
+                Some(false),
+                Some(true),
+                Some(text(&root)),
+            ))
+            .unwrap();
+            let bytes = BASE64.decode(edited.data_base64).unwrap();
+            let captured = String::from_utf8(bytes).unwrap();
+            let fields: Vec<_> = captured.splitn(4, '\n').collect();
+            let ops_file = PathBuf::from(fields[0]);
+            assert_eq!(ops_file.file_name().unwrap(), "ops.json");
+            assert!(
+                !ops_file.exists(),
+                "per-call files must be cleaned after readback"
+            );
+            assert_ne!(previous_ops_file.as_ref(), Some(&ops_file));
+            previous_ops_file = Some(ops_file);
+            assert_eq!(fields[1], "0", "verify=false must omit --verify");
+            assert_eq!(fields[2], "1", "allowPartial must retain its CLI flag");
+            assert_eq!(serde_json::from_str::<Value>(fields[3]).unwrap(), ops);
+            assert_eq!(
+                std::fs::read(root.join("docs/a.hwpx")).unwrap(),
+                b"original document"
+            );
+        }
+    }
+
+    /// Run separately with a checksum-verified released binary so its real
+    /// version probe cannot share the fake-binary memo used by the unit suite.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires MARU_HWPED_REAL_TEST_BIN pointing to checksum-verified hwp-cli >= 1.3.1"]
+    fn released_hwp_changes_only_the_addressed_duplicate_and_returns_page_layout() {
+        let binary = std::env::var_os("MARU_HWPED_REAL_TEST_BIN")
+            .map(PathBuf::from)
+            .expect("set MARU_HWPED_REAL_TEST_BIN to the verified release binary");
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let _env = EnvGuard::set("MARU_HWP_BIN", &binary);
+        let root = home.root.path();
+        let markdown = root.join("duplicate.md");
+        std::fs::write(
+            &markdown,
+            "# 제목\n\n첫 문단\n\n같은 문단\n\n셋째 문단\n\n같은 문단\n",
+        )
+        .unwrap();
+        let input = root.join("base.hwpx");
+        run_hwp_ok(
+            &binary,
+            &[
+                OsString::from("new"),
+                OsString::from("--from"),
+                markdown.into_os_string(),
+                OsString::from("-o"),
+                input.as_os_str().to_os_string(),
+            ],
+        )
+        .unwrap();
+        let original_bytes = std::fs::read(&input).unwrap();
+        let read_ir = |file: &Path| -> Value {
+            serde_json::from_slice(
+                &run_hwp_ok(
+                    &binary,
+                    &[
+                        OsString::from("cat"),
+                        file.as_os_str().to_os_string(),
+                        OsString::from("--format"),
+                        OsString::from("json"),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let before = read_ir(&input);
+        let ops = serde_json::json!([{"op":"set_format", "address":{"at":{"section":0,"paragraph":4,"run":0}}, "bold":"on"}]);
+        let document = || HwpedDocumentRef {
+            name: "base.hwpx".to_string(),
+            path: Some(text(&input)),
+            data_base64: None,
+        };
+        let edited = run(hwped_edit(document(), None, Some(ops), None, None, None)).unwrap();
+        let output = root.join("edited.hwpx");
+        std::fs::write(&output, BASE64.decode(edited.data_base64).unwrap()).unwrap();
+        let after = read_ir(&output);
+        assert_eq!(
+            before["sections"][0]["paragraphs"][2], after["sections"][0]["paragraphs"][2],
+            "the first identical phrase must remain entirely unchanged"
+        );
+        let changed = &after["sections"][0]["paragraphs"][4];
+        assert_ne!(
+            before["sections"][0]["paragraphs"][4]["char_shape_runs"],
+            changed["char_shape_runs"]
+        );
+        let runs = changed["char_shape_runs"]
+            .as_array()
+            .expect("engine JSON IR exposes actual run shapes");
+        assert!(
+            runs.iter().any(|run| {
+                let index = run[1].as_u64().expect("char shape ID is numeric") as usize;
+                after["header"]["char_shapes"][index]["attr"]
+                    .as_u64()
+                    .unwrap()
+                    & 2
+                    != 0
+            }),
+            "the second identical phrase must have a bold run"
+        );
+        assert_eq!(
+            std::fs::read(&input).unwrap(),
+            original_bytes,
+            "source document is not overwritten"
+        );
+        let rendered = run(hwped_render(document(), None, None)).unwrap();
+        assert!(!rendered.pages.is_empty());
+        assert!(
+            rendered.pages.iter().all(|page| page.layout.is_some()),
+            "released engine layout metadata must reach every returned page"
+        );
+        assert!(rendered
+            .pages
+            .iter()
+            .any(|page| !page.layout.as_ref().unwrap().rows.is_empty()));
+        println!(
+            "HWPED_REAL_JSON_LAYOUT_PASS version={} pages={}",
+            ensure_version(&binary).unwrap(),
+            rendered.pages.len()
         );
     }
 
@@ -1025,7 +1684,8 @@ esac
 
         let edited = run(hwped_edit(
             doc_with_path("docs/a.hwpx"),
-            vec!["--replace".to_string(), "본문".to_string()],
+            Some(vec!["--replace".to_string(), "본문".to_string()]),
+            None,
             None,
             None,
             Some(work.clone()),
@@ -1057,12 +1717,17 @@ esac
         assert!(validated.errors.is_empty());
 
         let capabilities = run(hwped_capabilities()).unwrap();
-        assert_eq!(capabilities.version, "0.9.0");
+        assert_eq!(capabilities.version, "0.20.0");
         assert!(capabilities.editable);
+        assert_eq!(
+            serde_json::to_value(&capabilities).unwrap()["editOps"],
+            "v1"
+        );
 
         assert!(run(hwped_edit(
             doc_with_path("docs/a.hwpx"),
-            vec!["--replace".to_string()],
+            Some(vec!["--replace".to_string()]),
+            None,
             None,
             None,
             Some(work.clone()),
