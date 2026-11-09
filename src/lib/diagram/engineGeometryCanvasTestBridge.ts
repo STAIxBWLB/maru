@@ -1,5 +1,9 @@
 /** Isolated canvas preview consumer. No DiagramMode, document or history write. */
-import { buildEngineCanvasLayoutRequest } from "./engineGeometryCanvas";
+import {
+  buildEngineCanvasLayoutRequest,
+  NO_CONTENT_OFFSET,
+  type ContentOffset,
+} from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
 import type { DiagramDoc } from "./types";
 import type { GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
@@ -32,7 +36,18 @@ export async function previewEngineCanvasForTest(
   doc: DiagramDoc,
   datasetId: string,
 ): Promise<EngineCanvasPreview> {
-  const request = await buildEngineCanvasLayoutRequest(doc, datasetId);
+  // A canvas shows emitted positions, while a pin is an authored source
+  // position. The page offset depends on the header text alone, so one pin-free
+  // layout measures it before the pinned layout converts every member
+  // (maru#561).
+  const pinned = doc.nodes.some((node) => node.locked === true || node.meta?.pinned === true);
+  let contentOffset: Readonly<ContentOffset> = NO_CONTENT_OFFSET;
+  if (pinned) {
+    const probe = engine.layout(await buildEngineCanvasLayoutRequest(doc, datasetId, { pins: false }));
+    const offset = probe.geometry?.page.contentOffset;
+    if (offset) contentOffset = offset;
+  }
+  const request = await buildEngineCanvasLayoutRequest(doc, datasetId, { contentOffset });
   const dataset = doc.datasets?.find((item) => item.id === datasetId);
   if (!dataset || dataset.kind !== "semanticSpec") {
     throw new Error("Engine canvas preview needs a semantic dataset; choose an existing semantic dataset and retry the isolated test.");

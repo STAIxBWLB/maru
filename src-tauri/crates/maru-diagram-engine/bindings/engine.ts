@@ -125,7 +125,16 @@ export type GeometryLegend = {
  */
 contentBounds?: GeometryBox | null, titleY?: number | null, bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
 
-export type GeometryPage = { bounds: GeometryBox, };
+export type GeometryPage = { bounds: GeometryBox,
+/**
+ * Translation this page applies to the source drawing, so an emitted
+ * position is `source + contentOffset`. It is present only when a family
+ * draws its header inside the page (workflow, dataflow): every authored
+ * coordinate stays in source space, so a consumer that turns an emitted
+ * canvas position back into an authored one subtracts this offset
+ * (`maru#561`). Absent fields read as (0,0).
+ */
+contentOffset?: GeometryPoint | null, };
 
 export type GeometryLine = { from: GeometryPoint, to: GeometryPoint, };
 

@@ -281,6 +281,18 @@ mod tests {
         crate::layout::layout_json(&request.to_string())
     }
 
+    fn layout_with_pins(
+        spec: &serde_json::Value,
+        pins: serde_json::Value,
+    ) -> crate::geometry::GeometryReport {
+        let spec_json = spec.to_string();
+        let request = serde_json::json!({
+            "specJson": spec_json.clone(),
+            "pinSet": { "sourceSpecSha256": crate::spec_hash(&spec_json), "pins": pins },
+        });
+        crate::layout::layout_json(&request.to_string())
+    }
+
     #[test]
     fn places_nodes_and_all_declared_workflow_containers() {
         let report = layout(
@@ -432,6 +444,81 @@ mod tests {
         assert!(label(&multi, "subtitle").bounds.height > label(&single, "subtitle").bounds.height);
     }
 
+    /// maru#561 review: a pin is an authored source coordinate, exactly like
+    /// `via`, `channelY` and `labelAt`. Editing the header changes the band, so
+    /// it must move the pinned and the unpinned content together instead of
+    /// separating them or refusing a pin that was valid before.
+    #[test]
+    fn a_header_edit_moves_pins_and_route_hints_with_the_source_drawing() {
+        // b is pinned 7px below the automatic row, so its emitted distance to
+        // the unpinned a is a property of the source drawing only.
+        let pin = serde_json::json!([{
+            "targetId": "b", "targetKind": "node", "position": {"x": 254 * 64, "y": 100 * 64}
+        }]);
+        let mut offsets = Vec::new();
+        for subtitle in [
+            None,
+            Some("결정적 SVG · 접근성 검증"),
+            Some("결정적 SVG\n접근성 검증\n다국어 라벨"),
+        ] {
+            let mut source = header_spec("결정적 SVG · 접근성 검증");
+            // A group frame is drawn from the automatic row, so the moved member
+            // is judged outside it; the pin under test is about authored
+            // coordinates, not frame membership.
+            source["groups"] = serde_json::json!([]);
+            match subtitle {
+                Some(text) => source["meta"]["subtitle"] = serde_json::json!(text),
+                None => {
+                    source["meta"].as_object_mut().unwrap().remove("subtitle");
+                }
+            }
+            // An orthogonal path between the two port heights, authored in the
+            // same source space as the pin.
+            source["edges"][0]["via"] = serde_json::json!([[200, 119], [200, 126]]);
+            let report = layout_with_pins(&source, pin.clone());
+            assert!(report.ok, "{subtitle:?}: {:?}", report.diagnostics);
+            let geometry = report.geometry.unwrap();
+            let offset = geometry
+                .page
+                .content_offset
+                .expect("a workflow page draws the header band inside itself")
+                .y;
+            let bounds = |id: &str| {
+                geometry
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == id)
+                    .unwrap()
+                    .bounds
+            };
+            let (a, b) = (bounds("a"), bounds("b"));
+            // The pinned node keeps its authored source distance to the
+            // automatic one; the band only moves both.
+            assert_eq!(a.y, 93 * 64 + offset, "{subtitle:?}");
+            assert_eq!(b.y, 100 * 64 + offset, "{subtitle:?}");
+            assert_eq!(b.y - a.y, 7 * 64, "{subtitle:?}");
+            // The authored hints translate with the drawing, never on their own.
+            for (x, y) in [(200, 119), (200, 126)] {
+                assert!(
+                    geometry.routes[0]
+                        .points
+                        .iter()
+                        .any(|point| point.x == x * 64 && point.y == y * 64 + offset),
+                    "{subtitle:?}: the source hint at ({x},{y}) left the source drawing"
+                );
+            }
+            // Round trip: the emitted position minus the page offset is the pin
+            // the author wrote.
+            let round_trip = b.y - geometry.page.content_offset.unwrap().y;
+            assert_eq!(round_trip / 64, 100, "{subtitle:?}");
+            offsets.push(offset);
+        }
+        assert!(
+            offsets[1] > offsets[0] && offsets[2] > offsets[1],
+            "a subtitle and a wrapped subtitle must widen the band: {offsets:?}"
+        );
+    }
+
     #[test]
     fn rejects_lane_coordinate_overflow_without_narrowing() {
         let error = crate::layout::point(1e30, 0.0);
@@ -453,15 +540,19 @@ mod tests {
                 "pins": [{
                     "targetId": "pinned",
                     "targetKind": "node",
-                    "position": {"x": 120 * 64, "y": 152 * 64}
+                    "position": {"x": 120 * 64, "y": 88 * 64}
                 }]
             }
         });
         let report = crate::layout::layout_json(&request.to_string());
         assert!(report.ok, "{:?}", report.diagnostics);
-        let node = report
-            .geometry
-            .unwrap()
+        let geometry = report.geometry.unwrap();
+        let offset = geometry
+            .page
+            .content_offset
+            .expect("a workflow page draws the header band inside itself")
+            .y;
+        let node = geometry
             .nodes
             .into_iter()
             .find(|node| node.id == "pinned")
@@ -470,9 +561,10 @@ mod tests {
             node.position_source,
             crate::geometry::GeometryPositionSource::PlannedPin
         );
-        // A pin is a canvas position: it is converted into the source drawing's
-        // space for the lane rules and returned exactly after the header band
-        // moves the drawing (maru#561).
-        assert_eq!((node.bounds.x, node.bounds.y), (120 * 64, 152 * 64));
+        // A pin is an authored source position, like `via` and `labelAt`: the
+        // header band moves it with the rest of the drawing, and the page offset
+        // is the only thing a consumer needs to convert back (maru#561).
+        assert_eq!(offset, 64 * 64);
+        assert_eq!((node.bounds.x, node.bounds.y), (120 * 64, 88 * 64 + offset));
     }
 }

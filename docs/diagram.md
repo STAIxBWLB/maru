@@ -1014,12 +1014,20 @@ containers, route points, non-header labels with their glyph ink, legend and pag
 bounds), the header labels stay where they were emitted, and the page grows by
 the band. Translating the finished drawing rather than pre-shifting a family
 stack keeps every source-relative predicate, authored route hint (`via`,
-`channelY`, `labelAt`) and budget identical to the pinned one. A pin is a canvas
-position, so pins are converted into the source drawing's space before
-placement (`SceneBuilder::shift_pins`) and come back at exactly the y the user
-set. The band is Maru page content above the pinned top, so the authored-canvas
-budgets (`workflow_page_diagnostics`, the workflow/dataflow label canvas) still
-measure the pinned drawing. Nothing moves inside the SVG writer
+`channelX/Y`, `labelAt`), pin and budget identical to the pinned one. Every
+coordinate an author supplies is a source coordinate, including a pin, so a title
+or subtitle edit moves the pinned and the unpinned content together and can never
+separate them or turn a valid pinned scene into a refusal.
+
+The translation is published, not implied: `page.contentOffset` reports it
+(`{x: 0, y: band}`, present only for the families that draw the header inside the
+page), so emitted = source + `contentOffset`. A consumer that turns an emitted
+canvas position into an authored one subtracts that offset instead of guessing
+the header text's measured height; the test-only canvas adapter does exactly that
+before it writes a pin. This is the E4 contract for interactive pin editing. The
+band is Maru page content above the pinned top, so the authored-canvas budgets
+(`workflow_page_diagnostics`, the workflow/dataflow label canvas) still measure
+the pinned drawing. Nothing moves inside the SVG writer
 ([maru#561](https://github.com/STAIxBWLB/maru/issues/561)).
 
 Routing uses deterministic port choices, obstacle visibility fast paths and an
@@ -1935,10 +1943,12 @@ dataflow scene moves down by its measured band (64px for a one-line title, and
 more once a subtitle or a wrapped title extends below it), so their SVG capture
 hashes change with it, while architecture, sequence and lifecycle are untouched.
 The shift is a pure translation of the whole source drawing, including authored
-route hints, so the strict parity corpus, the exact boundary cases and the dense
-scenes keep their recorded verdicts, and the S1 screenshot record remains the
-historical snapshot of that stage. #560's label-capacity role correction remains
-out of scope.
+route hints and pins, and it is published as `page.contentOffset` for the
+consumers that write authored positions. Because nothing changes relative to the
+source, the strict parity corpus, the exact boundary cases and the dense scenes
+keep their recorded verdicts, and the S1 screenshot record remains the historical
+snapshot of that stage. #560's label-capacity role correction remains out of
+scope.
 Source-bound verification and screenshot hashes are recorded with the PR; hosted
 agreement and native results remain separate from a remote Linux reproduction.
 

@@ -160,32 +160,41 @@ fn translate_drawing(geometry: &mut GeometryDocument, shift: Coord) -> Result<()
         }
     }
     let legend = &mut geometry.legend;
-    legend.bounds = legend
-        .bounds
-        .checked_translate(0, shift)
-        .map_err(arithmetic)?;
-    if let Some(bounds) = legend.content_bounds {
-        legend.content_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
-    }
-    legend.title_y = match legend.title_y {
-        Some(y) => Some(add(y, shift)?),
-        None => None,
-    };
-    for entry in &mut legend.entries {
-        entry.bounds = entry
+    // An empty legend is a (0,0,0,0) sentinel, not a drawing: translating it
+    // would claim a legend below the band that nothing paints.
+    if !legend.entries.is_empty() {
+        legend.bounds = legend
             .bounds
             .checked_translate(0, shift)
             .map_err(arithmetic)?;
-        if let Some(bounds) = entry.swatch_bounds {
-            entry.swatch_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
+        if let Some(bounds) = legend.content_bounds {
+            legend.content_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
         }
-        if let Some(bounds) = entry.text_bounds {
-            entry.text_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
+        legend.title_y = match legend.title_y {
+            Some(y) => Some(add(y, shift)?),
+            None => None,
+        };
+        for entry in &mut legend.entries {
+            entry.bounds = entry
+                .bounds
+                .checked_translate(0, shift)
+                .map_err(arithmetic)?;
+            if let Some(bounds) = entry.swatch_bounds {
+                entry.swatch_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
+            }
+            if let Some(bounds) = entry.text_bounds {
+                entry.text_bounds = Some(bounds.checked_translate(0, shift).map_err(arithmetic)?);
+            }
         }
     }
     // The page keeps its origin and grows by the band, which also covers the
     // header the drawing moved away from.
     geometry.page.bounds.height = add(geometry.page.bounds.height, shift)?;
+    // Emitted = source + offset. Every authored coordinate (pins, `via`,
+    // `channelX/Y`, `labelAt`) stays in source space, so a consumer writing a
+    // pin from an emitted canvas position subtracts this offset instead of
+    // guessing the header band (maru#561).
+    geometry.page.content_offset = Some(GeometryPoint { x: 0, y: shift });
     if let Some(line) = geometry.lifecycle_rail.as_mut() {
         line.from = line.from.checked_translate(0, shift).map_err(arithmetic)?;
         line.to = line.to.checked_translate(0, shift).map_err(arithmetic)?;
@@ -312,6 +321,7 @@ impl SceneBuilder {
                         width: 0,
                         height: 0,
                     },
+                    content_offset: None,
                 },
             },
             diagnostics: vec![],
@@ -334,18 +344,6 @@ impl SceneBuilder {
     }
     pub(crate) fn pinned_position(&self, id: &str) -> Option<GeometryPoint> {
         self.pins.get(id).map(|p| p.position)
-    }
-    /// Move every pin into another coordinate space. Placement and the geometry
-    /// rules work in the source drawing's space, and the finished drawing moves
-    /// below the header band as one rigid step (maru#561).
-    pub(crate) fn shift_pins(&mut self, dy: Coord) -> Result<(), Diagnostic> {
-        if dy == 0 {
-            return Ok(());
-        }
-        for pin in self.pins.values_mut() {
-            pin.position.y = add(pin.position.y, dy)?;
-        }
-        Ok(())
     }
     pub(crate) fn node_bounds(&self, id: &str) -> Option<GeometryBox> {
         self.routing_nodes.get(id).copied().or_else(|| {
@@ -1665,6 +1663,7 @@ impl SceneBuilder {
                 add(extent.width, 48 * 64)?.max(px(minimum[0])?),
                 add(extent.height, 48 * 64)?.max(px(minimum[1])?),
             )?,
+            content_offset: None,
         };
         self.document.nodes.sort_by(|a, b| a.id.cmp(&b.id));
         self.document.containers.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1782,12 +1781,11 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
                 12 * 64,
             )?;
         }
-        // The header band is emitted first, into this scene's own coordinates.
-        // A pin is a canvas position, so it is converted into the source
-        // drawing's space here: the drawing moves below the band later, which
-        // returns every pin to the exact position the user set (maru#561).
-        let band = header_shift(&scene.document, &kind)?;
-        scene.shift_pins(band.checked_neg().unwrap_or(0))?;
+        // The header band is emitted first, into this scene's own coordinates,
+        // but every authored coordinate stays in the source drawing's space:
+        // pins, `via`, `channelX/Y` and `labelAt` describe the same drawing, so
+        // the rigid translation moves them together and a title edit can never
+        // separate or refuse them (maru#561).
         match kind.as_str() {
             "architecture" => architecture::place(&typed(&spec)?, &mut scene)?,
             "workflow" => workflow::place(&typed(&spec)?, &mut scene)?,
@@ -2729,11 +2727,18 @@ mod tests {
             .iter()
             .all(|d| d.code != "document/pin-member-removed"));
         let geometry = report.geometry.unwrap();
+        // A container pin is an authored source coordinate too, so the page's
+        // header offset moves it with the rest of the drawing (maru#561).
+        let offset = geometry
+            .page
+            .content_offset
+            .expect("a workflow page draws the header band inside itself")
+            .y;
         for (index, id) in ids.iter().enumerate() {
             let frame = geometry.containers.iter().find(|c| c.id == *id).unwrap();
             assert_eq!(
                 (frame.bounds.x, frame.bounds.y),
-                ((800 + index as i32 * 200) * 64, 600 * 64)
+                ((800 + index as i32 * 200) * 64, 600 * 64 + offset)
             );
         }
     }

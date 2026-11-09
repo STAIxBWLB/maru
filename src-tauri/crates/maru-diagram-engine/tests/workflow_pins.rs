@@ -14,11 +14,11 @@ fn pinned(
     let spec_json = source.to_string();
     let validity = validate_json(&spec_json);
     assert!(validity.ok);
-    // A pin is a canvas position. The emitted header band moves the drawing
-    // down by 64px (maru#561), so the first canvas row that lands on the lane's
-    // top row is 93 + 64 and comes back at exactly that y.
+    // A pin is an authored source position, like the route hints beside it. The
+    // first lane row is y=93 and the page's header offset moves it on the canvas
+    // (maru#561).
     let pin = |id: &str, x: i32| -> Value {
-        json!({"targetId":id,"targetKind":"node","position":{"x":x*64,"y":(93+64)*64}})
+        json!({"targetId":id,"targetKind":"node","position":{"x":x*64,"y":93*64}})
     };
     layout_json(&json!({"specJson":spec_json,"pinSet":{"sourceSpecSha256":validity.receipt.input_spec_sha256,"pins":[pin("a",100),pin("b",right_x)]}}).to_string())
 }
@@ -38,8 +38,18 @@ fn column_capacity_uses_pin_created_gap_instead_of_nominal_columns() {
     let separated = pinned(1, 2, 400);
     assert!(separated.ok, "{:?}", separated.diagnostics);
     let geometry = separated.geometry.as_ref().unwrap();
+    let offset = geometry
+        .page
+        .content_offset
+        .expect("a workflow page draws the header band inside itself")
+        .y;
+    assert_eq!(offset, 64 * 64);
     for id in ["a", "b"] {
         let node = geometry.nodes.iter().find(|node| node.id == id).unwrap();
-        assert_eq!(node.bounds.y, (93 + 64) * 64, "{id} lost its canvas pin");
+        assert_eq!(
+            node.bounds.y,
+            93 * 64 + offset,
+            "{id} lost its authored pin"
+        );
     }
 }

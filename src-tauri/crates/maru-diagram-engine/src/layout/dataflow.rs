@@ -278,7 +278,16 @@ mod tests {
                 .bounds
         };
         assert_eq!(bounds(&before), bounds(&after));
-        assert_eq!(bounds(&after).y, px(500.0).unwrap());
+        // A pin is an authored source position, like `via` and `labelAt`: the
+        // header band moves it with the rest of the drawing, and the page offset
+        // converts it back to the canvas (maru#561).
+        let offset = after
+            .page
+            .content_offset
+            .expect("a dataflow page draws the header band inside itself")
+            .y;
+        assert_eq!(offset, 64 * 64);
+        assert_eq!(bounds(&after).y, px(500.0).unwrap() + offset);
         let stage = after
             .containers
             .iter()
@@ -397,6 +406,76 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// maru#561 review: a dataflow pin is an authored source coordinate, like
+    /// the flow hints beside it, so a header edit moves the pinned node, the
+    /// automatic row and the hint together and never refuses the scene.
+    #[test]
+    fn a_header_edit_moves_dataflow_pins_and_flow_hints_together() {
+        let pin_y = 158;
+        let mut offsets = Vec::new();
+        for subtitle in [
+            None,
+            Some("결정적 SVG · 접근성 검증"),
+            Some("결정적 SVG\n접근성 검증\n다국어 라벨"),
+        ] {
+            let mut source = header_spec("결정적 SVG · 접근성 검증");
+            match subtitle {
+                Some(text) => source["meta"]["subtitle"] = serde_json::json!(text),
+                None => {
+                    source["meta"].as_object_mut().unwrap().remove("subtitle");
+                }
+            }
+            // An orthogonal path between the two port heights, authored in the
+            // same source space as the pin: a right port at 158+29, b left port
+            // at 128+29.
+            source["flows"][0]["via"] = serde_json::json!([[210, 187], [210, 157]]);
+            let original = crate::validate_json(&source.to_string())
+                .receipt
+                .input_spec_sha256;
+            let pins = serde_json::json!({
+                "sourceSpecSha256": original,
+                "pins": [{
+                    "targetId": "a", "targetKind": "node",
+                    "position": {"x": 44 * 64, "y": pin_y * 64}
+                }],
+            });
+            let geometry = layout(&source, Some(pins));
+            let offset = geometry
+                .page
+                .content_offset
+                .expect("a dataflow page draws the header band inside itself")
+                .y;
+            let bounds = |id: &str| {
+                geometry
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == id)
+                    .unwrap()
+                    .bounds
+            };
+            let (a, b) = (bounds("a"), bounds("b"));
+            assert_eq!(a.y, pin_y * 64 + offset, "{subtitle:?}");
+            assert_eq!(b.y, 128 * 64 + offset, "{subtitle:?}");
+            assert_eq!(a.y - b.y, (pin_y - 128) * 64, "{subtitle:?}");
+            for (x, y) in [(210, 187), (210, 157)] {
+                assert!(
+                    geometry.routes[0]
+                        .points
+                        .iter()
+                        .any(|point| point.x == x * 64 && point.y == y * 64 + offset),
+                    "{subtitle:?}: the source flow hint at ({x},{y}) left the source drawing"
+                );
+            }
+            let round_trip = a.y - offset;
+            assert_eq!(round_trip / 64, pin_y, "{subtitle:?}");
+            offsets.push(offset);
+        }
+        assert!(
+            offsets[1] > offsets[0] && offsets[2] > offsets[1],
+            "a subtitle and a wrapped subtitle must widen the band: {offsets:?}"
+        );
     }
 
     #[test]

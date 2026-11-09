@@ -18,8 +18,26 @@ const AUTHORED_CONTAINERS: Readonly<Record<string, string>> = {
   lane: "lanes", phase: "phases", group: "groups",
 };
 
+/** Translation the emitted page applies to the source drawing (emitted = source + offset). */
+export interface ContentOffset { x: number; y: number }
+export const NO_CONTENT_OFFSET: Readonly<ContentOffset> = { x: 0, y: 0 };
+export interface CanvasPinOptions {
+  /** Offset of the canvas the pinned members are displayed on, from `page.contentOffset`. */
+  contentOffset?: Readonly<ContentOffset>;
+  /** False for the probe layout that only measures the offset. */
+  pins?: boolean;
+}
+
 function fail(cause: string, fix: string): never {
   throw new Error(`Cannot adapt canvas pins: ${cause}; ${fix}.`);
+}
+
+function offsetOf(value: Readonly<ContentOffset> | undefined): Readonly<ContentOffset> {
+  if (!value) return NO_CONTENT_OFFSET;
+  if (!Number.isInteger(value.x) || !Number.isInteger(value.y)) {
+    fail("the page content offset is not signed-32-bit fixed-point", "pass the contentOffset the engine reported and retry");
+  }
+  return value;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -78,8 +96,16 @@ function target(dataset: SemanticSpecDataset, node: DiagramNode): Pick<GeometryP
 
 /** Build the test engine request for one semantic dataset without editing the doc.
  * The hash covers the exact serialized source passed to the SDK, not canvas state.
+ * A canvas position is emitted space, so it becomes a pin only after the page's
+ * `contentOffset` is subtracted: pins are authored source coordinates (maru#561).
  */
-export async function buildEngineCanvasLayoutRequest(doc: DiagramDoc, datasetId: string): Promise<LayoutRequest> {
+export async function buildEngineCanvasLayoutRequest(
+  doc: DiagramDoc,
+  datasetId: string,
+  options: CanvasPinOptions = {},
+): Promise<LayoutRequest> {
+  const contentOffset = offsetOf(options.contentOffset);
+  const includePins = options.pins !== false;
   const datasets = (doc.datasets ?? []).filter((dataset) => dataset.id === datasetId);
   if (datasets.length !== 1 || datasets[0].kind !== "semanticSpec") {
     fail(`dataset ${datasetId} is missing, duplicated, or not semantic`, "select one uniquely identified semantic dataset and retry");
@@ -93,7 +119,7 @@ export async function buildEngineCanvasLayoutRequest(doc: DiagramDoc, datasetId:
   catch { fail(`dataset ${datasetId} cannot be serialized`, "repair cyclic or unsupported source values and retry"); }
   const pins: GeometryPin[] = [];
   const seen = new Set<string>();
-  for (const node of doc.nodes) {
+  for (const node of includePins ? doc.nodes : []) {
     if (node.locked !== true && node.meta?.pinned !== true) continue;
     // Imported dataset IDs may contain colons. A longer, exact dataset prefix
     // owns its members; a short prefix must not capture that other dataset.
@@ -105,7 +131,13 @@ export async function buildEngineCanvasLayoutRequest(doc: DiagramDoc, datasetId:
     const key = `${member.targetKind}:${member.targetId}`;
     if (seen.has(key)) fail(`multiple explicitly pinned canvas members map to ${member.targetId}`, "remove duplicate canvas members or regenerate the dataset projection and retry");
     seen.add(key);
-    pins.push({ ...member, position: { x: coordinate(node.x, node.id, "x"), y: coordinate(node.y, node.id, "y") } });
+    pins.push({
+      ...member,
+      position: {
+        x: coordinate(node.x - contentOffset.x / 64, node.id, "x"),
+        y: coordinate(node.y - contentOffset.y / 64, node.id, "y"),
+      },
+    });
   }
   pins.sort((a, b) => a.targetKind < b.targetKind ? -1 : a.targetKind > b.targetKind ? 1 : a.targetId < b.targetId ? -1 : a.targetId > b.targetId ? 1 : 0);
   let sourceSpecSha256: string;
