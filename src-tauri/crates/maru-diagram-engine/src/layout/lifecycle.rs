@@ -5,12 +5,17 @@ use crate::layout::{point, px, RouteRequest, SceneBuilder};
 use crate::lifecycle::LifecycleSpec;
 use crate::Diagnostic;
 
-const LAYOUT_X: f64 = 120.0;
-const LAYOUT_Y: f64 = 144.0;
-const COLUMN_STEP: f64 = 236.0;
-const LANE_STEP: f64 = 208.0;
-const NODE_WIDTH: f64 = 184.0;
-const NODE_HEIGHT: f64 = 76.0;
+const PHASE_COLUMNS: [f64; 5] = [94.0, 248.0, 402.0, 556.0, 710.0];
+const EVENT_COLUMNS: [f64; 3] = [402.0, 556.0, 710.0];
+const PHASE_TOP: f64 = 126.0;
+const EVENT_TOP: f64 = 278.0;
+const OUTCOME_TOP: f64 = 450.0;
+const V2_MARGIN_X: f64 = 60.0;
+const V2_STATE_WIDTH: f64 = 140.0;
+const V2_STATE_HEIGHT: f64 = 64.0;
+const V2_MIN_GAP: f64 = 64.0;
+const V2_FIRST_ROW_TOP: f64 = 56.0;
+const V2_ROW_PITCH: f64 = 184.0;
 
 fn geometry_error(path: &str, cause: impl Into<String>) -> Diagnostic {
     crate::diagnostic(
@@ -61,31 +66,155 @@ fn pixel_box(
     Ok(bounds)
 }
 
+fn default_state_size(version: u32, lane: &str) -> (f64, f64) {
+    if version == 2 {
+        (V2_STATE_WIDTH, V2_STATE_HEIGHT)
+    } else if lane == "main" {
+        (118.0, 62.0)
+    } else if lane == "terminal" {
+        (118.0, 58.0)
+    } else {
+        (126.0, 58.0)
+    }
+}
+
+fn lifecycle_row_order(spec: &LifecycleSpec) -> Vec<String> {
+    let populated: std::collections::HashSet<_> = spec
+        .states
+        .iter()
+        .map(|state| state.lane.as_str())
+        .collect();
+    let mut order = Vec::new();
+    if populated.contains("main") {
+        order.push("main".to_owned());
+    }
+    order.extend(
+        spec.lanes
+            .iter()
+            .filter(|lane| lane.id != "main" && lane.id != "terminal")
+            .filter(|lane| populated.contains(lane.id.as_str()))
+            .map(|lane| lane.id.clone()),
+    );
+    if populated.contains("terminal") {
+        order.push("terminal".to_owned());
+    }
+    order
+}
+
+fn lifecycle_v2_centers(spec: &LifecycleSpec) -> [f64; 5] {
+    let mut widths = [V2_STATE_WIDTH; 5];
+    for state in &spec.states {
+        let column = state.col as usize;
+        if column < widths.len() {
+            widths[column] = widths[column].max(state.width.unwrap_or(0.0));
+        }
+    }
+    let mut centers = [0.0; 5];
+    let mut left = V2_MARGIN_X;
+    for column in 0..centers.len() {
+        centers[column] = left + widths[column] / 2.0;
+        left += widths[column] + V2_MIN_GAP;
+    }
+    centers
+}
+
+fn state_position(
+    spec: &LifecycleSpec,
+    state: &crate::lifecycle::LifecycleState,
+    row_order: &[String],
+    centers: &[f64; 5],
+) -> Option<(f64, f64)> {
+    let version = spec.schema_version;
+    let (width, _) = default_state_size(version, &state.lane);
+    let width = state.width.unwrap_or(width);
+    if version == 2 {
+        let column = *centers.get(state.col as usize)?;
+        let row = row_order.iter().position(|lane| lane == &state.lane)?;
+        return Some((
+            column - width / 2.0,
+            V2_FIRST_ROW_TOP + row as f64 * V2_ROW_PITCH + state.y_offset.unwrap_or(0.0),
+        ));
+    }
+    let columns = if state.lane == "main" {
+        &PHASE_COLUMNS[..]
+    } else {
+        &EVENT_COLUMNS[..]
+    };
+    let center = columns.get(state.col as usize).or_else(|| columns.last())?;
+    let top = if state.lane == "main" {
+        PHASE_TOP
+    } else if state.lane == "terminal" {
+        OUTCOME_TOP
+    } else {
+        EVENT_TOP
+    } + state.y_offset.unwrap_or(0.0);
+    Some((*center - width / 2.0, top))
+}
+
+fn empty_lane_top(
+    spec: &LifecycleSpec,
+    lane: &crate::lifecycle::LifecycleLane,
+    lane_index: usize,
+    version: u32,
+    row_order: &[String],
+) -> f64 {
+    if version == 2 {
+        row_order
+            .iter()
+            .position(|row| row == &lane.id)
+            .map(|row| V2_FIRST_ROW_TOP + row as f64 * V2_ROW_PITCH)
+            .unwrap_or(V2_FIRST_ROW_TOP + lane_index as f64 * V2_ROW_PITCH)
+    } else if lane.id == "main" {
+        PHASE_TOP
+    } else if lane.id == "terminal" {
+        OUTCOME_TOP
+    } else {
+        let _ = spec;
+        EVENT_TOP
+    }
+}
+
 pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<(), Diagnostic> {
+    let version = spec.schema_version;
     let lane_indices: std::collections::HashMap<_, _> = spec
         .lanes
         .iter()
         .enumerate()
         .map(|(index, lane)| (lane.id.as_str(), index))
         .collect();
-    let max_col = spec.states.iter().map(|state| state.col).max().unwrap_or(0);
-    let total_width = LAYOUT_X + f64::from(max_col + 1) * COLUMN_STEP;
+    let row_order = lifecycle_row_order(spec);
+    let centers = lifecycle_v2_centers(spec);
+    let max_right = spec
+        .states
+        .iter()
+        .filter_map(|state| {
+            state_position(spec, state, &row_order, &centers).map(|(x, _)| {
+                x + state
+                    .width
+                    .unwrap_or(default_state_size(version, &state.lane).0)
+            })
+        })
+        .fold(0.0_f64, f64::max);
+    let total_width = max_right.max(980.0);
 
     for (index, state) in spec.states.iter().enumerate() {
-        let lane = *lane_indices.get(state.lane.as_str()).ok_or_else(|| {
+        let _lane = *lane_indices.get(state.lane.as_str()).ok_or_else(|| {
             geometry_error(&format!("/states/{index}/lane"), "state lane is missing")
         })?;
-        let width = state.width.unwrap_or(NODE_WIDTH);
-        let height = state.height.unwrap_or(NODE_HEIGHT);
+        let (default_width, default_height) = default_state_size(version, &state.lane);
+        let width = state.width.unwrap_or(default_width);
+        let height = state.height.unwrap_or(default_height);
         let auto = if let Some(position) = scene.pinned_position(&state.id) {
             position
         } else {
-            point(
-                LAYOUT_X + f64::from(state.col) * COLUMN_STEP,
-                LAYOUT_Y + lane as f64 * LANE_STEP + state.y_offset.unwrap_or(0.0),
-            )?
+            let (x, y) = state_position(spec, state, &row_order, &centers).ok_or_else(|| {
+                geometry_error(
+                    &format!("/states/{index}/col"),
+                    "state column has no source layout position",
+                )
+            })?;
+            point(x, y)?
         };
-        let size = (state.width.is_some() || state.height.is_some()).then_some([width, height]);
         let detail = match (state.sublabel.as_deref(), state.step.as_deref()) {
             (Some(sublabel), Some(step)) if sublabel != step => Some(format!("{sublabel}\n{step}")),
             (Some(sublabel), _) => Some(sublabel.to_owned()),
@@ -100,7 +229,7 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             state.tag.as_deref(),
             None,
             auto,
-            size,
+            Some([width, height]),
         )?;
     }
 
@@ -118,10 +247,14 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
                 "lane",
                 &lane.label,
                 pixel_box(
-                    LAYOUT_X - 24.0,
-                    LAYOUT_Y + index as f64 * LANE_STEP - 24.0,
-                    total_width - LAYOUT_X + 24.0,
-                    NODE_HEIGHT + 48.0,
+                    64.0,
+                    empty_lane_top(spec, lane, index, version, &row_order),
+                    total_width - 64.0,
+                    if version == 2 {
+                        V2_STATE_HEIGHT + 48.0
+                    } else {
+                        106.0
+                    },
                     &format!("/lanes/{index}"),
                 )?,
             )?;
@@ -216,12 +349,28 @@ mod tests {
 
     #[test]
     fn places_states_lanes_and_transition_geometry_deterministically() {
-        let spec = r#"{"schema_version":2,"diagram_type":"lifecycle","meta":{"title":"Lifecycle","output":"lifecycle.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"begin","type":"start","label":"Begin","sublabel":"Current","lane":"main","col":0,"step":"Entry"},{"id":"done","type":"success","label":"Done","lane":"main","col":1}],"transitions":[{"id":"complete","from":"begin","to":"done","label":"complete","note":"after review","route":"auto","fromSide":"right","toSide":"left","labelAt":[320,40]}]}"#;
+        let spec = r#"{"schema_version":2,"diagram_type":"lifecycle","meta":{"title":"Lifecycle","output":"lifecycle.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"begin","type":"start","label":"Begin","sublabel":"Current","lane":"main","col":0,"step":"Entry"},{"id":"done","type":"success","label":"Done","lane":"main","col":1}],"transitions":[{"id":"complete","from":"begin","to":"done","label":"complete","note":"after review","route":"auto","fromSide":"right","toSide":"left","labelAt":[500,200]}]}"#;
         let report = layout(spec);
         assert!(report.ok, "{:?}", report.diagnostics);
         let geometry = report.geometry.unwrap();
         assert_eq!(geometry.nodes.len(), 2);
         assert_eq!(geometry.routes.len(), 1);
+        let begin = geometry
+            .nodes
+            .iter()
+            .find(|node| node.id == "begin")
+            .unwrap();
+        let done = geometry
+            .nodes
+            .iter()
+            .find(|node| node.id == "done")
+            .unwrap();
+        assert_eq!((begin.bounds.x, begin.bounds.y), (60 * 64, 56 * 64));
+        assert_eq!(
+            (begin.bounds.width, begin.bounds.height),
+            (140 * 64, 64 * 64)
+        );
+        assert_eq!((done.bounds.x, done.bounds.y), (264 * 64, 56 * 64));
         assert!(geometry
             .containers
             .iter()
@@ -242,6 +391,26 @@ mod tests {
     }
 
     #[test]
+    fn v1_defaults_use_reserved_bands_and_format_state_sizes() {
+        let spec = r#"{"schema_version":1,"diagram_type":"lifecycle","meta":{"title":"Lifecycle","output":"lifecycle.html"},"lanes":[{"id":"main","label":"Main"},{"id":"ordinary","label":"Ordinary"}],"states":[{"id":"phase","type":"start","label":"Phase","lane":"main","col":0},{"id":"event","type":"active","label":"Event","lane":"ordinary","col":0}],"transitions":[]}"#;
+        let report = layout(spec);
+        assert!(report.ok, "{:?}", report.diagnostics);
+        let nodes = report.geometry.unwrap().nodes;
+        let phase = nodes.iter().find(|node| node.id == "phase").unwrap();
+        let event = nodes.iter().find(|node| node.id == "event").unwrap();
+        assert_eq!((phase.bounds.x, phase.bounds.y), (35 * 64, 126 * 64));
+        assert_eq!(
+            (phase.bounds.width, phase.bounds.height),
+            (118 * 64, 62 * 64)
+        );
+        assert_eq!((event.bounds.x, event.bounds.y), (339 * 64, 278 * 64));
+        assert_eq!(
+            (event.bounds.width, event.bounds.height),
+            (126 * 64, 58 * 64)
+        );
+    }
+
+    #[test]
     fn a_valid_pin_skips_unrepresentable_automatic_offset() {
         let spec = r#"{"schema_version":1,"diagram_type":"lifecycle","meta":{"title":"Pinned lifecycle","output":"pinned-lifecycle.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"pinned","type":"start","label":"Pinned","lane":"main","col":0,"yOffset":1e30},{"id":"done","type":"success","label":"Done","lane":"main","col":1}],"transitions":[]}"#;
         assert!(crate::validate_json(spec).ok);
@@ -257,7 +426,7 @@ mod tests {
                 "pins": [{
                     "targetId": "pinned",
                     "targetKind": "node",
-                    "position": {"x": 17 * 64, "y": 29 * 64}
+                    "position": {"x": 35 * 64, "y": 100 * 64}
                 }]
             }
         });
@@ -274,6 +443,6 @@ mod tests {
             node.position_source,
             crate::geometry::GeometryPositionSource::PlannedPin
         );
-        assert_eq!((node.bounds.x, node.bounds.y), (17 * 64, 29 * 64));
+        assert_eq!((node.bounds.x, node.bounds.y), (35 * 64, 100 * 64));
     }
 }

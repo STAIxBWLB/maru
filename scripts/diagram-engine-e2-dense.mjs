@@ -61,20 +61,20 @@ function specification(kind, seed) {
     const col = index % columns;
     const row = Math.floor(index / columns);
     if (kind === "architecture") return { ...shared, row, col, size: [180, 88] };
-    if (kind === "workflow") return { ...shared, lane: "main", col, yOffset: row * 180, width: 180, height: 88 };
+    if (kind === "workflow") return { ...shared, lane: `row-${row}`, col, width: 40, height: 40 };
     return { ...shared, stage: col, row, width: 180, height: 88 };
   });
   const edges = edgePairs(columns, seed);
   const common = { schema_version: 1, diagram_type: kind, meta };
   if (kind === "architecture") return { ...common, layout: { mode: "grid", cols: columns, origin: [64, 160], cellW: 180, cellH: 88, gapX: 100, gapY: 112 }, components: nodes, connections: edges };
-  if (kind === "workflow") return { ...common, lanes: [{ id: "main", label: "Main" }], nodes, edges };
+  if (kind === "workflow") return { ...common, lanes: Array.from({ length: DENSE_NODE_COUNT / columns }, (_, row) => ({ id: `row-${row}`, label: `Row ${row}` })), nodes, edges };
   return { ...common, stages: Array.from({ length: columns }, (_, index) => ({ label: `Stage ${index}` })), nodes, flows: edges };
 }
 export function generateDenseScenes() {
   return {
     schemaVersion: 1,
-    generator: { id: "seeded-e2-dense-v1", seed: DENSE_SEED, nodeCountPerScene: DENSE_NODE_COUNT, longEdgesPerScene: LONG_EDGES, adjacentEdgesPerScene: ADJACENT_EDGES,
-      policy: "synthetic regular non-overlapping grids; unique-endpoint long cross-edges plus adjacent clear routes; no authored route/port/channel shortcuts" },
+    generator: { id: "seeded-e2-dense-v2", seed: DENSE_SEED, nodeCountPerScene: DENSE_NODE_COUNT, longEdgesPerScene: LONG_EDGES, adjacentEdgesPerScene: ADJACENT_EDGES,
+      policy: "synthetic non-overlapping source-layout grids; workflow uses40 lanes and40px nodes at legacy column centers; unique-endpoint long cross-edges plus adjacent clear routes; no authored route/port/channel shortcuts" },
     cases: ["architecture", "workflow", "dataflow"].map((kind, index) => ({
       id: `dense-${kind}-seed-${DENSE_SEED + index}`,
       seed: DENSE_SEED + index,
@@ -92,7 +92,8 @@ export function combinedCorpus(parityContents, fixtureContents) {
   if (!Array.isArray(parity?.cases) || parity.cases.length === 0 || !Array.isArray(dense?.cases) || dense.cases.length !== 3) {
     throw new Error("Determinism corpus sources have missing cases; restore the parity corpus and all three seeded dense scenes.");
   }
-  const cases = [...parity.cases, ...dense.cases.map((item) => {
+  if (parity.boundaryCases !== undefined && !Array.isArray(parity.boundaryCases)) throw new Error("Boundary corpus is not an array; regenerate the geometry evidence before comparing platforms.");
+  const cases = [...parity.cases, ...(parity.boundaryCases ?? []), ...dense.cases.map((item) => {
     if (!item || typeof item.id !== "string" || !item.spec || typeof item.spec !== "object" || Array.isArray(item.spec)) {
       throw new Error("Dense scene fixture has a missing ID or spec object; regenerate it from the checked-in seeded generator.");
     }

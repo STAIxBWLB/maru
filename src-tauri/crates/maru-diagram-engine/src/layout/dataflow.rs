@@ -5,11 +5,13 @@ use crate::dataflow::DataflowSpec;
 use crate::geometry::{GeometryBox, GeometryPoint};
 use crate::Diagnostic;
 
-const NODE_WIDTH: f64 = 180.0;
-const NODE_HEIGHT: f64 = 88.0;
-const STAGE_GAP: f64 = 100.0;
-const ROW_GAP: f64 = 64.0;
-const PADDING: f64 = 24.0;
+const NODE_WIDTH: f64 = 112.0;
+const NODE_HEIGHT: f64 = 58.0;
+const STAGE_X: f64 = 100.0;
+const STAGE_STEP: f64 = 215.0;
+const STAGE_Y: f64 = 46.0;
+const STAGE_WIDTH: f64 = 168.0;
+const STAGE_BOTTOM_PAD: f64 = 74.0;
 
 fn geometry_error(path: &str, cause: impl Into<String>) -> Diagnostic {
     crate::diagnostic(
@@ -22,18 +24,16 @@ fn geometry_error(path: &str, cause: impl Into<String>) -> Diagnostic {
 }
 
 fn node_position(
-    stage_left: f64,
-    stage_width: f64,
+    stage: f64,
     width: f64,
     row: f64,
-    row_step: f64,
     offset: f64,
 ) -> Result<GeometryPoint, Diagnostic> {
     // Do not narrow a schema-unbounded row to an integer index. The checked
     // pixel boundary rejects a position that cannot be represented.
     point(
-        stage_left + (stage_width - width) / 2.0,
-        160.0 + row * row_step + offset,
+        STAGE_X + stage * STAGE_STEP - width / 2.0,
+        128.0 + row * 114.0 + offset,
     )
 }
 
@@ -56,36 +56,13 @@ fn label_segment(value: Option<f64>) -> Result<Option<usize>, Diagnostic> {
 }
 
 pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(), Diagnostic> {
-    let mut widths = vec![NODE_WIDTH; spec.stages.len()];
-    let mut row_height = NODE_HEIGHT;
-    for (index, node) in spec.nodes.iter().enumerate() {
-        let stage = usize::try_from(node.stage)
-            .map_err(|error| geometry_error(&format!("/nodes/{index}/stage"), error.to_string()))?;
-        let stage_width = widths.get_mut(stage).ok_or_else(|| {
-            geometry_error(
-                &format!("/nodes/{index}/stage"),
-                "node stage does not exist",
-            )
-        })?;
+    let view_height = spec.meta.view_box.map(|view| view[1]).unwrap_or(720.0);
+    for node in &spec.nodes {
         let width = node.width.unwrap_or(NODE_WIDTH);
         let height = node.height.unwrap_or(NODE_HEIGHT);
         px(width)?;
         px(height)?;
-        *stage_width = stage_width.max(width);
-        row_height = row_height.max(height);
-    }
-    let mut lefts = Vec::with_capacity(widths.len());
-    let mut next_left = 64.0;
-    for width in &widths {
-        lefts.push(next_left);
-        px(next_left + width)?;
-        next_left += width + STAGE_GAP;
-    }
-    for node in &spec.nodes {
-        let stage = usize::try_from(node.stage)
-            .map_err(|error| geometry_error("/nodes/stage", error.to_string()))?;
-        let width = node.width.unwrap_or(NODE_WIDTH);
-        let height = node.height.unwrap_or(NODE_HEIGHT);
+        let stage = f64::from(node.stage);
         scene.add_node(
             &node.id,
             &node.component_type,
@@ -96,41 +73,24 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
             if let Some(pin) = scene.pinned_position(&node.id) {
                 pin
             } else {
-                node_position(
-                    lefts[stage],
-                    widths[stage],
-                    width,
-                    node.row,
-                    row_height + ROW_GAP,
-                    node.y_offset.unwrap_or(0.0),
-                )?
+                node_position(stage, width, node.row, node.y_offset.unwrap_or(0.0))?
             },
             Some([width, height]),
         )?;
     }
     for (index, stage) in spec.stages.iter().enumerate() {
-        let members: Vec<String> = spec
-            .nodes
-            .iter()
-            .filter(|node| usize::try_from(node.stage).ok() == Some(index))
-            .map(|node| node.id.clone())
-            .collect();
-        let id = format!("stage:{index}");
-        if members.is_empty() {
-            scene.add_container(
-                &id,
-                "stage",
-                &stage.label,
-                GeometryBox {
-                    x: px(lefts[index] - PADDING)?,
-                    y: px(136.0)?,
-                    width: px(widths[index] + PADDING * 2.0)?,
-                    height: px(NODE_HEIGHT + PADDING * 2.0)?,
-                },
-            )?;
-        } else {
-            scene.container_for_members(&id, "stage", &stage.label, &members, PADDING)?;
-        }
+        let center_x = STAGE_X + index as f64 * STAGE_STEP;
+        scene.add_container(
+            &format!("stage:{index}"),
+            "stage",
+            &format!("{:02} / {}", index + 1, stage.label),
+            GeometryBox {
+                x: px(center_x - STAGE_WIDTH / 2.0)?,
+                y: px(STAGE_Y)?,
+                width: px(STAGE_WIDTH)?,
+                height: px((view_height - STAGE_Y - STAGE_BOTTOM_PAD).max(0.0))?,
+            },
+        )?;
     }
     let route_ids =
         super::allocate_route_ids("flow", spec.flows.iter().map(|flow| flow.id.as_deref()));
@@ -212,7 +172,15 @@ mod tests {
         source["nodes"][0]["sublabel"] = "Browser".into();
         source["nodes"][0]["tag"] = "Source".into();
         let geometry = layout(&source, None);
-        for text in ["Input", "Output", "A", "Browser", "Source", "B", "F\nPII"] {
+        for text in [
+            "01 / Input",
+            "02 / Output",
+            "A",
+            "Browser",
+            "Source",
+            "B",
+            "F\nPII",
+        ] {
             let label = geometry
                 .labels
                 .iter()
@@ -262,7 +230,7 @@ mod tests {
     fn dataflow_layout_uses_rows_offsets_and_actual_stage_bounds() {
         let geometry = layout(&spec(), None);
         let node = geometry.nodes.iter().find(|node| node.id == "b").unwrap();
-        assert_eq!(node.bounds.y, px(324.0).unwrap());
+        assert_eq!(node.bounds.y, px(254.0).unwrap());
         let stage = geometry
             .containers
             .iter()
@@ -324,9 +292,30 @@ mod tests {
 
     #[test]
     fn row_layout_keeps_fractional_math_without_narrowing_large_rows() {
-        let at = node_position(64.0, 200.0, 160.0, 3.0, 152.0, 12.0).unwrap();
-        assert_eq!(at, point(84.0, 628.0).unwrap());
-        assert!(node_position(64.0, 180.0, 180.0, 1e20, 152.0, 0.0).is_err());
+        let at = node_position(1.0, 160.0, 3.0, 12.0).unwrap();
+        assert_eq!(at, point(235.0, 482.0).unwrap());
+        assert!(node_position(0.0, 112.0, 1e20, 0.0).is_err());
+    }
+
+    #[test]
+    fn default_nodes_and_stage_frames_use_documented_geometry() {
+        let geometry = layout(&spec(), None);
+        let first = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+        assert_eq!((first.bounds.x, first.bounds.y), (44 * 64, 128 * 64));
+        assert_eq!(
+            (first.bounds.width, first.bounds.height),
+            (112 * 64, 58 * 64)
+        );
+        let stage = geometry
+            .containers
+            .iter()
+            .find(|container| container.id == "stage:0")
+            .unwrap();
+        assert_eq!((stage.bounds.x, stage.bounds.y), (16 * 64, 46 * 64));
+        assert_eq!(
+            (stage.bounds.width, stage.bounds.height),
+            (168 * 64, 600 * 64)
+        );
     }
 
     #[test]

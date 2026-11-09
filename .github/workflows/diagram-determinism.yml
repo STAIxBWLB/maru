@@ -43,6 +43,7 @@ jobs:
         run: |
           mkdir -p .engine-e2/determinism
           cargo test --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --lib geometry_corpus -- --test-threads=2
+          cargo test --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --test work_budget -- --test-threads=2
           cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-foundation-hashes -- .engine-e2/determinism-corpus.json .engine-e2/determinism/native-${{ matrix.receipt }}.json
       - uses: actions/upload-artifact@v4
         with:

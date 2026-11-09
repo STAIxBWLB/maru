@@ -5,9 +5,19 @@ import { combinedCorpus, denseContents, generateDenseScenes } from "./diagram-en
 function positioned(spec) {
   const nodes = spec.components ?? spec.nodes;
   return nodes.map((node) => {
-    if (spec.diagram_type === "architecture") return { id: node.id, x: 64 + node.col * 280, y: 160 + node.row * 200, w: 180, h: 88 };
-    if (spec.diagram_type === "workflow") return { id: node.id, x: 120 + node.col * 236, y: 144 + node.yOffset, w: 180, h: 88 };
-    return { id: node.id, x: 88 + node.stage * 328, y: 160 + node.row * 152, w: 180, h: 88 };
+    if (spec.diagram_type === "architecture") {
+      const layout = spec.layout;
+      const [w, h] = node.size ?? [120, 60];
+      return { id: node.id, x: layout.origin[0] + node.col * (layout.cellW + layout.gapX), y: layout.origin[1] + node.row * (layout.cellH + layout.gapY), w, h };
+    }
+    const w = node.width;
+    const h = node.height;
+    if (spec.diagram_type === "workflow") {
+      const centers = [88, 220, 300, 430, 500, 625];
+      const lane = spec.lanes.findIndex((candidate) => candidate.id === node.lane);
+      return { id: node.id, x: centers[node.col] - w / 2, y: 52 + lane * 124 + 30 + (74 - h) / 2 + (node.yOffset ?? 0), w, h };
+    }
+    return { id: node.id, x: 100 + node.stage * 215 - w / 2, y: 128 + node.row * 114 + (node.yOffset ?? 0), w, h };
   });
 }
 function edgeList(spec) { return spec.connections ?? spec.edges ?? spec.flows; }
@@ -37,10 +47,10 @@ describe("seeded dense whole-scene fixtures", () => {
         for (const other of nodes.slice(index + 1)) {
           expect(node.x < other.x + other.w && other.x < node.x + node.w && node.y < other.y + other.h && other.y < node.y + node.h).toBe(false);
         }
-        const ports = [[node.x - 10, node.y + 44], [node.x + node.w + 10, node.y + 44], [node.x + 90, node.y - 10], [node.x + 90, node.y + node.h + 10]];
-        for (const [x, y] of ports) expect(nodes.some((other) => other.id !== node.id && inside(x, y, other))).toBe(false);
+        const ports = [[node.x - 10, node.y + node.h / 2], [node.x + node.w + 10, node.y + node.h / 2], [node.x + node.w / 2, node.y - 10], [node.x + node.w / 2, node.y + node.h + 10]];
+        for (const [x, y] of ports) expect(nodes.some((other) => other.id !== node.id && inside(x, y, { x: other.x - 4, y: other.y - 4, w: other.w + 8, h: other.h + 8 }))).toBe(false);
       }
-      const centers = new Map(nodes.map((node) => [node.id, { x: node.x + 90, y: node.y + 44 }]));
+      const centers = new Map(nodes.map((node) => [node.id, { x: node.x + node.w / 2, y: node.y + node.h / 2 }]));
       const long = edges.filter((edge) => edge.id.startsWith("long-"));
       expect(long).toHaveLength(32);
       expect(new Set(long.map((edge) => edge.from)).size).toBe(32);
@@ -75,4 +85,10 @@ describe("seeded dense whole-scene fixtures", () => {
     const duplicate = JSON.stringify({ cases: [{ id: generateDenseScenes().cases[0].id, inputJson: "{}" }] });
     expect(() => combinedCorpus(duplicate, denseContents())).toThrow("duplicate IDs");
   });
+});
+
+it("keeps every layered boundary input in the deterministic combined corpus",()=>{
+  const base={cases:[{id:"parity",inputJson:"{}"}],boundaryCases:[{id:"boundary",inputJson:"{}",boundary:{layer:"model-difference"}}]};
+  const report=JSON.parse(combinedCorpus(JSON.stringify(base),denseContents()));
+  expect(report.cases.map((item:{id:string})=>item.id).slice(0,2)).toEqual(["parity","boundary"]);
 });

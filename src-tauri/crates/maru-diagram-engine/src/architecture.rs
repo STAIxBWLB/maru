@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn deployment_profile_requires_each_security_group_to_share_one_region() {
-        let mut mixed_regions = serde_json::json!({
+        let mixed_regions = serde_json::json!({
             "schema_version": 1,
             "diagram_type": "architecture",
             "meta": {

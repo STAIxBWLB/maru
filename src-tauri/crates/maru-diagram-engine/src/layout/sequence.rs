@@ -5,10 +5,8 @@ use crate::geometry::{GeometryBox, GeometryPoint};
 use crate::sequence::SequenceSpec;
 use crate::Diagnostic;
 
-const HEADER_WIDTH: f64 = 180.0;
-const HEADER_HEIGHT: f64 = 72.0;
-const MARGIN: f64 = 64.0;
-const COLUMN_STEP: f64 = 244.0;
+const HEADER_HEIGHT: f64 = 60.0;
+const HEADER_TOP: f64 = 72.0;
 
 fn geometry_error(path: &str, cause: impl Into<String>) -> Diagnostic {
     crate::diagnostic(
@@ -52,6 +50,84 @@ fn range_box(
     Ok(bounds)
 }
 
+fn overlaps_with_clearance(left: GeometryBox, right: GeometryBox, clearance: i64) -> bool {
+    i64::from(left.x) < i64::from(right.x) + i64::from(right.width) + clearance
+        && i64::from(right.x) < i64::from(left.x) + i64::from(left.width) + clearance
+        && i64::from(left.y) < i64::from(right.y) + i64::from(right.height) + clearance
+        && i64::from(right.y) < i64::from(left.y) + i64::from(left.height) + clearance
+}
+
+fn message_obstacles(
+    spec: &SequenceSpec,
+    scene: &SceneBuilder,
+) -> Result<Vec<GeometryBox>, Diagnostic> {
+    let mut occupied = Vec::new();
+    for (index, message) in spec.messages.iter().enumerate() {
+        let from = scene.node_bounds(&message.from).ok_or_else(|| {
+            geometry_error(
+                &format!("/messages/{index}/from"),
+                "message source has no placed participant",
+            )
+        })?;
+        let to = scene.node_bounds(&message.to).ok_or_else(|| {
+            geometry_error(
+                &format!("/messages/{index}/to"),
+                "message target has no placed participant",
+            )
+        })?;
+        let from_center = center(from)?;
+        let to_center = center(to)?;
+        let direction = if to_center.x > from_center.x { 1 } else { -1 };
+        let start = i64::from(from_center.x) + i64::from(direction * 7 * 64);
+        let end = i64::from(to_center.x) - i64::from(direction * 7 * 64);
+        let route_left = start.min(end);
+        let route_width = i64::try_from(end.abs_diff(start))
+            .map_err(|error| geometry_error(&format!("/messages/{index}/y"), error.to_string()))?;
+        let y = px(message.y)?;
+        occupied.push(GeometryBox {
+            x: i32::try_from(route_left).map_err(|error| {
+                geometry_error(&format!("/messages/{index}/y"), error.to_string())
+            })?,
+            y: i32::try_from(i64::from(y) - 2 * 64).map_err(|error| {
+                geometry_error(&format!("/messages/{index}/y"), error.to_string())
+            })?,
+            width: i32::try_from(route_width).map_err(|error| {
+                geometry_error(&format!("/messages/{index}/y"), error.to_string())
+            })?,
+            height: 4 * 64,
+        });
+
+        let text = match message.note.as_deref().filter(|note| !note.is_empty()) {
+            Some(note) => format!("{}\n{note}", message.label),
+            None => message.label.clone(),
+        };
+        let (measured_width, measured_height) = scene.text_size(&text, 400, 12 * 64)?;
+        let width =
+            super::fixed::checked_add(measured_width.max(34 * 64), 12 * 64).map_err(|error| {
+                geometry_error(&format!("/messages/{index}/label"), error.to_string())
+            })?;
+        let height = if message.note.as_deref().is_some_and(|note| !note.is_empty()) {
+            27 * 64
+        } else if spec.meta.quality_profile.as_deref() == Some("showcase") {
+            18 * 64
+        } else {
+            16 * 64
+        };
+        let center_x = (start + end) / 2;
+        occupied.push(GeometryBox {
+            x: i32::try_from(center_x - i64::from(width) / 2).map_err(|error| {
+                geometry_error(&format!("/messages/{index}/label"), error.to_string())
+            })?,
+            y: i32::try_from(i64::from(y) - 20 * 64).map_err(|error| {
+                geometry_error(&format!("/messages/{index}/label"), error.to_string())
+            })?,
+            width,
+            height: height.max(measured_height),
+        });
+    }
+    Ok(occupied)
+}
+
 pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(), Diagnostic> {
     let count = spec.participants.len();
     if count == 0 {
@@ -61,36 +137,31 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
         ));
     }
     let spread = spec.meta.column_fit.as_deref() == Some("spread");
-    let step = if spread && count > 1 {
-        spec.meta
-            .view_box
-            .map(|size| (size[0] - MARGIN * 2.0 - HEADER_WIDTH) / (count - 1) as f64)
-            .unwrap_or(COLUMN_STEP)
-            .max(COLUMN_STEP)
-    } else {
-        COLUMN_STEP
-    };
-    let mut left = f64::INFINITY;
-    let mut right = f64::NEG_INFINITY;
+    let view_width = i64::from(px(spec.meta.view_box.map(|size| size[0]).unwrap_or(920.0))?);
+    let columns = super::source_budgets::sequence_columns(view_width, count, spread);
+    let header_width_fixed = i32::try_from(columns.participant_width)
+        .map_err(|error| geometry_error("/participants", error.to_string()))?;
+    let header_width = f64::from(header_width_fixed) / 64.0;
     for (index, participant) in spec.participants.iter().enumerate() {
-        let bounds = scene.add_node(
+        let automatic = if let Some(position) = scene.pinned_position(&participant.id) {
+            position
+        } else {
+            let index = i64::try_from(index)
+                .map_err(|error| geometry_error("/participants", error.to_string()))?;
+            let center = i32::try_from(columns.first_center + index * columns.pitch)
+                .map_err(|error| geometry_error("/participants", error.to_string()))?;
+            point(f64::from(center) / 64.0 - header_width / 2.0, HEADER_TOP)?
+        };
+        scene.add_node(
             &participant.id,
             &participant.component_type,
             &participant.label,
             participant.decoration.sublabel.as_deref(),
             participant.decoration.tag.as_deref(),
             None,
-            point(MARGIN + index as f64 * step, 64.0)?,
-            Some([HEADER_WIDTH, HEADER_HEIGHT]),
+            automatic,
+            Some([header_width, HEADER_HEIGHT]),
         )?;
-        left = left.min(f64::from(bounds.x) / 64.0);
-        right = right.max(
-            f64::from(
-                bounds
-                    .right()
-                    .map_err(|error| geometry_error("/participants", error.to_string()))?,
-            ) / 64.0,
-        );
     }
     let route_ids = super::allocate_route_ids(
         "message",
@@ -113,18 +184,58 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
             ..Default::default()
         });
     }
+    let message_obstacles = message_obstacles(spec, scene)?;
+    let mut segment_titles = Vec::new();
     for (index, segment) in spec.segments.iter().enumerate() {
+        let frame_left = 48.0;
+        let frame_width = spec.meta.view_box.map(|size| size[0]).unwrap_or(920.0) - 96.0;
         scene.add_container(
             &format!("segment:{index}"),
             "segment",
-            &segment.label,
+            "",
             range_box(
-                left - 24.0,
-                right - left + 48.0,
+                frame_left,
+                frame_width,
                 segment.from,
                 segment.to,
                 &format!("/segments/{index}"),
             )?,
+        )?;
+        // Start above the segment and move the automatic heading up in fixed
+        // 22px steps when it collides with a message route or its label mask.
+        let (title_width, _) = scene.text_size(&segment.label, 700, 9 * 64)?;
+        let title_width = super::fixed::checked_add(title_width, 14 * 64)
+            .map_err(|error| {
+                geometry_error(&format!("/segments/{index}/label"), error.to_string())
+            })?
+            .max(42 * 64);
+        let base_y = px(segment.from - 22.0)?;
+        let mut title_box = GeometryBox {
+            x: px(56.0)?,
+            y: base_y,
+            width: title_width,
+            height: 18 * 64,
+        };
+        for _ in 0..4 {
+            if !message_obstacles
+                .iter()
+                .chain(segment_titles.iter())
+                .any(|occupied| overlaps_with_clearance(title_box, *occupied, 4 * 64))
+            {
+                break;
+            }
+            title_box.y = i32::try_from(i64::from(title_box.y) - 22 * 64).map_err(|error| {
+                geometry_error(&format!("/segments/{index}/label"), error.to_string())
+            })?;
+        }
+        segment_titles.push(title_box);
+        scene.label(
+            &format!("container:segment:{index}:label"),
+            &format!("segment:{index}"),
+            &segment.label,
+            point(62.0, f64::from(title_box.y) / 64.0 + 4.0)?,
+            700,
+            9 * 64,
         )?;
     }
     for (index, activation) in spec.activations.iter().enumerate() {
@@ -239,6 +350,12 @@ mod tests {
             .find(|node| node.id == "client")
             .unwrap();
         let api = geometry.nodes.iter().find(|node| node.id == "api").unwrap();
+        assert_eq!((client.bounds.x, client.bounds.y), (19 * 64, 72 * 64));
+        assert_eq!(
+            (client.bounds.width, client.bounds.height),
+            (86 * 64, 60 * 64)
+        );
+        assert_eq!(api.bounds.x, 127 * 64);
         assert_eq!(
             route.points.first().unwrap().x,
             center(client.bounds).unwrap().x
@@ -253,6 +370,10 @@ mod tests {
             .iter()
             .find(|container| container.id == "segment:0")
             .unwrap();
+        assert_eq!(
+            (segment.bounds.x, segment.bounds.width),
+            (48 * 64, 824 * 64)
+        );
         let activation = geometry
             .containers
             .iter()
@@ -299,6 +420,20 @@ mod tests {
         let bounds = range_box(50.0, 300.0, 120.0, 900.0, "/segments/0").unwrap();
         assert_eq!(bounds.y, px(120.0).unwrap());
         assert_eq!(bounds.bottom().unwrap(), px(900.0).unwrap());
+    }
+
+    #[test]
+    fn automatic_segment_title_moves_above_message_route_and_reserved_label() {
+        let mut source = spec();
+        source["messages"][0]["y"] = serde_json::json!(180);
+        source["segments"] = serde_json::json!([{"from":180,"to":300,"label":"Phase"}]);
+        let geometry = layout(&source, None);
+        let title = geometry
+            .labels
+            .iter()
+            .find(|label| label.id.as_deref() == Some("container:segment:0:label"))
+            .unwrap();
+        assert_eq!(title.bounds.y, px(140.0).unwrap());
     }
 
     #[test]

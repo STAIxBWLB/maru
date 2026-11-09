@@ -5,6 +5,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { stripTypeScriptTypes } from "node:module";
+import { geometryComparisonFor } from "./diagram-engine-e2-comparison.mjs";
+import { generatedBoundaryCases, REFUSAL_AUDIT } from "./diagram-engine-e2-boundaries.mjs";
+import { generatedRouteBoundaryCases, ROUTE_REFUSAL_AUDIT } from "./diagram-engine-e2-route-boundaries.mjs";
+import { generatedPageCases } from "./diagram-engine-e2-page-cases.mjs";
+import { generatedGeometryCases } from "./diagram-engine-e2-cases.mjs";
+import { generatedGateCases, GATE_ADJUST_AUDIT } from "./diagram-engine-e2-gates.mjs";
 import { generatedCases, comparisonFor, seedFor, TYPES, RULE_TABLE, INTENDED_DIFFERENCES } from "./diagram-engine-e1-cases.mjs";
 // Raw fixtures deliberately contain invalid field values for rejection probes.
 // The loose value type is confined to this host-side mutation boundary.
@@ -13,7 +19,7 @@ import { generatedCases, comparisonFor, seedFor, TYPES, RULE_TABLE, INTENDED_DIF
 /** @typedef {{ok:boolean, codes:string[], diagnostics:OracleDiagnostic[], scope?:string, error?:string, inputSha256?:string, strippedFields?:string[]}} OracleReport */
 /** @typedef {{kind:string, reasonId?:string, reason?:string}} CurrentScope */
 /** @typedef {{inputJson:string, accepted:boolean, equivalentCodes:string[], currentScope:CurrentScope, oracleLayer?:string, oracleMapping?:{reasonId:string,reason:string}}} Comparison */
-/** @typedef {{id:string, diagramType:string, rule:string, inputJson:string, inputSha256:string, origin:Record<string,any>, expectedCoreOk?:boolean, expectedEngineCode?:string, oracle?:OracleReport, schemaOracle?:OracleReport, documentOracle?:OracleReport, validityInputJson?:string, validityOracle?:OracleReport, validitySchemaOracle?:OracleReport, validityDocumentOracle?:OracleReport, comparison?:Comparison, currentScope?:CurrentScope}} CorpusCase */
+/** @typedef {{id:string, diagramType:string, rule:string, inputJson:string, inputSha256:string, origin:Record<string,any>, expectedCoreOk?:boolean, expectedEngineCode?:string, oracle?:OracleReport, schemaOracle?:OracleReport, documentOracle?:OracleReport, validityInputJson?:string, validityOracle?:OracleReport, validitySchemaOracle?:OracleReport, validityDocumentOracle?:OracleReport, comparison?:Comparison, currentScope?:CurrentScope, geometryRule?:string, geometryComparison?:unknown}} CorpusCase */
 /** @typedef {{validateSchema:(type:string,input:RawSpec)=>void}} SchemaFacade */
 /** @typedef {{validateEngineeringProfile:(type:string,input:RawSpec)=>void}} EngineeringFacade */
 /** @typedef {{validatePortablePath:(value:string,options:{profile:string})=>string}} PortableFacade */
@@ -139,6 +145,11 @@ export async function collectCases(publicCandidates = [], retainedPublicCases = 
     Object.assign(cases.at(-1), { expectedEngineCode: generated.expectedEngineCode,
       ...(generated.currentScope ? { currentScope: generated.currentScope } : {}) });
   }
+  for (const generated of [...generatedGeometryCases(seedFor),...generatedBoundaryCases(seedFor),...generatedRouteBoundaryCases(seedFor),...generatedGateCases(seedFor),...generatedPageCases(seedFor)]) {
+    add(generated.id, generated.diagramType, generated.rule, generated.spec, { kind: "synthetic-generated" });
+    const boundary = "boundary" in generated ? generated.boundary : undefined;
+    Object.assign(cases.at(-1), { geometryRule: generated.geometryRule, ...(boundary ? {boundary} : {}) });
+  }
   return cases;
 }
 const cacheFile = join(root, ".engine-e0/oracle-cache.json");
@@ -206,6 +217,7 @@ function documentOracle(corpusCase, schemaReport) {
   }
 }
 async function main() {
+  if (process.env.ARCHIFY_QUALITY_PROFILE) throw new Error("Oracle profile override would invalidate gate-control evidence; unset ARCHIFY_QUALITY_PROFILE and rerun the corpus generator.");
   const source = process.argv[2];
   const descriptors = source ? JSON.parse(readFileSync(source, "utf8")) : [];
   // No descriptor argument means refresh already admitted immutable sources,
@@ -235,6 +247,7 @@ async function main() {
     minimal.oracle = oracle(minimal);
     if (!minimal.oracle.ok) throw new Error(`Synthetic ${type} seed was rejected: ${minimal.oracle.error}; repair the fixture before generating comparisons.`);
   }
+  const comparisonFailures = [];
   for (const item of cases) {
     item.oracle ??= oracle(item);
     item.schemaOracle = schemaOracle(item);
@@ -251,8 +264,24 @@ async function main() {
         ...oracle({ ...item, inputJson: JSON.stringify(input) }),
       };
     }
-    item.comparison = comparisonFor(item);
-    item.currentScope = item.comparison.currentScope;
+    try {
+      item.comparison = comparisonFor(item);
+      const boundary=/** @type {any} */(item).boundary;
+      if (typeof boundary?.expectedOracleAccepted === "boolean" && (item.validityOracle ?? item.oracle).ok !== boundary.expectedOracleAccepted) {
+        comparisonFailures.push(`Renderer control ${item.id} expected accepted=${boundary.expectedOracleAccepted}, got ${(item.validityOracle ?? item.oracle).ok}: ${(item.validityOracle ?? item.oracle).diagnostics.map(d=>d.message).join("; ")}; isolate its predicate in scripts/diagram-engine-e2-gates.mjs and rerun node scripts/diagram-engine-e0-corpus.mjs.`);
+      }
+      if (boundary?.layer === "model-difference") {
+        // Keep the actual oracle verdict; this evidence is deliberately not an
+        // AC1 parity member. Do not invent an expected engine acceptance.
+        try { item.geometryComparison = geometryComparisonFor(item); }
+        catch (cause) { item.geometryComparison={inputJson:item.comparison.inputJson,accepted:(item.validityOracle??item.oracle).ok,equivalentCodes:[],geometryExpected:true,layer:"model-difference",mappingError:String(cause)}; }
+      } else { item.geometryComparison = geometryComparisonFor(item); }
+      item.currentScope = item.comparison.currentScope;
+    } catch (cause) { comparisonFailures.push(String(cause)); }
+  }
+  if (comparisonFailures.length) {
+    writeFileSync(join(root,".engine-e0/boundary-mapping-failures.json"),JSON.stringify({failures:comparisonFailures,cases},null,2));
+    throw new Error(comparisonFailures.join("\n"));
   }
   for (const type of TYPES) {
     const minimal = cases.find((item) => item.id === `e1-${type}-valid-minimal`);
@@ -266,8 +295,24 @@ async function main() {
     for (const item of cases) inspect(item, item.id);
     throw new Error(`Private metadata remains in corpus fields ${fields.slice(0, 4).join(", ")}; sanitize those oracle fields before committing.`);
   }
-  writeFileSync(join(output, "parity.json"), `${JSON.stringify({ schemaVersion: 2, oracle: { id: pin.name, version: pin.version, revision: pin.revision }, rules: RULE_TABLE, intendedDifferences: INTENDED_DIFFERENCES, cases }, null, 2)}\n`);
-  const { unlinkSync } = await import("node:fs"); unlinkSync(join(root, ".engine-e0/oracle-input.json"));
+  // Inventory only recorded renderer refusals, never a negative inferred from
+  // the fixture's name or the implementation's rule table.
+  const geometryRules = Object.fromEntries(TYPES.map((type) => {
+    const recorded = new Map();
+    for (const item of cases) {
+      const comparison = /** @type {{accepted:boolean,layer:string,equivalentCodes:string[]}} */ (item.geometryComparison);
+      if (item.diagramType !== type || comparison.accepted || comparison.layer === "document-validity") continue;
+      for (const code of comparison.equivalentCodes) {
+        const entry = recorded.get(code) ?? { code, cases: [], oracleCodes: [] };
+        entry.cases.push(item.id);
+        entry.oracleCodes = [...new Set([...entry.oracleCodes, ...(item.validityOracle ?? item.oracle).codes])].sort();
+        recorded.set(code, entry);
+      }
+    }
+    return [type, [...recorded.values()].sort((a,b)=>a.code.localeCompare(b.code, "en"))];
+  }));
+  writeFileSync(join(output, "parity.json"), `${JSON.stringify({ schemaVersion: 2, oracle: { id: pin.name, version: pin.version, revision: pin.revision }, rules: RULE_TABLE, geometryRules, rendererRefusalAudit:[...REFUSAL_AUDIT,...ROUTE_REFUSAL_AUDIT], gateAdjustmentAudit:GATE_ADJUST_AUDIT, intendedDifferences: INTENDED_DIFFERENCES, cases:cases.filter(item=>!/** @type {any} */(item).boundary), boundaryCases:cases.filter(item=>/** @type {any} */(item).boundary) }, null, 2)}\n`);
+  const { rmSync } = await import("node:fs"); rmSync(join(root, ".engine-e0/oracle-input.json"), { force: true });
   console.log(JSON.stringify({ cases: cases.length, byType: Object.fromEntries([...new Set(cases.map((c) => c.diagramType))].map((type) => [type, cases.filter((c) => c.diagramType === type).length])), byRule: Object.fromEntries([...new Set(cases.map((c) => c.rule))].map((rule) => [rule, cases.filter((c) => c.rule === rule).length])) }));
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
