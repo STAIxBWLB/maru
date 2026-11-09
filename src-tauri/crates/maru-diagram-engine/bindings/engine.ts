@@ -98,7 +98,11 @@ export type GeometryNode = {
 /**
  * Optional semantic classification; coordinates and API version are unchanged.
  */
-finalState?: boolean | null, id: string, bounds: GeometryBox,
+finalState?: boolean | null,
+/**
+ * Authored phase ordinal, separate from pin-adjusted x/y coordinates.
+ */
+phaseOrder?: number | null, id: string, bounds: GeometryBox,
 /**
  * Future placement resolution order is planned pin, authored position,
  * then automatic placement.

@@ -1661,127 +1661,160 @@ are far enough apart.
 
 ## Render
 
-### E3 S1 SVG contract
+### E3 S1 contract
 
-The optional `render-svg` feature writes SVG from an E2 `GeometryDocument` and
-`SvgOptions` (theme, title, description). It never places nodes, routes edges,
-reflows labels or reruns geometry admission. A retained scene can be rendered
-when its layout report has `ok:false`; SVG success means the artifact matches
-that scene, not that the source document passed admission. PNG, output receipts,
-the offline viewer and the product switch remain separate stages.
+`render-svg` writes deterministic SVG from an E2 `GeometryDocument`, theme,
+source title/description and a coordinate-free `SemanticContext`. The context
+reads only family/version and per-id node type/lane or frame variant. It never
+reads source positions, rows, columns, message times or viewBox coordinates.
+`SvgOptions::from_spec` prepares it natively; the isolated WASM request takes
+`geometry`, `options` and the matching `specJson` snapshot. The writer does not
+place nodes, move glyphs, reroute edges or change geometry admission rules.
 
-The writer preserves scene array order and emits attributes in fixed order.
-All geometry numbers are exact terminating decimals of the signed 1/64px
-coordinates; there is no locale, timestamp, random id or unordered map walk.
-Element ids combine their geometry category with the hexadecimal UTF-8 bytes
-of the E2 source id, so nodes, routes and namespaced labels cannot collide with
-each other or root metadata. Anonymous route/label ids use a separate ordinal
-namespace. No application or Archify source is linked into the SDK.
+A refused layout still renders its retained geometry. SVG `ok:true` means its
+artifact matches that scene, not that the input passed layout admission. PNG,
+output receipts, the offline viewer and the product switch are separate stages.
+No new Tauri command is registered; command isolation stays at 390.
 
-The geometry DTO carries boxes, routes and positioned glyphs but does not carry
-semantic node shapes, brand marks or node-type colors. S1 therefore uses a
-common rounded node box and neutral theme palette rather than inventing semantic
-properties from ids or rereading the source spec. Container kinds resolve the
-visual radius only. Every supplied box, route width, glyph baseline and label
-font size is consumed unchanged. Transparent label and legend-entry rectangles
-are geometry/selection frames; they neither mask text nor replace glyph checks.
-Legend labels are the existing E2 labels, not a second independently laid-out
-text layer.
+Array order, attribute order and source-id encoding are stable. Coordinates are
+exact terminating decimals of signed 1/64px units, with no timestamps, random
+ids, locale formatting or unordered traversal. SVG ids namespace and hex-encode
+the E2 UTF-8 source ids; node, container, route and `edge:{id}:label` identities
+cannot collide with each other or root metadata. Anonymous identities have a
+separate ordinal namespace. Route groups retain supplied role/variant tags.
 
-### Themes and accessibility
+### Semantic projection
 
-`render/theme.rs` is the single light/dark token source. The SVG root has
-`role="img"`, a source-derived `<title>` and `<desc>`, and `aria-labelledby`.
-Node/container groups carry source captions and roles; edge groups identify
-both endpoints. Label groups retain original source text in `aria-label`,
-including line separators and unsupported characters, while the paint uses the
-positioned glyph stream. All dynamic XML text/attributes are escaped, illegal
-XML 1.0 controls are diagnosed, and source strings never become element names,
-style rules or external URLs.
+Meaning-bearing elements are distinct from styling. Per-kind component fill and
+stroke tokens live once in `render/theme.rs`, for light and dark themes; nodes
+and corresponding legend swatches use the same token. An opaque node mask keeps
+underlaid rails and routes from showing through the translucent kind fill.
+Lifecycle kinds alias the component tokens using the pinned type-class mapping.
+Colors for components are semantic; shadows, gradients, brand marks, icons and
+animation/focus badges are omitted styling or viewer concerns.
 
-### Font decision
+The geometry-only primitive model derives sequence lifelines from participant
+bottom centres and the scene/legend extent, with activation bars painted above
+lifelines. All edge and legend line patterns preserve their meaning: return
+3,5; security 5,5; dashed 4,4. Existing E2 container boxes supply lanes, exception
+lanes, groups, phases, dataflow stages, sequence segments and activation bars.
+Frame patterns and phase-span lines retain their source kind/variant meaning.
 
-S1 uses the explicit `Noto Sans CJK KR, sans-serif` family stack for mapped
-scalars, with kerning, ligatures and contextual/localized shaping disabled.
-`text-rendering="geometricPrecision"` disables pixel-grid fitting that otherwise
-changed measured scalar advances. Each scalar is emitted at the E2 glyph position, so the browser does not invent
-wrapping or spacing. Original font binaries and per-document subsets are not
-embedded: a subsetter would introduce another binary-processing dependency and
-output-size surface before S2 measures rasterization. The optional renderer
-and its XML parser stay outside the validation artifact and its 400,000 B gzip
-budget. Stack-only SVG bytes are deterministic; physical text fidelity requires
-the pinned font, and fallback pixels are not claimed to match E2 metrics.
+Lifecycle initial markers, final double borders, V1 rail and populated band
+dividers are rendered separately. V2 has no V1 rail/dividers. Two additive,
+optional API-v1 node fields preserve semantics that cannot be recovered from
+pin-adjusted positions: `finalState` and `phaseOrder`. The lifecycle producer
+computes final classification and authored phase ordinal while the source order
+is available; SVG never rereads grid coordinates. Old geometry still decodes;
+lifecycle rendering asks for a fresh matching layout if these semantics are
+missing. Node/route coordinates and glyph positions are unchanged. Lifecycle
+scene hashes deliberately change for these fields and the derived final legend.
 
-Unsupported nonignorable scalars never reach platform fallback. They draw the
-actual pinned font's glyph 0 path at the E2 origin and scale; default-ignorables
-paint nothing. `render/notdef.json` records both source hashes and units-per-em.
-The Linux-only `diagram-engine-e3-fonts.mjs`/`export-notdef` tool derives those
-paths from the same immutable OTFs as E2; `--check` detects drift. OFL notices
-remain beside the metric data and are linked in `THIRD_PARTY_NOTICES.md`.
+When lifecycle legend output is nonempty and a final state exists, the producer
+appends a derived `final` entry. It does not add `final` to the authorable input
+vocabulary or shift existing legend labels. The new entry has an extra separator.
+Symbols fit E2's reserved trailing slots: node swatches, the initial pseudo-state,
+final double outline and directed route samples. A sample may shorten from its
+34px reference to fit a supplied slot, without moving or overwriting a label.
 
-The screenshot harness loads both pinned original OTFs outside the SVG, verifies
-their hashes and font load, then checks browser-parsed selection frames, glyph origins, font size/weight
-and scalar advances within 1/64px. This proves
-that captured CJK output used the intended fonts; it does not bundle those
-fonts into the SVG or prove native-app rendering. Browser group `getBBox()` is
-recorded separately: [SVG 2 §8.10](https://www.w3.org/TR/SVG2/coords.html#BoundingBoxes)
-defines text bounds using full glyph cells, while E2 label frames combine
-advance/line metrics and outward-rounded ink. Equating these quantities produced
-a measured 5/64px top-cell difference even with exact glyph origins. The harness
-does not widen a shared-quantity tolerance or turn that difference into a new
-geometry admission rule.
+### Per-family semantic coverage
 
-### Artifact gate and determinism
-
-The renderer reparses its output with optional roxmltree 0.21.1 (MIT option,
-complete licence retained in `render/licenses`). The gate independently checks
-actual XML elements, global id uniqueness, expected per-kind counts and parent
-relationships, page/node/container/label/legend rectangles, route points/width,
-source text, font identity/size/weight, each painted glyph position, and actual
-glyph-zero paths. Coordinate comparisons allow at most 1/64px; NaN/infinite
-numbers and missing/extra paint fail. Only the writer's static SVG vocabulary,
-local marker references and fixed theme/style attributes are accepted. DTDs,
-scripts, external content and unrecognized transformations are refused. A failed
-gate returns diagnostics naming the cause and next step, never a successful
-receipt or a silent omission. The request/artifact limit is 16 MiB.
-
-The existing four-report `diagram-determinism` workflow retains E2 whole-scene
-hashes and logical-work ceilings and adds light/dark SVG SHA-256, byte length
-and artifact-gate results for every retained corpus scene. Refused layouts with
-geometry participate. Scenes with no geometry explicitly carry `svg:null`.
-Native Linux/macOS/Windows and actual WASM must agree on all report fields.
-The separate `wasm-render` build is reached only by the isolated test facade;
-there is no Tauri command, product export or canvas switch in S1.
-
-### Pinned visual references
-
-These constants were read as references from the pinned renderer; its code is
-not imported or copied. Layout/label budgets are E2 inputs, not new SVG rules.
-The #560 label-capacity correction remains outside this slice.
-
-| Visual quantity used | S1 value/source | Pinned reference |
+| Family | Pinned semantic element | S1 disposition |
 | --- | --- | --- |
-| Common node radius/stroke | 6px / 1.5px | `sidecars/archify/renderers/architecture/render-architecture.mjs:898-901`; workflow `workflow-compiler.mjs:4711-4714`; dataflow `render-dataflow.mjs:421-451` |
-| Region/security frame radius | 12px / 8px, 1px stroke | `sidecars/archify/renderers/architecture/render-architecture.mjs:841-845` |
-| Lane/group radius | 10px / 9px, 1px stroke | `sidecars/archify/renderers/workflow/workflow-compiler.mjs:4658-4663,4685-4686` |
-| Stage/segment/activation radius | 10px / 10px / 3px | `sidecars/archify/renderers/dataflow/render-dataflow.mjs:79-88,417`; sequence `render-sequence.mjs:389-394,421-427` |
-| Arrow marker | 10x7, reference (9,3.5), triangle (0,0),(10,3.5),(0,7) | `sidecars/archify/renderers/shared/utils.mjs:14-25` |
-| Default/emphasis path width | supplied E2 width; 1.5px only when absent | `sidecars/archify/renderers/architecture/render-architecture.mjs:855-865`; other family widths already resolved by E2 |
-| Return/dashed pattern | 3px,5px | `sidecars/archify/renderers/sequence/render-sequence.mjs:444-454` |
-| Text size, weight, baseline and offsets | supplied E2 font identity and positioned glyphs; no 600/650-weight substitution | E2 `layout/mod.rs:195-271`; pinned visual labels in architecture `render-architecture.mjs:847-901`, sequence `render-sequence.mjs:413-450`, dataflow `render-dataflow.mjs:425-470`, lifecycle `render-lifecycle.mjs:754-846` |
-| Palette | named neutral background/text/lane/arrow and backend accent tokens | `sidecars/archify/assets/template.html:175-209,218-250` |
-| Legend text/order/bounds | supplied E2 legend entries and labels; no new legend padding or swatch layout | E2 `layout/mod.rs:1204-1330`; pinned legend typography `sidecars/archify/renderers/shared/legend.mjs:195-213` |
+| All | Title/subtitle, node/edge/frame text, notes, tags, classifications and optional cards supplied by E2 | Rendered at the supplied boxes, baselines, sizes and glyph positions |
+| Architecture | Component rectangles and opaque masks; directed connections and variant patterns; region/security boundary frames; legend | Rendered, including per-kind node/swatch tokens and distinct boundary patterns |
+| Workflow | Component nodes; lane and exception-lane frames; phase headers/span lines; group/security-group frames; directed edges, role/variant tags and legend | Rendered from E2 boxes and per-id semantic variants |
+| Workflow | Distinct decision/terminal shapes | Not applicable: accepted `WorkflowNode.type` is COMPONENT_TYPES and has no shape vocabulary; pinned `renderNode` is rect rx6. No topology inference or schema expansion |
+| Sequence | Participant headers/masks, lifelines, activation bars, segment frames/captions, messages, return/security/dashed styles and legend samples | Rendered. Lifelines start at placed box bottoms (reference has a 10px gap); their end respects timeline content, cards and legend clearance |
+| Dataflow | Component nodes/masks; stage frames; flow paths, line styles, classifications and legend | Rendered; database node and swatch share the same kind token |
+| Lifecycle | State rectangles/masks/type tokens; initial dot/stem/head; final double border; lane frames and labels; V1 band dividers and implied rail; transitions and legend | Rendered. Final classification and phase order remain authored semantics under pins |
+| Lifecycle V2 | V1 implied rail/dividers | Not applicable, matching the pinned renderer; supplied lane captions remain visible in E2's horizontal glyph layout rather than legacy vertical text |
+| Legend | Present/all/hidden selection, labels and semantic symbols, including derived lifecycle final | Rendered. Intentional placement change: use E2's trailing symbol slots rather than relaying out the reference's pre-label swatches |
+| Styling/viewer | Shadows, gradients, brands/icons, animation/focus badges and interaction chrome | Intended change/out of scope under #543; semantic component tokens, shapes/frames, paths, markers, labels and source identities remain |
 
-### S1 verification evidence
+### Accessibility and font policy
 
-Source-bound Rust/WASM and screenshot results are recorded with the PR.
-Hosted four-platform agreement, native-suite coverage and final-head CI remain
-separate from a remote Linux reproduction; screenshots are reviewed visually,
-not compared byte-for-byte with Archify.
+The root is `role="img"` with source-derived `<title>`, `<desc>` and
+`aria-labelledby`. Node groups name their text, semantic kind and final status;
+containers and directed edges have roles/labels. Label groups retain original
+text in `aria-label`, including line separators and unsupported scalars. All
+untrusted XML text/attributes are escaped; illegal XML controls are diagnosed.
+Source strings never become element names, CSS rules or external URLs.
 
-Visual review of the ten S1 captures found an existing E2 header-placement gap:
-workflow and dataflow subtitle frames overlap lane/stage captions before SVG
-serialization. [#561](https://github.com/STAIxBWLB/maru/issues/561) tracks it as
-an E4 blocker. The captures retain that geometry; the SVG writer does not hide
-labels or add a type-specific placement override. This is a reviewed projection,
-not acceptance of those overlapping source layouts for the product switch.
+Mapped scalars use `Noto Sans CJK KR, sans-serif`, weights 400/700, with shaping,
+kerning and ligatures disabled and `text-rendering="geometricPrecision"`. Every
+scalar has its E2 origin, so the browser cannot invent wrapping or spacing.
+S1 does not embed original font binaries or a per-document subset: a subsetter
+would add another binary-processing dependency and size surface before S2's
+rasterization measurement. Stack-only SVG bytes are deterministic; physical
+text fidelity requires the pinned font. Fallback pixels are not claimed to
+match E2 metrics. The separate renderer/parser never enters the validation
+artifact or its 400,000 B gzip budget.
+
+Unsupported nonignorables draw the actual pinned font glyph-zero outline, never
+the original scalar through platform fallback. Default-ignorables paint nothing.
+`render/notdef.json` retains source hashes and units-per-em; Linux-only
+`diagram-engine-e3-fonts.mjs` and `export-notdef` derive/check it from the same
+immutable OTFs as E2. OFL and roxmltree MIT notices are retained and indexed in
+`THIRD_PARTY_NOTICES.md`.
+
+The screenshot harness verifies both original OTF hashes and font loading, then
+checks browser-parsed selection frames, glyph origins, font size/weight and
+scalar advances within 1/64px. Browser `getBBox()` is separately recorded:
+[SVG 2 §8.10](https://www.w3.org/TR/SVG2/coords.html#BoundingBoxes) defines text
+bounds using full glyph cells, not E2's line/advance-plus-ink frames. Their
+measured difference is not used to widen a shared-quantity threshold or create
+a new geometry admission rule. Captures prove the intended font was loaded;
+they are not native-app proof or byte/pixel comparison with Archify.
+
+### Artifact and determinism gates
+
+Optional roxmltree 0.21.1 independently reparses the artifact. The gate checks
+root metadata, namespace, unique identities, counts/ownership/hierarchy per kind,
+rectangles, actual route points/width, font/text/glyph data, actual glyph-zero
+paths, node/swatch kind-token mapping, and every semantic primitive's geometry,
+paint, pattern and layer order. Numeric comparisons allow at most 1/64px and
+reject nonfinite values. DTDs, scripts, foreign paint, external references,
+unrecognized transforms and unexpected attributes fail with a cause and fix.
+The request/artifact limit is 16 MiB. Transparent label/legend-entry rectangles
+are selection frames, not substitutes for the positioned glyph checks.
+
+The four-report `diagram-determinism` workflow retains E2 geometry/refusal hashes
+and work ceilings and adds light/dark SVG SHA-256, byte count and artifact gates
+for all retained scenes, including `ok:false` layouts. No-geometry records
+explicitly carry `svg:null`; the comparator verifies that this agrees with the
+retention flag. Native Linux/macOS/Windows and actual WASM must match all fields.
+The isolated test facade owns the `wasm-render` artifact; normal JS/WASM exports
+exclude SVG/corpus tooling and there is no product export/canvas switch.
+
+### Pinned visual and semantic references
+
+Constants were read as references; no renderer code is imported/copied into the
+SDK. Layout quantities are E2 inputs, not duplicated source placement models.
+
+| Quantity/meaning | Reference value or rule | Pinned source |
+| --- | --- | --- |
+| Component type fill/stroke, light/dark | Seven semantic token pairs; lifecycle aliases retain the same mapping | `sidecars/archify/assets/template.html:175-209,218-250`; `renderers/lifecycle/render-lifecycle.mjs:175-183` |
+| Component/participant/workflow node radius and stroke | 6px / 1.5px; workflow decision/terminal vocabulary absent | `renderers/architecture/render-architecture.mjs:898-901`; `renderers/workflow/workflow-compiler.mjs:4689-4715` |
+| Lifecycle outer/final border and initial marker | Outer radius 7; final inset 3/radius4/stroke1; initial dot radius4.5, incoming arrow/stem | `renderers/lifecycle/render-lifecycle.mjs:781-804,851-865` |
+| Region/security/exception frame | Radius 12/8/8; source patterns 8,4 and 4,4 | `renderers/architecture/render-architecture.mjs:841-845`; workflow `workflow-compiler.mjs:4654-4663`; template `:4695-4697` |
+| Lane/group/phase/stage/segment/activation | Radius 10/9/4/10/10/3; source frames and phase span | workflow `workflow-compiler.mjs:4665-4686`; dataflow `render-dataflow.mjs:79-88,417`; sequence `render-sequence.mjs:389-427` |
+| Arrow marker | 10x7, ref(9,3.5), triangle (0,0),(10,3.5),(0,7) | `renderers/shared/utils.mjs:14-25` |
+| Edge meaning patterns | Return 3,5; security 5,5; dashed 4,4 | sequence `render-sequence.mjs:444-454`; template `:4151-4154` |
+| Lifeline extent/pattern | Bottom-centre projection, page footer65, legend clearance22; stroke0.8, dash3,7; covers message/activation/segment extent | sequence `render-sequence.mjs:76-98,398-406` |
+| Lifecycle classification/bands/rail | Authored final rule, V1 rail2.2 and band0.8/dash3,8, no V1 rail in V2 | lifecycle `render-lifecycle.mjs:271-280,736-756,880-893` |
+| Legend symbols | Node14x9/radius2; line sample max34; initial pseudo-state/final double outline | dataflow `render-dataflow.mjs:497-502`; sequence `render-sequence.mjs:459-477`; lifecycle `render-lifecycle.mjs:851-865` |
+| Label font sizes, baselines and offsets | Supplied E2 metric identity and positioned glyphs; no legacy 600/650 substitution | E2 `layout/mod.rs` text/legend producers; reference labels in architecture `:847-901`, sequence `:413-450`, dataflow `:425-470`, lifecycle `:754-846` |
+
+Paths shortened in the last table are under `sidecars/archify/`.
+
+### Reviewed geometry limitation
+
+The ten captures retain E2 geometry. Workflow/dataflow subtitle frames overlap
+lane/stage captions before SVG serialization; [#561](https://github.com/STAIxBWLB/maru/issues/561)
+tracks the source placement gap as an E4 blocker. S1 does not hide labels or add
+coordinate overrides, as agreed. #560's label-capacity role correction remains
+out of scope. The captures are reviewed projections, not acceptance of these
+source layouts for the product switch. Source-bound verification and screenshot
+hashes are recorded with the PR; hosted agreement and native results remain
+separate from a remote Linux reproduction.
