@@ -319,9 +319,17 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   explicit `stop_ai_mission` performs reviewed conditional release after positive
   native death proof. It never signals recovered PIDs or releases uncertain
   ownership. Exact request replay remains read-only after edits or completion.
-  Cross-process document/frontmatter and Today/web-action writers do not yet share
-  the claim lock, so a source edit between the final check and process spawn can
-  still race; this known limit is tracked in #541.
+  Cross-process document/frontmatter, task-field, Today and web-action writers to
+  an opted-in note take that task's existing claim lock before their path lease,
+  in the order claim lock, path lease, Today work lock, event append lock. The
+  web-actions batch locks the claims its pending receipts touch in ascending task
+  id before its lease, and a claim it cannot lock rejects only that receipt, with
+  its cause and next step, while the rest of the batch applies. A guarded write
+  that changes the note's revision, task identity, archive state or terminal
+  status moves an Active claim to NeedsReview, so a source edit between the final
+  check and a process spawn no longer races. Trashing a note (`trash_document`)
+  still takes only its path lease and consults no claim; that limit remains
+  outside this contract.
 - Adaptive runtime policy is opt-in under Settings > AI (`ai.adaptivePolicy`).
   Each invocation asks `dot ai policy resolve --json` for an eligible runtime,
   model, reasoning effort, and native automatic-review permission. Missing or

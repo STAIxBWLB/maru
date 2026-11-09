@@ -918,3 +918,457 @@ fn claimed_rename_to_non_markdown_is_refused_before_effects() {
     }
     check(&f.work, &claim.token()).unwrap();
 }
+
+/// Two-process writer fixture for #541 AC1. The parent holds the claim lock a
+/// provider holds from its source check through the spawn; this child tries a
+/// document save or a Today completion on the same note and reports whether it
+/// landed (exit 0) or was refused (exit 3).
+#[test]
+fn writer_contender() {
+    let Ok(raw) = std::env::var("MARU_TASK_WRITE_FIXTURE") else {
+        return;
+    };
+    let (work, kind, run_id): (PathBuf, String, String) = serde_json::from_str(&raw).unwrap();
+    fs::write(work.join(format!("ready-{run_id}")), "ready").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !work.join("go").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "writer fixture start signal absent; inspect the parent test"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let result = if kind == "document" {
+        // A body edit keeps the note's identity; dropping taskId here would
+        // replace the claim-freshness refusal with a missing-task one.
+        let current = fs::read_to_string(work.join("tasks/active/task.md")).unwrap();
+        let task_id = task_id_from_content(&current).unwrap_or_default();
+        crate::document::save_document(
+            display(&work),
+            "tasks/active/task.md".into(),
+            format!(
+                "---\ntitle: Task\ntaskId: {task_id}\nstatus: active\n---\nBody saved by the other process\n"
+            ),
+            None,
+        )
+        .map(|_| ())
+    } else {
+        let raw = fs::read_to_string(work.join("tasks/active/task.md")).unwrap();
+        crate::today_lifecycle::task_transition(
+            display(&work),
+            crate::today::TaskTransitionRequest {
+                task_id: task_id_from_content(&raw).unwrap_or_default(),
+                task_path: "tasks/active/task.md".into(),
+                kind: crate::today::TaskTransitionKind::Complete,
+                expected_task_hash: crate::document::revision_for(&raw),
+                defer_date: None,
+                date: Some("2026-11-08".into()),
+                now_iso: Some("2026-11-08T09:00:00+09:00".into()),
+                web_action_id: None,
+                payload: serde_json::json!({}),
+            },
+        )
+        .map(|_| ())
+    };
+    match result {
+        Ok(()) => {
+            fs::write(work.join(format!("done-{run_id}")), "done").unwrap();
+            std::process::exit(0);
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(3);
+        }
+    }
+}
+
+/// Locate the note that carries `task_id`, scanning the tasks tree the way the
+/// claim code does. A miss reports every markdown file it saw, so a lost
+/// identity is visible instead of a bare "not found".
+fn task_note_carrying(work: &Path, task_id: &str) -> PathBuf {
+    let mut scanned = Vec::new();
+    for entry in walkdir::WalkDir::new(work.join("tasks"))
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file()
+            || entry.path().extension().and_then(|value| value.to_str()) != Some("md")
+        {
+            continue;
+        }
+        scanned.push(display(entry.path()));
+        let Ok(content) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let found = task_id_from_content(&content);
+        if found.as_deref() == Some(task_id) {
+            return entry.path().to_path_buf();
+        }
+        scanned.push(format!(
+            "{} -> {:?}",
+            display(entry.path()),
+            found.as_deref()
+        ));
+    }
+    panic!("no note carries taskId {task_id}; scanned {scanned:?}");
+}
+
+/// The claim lock file `lock_task_claims` blocks on for `task_id`.
+fn claim_lock_file(work: &Path, task_id: &str) -> PathBuf {
+    let work = normalize_existing_dir(&display(work)).unwrap();
+    let roots = WorkspaceRoots {
+        work: work.clone(),
+        tasks: work,
+        identity: String::new(),
+    };
+    task_lock_path(&roots, task_id)
+}
+
+/// True when no one holds the claim lock at `path`. A second open handle
+/// conflicts with the first even inside one process, so this is a real probe
+/// of the lock and not of a shared in-process flag.
+fn claim_lock_is_free(path: &Path) -> bool {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap_or_else(|error| panic!("cannot probe {}: {error}", display(path)));
+    file.try_lock().is_ok()
+}
+
+/// The Today work lock is keyed on the normalized workspace path, and a temp
+/// dir is reached through `/var` on macOS: a raw fixture path would name a
+/// different mutex than the writer's.
+fn work_lock_key(work: &Path) -> PathBuf {
+    normalize_existing_dir(&display(work)).unwrap()
+}
+
+/// AC1: while another process holds the claim, a document save and a Today
+/// completion both wait for it, and a spawn never starts after such a write
+/// has committed.
+#[test]
+fn another_process_write_waits_for_the_claim_lock_and_fences_the_spawn() {
+    for kind in ["document", "today"] {
+        let f = Fixture::new();
+        let claim = acquire(&f.work, &f.request(&format!("writer-{kind}")), "holder-run")
+            .unwrap()
+            .claim;
+        let bound = fs::read_to_string(&f.path).unwrap();
+        // What a provider holds across its source check and the spawn.
+        let held = guard_task_mutation(&f.work, &f.path).unwrap().unwrap();
+        let run = format!("run-{kind}");
+        let raw = serde_json::to_string(&(f.work.clone(), kind.to_string(), run.clone())).unwrap();
+        // The child is a separate process, so the in-process claim_lock_wait
+        // channel cannot reach it: it writes this marker from inside the wait
+        // instead.
+        let waiting = f.work.join(format!("claim-wait-{run}"));
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "task_execution_claims::tests::writer_contender",
+                "--nocapture",
+            ])
+            .env("MARU_TASK_WRITE_FIXTURE", raw)
+            .env("MARU_CLAIM_LOCK_MARKER", &waiting)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !f.work.join(format!("ready-{run}")).exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{kind} writer fixture did not start; inspect its stderr and the test binary path"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        fs::write(f.work.join("go"), "go").unwrap();
+        // Only the claim-lock wait writes the marker, so this is proof the
+        // writer is past its own guard and is about to block: holding the claim
+        // lock is then the whole test, and no amount of host load can make such
+        // a writer commit.
+        while !waiting.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{kind} writer never reached the claim-lock wait; if it does not take that lock, this is the failure"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !f.work.join(format!("done-{run}")).exists(),
+            "{kind} write committed while another owner held the claim lock"
+        );
+        assert_eq!(fs::read_to_string(&f.path).unwrap(), bound);
+        drop(held);
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{kind} writer was not admitted after the claim lock was released: {output:?}"
+        );
+        let stored = read_claim(&f.file(&claim.task_id), &claim.task_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.lifecycle, TaskExecutionLifecycle::NeedsReview);
+        let spawned = std::cell::Cell::new(false);
+        let error = spawn_owned_child(&f.work, &claim.token(), || {
+            spawned.set(true);
+            Err("must not execute".into())
+        })
+        .unwrap_err();
+        assert!(
+            !spawned.get(),
+            "{kind}: a spawn started after another process committed a write"
+        );
+        assert!(error.contains("claim_not_active"), "{error}");
+        match kind {
+            "document" => assert!(fs::read_to_string(&f.path)
+                .unwrap()
+                .contains("Body saved by the other process")),
+            // Today completion archives the note and rebinds the claim to it.
+            _ => {
+                let archived = task_note_carrying(&f.work, &claim.task_id);
+                assert!(!f.path.exists(), "{kind}: the active note must be moved");
+                assert!(
+                    display(&archived).contains("/archive/"),
+                    "{kind}: the completed note should sit in the archive bucket: {}",
+                    display(&archived)
+                );
+            }
+        }
+    }
+}
+
+/// AC2: ordinary notes, non-opt-in tasks and a modify-only workspace keep
+/// their previous document and Today writes and create no claim state.
+#[test]
+fn unclaimed_notes_and_tasks_keep_unlocked_writes_and_create_no_claim() {
+    let home = Home::new();
+    let work = home.root.path().join("plain");
+    fs::create_dir_all(&work).unwrap();
+    let note = work.join("note.md");
+    fs::write(&note, "---\ntitle: Note\n---\nBody\n").unwrap();
+    let payload = crate::document::save_document(
+        display(&work),
+        "note.md".into(),
+        "---\ntitle: Note\n---\nBody\nEdited\n".into(),
+        None,
+    )
+    .unwrap();
+    assert!(payload.content.contains("Edited"));
+    let patched = crate::document::update_frontmatter_field(
+        display(&work),
+        "note.md".into(),
+        "title".into(),
+        Some(crate::document::FieldInput::Str("Renamed".into())),
+        Some(crate::document::revision_for(&payload.content)),
+    )
+    .unwrap();
+    assert_eq!(patched.meta["title"], "Renamed");
+    assert!(!work.join(CLAIM_DIR).exists());
+
+    // A task note with a taskId but no claim is not opted in.
+    let task = work.join("tasks/active/plain.md");
+    fs::create_dir_all(task.parent().unwrap()).unwrap();
+    fs::write(
+        &task,
+        "---\ntitle: Plain\ntaskId: plain-task\nstatus: active\n---\nPlain body\n",
+    )
+    .unwrap();
+    crate::document::save_document(
+        display(&work),
+        "tasks/active/plain.md".into(),
+        "---\ntitle: Plain\ntaskId: plain-task\nstatus: active\n---\nPlain body edited\n".into(),
+        None,
+    )
+    .unwrap();
+    assert!(!work.join(CLAIM_DIR).exists());
+    let raw = fs::read_to_string(&task).unwrap();
+    let outcome = crate::today_lifecycle::task_transition(
+        display(&work),
+        crate::today::TaskTransitionRequest {
+            task_id: "plain-task".into(),
+            task_path: "tasks/active/plain.md".into(),
+            kind: crate::today::TaskTransitionKind::Complete,
+            expected_task_hash: crate::document::revision_for(&raw),
+            defer_date: None,
+            date: Some("2026-11-08".into()),
+            now_iso: Some("2026-11-08T09:00:00+09:00".into()),
+            web_action_id: None,
+            payload: serde_json::json!({}),
+        },
+    )
+    .unwrap();
+    assert_eq!(outcome.bucket, "archive");
+    assert!(!work.join(CLAIM_DIR).exists());
+
+    // Workspaces without create permission keep their document writes usable.
+    use crate::vault_list::{ProviderPermissionSummary, WorkspaceCapabilities, WorkspaceRootEntry};
+    crate::vault_list::add_workspace_root(WorkspaceRootEntry {
+        label: "Modify only".into(),
+        path: display(&work),
+        visibility: "public".into(),
+        provider: "nextcloud".into(),
+        provider_id: None,
+        external_writer: None,
+        write_policy: "direct".into(),
+        permission_summary: Some(ProviderPermissionSummary {
+            role: Some("3".into()),
+            source: "manual".into(),
+            checked_at: None,
+            capabilities: WorkspaceCapabilities::default(),
+            warning: None,
+        }),
+    })
+    .unwrap();
+    assert!(crate::vault_list::assert_maru_can_write(
+        &display(&work),
+        WorkspaceWriteAction::Create
+    )
+    .is_err());
+    let current = fs::read_to_string(&note).unwrap();
+    crate::document::save_document(
+        display(&work),
+        "note.md".into(),
+        format!("{current}Still writable\n"),
+        Some(crate::document::revision_for(&current)),
+    )
+    .unwrap();
+    assert!(!work.join(CLAIM_DIR).exists());
+}
+
+/// AC3: claim locks, Today work locks and path leases keep one order in both
+/// directions — the claim lock is never taken behind a work lock or a lease,
+/// the work lock is never taken before a claim lock, and a batch sorts its
+/// claim locks so two callers with opposite input orders cannot invert them.
+#[test]
+fn claim_today_work_lock_and_lease_never_invert_between_writers() {
+    use std::sync::mpsc;
+    let f = Fixture::new();
+    let claim = acquire(&f.work, &f.request("order"), "order-run")
+        .unwrap()
+        .claim;
+    let second = f.work.join("tasks/active/second.md");
+    fs::write(&second, "---\nstatus: active\n---\nSecond\n").unwrap();
+    let second_request = TaskExecutionRequest {
+        request_id: "order-second".into(),
+        task_path: "tasks/active/second.md".into(),
+        source_revision: crate::document::revision_for(&fs::read_to_string(&second).unwrap()),
+        tasks_root: None,
+    };
+    let second_claim = acquire(&f.work, &second_request, "order-second-run")
+        .unwrap()
+        .claim;
+
+    // 1. The claim lock is not behind the Today work lock: a document writer
+    //    takes it while another actor holds the work lock.
+    let today_lock = crate::today_store::work_lock_for(&work_lock_key(&f.work)).unwrap();
+    let held_work = today_lock.lock().unwrap_or_else(|error| error.into_inner());
+    let (tx, rx) = mpsc::channel();
+    let (work, path) = (f.work.clone(), f.path.clone());
+    let writer = std::thread::spawn(move || {
+        tx.send(guard_task_mutation(&work, &path)).ok();
+    });
+    let guarded = rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("a document writer must take the claim lock while the Today work lock is held");
+    assert!(guarded.unwrap().is_some());
+    writer.join().unwrap();
+    drop(held_work);
+
+    // 2. A transition waiting on the claim lock holds no Today work lock, so
+    //    the work lock stays free for the next writer.
+    let held_claim = guard_task_mutation(&f.work, &f.path).unwrap().unwrap();
+    let bound = fs::read_to_string(&f.path).unwrap();
+    let waiting = claim_lock_wait::watch(&claim_lock_file(&f.work, &claim.task_id));
+    let (tx, rx) = mpsc::channel();
+    let (work, path) = (f.work.clone(), f.path.clone());
+    let transition = std::thread::spawn(move || {
+        tx.send(crate::today_lifecycle::task_transition(
+            display(&work),
+            crate::today::TaskTransitionRequest {
+                task_id: task_id_from_content(&fs::read_to_string(&path).unwrap())
+                    .unwrap_or_default(),
+                task_path: "tasks/active/task.md".into(),
+                kind: crate::today::TaskTransitionKind::Complete,
+                expected_task_hash: crate::document::revision_for(&bound),
+                defer_date: None,
+                date: Some("2026-11-08".into()),
+                now_iso: Some("2026-11-08T09:00:00+09:00".into()),
+                web_action_id: None,
+                payload: serde_json::json!({}),
+            },
+        ))
+        .ok();
+    });
+    // Rendezvous with the wait itself: the claim lock is held here, so a
+    // transition that has reached this point stays there, and the next lock it
+    // could take is the Today work lock.
+    waiting
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the transition must reach the claim-lock wait");
+    let today_lock = crate::today_store::work_lock_for(&work_lock_key(&f.work)).unwrap();
+    assert!(
+        today_lock.try_lock().is_ok(),
+        "the transition holds the Today work lock while waiting on the claim lock"
+    );
+    assert!(
+        !f.work.join("tasks/archive/task.md").exists(),
+        "the transition wrote while the claim lock was held"
+    );
+    drop(held_claim);
+    let outcome = rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the transition must finish once the claim lock is free")
+        .unwrap();
+    assert_eq!(outcome.bucket, "archive");
+    transition.join().unwrap();
+
+    // 3. A batch takes its claim locks in task-id order whatever order the
+    //    caller lists them in. The higher id is held here, so the batch stops
+    //    inside that wait with its earlier locks already taken, and the lock it
+    //    holds then says which end it started from. The first note moved to the
+    //    archive bucket, so resolve its new path.
+    let (first_source, second_source) = (task_note_carrying(&f.work, &claim.task_id), second);
+    let mut ordered = [
+        (claim.task_id.clone(), first_source),
+        (second_claim.task_id.clone(), second_source),
+    ];
+    ordered.sort_by(|left, right| left.0.cmp(&right.0));
+    let (low_id, low_source) = ordered[0].clone();
+    let (high_id, high_source) = ordered[1].clone();
+    assert_ne!(claim.task_id, second_claim.task_id);
+    let low_lock = claim_lock_file(&f.work, &low_id);
+    let (tx, rx) = mpsc::channel();
+    for reversed in [false, true] {
+        let held = guard_task_mutation(&f.work, &high_source).unwrap().unwrap();
+        assert!(
+            claim_lock_is_free(&low_lock),
+            "the probe needs the low lock free"
+        );
+        let waiting = claim_lock_wait::watch(&claim_lock_file(&f.work, &high_id));
+        let (work, tx) = (f.work.clone(), tx.clone());
+        let (first, second) = (low_source.clone(), high_source.clone());
+        std::thread::spawn(move || {
+            let sources = if reversed {
+                vec![second, first]
+            } else {
+                vec![first, second]
+            };
+            tx.send(lock_task_claims(&work, &sources).locked_count())
+                .ok();
+        });
+        waiting
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the batch must reach the wait for its highest task id");
+        assert!(
+            !claim_lock_is_free(&low_lock),
+            "reversed={reversed}: the batch stopped at the highest task id before taking the lowest one"
+        );
+        drop(held);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(30))
+                .expect("both claims must be locked once the batch owns the highest id"),
+            2
+        );
+    }
+}

@@ -150,22 +150,33 @@ fn outcome_for(
     bucket: TaskBucket,
     sync_status: TaskSyncStatus,
     task_id: &str,
-) -> Result<TaskTransitionOutcome, String> {
+) -> Result<TransitionResult, String> {
     let raw =
         fs::read_to_string(final_path).map_err(|err| format!("Cannot read task note: {err}"))?;
-    Ok(TaskTransitionOutcome {
-        task_id: task_id.to_string(),
-        new_task_hash: revision_for(&raw),
-        bucket: bucket.as_str().to_string(),
-        sync_status,
+    Ok(TransitionResult {
+        path: final_path.to_path_buf(),
+        outcome: TaskTransitionOutcome {
+            task_id: task_id.to_string(),
+            new_task_hash: revision_for(&raw),
+            bucket: bucket.as_str().to_string(),
+            sync_status,
+        },
     })
+}
+
+/// A transition's outcome plus the note's final location. The claim guard
+/// needs the post-move path to rebind an opted-in task's claim, and the
+/// outcome itself is a public payload that must not grow a field for it.
+struct TransitionResult {
+    path: PathBuf,
+    outcome: TaskTransitionOutcome,
 }
 
 fn run_complete(
     lease: &PathTransactionLease,
     ctx: TransitionContext,
     request: &TaskTransitionRequest,
-) -> Result<TaskTransitionOutcome, String> {
+) -> Result<TransitionResult, String> {
     // 1. Durable prepared record FIRST (see module docs for recovery rules).
     let prepared = match &ctx.google_task_id {
         Some(google_task_id) => Some(today_outbox::enqueue_record_in_transaction(
@@ -253,7 +264,7 @@ fn run_reopen(
     lease: &PathTransactionLease,
     ctx: TransitionContext,
     task_id: &str,
-) -> Result<TaskTransitionOutcome, String> {
+) -> Result<TransitionResult, String> {
     // Same durable ordering as complete: the provider mirror (only when a
     // complete op already drained — a reopen of a task the provider never
     // saw needs no remote call) is recorded `prepared` BEFORE the local
@@ -314,7 +325,7 @@ fn run_reopen(
     outcome_for(&final_path, TaskBucket::Active, sync_status, task_id)
 }
 
-fn run_cancel(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOutcome, String> {
+fn run_cancel(ctx: TransitionContext, task_id: &str) -> Result<TransitionResult, String> {
     // Maru-only by default: cancelling never queues provider ops.
     let updated = patch(
         &ctx.raw,
@@ -344,7 +355,7 @@ fn run_cancel(ctx: TransitionContext, task_id: &str) -> Result<TaskTransitionOut
 fn run_defer(
     ctx: TransitionContext,
     request: &TaskTransitionRequest,
-) -> Result<TaskTransitionOutcome, String> {
+) -> Result<TransitionResult, String> {
     let defer_date = request
         .defer_date
         .as_deref()
@@ -395,6 +406,10 @@ pub fn task_transition(
 ) -> Result<TaskTransitionOutcome, IpcError> {
     let work = normalize_existing_dir(&work_path)?;
     let source = resolve_inside_vault(&work_path, &request.task_path)?;
+    // Claim lock first, never inside a lease: a provider holding the claim
+    // must finish its source check and spawn before this note can be
+    // completed. Ordinary notes and non-opt-in tasks get `None`.
+    let mut claim = crate::task_execution_claims::guard_task_mutation(&work, &source)?;
     let lexical_work = if Path::new(&work_path).is_absolute() {
         PathBuf::from(&work_path)
     } else {
@@ -450,6 +465,9 @@ pub fn task_transition(
             }
         }
     }
+    if let Some(guard) = &claim {
+        paths.extend(guard.paths());
+    }
     let paths = paths.into_iter().flat_map(|path| {
         let alias = path
             .strip_prefix(&work)
@@ -466,17 +484,25 @@ pub fn task_transition(
         )?
         .with_workspace_registry()?;
     with_path_transactions(admission, |lease| {
-        Ok(task_transition_in_transaction(lease, work_path, request))
+        Ok(task_transition_in_transaction(
+            lease,
+            work_path,
+            request,
+            claim.as_mut(),
+        ))
     })?
 }
 
 /// Borrowed entry for callers already holding the complete write set. Lock
-/// order remains shared admission -> Today work lock -> event append lock;
-/// outbox and day reflection helpers do not reacquire admission.
+/// order remains claim lock -> shared admission -> Today work lock -> event
+/// append lock; outbox and day reflection helpers do not reacquire admission.
+/// `claim` is the guard the caller took before its lease — this entry must
+/// never acquire one, because the lease is already held.
 pub(crate) fn task_transition_in_transaction(
     lease: &PathTransactionLease,
     work_path: String,
     request: TaskTransitionRequest,
+    mut claim: Option<&mut crate::task_execution_claims::TaskMutationGuard>,
 ) -> Result<TaskTransitionOutcome, IpcError> {
     let work = normalize_existing_dir(&work_path)?;
     let source = resolve_inside_vault(&work_path, &request.task_path)?;
@@ -527,6 +553,9 @@ pub(crate) fn task_transition_in_transaction(
     }
     lease.ensure_covered(paths)?;
     lease.ensure_workspace_registry()?;
+    if let Some(guard) = &claim {
+        guard.check(lease, &source)?;
+    }
     lease.before_effect()?;
     assert_maru_can_write(&work_path, WorkspaceWriteAction::Modify)?;
     let work = normalize_existing_dir(&work_path)?;
@@ -541,7 +570,7 @@ pub(crate) fn task_transition_in_transaction(
         request.date.as_deref(),
         request.now_iso.as_deref(),
     )?;
-    let outcome = match request.kind {
+    let result = match request.kind {
         TaskTransitionKind::Complete => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
             run_complete(lease, ctx, &request)
@@ -556,7 +585,13 @@ pub(crate) fn task_transition_in_transaction(
         }
         TaskTransitionKind::Defer => run_defer(ctx, &request),
     };
-    outcome.map_err(IpcError::from)
+    let result = result.map_err(IpcError::from)?;
+    // Rebind the claim to the note's post-move path; a completion moves an
+    // Active claim to NeedsReview so the provider cannot adopt into it.
+    if let Some(guard) = claim.as_mut() {
+        guard.after_mutation(lease, &result.path)?;
+    }
+    Ok(result.outcome)
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1682,6 +1717,7 @@ mod phase08_11 {
                         lease,
                         text(root),
                         request(TaskTransitionKind::Defer, REL, revision_for(RAW)),
+                        None,
                     )
                     .map(|_| ())
                 } else {

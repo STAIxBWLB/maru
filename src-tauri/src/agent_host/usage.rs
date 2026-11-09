@@ -5,10 +5,12 @@
 //! [`summarize_usage`] deduplicates by `receiptId`, so replaying the same
 //! receipt (a duplicated log line, a re-append after restart) is counted once.
 //!
-//! First slice: only the Claude CLI (`--output-format json`) yields a parsed
-//! receipt. Every other provider, and any Claude output that does not match the
-//! expected shape, records `pricingStatus: "unavailable"` with no counters,
-//! never a fabricated zero.
+//! Only the Claude CLI yields a parsed receipt, from its machine-readable
+//! result object: printed once for `--output-format json` (the synchronous
+//! adapter) or as the terminal event of `--output-format stream-json` (the
+//! background dispatcher). Every other provider, and any Claude output that
+//! does not match the expected shape, records `pricingStatus: "unavailable"`
+//! with no counters, never a fabricated zero.
 //!
 //! A receipt carries counters, model ids and money only. It never stores
 //! prompts, response content, environment, credential paths or tokens.
@@ -24,8 +26,13 @@ pub const USAGE_RECEIPT_SCHEMA_VERSION: &str = "maru_usage_receipt_v1";
 pub const USAGE_RECORDED_EVENT: &str = "usage.recorded";
 /// Receipts that could not be persisted; payload `{"pending": n}` only.
 pub const USAGE_INCOMPLETE_EVENT: &str = "usage.incomplete";
-/// Source parser version for the Claude CLI `--output-format json` result.
+/// Source parser version for the Claude CLI's JSON result object, which both
+/// output modes carry (`json`, and the terminal event of `stream-json`).
 pub const CLAUDE_JSON_SOURCE: &str = "claude-cli-json-v1";
+/// Source for counters accumulated from streamed assistant messages when the run
+/// ended without its terminal result (cancelled, killed, EOF). The name is the
+/// marker: these totals are partial and must never read as complete.
+pub const CLAUDE_STREAM_PARTIAL_SOURCE: &str = "claude-cli-stream-partial-v1";
 
 /// How the money on a receipt is to be read. Each state stays distinct:
 /// a missing price is never shown as zero and an estimate never counts as
@@ -58,6 +65,33 @@ pub struct UsageTokens {
     pub cache_write: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<u64>,
+}
+
+impl UsageTokens {
+    /// True when no counter is known. An unknown counter is never a measured
+    /// zero, so this is what decides `unavailable`/`unpriced` over a total.
+    pub fn is_empty(&self) -> bool {
+        self.input.is_none()
+            && self.cached_read.is_none()
+            && self.cache_write.is_none()
+            && self.output.is_none()
+    }
+
+    /// Add the counters `other` reports. A counter neither side knows stays
+    /// unknown (a sum never invents a measured zero) and a counter only one
+    /// side knows keeps that side's value, so a run that lost its terminal
+    /// result still reports the spend its messages did report.
+    pub fn merge(&mut self, other: &Self) {
+        fn add(slot: &mut Option<u64>, value: Option<u64>) {
+            if let Some(value) = value {
+                *slot = Some((*slot).unwrap_or(0).saturating_add(value));
+            }
+        }
+        add(&mut self.input, other.input);
+        add(&mut self.cached_read, other.cached_read);
+        add(&mut self.cache_write, other.cache_write);
+        add(&mut self.output, other.output);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -122,6 +156,47 @@ impl UsageReceipt {
             outcome: outcome.to_string(),
         }
     }
+
+    /// A receipt for counters the streamed messages reported when the run ended
+    /// without its terminal `result` (a cancelled or killed run, an EOF).
+    ///
+    /// The totals are what was actually spent so far, so dropping them would
+    /// under-report real usage; they are recorded as `unpriced` (no price was
+    /// ever computed, and a partial run has none) with
+    /// [`CLAUDE_STREAM_PARTIAL_SOURCE`] naming them partial, so a reader can
+    /// neither take them for a complete total nor for a measured zero. `None`
+    /// when no message reported a counter at all — that run is `unavailable`,
+    /// because there is nothing to report.
+    pub fn partial_stream(
+        provider: &str,
+        models: &[String],
+        tokens: UsageTokens,
+        outcome: &str,
+    ) -> Option<Self> {
+        if tokens.is_empty() {
+            return None;
+        }
+        let mut models: Vec<String> = models
+            .iter()
+            .take(8)
+            .map(|model| model.chars().take(80).collect())
+            .collect();
+        models.sort();
+        models.dedup();
+        Some(Self {
+            schema_version: USAGE_RECEIPT_SCHEMA_VERSION.to_string(),
+            receipt_id: new_receipt_id(),
+            provider: provider.to_string(),
+            models,
+            source: CLAUDE_STREAM_PARTIAL_SOURCE.to_string(),
+            pricing_status: PricingStatus::Unpriced,
+            tokens,
+            billed_micros: None,
+            estimate_micros: None,
+            currency: None,
+            outcome: outcome.to_string(),
+        })
+    }
 }
 
 fn new_receipt_id() -> String {
@@ -135,11 +210,12 @@ fn usd_to_micros(value: f64) -> Option<i64> {
     Some((value * 1_000_000.0).round() as i64)
 }
 
-/// Parse the Claude CLI `--output-format json` result object.
+/// Parse the Claude CLI's JSON result object: all of stdout under
+/// `--output-format json`, the last line under `--output-format stream-json`.
 ///
-/// Returns `None` when stdout is not that shape (older CLI, a wrapper script,
-/// schema drift). The caller then keeps raw stdout as content and records an
-/// `unavailable` receipt.
+/// Returns `None` when the input is not that shape (older CLI, a wrapper
+/// script, schema drift). The caller then keeps raw stdout as content and
+/// records an `unavailable` receipt.
 pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, UsageReceipt)> {
     let value: JsonValue = serde_json::from_str(stdout.trim()).ok()?;
     let object = value.as_object()?;
@@ -184,12 +260,7 @@ pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, 
         cache_write: count("cache_creation_input_tokens", "cacheCreationInputTokens"),
         output: count("output_tokens", "outputTokens"),
     };
-    let has_counters = tokens
-        .input
-        .or(tokens.cached_read)
-        .or(tokens.cache_write)
-        .or(tokens.output)
-        .is_some();
+    let has_counters = !tokens.is_empty();
     let mut models: Vec<String> = model_usage
         .map(|m| {
             m.keys()
