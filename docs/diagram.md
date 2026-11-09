@@ -1936,6 +1936,19 @@ assertions.
 | Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 66.9, 11.9, 11.7, 11.7 | 693 / 51,430 | 11,088 |
 | 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2360.9, 2322.9, 2340.3, 2332.6 | 130,843 / 3,998,647 | 480,455 |
 
+The selected PNG transport is native IPC. The measured 36.3 MB gzip PNG module
+and 4.5s cold module initialization rule out the lazy WASM candidate for this
+prototype. SVG export stays in WASM. The native command accepts only a source
+spec and derives validation, layout, SVG and PNG itself; it returns the SVG hash
+alongside the PNG hash in the receipt. Refused layouts return structured IPC
+errors with their original diagnostics and no image.
+
+The existing E0 hosted WKWebView baseline is 46ms p95 at 1,000 components
+(see the E0 results above and `diagram-engine-e0.json`). That is a validation IPC
+baseline, not a measured overhead for these larger PNG responses. Combined
+with the payload sizes and the scoped MockRuntime samples below, it informs
+the transport decision without claiming a real WebView PNG latency result.
+
 The WASM adapter runs the two scenes in one realm, so the dense first request
 uses an already initialized font database. Native raster timings exclude
 layout; the WASM and IPC requests include source parsing, layout, SVG gates,
@@ -1970,5 +1983,31 @@ the product export, render store or canvas. The direct sanitizer supports the
 PNG geometry limits without weakening the legacy Archify SVG extraction path.
 
 Secondary captions now use the pinned renderer's `t-dim` token (#475569 dark,
-#9aa3b2 light). Writer and artifact-gate reference colors derive these roles
+#9aa3b2 light), from `assets/template.html:180,224`. The affected roles are
+referenced by `render-sequence.mjs:450`, `render-dataflow.mjs:466`,
+`render-lifecycle.mjs:843` and `workflow-compiler.mjs:4660`. Writer and artifact-gate reference colors derive these roles
 independently; node sublabels and semantic accents retain their own tokens.
+
+The PNG command is registered only through the existing `native-e2e` plugin
+integration. Production remains at 390 application commands; the native-e2e
+release guards remain in force. The separate plugin evidence JSON is emitted
+by successful registered MockRuntime invokes of `validate` and `render_png`.
+The isolation scanner independently enumerates the plugin handler and
+permission lists and requires those two measured commands, worker execution,
+single-flight behavior and real scene payload/timing samples. It does not
+merge plugin rows into the 390-command app inventory or re-execute behavioral
+tests during a source scan.
+
+The hosted native-e2e bridge additionally invokes PNG once for the typical
+2-component architecture and once for the 1,000-component fixture, logging
+elapsed time, request JSON/re-serialized response JSON byte counts, PNG length,
+dimensions and output hash. These payload counts exclude the IPC envelope. It has no timing assertion
+and performs no export/store mutation. Those real WKWebView PNG measurements
+are pending hosted CI; no local native build was performed for this task.
+
+The native PNG determinism producer emits optional ephemeral SVG parity
+fixtures for the same 12 scenes. A WASM runner calls `render_scene_svg` with the
+matching source, geometry and theme, then compares UTF-8 SVG bytes directly
+with the SVG returned by the native source-to-PNG path and checks its receipt
+hash. A mismatch refuses the parity gate. Fixture geometry is test input only;
+the public native PNG command continues to accept source specs exclusively.

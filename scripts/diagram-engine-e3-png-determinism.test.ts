@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
   compareManifests,
+  compareSvgParityFixture,
   parseManifest,
   REQUIRED_RECEIPTS,
   REQUIRED_SCENES,
@@ -81,5 +82,67 @@ describe("E3 PNG determinism manifest", () => {
     const reports = REQUIRED_RECEIPTS.map(() => manifest());
     reports[2].fontPin["700"].fontSha256 = digest("wrong-font");
     expect(() => compareManifests(reports, REQUIRED_RECEIPTS)).toThrow(/font identity differs/);
+  });
+});
+
+describe("native and WASM SVG bytes in PNG artifacts", () => {
+  const nativeSvg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>한글 마루</text></svg>";
+  const specJson = "{\"diagram_type\":\"architecture\"}";
+  const sceneInputSha256 = createHash("sha256").update(specJson).digest("hex");
+  const svgSha256 = createHash("sha256").update(Buffer.from(nativeSvg, "utf8")).digest("hex");
+  const fixture = {
+    name: "architecture-light",
+    sceneInputSha256,
+    nativeSvgSha256: svgSha256,
+    specJson,
+    geometry: { nodes: [], containers: [], routes: [], labels: [], legend: {}, page: {} },
+    options: { theme: "light", title: "마루", description: "한글" },
+    nativeSvg,
+  };
+  const manifestScene = {
+    name: fixture.name,
+    theme: "light",
+    sceneInputSha256,
+    svgSha256,
+  };
+
+  it("accepts exact UTF-8 bytes from the native PNG report and WASM SVG API", () => {
+    expect(compareSvgParityFixture(fixture, manifestScene, { apiVersion: 1, ok: true, svg: nativeSvg })).toMatchObject({
+      name: fixture.name,
+      svgSha256,
+      byteEqual: true,
+    });
+  });
+
+  it("rejects byte changes even when the SVG remains valid text", () => {
+    expect(() => compareSvgParityFixture(fixture, manifestScene, {
+      apiVersion: 1,
+      ok: true,
+      svg: nativeSvg.replace("한글", "한국"),
+    })).toThrow(/WASM SVG SHA-256.*differs from the native PNG manifest/);
+  });
+
+  it("rejects a source or manifest digest mismatch", () => {
+    expect(() => compareSvgParityFixture(fixture, { ...manifestScene, sceneInputSha256: digest("other") }, {
+      apiVersion: 1,
+      ok: true,
+      svg: nativeSvg,
+    })).toThrow(/does not match the native PNG manifest/);
+  });
+
+  it("preserves WASM refusal diagnostics with the actionable fix", () => {
+    expect(() => compareSvgParityFixture(fixture, manifestScene, {
+      apiVersion: 1,
+      ok: false,
+      diagnostics: [{ message: "bad geometry", fix: "repair the geometry" }],
+    })).toThrow(/bad geometry; fix: repair the geometry/);
+  });
+
+  it("rejects incomplete native fixture dumps", () => {
+    expect(() => compareSvgParityFixture({ name: fixture.name }, manifestScene, {
+      apiVersion: 1,
+      ok: true,
+      svg: nativeSvg,
+    })).toThrow(/missing specJson, retained geometry, SVG options, or nativeSvg/);
   });
 });

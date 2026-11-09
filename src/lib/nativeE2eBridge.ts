@@ -62,6 +62,25 @@ export interface NativeE2eEngineMeasurement {
   scope: string;
   coldMs: number;
   samples: Array<{ nodes: number; bytes: number; durationsMs: number[]; engine: { id: string; version: string; revision: string } }>;
+  pngSamples: Array<{
+    nodes: number;
+    requestBytes: number;
+    responseJsonBytes: number;
+    outputBytes: number;
+    durationMs: number;
+    width: number;
+    height: number;
+    outputSha256: string;
+  }>;
+}
+
+interface NativePngProbeReport {
+  ok: boolean;
+  bytes: number[] | null;
+  width: number | null;
+  height: number | null;
+  diagnostics: Array<{ message: string; fix: string }>;
+  receipt: { outputSha256: string | null };
 }
 
 export interface MaruNativeE2eBridge {
@@ -210,7 +229,61 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           }
           samples.push({ nodes: fixture.components.length, bytes: new TextEncoder().encode(input).length, durationsMs, engine: report.receipt.engine });
         }
-        return { transport: "ipc", scope: "pre-serialized spec string; invoke envelope transport, core validation/hash and reply decode; 30 warm samples", coldMs, samples };
+
+        const pngFixtures = [
+          { name: "typical", spec: (await import("../../src-tauri/crates/maru-diagram-engine/testdata/valid-architecture.json")).default },
+          { name: "1000", spec: fixtures[1] },
+        ];
+        const pngSamples = [];
+        const { invoke } = await import("@tauri-apps/api/core");
+        for (const { name, spec } of pngFixtures) {
+          const input = JSON.stringify(spec);
+          const pngInput = JSON.stringify({
+            specJson: input,
+            format: "png",
+            theme: "light",
+            pixelRatio: 1,
+          });
+          const pngStarted = performance.now();
+          let pngReport: NativePngProbeReport;
+          try {
+            pngReport = await invoke<NativePngProbeReport>("plugin:maru-diagram|render_png", { input: pngInput });
+          } catch (error) {
+            const body = error && typeof error === "object"
+              ? error as { code?: unknown; message?: unknown; nextStep?: unknown; diagnostics?: unknown }
+              : null;
+            const code = typeof body?.code === "string" ? ` [${body.code}]` : "";
+            const message = typeof body?.message === "string"
+              ? body.message
+              : error instanceof Error ? error.message : typeof error === "string" ? error : "unstructured IPC rejection";
+            const nextStep = typeof body?.nextStep === "string" ? `; ${body.nextStep}` : "";
+            const diagnostic = Array.isArray(body?.diagnostics) ? body.diagnostics[0] as { code?: unknown; message?: unknown; fix?: unknown } | undefined : undefined;
+            const detail = typeof diagnostic?.message === "string"
+              ? `; ${String(diagnostic.code ?? "diagnostic")}: ${diagnostic.message}${typeof diagnostic.fix === "string" ? `; ${diagnostic.fix}` : ""}`
+              : "";
+            throw new Error(`Native PNG IPC failed${code}: ${message}${nextStep}${detail}`);
+          }
+          const durationMs = performance.now() - pngStarted;
+          if (!pngReport.ok || !Array.isArray(pngReport.bytes)
+              || typeof pngReport.width !== "number" || typeof pngReport.height !== "number"
+              || !pngReport.receipt || typeof pngReport.receipt.outputSha256 !== "string") {
+            const diagnostic = Array.isArray(pngReport.diagnostics) ? pngReport.diagnostics[0] : undefined;
+            throw new Error(`Native PNG probe refused the fixture: ${diagnostic?.message ?? "missing PNG artifact"}; ${diagnostic?.fix ?? "inspect the engine diagnostics and retry"}`);
+          }
+          const responseJsonBytes = new TextEncoder().encode(JSON.stringify(pngReport)).length;
+          pngSamples.push({
+            name,
+            nodes: spec.components.length,
+            requestBytes: new TextEncoder().encode(pngInput).length,
+            responseJsonBytes,
+            outputBytes: pngReport.bytes.length,
+            durationMs,
+            width: pngReport.width,
+            height: pngReport.height,
+            outputSha256: pngReport.receipt.outputSha256,
+          });
+        }
+        return { transport: "ipc", scope: "pre-serialized spec through plugin render_png IPC; core validation, layout, SVG and PNG rendering, receipt/hash, response decode; requestBytes is the UTF-8 plugin input, responseJsonBytes is the UTF-8 JSON re-serialization of the decoded reply, one PNG sample per fixture", coldMs, samples, pngSamples };
       },
       terminalText: (sessionId) => terminalTextReaders.get(sessionId)?.() ?? null,
       menuCommandReady: () => menuCommandRegistration !== null,

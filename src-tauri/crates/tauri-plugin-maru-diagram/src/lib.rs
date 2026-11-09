@@ -3,7 +3,7 @@
 //! The plugin owns no Maru paths or data. Host integrations are passed through
 //! stable traits so this crate can be split from the application unchanged.
 
-use maru_diagram_engine::ValidationReport;
+use maru_diagram_engine::{Diagnostic, ValidationReport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -32,6 +32,47 @@ pub struct HostError {
     pub code: String,
     pub message: String,
     pub next_step: String,
+}
+
+/// Structured command failure returned across the plugin IPC boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcError {
+    pub code: String,
+    pub message: String,
+    pub next_step: String,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[cfg(feature = "png")]
+impl IpcError {
+    fn new(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        next_step: impl Into<String>,
+        diagnostics: Vec<Diagnostic>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            next_step: next_step.into(),
+            diagnostics,
+        }
+    }
+
+    fn from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
+        let first = diagnostics.first().cloned();
+        if let Some(first) = first {
+            Self::new(first.code, first.message, first.fix, diagnostics)
+        } else {
+            Self::new(
+                "diagram_export_refused",
+                "the pinned diagram engine refused the PNG export without a diagnostic",
+                "retry the export; if it repeats, report the failed engine receipt",
+                diagnostics,
+            )
+        }
+    }
 }
 
 impl HostError {
@@ -355,9 +396,21 @@ mod commands {
     pub async fn render_png(
         state: tauri::State<'_, PluginState>,
         input: String,
-    ) -> Result<maru_diagram_engine::render::ArtifactReport, String> {
+    ) -> Result<maru_diagram_engine::render::ArtifactReport, IpcError> {
         if input.len() > maru_diagram_engine::render::MAX_SVG_BYTES {
-            return Err("PNG request exceeds 16 MiB; reduce the source scene and retry".into());
+            let diagnostic = Diagnostic {
+                code: "diagram_export_size_invalid".into(),
+                path: "/".into(),
+                rule: "render-v1/request-size".into(),
+                message: "PNG request exceeds 16 MiB".into(),
+                fix: "reduce the source scene and retry".into(),
+            };
+            return Err(IpcError::new(
+                diagnostic.code.clone(),
+                diagnostic.message.clone(),
+                diagnostic.fix.clone(),
+                vec![diagnostic],
+            ));
         }
         let flag = Arc::clone(&state.rendering);
         if flag
@@ -369,18 +422,38 @@ mod commands {
             )
             .is_err()
         {
-            return Err(
-                "a PNG export is already running; wait for that export to finish and retry".into(),
-            );
+            return Err(IpcError::new(
+                "diagram_export_busy",
+                "a PNG export is already running",
+                "wait for that export to finish and retry",
+                Vec::new(),
+            ));
         }
         let permit = RenderPermit(flag);
         #[cfg(test)]
         let trace = Arc::clone(&state.worker_thread);
-        tauri::async_runtime::spawn_blocking(move||{
-            let _permit=permit;
-            #[cfg(test)] {*trace.lock().expect("test worker trace mutex")=Some(std::thread::current().id());}
+        let report = tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            #[cfg(test)]
+            {
+                *trace.lock().expect("test worker trace mutex") =
+                    Some(std::thread::current().id());
+            }
             maru_diagram_engine::render::render_png_artifact_json(&input)
-        }).await.map_err(|cause|format!("PNG worker failed: {cause}; retry export, or rebuild the native engine if it repeats"))
+        })
+        .await
+        .map_err(|cause| {
+            IpcError::new(
+                "diagram_export_worker_failed",
+                format!("PNG worker failed: {cause}"),
+                "retry the export; if it repeats, rebuild the native engine and report the failure",
+                Vec::new(),
+            )
+        })?;
+        if !report.ok {
+            return Err(IpcError::from_diagnostics(report.diagnostics));
+        }
+        Ok(report)
     }
     #[tauri::command]
     pub async fn validate(

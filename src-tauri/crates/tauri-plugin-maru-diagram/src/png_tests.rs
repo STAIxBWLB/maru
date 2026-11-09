@@ -56,6 +56,9 @@ fn invoke(
         },
     )
 }
+fn ipc_error(value: serde_json::Value) -> IpcError {
+    serde_json::from_value(value).expect("PNG IPC rejection has the structured error shape")
+}
 #[test]
 fn png_ipc_worker_receipts_and_real_fixture_evidence() {
     let (app, view) = fixture();
@@ -106,20 +109,22 @@ fn png_ipc_worker_receipts_and_real_fixture_evidence() {
         .lock()
         .unwrap()
         .unwrap();
-    assert_ne!(worker, caller);
+    let different_worker_thread = worker != caller;
+    assert!(different_worker_thread);
     let state = app.state::<PluginState>();
     state
         .rendering
         .store(true, std::sync::atomic::Ordering::Release);
-    let busy_observed = invoke(&view, "render_png", "{}")
-        .unwrap_err()
-        .to_string()
-        .contains("already running");
+    let busy = ipc_error(invoke(&view, "render_png", "{}").unwrap_err());
+    let busy_observed = busy.code == "diagram_export_busy"
+        && busy.message.contains("already running")
+        && !busy.next_step.is_empty()
+        && busy.diagnostics.is_empty();
     state
         .rendering
         .store(false, std::sync::atomic::Ordering::Release);
     assert!(busy_observed);
-    let evidence = json!({"schemaVersion":1,"scope":"Tauri MockRuntime registered IPC -> awaited spawn_blocking; no real WebView/OS transport claim","pluginCommandsObserved":observed,"pluginCommandCount":observed.len(),"command":"plugin:maru-diagram|render_png","differentWorkerThread":true,"hostFilesystemAccess":"none; fixture host panics on any access","singleInFlight":busy_observed,"cases":cases});
+    let evidence = json!({"schemaVersion":1,"scope":"Tauri MockRuntime registered IPC -> awaited spawn_blocking; no real WebView/OS transport claim","pluginCommandsObserved":observed,"pluginCommandCount":observed.len(),"command":"plugin:maru-diagram|render_png","differentWorkerThread":different_worker_thread,"hostFilesystemAccess":"none; fixture host panics on any access","singleInFlight":busy_observed,"cases":cases});
     println!("PNG_IPC_EVIDENCE {}", evidence);
     if let Ok(output) = std::env::var("MARU_PNG_IPC_EVIDENCE") {
         let output = PathBuf::from(output);
@@ -139,23 +144,41 @@ fn png_ipc_rejects_busy_oversized_and_svg_requests() {
     let state = app.state::<PluginState>();
     let flag = &state.rendering;
     flag.store(true, std::sync::atomic::Ordering::Release);
-    let busy = invoke(&view, "render_png", "{}").unwrap_err();
-    assert!(busy.to_string().contains("already running"));
+    let busy = ipc_error(invoke(&view, "render_png", "{}").unwrap_err());
+    assert_eq!(busy.code, "diagram_export_busy");
+    assert!(busy.message.contains("already running"));
+    assert!(!busy.next_step.is_empty());
+    assert!(busy.diagnostics.is_empty());
     flag.store(false, std::sync::atomic::Ordering::Release);
     let huge = "x".repeat(maru_diagram_engine::render::MAX_SVG_BYTES + 1);
-    assert!(invoke(&view, "render_png", &huge)
-        .unwrap_err()
-        .to_string()
-        .contains("16 MiB"));
+    let oversized = ipc_error(invoke(&view, "render_png", &huge).unwrap_err());
+    assert_eq!(oversized.code, "diagram_export_size_invalid");
+    assert!(oversized.message.contains("16 MiB"));
+    assert!(!oversized.next_step.is_empty());
+    assert_eq!(oversized.diagnostics.len(), 1);
+    let mut invalid_spec: serde_json::Value = serde_json::from_str(include_str!(
+        "../../maru-diagram-engine/testdata/valid-architecture.json"
+    ))
+    .unwrap();
+    invalid_spec["connections"][0]["to"] = serde_json::json!("missing-node");
+    let rejected_layout = json!({"specJson":invalid_spec.to_string(),"format":"png"}).to_string();
+    let expected_diagnostics = maru_diagram_engine::render::render_png_artifact_json(&rejected_layout).diagnostics;
+    let refused_value = invoke(&view, "render_png", &rejected_layout).unwrap_err();
+    assert!(refused_value.get("bytes").is_none());
+    let refused = ipc_error(refused_value);
+    assert!(!refused.code.is_empty());
+    assert!(!refused.message.is_empty());
+    assert!(!refused.next_step.is_empty());
+    assert!(!refused.diagnostics.is_empty());
+    assert_eq!(refused.code, refused.diagnostics[0].code);
+    assert_eq!(refused.message, refused.diagnostics[0].message);
+    assert_eq!(refused.next_step, refused.diagnostics[0].fix);
+    assert_eq!(refused.diagnostics, expected_diagnostics);
     let svg=json!({"specJson":include_str!("../../maru-diagram-engine/testdata/valid-architecture.json"),"format":"svg"}).to_string();
-    let report = invoke(&view, "render_png", &svg)
-        .unwrap()
-        .deserialize::<ArtifactReport>()
-        .unwrap();
-    assert!(!report.ok && report.bytes.is_none());
-    assert!(report.diagnostics[0]
-        .message
-        .contains("does not export SVG"));
+    let svg_refused = ipc_error(invoke(&view, "render_png", &svg).unwrap_err());
+    assert_eq!(svg_refused.code, "png-command-format");
+    assert!(svg_refused.message.contains("does not export SVG"));
+    assert_eq!(svg_refused.diagnostics.len(), 1);
     assert!(!app
         .state::<PluginState>()
         .rendering

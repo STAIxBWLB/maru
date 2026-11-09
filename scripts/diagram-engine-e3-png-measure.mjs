@@ -89,7 +89,7 @@ async function measureInBrowser(page, fixtures) {
     const modulePath = "/engine-png-test.js";
     const api = await import(modulePath);
     const imported = performance.now();
-    const host = await api.prepareEngineArtifactForTest("png");
+    const host = await api.prepareWasmArtifactForMeasurement("png");
     const loaded = performance.now();
     const results = [];
 

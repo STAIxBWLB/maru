@@ -7,6 +7,12 @@ import { createEmptyDoc } from "./types";
 import { exportVerifiedEngineArtifactForTest } from "./verifiedExport";
 import type { EngineArtifactHost } from "./engineArtifactForTest";
 
+const { rasteriseMock } = vi.hoisted(() => ({ rasteriseMock: vi.fn() }));
+vi.mock("./export", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./export")>();
+  return { ...actual, rasterise: rasteriseMock };
+});
+
 function digest(bytes: Uint8Array): Promise<string> {
   return globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(bytes).buffer)
     .then((hash) => [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join(""));
@@ -71,7 +77,10 @@ afterEach(() => vi.unstubAllEnvs());
 afterAll(() => vi.unstubAllGlobals());
 
 describe("verified native engine artifact test adapter", () => {
-  beforeEach(() => vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "1"));
+  beforeEach(() => {
+    vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "1");
+    rasteriseMock.mockClear();
+  });
 
   it.each([
     ["svg", 1],
@@ -97,6 +106,7 @@ describe("verified native engine artifact test adapter", () => {
     expect(result.svgForDom).toContain('aria-label="한글 도식"');
     expect(result.svgForDom).toContain('data-kind="artifact"');
     expect(Array.from(result.bytes)).toEqual(Array.from(format === "svg" ? new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" data-kind="artifact" aria-label="한글 도식"><text>한글</text></svg>') : new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])));
+    expect(rasteriseMock).not.toHaveBeenCalled();
   });
 
   it.each(forgedReceiptMutations)("rejects forged %s receipts", async (_name, mutate) => {

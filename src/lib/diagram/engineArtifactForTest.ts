@@ -32,6 +32,24 @@ export interface EngineArtifactReport {
 
 export type EngineArtifactHost = (inputJson: string) => Promise<unknown>;
 
+export class EngineArtifactTransportError extends Error {
+  readonly code: string;
+  readonly nextStep: string;
+  readonly diagnostics: Diagnostic[];
+
+  constructor(payload: { code: string; message: string; nextStep: string; diagnostics: Diagnostic[] }) {
+    const diagnosticText = payload.diagnostics
+      .map((diagnostic) => `${diagnostic.message} ${diagnostic.fix}`.trim())
+      .filter(Boolean)
+      .join(" ");
+    super([payload.message, diagnosticText, payload.nextStep].filter(Boolean).join(" "));
+    this.name = "EngineArtifactTransportError";
+    this.code = payload.code;
+    this.nextStep = payload.nextStep;
+    this.diagnostics = payload.diagnostics;
+  }
+}
+
 export interface VerifiedEngineArtifactForTest { bytes: Uint8Array; svgForDom: string; receipt: EngineReceipt }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
@@ -95,18 +113,35 @@ async function loadWasmHost(format: EngineArtifactFormat): Promise<EngineArtifac
   const wasmUrl = format === "svg"
     ? new URL("./__generated__/engine-render/maru_diagram_engine_bg.wasm", import.meta.url)
     : new URL("./__generated__/engine-png/maru_diagram_engine_bg.wasm", import.meta.url);
-  const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
-  if (typeof bindings.default !== "function" || typeof bindings.render_artifact !== "function") {
-    throw new Error(`The ${format.toUpperCase()} engine WASM binding is missing render_artifact; rebuild its isolated generated artifact and retry.`);
+  try {
+    const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
+    if (typeof bindings.default !== "function" || typeof bindings.render_artifact !== "function") {
+      throw new Error(`The ${format.toUpperCase()} engine WASM binding is missing render_artifact; rebuild its isolated generated artifact and retry.`);
+    }
+    await bindings.default({ module_or_path: wasmUrl });
+    const render = bindings.render_artifact as (inputJson: string) => string;
+    return async (inputJson) => render(inputJson);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`The isolated ${format.toUpperCase()} WASM could not load: ${detail}; rebuild its generated test artifact and retry.`);
   }
-  await bindings.default({ module_or_path: wasmUrl });
-  const render = bindings.render_artifact as (inputJson: string) => string;
-  return async (inputJson) => render(inputJson);
+}
+
+async function loadNativePngHost(): Promise<EngineArtifactHost> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (input) => invoke("plugin:maru-diagram|render_png", { input });
 }
 
 /** Preload the isolated module without running a scene; used by measured cold/warm exports. */
 export async function prepareEngineArtifactForTest(format: EngineArtifactFormat): Promise<EngineArtifactHost> {
   if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") throw new Error("Engine artifact preload is disabled; use the isolated geometry test build.");
+  if (format !== "svg" && format !== "png") throw new Error("Artifact format is invalid; choose svg or png.");
+  return format === "svg" ? loadWasmHost("svg") : loadNativePngHost();
+}
+
+/** PNG/WASM is kept only for the isolated adapter measurement script. */
+export async function prepareWasmArtifactForMeasurement(format: EngineArtifactFormat): Promise<EngineArtifactHost> {
+  if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") throw new Error("WASM artifact measurement is disabled; use the isolated geometry test build.");
   if (format !== "svg" && format !== "png") throw new Error("Artifact format is invalid; choose svg or png.");
   return loadWasmHost(format);
 }
@@ -147,13 +182,32 @@ export async function renderEngineArtifactForTest(
   } catch {
     throw new Error("The Rust artifact request cannot be serialized; provide a valid pin set and semantic source.");
   }
-  const adapter = host ?? await loadWasmHost(input.format);
+  const adapter = host ?? (input.format === "svg" ? await loadWasmHost("svg") : await loadNativePngHost());
   let result: unknown;
   try {
     result = await adapter(encoded);
   } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : "unknown adapter failure";
-    throw new Error(`The native diagram artifact request failed: ${detail}; rebuild the matching isolated WASM artifact and retry.`);
+    if (record(cause)
+        && typeof cause.code === "string"
+        && typeof cause.message === "string"
+        && typeof cause.nextStep === "string") {
+      if (cause.diagnostics !== undefined
+          && (!Array.isArray(cause.diagnostics) || !cause.diagnostics.every(validDiagnostic))) {
+        throw new Error("The native PNG refusal contains malformed diagnostics; rebuild matching plugin bindings and retry.");
+      }
+      const diagnostics = (cause.diagnostics ?? []) as Diagnostic[];
+      throw new EngineArtifactTransportError({
+        code: cause.code,
+        message: cause.message,
+        nextStep: cause.nextStep,
+        diagnostics,
+      });
+    }
+    const detail = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "invalid adapter error payload";
+    const fix = input.format === "png"
+      ? "use the native-e2e test build with the PNG plugin permission and retry"
+      : "rebuild the matching isolated engine-render WASM artifact and retry";
+    throw new Error(`The diagram artifact request failed: ${detail}; ${fix}.`);
   }
   return parseReport(result);
 }

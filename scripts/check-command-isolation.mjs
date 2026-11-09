@@ -502,6 +502,53 @@ export function parseArgs(argv) {
   insist(!options.plan || (+options.plan >= 1 && +options.plan <= 24), "Command shard plan must be 01-24");
   return options;
 }
+// Plugin prototype evidence stays separate from the 390 production app commands.
+export function checkPluginEvidence(root = process.cwd()) {
+  const base = "src-tauri/crates/tauri-plugin-maru-diagram";
+  if (!existsSync(resolve(root, `${base}/Cargo.toml`))) return 0;
+  const sources = new Sources(resolve(root));
+  const { code, functions } = sources.get(`${base}/src/lib.rs`);
+  const registered = new Set();
+  for (const match of code.matchAll(/\bgenerate_handler!\s*\[/g)) {
+    const start = code.indexOf("[", match.index);
+    const end = closeAt(code, start, "[", "]");
+    for (const item of splitTop(code.slice(start + 1, end))) {
+      insist(/^commands::[a-z_]\w*$/.test(item), `Unparsed plugin registration ${item}; extend the plugin scanner before adding another handler form`);
+      const name = item.slice("commands::".length);
+      const definition = functions.find((entry) => entry.symbol === item);
+      insist(definition?.async && /#\[tauri::command\]/.test(definition.prefix), `Plugin command ${name} has no async Tauri command definition`);
+      insist(/spawn_blocking/.test(definition.body) && /\.await\b/.test(definition.body), `Plugin command ${name} lost its awaited worker boundary`);
+      registered.add(name);
+    }
+  }
+  insist(registered.size > 0, "Plugin has no registered commands; inspect its handlers before accepting isolation evidence");
+  const buildSource = sources.read(`${base}/build.rs`);
+  const declaration = buildSource.match(/const COMMANDS:\s*&\[&str\]\s*=\s*&\[([^\]]*)\]/);
+  insist(declaration, "Plugin permission command list cannot be read; keep COMMANDS as an explicit string list");
+  const permissionNames = splitTop(declaration[1]).map((entry) => {
+    insist(/^"[a-z_]\w*"$/.test(entry), "Plugin permission command names must be explicit literals");
+    return JSON.parse(entry);
+  });
+  const expected = [...registered].sort();
+  insist(permissionNames.length === registered.size && new Set(permissionNames).size === registered.size
+    && permissionNames.every((name) => registered.has(name)), "Plugin permissions and registered commands differ; regenerate permissions for the exact handler list");
+  const evidence = JSON.parse(sources.read("docs/performance/diagram-engine-e3/png-mock-ipc-transport.json"));
+  insist(evidence.schemaVersion === 1 && /MockRuntime/.test(evidence.scope ?? ""), "Plugin evidence has no scoped real-invoke contract; rerun the MockRuntime evidence test");
+  insist(evidence.pluginCommandCount === registered.size && Array.isArray(evidence.pluginCommandsObserved)
+    && JSON.stringify([...evidence.pluginCommandsObserved].sort()) === JSON.stringify(expected), "Plugin command evidence drift; rerun the registered invoke fixture for the current command list");
+  insist(evidence.differentWorkerThread === true && evidence.singleInFlight === true, "Plugin worker or single-flight behavior failed; repair it and rerun the invoke fixture");
+  insist(Array.isArray(evidence.cases) && evidence.cases.length === 2
+    && ["typical", "1000"].every((name) => evidence.cases.some((entry) => entry.name === name)), "Plugin evidence is missing a measured scene; invoke typical and 1000-node sources");
+  for (const entry of evidence.cases) {
+    insist(Number.isInteger(entry.requestBytes) && entry.requestBytes > 0
+      && Number.isInteger(entry.responseBytes) && entry.responseBytes > 0
+      && /^[a-f0-9]{64}$/.test(entry.pngSha256 ?? "")
+      && Array.isArray(entry.roundTripMs) && entry.roundTripMs.length > 0
+      && entry.roundTripMs.every((value) => Number.isFinite(value) && value > 0), "Plugin evidence has invalid payload, hash or latency data; preserve complete output from a successful real invoke run");
+  }
+  return registered.size;
+}
+
 export function checkIsolation(options, root = process.cwd()) {
   const sources = new Sources(resolve(root));
   requireProductionInvokeHandlerGuard(sources);
@@ -562,12 +609,13 @@ export function checkIsolation(options, root = process.cwd()) {
     }
   }
   if (options.all) insist(seen.size === rows.size, `Incomplete command closure: ${seen.size}/${rows.size}`);
-  return { commands: seen.size, production: registered.size, native: seenNative.size, integration: Boolean(state.overlay), scope: options.plan ? `08-${options.plan}` : options.integration ? "08-29 integration" : "all" };
+  const plugin = options.all ? checkPluginEvidence(root) : 0;
+  return { plugin, commands: seen.size, production: registered.size, native: seenNative.size, integration: Boolean(state.overlay), scope: options.plan ? `08-${options.plan}` : options.integration ? "08-29 integration" : "all" };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = checkIsolation(parseArgs(process.argv.slice(2)));
-    console.log(`command-isolation: PASS ${result.scope}; ${result.commands} command evidence rows, ${result.production} production registrations, ${result.native} native-only commands. Source scans are drift alarms; recorded behavioral evidence is not re-executed by this gate.`);
+    console.log(`command-isolation: PASS ${result.scope}; ${result.commands} command evidence rows, ${result.production} production registrations, ${result.native} native-only commands, ${result.plugin} separately evidenced plugin commands. Source scans are drift alarms; recorded behavioral evidence is not re-executed by this gate.`);
   } catch (error) {
     console.error(`command-isolation: FAIL ${error.message}`);
     process.exitCode = 1;

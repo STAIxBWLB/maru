@@ -152,16 +152,28 @@ jobs:
         shell: bash
         run: |
           mkdir -p .engine-e3/png
-          cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features png-corpus --bin png-manifest -- .engine-e3/png/${{ matrix.receipt }}.json
+          if [ "${{ matrix.receipt }}" = "native-linux" ]; then
+            cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features png-corpus --bin png-manifest -- .engine-e3/png/${{ matrix.receipt }}.json --svg-parity-dir .engine-e3/png/svg-fixtures
+          else
+            cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features png-corpus --bin png-manifest -- .engine-e3/png/${{ matrix.receipt }}.json
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: diagram-png-${{ matrix.receipt }}
           path: .engine-e3/png/${{ matrix.receipt }}.json
           if-no-files-found: error
           retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: matrix.receipt == 'native-linux'
+        with:
+          name: diagram-svg-parity-fixtures
+          path: .engine-e3/png/svg-fixtures/*.json
+          if-no-files-found: error
+          retention-days: 3
 
   png-wasm:
     name: PNG manifest (WASM Linux)
+    needs: [png-native]
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
@@ -184,8 +196,18 @@ jobs:
           export MARU_DIAGRAM_ENGINE_REVISION=$(git rev-parse HEAD:src-tauri/crates)
           cargo build --locked --release --lib --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features wasm-png,png-corpus --target wasm32-unknown-unknown
           cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features bindgen-web --bin bindgen-web -- src-tauri/crates/target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm .engine-e3/wasm-test
+      - uses: actions/download-artifact@v4
+        with:
+          name: diagram-png-native-linux
+          path: .engine-e3/native-linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: diagram-svg-parity-fixtures
+          path: .engine-e3/svg-fixtures
       - name: Render the same PNG manifest through WASM
         run: node scripts/diagram-engine-e3-png-determinism.mjs --wasm .engine-e3/png/wasm-linux.json .engine-e3/wasm-test
+      - name: Require native PNG SVG bytes to match WASM render_scene_svg
+        run: node scripts/diagram-engine-e3-png-determinism.mjs --wasm-svg-parity .engine-e3/svg-fixtures .engine-e3/native-linux/native-linux.json .engine-e3/wasm-test .engine-e3/png/svg-parity.json
       - uses: actions/upload-artifact@v4
         with:
           name: diagram-png-wasm-linux

@@ -1,6 +1,6 @@
 //! Deterministic, source-pinned PNG corpus shared by native and test-featured WASM.
 use super::png::{render_png, PngOptions};
-use super::{SvgOptions, SvgTheme};
+use super::{render_png_artifact_json, SvgOptions, SvgTheme};
 use crate::{layout::layout_json, metrics, Diagnostic};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -113,6 +113,17 @@ fn fixture_sources() -> [(&'static str, &'static str, bool); 6] {
 pub fn png_corpus_manifest_with_sink(
     sink: &mut dyn FnMut(&str, &[u8]) -> Result<(), String>,
 ) -> Result<String, Diagnostic> {
+    png_corpus_manifest_with_sinks(sink, &mut |_, _| Ok(()))
+}
+
+/// Emit the manifest and optional native SVG parity fixtures while keeping
+/// filesystem access in the caller. Each parity fixture is serialized JSON
+/// containing source spec, retained geometry, options, and the SVG emitted by
+/// the same high-level PNG artifact API used by native artifact commands.
+pub fn png_corpus_manifest_with_sinks(
+    png_sink: &mut dyn FnMut(&str, &[u8]) -> Result<(), String>,
+    svg_sink: &mut dyn FnMut(&str, &[u8]) -> Result<(), String>,
+) -> Result<String, Diagnostic> {
     let mut scenes = Vec::with_capacity(12);
     for (fixture_name, source, mutate_cjk) in fixture_sources() {
         let (spec_json, spec) = fixture(fixture_name, source, mutate_cjk)?;
@@ -139,17 +150,69 @@ pub fn png_corpus_manifest_with_sink(
         for theme in [SvgTheme::Light, SvgTheme::Dark] {
             let options = SvgOptions::from_spec(&spec, theme)?;
             let name = format!("{}-{}", fixture_name, theme.name());
-            let first =
-                render_png(&geometry, &options, PngOptions::default()).map_err(|diagnostics| {
-                    diagnostics.into_iter().next().unwrap_or_else(|| {
-                        error(
-                            "render",
-                            &format!("/scenes/{name}"),
-                            "PNG render failed without a diagnostic",
-                            "repair the source scene or rasterizer and rerun the PNG manifest",
-                        )
-                    })
-                })?;
+            let artifact_request = json!({
+                "specJson": spec_json.as_str(),
+                "format": "png",
+                "theme": theme.name(),
+                "pixelRatio": 1,
+            });
+            let artifact = render_png_artifact_json(&artifact_request.to_string());
+            if !artifact.ok {
+                return Err(artifact.diagnostics.into_iter().next().unwrap_or_else(|| {
+                    error(
+                        "render",
+                        &format!("/scenes/{name}"),
+                        "high-level PNG artifact command failed without a diagnostic",
+                        "repair the source scene or rasterizer and rerun the PNG manifest",
+                    )
+                }));
+            }
+            let bytes = artifact.bytes.ok_or_else(|| {
+                error(
+                    "artifact-bytes",
+                    &format!("/scenes/{name}"),
+                    "successful PNG artifact command returned no encoded bytes",
+                    "restore the native PNG artifact report contract before measuring determinism",
+                )
+            })?;
+            let native_svg = artifact.svg.ok_or_else(|| {
+                error(
+                "artifact-svg",
+                &format!("/scenes/{name}"),
+                "successful PNG artifact command returned no source SVG",
+                "restore the native PNG artifact report's SVG field before checking WASM parity",
+            )
+            })?;
+            let width = artifact.width.ok_or_else(|| {
+                error(
+                "artifact-dimensions",
+                &format!("/scenes/{name}"),
+                "successful PNG artifact command returned no image width",
+                "restore the native PNG artifact report's dimensions before measuring determinism",
+            )
+            })?;
+            let height = artifact.height.ok_or_else(|| {
+                error(
+                "artifact-dimensions",
+                &format!("/scenes/{name}"),
+                "successful PNG artifact command returned no image height",
+                "restore the native PNG artifact report's dimensions before measuring determinism",
+            )
+            })?;
+            let pixels_sha256 = artifact.pixels_sha256.ok_or_else(|| error(
+                "artifact-pixels",
+                &format!("/scenes/{name}"),
+                "successful PNG artifact command returned no decoded pixel hash",
+                "restore the native PNG artifact report's decoded RGBA hash before measuring determinism",
+            ))?;
+            let svg_sha256 = artifact.receipt.engine_output_sha256.ok_or_else(|| {
+                error(
+                    "artifact-svg-hash",
+                    &format!("/scenes/{name}"),
+                    "successful PNG artifact command returned no source SVG hash",
+                    "restore the native artifact receipt's SVG digest before checking WASM parity",
+                )
+            })?;
             let repeat =
                 render_png(&geometry, &options, PngOptions::default()).map_err(|diagnostics| {
                     diagnostics.into_iter().next().unwrap_or_else(|| {
@@ -161,8 +224,8 @@ pub fn png_corpus_manifest_with_sink(
                         )
                     })
                 })?;
-            let repeat_byte_equal = first.bytes == repeat.bytes;
-            sink(&name, &first.bytes).map_err(|cause| {
+            let repeat_byte_equal = bytes == repeat.bytes;
+            png_sink(&name, &bytes).map_err(|cause| {
                 error(
                     "artifact-write",
                     &format!("/scenes/{name}"),
@@ -170,17 +233,59 @@ pub fn png_corpus_manifest_with_sink(
                     "choose a writable PNG artifact directory and rerun png-manifest",
                 )
             })?;
+            let scene_input_sha256 = hash(spec_json.as_bytes());
+            let geometry_json = serde_json::to_value(&geometry).map_err(|cause| {
+                error(
+                    "fixture-geometry",
+                    &format!("/scenes/{name}"),
+                    format!("retained geometry could not be serialized for WASM parity: {cause}"),
+                    "restore the geometry JSON contract for the native/WASM SVG comparison",
+                )
+            })?;
+            let options_json = serde_json::to_value(&options).map_err(|cause| {
+                error(
+                    "fixture-options",
+                    &format!("/scenes/{name}"),
+                    format!("render options could not be serialized for WASM parity: {cause}"),
+                    "restore the SVG options JSON contract for the native/WASM comparison",
+                )
+            })?;
+            let svg_fixture = serde_json::to_vec(&json!({
+                "name": name.as_str(),
+                "sceneInputSha256": scene_input_sha256.as_str(),
+                "nativeSvgSha256": svg_sha256.as_str(),
+                "specJson": spec_json.as_str(),
+                "geometry": geometry_json,
+                "options": options_json,
+                "nativeSvg": native_svg,
+            }))
+            .map_err(|cause| {
+                error(
+                    "fixture-serialize",
+                    &format!("/scenes/{name}"),
+                    format!("native SVG parity fixture could not be serialized: {cause}"),
+                    "repair the native/WASM fixture JSON contract and regenerate the fixture dump",
+                )
+            })?;
+            svg_sink(&name, &svg_fixture).map_err(|cause| {
+                error(
+                    "svg-fixture-write",
+                    &format!("/scenes/{name}"),
+                    format!("optional native SVG parity sink failed: {cause}"),
+                    "choose a writable SVG parity fixture directory and rerun png-manifest",
+                )
+            })?;
             scenes.push(json!({
                 "name": name,
                 "theme": theme.name(),
-                "sceneInputSha256": hash(spec_json.as_bytes()),
+                "sceneInputSha256": scene_input_sha256,
                 "repeatByteEqual": repeat_byte_equal,
-                "pngSha256": hash(&first.bytes),
-                "pixelsSha256": first.pixels_sha256,
-                "svgSha256": first.svg_sha256,
-                "pngBytes": first.bytes.len(),
-                "width": first.width,
-                "height": first.height,
+                "pngSha256": hash(&bytes),
+                "pixelsSha256": pixels_sha256,
+                "svgSha256": svg_sha256,
+                "pngBytes": bytes.len(),
+                "width": width,
+                "height": height,
             }));
         }
     }
@@ -218,5 +323,5 @@ pub fn png_corpus_manifest_with_sink(
 
 /// Generate the fixture manifest without host filesystem or environment access.
 pub fn png_corpus_manifest() -> Result<String, Diagnostic> {
-    png_corpus_manifest_with_sink(&mut |_, _| Ok(()))
+    png_corpus_manifest_with_sinks(&mut |_, _| Ok(()), &mut |_, _| Ok(()))
 }

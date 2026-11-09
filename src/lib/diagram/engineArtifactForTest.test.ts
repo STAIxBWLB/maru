@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderEngineArtifactForTest } from "./engineArtifactForTest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  EngineArtifactTransportError,
+  prepareEngineArtifactForTest,
+  renderEngineArtifactForTest,
+} from "./engineArtifactForTest";
+
+const { pluginInvoke } = vi.hoisted(() => ({ pluginInvoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: pluginInvoke }));
 
 const receipt = {
   schemaVersion: 1,
@@ -24,6 +31,7 @@ const baseReport = {
   receipt,
 };
 
+beforeEach(() => pluginInvoke.mockReset());
 afterEach(() => vi.unstubAllEnvs());
 
 describe("test-only Rust artifact adapter", () => {
@@ -66,5 +74,81 @@ describe("test-only Rust artifact adapter", () => {
     vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "0");
     await expect(renderEngineArtifactForTest({ specJson: "{}", theme: "light", format: "svg" }, async () => baseReport))
       .rejects.toThrow(/disabled/i);
+  });
+
+  it("dispatches PNG through the registered Tauri command and serializes the high-level request", async () => {
+    vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "1");
+    pluginInvoke.mockResolvedValue(baseReport);
+    const request = { specJson: "{\"diagram_type\":\"architecture\"}", theme: "dark" as const, format: "png" as const, pixelRatio: 2 };
+    const report = await renderEngineArtifactForTest(request);
+    expect(report).toMatchObject({ ok: true, bytes: baseReport.bytes });
+    expect(pluginInvoke).toHaveBeenCalledWith("plugin:maru-diagram|render_png", {
+      input: JSON.stringify({ ...request, pinSet: undefined }),
+    });
+
+    pluginInvoke.mockClear();
+    const prepared = await prepareEngineArtifactForTest("png");
+    await prepared(JSON.stringify(request));
+    expect(pluginInvoke).toHaveBeenCalledWith("plugin:maru-diagram|render_png", { input: JSON.stringify(request) });
+  });
+
+  it("keeps the Tauri host disabled when the test flag is off", async () => {
+    vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "0");
+    await expect(renderEngineArtifactForTest({ specJson: "{}", theme: "light", format: "png" }))
+      .rejects.toThrow(/disabled/i);
+    await expect(prepareEngineArtifactForTest("png")).rejects.toThrow(/disabled/i);
+    expect(pluginInvoke).not.toHaveBeenCalled();
+  });
+
+  it("preserves structured native IPC errors and diagnostics", async () => {
+    vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "1");
+    const diagnostic = {
+      code: "layout/input-type",
+      path: "/components/0/type",
+      rule: "architecture/type",
+      message: "The component type is unsupported.",
+      fix: "Choose a supported component type and retry.",
+    };
+    pluginInvoke.mockRejectedValue({
+      code: "diagram_render_refused",
+      message: "The Rust renderer refused the request.",
+      nextStep: "Correct the source and retry.",
+      diagnostics: [diagnostic],
+    });
+    await expect(renderEngineArtifactForTest({ specJson: "{}", theme: "light", format: "png" }))
+      .rejects.toMatchObject({
+        name: "EngineArtifactTransportError",
+        code: "diagram_render_refused",
+        nextStep: "Correct the source and retry.",
+        diagnostics: [diagnostic],
+      } satisfies Partial<EngineArtifactTransportError>);
+    await expect(renderEngineArtifactForTest({ specJson: "{}", theme: "light", format: "png" }))
+      .rejects.toThrow(/The Rust renderer refused the request.*The component type is unsupported.*Choose a supported component type.*Correct the source/);
+  });
+
+  it("keeps native transport causes actionable and refuses malformed diagnostics", async () => {
+    vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "1");
+    pluginInvoke.mockRejectedValue("command not allowed");
+    await expect(renderEngineArtifactForTest({ specJson: "{}", theme: "light", format: "png" }))
+      .rejects.toThrow(/command not allowed.*native-e2e.*PNG plugin permission/);
+    pluginInvoke.mockRejectedValue({ code: "refused", message: "bad scene", nextStep: "repair scene", diagnostics: [{}] });
+    await expect(renderEngineArtifactForTest({ specJson: "{}", theme: "light", format: "png" }))
+      .rejects.toThrow(/malformed diagnostics.*rebuild matching plugin bindings/);
+  });
+
+  it("returns structured source refusal diagnostics with no artifact bytes", async () => {
+    vi.stubEnv("VITE_ENGINE_GEOMETRY_TEST", "1");
+    const refused = {
+      ...baseReport,
+      ok: false,
+      bytes: null,
+      svg: null,
+      width: null,
+      height: null,
+      diagnostics: [{ code: "layout/refused", path: "/", rule: "layout", message: "Layout was refused.", fix: "Repair the source." }],
+    };
+    pluginInvoke.mockResolvedValue(refused);
+    const report = await renderEngineArtifactForTest({ specJson: "{}", theme: "light", format: "png" });
+    expect(report).toMatchObject({ ok: false, bytes: null, svg: null, diagnostics: refused.diagnostics });
   });
 });

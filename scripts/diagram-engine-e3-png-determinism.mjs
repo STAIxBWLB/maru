@@ -108,6 +108,48 @@ export function compareManifests(manifests, labels = REQUIRED_RECEIPTS) {
   return REQUIRED_SCENES.length;
 }
 
+export function compareSvgParityFixture(fixture, manifestScene, wasmReport) {
+  const name = fixture?.name ?? "unnamed scene";
+  if (!fixture || typeof fixture.specJson !== "string" || !fixture.specJson
+      || !fixture.geometry || typeof fixture.geometry !== "object"
+      || !fixture.options || typeof fixture.options !== "object"
+      || typeof fixture.nativeSvg !== "string") {
+    throw new Error(`${name} native parity fixture is missing specJson, retained geometry, SVG options, or nativeSvg; regenerate it with png-manifest --svg-parity-dir.`);
+  }
+  if (!manifestScene || manifestScene.name !== name
+      || fixture.sceneInputSha256 !== manifestScene.sceneInputSha256
+      || createHash("sha256").update(fixture.specJson).digest("hex") !== manifestScene.sceneInputSha256
+      || fixture.options.theme !== manifestScene.theme
+      || fixture.nativeSvgSha256 !== manifestScene.svgSha256) {
+    throw new Error(`${name} parity fixture does not match the native PNG manifest's source or SVG hash; regenerate both from the same native command run.`);
+  }
+  const nativeBytes = Buffer.from(fixture.nativeSvg, "utf8");
+  const nativeSha256 = createHash("sha256").update(nativeBytes).digest("hex");
+  if (nativeSha256 !== manifestScene.svgSha256) {
+    throw new Error(`${name} native SVG bytes hash to ${nativeSha256}, but the PNG manifest records ${manifestScene.svgSha256}; preserve the high-level PNG artifact's actual SVG and regenerate the fixture.`);
+  }
+  if (!wasmReport || wasmReport.apiVersion !== 1 || wasmReport.ok !== true || typeof wasmReport.svg !== "string") {
+    const detail = wasmReport?.diagnostics?.map((item) => `${item.message}; fix: ${item.fix}`).join(" | ") ?? "WASM SVG report is malformed";
+    throw new Error(`${name} WASM render_scene_svg refused the native geometry: ${detail}; restore matching geometry, options and source snapshot before comparing.`);
+  }
+  const wasmBytes = Buffer.from(wasmReport.svg, "utf8");
+  const wasmSha256 = createHash("sha256").update(wasmBytes).digest("hex");
+  if (wasmSha256 !== manifestScene.svgSha256) {
+    throw new Error(`${name} WASM SVG SHA-256 ${wasmSha256} differs from the native PNG manifest SVG SHA-256 ${manifestScene.svgSha256}; compare the exact source spec, geometry serialization and renderer build.`);
+  }
+  if (!nativeBytes.equals(wasmBytes)) {
+    throw new Error(`${name} native and WASM SVG strings have equal recorded hashes but different UTF-8 bytes; inspect serialization and encoding before accepting parity.`);
+  }
+  return {
+    name,
+    sceneInputSha256: manifestScene.sceneInputSha256,
+    svgSha256: manifestScene.svgSha256,
+    nativeSvgBytes: nativeBytes.length,
+    wasmSvgBytes: wasmBytes.length,
+    byteEqual: true,
+  };
+}
+
 function reportFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -138,13 +180,82 @@ async function writeWasmReport(outputPath, bindingsDirectory) {
   console.log(`ENGINE_E3_PNG_WASM ${JSON.stringify({ scenes: report.sceneCount, report: output })}`);
 }
 
+async function writeWasmSvgParity(fixtureDirectory, nativeManifestPath, bindingsDirectory, outputPath) {
+  const nativeManifest = parseManifest(readFileSync(resolve(nativeManifestPath), "utf8"), "native Linux PNG report");
+  let fixturePaths;
+  try {
+    fixturePaths = reportFiles(resolve(fixtureDirectory)).sort();
+  } catch (error) {
+    throw new Error(`Cannot read native SVG parity fixtures from ${fixtureDirectory}: ${error}; download the fixture artifact from the native Linux PNG job.`);
+  }
+  if (fixturePaths.length !== REQUIRED_SCENES.length) {
+    throw new Error(`Native SVG parity fixture set contains ${fixturePaths.length} files, expected ${REQUIRED_SCENES.length}; regenerate all five fixtures in both themes.`);
+  }
+  const manifestByName = new Map(nativeManifest.scenes.map((scene) => [scene.name, scene]));
+  const fixtureByName = new Map();
+  for (const path of fixturePaths) {
+    let fixture;
+    try {
+      fixture = JSON.parse(readFileSync(path, "utf8"));
+    } catch (error) {
+      throw new Error(`${path} is not a readable SVG parity fixture: ${error}; regenerate it with the native PNG manifest command.`);
+    }
+    if (!REQUIRED_SCENES.includes(fixture?.name) || fixtureByName.has(fixture.name)) {
+      throw new Error(`${path} has an unsupported or duplicate fixture name; restore the exact 12-scene parity fixture set.`);
+    }
+    fixtureByName.set(fixture.name, fixture);
+  }
+
+  const bindingsPath = resolve(bindingsDirectory);
+  let bindings;
+  try {
+    bindings = await import(pathToFileURL(join(bindingsPath, "maru_diagram_engine.js")).href);
+  } catch (error) {
+    throw new Error(`Cannot import test-featured WASM bindings from ${bindingsPath}: ${error}; build wasm-png and generate the separate bindgen test directory.`);
+  }
+  if (typeof bindings.default !== "function" || typeof bindings.render_scene_svg !== "function") {
+    throw new Error("WASM render_scene_svg export is missing; rebuild the test-featured wasm-png artifact with wasm-render and regenerate bindgen output.");
+  }
+  await bindings.default({ module_or_path: readFileSync(join(bindingsPath, "maru_diagram_engine_bg.wasm")) });
+  const scenes = [];
+  for (const name of REQUIRED_SCENES) {
+    const fixture = fixtureByName.get(name);
+    const manifestScene = manifestByName.get(name);
+    if (!fixture || !manifestScene) {
+      throw new Error(`${name} has no native parity fixture or manifest record; regenerate the native Linux PNG artifact.`);
+    }
+    let wasmReport;
+    try {
+      const contents = bindings.render_scene_svg(JSON.stringify({
+        geometry: fixture.geometry,
+        options: fixture.options,
+        specJson: fixture.specJson,
+      }));
+      if (typeof contents !== "string") throw new Error("render_scene_svg returned a non-string report");
+      wasmReport = JSON.parse(contents);
+    } catch (error) {
+      throw new Error(`${name} WASM SVG call failed: ${error}; rerun with matching retained geometry, options and source spec.`);
+    }
+    scenes.push(compareSvgParityFixture(fixture, manifestScene, wasmReport));
+  }
+  const report = { schemaVersion: 1, scope: "native-wasm-svg-byte-parity", sceneCount: scenes.length, scenes };
+  const output = resolve(outputPath);
+  mkdirSync(dirname(output), { recursive: true });
+  writeFileSync(output, `${JSON.stringify(report)}\n`);
+  console.log(`ENGINE_E3_PNG_SVG_PARITY ${JSON.stringify({ scenes: scenes.length, report: output })}`);
+}
+
 async function run() {
   const args = process.argv.slice(2);
   if (args[0] === "--wasm" && args.length === 3) {
     await writeWasmReport(args[1], args[2]);
     return;
   }
-  if (args.length > 1) throw new Error("Usage: node diagram-engine-e3-png-determinism.mjs [REPORT_DIR], or --wasm OUTPUT_JSON BINDINGS_DIR; provide the four matrix manifests or the generated WASM test bindings.");
+  if (args[0] === "--wasm-svg-parity" && args.length === 5) {
+    await writeWasmSvgParity(args[1], args[2], args[3], args[4]);
+    return;
+  }
+  if (args.length > 1) throw new Error("Usage: node diagram-engine-e3-png-determinism.mjs [REPORT_DIR], --wasm OUTPUT_JSON BINDINGS_DIR, or --wasm-svg-parity FIXTURE_DIR NATIVE_MANIFEST BINDINGS_DIR OUTPUT_JSON; provide the platform manifests or native SVG parity fixtures.");
   const directory = resolve(args[0] ?? ".engine-e3/png");
   let files;
   try {
