@@ -1378,17 +1378,30 @@ case IDs and diagnostic codes are in `boundaryEvidence.modelDifferences`.
 | `artifact-route-rounding` | 2 | 1 | 0 | 1 | `e2-boundary-lifecycle-physical-corridor-7` |
 | `readable-v2-implicit-placement` | 8 | 8 | 0 | 0 | No differing verdict |
 | `readable-v2-placement` | 15 | 8 | 2 | 5 | `e2-boundary-workflow-v2-arrow-spacing-8`; `e2-boundary-workflow-v2-turn-7` |
-| `text-capacity` | 76 | 43 | 26 | 7 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
+| `text-capacity` | 76 | 49 | 25 | 2 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
+
+The post-fix audit preserves the original 41 model-difference cases and the
+current 35 mismatches in a 42-case union. Seven original cases now agree, and
+one new sequence brand-rail case is current-only. Across all 101 boundary
+inputs, 66 verdicts agree, 27 are oracle-green/engine-refused, and 8 are
+oracle-red/engine-admitted. The [per-case admission ledger](performance/diagram-engine-e2-admission-ledger.json)
+records exact source inputs, original oracle results, current geometry and
+diagnostics, numeric boundary evidence, source references, and dispositions.
+The dataflow authored-via cases `e2-boundary-dataflow-label-route-3` and
+`e2-boundary-dataflow-label-route-5` now pass with retained nonempty routes;
+endpoint masking remains scoped to the route's own source/target nodes.
 
 The model differences measure Noto text capacity against legacy text masks,
 readable-v2 placement and implicit-port solver differences. Lifecycle's rounded
 SVG-corner crossing is separately labelled `artifact-route-rounding`; the
 geometry engine does not implement E3 SVG corner rounding. In particular,
-**4 oracle-green authored-coordinate inputs still get route-blocked refusals**
-on engine-placed geometry, including
-`e2-boundary-workflow-v2-route-lane-title-63` and
-`e2-boundary-dataflow-label-route-3`. These remain refusals under the provenance
-rule, not downgraded notices. Their migration risk stays explicit for E4.
+**2 oracle-green authored-coordinate inputs still get route-blocked refusals**
+on engine-placed geometry:
+`e2-boundary-sequence-family-label-route-above` and
+`e2-boundary-workflow-v2-route-lane-title-63`. They remain refusals under the
+provenance rule, not downgraded notices. The two dataflow endpoint-via cases
+are now admitted by the route-scoped endpoint mask. The remaining migration
+risk stays explicit for E4.
 
 Automatic port candidates may move along an unpinned face, or choose another
 face if no side was authored. Authored sides remain on that face, and via,
