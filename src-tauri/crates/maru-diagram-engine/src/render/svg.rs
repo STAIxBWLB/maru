@@ -125,6 +125,93 @@ fn caption(g: &GeometryDocument, target: &str) -> String {
         labels.join("; ")
     }
 }
+fn write_primitive(s: &mut String, p: &super::primitives::Primitive, t: &super::theme::Tokens) {
+    use super::primitives::{Paint, Shape};
+    let (fill, stroke) = match p.paint {
+        Paint::Line => ("none", t.arrow),
+        Paint::AccentLine => ("none", t.emphasis),
+        Paint::Node => (t.node_fill, t.node_stroke),
+        Paint::OutlineNode => ("none", t.node_stroke),
+        Paint::AccentFill => (t.emphasis, "none"),
+    };
+    let tag = match p.shape {
+        Shape::Rect { .. } => "rect",
+        Shape::Line { .. } => "line",
+        Shape::Polyline { .. } => "polyline",
+        Shape::Circle { .. } => "circle",
+        Shape::Polygon { .. } => "polygon",
+    };
+    write!(
+        s,
+        "<{tag} id=\"{}\" data-kind=\"{}\" data-target-id=\"{}\" aria-hidden=\"true\"",
+        id("primitive", &format!("{}:{}", p.kind, p.owner)),
+        p.kind,
+        escaped(&p.owner)
+    )
+    .unwrap();
+    match &p.shape {
+        Shape::Rect { bounds: b, radius } => write!(
+            s,
+            " x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"",
+            fixed(b.x.into()),
+            fixed(b.y.into()),
+            fixed(b.width.into()),
+            fixed(b.height.into()),
+            fixed((*radius).into())
+        )
+        .unwrap(),
+        Shape::Line { from, to } => write!(
+            s,
+            " x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"",
+            fixed(from.x.into()),
+            fixed(from.y.into()),
+            fixed(to.x.into()),
+            fixed(to.y.into())
+        )
+        .unwrap(),
+        Shape::Circle { center, radius } => write!(
+            s,
+            " cx=\"{}\" cy=\"{}\" r=\"{}\"",
+            fixed(center.x.into()),
+            fixed(center.y.into()),
+            fixed((*radius).into())
+        )
+        .unwrap(),
+        Shape::Polyline { points } | Shape::Polygon { points } => {
+            s.push_str(" points=\"");
+            for (i, p) in points.iter().enumerate() {
+                if i > 0 {
+                    s.push(' ');
+                }
+                write!(s, "{},{}", fixed(p.x.into()), fixed(p.y.into())).unwrap();
+            }
+            s.push('"');
+        }
+    }
+    write!(
+        s,
+        " fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"",
+        p.stroke
+    )
+    .unwrap();
+    if let Some(dash) = p.dash {
+        write!(s, " stroke-dasharray=\"{dash}\"").unwrap();
+    }
+    if p.arrow {
+        write!(
+            s,
+            " marker-end=\"url(#{})\"",
+            if p.paint == Paint::AccentLine {
+                "arrow-emphasis"
+            } else {
+                "arrow"
+            }
+        )
+        .unwrap();
+    }
+    s.push_str("/>");
+}
+
 fn validate(g: &GeometryDocument, o: &SvgOptions) -> Result<(), Diagnostic> {
     let texts = std::iter::once(o.title.as_str())
         .chain(std::iter::once(o.description.as_str()))
@@ -174,6 +261,23 @@ fn validate(g: &GeometryDocument, o: &SvgOptions) -> Result<(), Diagnostic> {
             "provide a retained layout with positive page width and height",
         ));
     }
+    for b in g
+        .nodes
+        .iter()
+        .map(|n| n.bounds)
+        .chain(g.containers.iter().map(|c| c.bounds))
+        .chain(g.labels.iter().map(|l| l.bounds))
+        .chain(std::iter::once(g.legend.bounds))
+    {
+        if b.width < 0 || b.height < 0 || b.right().is_err() || b.bottom().is_err() {
+            return Err(error(
+                "bounds",
+                "/geometry",
+                "scene contains negative dimensions or overflowing bounds",
+                "recompute bounded fixed-point geometry before rendering",
+            ));
+        }
+    }
     for l in &g.labels {
         let font = crate::metrics::font_identity(l.font.weight)?;
         if font != l.font || l.font_size <= 0 {
@@ -199,6 +303,8 @@ fn validate(g: &GeometryDocument, o: &SvgOptions) -> Result<(), Diagnostic> {
 }
 pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diagnostic> {
     validate(g, o)?;
+    let semantics = super::primitives::context(g, o)?;
+    let primitives = super::primitives::derive(g, o)?;
     let t = o.theme.tokens();
     let b = g.page.bounds;
     let mut s = String::new();
@@ -209,7 +315,7 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         write!(s,"<marker id=\"{key}\" markerWidth=\"10\" markerHeight=\"7\" refX=\"9\" refY=\"3.5\" orient=\"auto\" markerUnits=\"strokeWidth\"><polygon points=\"0,0 10,3.5 0,7\" fill=\"{color}\"/></marker>").unwrap();
     }
     s.push_str("</defs>");
-    for c in &g.containers {
+    for c in g.containers.iter().filter(|c| c.kind != "activation") {
         let radius = match c.kind.as_str() {
             "region" => 12,
             "lane" | "segment" | "stage" => 10,
@@ -224,6 +330,25 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             "container-box",
             c.bounds,
             radius * 64,
+            t.lane_fill,
+            t.lane_stroke,
+            "1",
+        );
+        s.push_str("</g>");
+    }
+    for p in primitives
+        .iter()
+        .filter(|p| p.layer == super::primitives::Layer::Underlay)
+    {
+        write_primitive(&mut s, p, &t);
+    }
+    for c in g.containers.iter().filter(|c| c.kind == "activation") {
+        write!(s,"<g id=\"{}\" data-kind=\"container\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("container",&c.id),escaped(&c.id),escaped(&caption(g,&c.id))).unwrap();
+        rect(
+            &mut s,
+            "container-box",
+            c.bounds,
+            3 * 64,
             t.lane_fill,
             t.lane_stroke,
             "1",
@@ -249,18 +374,22 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             if emphasis { "arrow-emphasis" } else { "arrow" }
         )
         .unwrap();
-        if r.variant.as_deref() == Some("dashed") || r.variant.as_deref() == Some("return") {
-            s.push_str(" stroke-dasharray=\"3 5\"");
+        if let Some(dash) = super::primitives::dash(r.variant.as_deref()) {
+            write!(s, " stroke-dasharray=\"{dash}\"").unwrap();
         }
         s.push_str("/></g>");
     }
     for n in &g.nodes {
-        write!(s,"<g id=\"{}\" data-kind=\"node\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("node",&n.id),escaped(&n.id),escaped(&caption(g,&n.id))).unwrap();
+        write!(s,"<g id=\"{}\" data-kind=\"node\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("node",&n.id),escaped(&n.id),escaped(&super::primitives::node_caption(g,semantics,&n.id))).unwrap();
         rect(
             &mut s,
             "node-box",
             n.bounds,
-            6 * 64,
+            if semantics.family == "lifecycle" {
+                7 * 64
+            } else {
+                6 * 64
+            },
             t.node_fill,
             t.node_stroke,
             "1.5",
@@ -286,6 +415,12 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         .unwrap();
         rect(&mut s, "legend-entry-box", e.bounds, 0, "none", "none", "0");
         s.push_str("</g>");
+    }
+    for p in primitives
+        .iter()
+        .filter(|p| p.layer == super::primitives::Layer::Overlay)
+    {
+        write_primitive(&mut s, p, &t);
     }
     for (i, l) in g.labels.iter().enumerate() {
         let key = label_key(l, i);

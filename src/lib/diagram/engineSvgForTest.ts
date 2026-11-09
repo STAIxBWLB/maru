@@ -2,10 +2,11 @@
 import type { Diagnostic, GeometryDocument } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 export interface SvgOptions { theme: "light" | "dark"; title: string; description: string }
 export interface SvgReport { apiVersion: 1; ok: boolean; svg: string | null; diagnostics: Diagnostic[] }
-export async function renderSvgForTest(geometry: GeometryDocument, options: SvgOptions): Promise<SvgReport> {
+export async function renderSvgForTest(geometry: GeometryDocument, options: SvgOptions, specJson: string): Promise<SvgReport> {
   if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") {
     throw new Error("Engine SVG rendering is disabled in this build; build the isolated E3 test library and retry.");
   }
+  if (typeof specJson !== "string" || !specJson.trim()) throw new Error("SVG semantic source is missing; provide the matching serialized spec snapshot.");
   const moduleUrl = new URL("./__generated__/engine-render/maru_diagram_engine.js", import.meta.url).href;
   const wasmUrl = new URL("./__generated__/engine-render/maru_diagram_engine_bg.wasm", import.meta.url);
   const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
@@ -15,7 +16,7 @@ export async function renderSvgForTest(geometry: GeometryDocument, options: SvgO
   await bindings.default({ module_or_path: wasmUrl });
   const render = bindings.render_scene_svg as (input: string) => string;
   let report: unknown;
-  try { report = JSON.parse(render(JSON.stringify({ geometry, options }))); }
+  try { report = JSON.parse(render(JSON.stringify({ geometry, options, specJson }))); }
   catch { throw new Error("SVG request or report cannot be serialized; provide compatible geometry/options and rebuild matching WASM bindings."); }
   if (!report || typeof report !== "object" || !("apiVersion" in report) || report.apiVersion !== 1
       || !("ok" in report) || typeof report.ok !== "boolean" || !("diagnostics" in report) || !Array.isArray(report.diagnostics)

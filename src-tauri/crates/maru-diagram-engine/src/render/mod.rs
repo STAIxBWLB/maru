@@ -1,9 +1,13 @@
 //! Pure SVG output from retained fixed-point geometry. No layout or host access.
 mod gate;
+mod primitive_gate;
+mod primitives;
+pub mod semantics;
 pub mod svg;
 mod theme;
 use crate::{geometry::GeometryDocument, Diagnostic, API_VERSION};
 pub use gate::check_svg_artifact;
+pub use semantics::{NodeSemantic, SemanticContext};
 use serde::{Deserialize, Serialize};
 pub use theme::SvgTheme;
 
@@ -15,10 +19,13 @@ pub struct SvgOptions {
     pub theme: SvgTheme,
     pub title: String,
     pub description: String,
+    #[serde(default)]
+    pub semantics: Option<SemanticContext>,
 }
 impl SvgOptions {
-    pub fn from_spec(spec: &serde_json::Value, theme: SvgTheme) -> Self {
-        Self {
+    pub fn from_spec(spec: &serde_json::Value, theme: SvgTheme) -> Result<Self, Diagnostic> {
+        Ok(Self {
+            semantics: Some(SemanticContext::from_spec(spec)?),
             theme,
             title: spec
                 .pointer("/meta/title")
@@ -32,7 +39,7 @@ impl SvgOptions {
                 .or_else(|| spec.get("diagram_type").and_then(|v| v.as_str()))
                 .unwrap_or("Diagram geometry")
                 .into(),
-        }
+        })
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +83,8 @@ pub fn render_svg(geometry: &GeometryDocument, options: &SvgOptions) -> SvgRepor
 struct SvgRequest {
     geometry: GeometryDocument,
     options: SvgOptions,
+    #[serde(default)]
+    spec_json: Option<String>,
 }
 pub fn render_svg_json(input: &str) -> SvgReport {
     let failed = |diagnostic| SvgReport {
@@ -93,7 +102,16 @@ pub fn render_svg_json(input: &str) -> SvgReport {
         ));
     }
     match serde_json::from_str::<SvgRequest>(input) {
-        Ok(request)=> render_svg(&request.geometry,&request.options),
+        Ok(mut request) => {
+            if let Some(source)=&request.spec_json {
+                let spec:serde_json::Value=match serde_json::from_str(source) {
+                    Ok(spec)=>spec,
+                    Err(cause)=>return failed(error("semantic-source","/specJson",format!("source spec cannot be decoded: {cause}"),"provide the matching source snapshot as valid JSON")),
+                };
+                request.options.semantics=match SemanticContext::from_spec(&spec) {Ok(context)=>Some(context),Err(cause)=>return failed(cause)};
+            }
+            render_svg(&request.geometry,&request.options)
+        },
         Err(cause)=>failed(error("request","/",format!("SVG request cannot be decoded: {cause}"),"provide geometry and options with theme, title and description in the render-v1 request")),
     }
 }

@@ -197,6 +197,31 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
         .fold(0.0_f64, f64::max);
     let total_width = max_right.max(980.0);
 
+    // Preserve final-state meaning before authored column ordering is discarded.
+    // The SVG projection does not need to read source coordinates or infer finals
+    // from pin-adjusted positions.
+    let outgoing: std::collections::BTreeSet<_> = spec
+        .transitions
+        .iter()
+        .map(|edge| edge.from.as_str())
+        .collect();
+    let last_main = spec
+        .states
+        .iter()
+        .filter(|state| state.lane == "main")
+        .map(|state| state.col)
+        .max();
+    let final_states: std::collections::BTreeMap<_, _> = spec
+        .states
+        .iter()
+        .map(|state| {
+            (
+                state.id.as_str(),
+                !outgoing.contains(state.id.as_str())
+                    && (version == 2 || state.lane != "main" || Some(state.col) == last_main),
+            )
+        })
+        .collect();
     for (index, state) in spec.states.iter().enumerate() {
         let _lane = *lane_indices.get(state.lane.as_str()).ok_or_else(|| {
             geometry_error(&format!("/states/{index}/lane"), "state lane is missing")
@@ -221,7 +246,7 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             (None, Some(step)) => Some(step.to_owned()),
             (None, None) => None,
         };
-        scene.add_node(
+        let placed = scene.add_node(
             &state.id,
             &state.state_type,
             &state.label,
@@ -230,7 +255,16 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             None,
             auto,
             Some([width, height]),
-        )?;
+        );
+        if let Some(node) = scene
+            .document
+            .nodes
+            .last_mut()
+            .filter(|node| node.id == state.id)
+        {
+            node.final_state = final_states.get(state.id.as_str()).copied();
+        }
+        placed?;
     }
 
     for (index, lane) in spec.lanes.iter().enumerate() {

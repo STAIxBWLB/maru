@@ -248,7 +248,7 @@ fn check_unique_ids(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
 fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
     const ALLOWED: &[&str] = &[
         "svg", "title", "desc", "rect", "g", "polyline", "text", "tspan", "path", "defs", "marker",
-        "polygon",
+        "polygon", "line", "circle",
     ];
     const KINDS: &[&str] = &[
         "page",
@@ -372,13 +372,44 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "remove foreign, active, or untyped elements and regenerate the artifact",
             ));
         }
+        let is_semantic = node
+            .attribute("data-kind")
+            .is_some_and(|kind| super::primitives::KINDS.contains(&kind));
         for attribute in node.attributes() {
             let name = attribute.name();
             let value = attribute.value().trim().to_ascii_lowercase();
-            let allowed = allowed_attributes
-                .iter()
-                .find(|(tag, _)| *tag == node.tag_name().name())
-                .is_some_and(|(_, attributes)| attributes.contains(&name));
+            let allowed = if is_semantic {
+                [
+                    "id",
+                    "data-kind",
+                    "data-target-id",
+                    "aria-hidden",
+                    "x",
+                    "y",
+                    "width",
+                    "height",
+                    "rx",
+                    "x1",
+                    "y1",
+                    "x2",
+                    "y2",
+                    "cx",
+                    "cy",
+                    "r",
+                    "points",
+                    "fill",
+                    "stroke",
+                    "stroke-width",
+                    "stroke-dasharray",
+                    "marker-end",
+                ]
+                .contains(&name)
+            } else {
+                allowed_attributes
+                    .iter()
+                    .find(|(tag, _)| *tag == node.tag_name().name())
+                    .is_some_and(|(_, attributes)| attributes.contains(&name))
+            };
             let is_xml_space = name == "space"
                 && attribute.namespace() == Some("http://www.w3.org/XML/1998/namespace")
                 && node.tag_name().name() == "text";
@@ -449,7 +480,7 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
         }
         if node
             .attribute("data-kind")
-            .is_some_and(|kind| !KINDS.contains(&kind))
+            .is_some_and(|kind| !KINDS.contains(&kind) && !super::primitives::KINDS.contains(&kind))
         {
             errors.push(diagnostic(
                 "unknown-kind",
@@ -458,7 +489,8 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "emit only the supported geometry kinds from the retained scene",
             ));
         }
-        if matches!(node.tag_name().name(), "marker" | "polygon")
+        if (node.tag_name().name() == "marker"
+            || (node.tag_name().name() == "polygon" && !is_semantic))
             && !node
                 .ancestors()
                 .any(|parent| parent.tag_name().name() == "defs")
@@ -786,6 +818,14 @@ pub fn check_svg_artifact(
             "remove the document type declaration and render a self-contained SVG",
         )];
     }
+    let semantics = match super::primitives::context(geometry, options) {
+        Ok(context) => context,
+        Err(cause) => return vec![cause],
+    };
+    let derived = match super::primitives::derive(geometry, options) {
+        Ok(items) => items,
+        Err(cause) => return vec![cause],
+    };
     let doc = match Document::parse(svg) {
         Ok(doc) => doc,
         Err(cause) => {
@@ -927,7 +967,15 @@ pub fn check_svg_artifact(
     }
     check_tag_count(&doc, "defs", 1, &mut errors);
     check_tag_count(&doc, "marker", 2, &mut errors);
-    check_tag_count(&doc, "polygon", 2, &mut errors);
+    check_tag_count(
+        &doc,
+        "polygon",
+        2 + derived
+            .iter()
+            .filter(|p| matches!(p.shape, super::primitives::Shape::Polygon { .. }))
+            .count(),
+        &mut errors,
+    );
     check_defs(&doc, options, &mut errors);
 
     if let Some(page) = first_kind(&doc, "page", "data-kind", &mut errors) {
@@ -957,7 +1005,7 @@ pub fn check_svg_artifact(
             require_attr(
                 group,
                 "aria-label",
-                &caption(geometry, &node.id, "node"),
+                &super::primitives::node_caption(geometry, semantics, &node.id),
                 &path,
                 &mut errors,
             );
@@ -965,7 +1013,18 @@ pub fn check_svg_artifact(
             if let Some(box_node) =
                 elements(group).find(|child| child.attribute("data-kind") == Some("node-box"))
             {
-                check_rect_paint(box_node, "node-box", 6 * 64, options, &path, &mut errors);
+                check_rect_paint(
+                    box_node,
+                    "node-box",
+                    if semantics.family == "lifecycle" {
+                        7 * 64
+                    } else {
+                        6 * 64
+                    },
+                    options,
+                    &path,
+                    &mut errors,
+                );
             }
         } else {
             errors.push(diagnostic(
@@ -1076,8 +1135,8 @@ pub fn check_svg_artifact(
                     &path,
                     &mut errors,
                 );
-                if matches!(route.variant.as_deref(), Some("dashed" | "return")) {
-                    require_attr(polyline, "stroke-dasharray", "3 5", &path, &mut errors);
+                if let Some(dash) = super::primitives::dash(route.variant.as_deref()) {
+                    require_attr(polyline, "stroke-dasharray", dash, &path, &mut errors);
                 } else if attr(polyline, "stroke-dasharray").is_some() {
                     errors.push(diagnostic(
                         "route-style",
@@ -1189,5 +1248,8 @@ pub fn check_svg_artifact(
             ));
         }
     }
+    errors.extend(super::primitive_gate::check_primitives(
+        &doc, geometry, options,
+    ));
     errors
 }

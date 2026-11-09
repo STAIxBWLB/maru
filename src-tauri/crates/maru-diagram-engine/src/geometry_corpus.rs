@@ -54,7 +54,7 @@ fn svg_hashes(
         crate::render::SvgTheme::Light,
         crate::render::SvgTheme::Dark,
     ] {
-        let options = crate::render::SvgOptions::from_spec(spec, theme);
+        let options = crate::render::SvgOptions::from_spec(spec, theme)?;
         let first_svg = crate::render::render_svg(geometry, &options);
         let second_svg = crate::render::render_svg(geometry, &options);
         if !first_svg.ok || !second_svg.ok || first_svg.svg != second_svg.svg {

@@ -2445,6 +2445,7 @@ mod tests {
             vec![vec![(10, 10), (30, 10), (40, 10)]],
         );
         g.nodes.push(crate::geometry::GeometryNode {
+            final_state: None,
             id: "source".into(),
             bounds: crate::geometry::GeometryBox {
                 x: 0,
@@ -2530,6 +2531,7 @@ mod tests {
         );
         g.labels.push(label_for(0, 15, 15, 10, 10));
         g.nodes.push(crate::geometry::GeometryNode {
+            final_state: None,
             id: "obstacle".into(),
             bounds: crate::geometry::GeometryBox {
                 x: 10 * 64,
@@ -2617,6 +2619,7 @@ mod tests {
             vec![vec![(0, 20), (10, 20), (90, 20), (100, 20)]],
         );
         g.nodes.push(crate::geometry::GeometryNode {
+            final_state: None,
             id: "obstacle".into(),
             bounds: crate::geometry::GeometryBox {
                 x: 40 * 64,
@@ -2641,6 +2644,7 @@ mod tests {
             ],
         );
         g.nodes.push(crate::geometry::GeometryNode {
+            final_state: None,
             id: "s0".into(),
             bounds: crate::geometry::GeometryBox {
                 x: -50 * 64,
@@ -2684,6 +2688,7 @@ mod tests {
         g.nodes = [("a", 80), ("b", if small { 160 } else { 480 })]
             .into_iter()
             .map(|(id, x)| crate::geometry::GeometryNode {
+                final_state: None,
                 id: id.into(),
                 bounds: crate::geometry::GeometryBox {
                     x: x * 64,

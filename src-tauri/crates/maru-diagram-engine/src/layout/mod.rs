@@ -313,6 +313,7 @@ impl SceneBuilder {
         bounds.right().map_err(arithmetic)?;
         bounds.bottom().map_err(arithmetic)?;
         self.document.nodes.push(GeometryNode {
+            final_state: None,
             id: id.into(),
             bounds,
             position_source: source,
@@ -1265,6 +1266,19 @@ impl SceneBuilder {
             }
         }
         ordered_kinds.extend(kinds);
+        // A final marker needs a derived legend entry. Append after existing
+        // entries so their placed labels retain their coordinates.
+        if self.kind == "lifecycle"
+            && !ordered_kinds.is_empty()
+            && self
+                .document
+                .nodes
+                .iter()
+                .any(|node| node.final_state == Some(true))
+            && !ordered_kinds.iter().any(|kind| kind == "final")
+        {
+            ordered_kinds.push("final".into());
+        }
         for kind in ordered_kinds {
             let entry = meta
                 .legend
@@ -1652,7 +1666,15 @@ mod tests {
             let report = layout(&spec.to_string());
             assert!(report.ok, "{:?}", report.diagnostics);
             let scene = report.geometry.unwrap();
-            let expected: BTreeSet<_> = common::legend_keys(&kind).into_iter().collect();
+            let mut expected: BTreeSet<_> = common::legend_keys(&kind).into_iter().collect();
+            if kind == "lifecycle"
+                && scene
+                    .nodes
+                    .iter()
+                    .any(|node| node.final_state == Some(true))
+            {
+                expected.insert("final");
+            }
             assert_eq!(
                 scene
                     .legend

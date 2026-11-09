@@ -14,6 +14,13 @@ fn scene() -> (maru_diagram_engine::geometry::GeometryDocument, SvgOptions) {
     (
         report.geometry.expect("successful fixture has geometry"),
         SvgOptions {
+            semantics: Some(
+                maru_diagram_engine::render::SemanticContext::from_spec(
+                    &serde_json::from_str(include_str!("../testdata/valid-architecture.json"))
+                        .unwrap(),
+                )
+                .unwrap(),
+            ),
             theme: SvgTheme::Light,
             title: "SVG gate fixture".into(),
             description: "Artifact gate integration fixture".into(),

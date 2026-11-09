@@ -26,6 +26,9 @@ fn cjk_xml_multiline_replacement_and_ignorable_glyphs_preserve_metric_positions(
     let mut outputs = Vec::new();
     for theme in [SvgTheme::Light, SvgTheme::Dark] {
         let options = SvgOptions {
+            semantics: Some(
+                maru_diagram_engine::render::SemanticContext::from_spec(&spec).unwrap(),
+            ),
             theme,
             title: "검증 & <제목>".into(),
             description: "CJK 줄바꿈·대체 글리프".into(),
@@ -66,6 +69,7 @@ fn namespaced_ids_and_captions_survive_node_edge_identity_collisions() {
     spec["connections"][0]["label"] = serde_json::json!("Edge caption");
     let layout = layout_json(&serde_json::json!({"specJson":spec.to_string()}).to_string());
     let options = SvgOptions {
+        semantics: Some(maru_diagram_engine::render::SemanticContext::from_spec(&spec).unwrap()),
         theme: SvgTheme::Light,
         title: "Collision".into(),
         description: "Node and edge have the same source id".into(),

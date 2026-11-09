@@ -151,6 +151,10 @@ pub struct FontIdentity {
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
 pub struct GeometryNode {
+    /// Optional semantic classification; coordinates and API version are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub final_state: Option<bool>,
     pub id: String,
     pub bounds: GeometryBox,
     /// Future placement resolution order is planned pin, authored position,

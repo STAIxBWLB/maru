@@ -43,7 +43,7 @@ try{
     const scene=engine.layout({specJson:JSON.stringify(spec)});
     if(!scene.ok||!scene.geometry)throw new Error(`CJK screenshot scene refused: ${JSON.stringify(scene.diagnostics)}`);
     const options={theme,title:spec.meta.title,description:spec.meta.subtitle};
-    const first=await engine.renderSvgForTest(scene.geometry,options);const second=await engine.renderSvgForTest(scene.geometry,options);
+    const first=await engine.renderSvgForTest(scene.geometry,options,JSON.stringify(spec));const second=await engine.renderSvgForTest(scene.geometry,options,JSON.stringify(spec));
     if(!first.ok||first.svg!==second.svg)throw new Error(`SVG artifact/repeat gate failed: ${JSON.stringify(first.diagnostics)}`);
     await document.fonts.load('400 13px "Noto Sans CJK KR"',"입력처리완료");await document.fonts.load('700 13px "Noto Sans CJK KR"',"입력처리완료");await document.fonts.ready;
     if(!document.fonts.check('700 13px "Noto Sans CJK KR"',"입력"))throw new Error("Pinned CJK font did not load; stop capture instead of accepting fallback.");
