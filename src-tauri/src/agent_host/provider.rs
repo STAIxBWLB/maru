@@ -354,6 +354,46 @@ pub fn resolve_provider_binary(
         .or_else(|| resolve_program(provider.default_binary_name()))
 }
 
+/// Which machine-readable output a CLI call asks for, so its usage can be read
+/// back (maru#431). Both the synchronous adapter (slice 1) and the background
+/// dispatcher (slice 2) go through [`apply_usage_output_flags`]: the flag sets
+/// differ, and a second copy of them would drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UsageOutputMode {
+    /// One JSON result object printed when the call ends (slice 1). Cheap, but
+    /// silent until then.
+    Result,
+    /// One JSON event per line, so assistant text reaches the caller while the
+    /// run is still going (slice 2).
+    Stream,
+}
+
+/// Add the flags that make `cmd` report usage, for the provider that will
+/// actually run. Returns the mode to expect from stdout, or `None` for a
+/// provider with no machine-readable usage: that call keeps its plain output
+/// and its run records an `unavailable` receipt, never a fabricated zero.
+pub(crate) fn apply_usage_output_flags(
+    cmd: &mut Command,
+    provider_id: &str,
+    mode: UsageOutputMode,
+) -> Option<UsageOutputMode> {
+    if provider_id != CliProviderKind::Claude.id() {
+        return None;
+    }
+    match mode {
+        UsageOutputMode::Result => {
+            cmd.arg("--output-format").arg("json");
+        }
+        UsageOutputMode::Stream => {
+            // Print mode takes `stream-json` only together with `--verbose`.
+            cmd.arg("--output-format")
+                .arg("stream-json")
+                .arg("--verbose");
+        }
+    }
+    Some(mode)
+}
+
 /// Real `ProviderAdapter` that drives a CLI provider (Claude/Codex/Kimi/Kiro)
 /// synchronously:
 /// `complete` spawns the command via [`build_cli_command`], pipes the prompt to
@@ -502,10 +542,9 @@ impl ProviderAdapter for CliProviderAdapter {
         })?;
         // First usage slice (maru#431): Claude prints one JSON result object
         // carrying both the answer and its usage. Other providers stay plain.
-        let json_usage = self.provider == CliProviderKind::Claude;
-        if json_usage {
-            cmd.arg("--output-format").arg("json");
-        }
+        let json_usage =
+            apply_usage_output_flags(&mut cmd, self.provider.id(), UsageOutputMode::Result)
+                .is_some();
         cmd.current_dir(&request.cwd)
             .stdin(if stdin_payload.is_some() {
                 Stdio::piped()

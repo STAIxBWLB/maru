@@ -5,10 +5,12 @@
 //! [`summarize_usage`] deduplicates by `receiptId`, so replaying the same
 //! receipt (a duplicated log line, a re-append after restart) is counted once.
 //!
-//! First slice: only the Claude CLI (`--output-format json`) yields a parsed
-//! receipt. Every other provider, and any Claude output that does not match the
-//! expected shape, records `pricingStatus: "unavailable"` with no counters,
-//! never a fabricated zero.
+//! Only the Claude CLI yields a parsed receipt, from its machine-readable
+//! result object: printed once for `--output-format json` (the synchronous
+//! adapter) or as the terminal event of `--output-format stream-json` (the
+//! background dispatcher). Every other provider, and any Claude output that
+//! does not match the expected shape, records `pricingStatus: "unavailable"`
+//! with no counters, never a fabricated zero.
 //!
 //! A receipt carries counters, model ids and money only. It never stores
 //! prompts, response content, environment, credential paths or tokens.
@@ -24,7 +26,8 @@ pub const USAGE_RECEIPT_SCHEMA_VERSION: &str = "maru_usage_receipt_v1";
 pub const USAGE_RECORDED_EVENT: &str = "usage.recorded";
 /// Receipts that could not be persisted; payload `{"pending": n}` only.
 pub const USAGE_INCOMPLETE_EVENT: &str = "usage.incomplete";
-/// Source parser version for the Claude CLI `--output-format json` result.
+/// Source parser version for the Claude CLI's JSON result object, which both
+/// output modes carry (`json`, and the terminal event of `stream-json`).
 pub const CLAUDE_JSON_SOURCE: &str = "claude-cli-json-v1";
 
 /// How the money on a receipt is to be read. Each state stays distinct:
@@ -135,11 +138,12 @@ fn usd_to_micros(value: f64) -> Option<i64> {
     Some((value * 1_000_000.0).round() as i64)
 }
 
-/// Parse the Claude CLI `--output-format json` result object.
+/// Parse the Claude CLI's JSON result object: all of stdout under
+/// `--output-format json`, the last line under `--output-format stream-json`.
 ///
-/// Returns `None` when stdout is not that shape (older CLI, a wrapper script,
-/// schema drift). The caller then keeps raw stdout as content and records an
-/// `unavailable` receipt.
+/// Returns `None` when the input is not that shape (older CLI, a wrapper
+/// script, schema drift). The caller then keeps raw stdout as content and
+/// records an `unavailable` receipt.
 pub fn parse_claude_json_result(stdout: &str, outcome: &str) -> Option<(String, UsageReceipt)> {
     let value: JsonValue = serde_json::from_str(stdout.trim()).ok()?;
     let object = value.as_object()?;

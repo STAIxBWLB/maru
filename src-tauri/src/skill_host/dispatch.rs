@@ -16,9 +16,12 @@ use crate::agent_host::contracts::{
 use crate::agent_host::event_store::{append_run_event_payload_in_transaction, run_events_path};
 use crate::agent_host::proposal::parse_skill_proposal;
 use crate::agent_host::provider::{
-    normalize_permission_mode, resolve_provider_binary, CliProviderKind,
+    apply_usage_output_flags, normalize_permission_mode, resolve_provider_binary, CliProviderKind,
+    UsageOutputMode,
 };
-use crate::agent_host::usage::{parse_claude_json_result, UsageReceipt, USAGE_RECORDED_EVENT};
+use crate::agent_host::usage::{
+    parse_claude_json_result, UsageReceipt, USAGE_INCOMPLETE_EVENT, USAGE_RECORDED_EVENT,
+};
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::atomic_file::{
     with_path_transactions, PathTransactionLease, PathTransactionParent, PathTransactionRequest,
@@ -348,17 +351,17 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
     run_request.metadata = metadata.clone();
     // The effective provider decides the output format, not the requested one:
     // an adaptive-policy resolution can reroute the run, and Maru must ask for
-    // JSON from the CLI that actually runs.
+    // machine-readable output from the CLI that actually runs. The flags live in
+    // `provider.rs` so this slice and slice 1 cannot drift apart.
     let usage_provider = resolution
         .as_ref()
         .map(|resolution| resolution.agent.clone())
         .unwrap_or_else(|| provider.id().to_string());
-    let claude_json = usage_provider == CliProviderKind::Claude.id();
-    if claude_json {
-        // One JSON result object carries both the answer and its usage, as in
-        // `CliProviderAdapter::complete` (maru#431 slice 1).
-        cmd.arg("--output-format").arg("json");
-    }
+    let output = match apply_usage_output_flags(&mut cmd, &usage_provider, UsageOutputMode::Stream)
+    {
+        Some(_) => BackgroundOutput::ClaudeStream,
+        None => BackgroundOutput::Plain,
+    };
     let retry_payload = serde_json::json!({
         "skillId": original_skill_id,
         "runtime": runtime,
@@ -388,7 +391,7 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
             },
             usage: BackgroundUsage {
                 provider: usage_provider,
-                claude_json,
+                output,
             },
         },
     )
@@ -587,9 +590,19 @@ struct BackgroundRunInfo {
 struct BackgroundUsage {
     /// Receipt provider id, used by the `unavailable` fallback.
     provider: String,
-    /// stdout is the Claude `--output-format json` result envelope, which the
-    /// stdout pump unwraps before anything reaches the caller.
-    claude_json: bool,
+    /// How the stdout pump reads this run, from the same helper that added the
+    /// flags.
+    output: BackgroundOutput,
+}
+
+/// What the stdout pump expects from one run.
+#[derive(Clone, Copy)]
+enum BackgroundOutput {
+    /// Plain lines, streamed verbatim; the run records `unavailable`.
+    Plain,
+    /// Claude `--output-format stream-json`: one JSON event per line, with the
+    /// assistant text and the terminal result's usage.
+    ClaudeStream,
 }
 
 /// One explicit transaction context shared by the setup, stream pumps and exit
@@ -827,7 +840,7 @@ fn spawn_background<R: tauri::Runtime>(
         stdout,
         stdout_buffer.clone(),
         writes.clone(),
-        usage.claude_json,
+        usage.output,
     );
     let stderr_pump = spawn_line_pump(
         app.clone(),
@@ -861,13 +874,9 @@ fn spawn_background<R: tauri::Runtime>(
                 let mut receipt = parsed_usage
                     .unwrap_or_else(|| UsageReceipt::unavailable(&usage.provider, outcome));
                 receipt.outcome = outcome.to_string();
-                let _ = writes.event(
-                    &cwd_done,
-                    &id_done,
-                    USAGE_RECORDED_EVENT,
-                    "provider",
-                    serde_json::json!({ "receipt": receipt }),
-                );
+                write_usage_receipt(&receipt, &id_done, |kind, payload| {
+                    writes.event(&cwd_done, &id_done, kind, "provider", payload)
+                });
                 if !status.success() {
                     let raw_error = stderr_buffer
                         .lock()
@@ -1380,15 +1389,72 @@ where
     })
 }
 
+/// One line of a provider's stdout, reduced to what a caller needs.
+enum StreamEvent {
+    /// Text the assistant produced, to emit now — the reason a long run keeps
+    /// producing output instead of looking idle.
+    Text(String),
+    /// The terminal `result` event: the answer (for a run whose text never
+    /// arrived as an assistant message) and the usage, when it parses. The
+    /// receipt is boxed because it dwarfs every other variant (12× the text it
+    /// travels with) and one event exists at a time.
+    Result(String, Option<Box<UsageReceipt>>),
+    /// A protocol event with nothing for the caller: session init, hooks, tool
+    /// results, rate-limit notices, thinking-token estimates.
+    Noise,
+}
+
+/// Read one stdout line of Claude's `--output-format stream-json` protocol.
+/// `None` means the line is not a protocol event at all (an older CLI, a
+/// wrapper script, a hard failure): the reader then emits it verbatim, which is
+/// the plain-text fallback.
+fn parse_stream_event(line: &str) -> Option<StreamEvent> {
+    let value: JsonValue = serde_json::from_str(line.trim()).ok()?;
+    let object = value.as_object()?;
+    match object.get("type").and_then(JsonValue::as_str)? {
+        "assistant" => {
+            // Only text blocks are output: a turn can also carry thinking,
+            // tool calls and their results, and none of that is the answer.
+            let text = object
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(JsonValue::as_array)
+                .map(|blocks| {
+                    blocks
+                        .iter()
+                        .filter(|block| {
+                            block.get("type").and_then(JsonValue::as_str) == Some("text")
+                        })
+                        .filter_map(|block| block.get("text").and_then(JsonValue::as_str))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            if text.trim().is_empty() {
+                Some(StreamEvent::Noise)
+            } else {
+                Some(StreamEvent::Text(text))
+            }
+        }
+        // The terminal event is the object slice 1's parser already reads, so
+        // the counters, model ids and price basis come from one place.
+        "result" => Some(match parse_claude_json_result(line, "ok") {
+            Some((content, receipt)) => StreamEvent::Result(content, Some(Box::new(receipt))),
+            None => StreamEvent::Result(String::new(), None),
+        }),
+        _ => Some(StreamEvent::Noise),
+    }
+}
+
 /// The stdout reader for one run, and the only one that can hand back a usage
-/// receipt. A Claude `--output-format json` run prints one result object whose
-/// `result` field is the text a plain-output run prints, so the reader decides
-/// from the first line which of the two it has: a result envelope is one JSON
-/// object and starts with `{`, and every other run keeps streaming line by
-/// line exactly as it did before usage existed. An envelope is unwrapped at
-/// exit and its text emitted through the same path, so the caller, the run log
-/// and the proposal parser see what they saw before. Any other shape (older
-/// CLI, a wrapper, a hard failure) is emitted verbatim rather than swallowed.
+/// receipt. A `stream-json` run is read event by event: assistant text goes to
+/// the caller the moment it is printed, so the mission's `last_output_at` keeps
+/// moving instead of falling to Idle after a silent minute, and the terminal
+/// `result` event supplies the usage. Text is emitted through the same
+/// `emit_output_line` as a plain run, so the caller, the run log and the
+/// proposal parser see the lines they always saw. A line that is not an event
+/// (older CLI, wrapper script, hard failure) is emitted verbatim rather than
+/// swallowed.
 fn spawn_stdout_pump<R: tauri::Runtime, S>(
     app: AppHandle<R>,
     invocation_id: String,
@@ -1396,55 +1462,13 @@ fn spawn_stdout_pump<R: tauri::Runtime, S>(
     source: S,
     buffer: Arc<Mutex<String>>,
     writes: Arc<DispatchWrites>,
-    expect_json: bool,
+    expect: BackgroundOutput,
 ) -> thread::JoinHandle<Option<UsageReceipt>>
 where
     S: Read + Send + 'static,
 {
     thread::spawn(move || {
-        let reader = BufReader::new(source);
-        // Nothing accumulates until the first line says this is an envelope,
-        // so a plain run's first line reaches the caller as it is printed.
-        let mut decided = !expect_json;
-        let mut envelope = false;
-        let mut raw = String::new();
-        for line in reader.lines() {
-            let Ok(line) = line else {
-                break;
-            };
-            if !decided {
-                decided = true;
-                envelope = line.trim_start().starts_with('{');
-            }
-            if envelope {
-                raw.push_str(&line);
-                raw.push('\n');
-                continue;
-            }
-            emit_output_line(
-                &app,
-                OutputLine {
-                    invocation_id: &invocation_id,
-                    cwd: &cwd,
-                    stream: "stdout",
-                    line: &line,
-                },
-                Some(&buffer),
-                &writes,
-            );
-        }
-        if !envelope {
-            return None;
-        }
-        let parsed = parse_claude_json_result(&raw, "ok");
-        let content = parsed
-            .as_ref()
-            .map(|(content, _)| content.as_str())
-            .unwrap_or(raw.as_str());
-        if let Ok(mut buffer) = buffer.lock() {
-            buffer.push_str(content);
-        }
-        for line in content.lines() {
+        let emit = |line: &str| {
             emit_output_line(
                 &app,
                 OutputLine {
@@ -1453,14 +1477,80 @@ where
                     stream: "stdout",
                     line,
                 },
-                None,
+                Some(&buffer),
                 &writes,
-            );
+            )
+        };
+        let reader = BufReader::new(source);
+        let mut streamed = false;
+        let mut result_text: Option<String> = None;
+        let mut usage: Option<UsageReceipt> = None;
+        for line in reader.lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            let event = match expect {
+                BackgroundOutput::Plain => None,
+                BackgroundOutput::ClaudeStream => parse_stream_event(&line),
+            };
+            match event {
+                Some(StreamEvent::Noise) => {}
+                Some(StreamEvent::Text(text)) => {
+                    streamed = true;
+                    for line in text.lines() {
+                        emit(line);
+                    }
+                }
+                Some(StreamEvent::Result(content, receipt)) => {
+                    // `outcome` is decided by the exit status in the completion
+                    // thread, which overwrites the placeholder this parse used.
+                    usage = receipt.map(|receipt| *receipt).or(usage);
+                    result_text = Some(content);
+                }
+                None => emit(&line),
+            }
         }
-        // `outcome` is decided by the exit status in the completion thread,
-        // which overwrites the placeholder this parse used.
-        parsed.map(|(_, receipt)| receipt)
+        // A run whose text arrived only in the result event (no assistant
+        // message, an error subtype) still reaches the caller, once.
+        let fallback = if streamed {
+            None
+        } else {
+            result_text.as_deref()
+        };
+        for line in fallback.unwrap_or_default().lines() {
+            emit(line);
+        }
+        usage
     })
+}
+
+/// Append the receipt, retrying the very same payload (the same receipt id makes
+/// a retry harmless), and leave a `usage.incomplete` marker when it still fails.
+/// A dropped write would leave a run that spent tokens looking like
+/// `receiptCount: 0` with no pending marker, so coverage would silently omit
+/// real usage (maru#431 AC3/AC5; same rule as `structured_loop.rs`).
+fn write_usage_receipt(
+    receipt: &UsageReceipt,
+    run_id: &str,
+    mut append: impl FnMut(&str, JsonValue) -> Result<(), String>,
+) {
+    const ATTEMPTS: u32 = 3;
+    let payload = serde_json::json!({ "receipt": receipt });
+    let mut last_error = String::new();
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            thread::sleep(std::time::Duration::from_millis(20));
+        }
+        match append(USAGE_RECORDED_EVENT, payload.clone()) {
+            Ok(()) => return,
+            Err(error) => last_error = error,
+        }
+    }
+    eprintln!("maru: usage receipt not recorded for run {run_id}: {last_error}");
+    let marker = serde_json::json!({ "pending": 1, "error": last_error });
+    if let Err(error) = append(USAGE_INCOMPLETE_EVENT, marker) {
+        eprintln!("maru: usage incomplete marker not recorded for run {run_id}: {error}");
+    }
 }
 
 fn format_spawn_error(err: &std::io::Error) -> String {
@@ -1938,10 +2028,10 @@ mod phase08_04 {
                 retry_payload: serde_json::json!({}),
                 write_roots: Vec::new(),
                 parents: Vec::new(),
-                // This test builds its own command, so no JSON flag was added.
+                // This test builds its own command, so no format flag was added.
                 usage: BackgroundUsage {
                     provider: "claude".into(),
-                    claude_json: false,
+                    output: BackgroundOutput::Plain,
                 },
             },
         );
@@ -2493,16 +2583,59 @@ mod usage_receipts {
     use std::time::Duration;
     use tauri::{Listener, Manager};
 
-    /// The shape `claude -p ... --output-format json` prints (Claude Code CLI,
-    /// 2026-11-08), with the session id and uuid replaced. `costBasis: "list"`
-    /// is the CLI's own price computation, so its amount is an estimate and
-    /// never a bill.
-    fn envelope(result: &str) -> String {
+    /// The working part of one captured `claude -p ... --output-format
+    /// stream-json --verbose` run (Claude Code CLI 2.1.321, 2026-11-08), with
+    /// the session id and thinking signature replaced and the hook chatter
+    /// dropped: a protocol event with nothing to show, one that carries only
+    /// thinking, and the assistant's text. `costBasis: "list"` in the terminal
+    /// event is the CLI's own price computation, so its amount is an estimate
+    /// and never a bill.
+    fn stream_head(answer: &str) -> Vec<String> {
+        let session = "00000000-0000-0000-0000-000000000000";
+        [
+            serde_json::json!({
+                "type": "system",
+                "subtype": "init",
+                "cwd": "/workspace",
+                "session_id": session,
+                "tools": ["Bash", "Edit"],
+                "model": "claude-opus-5-5",
+            }),
+            serde_json::json!({
+                "type": "system",
+                "subtype": "thinking_tokens",
+                "estimated_tokens": 50,
+                "session_id": session,
+            }),
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "model": "claude-opus-5-5",
+                    "role": "assistant",
+                    "content": [{ "type": "thinking", "thinking": "planning" }],
+                },
+            }),
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "model": "claude-opus-5-5",
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": answer }],
+                },
+            }),
+        ]
+        .iter()
+        .map(|event| event.to_string())
+        .collect()
+    }
+
+    /// The terminal event of the same run: the counters a receipt is built from.
+    fn stream_result(answer: &str) -> String {
         serde_json::json!({
             "type": "result",
             "subtype": "success",
             "is_error": false,
-            "result": result,
+            "result": answer,
             "session_id": "00000000-0000-0000-0000-000000000000",
             "total_cost_usd": 0.0123,
             "usage": {
@@ -2525,12 +2658,34 @@ mod usage_receipts {
         .to_string()
     }
 
-    /// A CLI that fails the run unless it was asked for JSON, then prints one
-    /// envelope and exits with `code`.
-    fn json_cli(dir: PathBuf, result: &str, code: u8) -> PathBuf {
+    /// Exits 7 unless the run carried both flags a stream-json call needs.
+    const STREAM_GUARD: &str = "#!/bin/sh\ncase \"$*\" in *'--output-format stream-json'*) ;; *) echo 'stream-json output not requested' >&2; exit 7 ;; esac\ncase \"$*\" in *'--verbose'*) ;; *) echo 'stream-json needs --verbose' >&2; exit 7 ;; esac\n";
+
+    fn print_events(events: &[String]) -> String {
+        events
+            .iter()
+            .map(|event| format!("printf '%s\\n' {}\n", shell_quote(event)))
+            .collect()
+    }
+
+    /// A CLI that prints the captured stream and exits with `code`.
+    fn stream_cli(dir: PathBuf, answer: &str, code: u8) -> PathBuf {
         let script = format!(
-            "#!/bin/sh\ncase \"$*\" in *'--output-format json'*) ;; *) echo 'json output not requested' >&2; exit 7 ;; esac\nprintf '%s\\n' {}\nexit {code}\n",
-            shell_quote(&envelope(result)),
+            "{STREAM_GUARD}{}{}exit {code}\n",
+            print_events(&stream_head(answer)),
+            print_events(&[stream_result(answer)]),
+        );
+        tests::write_fake_cli(dir, &script)
+    }
+
+    /// The same stream, but it stops after the assistant text until `gate`
+    /// exists: a run that shows output long before it exits.
+    fn gated_stream_cli(dir: PathBuf, gate: &Path, answer: &str) -> PathBuf {
+        let script = format!(
+            "{STREAM_GUARD}{}i=0\nwhile [ ! -f {} ]; do i=$((i+1)); [ \"$i\" -lt 2000 ] || exit 2; sleep 0.01; done\n{}exit 0\n",
+            print_events(&stream_head(answer)),
+            shell_quote(&text(gate)),
+            print_events(&[stream_result(answer)]),
         );
         tests::write_fake_cli(dir, &script)
     }
@@ -2609,13 +2764,18 @@ mod usage_receipts {
             }
         }
 
-        /// Dispatch once and wait for the run to finish; returns the run id.
-        fn dispatch(&self, runtime: &str) -> String {
-            let id = run(ipc::skills_dispatch_background(
+        /// Dispatch once and return the run id, without waiting for the exit.
+        fn start(&self, runtime: &str) -> String {
+            run(ipc::skills_dispatch_background(
                 self.app.handle().clone(),
                 args(&self.skill.id, &self.cwd, &self.cli, runtime),
             ))
-            .unwrap();
+            .unwrap()
+        }
+
+        /// Dispatch once and wait for the run to finish; returns the run id.
+        fn dispatch(&self, runtime: &str) -> String {
+            let id = self.start(runtime);
             self.done
                 .recv_timeout(Duration::from_secs(10))
                 .expect("background run completed");
@@ -2672,22 +2832,28 @@ mod usage_receipts {
     #[test]
     fn background_claude_run_records_usage_and_keeps_caller_output() {
         let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
-        let cli = json_cli(temp.path().join("provider"), "first line\nsecond line", 0);
-        let fixture = Fixture::new("usage-json", cli);
+        let cli = stream_cli(temp.path().join("provider"), "first line\nsecond line", 0);
+        let fixture = Fixture::new("usage-stream", cli);
         let id = fixture.dispatch("claude");
-        // The caller sees the result text, exactly as a plain-output run prints it.
+        // The caller sees the assistant text, exactly as a plain-output run prints it.
         let expected = vec!["first line".to_string(), "second line".to_string()];
         assert_eq!(fixture.streamed_lines(), expected);
         let events = fixture.events(&id);
         assert_eq!(logged_lines(&events), expected);
         let raw = fixture.raw_log(&id);
-        assert!(
-            !raw.contains("\"type\":\"result\""),
-            "the JSON envelope reached the run log: {raw}"
-        );
+        for protocol in [
+            "\"type\":\"result\"",
+            "\"type\":\"assistant\"",
+            "\"type\":\"system\"",
+        ] {
+            assert!(
+                !raw.contains(protocol),
+                "the {protocol} event reached the run log: {raw}"
+            );
+        }
         assert!(
             !raw.contains("00000000-0000-0000-0000-000000000000"),
-            "envelope session metadata reached the run log: {raw}"
+            "stream session metadata reached the run log: {raw}"
         );
         let receipts = receipts(&events);
         assert_eq!(receipts.len(), 1, "one receipt per dispatch");
@@ -2730,15 +2896,83 @@ mod usage_receipts {
         assert_eq!(summary.output_tokens, 44);
     }
 
+    /// U1: the output reaches the caller while the run is still working. A
+    /// buffered run showed nothing until exit, so `mission_state` turned it
+    /// Idle after `IDLE_AFTER_SECONDS` and the panel said the run had stopped
+    /// producing output.
     #[test]
-    fn claude_run_without_a_json_result_records_unavailable_and_keeps_output() {
+    fn streamed_output_reaches_the_caller_before_the_run_exits() {
         let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
-        // Asked for JSON, printed plain text: an older CLI or a wrapper script.
+        let gate = temp.path().join("release");
+        let cli = gated_stream_cli(
+            temp.path().join("provider"),
+            &gate,
+            "first line\nsecond line",
+        );
+        let fixture = Fixture::new("usage-live-output", cli);
+        let id = fixture.start("claude");
+        // The fixture is blocked on the gate: anything that already arrived came
+        // before the process exited.
+        let first = fixture
+            .streamed
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the first output line reached the caller before exit");
+        assert_eq!(first, "first line");
+        // One text block, two caller lines: the line semantics of a plain run.
+        let second = fixture
+            .streamed
+            .recv_timeout(Duration::from_secs(5))
+            .expect("every line of the block reached the caller before exit");
+        assert_eq!(second, "second line");
+        assert!(
+            fixture.done.try_recv().is_err(),
+            "the run was still going when its output arrived"
+        );
+        // Emitting a line is what refreshes `last_output_at`, so the mission log
+        // holds the text and a stale-run sweep cannot call this run Idle.
+        let mission = mission_state::mission_mutation_paths(&id).unwrap();
+        let journal = fs::read_to_string(&mission[2]).unwrap();
+        assert!(
+            journal.contains("first line"),
+            "the mission's output touch never saw the streamed line: {journal}"
+        );
+        let record: mission_state::MissionRecord =
+            serde_json::from_slice(&fs::read(&mission[1]).unwrap()).unwrap();
+        assert_eq!(record.status, mission_state::MissionStatus::Running);
+        fs::write(&gate, b"release").unwrap();
+        fixture
+            .done
+            .recv_timeout(Duration::from_secs(10))
+            .expect("background run completed");
+        // The usage comes from the terminal event, not from the streamed text.
+        let events = fixture.events(&id);
+        let receipts = receipts(&events);
+        assert_eq!(receipts.len(), 1);
+        let receipt = &receipts[0];
+        assert_eq!(receipt.tokens.input, Some(11));
+        assert_eq!(receipt.tokens.cached_read, Some(33));
+        assert_eq!(receipt.tokens.cache_write, Some(22));
+        assert_eq!(receipt.tokens.output, Some(44));
+        assert_eq!(receipt.pricing_status, PricingStatus::Estimate);
+        assert!(receipt.amounts_consistent());
+        assert_eq!(receipt.outcome, "ok");
+        assert!(
+            fixture.streamed_lines().is_empty(),
+            "the terminal event repeated text that already streamed"
+        );
+        assert_eq!(summary(&fixture.cwd, &id).receipt_count, 1);
+    }
+
+    #[test]
+    fn claude_run_without_a_parseable_stream_records_unavailable_and_keeps_output() {
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        // Asked for stream-json, printed plain text: an older CLI or a wrapper
+        // script. The lines still reach the caller, and no usage is invented.
         let cli = plain_cli(
             temp.path().join("provider"),
             "#!/bin/sh\nprintf 'plain one\\nplain two\\n'\nexit 0\n",
         );
-        let fixture = Fixture::new("usage-no-envelope", cli);
+        let fixture = Fixture::new("usage-no-stream", cli);
         let id = fixture.dispatch("claude");
         let expected = vec!["plain one".to_string(), "plain two".to_string()];
         assert_eq!(fixture.streamed_lines(), expected);
@@ -2778,7 +3012,7 @@ mod usage_receipts {
     #[test]
     fn failed_background_run_keeps_the_usage_it_spent() {
         let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
-        let cli = json_cli(temp.path().join("provider"), "partial answer", 9);
+        let cli = stream_cli(temp.path().join("provider"), "partial answer", 9);
         let fixture = Fixture::new("usage-failed", cli);
         let id = fixture.dispatch("claude");
         let events = fixture.events(&id);
@@ -2797,7 +3031,7 @@ mod usage_receipts {
     #[test]
     fn each_retry_records_its_own_receipt_and_a_replayed_receipt_counts_once() {
         let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
-        let cli = json_cli(temp.path().join("provider"), "answer", 0);
+        let cli = stream_cli(temp.path().join("provider"), "answer", 0);
         let fixture = Fixture::new("usage-retry", cli);
         let first = fixture.dispatch("claude");
         // A retry re-dispatches the saved payload: a new run, so a new receipt.
@@ -2826,7 +3060,7 @@ mod usage_receipts {
     }
 
     #[test]
-    fn a_json_wrapped_proposal_still_creates_the_proposal_event() {
+    fn a_streamed_proposal_still_creates_the_proposal_event() {
         let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
         let proposal = serde_json::json!({
             "summary": "usage slice",
@@ -2837,7 +3071,7 @@ mod usage_receipts {
             "schemaVersion": SKILL_PROPOSAL_SCHEMA_VERSION,
         })
         .to_string();
-        let cli = json_cli(
+        let cli = stream_cli(
             temp.path().join("provider"),
             &format!("Proposal:\n```json\n{proposal}\n```"),
             0,
@@ -2848,9 +3082,80 @@ mod usage_receipts {
         let proposal = events
             .iter()
             .find(|event| event.event_type == "proposal.created")
-            .expect("the unwrapped result still parses as a proposal");
+            .expect("the streamed answer still parses as a proposal");
         assert_eq!(proposal.payload["proposal"]["summary"], "usage slice");
         assert_eq!(receipts(&events)[0].tokens.input, Some(11));
         assert_eq!(summary(&fixture.cwd, &id).receipt_count, 1);
+    }
+
+    fn captured_receipt() -> UsageReceipt {
+        parse_claude_json_result(&stream_result("answer"), "ok")
+            .expect("the captured stream result carries usage")
+            .1
+    }
+
+    /// U2: a receipt whose append keeps failing leaves a `usage.incomplete`
+    /// marker, so a replay summary shows the gap instead of counting the run as
+    /// `receiptCount: 0`. Every attempt carries the same receipt id, which makes
+    /// a late success harmless.
+    #[test]
+    fn a_receipt_write_that_keeps_failing_leaves_an_incomplete_marker() {
+        let mut receipt = captured_receipt();
+        receipt.outcome = "ok".to_string();
+        let mut attempts: Vec<JsonValue> = Vec::new();
+        let mut markers: Vec<(String, JsonValue)> = Vec::new();
+        write_usage_receipt(&receipt, "run-1", |kind, payload| {
+            if kind == USAGE_RECORDED_EVENT {
+                attempts.push(payload);
+                Err("run_events_write_failed".to_string())
+            } else {
+                markers.push((kind.to_string(), payload));
+                Ok(())
+            }
+        });
+        assert_eq!(attempts.len(), 3, "the append is retried, not dropped");
+        assert_eq!(
+            attempts[0]["receipt"]["receiptId"], attempts[2]["receipt"]["receiptId"],
+            "a retry must not mint a second receipt identity",
+        );
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].0, USAGE_INCOMPLETE_EVENT);
+        assert_eq!(markers[0].1["pending"], 1);
+        // What the summary then reports: no receipt, one pending gap.
+        let event = crate::agent_host::contracts::new_run_event(
+            "run-1",
+            markers[0].0.clone(),
+            "provider",
+            markers[0].1.clone(),
+            None,
+        );
+        let summary = crate::agent_host::usage::summarize_usage(&[event]);
+        assert_eq!(summary.receipt_count, 0);
+        assert_eq!(summary.pending_count, 1);
+    }
+
+    #[test]
+    fn a_transient_receipt_write_failure_records_the_receipt_once() {
+        let mut receipt = captured_receipt();
+        receipt.outcome = "ok".to_string();
+        let mut attempts = 0;
+        let mut written: Vec<JsonValue> = Vec::new();
+        let mut markers: Vec<JsonValue> = Vec::new();
+        write_usage_receipt(&receipt, "run-1", |kind, payload| {
+            if kind == USAGE_RECORDED_EVENT {
+                attempts += 1;
+                if attempts == 1 {
+                    return Err("transient".to_string());
+                }
+                written.push(payload);
+                return Ok(());
+            }
+            markers.push(payload);
+            Ok(())
+        });
+        assert_eq!(attempts, 2);
+        assert_eq!(written.len(), 1, "one receipt, recorded once");
+        assert_eq!(written[0]["receipt"]["receiptId"], receipt.receipt_id);
+        assert!(markers.is_empty(), "recovered usage leaves no gap marker");
     }
 }
