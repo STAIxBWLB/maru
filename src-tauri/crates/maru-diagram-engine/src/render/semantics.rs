@@ -269,7 +269,7 @@ mod tests {
             ),
             (
                 "workflow",
-                json!({"nodes":[{"id":"a","type":"backend","lane":"main"}]}),
+                json!({"lanes":[{"id":"main","label":"Main"}],"nodes":[{"id":"a","type":"backend","lane":"main"}]}),
                 "backend",
                 Some("main"),
             ),

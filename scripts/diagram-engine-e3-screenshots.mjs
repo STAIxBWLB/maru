@@ -36,6 +36,21 @@ try{
   const spec=seedFor(type);spec.meta.title=`마루 ${type} 렌더`;spec.meta.subtitle="결정적 SVG · 접근성 검증";
   const collection={architecture:"components",workflow:"nodes",sequence:"participants",dataflow:"nodes",lifecycle:"states"}[type];
   spec[collection].forEach((node,i)=>{node.label=["입력","처리","완료"][i%3];});
+  if(type==="sequence"){
+    spec.messages[0].label="호출";
+    spec.messages.push({from:"b",to:"a",y:240,label:"응답",variant:"return"});
+    spec.activations=[{participant:"b",from:180,to:260}];
+    spec.segments=[{label:"구간",from:160,to:300}];
+  }
+  if(type==="dataflow"){
+    spec.stages.push({label:"Storage"});
+    spec.nodes.push({id:"c",type:"database",label:"저장",stage:2,row:0});
+    spec.flows.push({from:"b",to:"c",label:"저장",variant:"dashed"});
+  }
+  if(type==="lifecycle"){
+    spec.states.push({id:"c",type:"success",label:"완료",lane:"main",col:2});
+    spec.transitions.push({from:"b",to:"c",label:"완료"});
+  }
   for(const theme of ["light","dark"]){
    await page.goto(origin);
    const captured=await page.evaluate(async({spec,theme})=>{
