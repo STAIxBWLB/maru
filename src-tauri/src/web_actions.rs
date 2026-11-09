@@ -28,7 +28,7 @@ use crate::document::revision_for;
 use crate::frontmatter::{update_frontmatter_content, FrontmatterValue};
 use crate::ipc_error::{IpcError, TODAY_CONFLICT, WEB_ACTION_REPAIR_CONFLICT};
 use crate::task_execution_claims::{
-    action_error, guard_task_mutations, has_task_claim, TaskMutationGuard,
+    action_error, has_task_claim, lock_task_claims, BatchClaimLocks, TaskMutationGuard,
 };
 use crate::tasks::{
     normalize_task_frontmatter_aliases, string_field, task_display_title, yaml_to_json, TaskBucket,
@@ -784,12 +784,13 @@ fn queue_upsert(
     Ok(())
 }
 
-/// Find the claim guard `web_actions_apply` took for this note before its
-/// lease. A completion whose claim appeared after that scan cannot be locked
-/// any more without taking a claim lock while the lease is held, so it is
-/// refused instead of applied.
-fn batch_claim_guard<'a>(
-    guards: &'a mut [TaskMutationGuard],
+/// Resolve the claim guard `web_actions_apply` took for this note before its
+/// lease. A claim the batch could not lock is rejected for this receipt alone,
+/// so the rest of the batch still applies. A completion whose claim appeared
+/// after that scan cannot be locked any more without taking a claim lock while
+/// the lease is held, so it is refused instead of applied.
+fn batch_claim_lock<'a>(
+    locks: &'a mut BatchClaimLocks,
     work: &Path,
     note: &Path,
 ) -> Result<Option<&'a mut TaskMutationGuard>, String> {
@@ -801,8 +802,11 @@ fn batch_claim_guard<'a>(
             "refresh the task path and retry",
         )
     })?;
-    if let Some(index) = guards.iter().position(|guard| guard.source() == canonical) {
-        return Ok(Some(&mut guards[index]));
+    if let Some(reason) = locks.failure_for(&canonical) {
+        return Err(reason.to_string());
+    }
+    if let Some(guard) = locks.guard_for(&canonical) {
+        return Ok(Some(guard));
     }
     if has_task_claim(work, note)? {
         return Err(action_error(
@@ -829,7 +833,7 @@ fn apply_receipt(
     receipt: &Receipt,
     default_task_list_id: Option<&str>,
     now_iso: &str,
-    guards: &mut [TaskMutationGuard],
+    locks: &mut BatchClaimLocks,
 ) -> Result<WebActionState, String> {
     if ledger_has(work, &receipt.id) || has_web_action(work, &receipt.id)? {
         return Ok(WebActionState::Skipped);
@@ -862,7 +866,7 @@ fn apply_receipt(
                 .unwrap_or_else(|| receipt.requested_at.clone());
             let done = string_field(&frontmatter, "done")
                 .unwrap_or_else(|| completed_at.get(..10).unwrap_or(&completed_at).to_string());
-            let claim = batch_claim_guard(guards, work, &note)?;
+            let claim = batch_claim_lock(locks, work, &note)?;
             task_transition_in_transaction(
                 lease,
                 work_path.to_string(),
@@ -1290,15 +1294,17 @@ pub fn web_actions_apply(
         .with_workspace_registry()?;
     // Claim locks first, sorted by task id, for every opted-in note this batch
     // will complete. The batch may not take one later: its own lease is held.
-    let claims = batch_claim_sources(&work_path, &work)?;
-    let mut guards = guard_task_mutations(&work, &claims)?;
+    // A claim that cannot be locked is reported against its own receipt by the
+    // loop, so one unreadable note cannot abort the rest of the batch.
+    let claims = batch_claim_sources(&work_path, &work);
+    let mut locks = lock_task_claims(&work, &claims);
     with_path_transactions(admission, |lease| {
         web_actions_apply_in_transaction(
             lease,
             work_path,
             now_iso,
             default_task_list_id,
-            &mut guards,
+            &mut locks,
         )
     })
 }
@@ -1306,7 +1312,11 @@ pub fn web_actions_apply(
 /// The notes of the pending batch that a completion would mutate. Read
 /// without locking so the caller can order its claim locks; a receipt that
 /// disappears or fails to parse here is left to the loop, which reports it.
-fn batch_claim_sources(work_path: &str, work: &Path) -> Result<Vec<PathBuf>, String> {
+/// A receipt the loop would skip as a replay is left out too: it must not hold
+/// a claim lock for the whole batch. Nothing here fails the batch: a receipt
+/// the scan cannot classify is passed over, and the loop's own replay check
+/// then rejects it on its own.
+fn batch_claim_sources(work_path: &str, work: &Path) -> Vec<PathBuf> {
     let mut sources = Vec::new();
     for path in pending_receipt_files(work) {
         let Ok(receipt) = load_receipt(work, &path) else {
@@ -1315,12 +1325,22 @@ fn batch_claim_sources(work_path: &str, work: &Path) -> Result<Vec<PathBuf>, Str
         if receipt.operation != WebActionOperation::Complete {
             continue;
         }
-        let note = resolve_inside_vault(work_path, &receipt.task_path)?;
+        if ledger_has(work, &receipt.id) {
+            continue;
+        }
+        // A replay, or a replay check that cannot answer, holds no claim: the
+        // loop reports the latter against the receipt itself.
+        if !matches!(has_web_action(work, &receipt.id), Ok(false)) {
+            continue;
+        }
+        let Ok(note) = resolve_inside_vault(work_path, &receipt.task_path) else {
+            continue;
+        };
         if note.is_file() {
-            sources.push(note);
+            sources.push(note.canonicalize().unwrap_or(note));
         }
     }
-    Ok(sources)
+    sources
 }
 
 pub(crate) fn web_actions_apply_in_transaction(
@@ -1328,7 +1348,7 @@ pub(crate) fn web_actions_apply_in_transaction(
     work_path: String,
     now_iso: String,
     default_task_list_id: Option<String>,
-    guards: &mut [TaskMutationGuard],
+    locks: &mut BatchClaimLocks,
 ) -> Result<WebActionsOutcome, String> {
     let work = normalize_existing_dir(&work_path)?;
     let mut paths = vec![
@@ -1375,7 +1395,7 @@ pub(crate) fn web_actions_apply_in_transaction(
             &receipt,
             default_task_list_id.as_deref(),
             &now_iso,
-            guards,
+            locks,
         ) {
             Ok(state) => {
                 move_to_applied(&work, &path)?;
@@ -2473,6 +2493,69 @@ mod tests {
     }
 
     // --- complete -----------------------------------------------------------
+
+    /// One completion whose claim cannot be locked is rejected on its own, with
+    /// its cause and next step, and the rest of the batch still applies. The
+    /// batch takes its claim locks before its lease, so it may not take one
+    /// later: an aborted batch here would strand every other receipt behind one
+    /// unreadable claim file.
+    #[test]
+    fn an_unlockable_claim_rejects_only_its_receipt() {
+        use crate::atomic_file::phase08_06::Home;
+        let _home = Home::new();
+        let tmp = tempfile::tempdir().unwrap();
+        // Sorts first, so the failure happens before the healthy receipt.
+        let opted_in = tmp.path().join("tasks/active/opted-in.md");
+        fs::create_dir_all(opted_in.parent().unwrap()).unwrap();
+        fs::write(
+            &opted_in,
+            "---\nstatus: done\ndone: 2026-08-16\ntaskId: opted-in\n---\n# Opted in\n",
+        )
+        .unwrap();
+        let claimed = blob_sha(&opted_in).unwrap();
+        write_receipt(
+            tmp.path(),
+            ID,
+            &format!(
+                "schemaVersion: {WEB_ACTION_SCHEMA_VERSION}\nid: {ID}\noperation: complete\ntaskPath: tasks/active/opted-in.md\nexpectedTaskBlobSha: {claimed}\nrequestedAt: \"{NOW}\"\nrequestedBy: web:owner@example.com\n"
+            ),
+        );
+        let claims = tmp.path().join(".maru/task-execution");
+        fs::create_dir_all(&claims).unwrap();
+        fs::write(claims.join("opted-in.json"), "{ not a claim").unwrap();
+
+        let ordinary = tmp.path().join("tasks/active/ordinary.md");
+        fs::write(
+            &ordinary,
+            "---\nstatus: done\ndone: 2026-08-16\n---\n# Ordinary\n",
+        )
+        .unwrap();
+        let plain = blob_sha(&ordinary).unwrap();
+        write_receipt(
+            tmp.path(),
+            OTHER_ID,
+            &format!(
+                "schemaVersion: {WEB_ACTION_SCHEMA_VERSION}\nid: {OTHER_ID}\noperation: complete\ntaskPath: tasks/active/ordinary.md\nexpectedTaskBlobSha: {plain}\nrequestedAt: \"{NOW}\"\nrequestedBy: web:owner@example.com\n"
+            ),
+        );
+
+        let outcome = apply(&tmp);
+
+        assert_eq!(outcome.applied, 1, "{outcome:?}");
+        assert_eq!(outcome.stale, 1, "{outcome:?}");
+        assert!(tmp.path().join("tasks/archive/ordinary.md").is_file());
+        assert!(opted_in.is_file());
+        let rejected = outcome
+            .items
+            .iter()
+            .find(|item| item.id == ID)
+            .unwrap_or_else(|| panic!("no report for the unreadable claim: {outcome:?}"));
+        assert_eq!(rejected.state, WebActionState::Stale);
+        let reason = rejected.reason.as_deref().unwrap_or_default();
+        assert!(reason.contains("task_execution_claim_invalid"), "{reason}");
+        assert!(reason.contains("cause="), "{reason}");
+        assert!(reason.contains("next="), "{reason}");
+    }
 
     #[test]
     fn complete_archives_the_note_queues_one_op_and_acknowledges_the_receipt() {

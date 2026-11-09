@@ -1013,6 +1013,36 @@ fn task_note_carrying(work: &Path, task_id: &str) -> PathBuf {
     panic!("no note carries taskId {task_id}; scanned {scanned:?}");
 }
 
+/// The claim lock file `lock_task_claims` blocks on for `task_id`.
+fn claim_lock_file(work: &Path, task_id: &str) -> PathBuf {
+    let work = normalize_existing_dir(&display(work)).unwrap();
+    let roots = WorkspaceRoots {
+        work: work.clone(),
+        tasks: work,
+        identity: String::new(),
+    };
+    task_lock_path(&roots, task_id)
+}
+
+/// True when no one holds the claim lock at `path`. A second open handle
+/// conflicts with the first even inside one process, so this is a real probe
+/// of the lock and not of a shared in-process flag.
+fn claim_lock_is_free(path: &Path) -> bool {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap_or_else(|error| panic!("cannot probe {}: {error}", display(path)));
+    file.try_lock().is_ok()
+}
+
+/// The Today work lock is keyed on the normalized workspace path, and a temp
+/// dir is reached through `/var` on macOS: a raw fixture path would name a
+/// different mutex than the writer's.
+fn work_lock_key(work: &Path) -> PathBuf {
+    normalize_existing_dir(&display(work)).unwrap()
+}
+
 /// AC1: while another process holds the claim, a document save and a Today
 /// completion both wait for it, and a spawn never starts after such a write
 /// has committed.
@@ -1218,7 +1248,7 @@ fn claim_today_work_lock_and_lease_never_invert_between_writers() {
 
     // 1. The claim lock is not behind the Today work lock: a document writer
     //    takes it while another actor holds the work lock.
-    let today_lock = crate::today_store::work_lock_for(&f.work).unwrap();
+    let today_lock = crate::today_store::work_lock_for(&work_lock_key(&f.work)).unwrap();
     let held_work = today_lock.lock().unwrap_or_else(|error| error.into_inner());
     let (tx, rx) = mpsc::channel();
     let (work, path) = (f.work.clone(), f.path.clone());
@@ -1236,6 +1266,7 @@ fn claim_today_work_lock_and_lease_never_invert_between_writers() {
     //    the work lock stays free for the next writer.
     let held_claim = guard_task_mutation(&f.work, &f.path).unwrap().unwrap();
     let bound = fs::read_to_string(&f.path).unwrap();
+    let waiting = claim_lock_wait::watch(&claim_lock_file(&f.work, &claim.task_id));
     let (tx, rx) = mpsc::channel();
     let (work, path) = (f.work.clone(), f.path.clone());
     let transition = std::thread::spawn(move || {
@@ -1256,22 +1287,17 @@ fn claim_today_work_lock_and_lease_never_invert_between_writers() {
         ))
         .ok();
     });
-    // The transition is in flight and blocked on the claim lock. If it took the
-    // Today work lock first, this acquisition would deadlock instead of
-    // completing, so it runs on its own thread with a deadline.
-    let today_lock = crate::today_store::work_lock_for(&f.work).unwrap();
-    let (tx_work, rx_work) = mpsc::channel();
-    let holder = std::thread::spawn(move || {
-        let held = today_lock.lock().unwrap_or_else(|error| error.into_inner());
-        tx_work.send(()).ok();
-        std::thread::sleep(Duration::from_millis(200));
-        drop(held);
-    });
-    rx_work
+    // Rendezvous with the wait itself: the claim lock is held here, so a
+    // transition that has reached this point stays there, and the next lock it
+    // could take is the Today work lock.
+    waiting
         .recv_timeout(Duration::from_secs(30))
-        .expect("the Today work lock must stay free while a transition waits on the claim lock");
-    holder.join().unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+        .expect("the transition must reach the claim-lock wait");
+    let today_lock = crate::today_store::work_lock_for(&work_lock_key(&f.work)).unwrap();
+    assert!(
+        today_lock.try_lock().is_ok(),
+        "the transition holds the Today work lock while waiting on the claim lock"
+    );
     assert!(
         !f.work.join("tasks/archive/task.md").exists(),
         "the transition wrote while the claim lock was held"
@@ -1284,29 +1310,52 @@ fn claim_today_work_lock_and_lease_never_invert_between_writers() {
     assert_eq!(outcome.bucket, "archive");
     transition.join().unwrap();
 
-    // 3. A batch locks in task-id order whatever order the caller lists it in.
-    //    The first note moved to the archive bucket, so resolve its new path.
+    // 3. A batch takes its claim locks in task-id order whatever order the
+    //    caller lists them in. The higher id is held here, so the batch stops
+    //    inside that wait with its earlier locks already taken, and the lock it
+    //    holds then says which end it started from. The first note moved to the
+    //    archive bucket, so resolve its new path.
     let (first_source, second_source) = (task_note_carrying(&f.work, &claim.task_id), second);
+    let mut ordered = [
+        (claim.task_id.clone(), first_source),
+        (second_claim.task_id.clone(), second_source),
+    ];
+    ordered.sort_by(|left, right| left.0.cmp(&right.0));
+    let (low_id, low_source) = ordered[0].clone();
+    let (high_id, high_source) = ordered[1].clone();
+    assert_ne!(claim.task_id, second_claim.task_id);
+    let low_lock = claim_lock_file(&f.work, &low_id);
     let (tx, rx) = mpsc::channel();
     for reversed in [false, true] {
+        let held = guard_task_mutation(&f.work, &high_source).unwrap().unwrap();
+        assert!(
+            claim_lock_is_free(&low_lock),
+            "the probe needs the low lock free"
+        );
+        let waiting = claim_lock_wait::watch(&claim_lock_file(&f.work, &high_id));
         let (work, tx) = (f.work.clone(), tx.clone());
-        let (first, second) = (first_source.clone(), second_source.clone());
+        let (first, second) = (low_source.clone(), high_source.clone());
         std::thread::spawn(move || {
             let sources = if reversed {
                 vec![second, first]
             } else {
                 vec![first, second]
             };
-            tx.send(guard_task_mutations(&work, &sources).map(|guards| guards.len()))
+            tx.send(lock_task_claims(&work, &sources).locked_count())
                 .ok();
         });
-    }
-    for _ in 0..2 {
-        let count = rx
+        waiting
             .recv_timeout(Duration::from_secs(30))
-            .expect("claim locks must be taken in one order whatever the input order")
-            .unwrap();
-        assert_eq!(count, 2);
+            .expect("the batch must reach the wait for its highest task id");
+        assert!(
+            !claim_lock_is_free(&low_lock),
+            "reversed={reversed}: the batch stopped at the highest task id before taking the lowest one"
+        );
+        drop(held);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(30))
+                .expect("both claims must be locked once the batch owns the highest id"),
+            2
+        );
     }
-    assert_ne!(claim.task_id, second_claim.task_id);
 }
