@@ -30,7 +30,7 @@ struct Request {
     #[serde(default)]
     pin_set: Option<PinSet>,
 }
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactReport {
     pub api_version: u32,
@@ -61,6 +61,13 @@ fn failed(mut receipt: EngineReceipt, diagnostics: Vec<Diagnostic>, scope: &str)
     }
 }
 pub fn render_artifact_json(input: &str) -> ArtifactReport {
+    render(input, false)
+}
+#[cfg(feature = "render-png")]
+pub fn render_png_artifact_json(input: &str) -> ArtifactReport {
+    render(input, true)
+}
+fn render(input: &str, png_only: bool) -> ArtifactReport {
     let bad = |cause: Diagnostic| {
         let mut receipt = crate::make_report(input, None, Vec::new()).receipt;
         receipt.gates.schema = crate::gate("not-run", "render-request");
@@ -85,6 +92,14 @@ pub fn render_artifact_json(input: &str) -> ArtifactReport {
             ))
         }
     };
+    if png_only && !matches!(request.format, ArtifactFormat::Png) {
+        return bad(super::error(
+            "png-command-format",
+            "/format",
+            "native PNG command does not export SVG",
+            "use the WASM SVG renderer or request format png",
+        ));
+    }
     let layout = crate::layout::layout_json(
         &serde_json::to_string(&LayoutRequest {
             spec_json: request.spec_json.clone(),

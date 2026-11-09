@@ -43,6 +43,15 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function validDiagnostic(value: unknown): value is Diagnostic {
+  return record(value)
+    && typeof value.code === "string"
+    && typeof value.path === "string"
+    && typeof value.rule === "string"
+    && typeof value.message === "string"
+    && typeof value.fix === "string";
+}
+
 function validReceipt(value: unknown): boolean {
   if (!record(value) || typeof value.schemaVersion !== "number"
       || typeof value.inputSpecSha256 !== "string" || !record(value.engine)
@@ -66,7 +75,8 @@ function parseReport(value: unknown): EngineArtifactReport {
       || !(report.svg === null || typeof report.svg === "string")
       || !(report.width === null || (typeof report.width === "number" && Number.isFinite(report.width)))
       || !(report.height === null || (typeof report.height === "number" && Number.isFinite(report.height)))
-      || !Array.isArray(report.diagnostics) || !validReceipt(report.receipt)) {
+      || !Array.isArray(report.diagnostics) || !report.diagnostics.every(validDiagnostic)
+      || !validReceipt(report.receipt)) {
     throw new Error("The Rust artifact report has an incompatible shape; rebuild the matching generated bindings.");
   }
   if (Array.isArray(report.bytes) && report.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
@@ -185,10 +195,25 @@ export async function exportVerifiedEngineArtifactForTest(input: {
     ...(input.pinSet ? { pinSet: input.pinSet } : {}),
   }, input.host);
   current();
-  if (!report.ok || !report.bytes || !report.svg || !Number.isInteger(report.width) || !report.width
-      || !Number.isInteger(report.height) || !report.height || report.bytes.length > 32 * 1024 * 1024
-      || report.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
-    throw new Error("The Rust engine refused the source or returned invalid artifact bytes; repair the semantic dataset and retry.");
+  if (!report.ok) {
+    const diagnostic = report.diagnostics[0];
+    if (diagnostic && diagnostic.message.trim() && diagnostic.fix.trim()) {
+      throw new Error(`${diagnostic.message} ${diagnostic.fix} (Rust diagnostic ${diagnostic.code} at ${diagnostic.path}).`);
+    }
+    throw new Error("The Rust engine refused the artifact without an actionable diagnostic; rebuild the matching engine-render or engine-png artifact and retry.");
+  }
+  if (!report.bytes || !report.svg) {
+    throw new Error("The Rust engine marked an artifact successful without returning its bytes and SVG; rebuild the matching engine-render or engine-png artifact and retry.");
+  }
+  if (typeof report.width !== "number" || !Number.isInteger(report.width) || report.width <= 0
+      || typeof report.height !== "number" || !Number.isInteger(report.height) || report.height <= 0) {
+    throw new Error("The Rust engine returned invalid artifact pixel dimensions; reduce the requested output size and rebuild the matching engine artifact.");
+  }
+  if (report.bytes.length > 32 * 1024 * 1024) {
+    throw new Error("The Rust engine returned artifact bytes above the 32 MiB transport limit; reduce output dimensions or pixel ratio and retry.");
+  }
+  if (report.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
+    throw new Error("The Rust engine returned byte values outside the binary range; rebuild the matching engine artifact and retry.");
   }
   const bytes = new Uint8Array(report.bytes);
   const svgBytes = new TextEncoder().encode(report.svg);

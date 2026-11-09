@@ -290,6 +290,10 @@ impl DiagramSources for FixtureSources {
 pub struct PluginState {
     pub host: Arc<dyn DiagramHost>,
     pub sources: Arc<dyn DiagramSources>,
+    #[cfg(feature = "png")]
+    rendering: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(all(feature = "png", test))]
+    worker_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
 }
 
 pub struct Builder {
@@ -306,9 +310,20 @@ impl Builder {
         let state = PluginState {
             host: self.host,
             sources: self.sources,
+            #[cfg(feature = "png")]
+            rendering: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(all(feature = "png", test))]
+            worker_thread: Arc::new(std::sync::Mutex::new(None)),
         };
-        tauri::plugin::Builder::new(PLUGIN_NAME)
-            .invoke_handler(tauri::generate_handler![commands::validate])
+        let builder = tauri::plugin::Builder::new(PLUGIN_NAME);
+        #[cfg(feature = "png")]
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::render_png
+        ]);
+        #[cfg(not(feature = "png"))]
+        let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
+        builder
             .setup(move |app, _api| {
                 app.manage(state.clone());
                 Ok(())
@@ -327,6 +342,46 @@ pub fn init<R: Runtime>(
 mod commands {
     use super::*;
 
+    #[cfg(feature = "png")]
+    struct RenderPermit(Arc<std::sync::atomic::AtomicBool>);
+    #[cfg(feature = "png")]
+    impl Drop for RenderPermit {
+        fn drop(&mut self) {
+            self.0.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+    #[cfg(feature = "png")]
+    #[tauri::command]
+    pub async fn render_png(
+        state: tauri::State<'_, PluginState>,
+        input: String,
+    ) -> Result<maru_diagram_engine::render::ArtifactReport, String> {
+        if input.len() > maru_diagram_engine::render::MAX_SVG_BYTES {
+            return Err("PNG request exceeds 16 MiB; reduce the source scene and retry".into());
+        }
+        let flag = Arc::clone(&state.rendering);
+        if flag
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return Err(
+                "a PNG export is already running; wait for that export to finish and retry".into(),
+            );
+        }
+        let permit = RenderPermit(flag);
+        #[cfg(test)]
+        let trace = Arc::clone(&state.worker_thread);
+        tauri::async_runtime::spawn_blocking(move||{
+            let _permit=permit;
+            #[cfg(test)] {*trace.lock().expect("test worker trace mutex")=Some(std::thread::current().id());}
+            maru_diagram_engine::render::render_png_artifact_json(&input)
+        }).await.map_err(|cause|format!("PNG worker failed: {cause}; retry export, or rebuild the native engine if it repeats"))
+    }
     #[tauri::command]
     pub async fn validate(
         _state: tauri::State<'_, PluginState>,
@@ -463,3 +518,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "png"))]
+mod png_tests;
