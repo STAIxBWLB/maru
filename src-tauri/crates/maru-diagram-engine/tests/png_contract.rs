@@ -45,7 +45,9 @@ fn all_families_rasterize_with_bundled_cjk_and_repeat_bytes() {
                 (decoded.width(), decoded.height()),
                 (first.width, first.height)
             );
-            assert!(decoded.data().chunks_exact(4).all(|pixel| pixel[3] == 255));
+            let (pixels, remainder) = decoded.data().as_chunks::<4>();
+            assert!(remainder.is_empty());
+            assert!(pixels.iter().all(|pixel| pixel[3] == 255));
         }
     }
 }
@@ -72,7 +74,7 @@ fn oversized_pixels_and_invalid_ratios_fail_before_allocation() {
     }
     g.page.bounds.width = 10_000 * 64;
     g.page.bounds.height = 10_000 * 64;
-    assert!(100_000_000 > MAX_PNG_PIXELS);
+    const { assert!(100_000_000 > MAX_PNG_PIXELS) };
     let error = dimensions(&g, PngOptions::default()).unwrap_err();
     assert!(!error.message.is_empty() && !error.fix.is_empty());
     g.page.bounds.width = i32::MAX;
