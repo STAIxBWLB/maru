@@ -9,6 +9,7 @@ pub(crate) struct Tokens {
     pub background: &'static str,
     pub text: &'static str,
     pub muted: &'static str,
+    pub dim: &'static str,
     pub mask: &'static str,
     pub lane_fill: &'static str,
     pub lane_stroke: &'static str,
@@ -28,6 +29,7 @@ impl SvgTheme {
                 background: "#020617",
                 text: "#ffffff",
                 muted: "#94a3b8",
+                dim: "#475569",
                 mask: "#0f172a",
                 lane_fill: "#0f172a",
                 lane_stroke: "#334155",
@@ -38,6 +40,7 @@ impl SvgTheme {
                 background: "#f4f5f7",
                 text: "#111827",
                 muted: "#5b6474",
+                dim: "#9aa3b2",
                 mask: "#ffffff",
                 lane_fill: "#f8fafc",
                 lane_stroke: "#cbd5e1",
@@ -201,6 +204,12 @@ mod tests {
             );
             assert!(theme.kind("unknown").is_none());
         }
+    }
+
+    #[test]
+    fn dim_text_token_matches_the_pinned_svg_palette() {
+        assert_eq!(SvgTheme::Dark.tokens().dim, "#475569");
+        assert_eq!(SvgTheme::Light.tokens().dim, "#9aa3b2");
     }
 
     #[test]

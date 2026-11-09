@@ -1,0 +1,54 @@
+{
+  "scope": "actual isolated Vite ES adapter; PNG/WASM pinned full fonts; cold import/init followed by source layout+SVG gate+PNG encode+decode+JSON report",
+  "chunks": [
+    {
+      "name": "engine-png-test.js",
+      "bytes": 61037707,
+      "gzipBytes": 36321493
+    }
+  ],
+  "lazyGzipBytes": 36321493,
+  "wasmBytes": 41274386,
+  "wasmGzipBytes": 30534736,
+  "adapterImportMs": 1012.8999999761581,
+  "wasmInitMs": 3512.100000023842,
+  "coldLoadMs": 4525,
+  "scenes": [
+    {
+      "name": "typical",
+      "width": 920,
+      "height": 640,
+      "pngBytes": 11088,
+      "svgBytes": 11875,
+      "requestBytes": 693,
+      "responseBytes": 51447,
+      "pngSha256": "592fb70d1f2bba426d8ab6ba32bacb92d61941c2a71de410b1fd8cdd83edd011",
+      "pixelsSha256": "d6ceeab9ebec46c9913f6a3377f10697a0bc7efc40a28c60a1230b41feac98a3",
+      "svgSha256": "bcf5ce2a7a942d82e89a1d74b8040e7c18c0a36b484d194e9684ebc7b3ca54d6",
+      "coldRenderMs": 517.7000000476837,
+      "warmRenderMs": [
+        28.69999998807907,
+        26.80000001192093,
+        26.5
+      ]
+    },
+    {
+      "name": "1000",
+      "width": 1968,
+      "height": 8878,
+      "pngBytes": 480455,
+      "svgBytes": 2108514,
+      "requestBytes": 130843,
+      "responseBytes": 3998664,
+      "pngSha256": "0fc1c4536e61a630de13455bdba200ad3dfa01219adc4f8ad2079211b9270c71",
+      "pixelsSha256": "69ddf18b118831c46cc5e10561d184548a050a8e26d30b6b2a3b7a9edda6f498",
+      "svgSha256": "b1090e6b88d5cab29bb721b99e26c1408e8121ce5983784344d1aedc59d09e5b",
+      "coldRenderMs": 3630.7999999523163,
+      "warmRenderMs": [
+        3475.7000000476837,
+        3468.099999964237,
+        3451
+      ]
+    }
+  ]
+}

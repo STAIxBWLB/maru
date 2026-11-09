@@ -440,8 +440,11 @@ pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primiti
                     "lifecycle-band",
                     band,
                     Shape::Line {
-                        from: at(72 * 64, baseline * 64)?,
-                        to: at(i64::from(g.page.bounds.width) - 72 * 64, baseline * 64)?,
+                        from: at(i64::from(g.page.bounds.x) + 72 * 64, baseline * 64)?,
+                        to: at(
+                            i64::from(g.page.bounds.x) + i64::from(g.page.bounds.width) - 72 * 64,
+                            baseline * 64,
+                        )?,
                     },
                     Paint::Line,
                     "0.8",

@@ -397,6 +397,22 @@ pub fn render_scene_svg_wasm(input: &str) -> String {
     serde_json::to_string(&render::render_svg_json(input)).expect("integer SVG report serializes")
 }
 
+#[cfg(feature = "wasm-render")]
+#[wasm_bindgen(js_name=render_artifact)]
+pub fn render_artifact_wasm(input: &str) -> String {
+    serde_json::to_string(&render::render_artifact_json(input))
+        .expect("bounded artifact report serializes")
+}
+
+#[cfg(all(feature = "wasm-png", feature = "png-corpus"))]
+#[wasm_bindgen(js_name=png_corpus_manifest)]
+pub fn png_corpus_manifest_wasm() -> String {
+    match render::png_corpus::png_corpus_manifest() {
+        Ok(report) => report,
+        Err(error) => serde_json::json!({"error":error}).to_string(),
+    }
+}
+
 #[cfg(feature = "typegen")]
 pub fn typescript_declarations() -> String {
     use ts_rs::{Config, TS};

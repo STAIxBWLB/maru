@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "scope": "native-wasm-svg-byte-parity",
+  "sceneCount": 12,
+  "scenes": [
+    {
+      "name": "architecture-light",
+      "sceneInputSha256": "689e745b180fd227dabf17fcd53ec2cc31ef5f972bff868af7dd7398cc48d899",
+      "svgSha256": "adcc949abf2c098c86fe4c2123ce5b6e41cc85ee4202da83328b4a3d3b619bae",
+      "nativeSvgBytes": 10697,
+      "wasmSvgBytes": 10697,
+      "byteEqual": true
+    },
+    {
+      "name": "architecture-dark",
+      "sceneInputSha256": "689e745b180fd227dabf17fcd53ec2cc31ef5f972bff868af7dd7398cc48d899",
+      "svgSha256": "99d14c8e6f4a61c4f4a9bee170f16518a1e7aa3e59b2e796768360d8dff959f5",
+      "nativeSvgBytes": 10680,
+      "wasmSvgBytes": 10680,
+      "byteEqual": true
+    },
+    {
+      "name": "dataflow-light",
+      "sceneInputSha256": "4630ee7c95d332bae69f6b2ebb089fdf11df4a6c9c6afc8712b96370df4b0cd6",
+      "svgSha256": "816a9355bca9868655f129c85b5e630d387f5e3cf61f6f0fbdc9e8bf8690252d",
+      "nativeSvgBytes": 12626,
+      "wasmSvgBytes": 12626,
+      "byteEqual": true
+    },
+    {
+      "name": "dataflow-dark",
+      "sceneInputSha256": "4630ee7c95d332bae69f6b2ebb089fdf11df4a6c9c6afc8712b96370df4b0cd6",
+      "svgSha256": "7e78ec87a2adbe69fa23b9f68646185629746942e63552b5d5d89cdc898f339b",
+      "nativeSvgBytes": 12611,
+      "wasmSvgBytes": 12611,
+      "byteEqual": true
+    },
+    {
+      "name": "lifecycle-light",
+      "sceneInputSha256": "2912c8fedde0239d5459bf3d1823afa309ee6126c5f8a5e8137809c1e4857245",
+      "svgSha256": "04c40b7844fc77df2dd1dc3f73e210aea33d271c1d4fe2ad7cd0ba43807c01ce",
+      "nativeSvgBytes": 15444,
+      "wasmSvgBytes": 15444,
+      "byteEqual": true
+    },
+    {
+      "name": "lifecycle-dark",
+      "sceneInputSha256": "2912c8fedde0239d5459bf3d1823afa309ee6126c5f8a5e8137809c1e4857245",
+      "svgSha256": "19a7b58bffd911b16e643640e115e20d0811b12f3fca7291080d236aa400cbd8",
+      "nativeSvgBytes": 15424,
+      "wasmSvgBytes": 15424,
+      "byteEqual": true
+    },
+    {
+      "name": "sequence-light",
+      "sceneInputSha256": "c28f56f7e5808216a4cc89d446b4583475474c9e1dc6ce6e4d9dc64b6b554a14",
+      "svgSha256": "0993666040cc90758846c6e15bd36cef1747b2fa39b764940afcc8f1a467d4c4",
+      "nativeSvgBytes": 9250,
+      "wasmSvgBytes": 9250,
+      "byteEqual": true
+    },
+    {
+      "name": "sequence-dark",
+      "sceneInputSha256": "c28f56f7e5808216a4cc89d446b4583475474c9e1dc6ce6e4d9dc64b6b554a14",
+      "svgSha256": "b8574f7be9cb771f982f6151a2113ec678c49fa123ed49e68e4034297c001527",
+      "nativeSvgBytes": 9241,
+      "wasmSvgBytes": 9241,
+      "byteEqual": true
+    },
+    {
+      "name": "workflow-light",
+      "sceneInputSha256": "5b7509b3d5d9753e78bbd7b299b96d175ea18dc171440772ff4d681683b69b17",
+      "svgSha256": "ca9b3795ebe0776dd732998786fbd128bf19cc341bb29d4e6dc3de1d2255e9de",
+      "nativeSvgBytes": 12794,
+      "wasmSvgBytes": 12794,
+      "byteEqual": true
+    },
+    {
+      "name": "workflow-dark",
+      "sceneInputSha256": "5b7509b3d5d9753e78bbd7b299b96d175ea18dc171440772ff4d681683b69b17",
+      "svgSha256": "b9742d431d920952cea35f9d5d4cc9c67d88954768e42895e7c6614de55582f2",
+      "nativeSvgBytes": 12770,
+      "wasmSvgBytes": 12770,
+      "byteEqual": true
+    },
+    {
+      "name": "bench-1000-light",
+      "sceneInputSha256": "54713242d2de47e710929ef085ad152617cea19db01624208fc88800a8c7c1da",
+      "svgSha256": "b1090e6b88d5cab29bb721b99e26c1408e8121ce5983784344d1aedc59d09e5b",
+      "nativeSvgBytes": 2108514,
+      "wasmSvgBytes": 2108514,
+      "byteEqual": true
+    },
+    {
+      "name": "bench-1000-dark",
+      "sceneInputSha256": "54713242d2de47e710929ef085ad152617cea19db01624208fc88800a8c7c1da",
+      "svgSha256": "224cab23b7a2029cf239b4f43b6f5d677b195750e24d823098947fa3fc3a3bd3",
+      "nativeSvgBytes": 2104509,
+      "wasmSvgBytes": 2104509,
+      "byteEqual": true
+    }
+  ]
+}

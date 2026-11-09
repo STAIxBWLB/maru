@@ -1,7 +1,15 @@
-//! Pure SVG output from retained fixed-point geometry. No layout or host access.
+//! Geometry-based SVG/PNG and source-bound artifact orchestration, without host access.
+mod artifact;
 mod gate;
+#[cfg(feature = "render-png")]
+pub use artifact::render_png_artifact_json;
+pub use artifact::{render_artifact_json, ArtifactFormat, ArtifactReport};
 mod label_paint;
 mod legend_gate;
+#[cfg(feature = "render-png")]
+pub mod png;
+#[cfg(feature = "png-corpus")]
+pub mod png_corpus;
 mod primitive_gate;
 mod primitives;
 pub mod semantics;

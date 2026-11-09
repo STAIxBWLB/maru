@@ -68,6 +68,6 @@ pub fn plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 
 pub fn allow_measurement(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Local main webview only. Remote Sites frames never receive this permission.
-    app.add_capability(r#"{"identifier":"engine-e0","webviews":["main"],"permissions":["maru-diagram:allow-validate"]}"#)?;
+    app.add_capability(r#"{"identifier":"engine-e0","webviews":["main"],"permissions":["maru-diagram:allow-validate","maru-diagram:allow-render-png"]}"#)?;
     Ok(())
 }

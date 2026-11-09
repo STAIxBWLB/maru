@@ -1907,6 +1907,144 @@ source layouts for the product switch. Source-bound verification and screenshot
 hashes are recorded with the PR; hosted agreement and native results remain
 separate from a remote Linux reproduction.
 
+### PNG rasterization and transport measurement (S2)
+
+The optional `render-png` feature projects the gate-approved S1 SVG through
+resvg 0.49.0 and tiny-skia 0.12.0. It bundles the original Noto Sans CJK KR
+400/700 OTFs pinned by the E2 metric manifest. Loading checks their SHA-256
+values; the font database contains only those two faces. System-font discovery,
+file/URL image resolution and raster-image decoding are disabled. The optional
+feature adds no font binary or rasterizer to the default validation artifact or
+SVG-only WASM. Licences are recorded in `THIRD_PARTY_NOTICES.md`.
+
+PNG requests accept an integer pixel ratio from 1 through 4, at most 16,384px
+per dimension and 64 Mi pixels. Encoded output is limited to 32 MiB. The writer
+checks SVG artifacts before rasterization, then decodes the encoded PNG and
+requires exact dimensions and RGBA pixel equality. The theme background makes
+output opaque, including fractional page edges.
+
+The measurement prototype builds a real isolated Vite ES adapter with the
+WASM and fonts inlined in its separately loaded PNG module. The latest validation gate measured
+324,219 B gzip, below 400,000 B (the initial transport measurement was 324,220 B). The PNG module is 61,037,707 B raw and
+36,321,493 B gzip; its underlying WASM is 41,274,386 B raw and 30,534,736 B
+gzip. Adapter import took 1,012.9ms and initialization 3,512.1ms, totaling
+4,525.0ms before the first request. These are observed samples, not CI timing
+assertions.
+
+| Scene | WASM first request / warm samples (ms) | Native raster cold / warm range (ms) | Registered mock IPC samples (ms) | Request / response bytes | PNG bytes |
+| --- | --- | --- | --- | --- | --- |
+| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 62.8, 13.5, 11.3, 11.6 | 693 / 51,447 | 11,088 |
+| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2298.3, 2269.4, 2508.2, 2259.7 | 130,843 / 3,998,664 | 480,455 |
+
+The selected PNG transport is native IPC. The measured 36.3 MB gzip PNG module
+and 4.5s cold module initialization rule out the lazy WASM candidate for this
+prototype. SVG export stays in WASM. The native command accepts only a source
+spec and derives validation, layout, SVG and PNG itself; it returns the SVG hash
+alongside the PNG hash in the receipt. Refused layouts return structured IPC
+errors with their original diagnostics and no image.
+
+The existing E0 hosted WKWebView baseline is 46ms p95 at 1,000 components
+(see the E0 results above and `diagram-engine-e0.json`). That is a validation IPC
+baseline, not a measured overhead for these larger PNG responses. Combined
+with the payload sizes and the scoped MockRuntime samples below, it informs
+the transport decision without claiming a real WebView PNG latency result.
+
+The WASM adapter runs the two scenes in one realm, so the dense first request
+uses an already initialized font database. Native raster timings exclude
+layout; the WASM and IPC requests include source parsing, layout, SVG gates,
+rasterization, codecs and JSON serialization. The IPC prototype uses Tauri's
+registered MockRuntime dispatcher and awaited `spawn_blocking`; it proves a
+different worker thread, one request in flight, no host filesystem calls and
+source-bound receipts. It does not measure a real WebView or OS transport.
+The output PNG, decoded-pixel and SVG hashes matched native and WASM for both
+measured scenes. Cross-OS equality is checked separately by hosted manifests.
+Raw measurement reports are under `docs/performance/diagram-engine-e3/`.
+
+The pinned PNG manifest covers five source-family fixtures with CJK text in
+both themes and the 1,000-node scene in both themes. Linux native and WASM
+matched exactly in all 12 scenes, including repeat byte equality and decoded
+RGBA hashes. The hosted gate additionally requires native macOS and Windows
+to match the same bytes and pixels; no tolerance or cross-OS pass is inferred
+from the Linux comparison. All four reports must exist before that gate passes.
+
+Receipt-bearing exports accept a source spec, never caller-supplied geometry.
+Rust validates and lays out that source before rendering, so an unrelated SVG
+cannot certify it. API v1 receipts keep the existing schema and use
+`engine.id = maru-diagram-engine`, with the engine version/revision, source hash,
+SVG hash, requested output hash, conversion options and independent artifact
+gate status. Browser rendering, visual review and saved-file readback remain
+`not-run` unless their own checks actually run. Legacy Archify receipts retain
+their identity when parsed; fixtures cover old and new receipt shapes.
+
+The frontend entrypoints remain behind `VITE_ENGINE_GEOMETRY_TEST=1`. They
+verify the returned receipt and hashes before accepting bytes, and provide a
+separate DOMPurify-backed SVG string for app DOM insertion. They do not alter
+the product export, render store or canvas. The direct sanitizer supports the
+PNG geometry limits without weakening the legacy Archify SVG extraction path.
+
+Secondary captions now use the pinned renderer's `t-dim` token (#475569 dark,
+#9aa3b2 light), from `assets/template.html:180,224`. The affected roles are
+referenced by `render-sequence.mjs:450`, `render-dataflow.mjs:466`,
+`render-lifecycle.mjs:843` and `workflow-compiler.mjs:4660`. Writer and artifact-gate reference colors derive these roles
+independently; node sublabels and semantic accents retain their own tokens.
+
+The PNG command is registered only through the existing `native-e2e` plugin
+integration. Production remains at 390 application commands; the native-e2e
+release guards remain in force. The separate plugin evidence JSON is emitted
+by successful registered MockRuntime invokes of `validate` and `render_png`.
+The isolation scanner independently enumerates the plugin handler and
+permission lists and requires those two measured commands, worker execution,
+single-flight behavior and real scene payload/timing samples. It does not
+merge plugin rows into the 390-command app inventory or re-execute behavioral
+tests during a source scan.
+
+The hosted native-e2e bridge additionally invokes PNG once for the typical
+2-component architecture and once for the 1,000-component fixture, logging
+elapsed time, request JSON/re-serialized response JSON byte counts, PNG length,
+dimensions and output hash. These payload counts exclude the IPC envelope. It has no timing assertion
+and performs no export/store mutation. Those real WKWebView PNG measurements
+are pending hosted CI; no local native build was performed for this task.
+
+The native PNG determinism producer emits optional ephemeral SVG parity
+fixtures for the same 12 scenes. A WASM runner calls `render_scene_svg` with the
+matching source, geometry and theme, then compares UTF-8 SVG bytes directly
+with the SVG returned by the native source-to-PNG path and checks its receipt
+hash. A mismatch refuses the parity gate. Fixture geometry is test input only;
+the public native PNG command continues to accept source specs exclusively.
+
+Lifecycle start markers also contribute to the producer's page extent. The
+pinned source uses a dot at node x minus 22px, radius 4.5px, followed by the
+initial stem and head (`render-lifecycle.mjs:784-786,851-853`). The producer
+includes that paint footprint even when the start node is pinned at x=0 or
+negative x; node and pin coordinates stay unchanged. The artifact gate derives
+the marker shapes independently and refuses a viewBox that clips their paint,
+including the stem's 1.4px stroke. SVG pin tests cover both lifecycle versions;
+a low-level PNG test checks visible dot pixels in both themes. These boundary
+pins retain the existing readable-area refusal and its geometry; source-bound
+native exports continue to reject refused layouts. The API remains v1.
+
+Every derived primitive now has an independent paint-containment check against
+the viewBox. The gate includes rect/circle half-strokes, default butt-cap line
+paint, and the rotated marker-end triangle (10x7 marker units, refX 9/refY 3.5,
+scaled by stroke width). It does not substitute an oversized safety margin for
+actual paint bounds. Unsupported/nonfinite paint parameters cause a distinct
+paint-model diagnostic; actual clipping causes a page-containment diagnostic.
+The current derived vocabulary uses two-point polylines and filled polygons;
+a new stroked polygon or multisegment polyline needs an independent model
+before it can pass. Lifecycle v1 band dividers use the page-relative 72px
+insets (`render-lifecycle.mjs:755`); this preserves the pinned-renderer rule
+when the retained world-space viewBox has a nonzero origin. Pins are not moved.
+
+The refreshed combined 623-case scene/SVG run matches exactly between Linux
+native and WASM. Relative to approved S1 `4d12957f`, no geometry hash, admission
+verdict or cause-code set changes. The SVG hashes change in 266 cases per theme;
+the writer changes are secondary `t-dim` text paint and page-origin-aware
+lifecycle band paint. `scene-hash-delta.json` lists each changed case and both
+report hashes. All 405 retained scenes pass their artifact gates in both
+themes, including the 185 refused layouts. Logical work remains 3,355,500 for
+the 1,000-node/999-route fixture, within the existing 4,194,375 ceiling. The
+new pinned-boundary regression is separate from that unchanged corpus.
+
 ### Offline interactive viewer (T2)
 
 `src/lib/diagram/viewer/offlineViewer.ts` exports the pure

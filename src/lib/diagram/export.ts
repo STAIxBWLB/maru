@@ -25,6 +25,18 @@ import type { SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
 
 export type ExportFormat = "png" | "png-transparent" | "jpg" | "svg" | "json" | "pdf";
 
+/** Test-only lazy boundary for the isolated native SVG/PNG engine artifacts. */
+export async function renderEngineArtifactForTest(
+  input: import("./engineArtifactForTest").EngineArtifactRequest,
+  host?: import("./engineArtifactForTest").EngineArtifactHost,
+): Promise<import("./engineArtifactForTest").EngineArtifactReport> {
+  if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") {
+    throw new Error("Native engine artifact rendering is disabled in this build; use the isolated geometry test build.");
+  }
+  const { renderEngineArtifactForTest: render } = await import("./engineArtifactForTest");
+  return render(input, host);
+}
+
 export interface ExportOpts {
   /** Padding (canvas-space px) around the diagram's bounding box. */
   padding?: number;

@@ -1,0 +1,15 @@
+# E3 PNG measurement evidence
+
+- `png-wasm-transport.json`: real isolated Vite ES adapter with the PNG WASM/font module, measured at `9bace127`. One browser realm measures import/initialization and then typical and dense source-to-artifact calls. The dense first call reuses initialized font state.
+- `png-native-raster.json`: native raster probe at `321a880e`. Layout is measured separately; render includes SVG gates and PNG encode/decode.
+- `png-mock-ipc-transport.json`: registered Tauri MockRuntime dispatch to awaited worker rendering at `45cb00a8`. Both fixture tests passed. This does not measure WebView or OS IPC; do not promote it to native desktop latency evidence.
+- `png-native-linux.json`: 12-scene native manifest at `45cb00a8`, including repeated PNG bytes and pinned font identities.
+- `png-wasm-linux.json`: the same 12-scene WASM manifest at `45cb00a8`. It is exactly equal to the native Linux manifest. The same run also byte-compares the native source-to-PNG SVG with WASM `render_scene_svg` for all 12 scenes; `png-svg-parity.json` records those direct comparisons.
+
+These reports are direct JSON emitted by the tools, without constructed timing samples or invented platform results. The four-report hosted gate obtains its own reports from Linux, macOS, Windows and WASM at the submitted head. The two archived Linux reports do not satisfy that gate by themselves.
+
+The validation artifact measurement at the WASM transport head was 324,220 B gzip. The separately loaded PNG ES module was 36,321,493 B gzip. Measurement code is `scripts/diagram-engine-e3-png-measure.mjs`; fixture/native tools are in the engine crate.
+
+The final focused run at `45cb00a8` passed 277 release-mode Rust tests, both PNG/default plugin clippy configurations, native/WASM SVG byte and PNG/pixel equality for the 12 scenes, and four actual Chromium WASM tests. `validation-payload.json` is its emitted graph measurement: 324,219 B gzip for validation. These checks include the lifecycle initial-marker page-extent fix and retained-geometry/pixel tests. The mock IPC test emits its own timing/payload evidence; no evidence row was constructed by hand.
+
+The all-derived-primitive paint gate is included in `45cb00a8`. The same run compares the complete 623-case native/WASM scene and SVG manifests and the unchanged logical-work receipt. `scene-hash-delta.json` is tool-emitted evidence against S1 `4d12957f`: no geometry/admission/cause-code changes, 266 changed SVG hashes in each theme, all 405 retained artifacts pass (185 layouts refused). Writer changes are the secondary dim shade and viewport-relative lifecycle bands; exact changed IDs are recorded in the JSON. The native PNG SVG-byte link and PNG/pixel determinism still pass all 12 sampled scenes. The hosted four-platform results remain a separate gate.
