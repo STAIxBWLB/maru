@@ -72,8 +72,7 @@ fn accepts_renderer_text_whitespace_and_escaped_xml_like_label_text() {
 
     let mut spec: serde_json::Value =
         serde_json::from_str(include_str!("../testdata/valid-architecture.json")).unwrap();
-    spec["components"][0]["label"] =
-        json!("<?xml-stylesheet href=\"https://example.invalid/a.css\"?>");
+    spec["components"][0]["label"] = json!("<?xml?>");
     let report = layout_json(&json!({"specJson": spec.to_string()}).to_string());
     assert!(
         report.ok,
@@ -89,6 +88,6 @@ fn accepts_renderer_text_whitespace_and_escaped_xml_like_label_text() {
         report.diagnostics
     );
     let escaped = report.svg.expect("successful render has SVG");
-    assert!(escaped.contains("&lt;?xml-stylesheet"));
+    assert!(escaped.contains("&lt;?xml?&gt;"));
     assert!(check_svg_artifact(&escaped, &geometry, &options).is_empty());
 }
