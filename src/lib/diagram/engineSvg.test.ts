@@ -39,10 +39,29 @@ describe("engine SVG static conversion", () => {
   });
 
   it("sanitizes standalone Rust SVG with the existing DOMPurify profile before DOM use", () => {
-    const safe = sanitizeEngineSvgArtifact('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" onload="alert(1)"><script>alert(1)</script><text>한글</text><path d="M0 0L2 2" onclick="alert(2)"/></svg>', "dark");
+    const safe = sanitizeEngineSvgArtifact('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" data-artifact="engine" aria-label="한글 구조" onload="alert(1)"><script>alert(1)</script><text data-kind="label-text" style="font-feature-settings:\'liga\' 0,\'clig\' 0,\'calt\' 0,\'locl\' 0,\'kern\' 0,\'mark\' 0,\'mkmk\' 0">한글</text><path d="M0 0L2 2" onclick="alert(2)" fill="url(https://example.invalid/a)"/><image href="https://example.invalid/image.png"/></svg>', "dark");
     expect(safe).toContain("한글");
     expect(safe).toContain('data-theme="dark"');
-    expect(safe).not.toMatch(/script|onload|onclick/);
+    expect(safe).toContain('aria-label="한글 구조"');
+    expect(safe).toContain('data-artifact="engine"');
+    expect(safe).toContain('data-kind="label-text"');
+    expect(safe).toContain("font-feature-settings");
+    expect(safe).not.toMatch(/script|onload|onclick|example\.invalid/);
     expect(() => sanitizeEngineSvgArtifact("<html><svg/></html>")).toThrow(/valid SVG root/i);
+  });
+
+  it("accepts the native 1k logical viewBox without inheriting legacy crop limits", () => {
+    const large = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1968 8878"><text aria-label="large diagram">Diagram</text></svg>';
+    expect(sanitizeEngineSvgArtifact(large)).toContain('viewBox="0 0 1968 8878"');
+    expect(() => extractEngineSvg(large)).toThrow(/invalid or oversized dimensions/i);
+    expect(() => sanitizeEngineSvgArtifact('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16385 1"/>')).toThrow(/oversized viewBox/i);
+    expect(() => sanitizeEngineSvgArtifact('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9000 9000"/>')).toThrow(/oversized viewBox/i);
+  });
+
+  it("preserves inert filesystem-looking labels while removing file and external resource references", () => {
+    const result = sanitizeEngineSvgArtifact('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><text aria-label="source /tmp/a">/tmp/a</text><image href="file:///tmp/a.png"/><path d="M0 0L2 2" fill="url(https://example.invalid/fill)"/></svg>');
+    expect(result).toContain('aria-label="source /tmp/a"');
+    expect(result).toContain(">/tmp/a</text>");
+    expect(result).not.toMatch(/file:|example\.invalid/);
   });
 });

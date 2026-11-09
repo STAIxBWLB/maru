@@ -19,6 +19,7 @@ geometry-corpus = ["geometry", "render-svg"]
 render-svg = ["geometry", "dep:roxmltree"]
 render-png = ["render-svg", "dep:resvg"]
 wasm-png = ["wasm-render", "render-png"]
+png-corpus = ["render-png"]
 wasm-render = ["wasm-layout", "render-svg"]
 wasm-layout = ["geometry", "dep:wasm-bindgen"]
 font-tools = ["dep:ttf-parser"]
@@ -70,3 +71,8 @@ required-features = ["font-tools"]
 name = "png-probe"
 path = "src/bin/png_probe.rs"
 required-features = ["render-png"]
+
+[[bin]]
+name = "png-manifest"
+path = "src/bin/png_manifest.rs"
+required-features = ["png-corpus"]

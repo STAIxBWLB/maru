@@ -94,6 +94,13 @@ async function loadWasmHost(format: EngineArtifactFormat): Promise<EngineArtifac
   return async (inputJson) => render(inputJson);
 }
 
+/** Preload the isolated module without running a scene; used by measured cold/warm exports. */
+export async function prepareEngineArtifactForTest(format: EngineArtifactFormat): Promise<EngineArtifactHost> {
+  if (import.meta.env.VITE_ENGINE_GEOMETRY_TEST !== "1") throw new Error("Engine artifact preload is disabled; use the isolated geometry test build.");
+  if (format !== "svg" && format !== "png") throw new Error("Artifact format is invalid; choose svg or png.");
+  return loadWasmHost(format);
+}
+
 /** Invoke the isolated source-to-artifact ABI; never accepts caller-built geometry. */
 export async function renderEngineArtifactForTest(
   input: EngineArtifactRequest,

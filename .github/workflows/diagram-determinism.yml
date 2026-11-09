@@ -118,3 +118,98 @@ jobs:
           path: .engine-e2/determinism
       - name: Require three native and one WASM scene/SVG report to agree
         run: node scripts/diagram-engine-e2-determinism.mjs .engine-e2/determinism .engine-e2/determinism-corpus.json
+
+  png-native:
+    name: PNG manifests (native ${{ matrix.receipt }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            receipt: native-linux
+          - os: macos-26
+            receipt: native-macos
+          - os: windows-latest
+            receipt: native-windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - name: Cache pinned PNG rasterizer
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/crates -> target
+          shared-key: diagram-png-${{ matrix.os }}
+      - name: Render all pinned scenes twice and record PNG, pixels, SVG and font pins
+        shell: bash
+        run: |
+          mkdir -p .engine-e3/png
+          cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features png-corpus --bin png-manifest -- .engine-e3/png/${{ matrix.receipt }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diagram-png-${{ matrix.receipt }}
+          path: .engine-e3/png/${{ matrix.receipt }}.json
+          if-no-files-found: error
+          retention-days: 3
+
+  png-wasm:
+    name: PNG manifest (WASM Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - name: Cache isolated PNG and bindgen tooling
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/crates -> target
+          shared-key: diagram-png-linux-wasm
+      - name: Build test-featured PNG WASM and wrapper
+        shell: bash
+        run: |
+          rustup target add wasm32-unknown-unknown
+          export MARU_DIAGRAM_ENGINE_REVISION=$(git rev-parse HEAD:src-tauri/crates)
+          cargo build --locked --release --lib --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features wasm-png,png-corpus --target wasm32-unknown-unknown
+          cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features bindgen-web --bin bindgen-web -- src-tauri/crates/target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm .engine-e3/wasm-test
+      - name: Render the same PNG manifest through WASM
+        run: node scripts/diagram-engine-e3-png-determinism.mjs --wasm .engine-e3/png/wasm-linux.json .engine-e3/wasm-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diagram-png-wasm-linux
+          path: .engine-e3/png/wasm-linux.json
+          if-no-files-found: error
+          retention-days: 3
+
+  png-compare:
+    name: PNG native and WASM determinism
+    needs: [png-native, png-wasm]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            scripts/diagram-engine-e3-png-determinism.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: diagram-png-*
+          path: .engine-e3/png
+      - name: Require strict bytes and decoded pixel hashes across all four builds
+        run: node scripts/diagram-engine-e3-png-determinism.mjs .engine-e3/png

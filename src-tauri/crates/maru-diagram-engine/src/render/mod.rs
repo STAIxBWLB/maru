@@ -6,6 +6,8 @@ mod label_paint;
 mod legend_gate;
 #[cfg(feature = "render-png")]
 pub mod png;
+#[cfg(feature = "png-corpus")]
+pub mod png_corpus;
 mod primitive_gate;
 mod primitives;
 pub mod semantics;
