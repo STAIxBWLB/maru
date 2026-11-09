@@ -61,6 +61,8 @@ pub(crate) fn sequence_geometry_diagnostics(
         };
         let left = i64::from(bounds.x);
         let required_right = left + i64::from(bounds.width) + 40 * UNIT;
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         if left < 0 || required_right > width {
             push(&mut diagnostics, "geometry-participant-canvas-width", format!("/participants/{index}"),
                 format!("placed participant {id:?} starts at {:.3}px and needs {:.3}px of page width including its40px right reserve, but the page is {:.3}px wide", left as f64 / UNIT as f64, required_right as f64 / UNIT as f64, width as f64 / UNIT as f64),
@@ -80,6 +82,8 @@ pub(crate) fn sequence_geometry_diagnostics(
         content_bottom =
             content_bottom.max(y.saturating_add(if has_note { 22 * UNIT } else { 6 * UNIT }));
         if let Some((_, height)) = authored {
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if y < 160 * UNIT || y > height - 83 * UNIT {
                 push(&mut diagnostics, "geometry-message-time", format!("/messages/{index}/y"),
                     format!("message time {} is outside the authored page's readable timeline (160 through {} pixels)", y / UNIT, (height - 83 * UNIT) / UNIT),
@@ -98,6 +102,8 @@ pub(crate) fn sequence_geometry_diagnostics(
         if let Some(end) = to {
             content_bottom = content_bottom.max(end);
         }
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         if from.is_some_and(|start| start < 72 * UNIT)
             || authored.is_some_and(|(_, height)| to.is_some_and(|end| end > height - 45 * UNIT))
         {
@@ -109,6 +115,8 @@ pub(crate) fn sequence_geometry_diagnostics(
             match metrics::measure_text(label, 700, 9 * 64) {
                 Ok(measured) => {
                     let title_width = (i64::from(measured.advance.max(measured.ink.width)) + 14 * UNIT).max(42 * UNIT);
+                    #[cfg(any(test, feature = "geometry-corpus"))]
+                    crate::work::record_constraint_evaluation();
                     if title_width > width - 104 * UNIT {
                         push(&mut diagnostics, "geometry-segment-label-fit", format!("/segments/{index}/label"),
                             format!("segment title needs {} pixels including padding, but its frame has {} pixels", (title_width + UNIT - 1) / UNIT, (width - 104 * UNIT).max(0) / UNIT),
@@ -130,6 +138,8 @@ pub(crate) fn sequence_geometry_diagnostics(
     let mut row_height = 22 * UNIT;
     let mut total_row_height = 0_i64;
     for entry in legend_entries {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         let key = &entry.key;
         let mut label_width = 0_i64;
         let mut label_height = 0_i64;
@@ -192,6 +202,8 @@ pub(crate) fn sequence_geometry_diagnostics(
                 // its actual legend placement still fits at content+96px.
                 .saturating_add(96 * UNIT)
                 .saturating_add(total_row_height.saturating_sub(22 * UNIT));
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if required > height {
                 push(&mut diagnostics, "geometry-legend-clearance", "/meta/viewBox/1".into(),
                     format!("sequence content ends at {} pixels and leaves no room for the resolved legend text; at least {} pixels of page height are required", content_bottom / UNIT, (required + UNIT - 1) / UNIT),

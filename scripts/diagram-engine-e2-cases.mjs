@@ -58,6 +58,20 @@ export function generatedGeometryCases(seedFor) {
     s.connections=[{from:"a",to:"a",label:"Loop",fromSide:"top",toSide:"right",labelAt:[250,280]}];
   });
   add("lifecycle", "geometry-route-distance", "self-loop-positive", (s) => {s.transitions=[{from:"a",to:"a",label:"Loop"}];});
+  add("lifecycle", "geometry-route-distance", "v2-cross-row-same-side-positive", (s) => {
+    s.schema_version = 2;
+    s.lanes.push({ id: "ordinary", label: "Ordinary" });
+    s.states[1].lane = "ordinary";
+    s.states[1].col = 0;
+    s.transitions = [{ from: "a", to: "b", fromSide: "right", toSide: "right" }];
+  });
+  add("lifecycle", "geometry-route-distance", "v2-width-aware-column-positive", (s) => {
+    s.schema_version = 2;
+    s.states[0].width = 240;
+    // Source columns leave a 64px edge gap even when the first column grows.
+    // A fixed-pitch duplicate model incorrectly makes the port span 14px.
+    s.transitions = [{ from: "a", to: "b", fromSide: "right", toSide: "left" }];
+  });
   for (const version of [1,2]) add("lifecycle", "geometry-state-column", `band-version-${version}`, (s) => {
     s.schema_version=version;s.lanes.push({id:"ordinary",label:"Ordinary"});s.states[1].lane="ordinary";s.states[1].col=3;
   });

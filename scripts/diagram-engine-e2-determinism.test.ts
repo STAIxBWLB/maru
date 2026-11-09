@@ -14,6 +14,8 @@ const report = (caseIds = corpus.caseIds, extra = {}) => ({
   corpusSha256: corpus.corpusSha256,
   corpusCaseCount: caseIds.length,
   fontManifestSha256: "font-manifest",
+  benchmarkWork: { fixtureSha256: "a".repeat(64), nodes: 1000, routes: 999,
+    stats: { astarExpandedStates: 2, routeEvaluations: 999, constraintEvaluations: 3000 }, total: 4001 },
   cases: caseIds.map((id) => ({ id, hash: createHash("sha256").update(id).digest("hex") })),
   ...extra,
 });
@@ -50,6 +52,15 @@ describe("cross-platform whole-scene receipt comparison", () => {
     expect(() => compare([report(), report(), report(), altered])).toThrow("arch-one");
     const other = report(undefined, { fontManifestSha256: "other" });
     expect(() => compare([report(), other, report(), report()])).toThrow("manifest metadata");
+  });
+
+  it("requires identical native and WASM logical work and refuses missing counters", () => {
+    const missing = report(undefined, { benchmarkWork: undefined });
+    expect(() => compare([report(), report(), report(), missing])).toThrow("work receipt");
+    const changed = report();
+    changed.benchmarkWork.stats.constraintEvaluations += 1;
+    changed.benchmarkWork.total += 1;
+    expect(() => compare([report(), changed, report(), report()])).toThrow("manifest metadata");
   });
 
   it("fails closed for malformed corpus JSON and malformed report records", () => {

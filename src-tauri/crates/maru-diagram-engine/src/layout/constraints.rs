@@ -69,6 +69,9 @@ fn bottom(bounds: GeometryBox) -> f64 {
 }
 
 fn overlaps(left: GeometryBox, right: GeometryBox, gap: f64) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     let gap = (gap * UNITS) as i64;
     i64::from(left.x) < i64::from(right.x) + i64::from(right.width) + gap
         && i64::from(right.x) < i64::from(left.x) + i64::from(left.width) + gap
@@ -102,6 +105,9 @@ fn push(
 }
 
 fn box_inside_view(bounds: GeometryBox, width: f64, height: f64) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     fixed(bounds.x) >= 0.0
         && fixed(bounds.y) >= 0.0
         && right(bounds) <= width
@@ -229,6 +235,8 @@ fn check_node_labels(
             }
             let min_font = node_minimum_font(family, role, version);
             let required = fixed(label.bounds.width) * min_font / font_size;
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if required > available {
                 let combined = family.name == "lifecycle"
                     && role == "sublabel"
@@ -310,6 +318,8 @@ fn check_node_viewbox(
             let Some(rect) = rects.get(id) else {
                 continue;
             };
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if rect.x < frame.min_x
                 || rect.y < frame.min_y
                 || rect.right() > frame.max_right
@@ -351,6 +361,8 @@ fn check_node_viewbox(
             let Some(rect) = rects.get(id) else {
                 continue;
             };
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if rect.x < frame.min_x
                 || rect.y < frame.min_y
                 || rect.right() > frame.max_right
@@ -430,6 +442,8 @@ fn check_workflow_lane(
         let node_y = fixed(node.bounds.y);
         let outside_x = lane_bounds
             .is_some_and(|bounds| node.bounds.x < bounds.x || right(node.bounds) > right(bounds));
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         if node_y < low || node_y > high || outside_x {
             push(
                 diagnostics,
@@ -464,6 +478,8 @@ fn check_workflow_column_capacity(
         .map(|node| (node.id.as_str(), node.bounds))
         .collect();
     for (index, edge) in items(spec, "edges").iter().enumerate() {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         let (Some(from_id), Some(to_id)) = (text(edge, "from"), text(edge, "to")) else {
             continue;
         };
@@ -514,6 +530,8 @@ fn check_dataflow(spec: &Value, geometry: &GeometryDocument, diagnostics: &mut V
     let nodes = items(spec, "nodes");
     for (index, node) in nodes.iter().enumerate() {
         let row = number(node, "row").unwrap_or(-1.0);
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         if row.fract() != 0.0 || !(0.0..5.0).contains(&row) {
             push(
                 diagnostics,
@@ -538,6 +556,8 @@ fn check_dataflow(spec: &Value, geometry: &GeometryDocument, diagnostics: &mut V
         .and_then(|view| view.first())
         .and_then(Value::as_f64)
         .unwrap_or(940.0);
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
     if required_width > width && stage_count > 0 {
         push(
             diagnostics,
@@ -555,6 +575,8 @@ fn check_dataflow(spec: &Value, geometry: &GeometryDocument, diagnostics: &mut V
 }
 
 fn check_lifecycle(spec: &Value, diagnostics: &mut Vec<Diagnostic>) {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
     if !items(spec, "lanes")
         .iter()
         .any(|lane| text(lane, "id") == Some("main"))
@@ -578,6 +600,8 @@ fn check_lifecycle(spec: &Value, diagnostics: &mut Vec<Diagnostic>) {
         == 1
     {
         for (index, state) in items(spec, "states").iter().enumerate() {
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if text(state, "lane") != Some("main")
                 && number(state, "col").is_some_and(|col| col >= 3.0)
             {
@@ -621,6 +645,8 @@ fn check_boundary_title_fit(
         };
         // The architecture placer reserves the renderer's 4px frame inset on
         // each side and 10px for the title mask before this final fit check.
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         let available = fixed(frame.bounds.width) - 8.0;
         let measured_width =
             label_text
@@ -716,6 +742,8 @@ fn check_sequence_spacing(
             continue;
         };
         for (right_index, right_message) in messages.iter().enumerate().skip(left_index + 1) {
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             let Some(right_y) = number(right_message, "y").and_then(|y| super::px(y).ok()) else {
                 continue;
             };

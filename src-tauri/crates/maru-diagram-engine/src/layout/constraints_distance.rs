@@ -234,56 +234,23 @@ fn dataflow_rects(spec: &Value, geometry: &GeometryDocument) -> HashMap<String, 
 }
 
 fn lifecycle_rects(spec: &Value, geometry: &GeometryDocument) -> HashMap<String, Rect> {
-    let nodes = node_rects(geometry);
-    let version = spec
-        .get("schema_version")
-        .and_then(Value::as_u64)
-        .unwrap_or(1);
-    let phase_x = [94.0, 248.0, 402.0, 556.0, 710.0];
-    let band_x = [402.0, 556.0, 710.0];
-    let mut result = HashMap::new();
-    for state in records(spec, "states") {
-        let (Some(id), Some(lane), Some(col)) = (
-            string(state, "id"),
-            string(state, "lane"),
-            number(state, "col"),
-        ) else {
-            continue;
-        };
-        if col < 0.0 || col.fract() != 0.0 {
-            continue;
-        }
-        let col = col as usize;
-        let (cx, top, default_w, default_h) = if version == 2 {
-            // For v2, an actual authored/pinned engine box is the only source
-            // of absolute row placement; column widths remain source-sized.
-            let width = number(state, "width").unwrap_or(140.0);
-            let height = number(state, "height").unwrap_or(64.0);
-            (60.0 + col as f64 * 184.0 + width / 2.0, 56.0, width, height)
-        } else if lane == "main" {
-            let Some(cx) = phase_x.get(col).copied() else {
-                continue;
-            };
-            (cx, 126.0, 118.0, 62.0)
-        } else if lane == "terminal" {
-            let Some(cx) = band_x.get(col).copied() else {
-                continue;
-            };
-            (cx, 450.0, 118.0, 58.0)
-        } else {
-            let Some(cx) = band_x.get(col).copied() else {
-                continue;
-            };
-            (cx, 278.0, 126.0, 58.0)
-        };
-        let width = number(state, "width").unwrap_or(default_w);
-        let height = number(state, "height").unwrap_or(default_h);
-        let y = top + number(state, "yOffset").unwrap_or(0.0);
-        if let Some(rect) = source_rect(id, cx - width / 2.0, y, width, height, &nodes, true) {
-            result.insert(id.to_owned(), rect);
-        }
-    }
-    result
+    // Share width-aware columns, populated-lane rows and pin overrides with
+    // the other lifecycle source constraints. SourceRect uses 1/128px, while
+    // distance predicates and emitted geometry use 1/64px.
+    super::source_budgets::lifecycle_state_rects(spec, geometry)
+        .into_iter()
+        .filter_map(|(id, rect)| {
+            Some((
+                id,
+                Rect {
+                    x: point(rect.x as f64 / 128.0)?,
+                    y: point(rect.y as f64 / 128.0)?,
+                    width: point(rect.width as f64 / 128.0)?,
+                    height: point(rect.height as f64 / 128.0)?,
+                },
+            ))
+        })
+        .collect()
 }
 
 fn source_sides(family: &str, relation: &Value, from: Rect, to: Rect) -> (String, String) {
@@ -312,6 +279,9 @@ fn emit_short_span(
     end: Port,
     minimum: i64,
 ) {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     let dx = i128::from(start.x) - i128::from(end.x);
     let dy = i128::from(start.y) - i128::from(end.y);
     let span_sq = dx * dx + dy * dy;

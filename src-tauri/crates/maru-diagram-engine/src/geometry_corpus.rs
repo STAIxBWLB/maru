@@ -163,6 +163,7 @@ pub fn scene_corpus_hashes(input: &str) -> Result<String, Diagnostic> {
         "rejectedCaseCount": cases.len() - accepted,
         "repeatCheck": true,
         "fontManifestSha256": crate::spec_hash(crate::metrics::font_manifest()),
+        "benchmarkWork": crate::work::benchmark_work(),
         "cases": hashes,
     });
     serde_json::to_string_pretty(&report).map_err(|cause| {

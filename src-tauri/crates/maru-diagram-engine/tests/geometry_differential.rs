@@ -119,3 +119,29 @@ fn renderer_verdicts_have_equivalent_geometry_rules_and_preserve_placed_scenes()
         "all three E1 geometry deferrals must now be actual rule agreements"
     );
 }
+
+#[test]
+fn lifecycle_v2_row_and_width_controls_remain_oracle_accepted() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
+    for suffix in [
+        "v2-cross-row-same-side-positive",
+        "v2-width-aware-column-positive",
+    ] {
+        let id = format!("e2-lifecycle-geometry-route-distance-{suffix}");
+        let case = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap_or_else(|| panic!("regenerate the pinned oracle corpus to restore {id}"));
+        assert_eq!(case["oracle"]["ok"], true, "{id}: oracle must accept");
+        assert_eq!(case["geometryComparison"]["accepted"], true);
+        let input = case["geometryComparison"]["inputJson"].as_str().unwrap();
+        let report = layout_json(&serde_json::json!({"specJson": input}).to_string());
+        assert!(report.ok, "{id}: {:?}", report.diagnostics);
+        let geometry = report.geometry.unwrap();
+        assert_eq!(geometry.nodes.len(), 2);
+        assert_eq!(geometry.routes.len(), 1);
+    }
+}

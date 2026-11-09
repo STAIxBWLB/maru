@@ -270,6 +270,10 @@ fn search_leg(
         if current.cost != cost || current.bends != bends {
             continue;
         }
+        // Count only live expansions, including the terminal goal state.
+        // Queue entries superseded by a better path consume no expansion.
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_astar_expansion();
         let point = GeometryPoint {
             x: xs[state.x],
             y: ys[state.y],

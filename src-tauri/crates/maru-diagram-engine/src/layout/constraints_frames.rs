@@ -53,6 +53,9 @@ fn bottom(bounds: GeometryBox) -> i64 {
 }
 
 fn contained(outer: GeometryBox, inner: GeometryBox) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     i64::from(outer.x) <= i64::from(inner.x)
         && i64::from(outer.y) <= i64::from(inner.y)
         && right(outer) >= right(inner)
@@ -60,6 +63,9 @@ fn contained(outer: GeometryBox, inner: GeometryBox) -> bool {
 }
 
 fn overlaps(left: GeometryBox, right_box: GeometryBox) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     i64::from(left.x) < right(right_box)
         && i64::from(right_box.x) < right(left)
         && i64::from(left.y) < bottom(right_box)
@@ -120,6 +126,8 @@ fn architecture_frames(spec: &Value, geometry: &GeometryDocument) -> Vec<Diagnos
         let Some(bounds) = frame(geometry, id).copied() else {
             continue;
         };
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         let authored_overflow = authored_view_box.is_some_and(|(width, height)| {
             right(bounds) as f64 / UNITS > width || bottom(bounds) as f64 / UNITS > height
         });
@@ -300,6 +308,8 @@ fn workflow_frames(spec: &Value, geometry: &GeometryDocument) -> Vec<Diagnostic>
             let Some(node_bounds) = nodes.get(node_id) else {
                 continue;
             };
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if node_bounds.x < bounds.x || right(*node_bounds) > right(bounds) {
                 diagnostics.push(diag(
                     "workflow",
@@ -416,6 +426,9 @@ fn workflow_frames(spec: &Value, geometry: &GeometryDocument) -> Vec<Diagnostic>
 }
 
 fn sequence_legend(spec: &Value, geometry: &GeometryDocument) -> Vec<Diagnostic> {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     let meta = spec.get("meta").unwrap_or(&Value::Null);
     if string(meta, "quality_profile") != Some("showcase") || meta.get("legend").is_some() {
         return Vec::new();

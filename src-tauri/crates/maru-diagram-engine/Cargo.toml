@@ -49,3 +49,8 @@ required-features = ["font-tools"]
 name = "geometry-foundation-hashes"
 path = "src/bin/geometry_foundation_hashes.rs"
 required-features = ["geometry-corpus"]
+
+[[bin]]
+name = "geometry-work"
+path = "src/bin/geometry_work.rs"
+required-features = ["geometry-corpus"]

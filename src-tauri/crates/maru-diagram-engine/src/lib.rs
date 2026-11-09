@@ -22,6 +22,8 @@ pub mod metrics;
 pub mod routing;
 pub mod rules;
 pub mod sequence;
+#[cfg(all(feature = "geometry", any(test, feature = "geometry-corpus")))]
+pub mod work;
 pub mod workflow;
 pub use architecture::{
     ArchitectureBoundary, ArchitectureComponent, ArchitectureConnection, ArchitectureLayout,

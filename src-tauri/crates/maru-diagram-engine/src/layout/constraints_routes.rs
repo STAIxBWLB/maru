@@ -140,6 +140,9 @@ fn length(a: Point, b: Point) -> i64 {
     (a.0 - b.0).abs() + (a.1 - b.1).abs()
 }
 fn overlap(a: Rect, b: Rect, inset: i64) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     a.x < b.right() - inset
         && b.x < a.right() - inset
         && a.y < b.bottom() - inset
@@ -536,6 +539,8 @@ fn rhythm(
     domain: Domain,
 ) {
     for (i, segment) in points.windows(2).enumerate() {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         let n = length(segment[0], segment[1]);
         if n == 0 {
             continue;
@@ -612,6 +617,9 @@ fn explicit_path(r: &Relation<'_>, domain: Domain) -> bool {
     !r.via.is_empty() && matches!(domain, Domain::Authored | Domain::Reference)
 }
 fn on_segment(p: Point, a: Point, b: Point) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     let ab = (i128::from(b.0 - a.0), i128::from(b.1 - a.1));
     let ap = (i128::from(p.0 - a.0), i128::from(p.1 - a.1));
     ab.0 * ap.1 == ab.1 * ap.0
@@ -740,6 +748,9 @@ fn overlap_span(a: Point, b: Point, c: Point, d: Point) -> Option<(Point, Point)
     }
 }
 fn crossing_point(a: Point, b: Point, c: Point, d: Point) -> Option<Point> {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     if !proper_cross(a, b, c, d) {
         None
     } else if a.1 == b.1 {
@@ -762,6 +773,9 @@ fn integer_sqrt(n: i128) -> i64 {
     low as i64
 }
 fn near_span(a: Point, b: Point, r: Rect, limit: i64, inclusive: bool) -> Option<(Point, Point)> {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     if !axis(a, b) {
         return None;
     }
@@ -819,6 +833,9 @@ fn proper_cross(a: Point, b: Point, c: Point, d: Point) -> bool {
     }
 }
 fn corridor(a: Point, b: Point, c: Point, d: Point) -> i64 {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     if a.1 == b.1 && c.1 == d.1 && a.1 == c.1 {
         a.0.max(b.0).min(c.0.max(d.0)) - a.0.min(b.0).max(c.0.min(d.0))
     } else if a.0 == b.0 && c.0 == d.0 && a.0 == c.0 {
@@ -840,6 +857,9 @@ fn trunk(
     j: usize,
     n: i64,
 ) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     if n > 24 * U
         || text(a.raw, "variant").unwrap_or("default")
             != text(b.raw, "variant").unwrap_or("default")
@@ -853,6 +873,9 @@ fn trunk(
     (source || target) && forward(pa[i], pa[i + 1], pb[j], pb[j + 1])
 }
 fn endpoint_side(p: Point, b: Rect) -> Option<&'static str> {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     if p.0 == b.x && (b.y..=b.bottom()).contains(&p.1) {
         Some("left")
     } else if p.0 == b.right() && (b.y..=b.bottom()).contains(&p.1) {
@@ -866,6 +889,9 @@ fn endpoint_side(p: Point, b: Rect) -> Option<&'static str> {
     }
 }
 fn outward(p: Point, next: Point, side: &str) -> bool {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     match side {
         "left" => next.1 == p.1 && next.0 < p.0,
         "right" => next.1 == p.1 && next.0 > p.0,
@@ -960,6 +986,8 @@ fn arrows(
 ) {
     for (i, a) in routes.iter().enumerate() {
         for b in routes.iter().skip(i + 1) {
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if a.to != b.to || a.scene.len() < 2 || b.scene.len() < 2 {
                 continue;
             }
@@ -1125,6 +1153,8 @@ fn node_and_label_safety(
     }
     for (i, a) in routes.iter().enumerate() {
         for b in routes.iter().skip(i + 1) {
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             let scene_hit = a
                 .label
                 .zip(b.label)
@@ -1154,6 +1184,8 @@ fn pair_quality(
             if a.index == b.index {
                 continue;
             }
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             let explicit_pair = workflow_v2 && (label_authored(a) || authored_route(b));
             if !showcase && !explicit_pair {
                 continue;
@@ -1296,6 +1328,9 @@ fn source_presets(
     boxes: &BTreeMap<String, Rect>,
     out: &mut BTreeMap<(usize, String, usize), Diagnostic>,
 ) {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     if f.name != "workflow" || spec.get("schema_version").and_then(Value::as_u64) != Some(2) {
         return;
     }
@@ -1478,6 +1513,8 @@ fn page_checks(
     if showcase && f.name == "architecture" {
         let points = asserted_path(r, boxes);
         for (i, p) in points.iter().copied().enumerate() {
+            #[cfg(any(test, feature = "geometry-corpus"))]
+            crate::work::record_constraint_evaluation();
             if p.0 >= 0 && p.1 >= 0 && p.0 <= width && p.1 <= height {
                 continue;
             }
@@ -1506,6 +1543,8 @@ fn page_checks(
     let grow_v2 = v2 && page.is_empty();
     let tolerance = if v2 { 0 } else { U / 2 };
     for label in [r.label, r.reference_label].into_iter().flatten() {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         if label.x >= -tolerance
             && label.y >= -tolerance
             && (grow_v2
@@ -1587,6 +1626,9 @@ fn detour_checks(
     routes: &[Relation<'_>],
     out: &mut BTreeMap<(usize, String, usize), Diagnostic>,
 ) {
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
+
     // The pinned architecture renderer is the only caller of this opt-in rule.
     if f.name != "architecture"
         || spec.get("meta").and_then(|m| text(m, "quality_profile")) != Some("showcase")

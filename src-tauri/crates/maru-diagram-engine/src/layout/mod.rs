@@ -578,6 +578,8 @@ impl SceneBuilder {
         &self,
         r: &RouteRequest,
     ) -> Result<(Vec<GeometryPoint>, Vec<GeometryBox>), Diagnostic> {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_route_evaluation();
         let from = self.node_bounds(&r.from).ok_or_else(|| {
             failure(
                 "route-endpoint",

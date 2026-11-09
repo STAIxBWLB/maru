@@ -39,6 +39,13 @@ function validateReport(report, expected, index) {
   if (report.corpusCaseCount !== expected.caseCount || report.cases.length !== expected.caseCount) {
     throw new Error(`${label} has ${report.cases.length} case records but the corpus has ${expected.caseCount}; regenerate the complete whole-scene report.`);
   }
+  const work = report.benchmarkWork;
+  const workValues = work?.stats && [work.stats.astarExpandedStates, work.stats.routeEvaluations, work.stats.constraintEvaluations];
+  if (!work || !/^[a-f0-9]{64}$/.test(work.fixtureSha256 ?? "") || work.nodes !== 1000 || work.routes !== 999
+      || !Array.isArray(workValues) || workValues.some((n) => !Number.isSafeInteger(n) || n < 0)
+      || workValues.some((n) => n === 0) || work.total !== workValues.reduce((sum, n) => sum + n, 0)) {
+    throw new Error(`${label} has no valid deterministic1000-node work receipt; rebuild all OS/WASM reports with geometry-corpus before comparing them.`);
+  }
   for (let caseIndex = 0; caseIndex < expected.caseCount; caseIndex += 1) {
     if (!/^[a-f0-9]{64}$/.test(report.cases[caseIndex]?.hash ?? "")) {
       throw new Error(`${label} case hash is missing or malformed at index ${caseIndex}; regenerate every corpus hash with the SDK harness.`);

@@ -41,6 +41,8 @@ fn lane_metrics(spec: &Value, g: &GeometryDocument) -> (i64, i64, i64) {
         .map(|frame| frame.bounds);
     let (mut max_right, mut max_bottom) = (None, None);
     for bounds in lanes {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         max_right = Some(max_right.unwrap_or(i64::MIN).max(right(bounds)));
         max_bottom = Some(max_bottom.unwrap_or(i64::MIN).max(bottom(bounds)));
     }
@@ -84,6 +86,8 @@ pub(crate) fn workflow_page_diagnostics(spec: &Value, g: &GeometryDocument) -> V
         // profile/legend visibility. legendY is lastLaneBottom+44+extra rows.
         let required_width = lane_right + 16 * U;
         let required_height = lane_bottom + 62 * U + extra;
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         if width < required_width {
             output.push(error(
                 0,
@@ -92,6 +96,8 @@ pub(crate) fn workflow_page_diagnostics(spec: &Value, g: &GeometryDocument) -> V
                 "fixed-v1 lanes and16px right padding",
             ));
         }
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         if height < required_height {
             output.push(error(
                 1,
@@ -112,6 +118,8 @@ pub(crate) fn workflow_page_diagnostics(spec: &Value, g: &GeometryDocument) -> V
     let mut right_owner = "resolved lanes".to_owned();
     let mut bottom_owner = "resolved lanes and legend reserve".to_owned();
     let mut include = |bounds: GeometryBox, owner: String| {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_constraint_evaluation();
         min_x = min_x.min(i64::from(bounds.x));
         min_y = min_y.min(i64::from(bounds.y));
         if right(bounds) > required_right {
@@ -148,6 +156,8 @@ pub(crate) fn workflow_page_diagnostics(spec: &Value, g: &GeometryDocument) -> V
             );
         }
     }
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
     if min_x < 0 || min_y < 0 {
         output.push(Diagnostic{code:"workflow/geometry-viewbox-capacity".into(),path:"/meta/viewBox".into(),rule:"geometry-v1/workflow-authored-page".into(),
             message:format!("resolved workflow geometry starts before the page origin at [{},{}]px",min_x as f64/64.0,min_y as f64/64.0),
@@ -160,9 +170,13 @@ pub(crate) fn workflow_page_diagnostics(spec: &Value, g: &GeometryDocument) -> V
     let required_width = ceil_pixel(required_right + 16 * U) * U;
     let required_height =
         (ceil_pixel(required_bottom + 18 * U) * U).max(lane_bottom + 124 * U + extra);
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
     if width < required_width {
         output.push(error(0, width, required_width, &right_owner));
     }
+    #[cfg(any(test, feature = "geometry-corpus"))]
+    crate::work::record_constraint_evaluation();
     if height < required_height {
         output.push(error(1, height, required_height, &bottom_owner));
     }

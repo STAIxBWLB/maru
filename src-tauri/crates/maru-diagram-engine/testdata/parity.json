@@ -11110,7 +11110,7 @@
             "severity": "error",
             "message": "Cannot read properties of undefined (reading '0')",
             "subject": {
-              "input": "<oracle-staging>/specification.snapshot.json"
+              "input": "/var/folders/qn/v82hvrgn0w76wsnd3y3v597m0000gn/T/archify-validate-39dfoT/specification.snapshot.json"
             },
             "evidence": {
               "errorName": "TypeError"
@@ -11180,7 +11180,7 @@
             "severity": "error",
             "message": "Cannot read properties of undefined (reading '0')",
             "subject": {
-              "input": "<oracle-staging>/specification.snapshot.json"
+              "input": "/var/folders/qn/v82hvrgn0w76wsnd3y3v597m0000gn/T/archify-validate-7ifhZn/specification.snapshot.json"
             },
             "evidence": {
               "errorName": "TypeError"
@@ -33567,6 +33567,98 @@
       },
       "geometryComparison": {
         "inputJson": "{\"schema_version\":1,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"a\",\"label\":\"Loop\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-lifecycle-geometry-route-distance-v2-cross-row-same-side-positive",
+      "diagramType": "lifecycle",
+      "rule": "geometry-route-distance",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"ordinary\",\"label\":\"Ordinary\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"ordinary\",\"col\":0}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"right\"}]}",
+      "inputSha256": "5c146d49661cc9fd131c804e839c11df8aaba1a6738a668a6cca0568af5ce2a0",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "lifecycle/geometry-route-distance",
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"ordinary\",\"label\":\"Ordinary\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"ordinary\",\"col\":0}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"right\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"},{\"id\":\"ordinary\",\"label\":\"Ordinary\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"ordinary\",\"col\":0}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"right\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "layer": "renderer",
+        "geometryExpected": true
+      },
+      "currentScope": {
+        "kind": "document-validity"
+      }
+    },
+    {
+      "id": "e2-lifecycle-geometry-route-distance-v2-width-aware-column-positive",
+      "diagramType": "lifecycle",
+      "rule": "geometry-route-distance",
+      "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":240},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
+      "inputSha256": "4610d7d0cf4186af956c53a5fc4c217237457d63596b66efd49704ae9aae0121",
+      "origin": {
+        "kind": "synthetic-generated"
+      },
+      "geometryRule": "lifecycle/geometry-route-distance",
+      "oracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "schemaOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": []
+      },
+      "documentOracle": {
+        "ok": true,
+        "codes": [],
+        "diagnostics": [],
+        "scope": "schema and nongeometry engineering-profile validity"
+      },
+      "comparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":240},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
+        "accepted": true,
+        "equivalentCodes": [],
+        "oracleLayer": "document-profile",
+        "currentScope": {
+          "kind": "document-validity"
+        }
+      },
+      "geometryComparison": {
+        "inputJson": "{\"schema_version\":2,\"diagram_type\":\"lifecycle\",\"meta\":{\"title\":\"lifecycle fixture\",\"output\":\"fixture.html\"},\"lanes\":[{\"id\":\"main\",\"label\":\"Main\"}],\"states\":[{\"id\":\"a\",\"type\":\"start\",\"label\":\"A\",\"lane\":\"main\",\"col\":0,\"width\":240},{\"id\":\"b\",\"type\":\"active\",\"label\":\"B\",\"lane\":\"main\",\"col\":1}],\"transitions\":[{\"from\":\"a\",\"to\":\"b\",\"fromSide\":\"right\",\"toSide\":\"left\"}]}",
         "accepted": true,
         "equivalentCodes": [],
         "layer": "renderer",
