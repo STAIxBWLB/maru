@@ -594,7 +594,7 @@ fn check_label(
     require_attr(
         text,
         "font-size",
-        &super::svg::fixed(label.font_size),
+        &super::svg::fixed(label.font_size.into()),
         &path,
         errors,
     );
@@ -717,8 +717,8 @@ fn check_label(
                 let scale = super::svg::scale(label.font_size, expected.units_per_em);
                 let transform = format!(
                     "translate({} {}) scale({scale} -{scale})",
-                    super::svg::fixed(glyph.position.x),
-                    super::svg::fixed(glyph.position.y)
+                    super::svg::fixed(glyph.position.x.into()),
+                    super::svg::fixed(glyph.position.y.into())
                 );
                 require_attr(*path_node, "transform", &transform, &glyph_path, errors);
             }
@@ -835,10 +835,10 @@ pub fn check_svg_artifact(
     );
     let view_box = format!(
         "{} {} {} {}",
-        super::svg::fixed(geometry.page.bounds.x),
-        super::svg::fixed(geometry.page.bounds.y),
-        super::svg::fixed(geometry.page.bounds.width),
-        super::svg::fixed(geometry.page.bounds.height)
+        super::svg::fixed(geometry.page.bounds.x.into()),
+        super::svg::fixed(geometry.page.bounds.y.into()),
+        super::svg::fixed(geometry.page.bounds.width.into()),
+        super::svg::fixed(geometry.page.bounds.height.into())
     );
     require_attr(root, "viewBox", &view_box, "/svg", &mut errors);
     check_number(
