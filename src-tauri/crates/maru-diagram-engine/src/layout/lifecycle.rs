@@ -174,29 +174,9 @@ fn empty_lane_top(
     }
 }
 
-pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<(), Diagnostic> {
+type StateSemanticFlags<'a> = std::collections::BTreeMap<&'a str, (bool, Option<u32>)>;
+fn state_semantic_flags(spec: &LifecycleSpec) -> StateSemanticFlags<'_> {
     let version = spec.schema_version;
-    let lane_indices: std::collections::HashMap<_, _> = spec
-        .lanes
-        .iter()
-        .enumerate()
-        .map(|(index, lane)| (lane.id.as_str(), index))
-        .collect();
-    let row_order = lifecycle_row_order(spec);
-    let centers = lifecycle_v2_centers(spec);
-    let max_right = spec
-        .states
-        .iter()
-        .filter_map(|state| {
-            state_position(spec, state, &row_order, &centers).map(|(x, _)| {
-                x + state
-                    .width
-                    .unwrap_or(default_state_size(version, &state.lane).0)
-            })
-        })
-        .fold(0.0_f64, f64::max);
-    let total_width = max_right.max(980.0);
-
     // Preserve final-state meaning before authored column ordering is discarded.
     // The SVG projection does not need to read source coordinates or infer finals
     // from pin-adjusted positions.
@@ -232,6 +212,56 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             )
         })
         .collect();
+    spec.states
+        .iter()
+        .map(|state| {
+            let ordinal = if version == 1 && state.lane == "main" {
+                phase_order.get(&state.col).copied()
+            } else {
+                None
+            };
+            (
+                state.id.as_str(),
+                (final_states[state.id.as_str()], ordinal),
+            )
+        })
+        .collect()
+}
+fn attach_state_semantics(scene: &mut SceneBuilder, id: &str, flags: &StateSemanticFlags<'_>) {
+    if let Some(node) = scene.document.nodes.last_mut().filter(|node| node.id == id) {
+        let &(final_state, phase_order) = flags
+            .get(id)
+            .expect("every placed state has classified semantics");
+        node.final_state = Some(final_state);
+        node.phase_order = phase_order;
+    }
+}
+
+pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<(), Diagnostic> {
+    let version = spec.schema_version;
+    let lane_indices: std::collections::HashMap<_, _> = spec
+        .lanes
+        .iter()
+        .enumerate()
+        .map(|(index, lane)| (lane.id.as_str(), index))
+        .collect();
+    let row_order = lifecycle_row_order(spec);
+    let centers = lifecycle_v2_centers(spec);
+    let max_right = spec
+        .states
+        .iter()
+        .filter_map(|state| {
+            state_position(spec, state, &row_order, &centers).map(|(x, _)| {
+                x + state
+                    .width
+                    .unwrap_or(default_state_size(version, &state.lane).0)
+            })
+        })
+        .fold(0.0_f64, f64::max);
+    let total_width = max_right.max(980.0);
+
+    let semantic_flags = state_semantic_flags(spec);
+
     for (index, state) in spec.states.iter().enumerate() {
         let _lane = *lane_indices.get(state.lane.as_str()).ok_or_else(|| {
             geometry_error(&format!("/states/{index}/lane"), "state lane is missing")
@@ -266,17 +296,7 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             auto,
             Some([width, height]),
         );
-        if let Some(node) = scene
-            .document
-            .nodes
-            .last_mut()
-            .filter(|node| node.id == state.id)
-        {
-            node.final_state = final_states.get(state.id.as_str()).copied();
-            if version == 1 && state.lane == "main" {
-                node.phase_order = phase_order.get(&state.col).copied();
-            }
-        }
+        attach_state_semantics(scene, &state.id, &semantic_flags);
         placed?;
     }
 
