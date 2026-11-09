@@ -1,0 +1,482 @@
+{
+  "schemaVersion": 1,
+  "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against approved S1",
+  "sourceCommit": "af582230b41f5f34c9620da463eb6fd40af2c2c0",
+  "sdkTreePath": "src-tauri/crates",
+  "sdkTree": "4b02633660fbc471e7daa9a3024064e11bba6cb7",
+  "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+  "engineCrateTree": "58022b926f0b2656379037c8a78b64d6c6ea77c1",
+  "baseCommit": "4d12957f1e9ed7100263115fae6c2aec74976a84",
+  "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
+  "corpusCaseCount": 623,
+  "acceptedCaseCount": 216,
+  "retainedCaseCount": 405,
+  "baselineWork": {
+    "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+    "nodes": 1000,
+    "routes": 999,
+    "stats": {
+      "astarExpandedStates": 22167,
+      "constraintEvaluations": 3332334,
+      "routeEvaluations": 999
+    },
+    "total": 3355500
+  },
+  "work": {
+    "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+    "nodes": 1000,
+    "routes": 999,
+    "stats": {
+      "astarExpandedStates": 22167,
+      "constraintEvaluations": 3332334,
+      "routeEvaluations": 999
+    },
+    "total": 3355500
+  },
+  "nativeReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+  "wasmReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+  "changes": [
+    {
+      "id": "e2-architecture-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "architecture/geometry-label-fit"
+      ],
+      "codes": [
+        "architecture/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-workflow-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "workflow/geometry-label-fit"
+      ],
+      "codes": [
+        "workflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-sequence-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-dataflow-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-lifecycle-geometry-label-fit-primary",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-primary-width-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-primary-width-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v1-primary-width-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v1-primary-width-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-sequence-spread-primary-header-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-sequence-spread-primary-header-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v2-primary-width-below",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-v2-primary-width-above",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-brand-rail-71",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-brand-rail-71",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-sequence-brand-rail-7",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-sequence-brand-rail-9",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-endpoint-direction-1",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-route-quality"
+      ],
+      "codes": [
+        "dataflow/geometry-route-quality"
+      ],
+      "sceneChanged": true,
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
+    },
+    {
+      "id": "e2-boundary-sequence-family-label-route-below",
+      "oldAccepted": false,
+      "accepted": true,
+      "oldCodes": [
+        "sequence/route-blocked"
+      ],
+      "codes": [],
+      "sceneChanged": true,
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
+    },
+    {
+      "id": "e2-boundary-sequence-family-label-route-above",
+      "oldAccepted": false,
+      "accepted": true,
+      "oldCodes": [
+        "sequence/route-blocked"
+      ],
+      "codes": [],
+      "sceneChanged": true,
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
+    },
+    {
+      "id": "e2-boundary-architecture-clear-margin-text-1",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "architecture/geometry-label-fit"
+      ],
+      "codes": [
+        "architecture/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-workflow-clear-margin-text-1",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "workflow/geometry-label-fit"
+      ],
+      "codes": [
+        "workflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-sequence-clear-margin-text-1",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "sequence/geometry-label-fit"
+      ],
+      "codes": [
+        "sequence/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-dataflow-clear-margin-text-1",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "codes": [
+        "dataflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-lifecycle-clear-margin-text-1",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "codes": [
+        "lifecycle/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-architecture-endpoint-conflict",
+      "oldAccepted": false,
+      "accepted": false,
+      "oldCodes": [
+        "architecture/geometry-route-quality",
+        "architecture/route-blocked"
+      ],
+      "codes": [
+        "architecture/geometry-route-quality"
+      ],
+      "sceneChanged": true,
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
+    },
+    {
+      "id": "e2-boundary-dataflow-label-route-3",
+      "oldAccepted": false,
+      "accepted": true,
+      "oldCodes": [
+        "dataflow/geometry-route-quality",
+        "dataflow/route-blocked"
+      ],
+      "codes": [],
+      "sceneChanged": true,
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
+    },
+    {
+      "id": "e2-boundary-dataflow-label-route-5",
+      "oldAccepted": false,
+      "accepted": true,
+      "oldCodes": [
+        "dataflow/geometry-route-quality",
+        "dataflow/route-blocked"
+      ],
+      "codes": [],
+      "sceneChanged": true,
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
+    },
+    {
+      "id": "e2-boundary-workflow-v2-shared-trunk-23",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [
+        "workflow/geometry-route-quality-notice"
+      ],
+      "codes": [
+        "workflow/geometry-route-quality"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-workflow-v2-shared-trunk-25",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [
+        "workflow/geometry-route-quality-notice"
+      ],
+      "codes": [
+        "workflow/geometry-route-quality"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-architecture-brand-rail-71",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [],
+      "codes": [
+        "architecture/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-workflow-brand-rail-71",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [],
+      "codes": [
+        "workflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "e2-boundary-workflow-brand-rail-73",
+      "oldAccepted": true,
+      "accepted": false,
+      "oldCodes": [],
+      "codes": [
+        "workflow/geometry-label-fit"
+      ],
+      "sceneChanged": true,
+      "svgChanged": []
+    },
+    {
+      "id": "gate-lifecycle-via-side-bypass",
+      "oldAccepted": true,
+      "accepted": true,
+      "oldCodes": [],
+      "codes": [],
+      "sceneChanged": true,
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
+    }
+  ]
+}

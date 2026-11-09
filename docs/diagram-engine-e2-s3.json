@@ -1686,5 +1686,48 @@
       "total": 3355500
     },
     "scopeNote": "Prior committed source verification at f4dcf4fe before the final shared-trunk regression and Linux CI test-step commits; retained as source-stamped evidence, not claimed as the final exact-head proof."
+  },
+  "verifiedNativeWasm": {
+    "schemaVersion": 1,
+    "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against approved S1",
+    "sourceCommit": "af582230b41f5f34c9620da463eb6fd40af2c2c0",
+    "sdkTreePath": "src-tauri/crates",
+    "sdkTree": "4b02633660fbc471e7daa9a3024064e11bba6cb7",
+    "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+    "engineCrateTree": "58022b926f0b2656379037c8a78b64d6c6ea77c1",
+    "baseCommit": "4d12957f1e9ed7100263115fae6c2aec74976a84",
+    "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
+    "corpusCaseCount": 623,
+    "acceptedCaseCount": 216,
+    "retainedCaseCount": 405,
+    "baselineWork": {
+      "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+      "nodes": 1000,
+      "routes": 999,
+      "stats": {
+        "astarExpandedStates": 22167,
+        "constraintEvaluations": 3332334,
+        "routeEvaluations": 999
+      },
+      "total": 3355500
+    },
+    "work": {
+      "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+      "nodes": 1000,
+      "routes": 999,
+      "stats": {
+        "astarExpandedStates": 22167,
+        "constraintEvaluations": 3332334,
+        "routeEvaluations": 999
+      },
+      "total": 3355500
+    },
+    "nativeReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "wasmReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "nativeWasmReportsEqual": true,
+    "changedSceneCaseCount": 34,
+    "changedSvgCaseCount": 7,
+    "scopeNote": "Final implementation SDK tree verified at af582230, including the shared-trunk-23 regression. Later receipt-only commits preserve this SDK tree. Historical timing receipts and the separately stamped boundary export are not restamped.",
+    "changedCasesArtifact": "docs/performance/diagram-engine-e2-admission-determinism.json"
   }
 }

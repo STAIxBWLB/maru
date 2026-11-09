@@ -1372,7 +1372,7 @@ output geometry remains 1/64px. Dataflow/lifecycle readable-area predicates and
 sequence spread widths use shared source-budget helpers.
 
 The separate model layer reports all 101 inputs without failing the build.
-These synthetic inputs are not added to the strict 309-case AC1 corpus and do
+These synthetic inputs are not added to the strict 311-case AC1 corpus and do
 not waive any of its verdicts. Counts preserve both directions; full differing
 case IDs and diagnostic codes are in `boundaryEvidence.modelDifferences`.
 The table is stamped to the measured source snapshot `f4dcf4fe`, after the
@@ -1388,7 +1388,7 @@ shared-via provenance change and its strict regression.
 The 12 primary/detail role-fit cases now have per-case source formulas, widths,
 font sizes, glyph-advance sums, and Noto widths scaled to the source minimum in
 the ledger. Source estimates fit their budgets by 0px to 4.4px while Noto
-exceeds the role budget by 13.240385px to 75.059659px; each recorded Noto box
+exceeds the role budget by 13px to 75.059659px; each recorded Noto box
 matches its glyph advances within 1/64px. Pinned Noto geometry is authoritative
 for these text-fit
 checks. The separate sequence segment-title case records a 430px legacy estimate
@@ -1407,8 +1407,15 @@ These counts and per-case dispositions are stamped to `f4dcf4fe`. The prior
 native/WASM run at that head covered 623 cases (216 accepted, 405 retained),
 changed 34 scenes and 7 SVGs, and produced matching report hashes; its work
 receipt is preserved in [diagram-engine-e2-s3.json](diagram-engine-e2-s3.json).
-The later shared-trunk-23 regression and Linux test-workflow step need a fresh
-exact-head verification before the receipt can be restamped.
+The final implementation run at `af582230`, including that regression and the
+Linux test-workflow step, passed SDK fmt, clippy and all engine tests. Its
+623-case native/WASM reports remain identical, with the same 34 changed whole-scene
+hashes and 7 changed SVGs against approved S1. Whole-scene hashes include diagnostics;
+a changed hash does not by itself imply moved coordinates. The exact changed IDs,
+source commit and both explicitly named tree paths are in the
+[final determinism receipt](performance/diagram-engine-e2-admission-determinism.json).
+Logical work remains 3,355,500, below the 4,194,375 ceiling. Of 407 refusals, 405
+retain geometry; the other two stop at hard validation before layout.
 The dataflow authored-via cases `e2-boundary-dataflow-label-route-3` and
 `e2-boundary-dataflow-label-route-5` and sequence case
 `e2-boundary-sequence-family-label-route-above` now pass with retained
