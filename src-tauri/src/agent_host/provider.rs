@@ -9,6 +9,8 @@ use crate::agent_host::usage::{parse_claude_json_result, UsageReceipt};
 use crate::cli_path::{augmented_path, resolve_program};
 use crate::win_process::NoWindow;
 
+use super::runtime_policy::Resolution;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 /// What a backend can actually do. Only flags a gate reads live here — a flag
@@ -394,6 +396,31 @@ pub(crate) fn apply_usage_output_flags(
     Some(mode)
 }
 
+/// The provider whose CLI will actually run: the adaptive-policy target when
+/// one was resolved, the requested provider otherwise. Asking the requested
+/// provider about output format is the wrong question as soon as a reroute
+/// exists — Claude's flags on a codex command fail the call, and codex's
+/// absence of flags on a claude command loses its usage (maru#431).
+pub(crate) fn effective_provider_id<'a>(
+    requested: &'a str,
+    resolution: Option<&'a Resolution>,
+) -> &'a str {
+    resolution
+        .map(|resolution| resolution.agent.as_str())
+        .unwrap_or(requested)
+}
+
+/// Ask for the synchronous adapter's machine-readable output, from the provider
+/// that will actually run. Returns whether this call now prints a result object.
+fn apply_requested_usage_flags(
+    cmd: &mut Command,
+    requested: CliProviderKind,
+    resolution: Option<&Resolution>,
+) -> bool {
+    let provider = effective_provider_id(requested.id(), resolution);
+    apply_usage_output_flags(cmd, provider, UsageOutputMode::Result).is_some()
+}
+
 /// Real `ProviderAdapter` that drives a CLI provider (Claude/Codex/Kimi/Kiro)
 /// synchronously:
 /// `complete` spawns the command via [`build_cli_command`], pipes the prompt to
@@ -541,10 +568,9 @@ impl ProviderAdapter for CliProviderAdapter {
             }
         })?;
         // First usage slice (maru#431): Claude prints one JSON result object
-        // carrying both the answer and its usage. Other providers stay plain.
-        let json_usage =
-            apply_usage_output_flags(&mut cmd, self.provider.id(), UsageOutputMode::Result)
-                .is_some();
+        // carrying both the answer and its usage. The resolution decides which
+        // CLI runs, so it decides the flags; other providers stay plain.
+        let json_usage = apply_requested_usage_flags(&mut cmd, self.provider, resolution.as_ref());
         cmd.current_dir(&request.cwd)
             .stdin(if stdin_payload.is_some() {
                 Stdio::piped()
@@ -586,7 +612,10 @@ impl ProviderAdapter for CliProviderAdapter {
             Some((content, receipt)) => (content, receipt),
             None => (
                 stdout.into_owned(),
-                UsageReceipt::unavailable(self.provider.id(), outcome),
+                UsageReceipt::unavailable(
+                    effective_provider_id(self.provider.id(), resolution.as_ref()),
+                    outcome,
+                ),
             ),
         };
         let usage = serde_json::to_value(&receipt).ok();
@@ -1636,5 +1665,66 @@ mod tests {
         assert!(bypass_args
             .iter()
             .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+    }
+
+    /// maru#431 slice 2: the CLI that runs decides the flags, not the one that
+    /// was asked for. The adaptive resolution can reroute a call, and then
+    /// Claude's output flags on a codex command fail the call while their
+    /// absence on a claude command loses its usage.
+    #[test]
+    fn usage_flags_follow_the_effective_provider_of_the_resolution() {
+        fn resolution(agent: &str) -> Resolution {
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1, "policy_revision": "test", "target_id": "native-target", "workload": "implementation",
+                "agent": agent, "executable": format!("/usr/local/bin/{agent}"), "home": "/tmp/.claude", "home_mode": "native-default", "version": "2.1.283", "billing": "subscription", "billing_verified": true, "model": "sonnet", "effort": "medium",
+                "permission_intent": "auto-review", "permission_mechanism": "native-auto-review",
+                "launch_args": [], "eligible": true, "reason": "validated", "constraints": [],
+                "capabilities": [], "continuity": "checkpoint-handoff"
+            }))
+            .unwrap()
+        }
+        fn argv(cmd: &Command) -> Vec<String> {
+            cmd.get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect()
+        }
+        // Claude requested, codex resolved: a codex command takes no Claude flags.
+        let resolved = resolution("codex");
+        let mut cmd = Command::new("codex");
+        assert!(!apply_requested_usage_flags(
+            &mut cmd,
+            CliProviderKind::Claude,
+            Some(&resolved)
+        ));
+        assert!(argv(&cmd).is_empty(), "{:?}", argv(&cmd));
+        // Codex requested, claude resolved: the flags come back, or the rerouted
+        // call would report no usage at all.
+        let resolved = resolution("claude");
+        let mut cmd = Command::new("claude");
+        assert_eq!(
+            effective_provider_id(CliProviderKind::Codex.id(), Some(&resolved)),
+            "claude"
+        );
+        assert!(apply_requested_usage_flags(
+            &mut cmd,
+            CliProviderKind::Codex,
+            Some(&resolved)
+        ));
+        assert_eq!(argv(&cmd), ["--output-format", "json"]);
+        // No resolution: the requested provider decides, exactly as before.
+        let mut cmd = Command::new("claude");
+        assert!(apply_requested_usage_flags(
+            &mut cmd,
+            CliProviderKind::Claude,
+            None
+        ));
+        assert_eq!(argv(&cmd), ["--output-format", "json"]);
+        let mut cmd = Command::new("kimi");
+        assert!(!apply_requested_usage_flags(
+            &mut cmd,
+            CliProviderKind::Kimi,
+            None
+        ));
+        assert!(argv(&cmd).is_empty());
     }
 }

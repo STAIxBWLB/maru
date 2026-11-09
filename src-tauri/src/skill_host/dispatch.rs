@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -20,7 +20,8 @@ use crate::agent_host::provider::{
     UsageOutputMode,
 };
 use crate::agent_host::usage::{
-    parse_claude_json_result, UsageReceipt, USAGE_INCOMPLETE_EVENT, USAGE_RECORDED_EVENT,
+    parse_claude_json_result, UsageReceipt, UsageTokens, USAGE_INCOMPLETE_EVENT,
+    USAGE_RECORDED_EVENT,
 };
 use crate::ai_router::{AiDoneEvent, AiErrorEvent, AiOutputEvent};
 use crate::atomic_file::{
@@ -861,7 +862,7 @@ fn spawn_background<R: tauri::Runtime>(
             let _ = child.wait();
         }
         // The owned child transaction ends only after both callback streams.
-        let parsed_usage = stdout_pump.join().ok().flatten();
+        let streamed_usage = stdout_pump.join().unwrap_or_default();
         let _ = stderr_pump.join();
         match result {
             Ok(status) => {
@@ -870,8 +871,19 @@ fn spawn_background<R: tauri::Runtime>(
                 // runs and each retry land here once, with its own run id. A
                 // provider without machine-readable usage records `unavailable`
                 // (never a fabricated zero), and a run that spent tokens and
-                // then failed keeps them (maru#431 AC3/AC4).
-                let mut receipt = parsed_usage
+                // then failed keeps them (maru#431 AC3/AC4). A run killed before
+                // its terminal result (Stop, EOF) keeps what its messages
+                // reported, marked partial so it never reads as a total.
+                let StreamedUsage {
+                    receipt: parsed_receipt,
+                    tokens,
+                    models,
+                    failure,
+                } = streamed_usage;
+                let mut receipt = parsed_receipt
+                    .or_else(|| {
+                        UsageReceipt::partial_stream(&usage.provider, &models, tokens, outcome)
+                    })
                     .unwrap_or_else(|| UsageReceipt::unavailable(&usage.provider, outcome));
                 receipt.outcome = outcome.to_string();
                 write_usage_receipt(&receipt, &id_done, |kind, payload| {
@@ -882,6 +894,15 @@ fn spawn_background<R: tauri::Runtime>(
                         .lock()
                         .map(|buffer| buffer.clone())
                         .unwrap_or_default();
+                    // A failed run usually says why on stderr, but a Stop kills
+                    // the CLI mid-stream and an error result can arrive with
+                    // stderr empty: then the CLI's own error event is the reason
+                    // (maru#431 slice 2).
+                    let raw_error = if raw_error.trim().is_empty() {
+                        failure.unwrap_or(raw_error)
+                    } else {
+                        raw_error
+                    };
                     let error_kind = classify_runtime_error(&raw_error, "runtime_failed");
                     let message = raw_error
                         .lines()
@@ -1391,17 +1412,42 @@ where
 
 /// One line of a provider's stdout, reduced to what a caller needs.
 enum StreamEvent {
-    /// Text the assistant produced, to emit now — the reason a long run keeps
-    /// producing output instead of looking idle.
-    Text(String),
-    /// The terminal `result` event: the answer (for a run whose text never
-    /// arrived as an assistant message) and the usage, when it parses. The
-    /// receipt is boxed because it dwarfs every other variant (12× the text it
-    /// travels with) and one event exists at a time.
-    Result(String, Option<Box<UsageReceipt>>),
+    /// One assistant message: its text (the reason a long run keeps producing
+    /// output instead of looking idle) and the usage it reports under its own
+    /// `message.id`.
+    Assistant(AssistantMessage),
+    /// The terminal `result` event.
+    Result(TerminalResult),
     /// A protocol event with nothing for the caller: session init, hooks, tool
     /// results, rate-limit notices, thinking-token estimates.
     Noise,
+}
+
+/// What one streamed assistant message carries (maru#431 slice 2).
+struct AssistantMessage {
+    /// `message.id`: the key that keeps a repeated event from counting the same
+    /// spend twice. `None` on a CLI that omits it, where each event counts on
+    /// its own because nothing else identifies it.
+    id: Option<String>,
+    /// Text blocks joined; empty for a thinking-only or tool-only turn.
+    text: String,
+    /// The message's `usage`, projected onto the counters a receipt records.
+    usage: UsageTokens,
+    /// `message.model`, kept for a partial receipt's model list.
+    model: Option<String>,
+}
+
+/// The terminal `result` event of a `stream-json` run.
+struct TerminalResult {
+    /// The answer text, emitted only when no assistant text streamed (or when
+    /// this event reports an error and its words are all the caller will get).
+    content: String,
+    /// The counters the event totals, when it parses. Boxed because a receipt
+    /// dwarfs every other field and one event exists at a time.
+    usage: Option<Box<UsageReceipt>>,
+    /// The CLI's own account of a failed run (`subtype: message`), which the
+    /// run's failure reason uses when stderr says nothing.
+    failure: Option<String>,
 }
 
 /// Read one stdout line of Claude's `--output-format stream-json` protocol.
@@ -1413,10 +1459,10 @@ fn parse_stream_event(line: &str) -> Option<StreamEvent> {
     let object = value.as_object()?;
     match object.get("type").and_then(JsonValue::as_str)? {
         "assistant" => {
+            let message = object.get("message");
             // Only text blocks are output: a turn can also carry thinking,
             // tool calls and their results, and none of that is the answer.
-            let text = object
-                .get("message")
+            let text = message
                 .and_then(|message| message.get("content"))
                 .and_then(JsonValue::as_array)
                 .map(|blocks| {
@@ -1430,20 +1476,106 @@ fn parse_stream_event(line: &str) -> Option<StreamEvent> {
                         .join("\n")
                 })
                 .unwrap_or_default();
-            if text.trim().is_empty() {
-                Some(StreamEvent::Noise)
-            } else {
-                Some(StreamEvent::Text(text))
+            let usage = message
+                .and_then(|message| message.get("usage"))
+                .and_then(JsonValue::as_object)
+                .map(|usage| UsageTokens {
+                    input: usage.get("input_tokens").and_then(JsonValue::as_u64),
+                    cached_read: usage
+                        .get("cache_read_input_tokens")
+                        .and_then(JsonValue::as_u64),
+                    cache_write: usage
+                        .get("cache_creation_input_tokens")
+                        .and_then(JsonValue::as_u64),
+                    output: usage.get("output_tokens").and_then(JsonValue::as_u64),
+                })
+                .unwrap_or_default();
+            if text.trim().is_empty() && usage.is_empty() {
+                return Some(StreamEvent::Noise);
             }
+            Some(StreamEvent::Assistant(AssistantMessage {
+                id: message
+                    .and_then(|message| message.get("id"))
+                    .and_then(JsonValue::as_str)
+                    .map(str::to_string),
+                text,
+                usage,
+                model: message
+                    .and_then(|message| message.get("model"))
+                    .and_then(JsonValue::as_str)
+                    .map(str::to_string),
+            }))
         }
         // The terminal event is the object slice 1's parser already reads, so
         // the counters, model ids and price basis come from one place.
-        "result" => Some(match parse_claude_json_result(line, "ok") {
-            Some((content, receipt)) => StreamEvent::Result(content, Some(Box::new(receipt))),
-            None => StreamEvent::Result(String::new(), None),
-        }),
+        "result" => {
+            let subtype = object
+                .get("subtype")
+                .and_then(JsonValue::as_str)
+                .unwrap_or_default();
+            let error = object.get("is_error").and_then(JsonValue::as_bool) == Some(true)
+                || subtype.starts_with("error");
+            let (content, usage) = match parse_claude_json_result(line, "ok") {
+                Some((content, receipt)) => (content, Some(Box::new(receipt))),
+                None => (String::new(), None),
+            };
+            Some(StreamEvent::Result(TerminalResult {
+                content,
+                usage,
+                failure: error.then(|| terminal_failure(subtype, object)),
+            }))
+        }
         _ => Some(StreamEvent::Noise),
     }
+}
+
+/// A failed terminal event's own account of itself: its error subtype and the
+/// message it carries (`errors[]`, or the `result` string the CLI puts there).
+/// Empty stderr would otherwise leave a caller with a truncated answer and no
+/// reason at all (maru#431 slice 2).
+fn terminal_failure(subtype: &str, object: &serde_json::Map<String, JsonValue>) -> String {
+    let detail = object
+        .get("errors")
+        .and_then(JsonValue::as_array)
+        .map(|errors| {
+            errors
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .filter(|error| !error.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .filter(|detail| !detail.is_empty())
+        .or_else(|| {
+            object
+                .get("result")
+                .and_then(JsonValue::as_str)
+                .filter(|detail| !detail.trim().is_empty())
+                .map(str::to_string)
+        });
+    match (subtype.is_empty(), detail) {
+        (false, Some(detail)) => format!("{subtype}: {detail}"),
+        (false, None) => subtype.to_string(),
+        (true, Some(detail)) => detail,
+        (true, None) => "runtime_failed".to_string(),
+    }
+}
+
+/// What one run's stdout reader learned (maru#431 slice 2). The terminal result
+/// is authoritative when it arrives; the counters summed from streamed messages
+/// are what a cancelled or killed run still has.
+#[derive(Default)]
+struct StreamedUsage {
+    /// The terminal `result` event's receipt, when the CLI printed one.
+    receipt: Option<UsageReceipt>,
+    /// Counters summed over streamed assistant messages, one entry per
+    /// `message.id`. A run that ends without its result (Stop, kill, EOF) still
+    /// spent these; they are recorded as partial rather than dropped.
+    tokens: UsageTokens,
+    /// Model ids the streamed messages named.
+    models: Vec<String>,
+    /// The terminal result's own error text, when it reported one.
+    failure: Option<String>,
 }
 
 /// The stdout reader for one run, and the only one that can hand back a usage
@@ -1463,7 +1595,7 @@ fn spawn_stdout_pump<R: tauri::Runtime, S>(
     buffer: Arc<Mutex<String>>,
     writes: Arc<DispatchWrites>,
     expect: BackgroundOutput,
-) -> thread::JoinHandle<Option<UsageReceipt>>
+) -> thread::JoinHandle<StreamedUsage>
 where
     S: Read + Send + 'static,
 {
@@ -1484,7 +1616,8 @@ where
         let reader = BufReader::new(source);
         let mut streamed = false;
         let mut result_text: Option<String> = None;
-        let mut usage: Option<UsageReceipt> = None;
+        let mut streamed_usage = StreamedUsage::default();
+        let mut counted: BTreeSet<String> = BTreeSet::new();
         for line in reader.lines() {
             let Ok(line) = line else {
                 break;
@@ -1495,24 +1628,49 @@ where
             };
             match event {
                 Some(StreamEvent::Noise) => {}
-                Some(StreamEvent::Text(text)) => {
-                    streamed = true;
-                    for line in text.lines() {
-                        emit(line);
+                Some(StreamEvent::Assistant(message)) => {
+                    if !message.text.trim().is_empty() {
+                        streamed = true;
+                        for line in message.text.lines() {
+                            emit(line);
+                        }
+                    }
+                    if !message.usage.is_empty() {
+                        // The protocol repeats a message's event as its turn
+                        // grows, with the same id and the same usage: counting
+                        // each id once is what keeps the spend from doubling.
+                        let fresh = match message.id {
+                            Some(id) => counted.insert(id),
+                            None => true,
+                        };
+                        if fresh {
+                            streamed_usage.tokens.merge(&message.usage);
+                            streamed_usage.models.extend(message.model);
+                        }
                     }
                 }
-                Some(StreamEvent::Result(content, receipt)) => {
+                Some(StreamEvent::Result(terminal)) => {
                     // `outcome` is decided by the exit status in the completion
                     // thread, which overwrites the placeholder this parse used.
-                    usage = receipt.map(|receipt| *receipt).or(usage);
-                    result_text = Some(content);
+                    streamed_usage.receipt = terminal.usage.map(|receipt| *receipt);
+                    if let Some(failure) = terminal.failure {
+                        // A failed run's own account is never deduped away: with
+                        // an empty stderr it is all the caller would ever see.
+                        for line in failure.lines() {
+                            emit(line);
+                        }
+                        streamed_usage.failure = Some(failure);
+                    }
+                    result_text = Some(terminal.content);
                 }
                 None => emit(&line),
             }
         }
-        // A run whose text arrived only in the result event (no assistant
-        // message, an error subtype) still reaches the caller, once.
-        let fallback = if streamed {
+        // Text that arrived only in the result event (no assistant message was
+        // emitted) still reaches the caller, once. An error result already said
+        // its piece above, and its content is either that same message or the
+        // raw protocol line.
+        let fallback = if streamed || streamed_usage.failure.is_some() {
             None
         } else {
             result_text.as_deref()
@@ -1520,7 +1678,7 @@ where
         for line in fallback.unwrap_or_default().lines() {
             emit(line);
         }
-        usage
+        streamed_usage
     })
 }
 
@@ -2587,9 +2745,12 @@ mod usage_receipts {
     /// stream-json --verbose` run (Claude Code CLI 2.1.321, 2026-11-08), with
     /// the session id and thinking signature replaced and the hook chatter
     /// dropped: a protocol event with nothing to show, one that carries only
-    /// thinking, and the assistant's text. `costBasis: "list"` in the terminal
-    /// event is the CLI's own price computation, so its amount is an estimate
-    /// and never a bill.
+    /// thinking, and the assistant's text. Both assistant events are the same
+    /// message (`msg_answer`, as the protocol repeats it while the turn grows)
+    /// and carry that message's own counters, so a run that loses its terminal
+    /// event can still report them. `costBasis: "list"` in the terminal event is
+    /// the CLI's own price computation, so its amount is an estimate and never a
+    /// bill, and its totals (11/22/33/44) are what a complete run records.
     fn stream_head(answer: &str) -> Vec<String> {
         let session = "00000000-0000-0000-0000-000000000000";
         [
@@ -2610,17 +2771,31 @@ mod usage_receipts {
             serde_json::json!({
                 "type": "assistant",
                 "message": {
+                    "id": "msg_answer",
                     "model": "claude-opus-5-5",
                     "role": "assistant",
                     "content": [{ "type": "thinking", "thinking": "planning" }],
+                    "usage": {
+                        "input_tokens": 1,
+                        "cache_creation_input_tokens": 2,
+                        "cache_read_input_tokens": 3,
+                        "output_tokens": 4,
+                    },
                 },
             }),
             serde_json::json!({
                 "type": "assistant",
                 "message": {
+                    "id": "msg_answer",
                     "model": "claude-opus-5-5",
                     "role": "assistant",
                     "content": [{ "type": "text", "text": answer }],
+                    "usage": {
+                        "input_tokens": 1,
+                        "cache_creation_input_tokens": 2,
+                        "cache_read_input_tokens": 3,
+                        "output_tokens": 4,
+                    },
                 },
             }),
         ]
@@ -2687,6 +2862,74 @@ mod usage_receipts {
             shell_quote(&text(gate)),
             print_events(&[stream_result(answer)]),
         );
+        tests::write_fake_cli(dir, &script)
+    }
+
+    /// A run that streams its messages and dies without its terminal result:
+    /// the shape of a cancelled or killed run. Two messages carry counters and
+    /// the first is printed twice with the same id, exactly as the protocol
+    /// repeats a message while its turn grows — so a sum that ignored ids would
+    /// count 21 input tokens instead of 16.
+    fn cancelled_stream_cli(dir: PathBuf, code: u8) -> PathBuf {
+        let message = |id: &str, content: JsonValue, usage: JsonValue| {
+            serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "id": id,
+                    "model": "claude-opus-5-5",
+                    "role": "assistant",
+                    "content": [content],
+                    "usage": usage,
+                },
+            })
+            .to_string()
+        };
+        let thinking = serde_json::json!({ "type": "thinking", "thinking": "planning" });
+        let usage = serde_json::json!({
+            "input_tokens": 5,
+            "cache_creation_input_tokens": 2,
+            "cache_read_input_tokens": 3,
+            "output_tokens": 7,
+        });
+        let events = vec![
+            message("msg_first", thinking.clone(), usage.clone()),
+            message(
+                "msg_first",
+                serde_json::json!({ "type": "text", "text": "working" }),
+                usage,
+            ),
+            message(
+                "msg_second",
+                serde_json::json!({ "type": "text", "text": "still working" }),
+                serde_json::json!({ "input_tokens": 11, "output_tokens": 13 }),
+            ),
+        ];
+        let script = format!("{STREAM_GUARD}{}exit {code}\n", print_events(&events));
+        tests::write_fake_cli(dir, &script)
+    }
+
+    /// Text streams, then the terminal event reports an error and the CLI writes
+    /// nothing to stderr: that event is the caller's only account of the failure.
+    fn error_result_cli(dir: PathBuf) -> PathBuf {
+        let mut events = stream_head("partial answer");
+        events.push(
+            serde_json::json!({
+                "type": "result",
+                "subtype": "error_during_execution",
+                "is_error": true,
+                "errors": ["the model stopped early"],
+                "usage": { "input_tokens": 11, "output_tokens": 44 },
+                "modelUsage": {
+                    "claude-opus-5-5": {
+                        "inputTokens": 11,
+                        "outputTokens": 44,
+                        "costBasis": "list",
+                    }
+                },
+            })
+            .to_string(),
+        );
+        let script = format!("{STREAM_GUARD}{}exit 1\n", print_events(&events));
         tests::write_fake_cli(dir, &script)
     }
 
@@ -2827,6 +3070,16 @@ mod usage_receipts {
         crate::agent_host::event_store::replay_run_summary(&text(cwd), id)
             .unwrap()
             .usage
+    }
+
+    fn failure_message(events: &[AgentRunEvent]) -> String {
+        events
+            .iter()
+            .find(|event| event.event_type == "run.failed")
+            .and_then(|event| event.payload.get("message"))
+            .and_then(JsonValue::as_str)
+            .expect("the failed run recorded why it failed")
+            .to_string()
     }
 
     #[test]
@@ -3026,6 +3279,115 @@ mod usage_receipts {
         let summary = summary(&fixture.cwd, &id);
         assert_eq!((summary.receipt_count, summary.failed_count), (1, 1));
         assert_eq!(summary.input_tokens, 11);
+    }
+
+    /// V1 (maru#431 AC3): a cancelled run keeps the usage it already spent.
+    /// Usage came only from the terminal result, and a Stop kills the CLI: the
+    /// stream closed without one and the receipt was `unavailable` with no
+    /// counters, as if the run had spent nothing. Each message's own counters
+    /// are summed now (each `message.id` once) and marked partial, so the totals
+    /// never read as complete and never as a measured zero.
+    #[test]
+    fn a_cancelled_run_records_the_usage_its_messages_already_spent() {
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let cli = cancelled_stream_cli(temp.path().join("provider"), 9);
+        let fixture = Fixture::new("usage-cancelled", cli);
+        let id = fixture.dispatch("claude");
+        let events = fixture.events(&id);
+        // The text that did arrive still reached the caller, as before.
+        assert_eq!(
+            fixture.streamed_lines(),
+            vec!["working".to_string(), "still working".to_string()]
+        );
+        let receipts = receipts(&events);
+        assert_eq!(receipts.len(), 1, "one receipt per dispatch");
+        let receipt = &receipts[0];
+        assert_eq!(receipt.outcome, "failed");
+        // Partial: the source names it, so a reader can never take these totals
+        // for a complete run's totals.
+        assert_eq!(receipt.source, "claude-cli-stream-partial-v1");
+        assert_eq!(receipt.pricing_status, PricingStatus::Unpriced);
+        assert!(receipt.amounts_consistent());
+        // The spend survives, and the message printed twice counted once.
+        assert_eq!(receipt.tokens.input, Some(16));
+        assert_eq!(receipt.tokens.cache_write, Some(2));
+        assert_eq!(receipt.tokens.cached_read, Some(3));
+        assert_eq!(receipt.tokens.output, Some(20));
+        assert_eq!(receipt.models, vec!["claude-opus-5-5".to_string()]);
+        assert!(events.iter().any(|event| event.event_type == "run.failed"));
+        // Coverage sees the spend instead of a receipt-less run.
+        let summary = summary(&fixture.cwd, &id);
+        assert_eq!(summary.receipt_count, 1);
+        assert_eq!(summary.unpriced_count, 1);
+        assert_eq!(summary.unavailable_count, 0);
+        assert_eq!(summary.input_tokens, 16);
+        assert_eq!(summary.failed_count, 1);
+    }
+
+    /// A run whose text arrived only in a successful result event still emits
+    /// that text, and a complete run's totals come from the result even though
+    /// its messages also reported counters — the stream is a fallback, not a
+    /// second source to add to the total.
+    #[test]
+    fn a_result_without_assistant_messages_still_reaches_the_caller() {
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let cli = plain_cli(
+            temp.path().join("provider"),
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' {}\nexit 0\n",
+                shell_quote(&stream_result("answer only in the result"))
+            ),
+        );
+        let fixture = Fixture::new("usage-result-only", cli);
+        let id = fixture.dispatch("claude");
+        assert_eq!(
+            fixture.streamed_lines(),
+            vec!["answer only in the result".to_string()]
+        );
+        let events = fixture.events(&id);
+        let receipts = receipts(&events);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].source, "claude-cli-json-v1");
+        assert_eq!(receipts[0].tokens.input, Some(11));
+        assert_eq!(receipts[0].tokens.output, Some(44));
+    }
+
+    /// V2: an error result after streamed text used to be swallowed by the
+    /// "already streamed" dedupe. With stderr empty the caller saw a truncated
+    /// answer and a bare `runtime_failed`; the CLI's own error now surfaces both
+    /// as output and as the failure reason, while the success dedupe stays.
+    #[test]
+    fn an_error_result_after_streamed_text_names_the_failure() {
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let cli = error_result_cli(temp.path().join("provider"));
+        let fixture = Fixture::new("usage-error-result", cli);
+        let id = fixture.dispatch("claude");
+        let events = fixture.events(&id);
+        let streamed = fixture.streamed_lines();
+        assert!(
+            streamed.contains(&"partial answer".to_string()),
+            "the streamed text was lost: {streamed:?}"
+        );
+        assert!(
+            streamed.contains(&"error_during_execution: the model stopped early".to_string()),
+            "the error result never reached the caller: {streamed:?}"
+        );
+        assert!(
+            !streamed.iter().any(|line| line.contains("\"is_error\"")),
+            "the raw protocol line reached the caller: {streamed:?}"
+        );
+        assert_eq!(
+            failure_message(&events),
+            "error_during_execution: the model stopped early",
+            "the failure reason must name the result's error, not a generic one"
+        );
+        // The error variant still carries this run's usage.
+        let receipts = receipts(&events);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].outcome, "failed");
+        assert_eq!(receipts[0].source, "claude-cli-json-v1");
+        assert_eq!(receipts[0].tokens.input, Some(11));
+        assert_eq!(receipts[0].tokens.output, Some(44));
     }
 
     #[test]
