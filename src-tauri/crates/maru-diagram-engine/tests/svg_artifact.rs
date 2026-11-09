@@ -59,9 +59,6 @@ fn replace_attr(svg: &str, element: &str, attribute: &str, replacement: &str) ->
 
 fn add_attr(svg: &str, element: &str, attribute: &str, value: &str) -> String {
     let marker_start = svg.find(element).expect("fixture contains target element");
-    let start = svg[..marker_start]
-        .rfind('<')
-        .expect("target marker is inside an element tag");
     let end = svg[marker_start..]
         .find('>')
         .expect("element has a closing bracket")

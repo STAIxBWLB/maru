@@ -52,6 +52,11 @@ function validateReport(report, expected, index) {
       throw new Error(`${label} case hash is missing or malformed at index ${caseIndex}; regenerate every corpus hash with the SDK harness.`);
     }
     const svg = report.cases[caseIndex].svg;
+    if (typeof report.cases[caseIndex].geometryRetained !== "boolean"
+        || (svg !== null) !== report.cases[caseIndex].geometryRetained
+        || (report.cases[caseIndex].ok === true && !report.cases[caseIndex].geometryRetained)) {
+      throw new Error(`${label} omits SVG for retained geometry; regenerate SVG for rejected as well as accepted scene reports.`);
+    }
     if (svg !== null && (!svg || ["light", "dark"].some((theme) => !/^[a-f0-9]{64}$/.test(svg[theme]?.hash ?? "")
         || svg[theme].artifactGate !== true || !Number.isSafeInteger(svg[theme].bytes) || svg[theme].bytes <= 0))) {
       throw new Error(`${label} case SVG hash or artifact gate is missing; regenerate both light/dark retained-scene SVG reports.`);

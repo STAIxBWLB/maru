@@ -17,7 +17,7 @@ const report = (caseIds = corpus.caseIds, extra = {}) => ({
   fontManifestSha256: "font-manifest",
   benchmarkWork: { fixtureSha256: "a".repeat(64), nodes: 1000, routes: 999,
     stats: { astarExpandedStates: 2, routeEvaluations: 999, constraintEvaluations: 3000 }, total: 4001 },
-  cases: caseIds.map((id) => ({ id, hash: createHash("sha256").update(id).digest("hex"), svg: {light: {hash:"c".repeat(64),bytes:10,artifactGate:true},dark: {hash:"d".repeat(64),bytes:11,artifactGate:true}} })),
+  cases: caseIds.map((id) => ({ id, ok: true, geometryRetained: true, hash: createHash("sha256").update(id).digest("hex"), svg: {light: {hash:"c".repeat(64),bytes:10,artifactGate:true},dark: {hash:"d".repeat(64),bytes:11,artifactGate:true}} })),
   ...extra,
 });
 const four = () => [report(), report(), report(), report()];
@@ -68,6 +68,11 @@ describe("cross-platform whole-scene receipt comparison", () => {
     const missing = report();
     missing.cases[0]!.svg.light.hash = "";
     expect(() => compare([missing, report(), report(), report()])).toThrow("SVG hash");
+    const refused = report();
+    refused.cases[0]!.ok = false;
+    // Refusal is not a reason to drop a retained scene's SVG.
+    Object.assign(refused.cases[0]!, { svg: null });
+    expect(() => compare([refused, report(), report(), report()])).toThrow("retained geometry");
     const changed = report();
     changed.cases[0]!.svg.dark.hash = "e".repeat(64);
     expect(() => compare([report(), changed, report(), report()])).toThrow("arch-one");

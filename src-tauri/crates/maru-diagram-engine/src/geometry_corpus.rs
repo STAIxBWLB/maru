@@ -181,7 +181,7 @@ pub fn scene_corpus_hashes(input: &str) -> Result<String, Diagnostic> {
         } else {
             None
         };
-        hashes.push(json!({ "id": id, "ok": first.ok, "diagnosticCodes":codes,"routeQualityNotices":notices,"hash": crate::spec_hash(&first_bytes), "svg": svg }));
+        hashes.push(json!({ "id": id, "ok": first.ok, "diagnosticCodes":codes,"routeQualityNotices":notices,"hash": crate::spec_hash(&first_bytes), "geometryRetained": first.geometry.is_some(), "svg": svg }));
     }
     let report = json!({
         "apiVersion": crate::API_VERSION,
