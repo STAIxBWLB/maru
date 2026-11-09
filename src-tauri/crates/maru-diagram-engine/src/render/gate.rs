@@ -231,6 +231,26 @@ fn reference_frame_dash(kind: &str, c: &super::SemanticContext, id: &str) -> Opt
     }
 }
 
+fn reference_node_caption(
+    g: &GeometryDocument,
+    c: &super::SemanticContext,
+    target: &str,
+) -> String {
+    let text = caption(g, target, "node");
+    let kind = c
+        .nodes
+        .get(target)
+        .map_or("node", |node| node.kind.as_str());
+    if g.nodes
+        .iter()
+        .any(|node| node.id == target && node.final_state == Some(true))
+    {
+        format!("{text} ({kind}; final)")
+    } else {
+        format!("{text} ({kind})")
+    }
+}
+
 fn check_rect_paint(
     node: Node<'_, '_>,
     kind: &str,
@@ -806,7 +826,11 @@ fn check_label(
                 }
                 require_attr(*path_node, "d", &expected.path, &glyph_path, errors);
                 let glyph = &label.glyphs[*index];
-                let scale = super::svg::scale(label.font_size, expected.units_per_em);
+                let scale = format!(
+                    "{:.9}",
+                    f64::from(label.font_size) / (64.0 * f64::from(expected.units_per_em))
+                );
+                let scale = scale.trim_end_matches('0').trim_end_matches('.');
                 let transform = format!(
                     "translate({} {}) scale({scale} -{scale})",
                     super::svg::fixed(glyph.position.x.into()),
@@ -1067,7 +1091,7 @@ pub fn check_svg_artifact(
             require_attr(
                 group,
                 "aria-label",
-                &super::primitives::node_caption(geometry, semantics, &node.id),
+                &reference_node_caption(geometry, semantics, &node.id),
                 &path,
                 &mut errors,
             );

@@ -117,13 +117,15 @@ export type GeometryGlyph = { glyphId: number, input: string, position: Geometry
 
 export type GeometryLabel = { id?: string | null, targetId: string, text: string, bounds: GeometryBox, font: FontIdentity, fontSize: number, glyphs: Array<GeometryGlyph>, };
 
-export type GeometryLegendEntry = { key: string, label: string, bounds: GeometryBox, };
+export type GeometryLegendEntry = { swatchBounds?: GeometryBox | null, textBounds?: GeometryBox | null, key: string, label: string, bounds: GeometryBox, };
 
-export type GeometryLegend = { bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
+export type GeometryLegend = { titleY?: number | null, bounds: GeometryBox, entries: Array<GeometryLegendEntry>, };
 
 export type GeometryPage = { bounds: GeometryBox, };
 
-export type GeometryDocument = { nodes: Array<GeometryNode>, containers: Array<GeometryContainer>, routes: Array<GeometryRoute>, labels: Array<GeometryLabel>, legend: GeometryLegend, page: GeometryPage, };
+export type GeometryLine = { from: GeometryPoint, to: GeometryPoint, };
+
+export type GeometryDocument = { lifecycleRail?: GeometryLine | null, nodes: Array<GeometryNode>, containers: Array<GeometryContainer>, routes: Array<GeometryRoute>, labels: Array<GeometryLabel>, legend: GeometryLegend, page: GeometryPage, };
 
 export type GeometryReport = { apiVersion: number, ok: boolean, geometry?: GeometryDocument | null, diagnostics: Array<Diagnostic>, receipt: EngineReceipt, };
 

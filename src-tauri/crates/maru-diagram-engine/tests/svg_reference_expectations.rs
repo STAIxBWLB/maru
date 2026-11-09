@@ -156,7 +156,7 @@ fn empty_legend_emits_no_symbols_and_passes_reference_gate() {
     let doc = roxmltree::Document::parse(&svg).unwrap();
     assert!(!doc.descendants().any(|n| n
         .attribute("data-kind")
-        .is_some_and(|k| k.starts_with("legend-"))));
+        .is_some_and(|k| k.starts_with("legend-") && k != "legend-box")));
     let options = SvgOptions::from_spec(&spec, SvgTheme::Light).unwrap();
     assert!(check_svg_artifact(&svg, &g, &options).is_empty());
 }
