@@ -586,15 +586,26 @@ the document title and subtitle in the header band the page offset reserves.
 `src/lib/diagram/engineCanvasGeometry.ts` maps one dataset's geometry report onto
 canvas ids (a relation without an id is named by its ordinal: `<role>:<index>`
 in the report, `<datasetId>-e<index>` on the canvas, and `<role>:<index>:generated`
-when an authored id already holds that name) and publishes it per
+when an authored id already holds that name; `:generated` may repeat) and publishes it per
 dataset, and `useCanvasGeometry` reads it on the
 canvas side. The engine lays out exactly the bytes the export path sends, and the
-canvas carries their SHA-256 in `data-engine-spec-sha256`, so what is on screen
-and what is exported cannot disagree on placement.
+canvas carries their SHA-256 in `data-engine-spec-sha256`. When a ready published
+scene matches the current source and pins, the Maru visual exports (Maru SVG,
+plain SVG, PNG, PDF and clipboard) reuse its boxes, measured label lines and
+routes. Maru SVG still embeds the original editable source document as metadata.
+While no matching ready scene exists, visual exports keep their source-position
+fallback; retained stale canvas geometry is not a current export agreement
+claim. Font-independent outlines remain the native engine export profile; the
+Maru visual SVG keeps text labels in the canvas font family. The engine SVG/PNG
+export path independently lays out its source request.
 
 - Fixed-point coordinates become pixels once, at the render boundary (`value /
   64` in `fixedToPixels`). Nothing re-measures text, and Korean label lines are
   never sliced with backend offsets: the engine's own line breaks provide them.
+- Document replacement clears the published scene and invalidates in-flight
+  layouts, including when a copied file keeps the same dataset id. Returning to
+  an already cached revision also supersedes a different pending layout.
+- Escape cancels an uncommitted drag offset without changing the document.
 - A drag authors a pin, not a placement. Engine-drawn members move on the canvas
   during the gesture and the drop records one pin entry (`pinSemanticNodes`), in
   one undo step. A pin is an authored source position, so the adapter subtracts

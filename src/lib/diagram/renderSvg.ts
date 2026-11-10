@@ -4,8 +4,8 @@
  * The old export path deep-cloned the live `<svg class="maru-diagram-canvas">`,
  * which leaked interactive chrome (selection rects, ports, smart guides,
  * marquee, connect ghost) into exports and silently dropped every node the
- * viewport culler had skipped. `renderDocToSvg` builds the SVG straight from
- * the document model instead: every node kind from `NodeView.tsx` (`NodeBody`,
+ * viewport culler had skipped. `renderDocToSvg` builds the SVG from the
+ * document model and its matching published engine scene instead: every node kind from `NodeView.tsx` (`NodeBody`,
  * `SectionHeader`, `NodeLabel`), edges routed through
  * {@link routeEdge} with the shared arrow markers, plus the status/progress
  * decorators derived from `node.meta`.
@@ -23,6 +23,16 @@
  */
 
 import { ARROW_MARKER_ID, routeEdge } from "./edgeRouting";
+import {
+  canvasDisplayNode,
+  canvasLabelLines,
+  matchingCanvasGeometry,
+  routePathOf,
+  type CanvasGeometry,
+  type CanvasGeometryLabel,
+  type CanvasGeometryRoute,
+  type CanvasLabelLines,
+} from "./engineCanvasGeometry";
 import { bbox } from "./geometry";
 import type { MatrixDataset } from "./reportTypes";
 import { escapeHtml, sanitizeCssColor } from "./richText";
@@ -75,9 +85,9 @@ const STATUS_COLORS: Record<NodeStatus, { bg: string; fg: string; bar: string }>
   blocked: { bg: "#fee2e2", fg: "#7f1d1d", bar: "#dc2626" },
 };
 
-/** Keep coordinate strings short and stable for snapshot-ish tests. */
+/** Preserve engine 1/64px coordinates; keep other legacy values short. */
 function num(value: number): string {
-  const rounded = Math.round(value * 100) / 100;
+  const rounded = Number.isInteger(value * 64) ? value : Math.round(value * 100) / 100;
   return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
@@ -187,7 +197,7 @@ function rectSvg(w: number, h: number, s: ShapeStyle, extra = ""): string {
 
 // Mirrors `NodeBody` in NodeView.tsx (numbered badge included). For
 // view-linked tables `matrix` is the dataset resolved from the doc.
-function nodeBodySvg(node: DiagramNode, matrix?: MatrixDataset | null): string {
+function nodeBodySvg(node: DiagramNode, matrix?: MatrixDataset | null, band = true): string {
   const s = shapeFor(node);
   const w = node.w;
   const h = node.h;
@@ -259,9 +269,11 @@ function nodeBodySvg(node: DiagramNode, matrix?: MatrixDataset | null): string {
       return (
         `<g>` +
         rectSvg(w, h, s) +
-        `<rect width="${num(w)}" height="${headerH}" rx="${num(s.br)}" ry="${num(s.br)}"` +
-        ` fill="#1f2937" stroke="${s.border}" stroke-width="${num(s.bw)}"/>` +
-        `<rect width="${num(w)}" height="${num(headerH - s.br)}" fill="#1f2937"/>` +
+        (band
+          ? `<rect width="${num(w)}" height="${headerH}" rx="${num(s.br)}" ry="${num(s.br)}"` +
+            ` fill="#1f2937" stroke="${s.border}" stroke-width="${num(s.bw)}"/>` +
+            `<rect width="${num(w)}" height="${num(headerH - s.br)}" fill="#1f2937"/>`
+          : "") +
         `</g>`
       );
     case "split-box": {
@@ -403,13 +415,27 @@ function metaDecorationsSvg(node: DiagramNode): string {
   return out;
 }
 
-function nodeSvg(node: DiagramNode, matrix?: MatrixDataset | null): string {
+/** Match EngineLabels on the canvas without measuring or wrapping its lines. */
+function engineLabelsSvg(labels: readonly CanvasLabelLines[], color: string): string {
+  return labels.map((label) =>
+    `<text data-engine-label="${escapeHtml(label.id)}" x="${label.x}" y="${label.y}"` +
+    ` fill="${color}" font-size="${label.fontSize}" font-weight="${label.weight}"` +
+    ` font-family="Noto Sans CJK KR Diagram, Noto Sans CJK KR, sans-serif" dominant-baseline="text-before-edge">` +
+    label.lines.map((line, index) =>
+      `<tspan x="${label.x}" dy="${index === 0 ? 0 : label.fontSize * 1.5}">${escapeHtml(line)}</tspan>`,
+    ).join("") + `</text>`,
+  ).join("");
+}
+
+function nodeSvg(node: DiagramNode, matrix?: MatrixDataset | null, labels?: readonly CanvasLabelLines[]): string {
   const matrixTable = node.kind === "table" && matrix != null;
+  const engineLabels = labels && labels.length > 0;
   return (
     `<g transform="translate(${num(node.x)},${num(node.y)})" data-node-id="${escapeHtml(node.id)}">` +
-    nodeBodySvg(node, matrix) +
-    sectionHeaderSvg(node) +
-    (matrixTable ? "" : nodeLabelSvg(node)) +
+    nodeBodySvg(node, matrix, !engineLabels) +
+    (engineLabels
+      ? engineLabelsSvg(labels, shapeFor(node).fc)
+      : sectionHeaderSvg(node) + (matrixTable ? "" : nodeLabelSvg(node))) +
     metaDecorationsSvg(node) +
     `</g>`
   );
@@ -423,21 +449,35 @@ function arrowMarkerAttr(kind: DiagramEdge["arrowStart"] | DiagramEdge["arrowEnd
 
 // Mirrors `EdgeView` (visible path only — the transparent hit-area path is
 // interactive chrome and stays out of exports).
-function edgeSvg(edge: DiagramEdge, fromNode: DiagramNode, toNode: DiagramNode): string {
-  const routed = routeEdge(edge, fromNode, toNode);
-  if (!routed) return "";
+function edgeSvg(
+  edge: DiagramEdge,
+  fromNode: DiagramNode,
+  toNode: DiagramNode,
+  engineRoute?: CanvasGeometryRoute,
+  engineLabel?: CanvasGeometryLabel,
+): string {
+  const routed = engineRoute ? null : routeEdge(edge, fromNode, toNode);
+  const path = engineRoute ? routePathOf(engineRoute) : routed?.path;
+  if (!path) return "";
   const color = sanitizeCssColor(edge.color) ?? "#1f2937";
   const strokeWidth = edge.width ?? 1.5;
   const dash = edge.dash === "dashed" ? ` stroke-dasharray="6 4"` : "";
   const markerStart = arrowMarkerAttr(edge.arrowStart);
   const markerEnd = arrowMarkerAttr(edge.arrowEnd);
   let out =
-    `<path d="${routed.path}" fill="none" stroke="${color}" stroke-width="${num(strokeWidth)}"` +
+    `<path d="${path}" fill="none" stroke="${color}" stroke-width="${num(strokeWidth)}"` +
     `${dash} stroke-linecap="round" stroke-linejoin="round"` +
     (markerStart ? ` marker-start="${markerStart}"` : "") +
     (markerEnd ? ` marker-end="${markerEnd}"` : "") +
     `/>`;
-  if (edge.label) {
+  if (engineRoute) {
+    if (engineLabel) {
+      out += `<g data-engine-label-box="${engineLabel.x} ${engineLabel.y} ${engineLabel.w} ${engineLabel.h}">` +
+        `<rect x="${engineLabel.x}" y="${engineLabel.y}" width="${engineLabel.w}" height="${engineLabel.h}"` +
+        ` rx="3" ry="3" fill="#ffffff" stroke="${color}" stroke-width="1"/>` +
+        engineLabelsSvg([engineLabel], color) + `</g>`;
+    }
+  } else if (edge.label && routed) {
     const halfW = Math.max(edge.label.length * 3.5, 16);
     const w = Math.max(edge.label.length * 7, 32);
     out +=
@@ -470,6 +510,7 @@ function docBounds(
   nodes: DiagramNode[],
   edges: DiagramEdge[],
   nodeById: Map<string, DiagramNode>,
+  geometry: CanvasGeometry | null,
 ): { x: number; y: number; w: number; h: number } | null {
   const box = bbox(nodes);
   let minX = box ? box.x : Infinity;
@@ -480,9 +521,11 @@ function docBounds(
     const from = nodeById.get(edge.fromNode);
     const to = nodeById.get(edge.toNode);
     if (!from || !to) continue;
-    const routed = routeEdge(edge, from, to);
-    if (!routed) continue;
-    const coords = routed.path.match(/-?\d+(?:\.\d+)?/g) ?? [];
+    const engineRoute = geometry?.routes.get(edge.id);
+    const routed = engineRoute ? null : routeEdge(edge, from, to);
+    const coords = engineRoute
+      ? engineRoute.points.flatMap((point) => [String(point.x), String(point.y)])
+      : routed?.path.match(/-?\d+(?:\.\d+)?/g) ?? [];
     for (let i = 0; i + 1 < coords.length; i += 2) {
       const px = Number(coords[i]);
       const py = Number(coords[i + 1]);
@@ -491,12 +534,23 @@ function docBounds(
       if (px > maxX) maxX = px;
       if (py > maxY) maxY = py;
     }
-    if (edge.label) {
+    if (!engineRoute && routed && edge.label) {
       const halfW = Math.max(edge.label.length * 3.5, 16);
       minX = Math.min(minX, routed.label.x - halfW);
       maxX = Math.max(maxX, routed.label.x + halfW);
       minY = Math.min(minY, routed.label.y - 9);
       maxY = Math.max(maxY, routed.label.y + 9);
+    }
+  }
+  if (geometry) {
+    const visibleIds = new Set([...nodes.map((node) => node.id), ...edges.map((edge) => edge.id)]);
+    const labels = [...geometry.labels].filter(([id]) => visibleIds.has(id)).flatMap(([, items]) => items);
+    const bounds = [...labels, ...geometry.pageLabels, ...(geometry.page ? [geometry.page] : [])];
+    for (const item of bounds) {
+      minX = Math.min(minX, item.x);
+      minY = Math.min(minY, item.y);
+      maxX = Math.max(maxX, item.x + item.w);
+      maxY = Math.max(maxY, item.y + item.h);
     }
   }
   if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
@@ -510,17 +564,18 @@ function docBounds(
  */
 export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): RenderedDiagramSvg {
   const padding = opts.padding ?? 40;
+  const geometry = matchingCanvasGeometry(doc);
 
   const hiddenLayers = new Set(doc.layers.filter((layer) => !layer.visible).map((l) => l.id));
   const nodes = doc.nodes.filter(
     (node) => !node.hidden && !(node.layerId && hiddenLayers.has(node.layerId)),
-  );
+  ).map((node) => canvasDisplayNode(node, geometry));
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const edges = doc.edges.filter(
     (edge) => nodeById.has(edge.fromNode) && nodeById.has(edge.toNode),
   );
 
-  const bounds = docBounds(nodes, edges, nodeById) ?? { x: 0, y: 0, w: 800, h: 600 };
+  const bounds = docBounds(nodes, edges, nodeById, geometry) ?? { x: 0, y: 0, w: 800, h: 600 };
   const viewBox = {
     x: bounds.x - padding,
     y: bounds.y - padding,
@@ -541,8 +596,19 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
   }
 
   const content =
-    edges.map((edge) => edgeSvg(edge, nodeById.get(edge.fromNode)!, nodeById.get(edge.toNode)!)).join("") +
-    nodes.map((node) => nodeSvg(node, matrixByNodeId.get(node.id) ?? null)).join("");
+    (geometry ? engineLabelsSvg(geometry.pageLabels, "#111827") : "") +
+    edges.map((edge) => edgeSvg(
+      edge,
+      nodeById.get(edge.fromNode)!,
+      nodeById.get(edge.toNode)!,
+      geometry?.routes.get(edge.id),
+      geometry?.labels.get(edge.id)?.[0],
+    )).join("") +
+    nodes.map((node) => {
+      const box = geometry?.boxes.get(node.id);
+      const labels = box ? geometry?.labels.get(node.id)?.map((label) => canvasLabelLines(label, box)) : undefined;
+      return nodeSvg(node, matrixByNodeId.get(node.id) ?? null, labels);
+    }).join("");
 
   const svg =
     `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink"` +

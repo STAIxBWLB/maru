@@ -180,7 +180,7 @@ export function canvasGeometryOf(
     if (!relationPrefix || !sourceId.startsWith(`${relationPrefix}:`)) return null;
     if (authoredRelations.has(sourceId)) return null;
     let index = sourceId.slice(relationPrefix.length + 1);
-    if (index.endsWith(GENERATED_ROUTE_SUFFIX)) index = index.slice(0, -GENERATED_ROUTE_SUFFIX.length);
+    while (index.endsWith(GENERATED_ROUTE_SUFFIX)) index = index.slice(0, -GENERATED_ROUTE_SUFFIX.length);
     if (!/^(0|[1-9][0-9]*)$/.test(index)) return null;
     const relation = relations[Number(index)];
     const idLess = relation !== undefined && (typeof relation.id !== "string" || relation.id.length === 0);
@@ -368,6 +368,7 @@ export function canvasLabelLines(label: CanvasGeometryLabel, origin: { x: number
 }
 
 interface Entry {
+  generation: number;
   state: CanvasGeometryState;
   listeners: Set<() => void>;
   /** Source/pin key of the geometry currently displayed. */
@@ -398,6 +399,7 @@ function entryFor(datasetId: string): Entry {
   let entry = entries.get(datasetId);
   if (!entry) {
     entry = {
+      generation: 0,
       state: { datasetId, status: "idle", geometry: null, diagnostics: [], sourceSpecSha256: null },
       listeners: new Set(),
       cacheKey: null,
@@ -428,6 +430,32 @@ export function subscribeCanvasGeometry(datasetId: string, listener: () => void)
   };
 }
 
+/** Invalidate displayed scenes and in-flight work when opening/replacing a document. */
+export function resetCanvasGeometry(): void {
+  for (const entry of entries.values()) {
+    entry.generation += 1;
+    entry.cacheKey = null;
+    entry.pendingKey = null;
+    entry.pending = null;
+    entry.offset = null;
+    publish(entry, { ...IDLE, datasetId: entry.state.datasetId });
+  }
+}
+
+/** Only a ready scene for these exact source and pin bytes may feed visual exports. */
+export function matchingCanvasGeometry(doc: DiagramDoc): CanvasGeometry | null {
+  const datasetId = canvasGeometryDatasetId(doc);
+  if (!datasetId) return null;
+  const entry = entries.get(datasetId);
+  const dataset = doc.datasets?.find((item) => item.id === datasetId);
+  if (!entry || dataset?.kind !== "semanticSpec" || entry.state.status !== "ready") return null;
+  try {
+    return entry.cacheKey === canvasLayoutKey(JSON.stringify(dataset.spec), doc) ? entry.state.geometry : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Drop every cached layout — tests start here so keys never leak across cases. */
 export function _resetCanvasGeometryForTests(): void {
   entries.clear();
@@ -447,6 +475,10 @@ function pinSignature(doc: DiagramDoc): string {
   return parts.sort().join("\u0001");
 }
 
+function canvasLayoutKey(specJson: string, doc: DiagramDoc): string {
+  return `${specJson}\u0000${pinSignature(doc)}`;
+}
+
 function adapterDiagnostic(error: unknown): Diagnostic {
   return {
     code: "canvas.geometry.unavailable",
@@ -463,6 +495,7 @@ async function runLayout(
   dataset: SemanticSpecDataset,
   key: string,
   specJson: string,
+  generation: number,
 ): Promise<void> {
   try {
     const engine = await engineLoader();
@@ -477,7 +510,7 @@ async function runLayout(
     );
     // The doc has already moved on: a newer key owns the canvas, and publishing
     // this scene would replace it with an older one that nothing re-syncs.
-    if (entry.pendingKey !== key) return;
+    if (entry.pendingKey !== key || entry.generation !== generation) return;
     entry.cacheKey = key;
     if (report.ok && report.geometry?.page.contentOffset) {
       entry.offset = { specJson, value: report.geometry.page.contentOffset };
@@ -496,7 +529,7 @@ async function runLayout(
   } catch (error) {
     // A refused or unreadable layout must never block the canvas: keep the last
     // good scene (or the projected source positions) and report why.
-    if (entry.pendingKey !== key) return;
+    if (entry.pendingKey !== key || entry.generation !== generation) return;
     entry.cacheKey = key;
     publish(entry, {
       datasetId: dataset.id,
@@ -508,7 +541,7 @@ async function runLayout(
   } finally {
     // Only the layout that still owns the pending slot clears it: a superseded
     // one must leave the newer layout's key and promise intact.
-    if (entry.pendingKey === key) {
+    if (entry.pendingKey === key && entry.generation === generation) {
       entry.pendingKey = null;
       entry.pending = null;
     }
@@ -531,6 +564,9 @@ export function syncCanvasGeometry(
     (item): item is SemanticSpecDataset => item.kind === "semanticSpec" && item.id === datasetId,
   );
   if (!dataset) {
+    entry.generation += 1;
+    entry.pendingKey = null;
+    entry.pending = null;
     entry.cacheKey = null;
     if (entry.state.status !== "idle") publish(entry, { ...IDLE, datasetId });
     return Promise.resolve();
@@ -539,6 +575,9 @@ export function syncCanvasGeometry(
   try {
     specJson = JSON.stringify(dataset.spec);
   } catch (error) {
+    entry.generation += 1;
+    entry.pendingKey = null;
+    entry.pending = null;
     entry.cacheKey = null;
     publish(entry, {
       datasetId,
@@ -549,13 +588,19 @@ export function syncCanvasGeometry(
     });
     return Promise.resolve();
   }
-  const key = `${specJson}\u0000${pinSignature(doc)}`;
-  if (entry.cacheKey === key) return Promise.resolve();
+  const key = canvasLayoutKey(specJson, doc);
+  if (entry.cacheKey === key) {
+    entry.generation += 1;
+    entry.pendingKey = null;
+    entry.pending = null;
+    return Promise.resolve();
+  }
   if (entry.pendingKey === key && entry.pending) return entry.pending;
   entry.pendingKey = key;
+  const generation = ++entry.generation;
   if (!entry.state.geometry && entry.state.status !== "pending") {
     publish(entry, { datasetId, status: "pending", geometry: null, diagnostics: [], sourceSpecSha256: null });
   }
-  entry.pending = runLayout(entry, doc, dataset, key, specJson);
+  entry.pending = runLayout(entry, doc, dataset, key, specJson, generation);
   return entry.pending;
 }

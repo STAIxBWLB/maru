@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import { resetCanvasGeometry } from "../../lib/diagram/engineCanvasGeometry";
 import {
   addNode,
   defaultCoalescer,
@@ -357,6 +358,7 @@ function DiagramShell({
    */
   const openDoc = useCallback(
     (next: Parameters<typeof replaceDoc>[0]) => {
+      resetCanvasGeometry();
       store.setState(replaceDoc(next));
       if ((next.datasets ?? []).some((dataset) => dataset.kind === "semanticSpec" && dataset.diagramType === "floorplan")) {
         const rect = viewportRef.current?.getBoundingClientRect();
@@ -615,6 +617,7 @@ function DiagramShell({
               ? sel.preset.name
               : t(getPattern(patternId)?.labelKey ?? ""),
         });
+        resetCanvasGeometry();
         store.setState(replaceDoc(next));
         setActiveName(null);
         setLastSavedBody(null);
@@ -675,6 +678,7 @@ function DiagramShell({
 
   const handleMappingConfirm = useCallback(
     (result: CrossConversionResult) => {
+      resetCanvasGeometry();
       store.setState(withSnapshot(replaceDoc(result.doc), coalescer));
       if (mappingPreview) recordRecentPattern(mappingPreview.targetPatternId);
       setMappingPreview(null);
@@ -1119,6 +1123,7 @@ function DiagramShell({
 
   const handleNew = useCallback(() => {
     const fresh = createEmptyDoc(createDiagramId());
+    resetCanvasGeometry();
     store.setState(replaceDoc(fresh));
     setActiveName(null);
     setLastSavedBody(null);
@@ -1866,6 +1871,7 @@ function DiagramShell({
         doc={store.getState().doc}
         workspace={workPath}
         onRestore={(next) => {
+          resetCanvasGeometry();
           store.setState(replaceDoc(next));
           setHistoryOpen(false);
           reportError(null);

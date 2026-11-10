@@ -304,6 +304,27 @@ describe("semantic canvas pins a dropped member", () => {
     _resetCanvasGeometryForTests();
   });
 
+  it("Escape cancels a live engine drag without leaving a visual offset", async () => {
+    harness = renderCanvas(doc);
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+    act(() => {
+      probe!.setState((state) => ({ ...state, ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: false, smartGuideOn: false } } }));
+    });
+    const id = (doc.datasets![0] as SemanticSpecDataset).idMap.draft!;
+    const before = JSON.stringify(probe!.getState().doc);
+    const original = nodeGroup(id).getAttribute("transform");
+    const surface = document.body.querySelector(".maru-diagram-canvas")!;
+    await act(async () => { nodeGroup(id).dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 } as MouseEventInit)); });
+    await act(async () => { surface.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 60, clientY: 45 } as MouseEventInit)); });
+    expect(nodeGroup(id).getAttribute("transform")).not.toBe(original);
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(nodeGroup(id).getAttribute("transform")).toBe(original);
+    expect(JSON.stringify(probe!.getState().doc)).toBe(before);
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
   it("writes one pin at the dropped canvas position", async () => {
     harness = renderCanvas(doc);
     await settle();

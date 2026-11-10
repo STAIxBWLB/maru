@@ -14,6 +14,8 @@ import {
   canvasGeometryOf,
   canvasNudgePins,
   canvasGeometryState,
+  matchingCanvasGeometry,
+  resetCanvasGeometry,
   routePathOf,
   syncCanvasGeometry,
   _resetCanvasGeometryForTests,
@@ -320,7 +322,8 @@ describe("canvas geometry source agreement with the export path", () => {
     expect(geometry.routes.get("edge:7")).toMatchObject({ sourceId: "edge:7" });
   });
 
-  it("never lets an authored id take the route the engine generated", () => {
+  it.each([1, 2])("maps generated route ids with %s collision suffixes", (depth) => {
+    const generatedId = "edge:0" + ":generated".repeat(depth);
     // `<role>:<index>` is also a legal authored id. When one takes the name, the
     // engine renames the id-less relation's route `<role>:<index>:generated`,
     // and only that route belongs to the projection's edge.
@@ -341,9 +344,10 @@ describe("canvas geometry source agreement with the export path", () => {
     }, { id: "ds-collide" }).dataset;
     const spec = structuredClone(base.spec);
     delete (spec.edges as Array<Record<string, unknown>>)[0]!.id;
+    if (depth === 2) (spec.edges as Array<Record<string, unknown>>).push({ id: "edge:0:generated", from: "c", to: "a" });
     const legacy: SemanticSpecDataset = { ...base, spec, idMap: {} };
     const doc = projectSemanticDocument(legacy).doc;
-    expect(doc.edges.map((edge) => edge.id)).toEqual(["ds-collide-e0", "edge:0"]);
+    expect(doc.edges.map((edge) => edge.id)).toEqual(["ds-collide-e0", "edge:0", ...(depth === 2 ? ["edge:0:generated"] : [])]);
 
     const font = { id: "maru-ui", revision: "1", fontSha256: "f".repeat(64), weight: 400, unitsPerEm: 1000, license: "OFL-1.1" };
     const report: GeometryReport = {
@@ -353,13 +357,13 @@ describe("canvas geometry source agreement with the export path", () => {
         nodes: [],
         containers: [],
         routes: [
-          { id: "edge:0:generated", from: "a", to: "b", points: [{ x: 64 * 10, y: 64 * 20 }], variant: null, role: null, width: null },
+          { id: generatedId, from: "a", to: "b", points: [{ x: 64 * 10, y: 64 * 20 }], variant: null, role: null, width: null },
           { id: "edge:0", from: "b", to: "c", points: [{ x: 64 * 30, y: 64 * 40 }], variant: null, role: null, width: null },
         ],
         labels: [
           {
-            id: "edge:edge:0:generated:label",
-            targetId: "edge:0:generated",
+            id: `edge:${generatedId}:label`,
+            targetId: generatedId,
             text: "first",
             bounds: { x: 64 * 10, y: 64 * 20, width: 64 * 40, height: 64 * 14 },
             font,
@@ -385,9 +389,9 @@ describe("canvas geometry source agreement with the export path", () => {
     const geometry = canvasGeometryOf(report, doc, legacy)!;
     // Each route reaches the edge it was emitted for: the generated one the
     // projected edge, the authored one the edge that carries that name.
-    expect(geometry.routes.get("ds-collide-e0")).toMatchObject({ sourceId: "edge:0:generated" });
+    expect(geometry.routes.get("ds-collide-e0")).toMatchObject({ sourceId: generatedId });
     expect(geometry.routes.get("edge:0")).toMatchObject({ sourceId: "edge:0" });
-    expect(geometry.routes.has("edge:0:generated")).toBe(false);
+    expect(geometry.routes.has(generatedId)).toBe(false);
     expect(geometry.labels.get("ds-collide-e0")?.[0]?.lines).toEqual(["first"]);
     expect(geometry.labels.get("edge:0")?.[0]?.lines).toEqual(["second"]);
   });
@@ -505,6 +509,44 @@ describe("canvas geometry store", () => {
       syncCanvasGeometry(doc, dataset.id, engine.load),
     ]);
     expect(engine.requests).toHaveLength(1);
+  });
+
+  it("returning to a ready key supersedes a different in-flight layout", async () => {
+    const { doc, dataset } = docFor("workflow");
+    const engine = fakeEngine();
+    await syncCanvasGeometry(doc, dataset.id, engine.load);
+    const ready = canvasGeometryState(dataset.id);
+    const edited = structuredClone(doc);
+    ((edited.datasets![0] as SemanticSpecDataset).spec.nodes as Array<Record<string, unknown>>)[0]!.label = "다른 초안 Different draft";
+    let release!: (value: Awaited<ReturnType<FakeEngine["load"]>>) => void;
+    const held = new Promise<Awaited<ReturnType<FakeEngine["load"]>>>((resolve) => { release = resolve; });
+    const pending = syncCanvasGeometry(edited, dataset.id, () => held);
+    expect(matchingCanvasGeometry(edited)).toBeNull();
+    await syncCanvasGeometry(doc, dataset.id);
+    release(await engine.load());
+    await pending;
+    expect(canvasGeometryState(dataset.id)).toBe(ready);
+    expect(matchingCanvasGeometry(doc)).toBe(ready.geometry);
+  });
+
+  it("document replacement never inherits a copied dataset's scene or pending work", async () => {
+    const { doc, dataset } = docFor("workflow");
+    const engine = fakeEngine();
+    await syncCanvasGeometry(doc, dataset.id, engine.load);
+    expect(matchingCanvasGeometry(doc)).not.toBeNull();
+    resetCanvasGeometry();
+    const copy = structuredClone(doc);
+    let release!: (value: Awaited<ReturnType<FakeEngine["load"]>>) => void;
+    const held = new Promise<Awaited<ReturnType<FakeEngine["load"]>>>((resolve) => { release = resolve; });
+    const pending = syncCanvasGeometry(doc, dataset.id, () => held);
+    resetCanvasGeometry();
+    await syncCanvasGeometry(copy, dataset.id, fakeEngine({ ok: false }).load);
+    const refused = canvasGeometryState(dataset.id);
+    expect(refused).toMatchObject({ status: "refused", geometry: null });
+    expect(matchingCanvasGeometry(copy)).toBeNull();
+    release(await engine.load());
+    await pending;
+    expect(canvasGeometryState(dataset.id)).toBe(refused);
   });
 
   it("ignores a layout the document has already superseded", async () => {

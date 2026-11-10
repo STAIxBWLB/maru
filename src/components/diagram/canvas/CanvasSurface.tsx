@@ -826,6 +826,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (!isDiagramKeystroke(event.target)) return;
       if (event.key === "Escape") {
         gestureRef.current = null;
+        setCanvasOffset((current) => current?.committed ? current : null);
         setMarquee(null);
         setGuides([]);
         setConnectGhost(null);
