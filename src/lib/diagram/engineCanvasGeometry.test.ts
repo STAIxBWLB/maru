@@ -595,6 +595,25 @@ describe("canvas geometry store", () => {
   });
 });
 
+describe("document header and entity label namespaces", () => {
+  it("keeps a node named document out of the page header labels", async () => {
+    const spec = mixedSpec("architecture");
+    const nodes = spec.components as Array<Record<string, unknown>>;
+    const previous = nodes[0]!.id;
+    nodes[0]!.id = "document";
+    for (const edge of spec.connections as Array<Record<string, unknown>>) {
+      if (edge.from === previous) edge.from = "document";
+      if (edge.to === previous) edge.to = "document";
+    }
+    const dataset = archifySpecToDataset("architecture", spec, { id: "ds-document" }).dataset;
+    const doc = projectSemanticDocument(dataset).doc;
+    await syncCanvasGeometry(doc, dataset.id, fakeEngine().load);
+    const geometry = canvasGeometryState(dataset.id).geometry!;
+    expect(geometry.labels.get(dataset.idMap.document!)?.some((label) => label.id === "node:document:label")).toBe(true);
+    expect(geometry.pageLabels.some((label) => label.id === "node:document:label")).toBe(false);
+  });
+});
+
 describe("which canvases draw engine geometry", () => {
   it("selects the single engine-family semantic dataset and nothing else", () => {
     const { doc, dataset } = docFor("lifecycle");

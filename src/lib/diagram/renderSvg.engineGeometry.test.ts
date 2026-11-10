@@ -111,6 +111,27 @@ describe("published engine geometry in Maru visual exports", () => {
     expect(JSON.stringify(doc)).toBe(before);
   });
 
+  it("keeps node and edge labels separate when their canvas ids are identical", () => {
+    const { doc, geometry } = sceneFor("workflow");
+    const shared = doc.nodes[0]!.id;
+    const oldEdgeId = doc.edges[0]!.id;
+    const nodeLabels = geometry.labels.get(shared)!;
+    const edgeLabel = { ...geometry.labels.get(oldEdgeId)![0]!, targetId: shared };
+    doc.edges[0]!.id = shared;
+    const mixed: CanvasGeometry = {
+      ...geometry,
+      labels: new Map([[shared, [...nodeLabels, edgeLabel]]]),
+      routes: new Map([...geometry.routes].map(([id, route]) => id === oldEdgeId ? [shared, { ...route, id: shared }] : [id, route])),
+    };
+    vi.mocked(matchingCanvasGeometry).mockReturnValue(mixed);
+    const exported = parsed(renderDocToSvg(doc).svg);
+    const node = exported.querySelector(`[data-node-id="${shared}"]`)!;
+    const edge = exported.querySelector(`[data-edge-id="${shared}"]`)!;
+    expect(node.querySelector('[data-engine-label="edge:relation-0:label"]')).toBeNull();
+    expect(edge.querySelector('[data-engine-label="node:source-0:label"]')).toBeNull();
+    expect(edge.querySelector('[data-engine-label="edge:relation-0:label"]')?.textContent).toBe("처리Process");
+  });
+
   it("keeps source placement when no matching ready scene is available", () => {
     const { doc } = sceneFor("architecture");
     const rendered = parsed(renderDocToSvg(doc).svg);
