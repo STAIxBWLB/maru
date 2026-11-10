@@ -563,7 +563,7 @@ fn route_with_budget(
         let leg = search_leg(previous, target, &obstacles, leg_masks, max_search_states)?;
         if route.is_empty() {
             route.extend(leg.iter().copied());
-            segment_legs.extend(std::iter::repeat(leg_index).take(leg.len().saturating_sub(1)));
+            segment_legs.extend(std::iter::repeat_n(leg_index, leg.len().saturating_sub(1)));
         } else {
             for point in leg.into_iter().skip(1) {
                 if route.last() != Some(&point) {
