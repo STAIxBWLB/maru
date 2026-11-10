@@ -1,3 +1,4 @@
+import wasmUrl from "./__generated__/engine-geometry/maru_diagram_engine_bg.wasm?url";
 import initializeGeometry, * as geometryBindings from "./__generated__/engine-geometry/maru_diagram_engine.js";
 /** Lazy product layout/metrics. This module alone owns geometry-WASM asset references. */
 import type { Diagnostic, TextMetrics, GeometryReport, LayoutRequest } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
@@ -17,7 +18,7 @@ export async function loadGeometryEngine(): Promise<GeometryEngine> {
   if (typeof bindings.default !== "function" || typeof bindings.measure_text_json !== "function" || typeof bindings.layout_json !== "function") {
     throw new Error("The diagram layout module is unavailable; reload Maru, or update the app and retry.");
   }
-  await initializeGeometry();
+  await initializeGeometry({ module_or_path: wasmUrl });
   const measure = bindings.measure_text_json as (text: string, weight: number, size: number) => string;
   const layout = bindings.layout_json as (input: string) => string;
   const engine: GeometryEngine = { async renderSvgForTest(geometry, options, specJson) {

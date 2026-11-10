@@ -1,3 +1,4 @@
+import wasmUrl from "./__generated__/engine-e0/maru_diagram_engine_bg.wasm?url";
 import initializeValidation, * as validationBindings from "./__generated__/engine-e0/maru_diagram_engine.js";
 /** Independent engine measurement facade. Product apply/render paths do not import this. */
 import type { ValidationReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
@@ -39,7 +40,7 @@ export async function loadWasmEngine(): Promise<DiagramEngine> {
   if (typeof bindings.default !== "function" || typeof bindings.validate_diagram_json !== "function") {
     throw new Error("The diagram validation module is unavailable; reload Maru, or update the app and retry.");
   }
-  await initializeValidation();
+  await initializeValidation({ module_or_path: wasmUrl });
   const validate = bindings.validate_diagram_json as (input: string) => string;
   return { transport: "wasm", async validate(input) { return checkedReport(JSON.parse(validate(input))); } };
 }
