@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { archifySpecToDataset } from "./archifyCodec";
 import { deserializeDoc, serializeDoc } from "./persistence";
-import { ENGINE_DIAGRAM_TYPES, type EngineDiagramType, type SemanticSpecDataset } from "./reportTypes";
+import { ENGINE_DIAGRAM_TYPES, validateSemanticSpec, type EngineDiagramType, type SemanticSpecDataset } from "./reportTypes";
 import { createEmptyDoc } from "./types";
+import { validateEngineSpecPreCheck } from "./validation";
 
 const ENTITY_FIELDS: Record<EngineDiagramType, string> = {
   architecture: "components",
@@ -20,8 +21,8 @@ function datasetFor(type: EngineDiagramType, id: string, refused: boolean): Sema
   const entities = spec[ENTITY_FIELDS[type]] as Record<string, unknown>[];
   if (refused) {
     // Valid JSON with a semantic reference/shape the engine rejects. This test
-    // checks storage preservation, not SDK execution; actual SDK refusal
-    // behavior belongs to the browser apply-gate tests.
+    // checks storage preservation, not SDK execution; the real col-9 malformed-
+    // component refusal remains covered by the native/WASM E2E gate.
     if (type === "architecture") entities[0] = { id: "broken", label: "Broken", type: "future-kind" };
     else if (type === "workflow") entities[0] = { ...entities[0], lane: "missing-lane" };
     else if (type === "sequence") {
@@ -118,4 +119,30 @@ describe("existing semantic document persistence across v7-v9", () => {
       });
     }
   }
+
+  it.each([7, 8, 9])("loads and retains a v%d spec missing required collections and metadata", (version) => {
+    const { raw, dataset } = existingDocument("architecture", version, false);
+    const spec = { ...dataset.spec, futureSpecField: { keep: true } };
+    delete spec.components;
+    delete spec.meta;
+    const missingSource = { ...dataset, spec };
+    raw.datasets = [missingSource];
+    const exactSourceJson = JSON.stringify(spec);
+
+    const opened = deserializeDoc(JSON.stringify(raw), () => 1_800_000_000_000);
+    expect(opened.v).toBe(9);
+    expect(opened.datasets).toEqual([missingSource]);
+    expect(JSON.stringify((opened.datasets![0] as SemanticSpecDataset).spec)).toBe(exactSourceJson);
+    expect(validateSemanticSpec(missingSource).ok).toBe(true);
+
+    const enginePrecheck = validateEngineSpecPreCheck("architecture", spec);
+    expect(enginePrecheck.ok).toBe(false);
+    expect(enginePrecheck.diagnostics.map((diagnostic) => diagnostic.params?.field)).toEqual(
+      expect.arrayContaining(["components", "meta.title", "meta.output"]),
+    );
+
+    const reloaded = deserializeDoc(serializeDoc(opened), () => 1_900_000_000_000);
+    expect(reloaded.datasets).toEqual([missingSource]);
+    expect(JSON.stringify((reloaded.datasets![0] as SemanticSpecDataset).spec)).toBe(exactSourceJson);
+  });
 });

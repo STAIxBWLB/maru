@@ -1,15 +1,24 @@
 // Host-only reproducible E0 build/measurement orchestration. Never imported by the SDK.
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { createHash } from "node:crypto";
+import { resolve, join, relative } from "node:path";
 import { payloadReport } from "./diagram-engine-payload.mjs";
+import {
+  canReuseWasmAssets,
+  hasDirtySdkInputs,
+  makeWasmAssetsManifest,
+  WASM_ASSET_OUTPUTS,
+} from "./diagram-engine-e0-cache.mjs";
 import { isE0SelectedPath } from "./diagram-engine-e0-paths.mjs";
 import { fileURLToPath } from "node:url";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sdk = join(root, "src-tauri/crates");
 const output = join(root, "src/lib/diagram/__generated__/engine-e0");
 const scratch = join(root, ".engine-e0");
-const wasmArtifact = join(process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(sdk, "target"), "wasm32-unknown-unknown/release/maru_diagram_engine.wasm");
+const wasmCacheManifest = join(scratch, "wasm-assets-manifest.json");
+const cargoTargetDirectory = process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(sdk, "target");
+const wasmArtifact = join(cargoTargetDirectory, "wasm32-unknown-unknown/release/maru_diagram_engine.wasm");
 mkdirSync(scratch, { recursive: true });
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: root, env: { ...process.env, CARGO_BUILD_JOBS: "2" }, encoding: "utf8", stdio: "pipe", ...options });
@@ -18,6 +27,122 @@ function run(command, args, options = {}) {
 }
 // cargo's manifest option belongs after its subcommand.
 function sdkCargo(command, args) { return run("cargo", [command, "--manifest-path", join(sdk, "Cargo.toml"), ...args]); }
+function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
+function optionalFileHash(path) {
+  return existsSync(path) ? sha256(readFileSync(path)) : null;
+}
+function wasmArtifactHashes() {
+  const hashes = {};
+  for (const path of WASM_ASSET_OUTPUTS) {
+    const absolute = join(root, path);
+    if (!existsSync(absolute)) return null;
+    hashes[path] = optionalFileHash(absolute);
+  }
+  return hashes;
+}
+function readManifest() {
+  try { return JSON.parse(readFileSync(wasmCacheManifest, "utf8")); }
+  catch { return null; }
+}
+function sdkSnapshot() {
+  const trackedChanges = run("git", ["status", "--porcelain", "--untracked-files=no", "--", "src-tauri/crates"]);
+  const untrackedFiles = run("git", ["ls-files", "--others", "--exclude-standard", "--", "src-tauri/crates"])
+    .split("\n").filter(Boolean);
+  const targetRelative = relative(root, cargoTargetDirectory).replaceAll("\\", "/");
+  return {
+    originCommit: run("git", ["rev-parse", "HEAD"]).trim(),
+    sdkTree: run("git", ["rev-parse", "HEAD:src-tauri/crates"]).trim(),
+    clean: !hasDirtySdkInputs({ trackedChanges, untrackedFiles, targetDirectories: targetRelative.startsWith("../") ? [] : [targetRelative] }),
+    untrackedFiles,
+  };
+}
+function buildFingerprint(snapshot, revision) {
+  const cargoHome = process.env.CARGO_HOME
+    ? resolve(root, process.env.CARGO_HOME)
+    : process.env.HOME || process.env.USERPROFILE
+      ? join(process.env.HOME || process.env.USERPROFILE, ".cargo")
+      : null;
+  const buildScripts = [
+    "scripts/diagram-engine-e0.mjs",
+    "scripts/diagram-engine-e0-cache.mjs",
+    "scripts/diagram-engine-e2-wasm-hashes.mjs",
+    "rust-toolchain.toml",
+    ".cargo/config",
+    ".cargo/config.toml",
+    "src-tauri/.cargo/config",
+    "src-tauri/.cargo/config.toml",
+    "src-tauri/crates/.cargo/config",
+    "src-tauri/crates/.cargo/config.toml",
+    ...(cargoHome ? [join(cargoHome, "config"), join(cargoHome, "config.toml")] : []),
+  ].map((path) => ({ path: path.startsWith(root) ? path.slice(root.length + 1) : path, sha256: optionalFileHash(resolve(root, path)) }));
+  const envNames = [...new Set([
+    "CARGO_BUILD_JOBS", "CARGO_BUILD_TARGET", "CARGO_ENCODED_RUSTFLAGS", "CARGO_PROFILE_RELEASE_CODEGEN_UNITS",
+    "CARGO_PROFILE_RELEASE_DEBUG", "CARGO_PROFILE_RELEASE_INCREMENTAL", "CARGO_PROFILE_RELEASE_LTO",
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL", "CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS", "CARGO_PROFILE_RELEASE_PANIC",
+    "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO", "CARGO_PROFILE_RELEASE_STRIP", "CARGO_TARGET_DIR", "CARGO_HOME",
+    "CARGO_BUILD_RUSTC", "MARU_DIAGRAM_ENGINE_REVISION", "RUSTFLAGS", "RUSTC", "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "SOURCE_DATE_EPOCH",
+    ...Object.keys(process.env).filter((name) => name.startsWith("CARGO_PROFILE_RELEASE_")),
+  ])].sort();
+  const env = Object.fromEntries(envNames.map((name) => [name, name === "CARGO_BUILD_JOBS" ? "2" : process.env[name] ?? null]));
+  const fingerprintInputs = {
+    sdkTree: snapshot.sdkTree,
+    buildScripts,
+    env: { ...env, MARU_DIAGRAM_ENGINE_REVISION: revision },
+    toolchain: {
+      rustc: run("rustc", ["--version", "--verbose"]).trim(),
+      cargo: run("cargo", ["--version"]).trim(),
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      target: "wasm32-unknown-unknown",
+      features: ["wasm", "wasm-layout", "wasm-render", "bindgen-web"],
+      release: true,
+      cargoTargetDirectory,
+    },
+  };
+  return sha256(JSON.stringify(fingerprintInputs));
+}
+function assetCacheState() {
+  const snapshot = sdkSnapshot();
+  const revision = process.env.MARU_DIAGRAM_ENGINE_REVISION
+    ?? `${snapshot.sdkTree}${snapshot.clean ? "" : "-dirty"}`;
+  process.env.MARU_DIAGRAM_ENGINE_REVISION = revision;
+  const fingerprint = buildFingerprint(snapshot, revision);
+  const manifest = readManifest();
+  const artifactHashes = wasmArtifactHashes();
+  return {
+    snapshot,
+    revision,
+    fingerprint,
+    manifest,
+    artifactHashes,
+    hit: artifactHashes !== null && canReuseWasmAssets({
+      manifest,
+      sdkTree: snapshot.sdkTree,
+      fingerprint,
+      clean: snapshot.clean,
+      artifactHashes,
+    }),
+  };
+}
+function saveAssetCacheManifest(before) {
+  if (!before.snapshot.clean) return false;
+  const after = assetCacheState();
+  if (!after.snapshot.clean || after.snapshot.sdkTree !== before.snapshot.sdkTree
+      || after.fingerprint !== before.fingerprint) {
+    throw new Error("The diagram SDK or its build inputs changed while WASM artifacts were being generated; rerun node scripts/diagram-engine-e0.mjs wasm before using the assets.");
+  }
+  if (!after.artifactHashes) throw new Error("Generated WASM outputs are incomplete; rerun node scripts/diagram-engine-e0.mjs wasm before caching them.");
+  const manifest = makeWasmAssetsManifest({
+    originCommit: before.snapshot.originCommit,
+    sdkTree: before.snapshot.sdkTree,
+    fingerprint: before.fingerprint,
+    artifactHashes: after.artifactHashes,
+  });
+  writeFileSync(wasmCacheManifest, `${JSON.stringify(manifest, null, 2)}\n`);
+  return true;
+}
 const action = process.argv[2];
 if (action === "types") {
   const actual = sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "typegen,geometry", "--bin", "export-types"]);
@@ -27,19 +152,30 @@ if (action === "types") {
   console.log("E0 Rust-to-TypeScript bindings match");
 } else if (action === "wasm") {
   const before = performance.now();
-  process.env.MARU_DIAGRAM_ENGINE_REVISION ||= run("git", ["rev-parse", "HEAD:src-tauri/crates"]).trim();
-  sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm", "--target", "wasm32-unknown-unknown"]);
-  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, output]);
-  // A second WASM artifact includes metric tables. Only its dynamic TS module
-  // references these URLs, so validation cannot inline or fetch them eagerly.
-  sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-layout", "--target", "wasm32-unknown-unknown"]);
-  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, join(root, "src/lib/diagram/__generated__/engine-geometry")]);
-  // Corpus hashing belongs only to the dedicated CI test build, never the
-  // normal layout artifact whose bytes and cold load the browser measures.
+  const cache = assetCacheState();
+  const shouldRecordWasmCache = !cache.hit && cache.snapshot.clean;
+  if (cache.hit) {
+    console.log(`ENGINE_E0_WASM_ASSET_CACHE hit originCommit=${cache.manifest.originCommit} sdkTree=${cache.snapshot.sdkTree}`);
+  } else {
+    if (!cache.snapshot.clean) {
+      console.log(`ENGINE_E0_WASM_ASSET_CACHE bypass dirty SDK inputs; default engine revision=${cache.revision}`);
+    }
+    sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm", "--target", "wasm32-unknown-unknown"]);
+    sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, output]);
+    // A second WASM artifact includes metric tables. Only its dynamic TS module
+    // references these URLs, so validation cannot inline or fetch them eagerly.
+    sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-layout", "--target", "wasm32-unknown-unknown"]);
+    sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, join(root, "src/lib/diagram/__generated__/engine-geometry")]);
+    // Corpus hashing belongs only to the dedicated CI test build, never the
+    // normal layout artifact whose bytes and cold load the browser measures.
+    sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-render", "--target", "wasm32-unknown-unknown"]);
+    sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, join(root, "src/lib/diagram/__generated__/engine-render")]);
+  }
+  // Verify product isolation after a build or a cache hit.
   run(process.execPath, [join(root, "scripts/diagram-engine-e2-wasm-hashes.mjs"), "--assert-product", join(root, "src/lib/diagram/__generated__/engine-geometry")]);
-  // Text SVG preview is a separate lazy product artifact; native outline/fonts never enter WASM.
-  sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-render", "--target", "wasm32-unknown-unknown"]);
-  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, join(root, "src/lib/diagram/__generated__/engine-render")]);
+  if (shouldRecordWasmCache && saveAssetCacheManifest(cache)) {
+    console.log(`ENGINE_E0_WASM_ASSET_CACHE recorded originCommit=${cache.snapshot.originCommit} sdkTree=${cache.snapshot.sdkTree}`);
+  }
   if (process.argv.includes("--assets-only")) {
     console.log("Generated product validation, layout and text-SVG WebAssembly assets.");
     process.exit(0);

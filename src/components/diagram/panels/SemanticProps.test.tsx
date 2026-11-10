@@ -137,8 +137,8 @@ describe("SemanticProps", () => {
     expect(q("semantic-label")!.textContent).toBe("label" in entry ? entry.label : "API");
   });
 
-  // This unit test exercises UI handling with a mocked SDK result. Actual SDK refusal
-  // behavior belongs to the browser apply-gate tests.
+  // This unit test uses a mocked SDK result; the real col-9 malformed-component
+  // refusal remains covered by the native/WASM E2E gate.
   it("shows asynchronous SDK diagnostics for the selected dataset without changing the document", async () => {
     const doc = docOf("architecture");
     const dataset = doc.datasets![0] as SemanticSpecDataset;
@@ -163,6 +163,84 @@ describe("SemanticProps", () => {
     expect(q("semantic-engine-diagnostics")!.textContent).toContain("increase components[0].size[0]");
     expect(probe!.getState().doc).toBe(doc);
     expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("shows SDK refusal for a retained selected projection whose required source collection is missing", async () => {
+    const base = docOf("architecture");
+    const dataset = base.datasets![0] as SemanticSpecDataset;
+    const brokenSpec = { ...dataset.spec, futureSpecField: { keep: "untouched" } };
+    delete brokenSpec.components;
+    delete brokenSpec.meta;
+    const retainedDoc = { ...base, datasets: [{ ...dataset, spec: brokenSpec }] };
+    validateSdkCandidate.mockResolvedValueOnce({
+      ok: false,
+      errors: ["components: required collection missing", "meta.title: required field missing", "meta.output: required field missing"],
+      warnings: [],
+      diagnostics: [],
+    });
+
+    render(retainedDoc, { nodes: ["web"] });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(q("semantic-props")).not.toBeNull();
+    expect(q("semantic-engine-diagnostics")!.textContent).toContain("components: required collection missing");
+    expect(q("semantic-label")).toBeNull();
+    expect(q("semantic-structure")).toBeNull();
+    expect(probe!.getState().doc).toBe(retainedDoc);
+    expect((probe!.getState().doc.datasets![0] as SemanticSpecDataset).spec).toEqual(brokenSpec);
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("shows a refusal for a single unselected semantic dataset on an empty canvas", async () => {
+    const base = docOf("architecture");
+    const dataset = base.datasets![0] as SemanticSpecDataset;
+    const spec = { ...dataset.spec };
+    delete spec.components;
+    const retainedDoc = { ...base, nodes: [], edges: [], datasets: [{ ...dataset, spec }] };
+    validateSdkCandidate.mockResolvedValueOnce({
+      ok: false,
+      errors: ["components: required collection missing"],
+      warnings: [],
+      diagnostics: [],
+    });
+
+    render(retainedDoc, {});
+    await act(async () => { await Promise.resolve(); });
+
+    expect(validateSdkCandidate).toHaveBeenCalledWith("architecture", spec);
+    expect(q("semantic-engine-diagnostics")!.textContent).toContain("components: required collection missing");
+    expect(probe!.getState().doc).toBe(retainedDoc);
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("uses the longest exact dataset prefix when existing ids overlap", async () => {
+    const base = docOf("architecture");
+    const outer = base.datasets![0] as SemanticSpecDataset;
+    const nested = archifySpecToDataset("architecture", structuredClone(SEMANTIC_FIXTURES.architecture), { id: "ds:child" }).dataset;
+    const nestedSpec = { ...nested.spec };
+    delete nestedSpec.components;
+    const retainedDoc = {
+      ...base,
+      nodes: base.nodes.map((node) => node.id === "web"
+        ? { ...node, meta: { ...node.meta, memberId: "ds:child:m0" } }
+        : node),
+      datasets: [
+        { ...outer, spec: { ...outer.spec, components: [] } },
+        { ...nested, spec: nestedSpec },
+      ],
+    };
+    validateSdkCandidate.mockResolvedValueOnce({
+      ok: false,
+      errors: ["nested dataset source rejected"],
+      warnings: [],
+      diagnostics: [],
+    });
+
+    render(retainedDoc, { nodes: ["web"] });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(validateSdkCandidate).toHaveBeenCalledWith("architecture", nestedSpec);
+    expect(q("semantic-engine-diagnostics")!.textContent).toContain("nested dataset source rejected");
   });
 
   it("ignores a stale SDK result after the active semantic dataset changes", async () => {

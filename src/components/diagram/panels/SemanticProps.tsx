@@ -18,6 +18,7 @@ import {
   LIFECYCLE_STATE_TYPES,
   SEMANTIC_TYPES,
   resolveSemanticMember,
+  semanticDatasetsOf,
   semanticLosses,
   semanticTypeLabelKey,
   sequenceOrder,
@@ -41,6 +42,7 @@ import { deleteSelection } from "../deleteSelection";
 import { useTranslation } from "../../../lib/i18n";
 import { useDiagram, useDiagramStore, useDiagramValidationHost } from "../DiagramStoreContext";
 import { SemanticStructureEditor } from "./SemanticStructureEditor";
+import type { DiagramDoc } from "../../../lib/diagram/types";
 
 function Row({ labelKey, value, testId }: { labelKey: string; value: string; testId?: string }) {
   const { t } = useTranslation();
@@ -54,6 +56,38 @@ function Row({ labelKey, value, testId }: { labelKey: string; value: string; tes
 
 function labelOf(entry: Record<string, unknown> | undefined, fallback: string): string {
   return typeof entry?.label === "string" ? entry.label : fallback;
+}
+
+function datasetForMemberToken(doc: DiagramDoc, token: unknown) {
+  if (typeof token !== "string") return null;
+  const matches = semanticDatasetsOf(doc)
+    .filter((dataset) => typeof dataset.id === "string" && dataset.id.length > 0 && token.startsWith(`${dataset.id}:`))
+    .sort((left, right) => right.id.length - left.id.length);
+  if (matches.length > 1 && matches[0]!.id === matches[1]!.id) return null;
+  return matches[0] ?? null;
+}
+
+/** Recover a source dataset for diagnostics when its selected projection no longer resolves. */
+function datasetForUnresolvedSelection(doc: DiagramDoc, nodeId?: string, edgeId?: string) {
+  const datasets = semanticDatasetsOf(doc);
+  if (nodeId !== undefined) {
+    const node = doc.nodes.find((candidate) => candidate.id === nodeId);
+    return datasetForMemberToken(doc, node?.meta?.memberId)
+      ?? (typeof node?.meta?.semanticContainer === "string" ? datasetForMemberToken(doc, node.id) : null);
+  }
+  if (edgeId === undefined) return null;
+
+  const candidates = new Set<(typeof datasets)[number]>();
+  for (const dataset of datasets) {
+    const idMap = dataset.idMap && typeof dataset.idMap === "object" ? Object.values(dataset.idMap) : [];
+    // Relations have no meta.memberId; recover only from exact identity-map or
+    // legacy sequence-edge IDs, never merely because both endpoints share a dataset.
+    const legacyIndexedEdge = edgeId.startsWith(`${dataset.id}-e`)
+      && /^\d+$/.test(edgeId.slice(`${dataset.id}-e`.length));
+    if (idMap.includes(edgeId) || legacyIndexedEdge) candidates.add(dataset);
+  }
+  if (candidates.size === 1) return candidates.values().next().value ?? null;
+  return null;
 }
 
 /** Floorplan node inspector (issue #535): summary, kind and parent, one undo step each. */
@@ -114,7 +148,7 @@ function FloorplanNodeFields({ entry, index, spec, run }: {
   );
 }
 
-export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: string }) {
+export function SemanticProps({ nodeId, edgeId, datasetId }: { nodeId?: string; edgeId?: string; datasetId?: string }) {
   const { t } = useTranslation();
   const store = useDiagramStore();
   const validationHost = useDiagramValidationHost();
@@ -134,7 +168,10 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
   const [engineValidation, setEngineValidation] = useState<EngineCandidateValidation | null>(null);
   const [engineValidationError, setEngineValidationError] = useState<string | null>(null);
   const [classificationDraft, setClassificationDraft] = useState<string | null>(null);
-  const activeDataset = member && member.dataset.diagramType !== "floorplan" ? member.dataset : null;
+  const linkedDataset = member?.dataset
+    ?? (datasetId ? semanticDatasetsOf(doc).find((dataset) => dataset.id === datasetId) : null)
+    ?? datasetForUnresolvedSelection(doc, nodeId, edgeId);
+  const activeDataset = linkedDataset && linkedDataset.diagramType !== "floorplan" ? linkedDataset : null;
 
   useEffect(() => {
     let current = true;
@@ -154,7 +191,38 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
     return () => { current = false; };
   }, [activeDataset]);
 
-  if (!member) return null;
+  if (!member) {
+    if (!activeDataset) return null;
+    if (datasetId !== undefined && engineValidation?.ok === true && engineValidation.diagnostics.length === 0) return null;
+    return (
+      <section className="maru-diagram-prop-sections" data-testid="semantic-props">
+        <section>
+          <h3>{t("diagram.semantic.title")}</h3>
+          <Row labelKey="diagram.semantic.type" value={String(activeDataset.diagramType)} />
+          <Row labelKey="diagram.semantic.dataset" value={String(activeDataset.name)} />
+          {engineValidationError ? (
+            <p role="alert" data-testid="semantic-engine-error">{engineValidationError}</p>
+          ) : null}
+          {engineValidation === null && !engineValidationError ? (
+            <p role="status" data-testid="semantic-engine-checking">{t("diagram.semantic.validating")}</p>
+          ) : null}
+          {engineValidation && (engineValidation.diagnostics.length > 0 || (!engineValidation.ok && engineValidation.errors.length > 0)) ? (
+            <ul className="maru-diagram-ie-warnings" data-testid="semantic-engine-diagnostics">
+              {engineValidation.diagnostics.map((diagnostic, i) => (
+                <li key={`${diagnostic.code}:${diagnostic.path}:${i}`}>
+                  <strong>{diagnostic.code}</strong>{diagnostic.path ? ` (${diagnostic.path})` : ""}: {diagnostic.message}
+                  {diagnostic.fix ? ` Fix: ${diagnostic.fix}` : ""}
+                </li>
+              ))}
+              {engineValidation.diagnostics.length === 0 ? engineValidation.errors.map((error, i) => (
+                <li key={`engine-error:${i}`}>{error}</li>
+              )) : null}
+            </ul>
+          ) : null}
+        </section>
+      </section>
+    );
+  }
 
   const { dataset } = member;
   const type = dataset.diagramType;
