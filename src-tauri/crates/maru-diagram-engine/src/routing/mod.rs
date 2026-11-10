@@ -292,9 +292,9 @@ impl AxisCandidates {
         masked: &[usize],
         horizontal: bool,
     ) -> &[Rect] {
-        // At most two obstacle lists beyond this threshold can be retained
-        // across the two caches; adversarial wide obstacles cannot turn the
-        // cache into the full grid. Eviction only affects lookup cost.
+        // Each axis cache retains at most twice MAX_OBSTACLES rectangles;
+        // adversarial wide obstacles cannot materialize the Cartesian grid.
+        // Eviction only affects lookup cost.
         if self.retained > MAX_OBSTACLES {
             self.entries.clear();
             self.retained = 0;
