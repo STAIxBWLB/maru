@@ -136,7 +136,7 @@ fn render(input: &str, entry: Entry) -> ArtifactReport {
             "png-command-format",
             "/format",
             "native PNG command does not export SVG",
-            "use the WASM SVG renderer or request format png",
+            "use plugin:maru-diagram|render_svg or request format png",
         ));
     }
     // The mirror of the PNG guard: without it a `render_svg` request carrying

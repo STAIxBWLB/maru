@@ -49,8 +49,9 @@ family with shaping disabled; unsupported scalars draw the actual glyph zero.
 
 The optional `render-outline` feature converts each visible label glyph to an
 SVG path at export time from the same pinned Noto Sans CJK KR Regular/Bold OTFs
-as the PNG feature. The artifact embeds no font binary, per-document subset or
-font reference, so a viewer never resolves a face. The faces remain under
+as the PNG feature. The artifact embeds no font binary or per-document subset
+and contains no font-dependent text runs. It retains font-family metadata,
+but a viewer needs no font resolution to draw the glyph paths. The faces remain under
 OFL-1.1; the complete copyright/licence is retained in
 `src-tauri/crates/maru-diagram-engine/src/metrics/data/LICENSE.OFL` and the
 attribution record in `NOTICE.md` beside it. Their SHA-256 values match the
@@ -60,7 +61,8 @@ The diagram canvas draws its labels with two locally subset WOFF2 faces derived
 from those OTFs, `src/assets/fonts/NotoSansCJKkr-Regular-diagram.woff2`
 (545,356 B) and `src/assets/fonts/NotoSansCJKkr-Bold-diagram.woff2` (566,736 B),
 covering Hangul syllables/Jamo, ASCII, Latin-1, general punctuation, arrows,
-box/block drawing and CJK symbols. They are served from the app bundle; no font
+box drawing and CJK symbols. Block Elements (U+2580–U+259F) are omitted from
+both subsets, although the pinned OTFs include them. They are served from the app bundle; no font
 is fetched over the network. As subset copies of an OFL-1.1 work they remain
 under OFL-1.1, keep the original copyright notice, are declared under the
 distinct CSS family `Noto Sans CJK KR Diagram` rather than the upstream family

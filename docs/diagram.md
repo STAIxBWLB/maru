@@ -2038,8 +2038,9 @@ An exported or shared diagram must read the same on a machine that has no Korean
 font. The pinned Noto Sans CJK KR faces therefore leave the app as **glyph
 outlines**, not as text: the optional `render-outline` feature reads the same
 OTFs as PNG (`ttf-parser` 0.25.1), takes each visible glyph's original outline,
-and writes it as a path. The artifact names no font family, so nothing resolves
-at view time and no fallback can shift or overflow a label.
+and writes it as a path. The artifact retains font-family metadata but contains
+no font-dependent text runs, so no font needs to resolve at view time and no
+fallback can shift or overflow a label.
 
 The alternative, embedding a per-document subset, was rejected on measured
 grounds. The E2 metric repertoire is 44,074 glyphs across 44,810 cmap entries
@@ -2117,10 +2118,12 @@ faces as WOFF2 under `src/assets/fonts/` and `foundations.css` declares
 `Noto Sans CJK KR Diagram` (400/700, `font-display: block`) with
 `.maru-diagram-canvas` consuming `--font-diagram`, including the table cells that
 `TableView` draws inside a foreign object. Hangul syllables and Jamo,
-ASCII, Latin-1, general punctuation, arrows, box/block drawing and CJK symbols
+ASCII, Latin-1, general punctuation, arrows, box drawing and CJK symbols
 cost 1,112,092 B for both weights; covering the whole BMP instead would cost
 10,334,368 B, nine times as much for scripts the diagram fixtures do not carry.
-A label containing Han or kana therefore has no bundled canvas glyph and falls
+Block Elements (U+2580–U+259F) are omitted from both subsets, although the
+pinned OTFs include them. A label containing those characters, Han or kana
+therefore has no bundled canvas glyph and falls
 back to a local face for those runs on the canvas only; exports are unaffected
 because they carry outlines. That is a real coverage limit, not a rounding
 difference: E2 measures every scalar with the full Noto CJK metrics, so a label
