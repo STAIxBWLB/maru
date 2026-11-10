@@ -68,13 +68,13 @@ describe("archifySpecToDataset", () => {
 
     const { dataset } = archifySpecToDataset("architecture", spec);
     expect(dataset.spec).toEqual(spec);
-    expect(dataset.idMap).toEqual({ a: "a", b: "b" });
+    expect(dataset.idMap).toEqual({ a: "a", b: "b", db: "db" });
     expect(validateSemanticSpec(dataset).ok).toBe(true);
     expect((await pinnedEngineHost.validateCandidate("architecture", dataset.spec)).ok).toBe(true);
 
     const imported = parseArchifySpec(JSON.stringify(spec));
     if (!imported.ok) throw new Error(JSON.stringify(imported.diagnostics));
-    expect(imported.result.dataset.idMap).toEqual({ a: "a", b: "b" });
+    expect(imported.result.dataset.idMap).toEqual({ a: "a", b: "b", db: "db" });
     expect(imported.result.dataset.spec).toEqual(spec);
     expect((await pinnedEngineHost.validateCandidate("architecture", imported.result.dataset.spec)).ok).toBe(true);
 

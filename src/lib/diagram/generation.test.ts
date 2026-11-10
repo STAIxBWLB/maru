@@ -165,7 +165,7 @@ describe("runGenerationJob", () => {
     const job = await runGenerationJob(jobOf(), host);
     expect(job.state).toBe("ready");
     expect(job.candidate?.spec).toEqual(spec);
-    expect(job.candidate?.idMap).toEqual({ a: "a", b: "b" });
+    expect(job.candidate?.idMap).toEqual({ a: "a", b: "b", db: "db" });
   });
 
   it("runs the full pipeline to ready and builds the proposal", async () => {
