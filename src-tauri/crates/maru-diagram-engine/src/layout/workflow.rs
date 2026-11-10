@@ -122,8 +122,12 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
             None,
             auto,
             Some([width, height]),
-            // A taller node stops at the lane body so it stays inside its lane.
-            Some(px(LANE_HEIGHT - LANE_TITLE_HEIGHT)?),
+            // Authored heights are respected; a taller default node stops at
+            // the lane body so it stays inside its lane.
+            match node.height {
+                Some(_) => None,
+                None => Some(px(LANE_HEIGHT - LANE_TITLE_HEIGHT)?),
+            },
         )?;
     }
 

@@ -78,8 +78,12 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
                 node_position(stage, width, node.row, node.y_offset.unwrap_or(0.0))?
             },
             Some([width, height]),
-            // A taller node stops one 10px separation inside the next row.
-            Some(px(ROW_STEP - 10.0)?),
+            // Authored heights are respected; a taller default node stops one
+            // 10px separation inside the next row.
+            match node.height {
+                Some(_) => None,
+                None => Some(px(ROW_STEP - 10.0)?),
+            },
         )?;
     }
     for (index, stage) in spec.stages.iter().enumerate() {

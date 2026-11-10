@@ -123,7 +123,15 @@ fn wrap_paragraph(
         let consumed = match (fitting, allow_token_split) {
             (Some(break_at), _) => break_at,
             (None, true) => filled.max(1),
-            (None, false) => next_token_boundary(&chars).unwrap_or(chars.len()),
+            (None, false) => next_token_boundary(&chars)
+                .map(|boundary| {
+                    if boundary > 1 && chars[boundary - 1] == ' ' {
+                        boundary - 1
+                    } else {
+                        boundary
+                    }
+                })
+                .unwrap_or(chars.len()),
         };
         lines.push(prefix(&chars, consumed));
         emitted = true;
@@ -261,6 +269,22 @@ mod tests {
         let long = wrap("supercalifragilistic", 70);
         assert!(long.len() > 1, "a word longer than the box is split");
         assert_eq!(long.concat(), "supercalifragilistic");
+    }
+
+    #[test]
+    fn a_word_on_its_own_line_does_not_carry_the_space_it_replaced() {
+        // Each Korean word fits this box whole; `Gateway` alone does not, so it
+        // takes the whole-word line and must not keep the space after it.
+        let lines = wrap_keeping_words("결제 Gateway 확인 처리 모듈", 36);
+        assert!(lines.len() > 1, "{lines:?}");
+        assert!(
+            lines.iter().all(|line| !line.ends_with(' ')),
+            "a break replaces the space instead of leaving it painted: {lines:?}"
+        );
+        assert_eq!(
+            lines.join(" ").replace("  ", " "),
+            "결제 Gateway 확인 처리 모듈"
+        );
     }
 
     #[test]

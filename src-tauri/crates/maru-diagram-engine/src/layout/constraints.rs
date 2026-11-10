@@ -164,9 +164,10 @@ fn check_node_labels(
         let text_area_right = text_area_left + i64::from(node.bounds.width);
         let node_top = i64::from(node.bounds.y);
         let node_bottom = node_top + i64::from(node.bounds.height);
-        // The E2 node producer emits fixed-size Noto lines and has no fit or
-        // wrap pass. Admission checks that actual box instead of scaling it
-        // down to a hypothetical minimum font that the scene never emitted.
+        // The E2 node producer has already run T6 auto-fit: it wrapped, grew the
+        // box within its family ceiling and shrank to the 10px floor before
+        // this check sees the scene. What is left is checked as the actual
+        // emitted box, never scaled down to a hypothetical smaller font.
         for label in geometry
             .labels
             .iter()
