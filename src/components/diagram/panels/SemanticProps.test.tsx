@@ -137,6 +137,8 @@ describe("SemanticProps", () => {
     expect(q("semantic-label")!.textContent).toBe("label" in entry ? entry.label : "API");
   });
 
+  // This unit test exercises UI handling with a mocked SDK result. Actual SDK refusal
+  // behavior belongs to the browser apply-gate tests.
   it("shows asynchronous SDK diagnostics for the selected dataset without changing the document", async () => {
     const doc = docOf("architecture");
     const dataset = doc.datasets![0] as SemanticSpecDataset;
@@ -171,6 +173,7 @@ describe("SemanticProps", () => {
     validateSdkCandidate.mockReturnValueOnce(stale);
     const doc = docOf("architecture");
     render(doc, { nodes: ["web"] });
+    expect(q("semantic-props")).not.toBeNull();
     const original = doc.datasets![0] as SemanticSpecDataset;
     const updated = {
       ...doc,
@@ -190,7 +193,7 @@ describe("SemanticProps", () => {
     });
 
     await act(async () => {
-      probe!.setState({ doc: updated });
+      probe!.setState((state) => ({ ...state, doc: updated }));
       await Promise.resolve();
     });
     expect(validateSdkCandidate).toHaveBeenCalledTimes(2);

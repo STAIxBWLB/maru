@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { createHash, webcrypto } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { EngineRenderedCandidate } from "./engine";
 import type { EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { archifySpecToDataset } from "./archifyCodec";
 import { makeEngineArtifactFixture } from "./__fixtures__/engineArtifact";
@@ -118,7 +119,8 @@ describe("verified semantic export through the engine host", () => {
     const { doc, dataset } = semanticDoc("architecture");
     await expect(exportVerifiedSemanticArtifact({
       doc, datasetId: dataset.id, workspace: "/fixture", format: "svg",
-      host: async (_type, specJson) => hostFactory(specJson),
+      // Deliberately simulate a corrupt transport despite the typed host contract.
+      host: async (_type, specJson) => await hostFactory(specJson) as unknown as EngineRenderedCandidate,
     })).rejects.toThrow();
   });
 
