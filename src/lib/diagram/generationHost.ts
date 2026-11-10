@@ -144,9 +144,9 @@ export function createGenerationHost(options: GenerationHostOptions): DiagramGen
   return {
     runAgent,
     validateCandidate,
-    renderCandidate: (type, json, context, renderOptions) => {
+    renderCandidate: async (type, json, context, renderOptions) => {
       if (!options.workPath) throw new Error("Engine export needs a workspace; open a workspace and retry.");
-      return renderEngineCandidate(options.workPath, type, json, context, renderOptions);
+      return await renderEngineCandidate(options.workPath, type, json, context, renderOptions);
     },
     cancel: () => cancelCurrent?.(),
   };

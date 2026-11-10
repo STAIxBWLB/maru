@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineRenderedCandidate } from "./engine";
 import type { EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { archifySpecToDataset } from "./archifyCodec";
+import { ARCHIFY_STATIC_TYPES } from "./export";
 import { makeEngineArtifactFixture } from "./__fixtures__/engineArtifact";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { NATIVE_EXPORT_SPEC } from "./__fixtures__/nativeExport";
@@ -35,7 +36,10 @@ function cjkFixture(type: keyof typeof SEMANTIC_FIXTURES): Record<string, unknow
 }
 
 function semanticDoc(type: keyof typeof SEMANTIC_FIXTURES) {
-  const { dataset } = archifySpecToDataset(type, cjkFixture(type));
+  const source = type === "floorplan"
+    ? structuredClone(SEMANTIC_FIXTURES.floorplan)
+    : cjkFixture(type);
+  const { dataset } = archifySpecToDataset(type, source);
   const doc = createEmptyDoc(`verified-${type}`, 1);
   doc.datasets = [dataset];
   return { doc, dataset };
@@ -54,7 +58,7 @@ beforeAll(() => vi.stubGlobal("crypto", webcrypto));
 afterAll(() => vi.unstubAllGlobals());
 
 describe("verified semantic export through the engine host", () => {
-  it.each(Object.keys(SEMANTIC_FIXTURES) as Array<keyof typeof SEMANTIC_FIXTURES>)(
+  it.each(ARCHIFY_STATIC_TYPES)(
     "%s verifies outlined CJK SVGs in light and dark themes",
     async (type) => {
       const { doc, dataset } = semanticDoc(type);
@@ -90,11 +94,25 @@ describe("verified semantic export through the engine host", () => {
       specJson: candidateJson, format: "svg", receiptOverrides: receiptOverrides as Partial<EngineReceipt>,
     }));
     rasteriseMock.mockClear();
+    const expectedError = _name === "schema version"
+      ? /incompatible shape/i
+      : /receipt does not match/i;
     await expect(exportVerifiedSemanticArtifact({
       doc, datasetId: dataset.id, workspace: "/unused-by-test-host", format: "svg", host,
-    })).rejects.toThrow(/receipt does not match/i);
+    })).rejects.toThrow(expectedError);
     expect(host).toHaveBeenCalledTimes(1);
     expect(rasteriseMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses floorplan exports before invoking the engine host", async () => {
+    const { doc, dataset } = semanticDoc("floorplan");
+    const host = vi.fn(async () => makeEngineArtifactFixture({
+      specJson: JSON.stringify(dataset.spec), format: "svg",
+    }));
+    await expect(exportVerifiedSemanticArtifact({
+      doc, datasetId: dataset.id, workspace: "/unused-by-test-host", format: "svg", host,
+    })).rejects.toThrow(/does not render this diagram type/i);
+    expect(host).not.toHaveBeenCalled();
   });
 
   it("rejects forged outlined-text mode and SVG text content", async () => {

@@ -27,7 +27,7 @@ import {
   type SemanticProvenance,
   type SemanticSpecDataset,
 } from "./reportTypes";
-import { SEMANTIC_TYPES, collectSemanticIds, mintRelationIds, validateSemanticContent } from "./semantic";
+import { SEMANTIC_TYPES, collectSemanticIds, mintRelationIds } from "./semantic";
 import { validateEngineSpecPreCheck, type ValidationDiagnostic } from "./validation";
 
 /** Legacy identity preserved on imported Archify interchange datasets. */
@@ -208,8 +208,6 @@ export function parseArchifySpec(
     raw,
     opts,
   );
-  const content = validateSemanticContent(dataset.diagramType, dataset.spec);
-  if (content.length > 0) return { ok: false, diagnostics: content };
   return { ok: true, result: { dataset, diagnostics } };
 }
 

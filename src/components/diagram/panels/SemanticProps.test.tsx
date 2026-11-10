@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { confirmDialog, messageDialog } from "../../../lib/confirmDialog";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
-import { pinnedEngineHost } from "../../../../e2e/helpers/diagramEngineHost";
+import { pinnedEngineHost } from "../../../lib/diagram/__fixtures__/engineHost";
 import type { GenerationHost } from "../../../lib/diagram/generation";
 import { undo } from "../../../lib/diagram/actions";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";

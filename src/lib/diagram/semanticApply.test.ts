@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { undo } from "./actions";
 import { archifySpecToDataset } from "./archifyCodec";
-import { pinnedEngineHost as engineHost } from "../../../e2e/helpers/diagramEngineHost";
+import { pinnedEngineHost as engineHost } from "./__fixtures__/engineHost";
 import type { SemanticDiagramType } from "./reportTypes";
 import { projectSemanticDocument } from "./semantic";
 import { applyValidatedSemanticEdit } from "./semanticApply";
