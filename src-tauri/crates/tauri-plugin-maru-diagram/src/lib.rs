@@ -408,7 +408,11 @@ impl Builder {
             commands::diagram_delete_render,
             commands::render_and_store
         ]);
-        #[cfg(all(feature = "png", not(feature = "outline"), not(feature = "render-store")))]
+        #[cfg(all(
+            feature = "png",
+            not(feature = "outline"),
+            not(feature = "render-store")
+        ))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
             commands::render_png
@@ -422,12 +426,20 @@ impl Builder {
             commands::diagram_delete_render,
             commands::render_and_store
         ]);
-        #[cfg(all(not(feature = "png"), feature = "outline", not(feature = "render-store")))]
+        #[cfg(all(
+            not(feature = "png"),
+            feature = "outline",
+            not(feature = "render-store")
+        ))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
             commands::render_svg
         ]);
-        #[cfg(all(not(feature = "png"), not(feature = "outline"), feature = "render-store"))]
+        #[cfg(all(
+            not(feature = "png"),
+            not(feature = "outline"),
+            feature = "render-store"
+        ))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
             commands::diagram_list_renders,
@@ -435,10 +447,12 @@ impl Builder {
             commands::diagram_delete_render,
             commands::render_and_store
         ]);
-        #[cfg(all(not(feature = "png"), not(feature = "outline"), not(feature = "render-store")))]
-        let builder = builder.invoke_handler(tauri::generate_handler![
-            commands::validate
-        ]);
+        #[cfg(all(
+            not(feature = "png"),
+            not(feature = "outline"),
+            not(feature = "render-store")
+        ))]
+        let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
         builder
             .setup(move |app, _api| {
                 app.manage(state.clone());
