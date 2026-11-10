@@ -827,7 +827,7 @@ mod quit_acl_tests {
         builder: tauri::Builder<tauri::test::MockRuntime>,
         with_diagram_plugin: bool,
     ) -> tauri::App<tauri::test::MockRuntime> {
-        builder
+        let app = builder
             .manage(PolicyDispatchCount::default())
             .invoke_handler(crate::ipc_policy::restrict_app_commands(|invoke| {
                 invoke
@@ -839,15 +839,15 @@ mod quit_acl_tests {
                 invoke.resolver.resolve("first-party-dispatch");
                 true
             }))
-            .setup(move |app| {
-                if with_diagram_plugin {
-                    app.handle()
-                        .plugin(crate::diagram::engine_host::plugin(app.handle().clone()))?;
-                }
-                Ok(())
-            })
             .build(tauri::generate_context!())
-            .expect("failed to build the app with this crate's real context/capabilities")
+            .expect("failed to build the app with this crate's real context/capabilities");
+        // MockRuntime build does not drive the application's setup callback.
+        if with_diagram_plugin {
+            app.handle()
+                .plugin(crate::diagram::engine_host::plugin(app.handle().clone()))
+                .expect("install the production diagram plugin in the ACL fixture");
+        }
+        app
     }
 
     fn invoke_json_request(cmd: &str, body: serde_json::Value) -> InvokeRequest {
