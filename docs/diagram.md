@@ -1204,6 +1204,60 @@ scene, including every successfully routed edge. Input decoding, E1 validity
 and coordinate overflow can still prevent placement. Font replacement and pin
 notices remain nonfatal. No SVG or visual-review success is implied.
 
+The [owner scope update](https://github.com/STAIxBWLB/maru/issues/560#issuecomment-6751241103)
+prioritizes readability of emitted text, including mixed Korean and English. Label-fit checks compare nonzero positioned glyph ink from
+the resolved Noto font at the actual font size against node bounds. Line leading
+and whitespace are not paint; glyph bearings may use available text padding.
+This measures the visible output rather than legacy character counts or a
+hypothetical minimum-font model. There is no node auto-fit, wrap or shrink pass,
+so an overflow is an actionable refusal that retains geometry and names the text
+or node-size change needed to fit. Two independently checked source-green cases
+show the rule: `public-01` detail text overflows by 3.531px at 11px, and
+`gate-sequence-brand-absent` overflows by 2.812px at 13px. Their original source
+verdicts remain unchanged. The 2px workflow-column boundary and 8px/9px
+lifecycle rail case are not pursued as compatibility work. Archify comparisons
+remain reference evidence, not a merge or E4 admission gate.
+
+Endpoint masks are route-local: an authored via must lie strictly inside the
+visible endpoint node before its incident routing legs can receive a node mask.
+A via in only the 2px clearance ring never authorizes passage through the node.
+For a via inside that visible node, planning may waive a contained label's
+clearance halo; the final centerline scan still exempts visible label passage
+only for an authored via inside the label itself. The final scan scopes each
+visible obstacle exemption to the contiguous inside run connected to its seed,
+including entry and exit. Other legs and outside re-entry retain the endpoint
+as an obstacle. Routing retains full label line boxes, including leading, as
+conservative obstacles; admission instead checks painted glyph ink.
+
+The source-green ink-refusal allowance is explicit, not open-ended: `public-01`
+(3.53125px), `gate-sequence-brand-absent` (2.8125px),
+`e2-boundary-sequence-brand-rail-7` (9.015625px), and
+`dense-workflow-seed-5502027` (100 named labels at 3.9375px to 4.390625px).
+The shared test pins case IDs, node/label/font witnesses and exact 1/64px excess;
+a new refusal or an unexpected overflowing node fails the guard.
+Repairs name sequence's `meta.column_fit`/`meta.viewBox`, architecture's `size`,
+and the other families' `width`/`height`; vertical failures report available height.
+
+The authored-via work probe rechecked at `e6fb7973` has 27 nodes, 32 labels,
+17 vias and 22 segments. It forces A* on a masked leg: all 81 expansions
+are masked. The fixture uses nonpainting blank tag lines as a conservative
+routing obstacle while every painted glyph stays inside its node, retaining the
+showcase profile and its 16px interior rhythm. Mask construction evaluates
+57 candidates; final clearance evaluates 1,254. Total work is 2,788; the
+masked-expansion counter is a subset of A*, so it is not added twice. Every
+counter and total has a recorded baseline plus a 25% ceiling, like the unchanged
+1,000-node baseline of 3,355,500. The
+[determinism receipt](performance/diagram-engine-e2-admission-determinism.json)
+records tested source trees and current scene/SVG/work results.
+
+This verification at `e6fb7973` compares 623 cases against main `010180e2`: native
+and WASM reports match byte for byte. There are 218 accepted cases, 405 with geometry
+(including accepted ones), 187 retained refusals and 218 pre-placement refusals.
+The receipt lists 53 changed report hashes and 5 changed SVG scenes, including
+the scoped endpoint/label-route corrections. Diagnostics can also change a
+report hash without moving SVG geometry. No workflow-column shift or lifecycle
+compatibility font adjustment is added.
+
 Route-quality findings distinguish the offending geometry's provenance.
 Explicit `via` points, channel coordinates, label-position controls, endpoint
 pins and authored side assertions can produce blocking refusals. A wholly
@@ -1213,13 +1267,16 @@ retained. Authorship is checked at the offending piece: an authored side fixes
 endpoint direction but does not turn every middle corridor or an engine-chosen
 coordinate along that side into user-authored geometry. A label pin constrains
 the label, not the whole route. A mixed pair refuses at and names the authored
-route. Node, text, frame, source-budget and input errors remain blocking.
+route. For showcase families, a corridor witness ending at a first/last via junction
+explicitly present on at least two distinct raw edges is an authored endpoint
+piece and refuses on the owning edge; an internal via does not own an upstream
+detour or a separate piece. Node, text, frame, source-budget and input errors remain blocking.
 A routing failure with no path or an exhausted search budget still follows S2's
 per-edge error contract; a successfully generated low-quality path is the
 notice case. Unknown diagnostic codes do not acquire notice status. The engine keeps the
 scene in both quality outcomes. Corpus notices are recorded per case/rule in
-the same native/WASM determinism reports; no oracle-green document is waived
-into an expected engine refusal.
+the same native/WASM determinism reports. Original oracle verdicts stay intact;
+actual emitted text overflow is independently refused with retained geometry.
 
 The canvas adapter is an isolated test consumer, not the E4 product switch.
 Only an explicit `meta.pinned === true` or `locked === true` flag becomes a pin;
@@ -1363,9 +1420,13 @@ stored in the source-bound JSON receipt and native/WASM reports.
 | `public-06` | `geometry-v1/ambiguous-corridor` | 7 | Yes |
 | `public-06` | `geometry-v1/short-interior-segment` | 1 | Yes |
 
-#### Layered boundary evidence
+#### Historical layered boundary evidence
 
-The exact layer passes in both directions: **208 cases, zero mismatches**.
+The following comparison and model figures are historical at their stamped
+sources. They preserve the final case dispositions; current admission uses the
+actual glyph-ink rule above and the refreshed implementation receipt.
+
+At that historical snapshot, the exact layer passed in both directions: **208 cases, zero mismatches**.
 It covers shared readable-area, page, margin, spacing, reserve and spread-width
 quantities, plus source-format defaults and placement constants. Source checks
 use 1/128px intermediates when half of an authored 1/64px dimension is needed;
@@ -1373,26 +1434,93 @@ output geometry remains 1/64px. Dataflow/lifecycle readable-area predicates and
 sequence spread widths use shared source-budget helpers.
 
 The separate model layer reports all 101 inputs without failing the build.
-These synthetic inputs are not added to the strict 309-case AC1 corpus and do
+These synthetic inputs are not added to the strict 311-case AC1 corpus and do
 not waive any of its verdicts. Counts preserve both directions; full differing
 case IDs and diagnostic codes are in `boundaryEvidence.modelDifferences`.
+The table is stamped to the measured source snapshot `f4dcf4fe`, after the
+shared-via provenance change and its strict regression.
 
 | Category | Cases | Agreements | Oracle accepts, engine refuses | Oracle refuses, engine accepts | Examples of differences |
 | --- | --- | --- | --- | --- | --- |
 | `artifact-route-rounding` | 2 | 1 | 0 | 1 | `e2-boundary-lifecycle-physical-corridor-7` |
 | `readable-v2-implicit-placement` | 8 | 8 | 0 | 0 | No differing verdict |
-| `readable-v2-placement` | 15 | 8 | 2 | 5 | `e2-boundary-workflow-v2-arrow-spacing-8`; `e2-boundary-workflow-v2-turn-7` |
-| `text-capacity` | 76 | 43 | 26 | 7 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
+| `readable-v2-placement` | 15 | 8 | 3 | 4 | `e2-boundary-workflow-v2-arrow-spacing-8`; `e2-boundary-workflow-v2-shared-trunk-23` |
+| `text-capacity` | 76 | 49 | 24 | 3 | `e2-boundary-sequence-segment-title-above`; `e2-boundary-dataflow-primary-width-above` |
+
+The historical 12 primary/detail role-fit cases have per-case source formulas, widths,
+font sizes, glyph-advance sums, and Noto widths scaled to the source minimum in
+the ledger. Source estimates fit their budgets by 0px to 4.4px while Noto
+exceeds the role budget by 13px to 75.059659px; each recorded Noto box
+matches its glyph advances within 1/64px. This minimum-font analysis is preserved for provenance; the current check
+uses positioned Noto ink at its actual emitted size instead. The separate sequence segment-title case records a 430px legacy estimate
+and a 673px Noto requirement against a 430px frame.
+
+The measured `f4dcf4fe` audit preserves the original 41 model-difference cases
+and 35 current mismatches in a 44-case union. Nine original cases now agree,
+and three current-only cases record the Noto sequence brand rail, the paired
+sequence automatic-label placement boundary, and the workflow shared-via
+placement threshold. Across all 101 boundary inputs, 66 verdicts agree, 27 are
+oracle-green/engine-refused, and 8 are oracle-red/engine-admitted. The
+[per-case admission ledger](performance/diagram-engine-e2-admission-ledger.json)
+records exact source inputs, original oracle results, current geometry and
+diagnostics, numeric boundary evidence, source references, and dispositions.
+Those counts describe the historical `f4dcf4fe` snapshot. The ring-via follow-up
+refreshes exactly five brand-rail records from committed source `e6fb7973`:
+architecture/dataflow/lifecycle/workflow at 71px and workflow at 73px. All five
+now admit with their positioned Noto glyph ink contained in the node (0px
+overflow), while their unchanged oracle verdicts remain refusals. They are
+intentional ink-fit model differences, replacing the superseded
+`fixed-by-role-budget` status. Their full earlier evidence is retained under
+`historicalEvidence`. The mixed-source ledger now has four agreements and
+40 dispositioned differences across the same 44-case union. The other 39 final
+records remain at their original source stamp; this refresh makes no new
+parity claim for them. Each row and the receipt identify that evidence scope.
+The prior
+native/WASM run at that head covered 623 cases (216 accepted, 405 with geometry present),
+changed 34 scenes and 7 SVGs, and produced matching report hashes; its work
+receipt is preserved in [diagram-engine-e2-s3.json](diagram-engine-e2-s3.json).
+The pre-rescope implementation run at `af582230`, including that regression and the
+Linux test-workflow step, passed SDK fmt, clippy and all engine tests. Its
+623-case native/WASM reports remain identical, with the same 34 changed whole-scene
+hashes and 7 changed SVGs against approved S1. Whole-scene hashes include diagnostics;
+a changed hash does not by itself imply moved coordinates. The exact changed IDs,
+source commit and both explicitly named tree paths are in the
+[historical determinism receipt](https://github.com/STAIxBWLB/maru/blob/af444200ec86a584dcf8eb1db5e7decb744595dd/docs/performance/diagram-engine-e2-admission-determinism.json).
+Logical work remains 3,355,500, below the 4,194,375 ceiling. The old receipt's `retainedCaseCount` counted all geometry-present reports, including
+accepted ones; it was not a retained-refusal count. The refreshed receipt names
+these quantities separately.
+The dataflow authored-via cases `e2-boundary-dataflow-label-route-3` and
+`e2-boundary-dataflow-label-route-5` and sequence case
+`e2-boundary-sequence-family-label-route-above` now pass with retained
+nonempty routes. Dataflow endpoint masking is scoped to the route's own
+source/target nodes. The sequence's paired below-boundary case remains an
+oracle-red/engine-admitted automatic-placement difference: E2 moves the Noto
+label below its route to clear other message ports. The shared-trunk-25 source
+is now refused because two raw edges explicitly share the first via junction
+and the actual clipped route witness ends there. Its paired 23px case remains
+oracle-green but is refused: the source port gives a 23px approach inside the
+24px exception, while the E2 port shifts 2px and yields a 25px shared piece.
+The lifecycle band-title
+case is a measured-geometry model difference: the source composite `01 / Main`
+mask overlaps `Go` by 0.015625px, while the retained Noto `Main` and `Go` boxes
+are separate by 5.484375px. The geometry DTO has no composite source-title
+record, and [the SVG regression](../src-tauri/crates/maru-diagram-engine/tests/lifecycle_band_title_svg.rs)
+confirms the writer emits only geometry labels. The workflow shared-trunk rule
+now treats a first/last via junction explicitly shared by distinct raw edges
+as authored/fatal; the committed route regression covers this rule and its
+same-geometry unshared control.
 
 The model differences measure Noto text capacity against legacy text masks,
 readable-v2 placement and implicit-port solver differences. Lifecycle's rounded
 SVG-corner crossing is separately labelled `artifact-route-rounding`; the
 geometry engine does not implement E3 SVG corner rounding. In particular,
-**4 oracle-green authored-coordinate inputs still get route-blocked refusals**
-on engine-placed geometry, including
-`e2-boundary-workflow-v2-route-lane-title-63` and
-`e2-boundary-dataflow-label-route-3`. These remain refusals under the provenance
-rule, not downgraded notices. Their migration risk stays explicit for E4.
+**1 oracle-green authored-coordinate input still gets a route-blocked refusal**
+on engine-placed geometry:
+`e2-boundary-workflow-v2-route-lane-title-63`. It remains a refusal under the
+provenance rule, not a downgraded notice. The two dataflow endpoint-via cases
+and sequence case `e2-boundary-sequence-family-label-route-above` now pass with
+their pinned source routes retained. The remaining migration risk stays
+explicit for E4.
 
 Automatic port candidates may move along an unpinned face, or choose another
 face if no side was authored. Authored sides remain on that face, and via,
@@ -1585,8 +1713,8 @@ boundary captions with distinct diagnostic paths.
 | `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:480` | ambiguous corridor | `lifecycle/geometry-route-quality` | showcase unrelated routes do not merge; no separate measured-boundary field | shared-covered; e2-boundary-architecture-corridor-7/9 exact shared8px predicate proof; lifecycle physical-corridor7/9 retained as MODEL artifact-route-rounding because final rounded SVG corner crossing preempts isolated source-corridor proof | model-difference: rounded SVG corners; logical8px threshold stays exact | effective quality profile=showcase; controls: `gate-lifecycle-corridor-standard` | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
 | `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:492` | container border run | `lifecycle/geometry-route-quality` | frames=[]; no separate measured-boundary field | renderer-invariant; lifecycle bands are guides, not closed structural containers; no admitted source can trigger this call | exact: shared bounds, source constants or authored geometric predicate | effective profile present but frames is always empty; exemption: unreachable: lifecycle bands are open guides and this call supplies frames=[] | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
 | `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:501` | route rhythm | `lifecycle/geometry-route-quality` | showcase micro8/interior16 floors; no separate measured-boundary field | shared-covered; e2-boundary-architecture-turn-7/9/15/17 shared rhythm floors plus existing e2-lifecycle-geometry-route-quality-micro-segment actual family refusal | exact: shared bounds, source constants or authored geometric predicate | effective quality profile=showcase; controls: `gate-lifecycle-rhythm-standard` | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
-| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:517` | transition label overlaps band title | `lifecycle/geometry-label-overlap` | showcase label rect misses band title rect; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-band-title-*; below114 actual composition/label-band-title-overlap observed; model text-capacity | model-difference: Noto text extents replace legacy heuristic masks | source quality_profile=showcase; controls: `gate-lifecycle-title-standard` | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
-| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:523` | band-title refusal accumulation | `lifecycle/geometry-label-overlap` | same recorded cause as line517; no separate measured-boundary field | aggregation-only | model-difference: Noto text extents replace legacy heuristic masks | source quality_profile=showcase; controls: `gate-lifecycle-title-standard` | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:517` | transition label overlaps band title | `lifecycle/geometry-label-overlap` | showcase label rect misses the composed legacy band-title mask; no separate measured-boundary field | `e2-boundary-lifecycle-band-title-113.984375`: source `01 / Main` mask `[72,89,55.8,14]` overlaps `Go` by0.015625px; E2 `Main`/`Go` measured boxes are separate by5.484375px | measured-geometry model difference: E2 has no composed band-title text record, so do not add a source-composition predicate | source quality_profile=showcase; controls: `gate-lifecycle-title-standard` | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
+| `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:523` | band-title refusal accumulation | `lifecycle/geometry-label-overlap` | aggregation-only; inherits line517 cause with no independent threshold | Same single band-title case and measured boxes as line517 | measured-geometry model difference; no separate composed text or source-coordinate check | source quality_profile=showcase; controls: `gate-lifecycle-title-standard` | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
 | `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:530` | label overlaps state | `lifecycle/geometry-label-overlap` | label/state inset overlap forbidden; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-label-node-122/124; model text-capacity | model-difference: Noto text extents replace legacy heuristic masks | always for admitted members/references; bounds use schema-specific resolved metrics | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
 | `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:537` | label pairs overlap | `lifecycle/geometry-label-overlap` | label pair inset-2 overlap forbidden; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-label-pair-412/416; model text-capacity | model-difference: Noto text extents replace legacy heuristic masks | always for admitted members/references; bounds use schema-specific resolved metrics | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
 | `sidecars/archify/renderers/lifecycle/render-lifecycle.mjs:541` | label route clearance | `lifecycle/geometry-route-clearance` | showcase label/other-route distance >=4; no separate measured-boundary field | generated-boundary; e2-boundary-lifecycle-family-label-route-below/above; actual source4px oracle cause observed with displaced lower states | exact: shared bounds, source constants or authored geometric predicate | effective quality profile=showcase; controls: `gate-lifecycle-label-route-standard` | schema1 uses reserved fixed main/event/terminal bands; schema2 orders reserved main first/terminal last and resolves row metrics; schema2 without authored viewBox grows to node bounds and resolved legend rows before checks; showcase places unpinned labels before checks; schema2 also uses gridSweep/near-route fallback |
@@ -1638,7 +1766,7 @@ boundary captions with distinct diagnostic paths.
 | `sidecars/archify/renderers/shared/geometry.mjs:388-455` | endpoint-side-direction | `*/geometry-route-quality` | first/final nonzero segment honors declared/inferred side; threshold 0 | new endpoint-orientation plus raw diagonal controls | exact: shared bounds, source constants or authored geometric predicate | always except renderer shouldCheckRelation callback (lifecycle via-array bypass); controls: `gate-lifecycle-via-side-bypass` | No independent adjustment; consume resolved geometry from caller |
 | `sidecars/archify/renderers/shared/geometry.mjs:463-522` | edge-through-node | `*/geometry-route-clearance` | unrelated opaque obstacle intersects segment with2px clearance; threshold 2 | new unrelated-node-clearance | exact: shared bounds, source constants or authored geometric predicate | valid referenced endpoints; unrelated opaque obstacles only; source/target exempt; exemption: applicability guard, not a profile/version refusal; exempt source/target is covered by normal endpoint routes | renderer selects opaque obstacles; sequence excludes lifelines, activations and segments |
 | `sidecars/archify/renderers/shared/geometry.mjs:607-693` | proper-crossing | `*/geometry-route-quality` | strict interior segment intersection; shared ends/profile exceptions; threshold 0 | new proper-crossing raw pin case; touching control | exact: shared bounds, source constants or authored geometric predicate | effective showcase refuses; standard warning only when caller enables warnInStandard; crossingResolved callback may exempt automatic halo routes; exemption: halo callback requires observing actual planner geometry, not an arbitrary synthetic crossing override; controls: `gate-architecture-crossing-standard`, `gate-dataflow-crossing-standard`, `gate-lifecycle-crossing-standard` | No independent adjustment; consume resolved geometry from caller |
-| `sidecars/archify/renderers/shared/geometry.mjs:706-855` | ambiguous-corridor | `*/geometry-route-quality` | collinear overlap >=8; v2 same-style terminal trunk <=24 exempt; threshold {"minimum":8,"trunkMaximum":24} | new corridor7/9 pairs; individually observed v2 trunk23 pass /25 measured corridor refusal | exact: shared bounds, source constants or authored geometric predicate | showcase refusal; standard only warning for v2 short-trunk mode; shared-endpoint policies and <=24px same-style terminal-trunk exception; controls: `gate-architecture-corridor-standard`, `gate-workflow-v2-corridor-standard` | No independent adjustment; consume resolved geometry from caller |
+| `sidecars/archify/renderers/shared/geometry.mjs:706-855` | ambiguous-corridor | `*/geometry-route-quality` | collinear overlap >=8; v2 same-style terminal trunk <=24 exempt; threshold {"minimum":8,"trunkMaximum":24} | new corridor7/9 pairs; `workflow-v2-shared-trunk-25` has two raw edges ending the same first via at [169,119] and now refuses on that authored piece | exact shared bounds; v2 first/last via witness ownership is fatal only when distinct raw edges explicitly share that endpoint and the clipped witness ends there; other pieces remain piece-local | showcase refusal; standard only warning for v2 short-trunk mode; shared-endpoint policies and <=24px same-style terminal-trunk exception; controls: `gate-architecture-corridor-standard`, `gate-workflow-v2-corridor-standard` | No independent adjustment; consume resolved geometry from caller |
 | `sidecars/archify/renderers/shared/geometry.mjs:788-815` | arrowhead-collision | `*/geometry-route-quality` | same destination/axis/direction, tip distance <3.5*(widthA+widthB); threshold "3.5*(widthA+widthB)" | observed v2 tips288,119 /288,126; widths6/7 and8/7 test marker sums6/8 around7px; C-generated notice policy explicit | exact: shared bounds, source constants or authored geometric predicate | caller selects architecture auto unlabeled-position routes or workflow schema2; standard workflow is warning, showcase refusal; controls: `gate-workflow-v1-no-v2-arrows`, `gate-workflow-v2-arrows-standard` | No independent adjustment; consume resolved geometry from caller |
 | `sidecars/archify/renderers/shared/geometry.mjs:876-953` | container-border-run | `*/geometry-route-quality` | positive overlap beyond epsilon on corner-trimmed frame side; threshold 0.0001 | existing seq segment-border; new sequence border-neighbor pair | exact: shared bounds, source constants or authored geometric predicate | effective profile is present; controls: `gate-architecture-border-profile-absent`, `gate-sequence-border-profile-absent`, `gate-dataflow-border-profile-absent` | No independent adjustment; consume resolved geometry from caller |
 | `sidecars/archify/renderers/shared/geometry.mjs:1028-1104` | micro/short interior segment | `*/geometry-route-quality` | nonzero segment length <8; interior length <16; threshold {"micro":8,"interior":16} | new 7/9 and15/17 source-via pairs | exact: shared bounds, source constants or authored geometric predicate | effective quality profile=showcase; controls: `gate-architecture-rhythm-standard`, `gate-workflow-rhythm-standard`, `gate-dataflow-rhythm-standard`, `gate-lifecycle-rhythm-standard` | No independent adjustment; consume resolved geometry from caller |

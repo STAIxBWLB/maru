@@ -475,7 +475,7 @@
     "scope": "previous source-bound reproduction before test-only logical-work instrumentation; not current-head acceptance"
   },
   "boundaryEvidence": {
-    "scope": "separate synthetic evidence; exact layer gates both directions, model layer reports without failing; does not change AC1 membership",
+    "scope": "Mixed source-stamped disposition evidence: five brand-rail cases refreshed from current emitted Noto ink; all other final dispositions remain at their recorded source. This is not a current-head re-audit of every boundary verdict.",
     "strictParityCases": 311,
     "boundaryCases": 309,
     "rendererRefusalSites": 132,
@@ -522,12 +522,12 @@
             "oracleAccepted": false
           },
           {
-            "case": "e2-boundary-workflow-v2-shared-trunk-25",
+            "case": "e2-boundary-workflow-v2-shared-trunk-23",
             "diagnosticCodes": [
-              "workflow/geometry-route-quality-notice"
+              "workflow/geometry-route-quality"
             ],
-            "engineAccepted": true,
-            "oracleAccepted": false
+            "engineAccepted": false,
+            "oracleAccepted": true
           },
           {
             "case": "e2-boundary-workflow-v2-route-legend-191",
@@ -550,11 +550,11 @@
             "oracleAccepted": true
           }
         ],
-        "oracleGreenEngineRefused": 2,
-        "oracleRedEngineAdmitted": 5
+        "oracleGreenEngineRefused": 3,
+        "oracleRedEngineAdmitted": 4
       },
       "text-capacity": {
-        "agreements": 43,
+        "agreements": 44,
         "cases": 76,
         "examples": [
           {
@@ -604,13 +604,492 @@
             ],
             "engineAccepted": false,
             "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-architecture-brand-rail-71",
+            "category": "text-capacity",
+            "oracleAccepted": false,
+            "engineAccepted": true,
+            "diagnosticCodes": [],
+            "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+            "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+          },
+          {
+            "case": "e2-boundary-dataflow-brand-rail-71",
+            "category": "text-capacity",
+            "oracleAccepted": false,
+            "engineAccepted": true,
+            "diagnosticCodes": [],
+            "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+            "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+          },
+          {
+            "case": "e2-boundary-lifecycle-brand-rail-71",
+            "category": "text-capacity",
+            "oracleAccepted": false,
+            "engineAccepted": true,
+            "diagnosticCodes": [],
+            "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+            "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+          },
+          {
+            "case": "e2-boundary-workflow-brand-rail-71",
+            "category": "text-capacity",
+            "oracleAccepted": false,
+            "engineAccepted": true,
+            "diagnosticCodes": [],
+            "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+            "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+          },
+          {
+            "case": "e2-boundary-workflow-brand-rail-73",
+            "category": "text-capacity",
+            "oracleAccepted": false,
+            "engineAccepted": true,
+            "diagnosticCodes": [],
+            "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+            "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
           }
         ],
-        "oracleGreenEngineRefused": 26,
-        "oracleRedEngineAdmitted": 7
+        "oracleGreenEngineRefused": 24,
+        "oracleRedEngineAdmitted": 8
       }
     },
     "modelDifferences": [
+      {
+        "case": "e2-boundary-sequence-segment-title-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-segment-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-dataflow-primary-width-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-dataflow-detail-width-sublabel-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-dataflow-detail-width-tag-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-v1-primary-width-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-v1-detail-width-sublabel-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-v1-detail-width-tag-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-dataflow-label-pair-gap-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-spread-primary-header-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-spread-sublabel-header-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-v2-primary-width-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-v2-detail-width-sublabel-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-v2-detail-width-tag-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-brand-rail-7",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-label-fit"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-physical-corridor-7",
+        "category": "artifact-route-rounding",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-message-label-canvas-32",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-band-title-113.984375",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-family-label-route-below",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-family-label-route-above",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/route-label-space",
+          "lifecycle/geometry-route-clearance",
+          "lifecycle/geometry-label-overlap"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-dataflow-label-node-124",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "dataflow/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-lifecycle-label-node-122",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "lifecycle/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-label-pair-193.984375",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-legend-wrap-label-width-71",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-legend-clearance"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-sequence-legend-wrap-overrides-790.015625",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "sequence/geometry-legend-clearance",
+          "sequence/geometry-legend-clearance"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-architecture-label-node-overlap-1",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-architecture-label-node-overlap-3",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-architecture-label-pair-overlap-1",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-architecture-label-pair-overlap-3",
+        "category": "text-capacity",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "architecture/route-label-space",
+          "architecture/geometry-label-overlap"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-workflow-v2-arrow-spacing-8",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [
+          "workflow/geometry-route-quality-notice"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-workflow-v2-turn-7",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-workflow-v2-shared-trunk-23",
+        "category": "readable-v2-placement",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "workflow/geometry-route-quality"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-workflow-v2-route-legend-191",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-workflow-v2-label-legend-187",
+        "category": "readable-v2-placement",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-workflow-v2-label-lane-title-59",
+        "category": "readable-v2-placement",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "workflow/route-label-space"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-workflow-v2-route-lane-title-63",
+        "category": "readable-v2-placement",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "workflow/route-blocked"
+        ],
+        "engineSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+        "engineEvidenceScope": "preserved-source-stamped-model-record"
+      },
+      {
+        "case": "e2-boundary-architecture-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+        "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+      },
+      {
+        "case": "e2-boundary-dataflow-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+        "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+      },
+      {
+        "case": "e2-boundary-lifecycle-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+        "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+      },
+      {
+        "case": "e2-boundary-workflow-brand-rail-71",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+        "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+      },
+      {
+        "case": "e2-boundary-workflow-brand-rail-73",
+        "category": "text-capacity",
+        "oracleAccepted": false,
+        "engineAccepted": true,
+        "diagnosticCodes": [],
+        "engineSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+        "engineEvidenceScope": "current-wasm-layout-with-native-acceptance-cross-check"
+      }
+    ],
+    "clearMarginControls": 10,
+    "authoredCoordinateRoutingRefusals": [
+      {
+        "case": "e2-boundary-workflow-v2-route-lane-title-63",
+        "category": "readable-v2-placement",
+        "oracleAccepted": true,
+        "engineAccepted": false,
+        "diagnosticCodes": [
+          "workflow/route-blocked"
+        ]
+      }
+    ],
+    "originalModelDifferences": [
       {
         "case": "e2-boundary-sequence-segment-title-above",
         "category": "text-capacity",
@@ -964,47 +1443,171 @@
         "diagnosticCodes": []
       }
     ],
-    "clearMarginControls": 10,
-    "authoredCoordinateRoutingRefusals": [
-      {
-        "case": "e2-boundary-sequence-family-label-route-above",
-        "category": "text-capacity",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "sequence/route-blocked"
-        ]
+    "originalModelCategories": {
+      "artifact-route-rounding": {
+        "agreements": 1,
+        "cases": 2,
+        "examples": [
+          {
+            "case": "e2-boundary-lifecycle-physical-corridor-7",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          }
+        ],
+        "oracleGreenEngineRefused": 0,
+        "oracleRedEngineAdmitted": 1
       },
-      {
-        "case": "e2-boundary-dataflow-label-route-3",
-        "category": "text-capacity",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "dataflow/geometry-route-quality",
-          "dataflow/route-blocked"
-        ]
+      "readable-v2-implicit-placement": {
+        "agreements": 8,
+        "cases": 8,
+        "examples": [],
+        "oracleGreenEngineRefused": 0,
+        "oracleRedEngineAdmitted": 0
       },
-      {
-        "case": "e2-boundary-dataflow-label-route-5",
-        "category": "text-capacity",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "dataflow/geometry-route-quality",
-          "dataflow/route-blocked"
-        ]
+      "readable-v2-placement": {
+        "agreements": 8,
+        "cases": 15,
+        "examples": [
+          {
+            "case": "e2-boundary-workflow-v2-arrow-spacing-8",
+            "diagnosticCodes": [
+              "workflow/geometry-route-quality-notice"
+            ],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-turn-7",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-shared-trunk-25",
+            "diagnosticCodes": [
+              "workflow/geometry-route-quality-notice"
+            ],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-route-legend-191",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-label-legend-187",
+            "diagnosticCodes": [],
+            "engineAccepted": true,
+            "oracleAccepted": false
+          },
+          {
+            "case": "e2-boundary-workflow-v2-label-lane-title-59",
+            "diagnosticCodes": [
+              "workflow/route-label-space"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          }
+        ],
+        "oracleGreenEngineRefused": 2,
+        "oracleRedEngineAdmitted": 5
       },
-      {
-        "case": "e2-boundary-workflow-v2-route-lane-title-63",
-        "category": "readable-v2-placement",
-        "oracleAccepted": true,
-        "engineAccepted": false,
-        "diagnosticCodes": [
-          "workflow/route-blocked"
-        ]
+      "text-capacity": {
+        "agreements": 43,
+        "cases": 76,
+        "examples": [
+          {
+            "case": "e2-boundary-sequence-segment-title-above",
+            "diagnosticCodes": [
+              "sequence/geometry-segment-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-dataflow-primary-width-above",
+            "diagnosticCodes": [
+              "dataflow/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-dataflow-detail-width-sublabel-above",
+            "diagnosticCodes": [
+              "dataflow/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-dataflow-detail-width-tag-above",
+            "diagnosticCodes": [
+              "dataflow/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-lifecycle-v1-primary-width-above",
+            "diagnosticCodes": [
+              "lifecycle/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          },
+          {
+            "case": "e2-boundary-lifecycle-v1-detail-width-sublabel-above",
+            "diagnosticCodes": [
+              "lifecycle/geometry-label-fit"
+            ],
+            "engineAccepted": false,
+            "oracleAccepted": true
+          }
+        ],
+        "oracleGreenEngineRefused": 26,
+        "oracleRedEngineAdmitted": 7
       }
-    ]
+    },
+    "currentSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+    "currentEngineCrateTree": "84e4bf303f12543306470a59369cbc1334a7c89c",
+    "currentModelCounts": {
+      "cases": 101,
+      "agreements": 61,
+      "oracleGreenEngineRefused": 27,
+      "oracleRedEngineAdmitted": 13,
+      "originalModelDifferenceCases": 41,
+      "currentMismatches": 40,
+      "unionCases": 44
+    },
+    "currentSdkTreePath": "src-tauri/crates",
+    "currentSdkTree": "3a47428ca7a92c764bed88e761cece5caa704c49",
+    "currentEngineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+    "currentEvidenceScope": {
+      "kind": "mixed-per-record-engine-snapshots",
+      "refreshedCaseIds": [
+        "e2-boundary-architecture-brand-rail-71",
+        "e2-boundary-dataflow-brand-rail-71",
+        "e2-boundary-lifecycle-brand-rail-71",
+        "e2-boundary-workflow-brand-rail-71",
+        "e2-boundary-workflow-brand-rail-73"
+      ],
+      "refreshedSourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+      "refreshedSdkTreePath": "src-tauri/crates",
+      "refreshedSdkTree": "3a47428ca7a92c764bed88e761cece5caa704c49",
+      "refreshedEngineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+      "refreshedEngineCrateTree": "84e4bf303f12543306470a59369cbc1334a7c89c",
+      "preservedSourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+      "preservedSdkTreePath": "src-tauri/crates",
+      "preservedSdkTree": "39ec098466eec80f2b1190ea981dc2e036fdf74d",
+      "preservedEngineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+      "preservedEngineCrateTree": "d935b17a892c3f04b3f897fb30f10c8155ec9a87",
+      "preservedCaseCount": 39,
+      "nativeCorpusReportSha256": "9d5c96087bf6a7c2259f4b305dded68fbdaeef9199488a9bf9f75aa732a2eaf1"
+    }
   },
   "hostedBaseline": {
     "runId": 42538495856,
@@ -1232,5 +1835,81 @@
     "issue": 560,
     "url": "https://github.com/STAIxBWLB/maru/issues/560",
     "scope": "remaining model/admission case audit and genuine long-tail defects, blocks E4; no implementation in this PR"
+  },
+  "sdkTreePath": "src-tauri/crates",
+  "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+  "engineCrateTree": "76752a25c972fc06bae8017f9ec800c87466487e",
+  "priorVerifiedNativeWasm": {
+    "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against approved S1",
+    "sourceCommit": "f4dcf4fe86b47799e9712e3374fe6940fa444234",
+    "sdkTreePath": "src-tauri/crates",
+    "sdkTree": "39ec098466eec80f2b1190ea981dc2e036fdf74d",
+    "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+    "engineCrateTree": "d935b17a892c3f04b3f897fb30f10c8155ec9a87",
+    "baseCommit": "4d12957f1e9ed7100263115fae6c2aec74976a84",
+    "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
+    "corpusCaseCount": 623,
+    "acceptedCaseCount": 216,
+    "geometryRetainedCaseCount": 405,
+    "changedSceneCaseCount": 34,
+    "changedSvgCaseCount": 7,
+    "nativeReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "wasmReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "nativeWasmReportsEqual": true,
+    "work": {
+      "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+      "nodes": 1000,
+      "routes": 999,
+      "stats": {
+        "astarExpandedStates": 22167,
+        "constraintEvaluations": 3332334,
+        "routeEvaluations": 999
+      },
+      "total": 3355500
+    },
+    "scopeNote": "Prior committed source verification at f4dcf4fe before the final shared-trunk regression and Linux CI test-step commits; retained as source-stamped evidence, not claimed as the final exact-head proof."
+  },
+  "verifiedNativeWasm": {
+    "schemaVersion": 1,
+    "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against approved S1",
+    "sourceCommit": "af582230b41f5f34c9620da463eb6fd40af2c2c0",
+    "sdkTreePath": "src-tauri/crates",
+    "sdkTree": "4b02633660fbc471e7daa9a3024064e11bba6cb7",
+    "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
+    "engineCrateTree": "58022b926f0b2656379037c8a78b64d6c6ea77c1",
+    "baseCommit": "4d12957f1e9ed7100263115fae6c2aec74976a84",
+    "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
+    "corpusCaseCount": 623,
+    "acceptedCaseCount": 216,
+    "retainedCaseCount": 405,
+    "baselineWork": {
+      "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+      "nodes": 1000,
+      "routes": 999,
+      "stats": {
+        "astarExpandedStates": 22167,
+        "constraintEvaluations": 3332334,
+        "routeEvaluations": 999
+      },
+      "total": 3355500
+    },
+    "work": {
+      "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
+      "nodes": 1000,
+      "routes": 999,
+      "stats": {
+        "astarExpandedStates": 22167,
+        "constraintEvaluations": 3332334,
+        "routeEvaluations": 999
+      },
+      "total": 3355500
+    },
+    "nativeReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "wasmReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "nativeWasmReportsEqual": true,
+    "changedSceneCaseCount": 34,
+    "changedSvgCaseCount": 7,
+    "scopeNote": "Final implementation SDK tree verified at af582230, including the shared-trunk-23 regression. Later receipt-only commits preserve this SDK tree. Historical timing receipts and the separately stamped boundary export are not restamped.",
+    "changedCasesArtifact": "docs/performance/diagram-engine-e2-admission-determinism.json"
   }
 }

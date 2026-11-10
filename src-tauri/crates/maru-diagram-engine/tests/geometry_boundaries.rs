@@ -4,6 +4,8 @@
 use maru_diagram_engine::layout::layout_json;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
+#[path = "support/painted_ink.rs"]
+mod painted_ink;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Corpus {
@@ -35,7 +37,7 @@ struct Comparison {
     equivalent_codes: Vec<String>,
 }
 #[test]
-fn exact_boundaries_agree_and_model_differences_are_reported() {
+fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
     let corpus: Corpus = serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
     assert!(
         !corpus.boundary_cases.is_empty(),
@@ -43,18 +45,35 @@ fn exact_boundaries_agree_and_model_differences_are_reported() {
     );
     let mut failures = Vec::new();
     let mut exact = 0;
+    let mut measured_text_refusals = 0;
+    let mut measured_text_refusal_ids = HashSet::new();
     let mut models = BTreeMap::<String, serde_json::Value>::new();
+    let include_case_ledger = std::env::var_os("MARU_E2_BOUNDARY_CASE_LEDGER").is_some();
+    let mut model_case_ledger = Vec::new();
     for case in corpus.boundary_cases {
         let expected = case.geometry_comparison;
         let report = layout_json(&serde_json::json!({"specJson":expected.input_json}).to_string());
+        painted_ink::assert_accepted_text_ink_fits(&report);
         match case.boundary.layer.as_str() {
             "exact" => {
                 exact += 1;
                 if report.ok != expected.accepted {
-                    failures.push(format!(
-                        "{}: oracle accepted={} engine accepted={}, diagnostics {:?}",
-                        case.id, expected.accepted, report.ok, report.diagnostics
-                    ));
+                    if expected.accepted && !report.ok {
+                        // Keep exact source data intact; accept only the
+                        // physically measured Noto overflow refusal.
+                        painted_ink::assert_source_green_overflow_exception(
+                            &report,
+                            &case.id,
+                            &case.diagram_type,
+                        );
+                        measured_text_refusals += 1;
+                        measured_text_refusal_ids.insert(case.id.clone());
+                    } else {
+                        failures.push(format!(
+                            "{}: oracle accepted={} engine accepted={}, diagnostics {:?}",
+                            case.id, expected.accepted, report.ok, report.diagnostics
+                        ));
+                    }
                 }
                 let mut known: HashSet<_> = corpus
                     .rules
@@ -81,6 +100,17 @@ fn exact_boundaries_agree_and_model_differences_are_reported() {
                 }
             }
             "model-difference" => {
+                if include_case_ledger {
+                    model_case_ledger.push(serde_json::json!({
+                        "id":&case.id,
+                        "category":&case.boundary.category,
+                        "inputJson":&expected.input_json,
+                        "oracleAccepted":expected.accepted,
+                        "engineAccepted":report.ok,
+                        "diagnostics":&report.diagnostics,
+                        "geometry":&report.geometry,
+                    }));
+                }
                 let entry=models.entry(case.boundary.category).or_insert_with(||serde_json::json!({"cases":0,"agreements":0,"oracleGreenEngineRefused":0,"oracleRedEngineAdmitted":0,"examples":[]}));
                 entry["cases"] = serde_json::json!(entry["cases"].as_u64().unwrap() + 1);
                 let key = if expected.accepted == report.ok {
@@ -101,11 +131,22 @@ fn exact_boundaries_agree_and_model_differences_are_reported() {
     }
     println!(
         "ENGINE_E2_BOUNDARIES {}",
-        serde_json::json!({"exactCases":exact,"exactFailures":failures.len(),"modelCategories":models})
+        serde_json::json!({"exactCases":exact,"exactFailures":failures.len(),"measuredTextRefusals":measured_text_refusals,"modelCategories":models})
     );
+    if include_case_ledger {
+        println!(
+            "ENGINE_E2_BOUNDARY_CASE_LEDGER {}",
+            serde_json::json!(model_case_ledger)
+        );
+    }
     assert!(
         failures.is_empty(),
         "Exact geometry boundary drift:\n{}",
         failures.join("\n")
+    );
+    assert_eq!(
+        measured_text_refusal_ids,
+        HashSet::from(["gate-sequence-brand-absent".to_string()]),
+        "only the named sequence control may differ for measured text ink"
     );
 }

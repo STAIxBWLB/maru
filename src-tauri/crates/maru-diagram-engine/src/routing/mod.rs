@@ -19,6 +19,22 @@ const MAX_WAYPOINTS: usize = 4096;
 const MAX_OBSTACLES: usize = 65_536;
 const MAX_QUEUED_STATES: usize = 4 * MAX_SEARCH_STATES;
 
+/// An endpoint's node/label mask may contain this authored via anchor. The
+/// obstacle indexes are exempt only on the two route legs incident to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EndpointObstacleMask {
+    pub waypoint_index: usize,
+    pub obstacle_indices: Vec<usize>,
+}
+
+/// A routed path retains the output index of every mandatory waypoint. Layout
+/// uses these to scope the final exemption to the visible inside run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MaskedRoute {
+    pub points: Vec<GeometryPoint>,
+    pub waypoint_point_indices: Vec<usize>,
+}
+
 /// Authored connection hints. The scene builder resolves ports, translates
 /// channels into mandatory points, and positions labels before calling routing.
 #[derive(Debug, Clone, Default)]
@@ -119,6 +135,19 @@ fn point_clear(point: GeometryPoint, obstacles: &[Rect]) -> bool {
     })
 }
 
+fn point_clear_except(point: GeometryPoint, obstacles: &[Rect], masked: &[usize]) -> bool {
+    if masked.is_empty() {
+        return point_clear(point, obstacles);
+    }
+    !obstacles.iter().enumerate().any(|(index, rect)| {
+        !masked.contains(&index)
+            && point.x > rect.left
+            && point.x < rect.right
+            && point.y > rect.top
+            && point.y < rect.bottom
+    })
+}
+
 fn segment_clear(from: GeometryPoint, to: GeometryPoint, obstacles: &[Rect]) -> bool {
     if from.y == to.y {
         let (left, right) = (from.x.min(to.x), from.x.max(to.x));
@@ -129,6 +158,36 @@ fn segment_clear(from: GeometryPoint, to: GeometryPoint, obstacles: &[Rect]) -> 
         let (top, bottom) = (from.y.min(to.y), from.y.max(to.y));
         !obstacles.iter().any(|rect| {
             from.x > rect.left && from.x < rect.right && top.max(rect.top) < bottom.min(rect.bottom)
+        })
+    } else {
+        false
+    }
+}
+
+fn segment_clear_except(
+    from: GeometryPoint,
+    to: GeometryPoint,
+    obstacles: &[Rect],
+    masked: &[usize],
+) -> bool {
+    if masked.is_empty() {
+        return segment_clear(from, to, obstacles);
+    }
+    if from.y == to.y {
+        let (left, right) = (from.x.min(to.x), from.x.max(to.x));
+        !obstacles.iter().enumerate().any(|(index, rect)| {
+            !masked.contains(&index)
+                && from.y > rect.top
+                && from.y < rect.bottom
+                && left.max(rect.left) < right.min(rect.right)
+        })
+    } else if from.x == to.x {
+        let (top, bottom) = (from.y.min(to.y), from.y.max(to.y));
+        !obstacles.iter().enumerate().any(|(index, rect)| {
+            !masked.contains(&index)
+                && from.x > rect.left
+                && from.x < rect.right
+                && top.max(rect.top) < bottom.min(rect.bottom)
         })
     } else {
         false
@@ -191,12 +250,13 @@ fn search_leg(
     start: GeometryPoint,
     end: GeometryPoint,
     obstacles: &[Rect],
+    masked_obstacle_indices: &[usize],
     max_search_states: usize,
 ) -> Result<Vec<GeometryPoint>, Diagnostic> {
     if start == end {
         return Ok(vec![start]);
     }
-    if segment_clear(start, end, obstacles) {
+    if segment_clear_except(start, end, obstacles, masked_obstacle_indices) {
         return Ok(vec![start, end]);
     }
     // One bend is globally shortest in distance and bends whenever available.
@@ -213,9 +273,9 @@ fn search_leg(
     ];
     corners.sort_by_key(|point| (point.x, point.y));
     for corner in corners {
-        if point_clear(corner, obstacles)
-            && segment_clear(start, corner, obstacles)
-            && segment_clear(corner, end, obstacles)
+        if point_clear_except(corner, obstacles, masked_obstacle_indices)
+            && segment_clear_except(start, corner, obstacles, masked_obstacle_indices)
+            && segment_clear_except(corner, end, obstacles, masked_obstacle_indices)
         {
             return Ok(simplify(vec![start, corner, end]));
         }
@@ -274,6 +334,10 @@ fn search_leg(
         // Queue entries superseded by a better path consume no expansion.
         #[cfg(any(test, feature = "geometry-corpus"))]
         crate::work::record_astar_expansion();
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        if !masked_obstacle_indices.is_empty() {
+            crate::work::record_masked_astar_expansion();
+        }
         let point = GeometryPoint {
             x: xs[state.x],
             y: ys[state.y],
@@ -319,7 +383,9 @@ fn search_leg(
                 x: xs[next.x],
                 y: ys[next.y],
             };
-            if !point_clear(target, obstacles) || !segment_clear(point, target, obstacles) {
+            if !point_clear_except(target, obstacles, masked_obstacle_indices)
+                || !segment_clear_except(point, target, obstacles, masked_obstacle_indices)
+            {
                 continue;
             }
             let turn = u32::from(state.axis != 2 && state.axis != next.axis);
@@ -372,7 +438,46 @@ pub fn route_orthogonal(
     obstacles: &[GeometryBox],
     waypoints: &[GeometryPoint],
 ) -> Result<Vec<GeometryPoint>, Diagnostic> {
-    route_with_budget(start, end, obstacles, waypoints, MAX_SEARCH_STATES)
+    route_with_budget(start, end, obstacles, waypoints, &[], MAX_SEARCH_STATES)
+        .map(|route| route.points)
+}
+
+/// Route an authored endpoint via through its own opaque node/label mask while
+/// keeping every unrelated node and label obstacle active.
+pub(crate) fn route_orthogonal_with_endpoint_masks(
+    start: GeometryPoint,
+    end: GeometryPoint,
+    obstacles: &[GeometryBox],
+    waypoints: &[GeometryPoint],
+    endpoint_masks: &[EndpointObstacleMask],
+) -> Result<MaskedRoute, Diagnostic> {
+    route_with_budget(
+        start,
+        end,
+        obstacles,
+        waypoints,
+        endpoint_masks,
+        MAX_SEARCH_STATES,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn route_orthogonal_with_endpoint_masks_and_budget(
+    start: GeometryPoint,
+    end: GeometryPoint,
+    obstacles: &[GeometryBox],
+    waypoints: &[GeometryPoint],
+    endpoint_masks: &[EndpointObstacleMask],
+    max_search_states: usize,
+) -> Result<MaskedRoute, Diagnostic> {
+    route_with_budget(
+        start,
+        end,
+        obstacles,
+        waypoints,
+        endpoint_masks,
+        max_search_states,
+    )
 }
 
 /// Local deterministic failure injection, without a process-global setting or
@@ -385,7 +490,8 @@ pub(crate) fn route_orthogonal_with_budget(
     waypoints: &[GeometryPoint],
     max_search_states: usize,
 ) -> Result<Vec<GeometryPoint>, Diagnostic> {
-    route_with_budget(start, end, obstacles, waypoints, max_search_states)
+    route_with_budget(start, end, obstacles, waypoints, &[], max_search_states)
+        .map(|route| route.points)
 }
 
 fn route_with_budget(
@@ -393,37 +499,131 @@ fn route_with_budget(
     end: GeometryPoint,
     obstacles: &[GeometryBox],
     waypoints: &[GeometryPoint],
+    endpoint_masks: &[EndpointObstacleMask],
     max_search_states: usize,
-) -> Result<Vec<GeometryPoint>, Diagnostic> {
+) -> Result<MaskedRoute, Diagnostic> {
     if waypoints.len() > MAX_WAYPOINTS {
         return Err(budget());
     }
-    let obstacles = normalize(obstacles)?;
-    for (index, anchor) in std::iter::once(&start)
-        .chain(waypoints)
-        .chain(std::iter::once(&end))
-        .enumerate()
-    {
-        if !point_clear(*anchor, &obstacles) {
+    let raw_obstacles = obstacles;
+    let obstacles = normalize(raw_obstacles)?;
+    let source_to_normalized = if endpoint_masks.is_empty() {
+        Vec::new()
+    } else {
+        normalized_obstacle_indexes(raw_obstacles)
+    };
+    let (via_masked_indexes, leg_masked_indexes) =
+        endpoint_mask_indexes(endpoint_masks, &source_to_normalized, waypoints.len());
+    if !point_clear(start, &obstacles) {
+        return Err(diagnostic(
+            "blocked",
+            "route anchor 0 lies inside a node or label obstacle",
+            "move the port or authored waypoint outside all node and label bounds",
+        ));
+    }
+    for (index, anchor) in waypoints.iter().enumerate() {
+        if !point_clear_except(*anchor, &obstacles, &via_masked_indexes[index]) {
             return Err(diagnostic(
                 "blocked",
-                format!("route anchor {index} lies inside a node or label obstacle"),
+                format!(
+                    "route anchor {} lies inside a node or label obstacle",
+                    index + 1
+                ),
                 "move the port or authored waypoint outside all node and label bounds",
             ));
         }
     }
+    if !point_clear(end, &obstacles) {
+        return Err(diagnostic(
+            "blocked",
+            format!(
+                "route anchor {} lies inside a node or label obstacle",
+                waypoints.len() + 1
+            ),
+            "move the port or authored waypoint outside all node and label bounds",
+        ));
+    }
     let mut route = Vec::new();
+    let mut waypoint_point_indices = Vec::with_capacity(waypoints.len());
     let mut previous = start;
-    for target in waypoints.iter().copied().chain(std::iter::once(end)) {
-        let leg = search_leg(previous, target, &obstacles, max_search_states)?;
-        for point in leg {
-            if route.last() != Some(&point) {
-                route.push(point);
+    for (leg_index, target) in waypoints
+        .iter()
+        .copied()
+        .chain(std::iter::once(end))
+        .enumerate()
+    {
+        let leg_masks = leg_masked_indexes
+            .get(leg_index)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let leg = search_leg(previous, target, &obstacles, leg_masks, max_search_states)?;
+        if route.is_empty() {
+            route.extend(leg.iter().copied());
+        } else {
+            for point in leg.into_iter().skip(1) {
+                if route.last() != Some(&point) {
+                    route.push(point);
+                }
             }
+        }
+        if leg_index < waypoints.len() {
+            waypoint_point_indices.push(route.len() - 1);
         }
         previous = target;
     }
-    Ok(route)
+    Ok(MaskedRoute {
+        points: route,
+        waypoint_point_indices,
+    })
+}
+
+fn normalized_obstacle_indexes(source: &[GeometryBox]) -> Vec<Option<usize>> {
+    // normalize omits zero-area boxes, retaining the source order of every
+    // painted obstacle. The caller-provided indexes refer to that source list.
+    let mut next = 0;
+    source
+        .iter()
+        .map(|bounds| {
+            if bounds.width == 0 || bounds.height == 0 {
+                None
+            } else {
+                let index = next;
+                next += 1;
+                Some(index)
+            }
+        })
+        .collect()
+}
+
+fn endpoint_mask_indexes(
+    masks: &[EndpointObstacleMask],
+    source_to_normalized: &[Option<usize>],
+    waypoint_count: usize,
+) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
+    let mut by_via = vec![Vec::new(); waypoint_count];
+    for mask in masks {
+        let Some(allowed) = by_via.get_mut(mask.waypoint_index) else {
+            continue;
+        };
+        for source_index in &mask.obstacle_indices {
+            if let Some(Some(index)) = source_to_normalized.get(*source_index) {
+                if !allowed.contains(index) {
+                    allowed.push(*index);
+                }
+            }
+        }
+    }
+    let mut by_leg = vec![Vec::new(); waypoint_count + 1];
+    for (via_index, indexes) in by_via.iter().enumerate() {
+        for leg_index in [via_index, via_index + 1] {
+            for index in indexes {
+                if !by_leg[leg_index].contains(index) {
+                    by_leg[leg_index].push(*index);
+                }
+            }
+        }
+    }
+    (by_via, by_leg)
 }
 
 #[cfg(test)]
@@ -486,6 +686,82 @@ mod tests {
     fn retains_even_collinear_mandatory_waypoints() {
         let route = route_orthogonal(p(0, 0), p(100, 0), &[], &[p(30, 0), p(60, 0)]).unwrap();
         assert_eq!(route, [p(0, 0), p(30, 0), p(60, 0), p(100, 0)]);
+    }
+
+    #[test]
+    fn authored_via_can_enter_only_its_indexed_endpoint_mask() {
+        let inflated = rect(75, -15, 40, 30);
+        let mask = EndpointObstacleMask {
+            waypoint_index: 0,
+            obstacle_indices: vec![0],
+        };
+        let route = route_orthogonal_with_endpoint_masks(
+            p(0, 0),
+            p(120, 0),
+            &[inflated],
+            &[p(90, 0)],
+            &[mask],
+        )
+        .unwrap();
+        assert_eq!(route.points, [p(0, 0), p(90, 0), p(120, 0)]);
+        assert_eq!(route.waypoint_point_indices, [1]);
+    }
+
+    #[test]
+    fn endpoint_mask_is_limited_to_the_two_legs_incident_to_its_inside_via() {
+        let endpoint = rect(40, 40, 40, 40);
+        let mask = EndpointObstacleMask {
+            waypoint_index: 0,
+            obstacle_indices: vec![0],
+        };
+        let route = route_orthogonal_with_endpoint_masks(
+            p(0, 60),
+            p(0, 0),
+            &[endpoint],
+            &[p(60, 60), p(100, 60)],
+            &[mask],
+        )
+        .unwrap();
+
+        assert_eq!(route.waypoint_point_indices.len(), 2);
+        let inside_via = route.waypoint_point_indices[0];
+        let outside_via = route.waypoint_point_indices[1];
+        let normalized = normalize(&[endpoint]).unwrap();
+        assert!(
+            route.points[..=inside_via]
+                .windows(2)
+                .any(|segment| { !segment_clear(segment[0], segment[1], &normalized) }),
+            "an incident leg must be allowed to enter or leave its endpoint mask"
+        );
+        assert!(route.points[inside_via..=outside_via]
+            .windows(2)
+            .any(|segment| !segment_clear(segment[0], segment[1], &normalized)));
+        assert!(
+            route.points[outside_via..]
+                .windows(2)
+                .all(|segment| segment_clear(segment[0], segment[1], &normalized)),
+            "outside-to-outside leg must keep the endpoint obstacle active: {:?}",
+            route.points
+        );
+    }
+
+    #[test]
+    fn endpoint_mask_never_exempts_a_co_located_third_party_obstacle() {
+        let inflated = rect(75, -15, 40, 30);
+        let mask = EndpointObstacleMask {
+            waypoint_index: 0,
+            obstacle_indices: vec![0],
+        };
+        let error = route_orthogonal_with_endpoint_masks(
+            p(0, 0),
+            p(120, 0),
+            &[inflated, inflated],
+            &[p(90, 0)],
+            &[mask],
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "document/route-blocked");
+        assert!(error.message.contains("route anchor 1"));
     }
 
     #[test]

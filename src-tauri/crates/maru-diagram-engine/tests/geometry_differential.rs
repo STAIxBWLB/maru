@@ -3,6 +3,8 @@
 use maru_diagram_engine::layout::layout_json;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
+#[path = "support/painted_ink.rs"]
+mod painted_ink;
 
 #[derive(Deserialize)]
 struct Corpus {
@@ -30,19 +32,30 @@ struct Comparison {
 }
 
 #[test]
-fn renderer_verdicts_have_equivalent_geometry_rules_and_preserve_placed_scenes() {
+fn reference_verdicts_and_actual_text_bounds_preserve_placed_scenes() {
     let corpus: Corpus = serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
     let mut failures = Vec::new();
     let mut deferred = HashSet::new();
+    let mut measured_text_refusals = HashSet::new();
     for case in corpus.cases {
         let expected = case.geometry_comparison;
         let request = serde_json::json!({"specJson":expected.input_json});
         let report = layout_json(&request.to_string());
+        painted_ink::assert_accepted_text_ink_fits(&report);
         if report.ok != expected.accepted {
-            failures.push(format!(
-                "{}: expected ok={}, got {:?}",
-                case.id, expected.accepted, report.diagnostics
-            ));
+            if expected.accepted && !report.ok {
+                painted_ink::assert_source_green_overflow_exception(
+                    &report,
+                    &case.id,
+                    &case.diagram_type,
+                );
+                measured_text_refusals.insert(case.id.clone());
+            } else {
+                failures.push(format!(
+                    "{}: expected ok={}, got {:?}",
+                    case.id, expected.accepted, report.diagnostics
+                ));
+            }
         }
         if expected.geometry_expected && report.geometry.is_none() {
             failures.push(format!(
@@ -118,6 +131,82 @@ fn renderer_verdicts_have_equivalent_geometry_rules_and_preserve_placed_scenes()
         3,
         "all three E1 geometry deferrals must now be actual rule agreements"
     );
+    assert_eq!(
+        measured_text_refusals,
+        HashSet::from(["public-01".to_string()]),
+        "only public-01 has a measured source-green text refusal in this corpus"
+    );
+}
+
+#[test]
+fn only_named_source_green_cases_can_refuse_for_measured_noto_ink_overflow() {
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
+    let dense: serde_json::Value =
+        serde_json::from_str(include_str!("../testdata/dense-scenes.json")).unwrap();
+    let mut observed = HashSet::new();
+
+    for id in painted_ink::SOURCE_GREEN_INK_CASES {
+        let (spec, diagram_type) = match *id {
+            "public-01" => {
+                let case = corpus["cases"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|case| case["id"] == *id)
+                    .unwrap();
+                assert_eq!(case["geometryComparison"]["accepted"], true);
+                (
+                    case["geometryComparison"]["inputJson"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    case["diagramType"].as_str().unwrap().to_owned(),
+                )
+            }
+            "gate-sequence-brand-absent" | "e2-boundary-sequence-brand-rail-7" => {
+                let case = corpus["boundaryCases"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|case| case["id"] == *id)
+                    .unwrap();
+                assert_eq!(case["oracle"]["ok"], true);
+                assert_eq!(case["geometryComparison"]["accepted"], true);
+                (
+                    case["geometryComparison"]["inputJson"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    case["diagramType"].as_str().unwrap().to_owned(),
+                )
+            }
+            "dense-workflow-seed-5502027" => {
+                let case = dense["cases"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|case| case["id"] == *id)
+                    .unwrap();
+                let spec = case["spec"].to_string();
+                assert!(
+                    maru_diagram_engine::validate_json(&spec).ok,
+                    "dense source fixture remains accepted"
+                );
+                (spec, "workflow".to_string())
+            }
+            other => panic!("source-green overflow case {other:?} is not wired to a fixture"),
+        };
+        let report = layout_json(&serde_json::json!({"specJson":spec}).to_string());
+        assert!(
+            !report.ok,
+            "listed case {id} must retain its measured refusal"
+        );
+        painted_ink::assert_source_green_overflow_exception(&report, id, &diagram_type);
+        observed.insert(*id);
+    }
+
+    assert_eq!(observed.len(), painted_ink::SOURCE_GREEN_INK_CASES.len());
 }
 
 #[test]

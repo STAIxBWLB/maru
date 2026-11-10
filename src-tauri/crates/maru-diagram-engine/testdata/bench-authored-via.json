@@ -1,0 +1,445 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "A3 authored via mask work fixture",
+    "output": "a3-authored-via.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      3600,
+      600
+    ]
+  },
+  "components": [
+    {
+      "id": "a",
+      "type": "backend",
+      "label": "Source",
+      "pos": [
+        100,
+        100
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "b",
+      "type": "backend",
+      "label": "Target",
+      "pos": [
+        480,
+        100
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "mask-blocker",
+      "type": "backend",
+      "label": "X",
+      "pos": [
+        230,
+        71
+      ],
+      "size": [
+        40,
+        56
+      ],
+      "sublabel": "S",
+      "tag": "T\n\n"
+    },
+    {
+      "id": "outside-00",
+      "type": "backend",
+      "label": "N00",
+      "pos": [
+        700,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-01",
+      "type": "backend",
+      "label": "N01",
+      "pos": [
+        820,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-02",
+      "type": "backend",
+      "label": "N02",
+      "pos": [
+        940,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-03",
+      "type": "backend",
+      "label": "N03",
+      "pos": [
+        1060,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-04",
+      "type": "backend",
+      "label": "N04",
+      "pos": [
+        1180,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-05",
+      "type": "backend",
+      "label": "N05",
+      "pos": [
+        1300,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-06",
+      "type": "backend",
+      "label": "N06",
+      "pos": [
+        1420,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-07",
+      "type": "backend",
+      "label": "N07",
+      "pos": [
+        1540,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-08",
+      "type": "backend",
+      "label": "N08",
+      "pos": [
+        1660,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-09",
+      "type": "backend",
+      "label": "N09",
+      "pos": [
+        1780,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-10",
+      "type": "backend",
+      "label": "N10",
+      "pos": [
+        1900,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-11",
+      "type": "backend",
+      "label": "N11",
+      "pos": [
+        2020,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-12",
+      "type": "backend",
+      "label": "N12",
+      "pos": [
+        2140,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-13",
+      "type": "backend",
+      "label": "N13",
+      "pos": [
+        2260,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-14",
+      "type": "backend",
+      "label": "N14",
+      "pos": [
+        2380,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-15",
+      "type": "backend",
+      "label": "N15",
+      "pos": [
+        2500,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-16",
+      "type": "backend",
+      "label": "N16",
+      "pos": [
+        2620,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-17",
+      "type": "backend",
+      "label": "N17",
+      "pos": [
+        2740,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-18",
+      "type": "backend",
+      "label": "N18",
+      "pos": [
+        2860,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-19",
+      "type": "backend",
+      "label": "N19",
+      "pos": [
+        2980,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-20",
+      "type": "backend",
+      "label": "N20",
+      "pos": [
+        3100,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-21",
+      "type": "backend",
+      "label": "N21",
+      "pos": [
+        3220,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-22",
+      "type": "backend",
+      "label": "N22",
+      "pos": [
+        3340,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "outside-23",
+      "type": "backend",
+      "label": "N23",
+      "pos": [
+        3460,
+        400
+      ],
+      "size": [
+        100,
+        60
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "authored-via",
+      "from": "a",
+      "to": "b",
+      "via": [
+        [
+          190,
+          130
+        ],
+        [
+          280,
+          130
+        ],
+        [
+          280,
+          150
+        ],
+        [
+          300,
+          150
+        ],
+        [
+          300,
+          170
+        ],
+        [
+          320,
+          170
+        ],
+        [
+          320,
+          150
+        ],
+        [
+          340,
+          150
+        ],
+        [
+          340,
+          170
+        ],
+        [
+          360,
+          170
+        ],
+        [
+          360,
+          150
+        ],
+        [
+          380,
+          150
+        ],
+        [
+          380,
+          170
+        ],
+        [
+          400,
+          170
+        ],
+        [
+          400,
+          150
+        ],
+        [
+          420,
+          150
+        ],
+        [
+          420,
+          130
+        ]
+      ]
+    }
+  ]
+}
