@@ -840,6 +840,7 @@ mod tests {
                     width: 0,
                     height: 0,
                 },
+                content_offset: None,
             },
         }
     }
