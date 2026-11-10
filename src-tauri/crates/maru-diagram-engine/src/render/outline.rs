@@ -94,10 +94,7 @@ impl PinnedFace {
         if let Some(cached) = self.glyphs.get(&ch) {
             return Ok(cached.clone());
         }
-        let glyph = self
-            .face
-            .glyph_index(ch)
-            .unwrap_or_else(|| GlyphId(u16::MAX));
+        let glyph = self.face.glyph_index(ch).unwrap_or(GlyphId(u16::MAX));
         let mut path = UnitsPath::default();
         let outlined = glyph.0 != u16::MAX && self.face.outline_glyph(glyph, &mut path).is_some();
         let value = outlined.then(|| path.into_data()).filter(|d| !d.is_empty());
