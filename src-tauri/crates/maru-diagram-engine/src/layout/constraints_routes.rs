@@ -2573,9 +2573,11 @@ mod tests {
         let spec: Value = serde_json::from_str(source_json).unwrap();
         let report = crate::layout::layout_json(&json!({"specJson":source_json}).to_string());
         assert!(!report.ok, "the explicitly shared junction is fatal");
-        let scene = source_rule_scene(report
-            .geometry
-            .expect("fatal route finding retains geometry"));
+        let scene = source_rule_scene(
+            report
+                .geometry
+                .expect("fatal route finding retains geometry"),
+        );
         let diagnostics = route_geometry_diagnostics(&spec, &scene);
         let shared = cause(&diagnostics, "ambiguous-corridor");
         assert!(
