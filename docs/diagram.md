@@ -1837,6 +1837,13 @@ with PNG so the two exports cannot run at once. The plugin's registered-invoke
 evidence records two outlined scenes (SHA-256, byte count, `textMode`) and that
 shared permit next to the PNG cases.
 
+The artifact is also measured where it will be opened. A headless-Chromium test
+loads the outlined viewer fixture, overrides every `font-family` with a family
+that is not installed, and requires that no label's glyph ink leaves its measured
+frame; at the pinned options the tightest label keeps 0.396px of clearance, so
+the 0.5px tolerance still fails a real overflow. That fixture is engine output
+and `tests/svg_viewer_fixture.rs` fails if it drifts from the renderer.
+
 Measured cost, byte counts from `tests/svg_outline_size.rs` (light theme, both
 modes from the same geometry):
 
