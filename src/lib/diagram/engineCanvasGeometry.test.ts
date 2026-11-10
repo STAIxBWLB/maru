@@ -271,6 +271,54 @@ describe("canvas geometry source agreement with the export path", () => {
     expect(geometry.labels.get(`${dataset.id}:lane:author`)![0]!.role).toBe("label");
   });
 
+  it("maps an id-less relation onto the edge the projection mints for it", () => {
+    // A legacy document keeps relations without ids: the projection names them
+    // `<datasetId>-e<index>` while the engine reports `<role>:<index>`.
+    const base = datasetFor("workflow");
+    const spec = structuredClone(base.spec);
+    delete (spec.edges as Array<Record<string, unknown>>)[0]!.id;
+    const legacy: SemanticSpecDataset = { ...base, id: "ds-legacy", spec, idMap: {} };
+    const doc = projectSemanticDocument(legacy).doc;
+    expect(doc.edges[0]!.id).toBe("ds-legacy-e0");
+
+    const font = { id: "maru-ui", revision: "1", fontSha256: "f".repeat(64), weight: 400, unitsPerEm: 1000, license: "OFL-1.1" };
+    const report: GeometryReport = {
+      apiVersion: 1,
+      ok: true,
+      geometry: {
+        nodes: [],
+        containers: [],
+        routes: [
+          { id: "edge:0", from: "draft", to: "review", points: [{ x: 64 * 10, y: 64 * 20 }], variant: null, role: null, width: null },
+          // No projected edge answers this ordinal, so it keeps the reported id.
+          { id: "edge:7", from: "draft", to: "review", points: [{ x: 64 * 30, y: 64 * 40 }], variant: null, role: null, width: null },
+        ],
+        labels: [
+          {
+            id: "edge:edge:0:label",
+            targetId: "edge:0",
+            text: "approve",
+            bounds: { x: 64 * 10, y: 64 * 20, width: 64 * 40, height: 64 * 14 },
+            font,
+            fontSize: 10 * 64,
+            glyphs: [],
+          },
+        ],
+        legend: { bounds: { x: 0, y: 0, width: 0, height: 0 }, entries: [] },
+        page: { bounds: { x: 0, y: 0, width: 64 * 100, height: 64 * 100 } },
+      },
+      diagnostics: [],
+      receipt: receipt(),
+    };
+    const geometry = canvasGeometryOf(report, doc, legacy)!;
+    // The canvas draws this edge, so its route and label must reach it rather
+    // than falling back to the legacy router.
+    expect(geometry.routes.get("ds-legacy-e0")).toMatchObject({ sourceId: "edge:0" });
+    expect(geometry.labels.get("ds-legacy-e0")?.[0]?.lines).toEqual(["approve"]);
+    expect(geometry.routes.has("edge:0")).toBe(false);
+    expect(geometry.routes.get("edge:7")).toMatchObject({ sourceId: "edge:7" });
+  });
+
   it("treats a refused report as no scene at all", () => {
     const { doc, dataset } = docFor("workflow");
     const report: GeometryReport = {
@@ -381,6 +429,51 @@ describe("canvas geometry store", () => {
       syncCanvasGeometry(doc, dataset.id, engine.load),
     ]);
     expect(engine.requests).toHaveLength(1);
+  });
+
+  it("ignores a layout the document has already superseded", async () => {
+    const { doc, dataset } = docFor("workflow");
+    const edited = structuredClone(doc);
+    const editedSpec = (edited.datasets![0] as SemanticSpecDataset).spec;
+    (editedSpec.nodes as Array<Record<string, unknown>>)[0]!.label = "초안 Draft";
+
+    // Two distinct keys answering in the wrong order: the superseded layout
+    // must neither replace the newer scene nor clear its pending slot.
+    const requests: LayoutRequest[] = [];
+    const held: Array<() => void> = [];
+    const load = () => new Promise<{ layout: (input: LayoutRequest) => GeometryReport }>((resolve) => {
+      const engine = {
+        layout: (input: LayoutRequest): GeometryReport => {
+          requests.push(input);
+          return {
+            apiVersion: 1,
+            ok: true,
+            geometry: sceneFor(input),
+            diagnostics: [],
+            receipt: receipt(input.pinSet?.sourceSpecSha256),
+          };
+        },
+      };
+      held.push(() => resolve(engine));
+    });
+
+    const superseded = syncCanvasGeometry(doc, dataset.id, load);
+    const current = syncCanvasGeometry(edited, dataset.id, load);
+    expect(held).toHaveLength(2);
+
+    held[1]!();
+    await current;
+    const newest = canvasGeometryState(dataset.id);
+    expect(newest.status).toBe("ready");
+    expect(
+      [...newest.geometry!.labels.values()].flat().some((label) => label.lines.join(" ") === "초안 Draft"),
+    ).toBe(true);
+
+    held[0]!();
+    await superseded;
+    // The older layout did reach the engine; its answer just never published.
+    expect(requests).toHaveLength(2);
+    expect(canvasGeometryState(dataset.id)).toBe(newest);
   });
 });
 

@@ -633,6 +633,16 @@ export function semanticContainerId(datasetId: string, role: SemanticContainerRo
   return `${datasetId}:${role}:${key}`;
 }
 
+/**
+ * Canvas edge id the projection mints for a relation that carries no id (legacy
+ * P1 documents). The engine names the same route `<role>:<index>` instead, so a
+ * consumer that maps an engine report back onto canvas ids needs this rule, and
+ * both call sites stay on it.
+ */
+export function projectedRelationEdgeId(datasetId: string, index: number): string {
+  return `${datasetId}-e${index}`;
+}
+
 export function isSemanticContainerNode(node: DiagramNode): boolean {
   return typeof node.meta?.semanticContainer === "string";
 }
@@ -935,7 +945,7 @@ export function projectSemanticDataset(
   specEntries(spec, descriptor.relations).forEach((entry, index) => {
     if (typeof entry.from !== "string" || typeof entry.to !== "string") return;
     const specId = idOf(entry);
-    let id = specId !== null ? maruIdFor(dataset, specId) : `${dataset.id}-e${index}`;
+    let id = specId !== null ? maruIdFor(dataset, specId) : projectedRelationEdgeId(dataset.id, index);
     while (edgeIds.has(id)) id = `${id}-2`;
     edgeIds.add(id);
     const label = typeof entry.label === "string" ? entry.label : undefined;
@@ -1103,7 +1113,7 @@ export function resolveSemanticMember(
     const index = entries.findIndex((entry, i) => {
       const specId = idOf(entry);
       // Floorplan edges are index-keyed even when an `id` extension is present.
-      return specId !== null && !descriptor.noRelationIds ? maruIdFor(dataset, specId) === target.edgeId : `${dataset.id}-e${i}` === target.edgeId;
+      return specId !== null && !descriptor.noRelationIds ? maruIdFor(dataset, specId) === target.edgeId : projectedRelationEdgeId(dataset.id, i) === target.edgeId;
     });
     if (index >= 0) {
       return { kind: "relation", dataset, field: descriptor.relations, index, entry: entries[index]! };

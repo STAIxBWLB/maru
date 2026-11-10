@@ -18,6 +18,7 @@ import type { Diagnostic, GeometryReport } from "../../../src-tauri/crates/maru-
 import { fixedToPixels, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
 import { ENGINE_DIAGRAM_TYPES, type SemanticSpecDataset } from "./reportTypes";
+import { projectedRelationEdgeId } from "./semantic";
 import type { DiagramDoc, DiagramNode } from "./types";
 
 export interface CanvasGeometryPoint {
@@ -76,6 +77,8 @@ export interface CanvasGeometry {
   labels: ReadonlyMap<string, readonly CanvasGeometryLabel[]>;
   /** Canvas edge id → engine route points. */
   routes: ReadonlyMap<string, CanvasGeometryRoute>;
+  /** Document title and subtitle in page coordinates: no member owns them. */
+  pageLabels: readonly CanvasGeometryLabel[];
   page: CanvasGeometryPage | null;
   diagnostics: readonly Diagnostic[];
 }
@@ -102,6 +105,19 @@ const IDLE: CanvasGeometryState = Object.freeze({
   diagnostics: [],
   sourceSpecSha256: null,
 });
+
+/**
+ * Route id prefix the engine allocates per family for a relation that carries
+ * no id (`allocate_route_ids` in the layout crate). Only id-less relations use
+ * it; an authored id is reported verbatim.
+ */
+const RELATION_ROUTE_PREFIX: Readonly<Record<string, string>> = {
+  architecture: "connection",
+  workflow: "edge",
+  sequence: "message",
+  dataflow: "flow",
+  lifecycle: "transition",
+};
 
 /**
  * The semantic dataset this canvas draws, or null. The five engine families
@@ -141,6 +157,26 @@ export function canvasGeometryOf(
     const memberId = `${dataset.id}:${sourceId}`;
     return doc.nodes.find((node) => node.meta?.memberId === memberId)?.id ?? memberId;
   };
+  // The engine names a relation route `<role>:<index>` when the source relation
+  // carries no id, while the projection mints `<datasetId>-e<index>` for it (a
+  // legacy document). Without this mapping the route and its label miss the
+  // canvas edge and the canvas silently falls back to the legacy router.
+  const relationPrefix = RELATION_ROUTE_PREFIX[dataset.diagramType] ?? null;
+  const relationCanvasId = (sourceId: string): string | null => {
+    if (Object.hasOwn(dataset.idMap, sourceId)) return dataset.idMap[sourceId]!;
+    if (!relationPrefix || !sourceId.startsWith(`${relationPrefix}:`)) return null;
+    const index = sourceId.slice(relationPrefix.length + 1);
+    if (!/^(0|[1-9][0-9]*)$/.test(index)) return null;
+    const projected = projectedRelationEdgeId(dataset.id, Number(index));
+    return doc.edges.some((edge) => edge.id === projected) ? projected : null;
+  };
+  const labelTarget = (id: string, targetId: string): string | null => {
+    // The document header belongs to the page, not to a canvas member.
+    if (targetId === "document") return null;
+    if (id.startsWith("container:")) return canvasId(targetId, "container");
+    if (id.startsWith("edge:")) return relationCanvasId(targetId) ?? canvasId(targetId, "node");
+    return canvasId(targetId, "node");
+  };
   const boxes = new Map<string, CanvasGeometryBox>();
   const box = (role: "node" | "container", sourceId: string, bounds: { x: number; y: number; width: number; height: number }) => {
     const id = canvasId(sourceId, role);
@@ -164,14 +200,13 @@ export function canvasGeometryOf(
     if (!boxes.has(entry.id)) boxes.set(entry.id, entry);
   }
   const labels = new Map<string, CanvasGeometryLabel[]>();
+  const pageLabels: CanvasGeometryLabel[] = [];
   scene.labels.forEach((label, index) => {
     const id = label.id ?? `label:${index}`;
-    const targetId = id.startsWith("container:")
-      ? canvasId(label.targetId, "container")
-      : canvasId(label.targetId, "node");
+    const targetId = labelTarget(id, label.targetId);
     const entry: CanvasGeometryLabel = {
       id,
-      targetId,
+      targetId: targetId ?? label.targetId,
       role: labelRole(id),
       lines: label.text.split("\n"),
       x: fixedToPixels(label.bounds.x, `the label ${id} x`),
@@ -181,6 +216,10 @@ export function canvasGeometryOf(
       fontSize: fixedToPixels(label.fontSize, `the label ${id} size`),
       weight: label.font.weight === 700 ? 700 : 400,
     };
+    if (targetId === null) {
+      pageLabels.push(entry);
+      return;
+    }
     const list = labels.get(targetId);
     if (list) list.push(entry);
     else labels.set(targetId, [entry]);
@@ -188,7 +227,7 @@ export function canvasGeometryOf(
   const routes = new Map<string, CanvasGeometryRoute>();
   scene.routes.forEach((route, index) => {
     const sourceId = route.id ?? `route:${index}`;
-    const id = canvasId(sourceId, "node");
+    const id = relationCanvasId(sourceId) ?? canvasId(sourceId, "node");
     routes.set(id, {
       id,
       sourceId,
@@ -202,6 +241,7 @@ export function canvasGeometryOf(
     boxes,
     labels,
     routes,
+    pageLabels,
     page: {
       x: fixedToPixels(scene.page.bounds.x, "the page x"),
       y: fixedToPixels(scene.page.bounds.y, "the page y"),
@@ -380,6 +420,9 @@ async function runLayout(
       dataset.id,
       known ? { contentOffset: known } : {},
     );
+    // The doc has already moved on: a newer key owns the canvas, and publishing
+    // this scene would replace it with an older one that nothing re-syncs.
+    if (entry.pendingKey !== key) return;
     entry.cacheKey = key;
     if (report.ok && report.geometry?.page.contentOffset) {
       entry.offset = { specJson, value: report.geometry.page.contentOffset };
@@ -395,6 +438,7 @@ async function runLayout(
   } catch (error) {
     // A refused or unreadable layout must never block the canvas: keep the last
     // good scene (or the projected source positions) and report why.
+    if (entry.pendingKey !== key) return;
     entry.cacheKey = key;
     publish(entry, {
       datasetId: dataset.id,
@@ -404,8 +448,12 @@ async function runLayout(
       sourceSpecSha256: entry.state.sourceSpecSha256,
     });
   } finally {
-    entry.pendingKey = null;
-    entry.pending = null;
+    // Only the layout that still owns the pending slot clears it: a superseded
+    // one must leave the newer layout's key and promise intact.
+    if (entry.pendingKey === key) {
+      entry.pendingKey = null;
+      entry.pending = null;
+    }
   }
 }
 

@@ -70,7 +70,7 @@ import {
 import { EdgeMarkers } from "./EdgeMarkers";
 import { EdgeView, type EngineRoute } from "./EdgeView";
 import { Marquee } from "./Marquee";
-import { NodeView } from "./NodeView";
+import { EngineLabels, NodeView } from "./NodeView";
 import { SmartGuides } from "./SmartGuides";
 import { useCanvasGeometry } from "./useCanvasGeometry";
 
@@ -234,10 +234,12 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   const [hoverNodeId, setHoverNodeId] = useState<NodeId | null>(null);
   const [svgSize, setSvgSize] = useState({ width: 0, height: 0 });
 
-  // A committed drop offset lives until the layout that carries its pins lands.
+  // A committed drop offset lives until the canvas answers with its next
+  // geometry: any publish means the layout that carries the pins was tried, and
+  // a refusal must not leave a painting that no later layout will replace.
   useEffect(() => {
     setCanvasOffset((current) => (current?.committed ? null : current));
-  }, [geometry]);
+  }, [canvasGeometry]);
 
   const offset: CanvasDisplayOffset | null = useMemo(
     () => (canvasOffset ? { ids: canvasOffset.ids, dx: canvasOffset.dx, dy: canvasOffset.dy } : null),
@@ -384,13 +386,21 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         lastDx: 0,
         lastDy: 0,
         ids,
-        engineIds: geometry ? ids.filter((id) => geometry.boxes.has(id)) : [],
+        // A member the engine draws moves on the canvas, not in the doc. Before
+        // the first scene arrives there is no box yet, but a pinnable semantic
+        // member still must not be moved in the doc: the layout would put the
+        // engine's box over it and the drag would vanish.
+        engineIds: ids.filter((id) => {
+          if (geometry?.boxes.has(id)) return true;
+          const node = nodeById.get(id);
+          return node != null && datasetId != null && isPinnableCanvasMember(doc, datasetId, node);
+        }),
         origins,
         linkedViewIds: analysis.full,
         coalescer: defaultCoalescer(),
       };
     },
-    [geometry, nodeById, store, t, viewport],
+    [datasetId, doc, geometry, nodeById, store, t, viewport],
   );
 
   const beginConnect = useCallback(
@@ -737,24 +747,33 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         // pinnable member, in emitted canvas coordinates, in one undo step.
         const moved = gesture.lastDx !== 0 || gesture.lastDy !== 0;
         const placed: Array<{ id: NodeId; x: number; y: number }> = [];
-        if (moved && geometry && datasetId) {
+        if (moved && datasetId) {
           for (const id of gesture.engineIds) {
-            const box = geometry.boxes.get(id);
             const node = nodeById.get(id);
-            if (!box || !node || !isPinnableCanvasMember(doc, datasetId, node)) continue;
-            placed.push({ id, x: box.x + gesture.lastDx, y: box.y + gesture.lastDy });
+            if (!node || !isPinnableCanvasMember(doc, datasetId, node)) continue;
+            // Without a scene yet (first paint, first-run refusal) the doc's own
+            // position stands in for the engine box the drag moved away from.
+            const box = geometry?.boxes.get(id) ?? null;
+            placed.push({
+              id,
+              x: (box?.x ?? node.x) + gesture.lastDx,
+              y: (box?.y ?? node.y) + gesture.lastDy,
+            });
           }
         }
         if (placed.length > 0) {
           store.setState(withSnapshot(pinSemanticNodes(placed), gesture.coalescer, { coalesce: true }));
         }
+        // The painting follows the pins until the layout answers them: with a
+        // scene the engine box hides the doc position, so the gesture offset
+        // holds the drop. Without one, or when nothing was pinnable, the offset
+        // must go, or the canvas keeps a displacement no layout will replace.
         if (moved && gesture.engineIds.length > 0) {
-          setCanvasOffset({
-            ids: new Set(gesture.engineIds),
-            dx: gesture.lastDx,
-            dy: gesture.lastDy,
-            committed: true,
-          });
+          setCanvasOffset(
+            placed.length > 0 && geometry
+              ? { ids: new Set(gesture.engineIds), dx: gesture.lastDx, dy: gesture.lastDy, committed: true }
+              : null,
+          );
         }
       }
       if (gesture.kind === "connect") {
@@ -872,6 +891,11 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
               strokeDasharray="8 4"
             />
           </g>
+        ) : null}
+        {geometry && geometry.pageLabels.length > 0 ? (
+          // The engine's title and subtitle sit in the header band its page
+          // offset reserves; without them the band is blank.
+          <EngineLabels labels={geometry.pageLabels} color="#111827" />
         ) : null}
         {visible.edges.map((edge) => (
           <EdgeView

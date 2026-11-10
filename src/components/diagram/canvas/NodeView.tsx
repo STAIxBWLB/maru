@@ -278,9 +278,10 @@ function NodeLabel({ node }: { node: DiagramNode }) {
  * Engine label lines for a semantic member. The line breaks, the wrap width and
  * the size are the engine's, so nothing here measures or splits the text; only
  * the line advance is repeated (the engine steps a line by 1.5× its size when
- * the font's own ascender/descender span is narrower).
+ * the font's own ascender/descender span is narrower). Coordinates are used as
+ * given, so the canvas also paints the page's own title with it.
  */
-function EngineLabels({ labels, color }: { labels: readonly CanvasLabelLines[]; color: string }) {
+export function EngineLabels({ labels, color }: { labels: readonly CanvasLabelLines[]; color: string }) {
   return (
     <g className="maru-diagram-engine-labels" pointerEvents="none">
       {labels.map((label) => (

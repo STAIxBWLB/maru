@@ -212,8 +212,10 @@ apply is disabled.
 (lane bands top-down, `col` columns), dataflow entities in stage columns
 (ordered by `row`). Architecture projection honors explicit pos coordinates
 and authored row/col cells using the pinned grid's origin and spacing;
-index-based placement is a fallback only. Fresh-document auto-layout is used
-only when no architecture member has authored placement.
+index-based grid placement is the fallback for members without authored
+coordinates. There is no reflow pass: the canvas draws the engine's own scene
+(§ Canvas geometry), so a projection position only stands in until that scene
+arrives.
 Lanes, stages, boundaries, workflow phases/groups and sequence segments become
 `section` containers; activations use simple transparent outlines so their
 captions have no opaque header over message endpoints. Managed containers
@@ -579,9 +581,12 @@ for replace/restore.
 ## Canvas geometry
 
 A semantic canvas draws the engine scene rather than its own placement: node
-and container boxes, the label lines the engine wrapped, and its route points.
+and container boxes, the label lines the engine wrapped, its route points, and
+the document title and subtitle in the header band the page offset reserves.
 `src/lib/diagram/engineCanvasGeometry.ts` maps one dataset's geometry report onto
-canvas ids and publishes it per dataset, and `useCanvasGeometry` reads it on the
+canvas ids (a relation without an id is named by its ordinal: `<role>:<index>`
+in the report, `<datasetId>-e<index>` on the canvas) and publishes it per
+dataset, and `useCanvasGeometry` reads it on the
 canvas side. The engine lays out exactly the bytes the export path sends, and the
 canvas carries their SHA-256 in `data-engine-spec-sha256`, so what is on screen
 and what is exported cannot disagree on placement.
@@ -593,7 +598,11 @@ and what is exported cannot disagree on placement.
   during the gesture and the drop records one pin entry (`pinSemanticNodes`), in
   one undo step. A pin is an authored source position, so the adapter subtracts
   `page.contentOffset`; the measured offset is reused per source spec, which
-  keeps a drop to one layout instead of a probe plus a layout.
+  keeps a drop to one layout instead of a probe plus a layout. A member with no
+  scene yet (first paint, first-run refusal) pins at the position the canvas
+  shows it on, and a derived frame (a boundary, stage, segment or activation
+  computed from its members) pins nothing: its drop returns to the engine's box
+  instead of leaving an offset no layout would replace.
 - A refused or unavailable layout keeps the last good scene (or the projected
   source positions on first paint) and shows the engine's diagnostic and its fix
   on the canvas. The same bytes are not requested again until the document
