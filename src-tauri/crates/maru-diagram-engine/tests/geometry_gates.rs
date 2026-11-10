@@ -44,6 +44,7 @@ fn audited_controls_preserve_source_verdicts_and_check_actual_text_bounds() {
         }
     }
     let mut measured_text_refusals = 0;
+    let mut measured_text_refusal_ids = BTreeSet::new();
     for (id, case) in &controls {
         assert_eq!(
             case["geometryComparison"]["accepted"], true,
@@ -69,13 +70,20 @@ fn audited_controls_preserve_source_verdicts_and_check_actual_text_bounds() {
         painted_ink::assert_accepted_text_ink_fits(&report);
         if !report.ok {
             measured_text_refusals += 1;
-            painted_ink::assert_measured_ink_overflow_refusal(
+            measured_text_refusal_ids.insert(id.to_owned());
+            painted_ink::assert_source_green_overflow_exception(
                 &report,
+                id,
                 case["diagramType"].as_str().unwrap(),
             );
         }
         assert!(report.geometry.is_some());
     }
+    assert_eq!(
+        measured_text_refusal_ids,
+        BTreeSet::from(["gate-sequence-brand-absent"]),
+        "only the named sequence gate control may have measured text overflow"
+    );
     println!(
         "ENGINE_E2_GATES {}",
         serde_json::json!({"auditedRows":audit.len(),"sourceAcceptedControls":controls.len(),"engineAcceptedControls":controls.len()-measured_text_refusals,"measuredTextRefusals":measured_text_refusals})

@@ -227,6 +227,136 @@ fn axis_segment_hits(
     }
 }
 
+fn endpoint_mask_dataflow(via: Vec<[f64; 2]>) -> Value {
+    json!({
+        "schema_version":1,
+        "diagram_type":"dataflow",
+        "meta":{"title":"Endpoint via mask","output":"endpoint-mask.html","viewBox":[940,720]},
+        "stages":[{"label":"Input"},{"label":"Output"}],
+        "nodes":[
+            {"id":"a","type":"backend","label":"A","stage":0,"row":0},
+            {"id":"b","type":"backend","label":"B","stage":1,"row":0}
+        ],
+        "flows":[{
+            "id":"f","from":"a","to":"b","label":"Flow",
+            "fromSide":"right","toSide":"left","via":via,"labelAt":[700,500]
+        }]
+    })
+}
+
+fn source_label_ink_center(
+    spec: &Value,
+) -> (maru_diagram_engine::geometry::GeometryPoint, [f64; 2]) {
+    let report = layout(spec);
+    assert!(report.ok, "probe layout refused: {:?}", report.diagnostics);
+    let geometry = report.geometry.expect("probe layout retains geometry");
+    let label = geometry
+        .labels
+        .iter()
+        .find(|label| label.id.as_deref() == Some("node:a:label"))
+        .expect("source node label is emitted");
+    let ink = label
+        .glyphs
+        .iter()
+        .find(|glyph| glyph.ink.width > 0 && glyph.ink.height > 0)
+        .expect("source label has painted glyph ink")
+        .ink;
+    let point = maru_diagram_engine::geometry::GeometryPoint {
+        x: ink.x + ink.width / 2,
+        y: ink.y + ink.height / 2,
+    };
+    (
+        point,
+        [f64::from(point.x) / 64.0, f64::from(point.y) / 64.0],
+    )
+}
+
+#[test]
+fn via_outside_source_does_not_exempt_a_route_that_would_cut_through_source_ink() {
+    let spec = endpoint_mask_dataflow(vec![[10.0, 157.0], [230.0, 157.0]]);
+    let report = layout(&spec);
+    assert!(
+        report.ok,
+        "the unmasked route should detour around source: {:?}",
+        report.diagnostics
+    );
+    let geometry = report.geometry.expect("accepted layout retains geometry");
+    let source = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+    let source_label = geometry
+        .labels
+        .iter()
+        .find(|label| label.id.as_deref() == Some("node:a:label"))
+        .unwrap();
+    let route = geometry
+        .routes
+        .iter()
+        .find(|route| route.id.as_deref() == Some("f"))
+        .expect("authored route is retained");
+    assert!(!route.points.is_empty());
+    for segment in route.points.windows(2) {
+        assert!(
+            !axis_segment_hits(source.bounds, segment[0], segment[1]),
+            "outside via route crossed source body: {:?}",
+            route.points
+        );
+        assert!(
+            !axis_segment_hits(source_label.bounds, segment[0], segment[1]),
+            "outside via route crossed source label ink box: {:?}",
+            route.points
+        );
+    }
+}
+
+#[test]
+fn via_inside_source_ink_can_enter_and_exit_its_endpoint_mask() {
+    let probe = endpoint_mask_dataflow(vec![[230.0, 157.0]]);
+    let (inside, inside_xy) = source_label_ink_center(&probe);
+    let spec = endpoint_mask_dataflow(vec![inside_xy, [230.0, 157.0]]);
+    let report = layout(&spec);
+    assert!(
+        report.ok,
+        "inside-source via remains a valid authored path: {:?}",
+        report.diagnostics
+    );
+    let geometry = report.geometry.expect("accepted layout retains geometry");
+    let source = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+    let source_label = geometry
+        .labels
+        .iter()
+        .find(|label| label.id.as_deref() == Some("node:a:label"))
+        .unwrap();
+    assert!(source.bounds.contains(inside).unwrap_or(false));
+    assert!(source_label.bounds.contains(inside).unwrap_or(false));
+    let route = geometry
+        .routes
+        .iter()
+        .find(|route| route.id.as_deref() == Some("f"))
+        .expect("authored route is retained");
+    let via_index = route
+        .points
+        .iter()
+        .position(|point| *point == inside)
+        .expect("inside via remains a mandatory route point");
+    assert!(
+        route.points[..=via_index]
+            .windows(2)
+            .any(
+                |segment| axis_segment_hits(source.bounds, segment[0], segment[1])
+                    && axis_segment_hits(source_label.bounds, segment[0], segment[1])
+            ),
+        "incoming leg should be allowed to enter the authored endpoint label mask"
+    );
+    assert!(
+        route.points[via_index..]
+            .windows(2)
+            .any(
+                |segment| axis_segment_hits(source.bounds, segment[0], segment[1])
+                    && axis_segment_hits(source_label.bounds, segment[0], segment[1])
+            ),
+        "outgoing leg should be allowed to exit the authored endpoint label mask"
+    );
+}
+
 #[test]
 fn automatic_self_edge_keeps_distinct_ports_and_avoids_an_unrelated_participant() {
     let mut spec: Value =

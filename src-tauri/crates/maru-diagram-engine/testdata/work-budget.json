@@ -4,34 +4,39 @@
   "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
   "nodes": 1000,
   "routes": 999,
-  "counterDefinitionVersion": 1,
+  "counterDefinitionVersion": 2,
   "baseline": {
     "astarExpandedStates": 22167,
     "routeEvaluations": 999,
     "constraintEvaluations": 3332334,
     "endpointMaskEvaluations": 0,
-    "endpointClearanceEvaluations": 0
+    "endpointClearanceEvaluations": 0,
+    "maskedAstarExpandedStates": 0
   },
   "ceiling": {
     "astarExpandedStates": 27709,
     "routeEvaluations": 1249,
     "constraintEvaluations": 4165418,
     "endpointMaskEvaluations": 0,
-    "endpointClearanceEvaluations": 0
+    "endpointClearanceEvaluations": 0,
+    "maskedAstarExpandedStates": 0
   },
   "totalBaseline": 3355500,
   "totalCeiling": 4194375,
   "authoredVia": {
     "fixturePath": "testdata/bench-authored-via.json",
-    "fixtureSha256": "f667c96790d8e93aafeeec5ff2efb54a8d72c07dbf0f2ed1e87ae0b6c1b28b34",
-    "nodes": 26,
-    "minimumLabels": 26,
-    "routes": 1,
+    "measurementStatus": "pending-remote-capture",
+    "fixtureSha256": null,
+    "nodes": null,
+    "labels": null,
+    "routes": null,
     "viaPoints": 17,
     "minimumRouteSegments": 10,
-    "endpointMaskPassesPerNodeOrLabelCeiling": 2,
-    "totalOperationsPerNodeSegmentCeiling": 256,
-    "endpointClearancePassesPerNodeLabelSegmentCeiling": 1
+    "routeSegments": null,
+    "baseline": null,
+    "ceiling": null,
+    "totalBaseline": null,
+    "totalCeiling": null
   },
   "scope": "deterministic logical operations, not elapsed time; normal geometry builds omit all hooks",
   "recordedCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-work"

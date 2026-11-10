@@ -38,6 +38,21 @@
       ]
     },
     {
+      "id": "mask-blocker",
+      "type": "backend",
+      "label": "X",
+      "pos": [
+        230,
+        70
+      ],
+      "size": [
+        40,
+        58
+      ],
+      "sublabel": "S",
+      "tag": "T"
+    },
+    {
       "id": "outside-00",
       "type": "backend",
       "label": "N00",

@@ -46,6 +46,7 @@ fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
     let mut failures = Vec::new();
     let mut exact = 0;
     let mut measured_text_refusals = 0;
+    let mut measured_text_refusal_ids = HashSet::new();
     let mut models = BTreeMap::<String, serde_json::Value>::new();
     let include_case_ledger = std::env::var_os("MARU_E2_BOUNDARY_CASE_LEDGER").is_some();
     let mut model_case_ledger = Vec::new();
@@ -60,11 +61,13 @@ fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
                     if expected.accepted && !report.ok {
                         // Keep exact source data intact; accept only the
                         // physically measured Noto overflow refusal.
-                        painted_ink::assert_measured_ink_overflow_refusal(
+                        painted_ink::assert_source_green_overflow_exception(
                             &report,
+                            &case.id,
                             &case.diagram_type,
                         );
                         measured_text_refusals += 1;
+                        measured_text_refusal_ids.insert(case.id.clone());
                     } else {
                         failures.push(format!(
                             "{}: oracle accepted={} engine accepted={}, diagnostics {:?}",
@@ -140,5 +143,10 @@ fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
         failures.is_empty(),
         "Exact geometry boundary drift:\n{}",
         failures.join("\n")
+    );
+    assert_eq!(
+        measured_text_refusal_ids,
+        HashSet::from(["gate-sequence-brand-absent".to_string()]),
+        "only the named sequence control may differ for measured text ink"
     );
 }
