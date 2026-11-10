@@ -585,7 +585,8 @@ and container boxes, the label lines the engine wrapped, its route points, and
 the document title and subtitle in the header band the page offset reserves.
 `src/lib/diagram/engineCanvasGeometry.ts` maps one dataset's geometry report onto
 canvas ids (a relation without an id is named by its ordinal: `<role>:<index>`
-in the report, `<datasetId>-e<index>` on the canvas) and publishes it per
+in the report, `<datasetId>-e<index>` on the canvas, and `<role>:<index>:generated`
+when an authored id already holds that name) and publishes it per
 dataset, and `useCanvasGeometry` reads it on the
 canvas side. The engine lays out exactly the bytes the export path sends, and the
 canvas carries their SHA-256 in `data-engine-spec-sha256`, so what is on screen
@@ -603,10 +604,18 @@ and what is exported cannot disagree on placement.
   shows it on, and a derived frame (a boundary, stage, segment or activation
   computed from its members) pins nothing: its drop returns to the engine's box
   instead of leaving an offset no layout would replace.
+- Every path that acts on a member acts on what the canvas shows. An arrow-key
+  nudge pins the engine-drawn members at their painted box (`canvasNudgePins`)
+  and moves the rest in the doc, as one edit. The property panel reports the
+  painted box: its position fields are read-only for an unpinned engine member
+  (a pinned one's typed position *is* the pin) and its size fields are always
+  the engine's. The inline editor, fit view and find navigation read the same
+  displayed nodes (`useCanvasDisplay`), so none of them aims at the coarse slot
+  the doc still stores under an engine member.
 - A refused or unavailable layout keeps the last good scene (or the projected
   source positions on first paint) and shows the engine's diagnostic and its fix
-  on the canvas. The same bytes are not requested again until the document
-  changes.
+  on the canvas. The retained scene keeps the hash it was emitted for; the same
+  bytes are not requested again until the document changes.
 - The five engine families (architecture, workflow, sequence, dataflow,
   lifecycle) draw the engine scene when the document holds exactly one semantic
   dataset. Floorplan stays local-only, and a document with no semantic dataset

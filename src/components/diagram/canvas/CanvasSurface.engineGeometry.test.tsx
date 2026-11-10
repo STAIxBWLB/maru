@@ -310,6 +310,15 @@ describe("semantic canvas pins a dropped member", () => {
     await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
     await settle();
 
+    // Exact deltas: snapping and smart guides would round the drop, and a
+    // tolerant assertion cannot tell one gesture offset from two.
+    act(() => {
+      probe!.setState((state) => ({
+        ...state,
+        ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: false, smartGuideOn: false } },
+      }));
+    });
+
     const dataset = doc.datasets![0] as SemanticSpecDataset;
     const draftId = dataset.idMap.draft!;
     const before = probe!.getState();
@@ -329,10 +338,9 @@ describe("semantic canvas pins a dropped member", () => {
 
     const after = probe!.getState();
     const pinned = after.doc.nodes.find((node) => node.id === draftId)!;
-    // Engine box (200,300) plus the snapped drag delta, in emitted canvas space.
+    // Engine box (200,300) plus the drag delta exactly, in emitted canvas space.
     expect(pinned.meta?.pinned).toBe(true);
-    expect(pinned.x).toBeGreaterThan(200);
-    expect(pinned.y).toBeGreaterThan(300);
+    expect([pinned.x, pinned.y]).toEqual([200 + 60, 300 + 45]);
     expect(after.ephemeral.history.past).toHaveLength(1);
     // The pin is what the engine is asked to place next.
     await vi.waitFor(() => {
@@ -367,6 +375,12 @@ describe("semantic canvas pins a dropped member", () => {
     const dataset = doc.datasets![0] as SemanticSpecDataset;
     const draftId = dataset.idMap.draft!;
     const before = probe!.getState().doc.nodes.find((node) => node.id === draftId)!;
+    act(() => {
+      probe!.setState((state) => ({
+        ...state,
+        ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: false, smartGuideOn: false } },
+      }));
+    });
 
     const surface = document.body.querySelector(".maru-diagram-canvas")!;
     await act(async () => {
@@ -383,9 +397,10 @@ describe("semantic canvas pins a dropped member", () => {
     const pinned = probe!.getState().doc.nodes.find((node) => node.id === draftId)!;
     // Without a scene there is no engine box to read, but the drop still
     // authors a pin instead of an unpinned doc move the layout would erase.
+    // The base is the doc position, and the painted node already carries the
+    // gesture offset, so adding it again would store twice the drag.
     expect(pinned.meta?.pinned).toBe(true);
-    expect(pinned.x).toBeGreaterThan(before.x);
-    expect(pinned.y).toBeGreaterThan(before.y);
+    expect([pinned.x, pinned.y]).toEqual([before.x + 60, before.y + 45]);
     // The pinned doc position is what the canvas paints while no box hides it,
     // so a gesture offset on top of it would double the move.
     expect(nodeGroup(draftId).getAttribute("transform")).toBe(`translate(${pinned.x},${pinned.y})`);

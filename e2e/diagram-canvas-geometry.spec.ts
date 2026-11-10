@@ -93,6 +93,50 @@ interface CanvasProof {
   routes: number;
 }
 
+/**
+ * The member whose doc slot and engine box disagree most, in spec order: the
+ * slab the canvas must not act on, and the box it must. Without a member the
+ * engine placed away from its slot, comparing the two proves nothing.
+ */
+async function widestSlotGap(
+  page: Page,
+  type: EngineDiagramType,
+  spec: Record<string, unknown>,
+): Promise<{ sourceId: string; gap: number }> {
+  return page.evaluate(async (input) => {
+    // Runtime specifiers: the browser resolves them against the dev server.
+    const load = (specifier: string) => import(specifier);
+    const codec = (await load("/src/lib/diagram/archifyCodec.ts")) as {
+      archifySpecToDataset(diagramType: string, spec: Record<string, unknown>, opts?: { id?: string }): {
+        dataset: { id: string };
+      };
+    };
+    const semantic = (await load("/src/lib/diagram/semantic.ts")) as {
+      projectSemanticDocument(dataset: unknown): { nodes: Array<{ x: number; y: number; meta?: { memberId?: string } }> };
+    };
+    const dataset = codec.archifySpecToDataset(input.type, input.spec, { id: "ds-vacuity" }).dataset;
+    const slots = new Map<string, { x: number; y: number }>();
+    for (const node of semantic.projectSemanticDocument(dataset).nodes) {
+      if (node.meta?.memberId) slots.set(node.meta.memberId, { x: node.x, y: node.y });
+    }
+    const entries = (input.spec[input.field] ?? []) as Array<{ id?: string }>;
+    const surface = document.querySelector<SVGSVGElement>(".maru-diagram-canvas");
+    if (!surface) throw new Error("The diagram canvas is not mounted.");
+    let best = { sourceId: "", gap: 0 };
+    entries.forEach((entry, index) => {
+      const slot = slots.get(`${dataset.id}:m${index}`);
+      const sourceId = entry.id ?? "";
+      if (!slot || !sourceId) return;
+      const group = surface.querySelector(`[data-engine-source-id="${sourceId}"]`);
+      const box = (group?.getAttribute("data-engine-box") ?? "").split(" ").map(Number);
+      if (box.length !== 4) return;
+      const gap = Math.hypot(box[0]! - slot.x, box[1]! - slot.y);
+      if (gap > best.gap) best = { sourceId, gap };
+    });
+    return best;
+  }, { type, spec, field: ENTITY_FIELD[type] });
+}
+
 for (const type of TYPES) {
   test(`the canvas draws the ${type} export geometry`, async ({ page }) => {
     const spec = mixedSpec(type);
@@ -268,3 +312,91 @@ for (const type of TYPES) {
     });
   });
 }
+
+/**
+ * The chrome that acts on a member uses the same coordinates as the painting.
+ * Both cases below select a member the engine placed away from its slot, so a
+ * pass cannot come from the two happening to agree.
+ */
+test("the inline editor opens over the engine box, not the doc slot", async ({ page }) => {
+  const spec = mixedSpec("workflow");
+  await importSpec(page, "workflow", spec);
+  await showWholePage(page);
+  const target = await widestSlotGap(page, "workflow", spec);
+  // Non-vacuity: a slot that coincides with the box would make this probe mute.
+  expect(target.sourceId).not.toBe("");
+  expect(target.gap).toBeGreaterThan(20);
+
+  await page.locator(`[data-engine-source-id="${target.sourceId}"] [data-node-id]`).click();
+  await page.keyboard.press("F2");
+
+  const proof = await page.evaluate((sourceId) => {
+    const surface = document.querySelector<SVGSVGElement>(".maru-diagram-canvas");
+    if (!surface) throw new Error("The diagram canvas is not mounted.");
+    const group = surface.querySelector(`[data-engine-source-id="${sourceId}"]`);
+    const inner = group?.querySelector("[data-node-id]") as SVGGElement | null;
+    const ctm = inner?.getScreenCTM();
+    const box = (group?.getAttribute("data-engine-box") ?? "").split(" ").map(Number);
+    const editor = document.querySelector<HTMLTextAreaElement>("textarea.maru-diagram-inline-editor");
+    if (!group || !ctm || box.length !== 4) throw new Error(`Member ${sourceId} is not painted; F2 has nothing to sit on.`);
+    if (!editor) throw new Error("Pressing F2 did not open the inline editor.");
+    const rect = editor.getBoundingClientRect();
+    return {
+      box,
+      painted: { left: ctm.e, top: ctm.f, width: box[2]! * ctm.a, height: box[3]! * ctm.d },
+      editor: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+    };
+  }, target.sourceId);
+
+  const near = (actual: number, expected: number) => Math.abs(actual - expected) <= 1.5;
+  const report = JSON.stringify(proof);
+  expect(near(proof.editor.left, proof.painted.left), `editor left ${report}`).toBe(true);
+  expect(near(proof.editor.top, proof.painted.top), `editor top ${report}`).toBe(true);
+  // The overlay clamps a small box to a usable size; that clamp is the last word.
+  expect(near(proof.editor.width, Math.max(proof.painted.width, 40)), `editor width ${report}`).toBe(true);
+  expect(near(proof.editor.height, Math.max(proof.painted.height, 24)), `editor height ${report}`).toBe(true);
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("textarea.maru-diagram-inline-editor")).toHaveCount(0);
+  console.log(`CANVAS_CHROME ${JSON.stringify({ scope: "inline editor sits on the engine box, chromium only", ...proof })}`);
+});
+
+test("an arrow-key nudge moves the painted box and pins it", async ({ page }) => {
+  const spec = mixedSpec("workflow");
+  await importSpec(page, "workflow", spec);
+  await showWholePage(page);
+  const target = await widestSlotGap(page, "workflow", spec);
+  expect(target.sourceId).not.toBe("");
+
+  const painted = async () =>
+    page.evaluate((sourceId) => {
+      const group = document.querySelector(`.maru-diagram-canvas [data-engine-source-id="${sourceId}"]`);
+      const transform = group?.querySelector("[data-node-id]")?.getAttribute("transform") ?? "";
+      const match = /^translate\((-?[0-9.]+),(-?[0-9.]+)\)$/.exec(transform);
+      const box = (group?.getAttribute("data-engine-box") ?? "").split(" ").map(Number);
+      return { x: match ? Number(match[1]) : NaN, y: match ? Number(match[2]) : NaN, box, transform };
+    }, target.sourceId);
+
+  const before = await painted();
+  expect(Number.isFinite(before.x), `member ${target.sourceId} is not painted: ${before.transform}`).toBe(true);
+  // What the canvas laid out, so a later check can tell a pin from a new source.
+  const specSha = await page.locator(".maru-diagram-canvas").getAttribute("data-engine-spec-sha256");
+
+  await page.locator(`[data-engine-source-id="${target.sourceId}"] [data-node-id]`).click();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+
+  // The pin has to survive a layout round trip: the box moves by exactly the
+  // three nudges, not by nothing (a hidden doc edit) or by six (a double add).
+  await expect.poll(async () => (await painted()).x, { timeout: 15_000 }).toBeCloseTo(before.x + 3, 2);
+  const after = await painted();
+  expect(after.y, `box moved from ${before.transform} to ${after.transform}`).toBeCloseTo(before.y, 2);
+  // The source is untouched, so only an authored pin can have moved the box.
+  expect(after.box[0], `engine box ${JSON.stringify(before.box)} -> ${JSON.stringify(after.box)}`).toBeCloseTo(
+    before.box[0]! + 3,
+    2,
+  );
+  expect(await page.locator(".maru-diagram-canvas").getAttribute("data-engine-spec-sha256")).toBe(specSha);
+  console.log(`CANVAS_CHROME ${JSON.stringify({ scope: "arrow nudge pins the painted box, chromium only", target, before, after })}`);
+});

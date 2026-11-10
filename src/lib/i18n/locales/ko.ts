@@ -3493,6 +3493,8 @@ export const ko: Record<string, string> = {
   "diagram.properties.br": "모서리",
   "diagram.properties.bw": "선 두께",
   "diagram.properties.textAlign": "텍스트 정렬",
+  "diagram.properties.enginePosition": "엔진이 배치한 요소입니다. 캔버스에서 끌어 옮기면 그 자리에 고정됩니다.",
+  "diagram.properties.engineSize": "엔진이 계산한 상자입니다. 크기는 라벨에서 나옵니다.",
 
   "diagram.fw.light": "얇게",
   "diagram.fw.regular": "보통",

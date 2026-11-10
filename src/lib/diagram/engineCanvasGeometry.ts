@@ -15,11 +15,11 @@
  * history and saving never wait for the engine.
  */
 import type { Diagnostic, GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
-import { fixedToPixels, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
+import { fixedToPixels, isPinnableCanvasMember, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
 import { ENGINE_DIAGRAM_TYPES, type SemanticSpecDataset } from "./reportTypes";
-import { projectedRelationEdgeId } from "./semantic";
-import type { DiagramDoc, DiagramNode } from "./types";
+import { descriptorFor, projectedRelationEdgeId, specEntries } from "./semantic";
+import type { DiagramDoc, DiagramNode, NodeId } from "./types";
 
 export interface CanvasGeometryPoint {
   x: number;
@@ -119,6 +119,9 @@ const RELATION_ROUTE_PREFIX: Readonly<Record<string, string>> = {
   lifecycle: "transition",
 };
 
+/** Suffix the engine appends when an authored id already owns `<prefix>:<n>`. */
+const GENERATED_ROUTE_SUFFIX = ":generated";
+
 /**
  * The semantic dataset this canvas draws, or null. The five engine families
  * are drawn; Floorplan stays local-only and an ambiguous document (no
@@ -160,13 +163,28 @@ export function canvasGeometryOf(
   // The engine names a relation route `<role>:<index>` when the source relation
   // carries no id, while the projection mints `<datasetId>-e<index>` for it (a
   // legacy document). Without this mapping the route and its label miss the
-  // canvas edge and the canvas silently falls back to the legacy router.
+  // canvas edge and the canvas silently falls back to the legacy router. The
+  // name is only the engine's own when no authored relation claims it: the same
+  // shape is a legal authored id, and then the id-less route is the one the
+  // engine renamed `:generated`.
   const relationPrefix = RELATION_ROUTE_PREFIX[dataset.diagramType] ?? null;
+  const descriptor = descriptorFor(dataset);
+  const relations = descriptor ? specEntries(dataset.spec, descriptor.relations) : [];
+  const authoredRelations = new Set(
+    relations
+      .map((relation) => relation.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
+  );
   const relationCanvasId = (sourceId: string): string | null => {
     if (Object.hasOwn(dataset.idMap, sourceId)) return dataset.idMap[sourceId]!;
     if (!relationPrefix || !sourceId.startsWith(`${relationPrefix}:`)) return null;
-    const index = sourceId.slice(relationPrefix.length + 1);
+    if (authoredRelations.has(sourceId)) return null;
+    let index = sourceId.slice(relationPrefix.length + 1);
+    if (index.endsWith(GENERATED_ROUTE_SUFFIX)) index = index.slice(0, -GENERATED_ROUTE_SUFFIX.length);
     if (!/^(0|[1-9][0-9]*)$/.test(index)) return null;
+    const relation = relations[Number(index)];
+    const idLess = relation !== undefined && (typeof relation.id !== "string" || relation.id.length === 0);
+    if (!idLess) return null;
     const projected = projectedRelationEdgeId(dataset.id, Number(index));
     return doc.edges.some((edge) => edge.id === projected) ? projected : null;
   };
@@ -283,6 +301,31 @@ export function canvasDisplayNode(
   if (!box) return dx !== 0 || dy !== 0 ? { ...node, x: node.x + dx, y: node.y + dy } : node;
   if (node.x === box.x + dx && node.y === box.y + dy && node.w === box.w && node.h === box.h) return node;
   return { ...node, x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
+}
+
+/**
+ * The pins a keyboard nudge of `ids` authors: a member the engine draws is
+ * moved by pinning the box the canvas shows it at, exactly as a drop does,
+ * because its doc position is a slot the next layout overwrites. Members the
+ * canvas places itself return nothing and keep the live doc move.
+ */
+export function canvasNudgePins(
+  doc: DiagramDoc,
+  datasetId: string | null,
+  geometry: CanvasGeometry | null,
+  ids: Iterable<NodeId>,
+  dx: number,
+  dy: number,
+): Array<{ id: NodeId; x: number; y: number }> {
+  if (datasetId === null) return [];
+  const pins: Array<{ id: NodeId; x: number; y: number }> = [];
+  for (const id of ids) {
+    const node = doc.nodes.find((candidate) => candidate.id === id);
+    if (!node || !isPinnableCanvasMember(doc, datasetId, node)) continue;
+    const box = geometry?.boxes.get(id) ?? null;
+    pins.push({ id, x: (box?.x ?? node.x) + dx, y: (box?.y ?? node.y) + dy });
+  }
+  return pins;
 }
 
 /** One engine label in the labelled node's own coordinate space. */
@@ -428,12 +471,15 @@ async function runLayout(
       entry.offset = { specJson, value: report.geometry.page.contentOffset };
     }
     const geometry = canvasGeometryOf(report, doc, dataset);
+    // A retained scene keeps the hash it was emitted for: the refused request's
+    // bytes drew none of what is on screen.
+    const retained = geometry === null && entry.state.geometry !== null;
     publish(entry, {
       datasetId: dataset.id,
       status: geometry ? "ready" : entry.state.geometry ? "stale" : "refused",
       geometry: geometry ?? entry.state.geometry,
       diagnostics: report.diagnostics,
-      sourceSpecSha256: request.pinSet?.sourceSpecSha256 ?? null,
+      sourceSpecSha256: retained ? entry.state.sourceSpecSha256 : (request.pinSet?.sourceSpecSha256 ?? null),
     });
   } catch (error) {
     // A refused or unreadable layout must never block the canvas: keep the last

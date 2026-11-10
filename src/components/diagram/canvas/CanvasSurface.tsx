@@ -749,7 +749,10 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         const placed: Array<{ id: NodeId; x: number; y: number }> = [];
         if (moved && datasetId) {
           for (const id of gesture.engineIds) {
-            const node = nodeById.get(id);
+            // The doc node is the base, never the painted one: a painted node
+            // already carries the live gesture offset, and the drop adds it
+            // again (maru#552).
+            const node = nodes.find((candidate) => candidate.id === id);
             if (!node || !isPinnableCanvasMember(doc, datasetId, node)) continue;
             // Without a scene yet (first paint, first-run refusal) the doc's own
             // position stands in for the engine box the drag moved away from.
@@ -793,7 +796,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       }
       gestureRef.current = null;
     },
-    [datasetId, displayNodes, doc, geometry, nodeById, store],
+    [datasetId, displayNodes, doc, geometry, nodes, store],
   );
 
   const onWheel = useCallback(

@@ -12,6 +12,7 @@ import {
   canvasDisplayNode,
   canvasGeometryDatasetId,
   canvasGeometryOf,
+  canvasNudgePins,
   canvasGeometryState,
   routePathOf,
   syncCanvasGeometry,
@@ -21,7 +22,7 @@ import {
 import { canonicalSemanticExportInput } from "./export";
 import type { EngineDiagramType, SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDocument } from "./semantic";
-import { createEmptyDoc, type DiagramDoc } from "./types";
+import { createEmptyDoc, type DiagramDoc, type DiagramNode } from "./types";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 
 const TYPES: EngineDiagramType[] = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"];
@@ -319,6 +320,78 @@ describe("canvas geometry source agreement with the export path", () => {
     expect(geometry.routes.get("edge:7")).toMatchObject({ sourceId: "edge:7" });
   });
 
+  it("never lets an authored id take the route the engine generated", () => {
+    // `<role>:<index>` is also a legal authored id. When one takes the name, the
+    // engine renames the id-less relation's route `<role>:<index>:generated`,
+    // and only that route belongs to the projection's edge.
+    const base = archifySpecToDataset("workflow", {
+      schema_version: 2,
+      diagram_type: "workflow",
+      meta: { title: "Collision", output: "collision.html", locale: "en" },
+      lanes: [{ id: "main", label: "Main" }],
+      nodes: [
+        { id: "a", lane: "main", col: 0, type: "frontend", label: "A" },
+        { id: "b", lane: "main", col: 1, type: "backend", label: "B" },
+        { id: "c", lane: "main", col: 2, type: "backend", label: "C" },
+      ],
+      edges: [
+        { id: "first", from: "a", to: "b" },
+        { id: "edge:0", from: "b", to: "c" },
+      ],
+    }, { id: "ds-collide" }).dataset;
+    const spec = structuredClone(base.spec);
+    delete (spec.edges as Array<Record<string, unknown>>)[0]!.id;
+    const legacy: SemanticSpecDataset = { ...base, spec, idMap: {} };
+    const doc = projectSemanticDocument(legacy).doc;
+    expect(doc.edges.map((edge) => edge.id)).toEqual(["ds-collide-e0", "edge:0"]);
+
+    const font = { id: "maru-ui", revision: "1", fontSha256: "f".repeat(64), weight: 400, unitsPerEm: 1000, license: "OFL-1.1" };
+    const report: GeometryReport = {
+      apiVersion: 1,
+      ok: true,
+      geometry: {
+        nodes: [],
+        containers: [],
+        routes: [
+          { id: "edge:0:generated", from: "a", to: "b", points: [{ x: 64 * 10, y: 64 * 20 }], variant: null, role: null, width: null },
+          { id: "edge:0", from: "b", to: "c", points: [{ x: 64 * 30, y: 64 * 40 }], variant: null, role: null, width: null },
+        ],
+        labels: [
+          {
+            id: "edge:edge:0:generated:label",
+            targetId: "edge:0:generated",
+            text: "first",
+            bounds: { x: 64 * 10, y: 64 * 20, width: 64 * 40, height: 64 * 14 },
+            font,
+            fontSize: 10 * 64,
+            glyphs: [],
+          },
+          {
+            id: "edge:edge:0:label",
+            targetId: "edge:0",
+            text: "second",
+            bounds: { x: 64 * 30, y: 64 * 40, width: 64 * 40, height: 64 * 14 },
+            font,
+            fontSize: 10 * 64,
+            glyphs: [],
+          },
+        ],
+        legend: { bounds: { x: 0, y: 0, width: 0, height: 0 }, entries: [] },
+        page: { bounds: { x: 0, y: 0, width: 64 * 100, height: 64 * 100 } },
+      },
+      diagnostics: [],
+      receipt: receipt(),
+    };
+    const geometry = canvasGeometryOf(report, doc, legacy)!;
+    // Each route reaches the edge it was emitted for: the generated one the
+    // projected edge, the authored one the edge that carries that name.
+    expect(geometry.routes.get("ds-collide-e0")).toMatchObject({ sourceId: "edge:0:generated" });
+    expect(geometry.routes.get("edge:0")).toMatchObject({ sourceId: "edge:0" });
+    expect(geometry.routes.has("edge:0:generated")).toBe(false);
+    expect(geometry.labels.get("ds-collide-e0")?.[0]?.lines).toEqual(["first"]);
+    expect(geometry.labels.get("edge:0")?.[0]?.lines).toEqual(["second"]);
+  });
+
   it("treats a refused report as no scene at all", () => {
     const { doc, dataset } = docFor("workflow");
     const report: GeometryReport = {
@@ -398,6 +471,9 @@ describe("canvas geometry store", () => {
     expect(refused.status).toBe("stale");
     expect(refused.geometry).toBe(good.geometry);
     expect(refused.diagnostics[0]!.code).toBe("test.labelTooWide");
+    // The retained scene keeps the hash it was emitted for: the refused bytes
+    // drew nothing on screen.
+    expect(refused.sourceSpecSha256).toBe(good.sourceSpecSha256);
   });
 
   it("starts on source positions when the first layout is refused or unavailable", async () => {
@@ -509,5 +585,36 @@ describe("which canvases draw engine geometry", () => {
     const free = { ...member, id: "free-note", x: 900, y: 900 };
     expect(canvasDisplayNode(free, geometry)).toBe(free);
     expect(canvasDisplayNode(free, null, { ids: new Set(["free-note"]), dx: 10, dy: 10 })).toMatchObject({ x: 910, y: 910 });
+  });
+});
+
+describe("a keyboard nudge writes what the canvas shows", () => {
+  function scene(member: DiagramNode): CanvasGeometry {
+    return {
+      boxes: new Map([[member.id, { id: member.id, sourceId: "draft", role: "node", x: 200, y: 300, w: 180, h: 72 }]]),
+      labels: new Map(),
+      routes: new Map(),
+      pageLabels: [],
+      page: null,
+      diagnostics: [],
+    };
+  }
+
+  it("pins an engine member at its box and leaves the rest to the doc", () => {
+    const { doc, dataset } = docFor("workflow");
+    const member = doc.nodes.find((node) => node.meta?.memberId === `${dataset.id}:m0`)!;
+    const free: DiagramNode = { id: "free-note", kind: "simple", x: 10, y: 20, w: 40, h: 20 };
+    const withFree = { ...doc, nodes: [...doc.nodes, free] };
+    const geometry = scene(member);
+
+    expect(canvasNudgePins(withFree, dataset.id, geometry, [member.id, free.id], 5, -4)).toEqual([
+      { id: member.id, x: 205, y: 296 },
+    ]);
+    // Before the first scene arrives the doc position stands in for the box.
+    expect(canvasNudgePins(withFree, dataset.id, null, [member.id], 5, -4)).toEqual([
+      { id: member.id, x: member.x + 5, y: member.y - 4 },
+    ]);
+    // Another dataset's canvas pins nothing here.
+    expect(canvasNudgePins(withFree, "ds-elsewhere", geometry, [member.id], 5, -4)).toEqual([]);
   });
 });

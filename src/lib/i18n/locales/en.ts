@@ -3498,6 +3498,8 @@ export const en: Record<string, string> = {
   "diagram.properties.br": "Radius",
   "diagram.properties.bw": "Stroke width",
   "diagram.properties.textAlign": "Align",
+  "diagram.properties.enginePosition": "The engine places this member. Drag it on the canvas to pin it where you drop it.",
+  "diagram.properties.engineSize": "The engine sizes this box from its label.",
 
   "diagram.fw.light": "Light",
   "diagram.fw.regular": "Regular",

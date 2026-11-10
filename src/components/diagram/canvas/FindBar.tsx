@@ -13,6 +13,7 @@ import {
   type FindMatch,
 } from "../../../lib/diagram/findReplace";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
+import { useCanvasDisplay } from "./useCanvasGeometry";
 import { useTranslation } from "../../../lib/i18n";
 
 export interface FindBarProps {
@@ -25,6 +26,7 @@ export function FindBar({ open, onClose }: FindBarProps) {
   const store = useDiagramStore();
   const doc = useDiagram((s) => s.doc);
   const viewport = useDiagram((s) => s.ephemeral.viewport);
+  const canvasDisplay = useCanvasDisplay(doc);
   const [query, setQuery] = useState("");
   const [replace, setReplace] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
@@ -46,7 +48,9 @@ export function FindBar({ open, onClose }: FindBarProps) {
   function jumpTo(match: FindMatch | undefined) {
     if (!match) return;
     if (match.kind === "node") {
-      const node = store.getState().doc.nodes.find((n) => n.id === match.id);
+      // The painted box: an engine member's doc position is a slot the canvas
+      // does not show, and centering on it misses the member.
+      const node = canvasDisplay.nodes.find((n) => n.id === match.id);
       if (!node) return;
       store.setState(setSelection([node.id]));
       // Center viewport on the node.
