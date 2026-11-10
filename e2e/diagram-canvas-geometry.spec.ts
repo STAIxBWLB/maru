@@ -112,11 +112,13 @@ async function widestSlotGap(
       };
     };
     const semantic = (await load("/src/lib/diagram/semantic.ts")) as {
-      projectSemanticDocument(dataset: unknown): { nodes: Array<{ x: number; y: number; meta?: { memberId?: string } }> };
+      projectSemanticDocument(dataset: unknown): {
+        doc: { nodes: Array<{ x: number; y: number; meta?: { memberId?: string } }> };
+      };
     };
     const dataset = codec.archifySpecToDataset(input.type, input.spec, { id: "ds-vacuity" }).dataset;
     const slots = new Map<string, { x: number; y: number }>();
-    for (const node of semantic.projectSemanticDocument(dataset).nodes) {
+    for (const node of semantic.projectSemanticDocument(dataset).doc.nodes) {
       if (node.meta?.memberId) slots.set(node.meta.memberId, { x: node.x, y: node.y });
     }
     const entries = (input.spec[input.field] ?? []) as Array<{ id?: string }>;
