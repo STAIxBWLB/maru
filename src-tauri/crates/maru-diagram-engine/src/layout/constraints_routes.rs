@@ -312,16 +312,6 @@ fn scene_analysis(points: &[Point]) -> (Vec<Point>, Vec<(usize, usize)>) {
         kept.windows(2).map(|s| (s[0].1, s[1].1)).collect(),
     )
 }
-fn fixed_node(g: &GeometryDocument, id: &str) -> bool {
-    g.nodes.iter().any(|node| {
-        node.id == id
-            && matches!(
-                node.position_source,
-                crate::geometry::GeometryPositionSource::PlannedPin
-                    | crate::geometry::GeometryPositionSource::AuthoredPosition
-            )
-    })
-}
 fn relations<'a>(
     spec: &'a Value,
     f: Family,
@@ -335,6 +325,26 @@ fn relations<'a>(
         .iter()
         .filter_map(|r| r.id.as_ref().map(|id| (id.as_str(), r)))
         .collect();
+    // Preserve first-match lookup semantics while sharing the indexes across
+    // every relation instead of scanning all scene nodes and labels each time.
+    let mut nodes = BTreeMap::new();
+    let mut labels = BTreeMap::new();
+    let mut fixed_nodes = BTreeSet::new();
+    for node in &g.nodes {
+        nodes.entry(node.id.as_str()).or_insert(node);
+        if matches!(
+            node.position_source,
+            crate::geometry::GeometryPositionSource::PlannedPin
+                | crate::geometry::GeometryPositionSource::AuthoredPosition
+        ) {
+            fixed_nodes.insert(node.id.as_str());
+        }
+    }
+    for label in &g.labels {
+        if let Some(id) = label.id.as_deref() {
+            labels.entry(id).or_insert(label);
+        }
+    }
     source
         .iter()
         .enumerate()
@@ -405,11 +415,9 @@ fn relations<'a>(
                 && text(raw, "route") == Some("drop")
                 && owned_channel_y.is_none()
             {
-                if let (Some(bias), Some(a), Some(b)) = (
-                    number(raw, "bias"),
-                    g.nodes.iter().find(|n| n.id == from),
-                    g.nodes.iter().find(|n| n.id == to),
-                ) {
+                if let (Some(bias), Some(a), Some(b)) =
+                    (number(raw, "bias"), nodes.get(from), nodes.get(to))
+                {
                     let width = number(raw, "width").and_then(q).unwrap_or(2 * U);
                     let clearance = (width / 2 + 2 * U).max(4 * U);
                     if let Ok(clearance) = i32::try_from(clearance) {
@@ -432,11 +440,11 @@ fn relations<'a>(
                 }
             }
             let label_id = format!("edge:{id}:label");
-            let label = g
-                .labels
-                .iter()
-                .find(|l| l.id.as_deref() == Some(label_id.as_str()))
-                .map(|l| rect(l.bounds));
+            let label = labels
+                .get(label_id.as_str())
+                .map(|label| rect(label.bounds));
+            let from_fixed = fixed_nodes.contains(from);
+            let to_fixed = fixed_nodes.contains(to);
             Relation {
                 index,
                 raw,
@@ -445,17 +453,15 @@ fn relations<'a>(
                 scene,
                 scene_raw,
                 scene_ranges,
-                from_fixed: fixed_node(g, from),
-                to_fixed: fixed_node(g, to),
-                from_anchor: g
-                    .nodes
-                    .iter()
-                    .find(|node| node.id == from && fixed_node(g, from))
+                from_fixed,
+                to_fixed,
+                from_anchor: nodes
+                    .get(from)
+                    .filter(|_| from_fixed)
                     .map(|node| (i64::from(node.bounds.x), i64::from(node.bounds.y))),
-                to_anchor: g
-                    .nodes
-                    .iter()
-                    .find(|node| node.id == to && fixed_node(g, to))
+                to_anchor: nodes
+                    .get(to)
+                    .filter(|_| to_fixed)
                     .map(|node| (i64::from(node.bounds.x), i64::from(node.bounds.y))),
                 via,
                 owned_channel_x,

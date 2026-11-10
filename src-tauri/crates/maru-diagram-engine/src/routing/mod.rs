@@ -784,11 +784,16 @@ mod tests {
             rect(0, 0, 0, 0),
         ])
         .unwrap();
-        for masked in [vec![], vec![0], vec![1, 3], vec![0, 1, 2, 3]] {
+        for (masked, preload) in [vec![], vec![0], vec![1, 3], vec![0, 1, 2, 3]]
+            .into_iter()
+            .flat_map(|masked| [false, true].map(|preload| (masked.clone(), preload)))
+        {
             let mut cache = ClearanceCache::default();
             let axis: Vec<_> = (-6..=8).collect();
-            cache.rows.preload(&axis, &obstacles, &masked, true);
-            cache.columns.preload(&axis, &obstacles, &masked, false);
+            if preload {
+                cache.rows.preload(&axis, &obstacles, &masked, true);
+                cache.columns.preload(&axis, &obstacles, &masked, false);
+            }
             for x in -6..=7 {
                 for y in -6..=8 {
                     let from = p(x, y);
@@ -805,6 +810,28 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_obstacle_cache_fallback_preserves_clearance() {
+        let obstacles = normalize(&[rect(-1, -1, 9000, 9000); 9]).unwrap();
+        let axis: Vec<_> = (0..MAX_AXIS_COORDINATES as Coord).collect();
+        let masked = [0, 1];
+        let mut cache = ClearanceCache::default();
+        cache.rows.preload(&axis, &obstacles, &masked, true);
+        cache.columns.preload(&axis, &obstacles, &masked, false);
+        for from in [p(-1, -1), p(0, 0), p(8191, 8191), p(8999, 8999)] {
+            assert_eq!(
+                cache.point_clear(from, &obstacles, &masked),
+                point_clear_except(from, &obstacles, &masked)
+            );
+            for to in [p(from.x, 9000), p(9000, from.y)] {
+                assert_eq!(
+                    cache.segment_clear(from, to, &obstacles, &masked),
+                    segment_clear_except(from, to, &obstacles, &masked)
+                );
             }
         }
     }
