@@ -324,7 +324,7 @@ test("generated WebAssembly rejects malformed components and lifecycle col 9 wit
     return (await loadWasmEngine()).validate(JSON.stringify(spec));
   }, malformed);
   expect(e1Report.ok).toBe(false);
-  expect(e1Report.diagnostics.some((diagnostic) => diagnostic.path === "/components/0/type")).toBe(true);
+  expect(e1Report.diagnostics.some((diagnostic: { path: string }) => diagnostic.path === "/components/0/type")).toBe(true);
 
   const componentRefusal = await runBrowserSdkEdit(
     page, "architecture", SEMANTIC_FIXTURES.architecture, "components", 0, "type", "invalid-component",
