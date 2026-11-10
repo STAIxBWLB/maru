@@ -66,6 +66,7 @@ describe("engine admission before semantic apply", () => {
     store.setState(undo());
     expect(store.getState().doc).toEqual(before);
 
+    const beforeDuplicate = store.getState().doc;
     const duplicateRefusal = await applyValidatedSemanticEdit(
       store,
       dataset.id,
@@ -75,7 +76,7 @@ describe("engine admission before semantic apply", () => {
     expect(duplicateRefusal.status).toBe("invalid");
     if (duplicateRefusal.status !== "invalid") throw new Error("Expected duplicate id refusal");
     expect(duplicateRefusal.diagnostics).toContainEqual(expect.objectContaining({ key: "diagram.semantic.duplicateId" }));
-    expect(store.getState().doc).toBe(before);
+    expect(store.getState().doc).toBe(beforeDuplicate);
     expect(store.getState().ephemeral.history.past).toHaveLength(0);
   });
 

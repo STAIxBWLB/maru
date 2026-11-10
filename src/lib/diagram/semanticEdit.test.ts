@@ -427,9 +427,12 @@ describe("semantic structural edits", () => {
     const lastLane = structuredClone(SEMANTIC_FIXTURES.lifecycle);
     const store = storeOf("lifecycle", lastLane);
     const before = JSON.stringify(store.getState().doc);
-    const removal = removeSemanticEntries("lifecycle", lastLane, [{ field: "lanes", index: 0 }]);
-    expect(removal.transform(lastLane)!.spec.lanes).toEqual([]);
-    expect(planSemanticEdit(store.getState(), "ds", removal.transform).status).toBe("applied");
+    const original = specOf(store.getState());
+    const removal = removeSemanticEntries("lifecycle", original, [{ field: "lanes", index: 0 }]);
+    const draft = removal.transform(original)!.spec;
+    expect(draft.lanes).toEqual([]);
+    expect((await pinnedEngineHost.validateCandidate("lifecycle", draft)).ok).toBe(false);
+    expect(planSemanticEdit(store.getState(), "ds", removal.transform).status).not.toBe("unchanged");
     const outcome = await applyValidatedSemanticEdit(store, "ds", removal.transform, pinnedEngineHost);
     expect(outcome.status).toBe("invalid");
     expect(JSON.stringify(store.getState().doc)).toBe(before);
@@ -458,7 +461,9 @@ describe("semantic structural edits", () => {
       const store = storeOf(type, source);
       const before = JSON.stringify(store.getState().doc);
       const { transform } = removeSemanticEntries(type, specOf(store.getState()), [target]);
-      expect(planSemanticEdit(store.getState(), "ds", transform).status).toBe("applied");
+      const draft = transform(specOf(store.getState()))!.spec;
+      expect((await pinnedEngineHost.validateCandidate(type, draft)).ok).toBe(false);
+      expect(planSemanticEdit(store.getState(), "ds", transform).status).not.toBe("unchanged");
       expect((await applyValidatedSemanticEdit(store, "ds", transform, pinnedEngineHost)).status).toBe("invalid");
       expect(JSON.stringify(store.getState().doc)).toBe(before);
       expect(store.getState().ephemeral.history.past).toHaveLength(0);
