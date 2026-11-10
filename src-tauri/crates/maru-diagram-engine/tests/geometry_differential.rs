@@ -246,6 +246,30 @@ fn only_recorded_cases_may_accept_beyond_the_reference_model() {
 }
 
 #[test]
+fn the_dense_workflow_seed_is_accepted_and_readable_after_auto_fit() {
+    // The densest workflow fixture in the E1 seed set is where auto-fit has the
+    // least room: 200 nodes, so a grown or shrunk label has neighbours on every
+    // side. It has to come out accepted, with its ink inside its nodes and every
+    // label at or above the readable floor - not merely without a refusal.
+    let dense: serde_json::Value =
+        serde_json::from_str(include_str!("../testdata/dense-scenes.json")).unwrap();
+    let id = "dense-workflow-seed-5502027";
+    let case = dense["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == id)
+        .unwrap_or_else(|| panic!("regenerate the E1 dense seed set to restore {id}"));
+    let spec = &case["spec"];
+    let report = layout_json(&serde_json::json!({"specJson": spec.to_string()}).to_string());
+    assert!(report.ok, "{id}: {:?}", report.diagnostics);
+    let geometry = report.geometry.as_ref().expect("an accepted scene keeps geometry");
+    assert_eq!(geometry.nodes.len(), 200, "{id}: every seeded node is placed");
+    painted_ink::assert_accepted_text_ink_fits(&report);
+    painted_ink::assert_readable_floors(&report, id);
+}
+
+#[test]
 fn lifecycle_v2_row_and_width_controls_remain_oracle_accepted() {
     let corpus: serde_json::Value =
         serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
