@@ -122,7 +122,7 @@ describe("existing semantic document persistence across v7-v9", () => {
 
   it.each([7, 8, 9])("loads and retains a v%d spec missing required collections and metadata", (version) => {
     const { raw, dataset } = existingDocument("architecture", version, false);
-    const spec = { ...dataset.spec, futureSpecField: { keep: true } };
+    const spec: Record<string, unknown> = { ...dataset.spec, futureSpecField: { keep: true } };
     delete spec.components;
     delete spec.meta;
     const missingSource = { ...dataset, spec };

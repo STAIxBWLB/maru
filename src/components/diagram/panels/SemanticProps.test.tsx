@@ -168,7 +168,7 @@ describe("SemanticProps", () => {
   it("shows SDK refusal for a retained selected projection whose required source collection is missing", async () => {
     const base = docOf("architecture");
     const dataset = base.datasets![0] as SemanticSpecDataset;
-    const brokenSpec = { ...dataset.spec, futureSpecField: { keep: "untouched" } };
+    const brokenSpec: Record<string, unknown> = { ...dataset.spec, futureSpecField: { keep: "untouched" } };
     delete brokenSpec.components;
     delete brokenSpec.meta;
     const retainedDoc = { ...base, datasets: [{ ...dataset, spec: brokenSpec }] };
