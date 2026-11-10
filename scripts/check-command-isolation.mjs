@@ -591,7 +591,7 @@ function pluginRegistrationScan(root = process.cwd()) {
   const scoped = capabilities.find((capability) => capability.identifier === "diagram-render");
   const pluginPermissions = expected.map((name) => `maru-diagram:allow-${name.replaceAll("_", "-")}`);
   insist(scoped && !Object.hasOwn(scoped, "windows") && JSON.stringify(scoped.webviews) === JSON.stringify(["main"])
-    && pluginPermissions.every((permission) => scoped.permissions.includes(permission)), "Diagram plugin commands must be granted to the main-only diagram-render capability");
+    && pluginPermissions.every((permission) => scoped.permissions.includes(permission)), "Diagram plugin commands must use the main-only capability (diagram-render, webviews=[main], no window-wide grants)");
   insist(capabilities.filter((capability) => capability.identifier !== "diagram-render")
     .every((capability) => !(capability.permissions ?? []).some((permission) => permission.startsWith("maru-diagram:allow-"))), "Diagram plugin permission escaped the main-only capability (Sites and other windows must remain denied)");
   return { base, registered, expected, sources };

@@ -125,7 +125,11 @@ export function archifySpecToDataset(
     diagnostics.push({ key: "diagram.archify.unsupportedField", params: { field: key, diagramType } });
   }
 
-  const ids = collectArchifyIds(diagramType, minted);
+  // IDs are unique within each semantic collection, but the engine permits
+  // the same raw id in separate namespaces (for example, a component and a
+  // connection). Build the reversible map once per raw id while retaining
+  // collision handling for distinct ids that sanitize to the same Archify id.
+  const ids = [...new Set(collectArchifyIds(diagramType, minted))];
   const idMap: Record<string, string> = {};
   const taken = new Set<string>();
   for (const id of ids) {

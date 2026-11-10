@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { pinnedEngineHost } from "./__fixtures__/engineHost";
 import {
   CURRENT_SPEC_PROMPT_MAX_BYTES,
   buildGenerationPrompt,
@@ -149,6 +150,24 @@ describe("createGenerationJob", () => {
 // ---------------------------------------------------------------------------
 
 describe("runGenerationJob", () => {
+  it("generates a semantic dataset when node and edge namespaces share a raw id", async () => {
+    const spec = structuredClone(SEMANTIC_FIXTURES.architecture);
+    const components = spec.components as Record<string, unknown>[];
+    components[0]!.id = "a";
+    components[1]!.id = "b";
+    spec.boundaries = [];
+    spec.connections = [{ id: "a", from: "a", to: "b", label: "Call" }];
+    const host = hostOf({
+      runAgent: async () => JSON.stringify(spec),
+      validateCandidate: pinnedEngineHost.validateCandidate,
+    });
+
+    const job = await runGenerationJob(jobOf(), host);
+    expect(job.state).toBe("ready");
+    expect(job.candidate?.spec).toEqual(spec);
+    expect(job.candidate?.idMap).toEqual({ a: "a", b: "b" });
+  });
+
   it("runs the full pipeline to ready and builds the proposal", async () => {
     const host = hostOf();
     const updates: string[] = [];

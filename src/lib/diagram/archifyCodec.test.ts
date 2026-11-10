@@ -58,6 +58,31 @@ describe("archifySpecToDataset", () => {
     expect(validateSemanticSpec(dataset).ok).toBe(true);
   });
 
+  it("maps a node and edge sharing a raw id once and preserves the SDK-valid spec on import", async () => {
+    const spec = structuredClone(SEMANTIC_FIXTURES.architecture);
+    const components = spec.components as Record<string, unknown>[];
+    components[0]!.id = "a";
+    components[1]!.id = "b";
+    spec.boundaries = [];
+    spec.connections = [{ id: "a", from: "a", to: "b", label: "Call" }];
+
+    const { dataset } = archifySpecToDataset("architecture", spec);
+    expect(dataset.spec).toEqual(spec);
+    expect(dataset.idMap).toEqual({ a: "a", b: "b" });
+    expect(validateSemanticSpec(dataset).ok).toBe(true);
+    expect((await pinnedEngineHost.validateCandidate("architecture", dataset.spec)).ok).toBe(true);
+
+    const imported = parseArchifySpec(JSON.stringify(spec));
+    if (!imported.ok) throw new Error(JSON.stringify(imported.diagnostics));
+    expect(imported.result.dataset.idMap).toEqual({ a: "a", b: "b" });
+    expect(imported.result.dataset.spec).toEqual(spec);
+    expect((await pinnedEngineHost.validateCandidate("architecture", imported.result.dataset.spec)).ok).toBe(true);
+
+    const sameCollectionDuplicate = structuredClone(spec);
+    (sameCollectionDuplicate.components as Record<string, unknown>[])[1]!.id = "a";
+    expect((await pinnedEngineHost.validateCandidate("architecture", sameCollectionDuplicate)).ok).toBe(false);
+  });
+
   it("accepts legacy Archify and current Maru engine identities on semantic datasets", () => {
     const legacy = archifySpecToDataset("architecture", ARCH_SPEC).dataset;
     const engine = {
