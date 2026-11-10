@@ -576,6 +576,37 @@ A 5-minute auto-snapshot ring (cap 20 per document) under
 `<workspace>/.maru/diagrams/history/<docId>/`, with Radix confirmation dialogs
 for replace/restore.
 
+## Canvas geometry
+
+A semantic canvas draws the engine scene rather than its own placement: node
+and container boxes, the label lines the engine wrapped, and its route points.
+`src/lib/diagram/engineCanvasGeometry.ts` maps one dataset's geometry report onto
+canvas ids and publishes it per dataset, and `useCanvasGeometry` reads it on the
+canvas side. The engine lays out exactly the bytes the export path sends, and the
+canvas carries their SHA-256 in `data-engine-spec-sha256`, so what is on screen
+and what is exported cannot disagree on placement.
+
+- Fixed-point coordinates become pixels once, at the render boundary (`value /
+  64` in `fixedToPixels`). Nothing re-measures text, and Korean label lines are
+  never sliced with backend offsets: the engine's own line breaks provide them.
+- A drag authors a pin, not a placement. Engine-drawn members move on the canvas
+  during the gesture and the drop records one pin entry (`pinSemanticNodes`), in
+  one undo step. A pin is an authored source position, so the adapter subtracts
+  `page.contentOffset`; the measured offset is reused per source spec, which
+  keeps a drop to one layout instead of a probe plus a layout.
+- A refused or unavailable layout keeps the last good scene (or the projected
+  source positions on first paint) and shows the engine's diagnostic and its fix
+  on the canvas. The same bytes are not requested again until the document
+  changes.
+- The five engine families (architecture, workflow, sequence, dataflow,
+  lifecycle) draw the engine scene when the document holds exactly one semantic
+  dataset. Floorplan stays local-only, and a document with no semantic dataset
+  or several keeps plain canvas placement.
+- Free-form documents, templates, pattern views and Mermaid imports keep their
+  own placement and routing helpers, including `edgeRouting.ts`. The old
+  `layoutDoc` reflow (`layout.ts`) is gone; the projection keeps only coarse
+  source slots as the fallback shown before an engine scene arrives.
+
 ## Performance
 
 Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache
