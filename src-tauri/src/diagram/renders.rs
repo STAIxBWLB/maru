@@ -1902,10 +1902,14 @@ mod tests {
         let render_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
         let render_dir = fixture.render_dir(render_id);
         fs::create_dir_all(&render_dir).unwrap();
-        let source_path = fixture.work.join(DIAGRAMS_ROOT).join("render-test.cmd.json");
+        let source_path = fixture
+            .work
+            .join(DIAGRAMS_ROOT)
+            .join("render-test.cmd.json");
         let source = fs::read(&source_path).unwrap();
         fs::write(render_dir.join(HTML_FILE), HTML).unwrap();
-        let pin: serde_json::Value = serde_json::from_str(include_str!("../../../sidecars/archify/PIN.json")).unwrap();
+        let pin: serde_json::Value =
+            serde_json::from_str(include_str!("../../../sidecars/archify/PIN.json")).unwrap();
         let receipt = serde_json::json!({
             "schemaVersion": 1,
             "docId": fixture.doc_id.clone(),
@@ -1924,8 +1928,16 @@ mod tests {
                 "visualReview": {"status": "not-run", "scope": "manual"}
             }
         });
-        fs::write(receipt_path(&render_dir), serde_json::to_vec_pretty(&receipt).unwrap()).unwrap();
-        fs::write(render_dir.join("neighbor.html"), b"not the receipt-verified artifact").unwrap();
+        fs::write(
+            receipt_path(&render_dir),
+            serde_json::to_vec_pretty(&receipt).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            render_dir.join("neighbor.html"),
+            b"not the receipt-verified artifact",
+        )
+        .unwrap();
 
         let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
         assert_eq!(groups.len(), 1);
@@ -1953,12 +1965,21 @@ mod tests {
         let serialized = serde_json::to_value(&view).unwrap();
         assert_eq!(serialized["mimeType"], "text/html");
         assert_eq!(serialized["receipt"]["enginePin"]["name"], "archify");
-        assert_eq!(serialized["receipt"]["enginePin"]["revision"], receipt["enginePin"]["revision"]);
-        assert!(serialized["receipt"]["enginePin"].get("fileHashes").is_none());
+        assert_eq!(
+            serialized["receipt"]["enginePin"]["revision"],
+            receipt["enginePin"]["revision"]
+        );
+        assert!(serialized["receipt"]["enginePin"]
+            .get("fileHashes")
+            .is_none());
         assert!(view.path.ends_with(HTML_FILE));
         assert!(app.asset_protocol_scope().is_allowed(Path::new(&view.path)));
-        assert!(!app.asset_protocol_scope().is_allowed(receipt_path(&render_dir)));
-        assert!(!app.asset_protocol_scope().is_allowed(render_dir.join("neighbor.html")));
+        assert!(!app
+            .asset_protocol_scope()
+            .is_allowed(receipt_path(&render_dir)));
+        assert!(!app
+            .asset_protocol_scope()
+            .is_allowed(render_dir.join("neighbor.html")));
     }
 
     #[test]

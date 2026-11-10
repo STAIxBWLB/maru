@@ -383,7 +383,10 @@ mod tests {
         };
         assert_eq!(pin.engine_pin.name, "archify");
         assert_eq!(pin.engine_pin.version, "3.0.0");
-        assert_eq!(pin.engine_pin.revision, "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(
+            pin.engine_pin.revision,
+            "0123456789abcdef0123456789abcdef01234567"
+        );
         let serialized = serde_json::to_value(parsed).unwrap();
         assert_eq!(serialized["enginePin"]["name"], "archify");
         assert!(serialized["enginePin"].get("fileHashes").is_none());
