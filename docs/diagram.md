@@ -1214,22 +1214,42 @@ verdicts remain unchanged. The 2px workflow-column boundary and 8px/9px
 lifecycle rail case are not pursued as compatibility work. Archify comparisons
 remain reference evidence, not a merge or E4 admission gate.
 
-The authored-via work probe at source `964ade69` has 26 nodes,
-29 labels, 17 via points and 20 route segments. Endpoint masks are
-precomputed once per route: 53 candidate evaluations, below the `2*(N+L)`
-ceiling. The final collision scan remains in place and separately measures
-1,060 candidate evaluations, bounded by `segments*(N+L)`. Total via work is
-2,392. The existing 1,000-node fixture and its 3,355,500 work baseline remain
-unchanged. The [determinism receipt](performance/diagram-engine-e2-admission-determinism.json)
-records the source trees and current scene/SVG/work results.
+Endpoint masks are route-local: an authored via must lie inside the endpoint's
+clearance-inflated node or contained-label box. Only its incident routing legs
+receive that exemption. The final centerline scan allows the contiguous inside
+run connected to the authorized via, including entry and exit; other legs and
+outside re-entry retain the endpoint as an obstacle. Routing retains full label
+line boxes, including leading, as conservative obstacles; admission instead
+checks painted glyph ink.
+
+The source-green ink-refusal allowance is explicit, not open-ended: `public-01`
+(3.53125px), `gate-sequence-brand-absent` (2.8125px),
+`e2-boundary-sequence-brand-rail-7` (9.015625px), and
+`dense-workflow-seed-5502027` (100 named labels at 3.9375px to 4.390625px).
+The shared test pins case IDs, node/label/font witnesses and exact 1/64px excess;
+a new refusal or an unexpected overflowing node fails the guard.
+Repairs name sequence's `meta.column_fit`/`meta.viewBox`, architecture's `size`,
+and the other families' `width`/`height`; vertical failures report available height.
+
+The authored-via work probe at `241d65e6` has 27 nodes, 32 labels,
+17 vias and 22 segments. It forces A* on a masked leg: all 81 expansions
+are masked. The fixture uses nonpainting blank tag lines as a conservative
+routing obstacle while every painted glyph stays inside its node, retaining the
+showcase profile and its 16px interior rhythm. Mask construction evaluates
+57 candidates; final clearance evaluates 1,254. Total work is 2,788; the
+masked-expansion counter is a subset of A*, so it is not added twice. Every
+counter and total has a recorded baseline plus a 25% ceiling, like the unchanged
+1,000-node baseline of 3,355,500. The
+[determinism receipt](performance/diagram-engine-e2-admission-determinism.json)
+records tested source trees and current scene/SVG/work results.
 
 This merged-S2 verification compares 623 cases against main `010180e2`: native
 and WASM reports match byte for byte. There are 218 accepted cases, 405 with geometry
 (including accepted ones), 187 retained refusals and 218 pre-placement refusals.
-The receipt lists 55 changed report hashes and 7 changed SVG scenes. The SVG
-changes are the initial endpoint-mask/route-label corrections; actual text-fit
-and provenance diagnostics also change report hashes without moving SVG geometry.
-No workflow-column shift or lifecycle compatibility font adjustment is added.
+The receipt lists 53 changed report hashes and 5 changed SVG scenes, including
+the scoped endpoint/label-route corrections. Diagnostics can also change a
+report hash without moving SVG geometry. No workflow-column shift or lifecycle
+compatibility font adjustment is added.
 
 Route-quality findings distinguish the offending geometry's provenance.
 Explicit `via` points, channel coordinates, label-position controls, endpoint
