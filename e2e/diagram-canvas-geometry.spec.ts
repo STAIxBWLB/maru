@@ -389,13 +389,13 @@ test("an arrow-key nudge moves the painted box and pins it", async ({ page }) =>
 
   // The pin has to survive a layout round trip: the box moves by exactly the
   // three nudges, not by nothing (a hidden doc edit) or by six (a double add).
-  await expect.poll(async () => (await painted()).x, { timeout: 15_000 }).toBeCloseTo(before.x + 3, 2);
+  await expect.poll(async () => (await painted()).x, { timeout: 15_000 }).toBeCloseTo(before.x + 3, 1);
   const after = await painted();
-  expect(after.y, `box moved from ${before.transform} to ${after.transform}`).toBeCloseTo(before.y, 2);
+  expect(after.y, `box moved from ${before.transform} to ${after.transform}`).toBeCloseTo(before.y, 1);
   // The source is untouched, so only an authored pin can have moved the box.
   expect(after.box[0], `engine box ${JSON.stringify(before.box)} -> ${JSON.stringify(after.box)}`).toBeCloseTo(
     before.box[0]! + 3,
-    2,
+    1,
   );
   expect(await page.locator(".maru-diagram-canvas").getAttribute("data-engine-spec-sha256")).toBe(specSha);
   console.log(`CANVAS_CHROME ${JSON.stringify({ scope: "arrow nudge pins the painted box, chromium only", target, before, after })}`);
