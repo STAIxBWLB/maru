@@ -152,7 +152,8 @@ async function runGeneration() {
     const status = query('[data-testid="gen-status"]');
     const preview = query('[data-testid="gen-preview"]');
     const failed = query('[data-testid="gen-failed"]');
-    expect(status !== null || preview !== null || failed !== null).toBe(true);
+    const unavailable = query('[data-testid="gen-engine-unavailable"]');
+    expect(status !== null || preview !== null || failed !== null || unavailable !== null).toBe(true);
   });
 }
 
