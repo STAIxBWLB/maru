@@ -116,6 +116,19 @@ describe("PR change classification", () => {
 
   it("selects both geometry and native gates and the E0 build for every artifact adapter", () => {
     const paths = [
+      "src/lib/diagram/engine.ts",
+      "src/lib/diagram/engineArtifact.ts",
+      "src/lib/diagram/engineCandidate.ts",
+      "src/lib/diagram/enginePreflight.ts",
+      "src/lib/diagram/engineUnavailable.ts",
+      "src/lib/diagram/semanticApply.ts",
+      "src/lib/diagram/generation.ts",
+      "src/lib/diagram/generationHost.ts",
+      "src/lib/diagram/validation.ts",
+      "src/lib/diagram/semantic.ts",
+      "src/lib/diagram/codecs.ts",
+      "src/lib/diagram/reportInsert.ts",
+      "src/components/diagram/panels/SemanticProps.tsx",
       "src/lib/diagram/engineArtifactForTest.ts",
       "src/lib/diagram/engineSvg.ts",
       "src/lib/diagram/verifiedExport.ts",

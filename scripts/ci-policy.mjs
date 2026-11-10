@@ -4,6 +4,19 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 // This file is the sole trusted input in the decision and aggregate sparse checkouts.
 export const ENGINE_E3_ARTIFACT_PATHS = Object.freeze([
+  "src/lib/diagram/engine.ts",
+  "src/lib/diagram/engineArtifact.ts",
+  "src/lib/diagram/engineCandidate.ts",
+  "src/lib/diagram/enginePreflight.ts",
+  "src/lib/diagram/engineUnavailable.ts",
+  "src/lib/diagram/semanticApply.ts",
+  "src/lib/diagram/generation.ts",
+  "src/lib/diagram/generationHost.ts",
+  "src/lib/diagram/validation.ts",
+  "src/lib/diagram/semantic.ts",
+  "src/lib/diagram/codecs.ts",
+  "src/lib/diagram/reportInsert.ts",
+  "src/components/diagram/panels/SemanticProps.tsx",
   "src/lib/diagram/engineArtifactForTest.ts",
   "src/lib/diagram/engineSvg.ts",
   "src/lib/diagram/verifiedExport.ts",
