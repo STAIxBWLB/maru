@@ -38,16 +38,26 @@ fn prefix(chars: &[char], length: usize) -> String {
 ///
 /// Authored line breaks are kept and wrapped independently. A line that already
 /// fits is returned unchanged, so a source that needs no wrap keeps its exact
-/// bytes.
+/// bytes. When `allow_token_split` is false a single token wider than the box
+/// keeps its own line and overflows instead of being cut, which lets the caller
+/// try a bigger box or a smaller size before the word is broken.
 pub fn wrap_label_lines(
     text: &str,
     weight: u16,
     size: Coord,
     max_width: Coord,
+    allow_token_split: bool,
 ) -> Result<Vec<String>, Diagnostic> {
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
-        wrap_paragraph(paragraph, weight, size, i64::from(max_width), &mut lines)?;
+        wrap_paragraph(
+            paragraph,
+            weight,
+            size,
+            i64::from(max_width),
+            allow_token_split,
+            &mut lines,
+        )?;
     }
     Ok(lines)
 }
@@ -57,6 +67,7 @@ fn wrap_paragraph(
     weight: u16,
     size: Coord,
     max_width: i64,
+    allow_token_split: bool,
     lines: &mut Vec<String>,
 ) -> Result<(), Diagnostic> {
     let fits = |candidate: &str| -> Result<bool, Diagnostic> {
@@ -103,12 +114,17 @@ fn wrap_paragraph(
                 hangul_break = Some(length);
             }
         }
-        // A word earns its own line only when nothing else fits; a line that
-        // cannot hold a single scalar still emits one so wrapping terminates.
-        let consumed = space_break
+        // A word earns its own line only when nothing else fits. Cutting a word
+        // is the caller's last resort, so without permission the whole token
+        // overflows on its own line and a caller can still grow or shrink.
+        let fitting = space_break
             .or(hangul_break)
-            .filter(|break_at| *break_at > 0)
-            .unwrap_or(filled.max(1));
+            .filter(|break_at| *break_at > 0);
+        let consumed = match (fitting, allow_token_split) {
+            (Some(break_at), _) => break_at,
+            (None, true) => filled.max(1),
+            (None, false) => next_token_boundary(&chars).unwrap_or(chars.len()),
+        };
         lines.push(prefix(&chars, consumed));
         emitted = true;
         rest = &rest[rest
@@ -116,6 +132,13 @@ fn wrap_paragraph(
             .nth(consumed)
             .map_or(rest.len(), |(offset, _)| offset)..];
     }
+}
+
+/// The first place after the first scalar where a new token could start.
+fn next_token_boundary(chars: &[char]) -> Option<usize> {
+    (1..chars.len()).find(|&index| {
+        chars[index - 1] == ' ' || (is_hangul(chars[index - 1]) && is_hangul(chars[index]))
+    })
 }
 
 #[cfg(test)]
@@ -126,7 +149,36 @@ mod tests {
     const BODY: u16 = 400;
 
     fn wrap(text: &str, width: i32) -> Vec<String> {
-        wrap_label_lines(text, BODY, LABEL, width * 64).expect("wrapping measures the pinned face")
+        wrap_label_lines(text, BODY, LABEL, width * 64, true)
+            .expect("wrapping measures the pinned face")
+    }
+
+    fn wrap_keeping_words(text: &str, width: i32) -> Vec<String> {
+        wrap_label_lines(text, BODY, LABEL, width * 64, false)
+            .expect("wrapping measures the pinned face")
+    }
+
+    #[test]
+    fn a_token_wider_than_the_box_keeps_its_line_until_the_caller_allows_a_cut() {
+        let kept = wrap_keeping_words("WWWWWWWWWWWW", 70);
+        assert_eq!(kept, vec!["WWWWWWWWWWWW"], "a whole word on its own line");
+        assert!(
+            painted_width(&kept[0], BODY, LABEL).expect("pinned face") > 70 * 64,
+            "the line still overflows, so the caller can grow or shrink first"
+        );
+        let cut = wrap("WWWWWWWWWWWW", 70);
+        assert!(cut.len() > 1, "the last resort splits the word: {cut:?}");
+        assert_eq!(cut.concat(), "WWWWWWWWWWWW");
+    }
+
+    #[test]
+    fn keeping_words_still_uses_every_space_and_hangul_break() {
+        let spaced = wrap_keeping_words("alpha beta gamma delta", 70);
+        assert!(spaced.len() > 1);
+        assert_eq!(spaced.join(" "), "alpha beta gamma delta");
+        let hangul = wrap_keeping_words("주문처리완료알림", 40);
+        assert!(hangul.len() > 1);
+        assert_eq!(hangul.concat(), "주문처리완료알림");
     }
 
     #[test]

@@ -492,9 +492,10 @@ impl SceneBuilder {
     /// default size; growth stops at the caller's slot ceiling and leaves the
     /// width alone, because wrapping - not a wider box - is what makes a line
     /// fit. Then each step wraps at its own size and keeps the first step whose
-    /// painted ink stays inside the node, down to the readable floor. When no
-    /// step fits, the readable default is placed so the admission check refuses
-    /// with the geometry Maru would actually draw.
+    /// painted ink stays inside the node, down to the readable floor. Cutting a
+    /// word runs last, after a whole word has failed at every box and size, and
+    /// the readable default is placed when nothing fits at all, so the admission
+    /// check refuses the geometry Maru would actually draw.
     fn place_node_labels(
         &mut self,
         id: &str,
@@ -506,36 +507,53 @@ impl SceneBuilder {
     ) -> Result<GeometryBox, Diagnostic> {
         let label_mark = self.document.labels.len();
         let diagnostic_mark = self.diagnostics.len();
-        let mut bounds = bounds;
-        self.place_node_labels_at(id, label, detail, tag, bounds, NODE_LABEL_STEPS[0])?;
-        let (overflow_x, overflow_y) = self.placed_node_label_overflow(id, bounds);
-        self.document.labels.truncate(label_mark);
-        self.diagnostics.truncate(diagnostic_mark);
-        if overflow_y > 0 {
-            // The wrapped lines are fixed once the width is, so one growth step
-            // absorbs the whole overflow; only the ceiling can limit it.
-            let grown = i64::from(bounds.height) + overflow_y;
-            let ceiling = grow_height_to.map_or(i64::from(bounds.height), i64::from);
-            let grown = grown.min(ceiling.max(i64::from(bounds.height)));
-            bounds.height = Coord::try_from(grown).map_err(|error| {
-                failure(
-                    "coordinate",
-                    error.to_string(),
-                    "use a smaller node box or shorter label text",
-                )
-            })?;
-            bounds.bottom().map_err(arithmetic)?;
-        }
-        let _ = overflow_x;
-        for &sizes in NODE_LABEL_STEPS.iter() {
-            self.place_node_labels_at(id, label, detail, tag, bounds, sizes)?;
-            if self.placed_node_labels_fit(id, bounds) {
-                return Ok(bounds);
-            }
+        for &allow_token_split in &[false, true] {
+            let mut candidate = bounds;
+            self.place_node_labels_at(
+                id,
+                label,
+                detail,
+                tag,
+                candidate,
+                NODE_LABEL_STEPS[0],
+                allow_token_split,
+            )?;
+            let (_, overflow_y) = self.placed_node_label_overflow(id, candidate);
             self.document.labels.truncate(label_mark);
             self.diagnostics.truncate(diagnostic_mark);
+            if overflow_y > 0 {
+                // The wrapped lines are fixed once the width is, so one growth
+                // step absorbs the whole overflow; only the ceiling limits it.
+                let grown = i64::from(candidate.height) + overflow_y;
+                let ceiling = grow_height_to.map_or(i64::from(candidate.height), i64::from);
+                let grown = grown.min(ceiling.max(i64::from(candidate.height)));
+                candidate.height = Coord::try_from(grown).map_err(|error| {
+                    failure(
+                        "coordinate",
+                        error.to_string(),
+                        "use a smaller node box or shorter label text",
+                    )
+                })?;
+                candidate.bottom().map_err(arithmetic)?;
+            }
+            for &sizes in NODE_LABEL_STEPS.iter() {
+                self.place_node_labels_at(
+                    id,
+                    label,
+                    detail,
+                    tag,
+                    candidate,
+                    sizes,
+                    allow_token_split,
+                )?;
+                if self.placed_node_labels_fit(id, candidate) {
+                    return Ok(candidate);
+                }
+                self.document.labels.truncate(label_mark);
+                self.diagnostics.truncate(diagnostic_mark);
+            }
         }
-        self.place_node_labels_at(id, label, detail, tag, bounds, NODE_LABEL_STEPS[0])?;
+        self.place_node_labels_at(id, label, detail, tag, bounds, NODE_LABEL_STEPS[0], false)?;
         Ok(bounds)
     }
     fn place_node_labels_at(
@@ -546,11 +564,13 @@ impl SceneBuilder {
         tag: Option<&str>,
         bounds: GeometryBox,
         sizes: NodeLabelSizes,
+        allow_token_split: bool,
     ) -> Result<(), Diagnostic> {
         let available = bounds.width - NODE_TEXT_INSET;
         let x = add(bounds.x, NODE_TEXT_INSET)?;
         let mut y = add(bounds.y, NODE_TOP_INSET)?;
-        let (wrapped, height) = self.wrap_node_text(label, 700, sizes.label, available)?;
+        let (wrapped, height) =
+            self.wrap_node_text(label, 700, sizes.label, available, allow_token_split)?;
         self.label(
             &format!("node:{id}:label"),
             id,
@@ -561,7 +581,8 @@ impl SceneBuilder {
         )?;
         y = add(y, height)?;
         if let Some(text) = detail {
-            let (wrapped, height) = self.wrap_node_text(text, 400, sizes.detail, available)?;
+            let (wrapped, height) =
+                self.wrap_node_text(text, 400, sizes.detail, available, allow_token_split)?;
             self.label(
                 &format!("node:{id}:sublabel"),
                 id,
@@ -573,7 +594,8 @@ impl SceneBuilder {
             y = add(y, height)?;
         }
         if let Some(text) = tag {
-            let (wrapped, _) = self.wrap_node_text(text, 400, sizes.tag, available)?;
+            let (wrapped, _) =
+                self.wrap_node_text(text, 400, sizes.tag, available, allow_token_split)?;
             self.label(
                 &format!("node:{id}:tag"),
                 id,
@@ -628,8 +650,9 @@ impl SceneBuilder {
         weight: u16,
         size: Coord,
         available: Coord,
+        allow_token_split: bool,
     ) -> Result<(String, Coord), Diagnostic> {
-        let lines = metrics::wrap_label_lines(text, weight, size, available)?;
+        let lines = metrics::wrap_label_lines(text, weight, size, available, allow_token_split)?;
         let wrapped = lines.join("\n");
         let (_, height) = self.text_size(&wrapped, weight, size)?;
         Ok((wrapped, height))
