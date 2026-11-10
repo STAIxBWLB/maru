@@ -29,6 +29,46 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Distance from a node's left edge to its text origin, which is also the span
+/// a wrapped node line may not paint past (T6 auto-fit).
+const NODE_TEXT_INSET: Coord = 12 * 64;
+/// Distance from a node's top edge to the first line's origin.
+const NODE_TOP_INSET: Coord = 8 * 64;
+
+/// The three node text roles at one auto-fit step.
+#[derive(Clone, Copy)]
+struct NodeLabelSizes {
+    label: Coord,
+    detail: Coord,
+    tag: Coord,
+}
+
+/// Whole-pixel steps the T6 auto-fit may shrink node text by. The floor is
+/// `--type-micro-size` (10px), the smallest type step Maru ships, so auto-fit
+/// never draws text smaller than the product already does.
+const NODE_LABEL_STEPS: [NodeLabelSizes; 4] = [
+    NodeLabelSizes {
+        label: 13 * 64,
+        detail: 11 * 64,
+        tag: 10 * 64,
+    },
+    NodeLabelSizes {
+        label: 12 * 64,
+        detail: 10 * 64,
+        tag: 10 * 64,
+    },
+    NodeLabelSizes {
+        label: 11 * 64,
+        detail: 10 * 64,
+        tag: 10 * 64,
+    },
+    NodeLabelSizes {
+        label: 10 * 64,
+        detail: 10 * 64,
+        tag: 10 * 64,
+    },
+];
+
 pub(crate) fn failure(rule: &str, cause: impl Into<String>, fix: &str) -> Diagnostic {
     Diagnostic {
         code: format!("document/{rule}"),
@@ -397,6 +437,7 @@ impl SceneBuilder {
         authored: Option<Point>,
         automatic: GeometryPoint,
         size: Option<Point>,
+        grow_height_to: Option<Coord>,
     ) -> Result<GeometryBox, Diagnostic> {
         let (tw, th) = self.text_size(label, 700, 13 * 64)?;
         let (dw, dh) = match detail {
@@ -420,6 +461,10 @@ impl SceneBuilder {
                 "use positive authored dimensions or remove the size override",
             ));
         }
+        // T6 auto-fit. The text origin sits one inset inside the node and the
+        // admission rule measures painted ink against the node's own edge, so a
+        // line wrapped to the same span is admissible by construction. A label
+        // that already fits is returned unchanged and keeps its exact bytes.
         let (position, source) = if let Some(pin) = self.pins.get(id) {
             (pin.position, GeometryPositionSource::PlannedPin)
         } else if let Some(p) = authored {
@@ -430,6 +475,7 @@ impl SceneBuilder {
         let bounds = rect(position.x, position.y, width, height)?;
         bounds.right().map_err(arithmetic)?;
         bounds.bottom().map_err(arithmetic)?;
+        let bounds = self.place_node_labels(id, label, detail, tag, bounds, grow_height_to)?;
         self.document.nodes.push(GeometryNode {
             final_state: None,
             phase_order: None,
@@ -438,39 +484,155 @@ impl SceneBuilder {
             position_source: source,
         });
         self.kinds.insert(id.into(), kind.into());
-        let x = add(position.x, 12 * 64)?;
-        let mut y = add(position.y, 8 * 64)?;
+        Ok(bounds)
+    }
+    /// Place the three node text roles under the T6 auto-fit ladder.
+    ///
+    /// The box grows down first, because a taller box keeps the readable
+    /// default size; growth stops at the caller's slot ceiling and leaves the
+    /// width alone, because wrapping - not a wider box - is what makes a line
+    /// fit. Then each step wraps at its own size and keeps the first step whose
+    /// painted ink stays inside the node, down to the readable floor. When no
+    /// step fits, the readable default is placed so the admission check refuses
+    /// with the geometry Maru would actually draw.
+    fn place_node_labels(
+        &mut self,
+        id: &str,
+        label: &str,
+        detail: Option<&str>,
+        tag: Option<&str>,
+        bounds: GeometryBox,
+        grow_height_to: Option<Coord>,
+    ) -> Result<GeometryBox, Diagnostic> {
+        let label_mark = self.document.labels.len();
+        let diagnostic_mark = self.diagnostics.len();
+        let mut bounds = bounds;
+        self.place_node_labels_at(id, label, detail, tag, bounds, NODE_LABEL_STEPS[0])?;
+        let (overflow_x, overflow_y) = self.placed_node_label_overflow(id, bounds);
+        self.document.labels.truncate(label_mark);
+        self.diagnostics.truncate(diagnostic_mark);
+        if overflow_y > 0 {
+            // The wrapped lines are fixed once the width is, so one growth step
+            // absorbs the whole overflow; only the ceiling can limit it.
+            let grown = i64::from(bounds.height) + overflow_y;
+            let ceiling = grow_height_to.map_or(i64::from(bounds.height), i64::from);
+            let grown = grown.min(ceiling.max(i64::from(bounds.height)));
+            bounds.height = Coord::try_from(grown).map_err(|error| {
+                failure(
+                    "coordinate",
+                    error.to_string(),
+                    "use a smaller node box or shorter label text",
+                )
+            })?;
+            bounds.bottom().map_err(arithmetic)?;
+        }
+        let _ = overflow_x;
+        for &sizes in NODE_LABEL_STEPS.iter() {
+            self.place_node_labels_at(id, label, detail, tag, bounds, sizes)?;
+            if self.placed_node_labels_fit(id, bounds) {
+                return Ok(bounds);
+            }
+            self.document.labels.truncate(label_mark);
+            self.diagnostics.truncate(diagnostic_mark);
+        }
+        self.place_node_labels_at(id, label, detail, tag, bounds, NODE_LABEL_STEPS[0])?;
+        Ok(bounds)
+    }
+    fn place_node_labels_at(
+        &mut self,
+        id: &str,
+        label: &str,
+        detail: Option<&str>,
+        tag: Option<&str>,
+        bounds: GeometryBox,
+        sizes: NodeLabelSizes,
+    ) -> Result<(), Diagnostic> {
+        let available = bounds.width - NODE_TEXT_INSET;
+        let x = add(bounds.x, NODE_TEXT_INSET)?;
+        let mut y = add(bounds.y, NODE_TOP_INSET)?;
+        let (wrapped, height) = self.wrap_node_text(label, 700, sizes.label, available)?;
         self.label(
             &format!("node:{id}:label"),
             id,
-            label,
+            &wrapped,
             GeometryPoint { x, y },
             700,
-            13 * 64,
+            sizes.label,
         )?;
-        y = add(y, th)?;
-        if let Some(detail) = detail {
+        y = add(y, height)?;
+        if let Some(text) = detail {
+            let (wrapped, height) = self.wrap_node_text(text, 400, sizes.detail, available)?;
             self.label(
                 &format!("node:{id}:sublabel"),
                 id,
-                detail,
+                &wrapped,
                 GeometryPoint { x, y },
                 400,
-                11 * 64,
+                sizes.detail,
             )?;
-            y = add(y, dh)?;
+            y = add(y, height)?;
         }
-        if let Some(tag) = tag {
+        if let Some(text) = tag {
+            let (wrapped, _) = self.wrap_node_text(text, 400, sizes.tag, available)?;
             self.label(
                 &format!("node:{id}:tag"),
                 id,
-                tag,
+                &wrapped,
                 GeometryPoint { x, y },
                 400,
-                10 * 64,
+                sizes.tag,
             )?;
         }
-        Ok(bounds)
+        Ok(())
+    }
+    /// How far this node's painted glyphs reach past its own bounds, which is
+    /// the span the admission check measures. Zero on both axes means the text
+    /// fits as drawn.
+    fn placed_node_label_overflow(&self, id: &str, bounds: GeometryBox) -> (i64, i64) {
+        let prefix = format!("node:{id}:");
+        let left = i64::from(bounds.x);
+        let top = i64::from(bounds.y);
+        let right = left + i64::from(bounds.width);
+        let bottom = top + i64::from(bounds.height);
+        let mut overflow_x = 0;
+        let mut overflow_y = 0;
+        for label in self.document.labels.iter().filter(|label| {
+            label
+                .id
+                .as_deref()
+                .is_some_and(|label_id| label_id.starts_with(&prefix))
+        }) {
+            for glyph in label
+                .glyphs
+                .iter()
+                .filter(|glyph| glyph.ink.width > 0 && glyph.ink.height > 0)
+            {
+                let glyph_left = i64::from(glyph.ink.x);
+                let glyph_top = i64::from(glyph.ink.y);
+                let glyph_right = glyph_left + i64::from(glyph.ink.width);
+                let glyph_bottom = glyph_top + i64::from(glyph.ink.height);
+                overflow_x = overflow_x.max(left - glyph_left).max(glyph_right - right);
+                overflow_y = overflow_y.max(top - glyph_top).max(glyph_bottom - bottom);
+            }
+        }
+        (overflow_x.max(0), overflow_y.max(0))
+    }
+    fn placed_node_labels_fit(&self, id: &str, bounds: GeometryBox) -> bool {
+        self.placed_node_label_overflow(id, bounds) == (0, 0)
+    }
+    /// Wrap one node text role into `available` and report the height of the
+    /// lines it produced, so the next role stacks below them.
+    fn wrap_node_text(
+        &self,
+        text: &str,
+        weight: u16,
+        size: Coord,
+        available: Coord,
+    ) -> Result<(String, Coord), Diagnostic> {
+        let lines = metrics::wrap_label_lines(text, weight, size, available)?;
+        let wrapped = lines.join("\n");
+        let (_, height) = self.text_size(&wrapped, weight, size)?;
+        Ok((wrapped, height))
     }
     pub(crate) fn add_container(
         &mut self,

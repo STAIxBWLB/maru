@@ -327,6 +327,8 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             None,
             auto,
             Some([width, height]),
+            // A taller state stops one 10px separation inside the next row.
+            Some(px(if version == 2 { 184.0 } else { 176.0 } - 10.0)?),
         );
         attach_state_semantics(scene, &state.id, &semantic_flags);
         placed?;

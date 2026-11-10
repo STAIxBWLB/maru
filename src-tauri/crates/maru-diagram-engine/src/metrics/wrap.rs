@@ -20,15 +20,12 @@ fn is_hangul(scalar: char) -> bool {
     )
 }
 
-/// Width a measured line paints, including a left bearing that reaches past the
-/// text origin, which is the same span the emission measures.
+/// Width a measured line paints. Only ink counts, so the bound is the span the
+/// emission's own admission check measures: a trailing space, or an advance
+/// past the last glyph's ink, never pushes a line into a break on its own.
 fn painted_width(text: &str, weight: u16, size: Coord) -> Result<i64, Diagnostic> {
     let metrics = measure_text(text, weight, size)?;
-    let right = metrics
-        .ink
-        .right()
-        .map_err(|_| overflow())?
-        .max(metrics.advance);
+    let right = metrics.ink.right().map_err(|_| overflow())?;
     let left = metrics.ink.x.min(0);
     Ok(i64::from(right) - i64::from(left))
 }

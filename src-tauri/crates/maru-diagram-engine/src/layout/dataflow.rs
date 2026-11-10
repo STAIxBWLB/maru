@@ -7,6 +7,8 @@ use crate::Diagnostic;
 
 const NODE_WIDTH: f64 = 112.0;
 const NODE_HEIGHT: f64 = 58.0;
+const ROW_TOP: f64 = 128.0;
+const ROW_STEP: f64 = 114.0;
 const STAGE_X: f64 = 100.0;
 const STAGE_STEP: f64 = 215.0;
 const STAGE_Y: f64 = 46.0;
@@ -33,7 +35,7 @@ fn node_position(
     // pixel boundary rejects a position that cannot be represented.
     point(
         STAGE_X + stage * STAGE_STEP - width / 2.0,
-        128.0 + row * 114.0 + offset,
+        ROW_TOP + row * ROW_STEP + offset,
     )
 }
 
@@ -76,6 +78,8 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
                 node_position(stage, width, node.row, node.y_offset.unwrap_or(0.0))?
             },
             Some([width, height]),
+            // A taller node stops one 10px separation inside the next row.
+            Some(px(ROW_STEP - 10.0)?),
         )?;
     }
     for (index, stage) in spec.stages.iter().enumerate() {

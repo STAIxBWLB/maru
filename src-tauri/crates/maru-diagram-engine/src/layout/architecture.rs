@@ -90,6 +90,8 @@ pub(crate) fn place(spec: &ArchitectureSpec, scene: &mut SceneBuilder) -> Result
             component.pos,
             auto,
             Some(component.size.unwrap_or([120.0, 60.0])),
+            // A taller node stops one 8px separation inside the next cell.
+            Some(px(cell_h + gap_y)? - 8 * 64),
         )?;
     }
 
