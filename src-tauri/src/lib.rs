@@ -802,6 +802,12 @@ mod quit_acl_tests {
         build_test_app_from(mock_builder().channel_interceptor(crate::channel_delivery::intercept))
     }
 
+    fn build_diagram_acl_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        build_test_app_with_diagram_plugin(
+            mock_builder().channel_interceptor(crate::channel_delivery::intercept),
+        )
+    }
+
     #[derive(Default)]
     struct PolicyDispatchCount(AtomicUsize);
 
@@ -811,6 +817,13 @@ mod quit_acl_tests {
 
     fn build_test_app_from(
         builder: tauri::Builder<tauri::test::MockRuntime>,
+    ) -> tauri::App<tauri::test::MockRuntime> {
+        build_test_app_with_diagram_plugin(builder, false)
+    }
+
+    fn build_test_app_with_diagram_plugin(
+        builder: tauri::Builder<tauri::test::MockRuntime>,
+        with_diagram_plugin: bool,
     ) -> tauri::App<tauri::test::MockRuntime> {
         builder
             .manage(PolicyDispatchCount::default())
@@ -824,8 +837,20 @@ mod quit_acl_tests {
                 invoke.resolver.resolve("first-party-dispatch");
                 true
             }))
+            .setup(move |app| {
+                if with_diagram_plugin {
+                    app.plugin(crate::diagram::engine_host::plugin(app.handle().clone()))?;
+                }
+                Ok(())
+            })
             .build(tauri::generate_context!())
             .expect("failed to build the app with this crate's real context/capabilities")
+    }
+
+    fn invoke_json_request(cmd: &str, body: serde_json::Value) -> InvokeRequest {
+        let mut request = invoke_request(cmd);
+        request.body = InvokeBody::Json(body);
+        request
     }
 
     fn isolated_channel_case() {
@@ -1193,6 +1218,82 @@ mod quit_acl_tests {
                 "{origin}: {refused}"
             );
             assert_eq!(policy_dispatch_count(&app), 0);
+        }
+    }
+
+    #[test]
+    fn diagram_plugin_commands_are_allowed_only_in_main_window() {
+        let app = build_diagram_acl_test_app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("main mock window builds with the real app capabilities");
+        let sites = WebviewWindowBuilder::new(&app, "sites", Default::default())
+            .build()
+            .expect("Sites mock window builds without diagram permissions");
+
+        let commands = [
+            ("validate", serde_json::json!({"input":"{}"})),
+            ("render_png", serde_json::json!({"input":"{}"})),
+            (
+                "diagram_list_renders",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__"}),
+            ),
+            (
+                "diagram_prepare_render_view",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__","docId":"doc","renderId":"00000000000000000000000000000000"}),
+            ),
+            (
+                "diagram_delete_render",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__","docId":"doc","renderId":"00000000000000000000000000000000"}),
+            ),
+            (
+                "render_and_store",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__","input":"{}","context":null}),
+            ),
+        ];
+        let mut main_handler_reached = Vec::new();
+        let mut sites_denied = Vec::new();
+
+        for (command, body) in commands {
+            let cmd = format!("plugin:maru-diagram|{command}");
+            let main_result = get_ipc_response(&main, invoke_json_request(&cmd, body.clone()));
+            if command == "validate" {
+                let report = main_result
+                    .expect("validate is allowed in main")
+                    .deserialize::<maru_diagram_engine::ValidationReport>()
+                    .expect("allowed validation returns its typed report");
+                assert_eq!(report.receipt.engine.id, "maru-diagram-engine");
+            } else {
+                let refusal = main_result.expect_err("malformed or missing workspace input reaches the main plugin handler");
+                assert!(refusal.is_object(), "main plugin handler returned ACL denial: {refusal}");
+                assert!(refusal.get("code").is_some(), "main plugin handler did not return its structured error: {refusal}");
+            }
+            main_handler_reached.push(command);
+
+            let refused = get_ipc_response(&sites, invoke_json_request(&cmd, body))
+                .expect_err("Sites window must not inherit the main-only diagram capability");
+            let message = refused.as_str().unwrap_or_default();
+            assert!(message.contains("not allowed"), "{command} reached the Sites plugin handler: {refused}");
+            assert!(message.contains("sites"), "ACL denial did not identify the Sites window: {refused}");
+            sites_denied.push(command);
+        }
+
+        let evidence = serde_json::json!({
+            "schemaVersion": 1,
+            "scope": "Tauri MockRuntime invocation with the app's compiled generate_context capabilities; not native WebView transport evidence",
+            "mainWindowLabel": "main",
+            "deniedWindowLabel": "sites",
+            "mainHandlerReached": main_handler_reached,
+            "sitesDeniedByAcl": sites_denied,
+        });
+        println!("DIAGRAM_PLUGIN_ACL_EVIDENCE {evidence}");
+        if let Ok(path) = std::env::var("MARU_PLUGIN_ACL_EVIDENCE") {
+            let path = std::path::PathBuf::from(path);
+            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent).expect("create requested ACL evidence directory");
+            }
+            std::fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap())
+                .expect("write generated app capability invocation evidence");
         }
     }
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { checkPluginEvidence, maskRust, parseArgs } from "./check-command-isolation.mjs";
+import { checkPluginEvidence, createCurrentRegistrationManifest, filterHistoricalRegistrations, maskRust, parseArgs } from "./check-command-isolation.mjs";
 
 const CHECKER = fileURLToPath(new URL("./check-command-isolation.mjs", import.meta.url));
 const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
@@ -272,8 +272,9 @@ test("Rust mask preserves offsets and ignores nested comments, raw strings and l
   const masked = maskRust(source); assert.equal(masked.length, source.length); assert.equal(masked.match(/\{/g).length, 1); assert.equal(masked.match(/\}/g).length, 1); assert.match(masked, /real<'a>/);
 });
 test("CLI rejects missing/mixed/unknown modes and invalid counts", () => {
-  for (const args of [[], ["--all", "--plan", "04"], ["--plan"], ["--plan", "29"], ["--integration", "07"], ["--all", "--expected-count", "0"], ["--wat"]]) assert.throws(() => parseArgs(args));
+  for (const args of [[], ["--all", "--plan", "04"], ["--plan"], ["--plan", "29"], ["--integration", "07"], ["--all", "--expected-count", "0"], ["--refresh-current-manifest", "--all"], ["--wat"]]) assert.throws(() => parseArgs(args));
   assert.deepEqual(parseArgs(["--plan", "4"]), { plan: "04", expectedCount: 365 });
+  assert.deepEqual(parseArgs(["--refresh-current-manifest"]), { expectedCount: 365, refreshCurrentManifest: true });
 });
 
 test("read-only evidence permits explicitly empty write sets", (t) => {
@@ -437,6 +438,7 @@ function pluginFixture(t) {
   const f = fixture(t);
   const base = "src-tauri/crates/tauri-plugin-maru-diagram";
   f.write(`${base}/Cargo.toml`, `[package]\nname = "tauri-plugin-maru-diagram"\nversion = "0.1.0"\n`);
+  f.write(`${base}/permissions/default.toml`, '[default]\npermissions = ["allow-validate"]\n');
   const source = `
 fn build() { tauri::generate_handler![commands::validate, commands::render_png]; }
 mod commands {
@@ -446,29 +448,77 @@ mod commands {
   pub async fn render_png() { tauri::async_runtime::spawn_blocking(|| ()).await; }
 }`;
   f.write(`${base}/src/lib.rs`, source);
-  f.write(`${base}/build.rs`, 'const COMMANDS: &[&str] = &["validate", "render_png"];');
+  f.write("src-tauri/Cargo.toml", '[dependencies]\ntauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ["png"] }');
+  f.write(`${base}/build.rs`, `fn main() {
+  let mut commands = vec!["validate"];
+  if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
+}`);
+  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", windows: ["main"], permissions: ["maru-diagram:allow-validate", "maru-diagram:allow-render-png"] });
+  f.write("src-tauri/capabilities/default.json", { identifier: "default", windows: ["main", "skill-editor"], permissions: [] });
+  f.write("docs/performance/diagram-engine-e3/plugin-acl-mock-ipc.json", {
+    schemaVersion: 1, scope: "synthetic compiled generate_context ACL scanner fixture",
+    mainWindowLabel: "main", deniedWindowLabel: "sites",
+    mainHandlerReached: ["validate", "render_png"], sitesDeniedByAcl: ["validate", "render_png"],
+  });
   const evidence = {
     schemaVersion: 1, scope: "synthetic MockRuntime scanner unit fixture",
     pluginCommandCount: 2, pluginCommandsObserved: ["validate", "render_png"],
     differentWorkerThread: true, singleInFlight: true,
     cases: ["typical", "1000"].map((name) => ({ name, requestBytes: 1, responseBytes: 1, pngSha256: "a".repeat(64), roundTripMs: [1] })),
   };
-  const saveEvidence = () => f.write("docs/performance/diagram-engine-e3/png-mock-ipc-transport.json", evidence);
+  const saveEvidence = () => {
+    f.write("docs/performance/diagram-engine-e3/png-mock-ipc-transport.json", evidence);
+    f.write("docs/performance/diagram-engine-e3/plugin-command-mock-ipc.json", {
+      schemaVersion: 1, scope: "synthetic MockRuntime scanner unit fixture", windowLabel: "main",
+      pluginCommandCount: evidence.pluginCommandCount, pluginCommandsObserved: evidence.pluginCommandsObserved,
+    });
+  };
   saveEvidence();
   return { ...f, base, source, evidence, saveEvidence };
 }
 
-test("plugin commands have separate invoke evidence without changing production count", (t) => {
+test("plugin commands have independent invoke evidence and production permission scope", (t) => {
   const f = pluginFixture(t);
   assert.equal(checkPluginEvidence(f.root), 2);
   pass(f.run("--plan", "06"));
 });
 
+test("current registration manifest is explicitly source-scan provenance", (t) => {
+  const f = pluginFixture(t);
+  const manifest = createCurrentRegistrationManifest(f.root, "a".repeat(40));
+  assert.equal(manifest.evidenceClass, "SOURCE-SCAN only; this manifest is not behavioral evidence");
+  assert.deepEqual(manifest.counts, { app: 1, plugin: 2, total: 3 });
+  assert.ok(manifest.sourceFiles.some((file) => file.path === "src-tauri/src/lib.rs" && /^[a-f0-9]{64}$/.test(file.sha256)));
+  assert.ok(manifest.commands.every((entry) => ["app", "plugin:maru-diagram"].includes(entry.surface)));
+});
+
+test("historical phase evidence keeps inactive rows archival while active rows retain ownership", () => {
+  const rows = new Map([["active", { module: "src-tauri/src/active.rs" }], ["retired", { module: "src-tauri/src/retired.rs" }]]);
+  const owners = new Map([["active", { module: "src-tauri/src/active.rs" }], ["retired", { module: "src-tauri/src/retired.rs" }]]);
+  const filtered = filterHistoricalRegistrations(rows, owners, ["active"]);
+  assert.deepEqual([...filtered.rows.keys()], ["active"]);
+  assert.deepEqual([...filtered.owners.keys()], ["active"]);
+  assert.deepEqual(filtered.archivalNames, ["retired"]);
+  assert.equal(rows.size, 2, "the source history remains unchanged");
+});
+
+test("plugin permissions cannot be granted outside the main-only capability", (t) => {
+  const f = pluginFixture(t);
+  f.write("src-tauri/capabilities/default.json", { identifier: "default", windows: ["main", "Sites"], permissions: ["maru-diagram:allow-render-png"] });
+  assert.throws(() => checkPluginEvidence(f.root), /permission escaped the main-only capability/);
+});
+
 test("plugin scanner refuses stale permission and observed command lists", (t) => {
   const f = pluginFixture(t);
-  f.write(`${f.base}/build.rs`, 'const COMMANDS: &[&str] = &["validate"];');
+  f.write(`${f.base}/build.rs`, `fn main() {
+  let mut commands = vec!["validate"];
+  if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
+}`);
   assert.throws(() => checkPluginEvidence(f.root), /permissions and registered commands differ/);
-  f.write(`${f.base}/build.rs`, 'const COMMANDS: &[&str] = &["validate", "render_png"];');
+  f.write(`${f.base}/build.rs`, `fn main() {
+  let mut commands = vec!["validate"];
+  if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
+}`);
   f.evidence.pluginCommandsObserved = ["validate"];
   f.saveEvidence();
   assert.throws(() => checkPluginEvidence(f.root), /command evidence drift/);
