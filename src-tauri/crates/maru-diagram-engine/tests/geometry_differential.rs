@@ -160,26 +160,88 @@ fn reference_verdicts_and_actual_text_bounds_preserve_placed_scenes() {
 fn only_recorded_cases_may_accept_beyond_the_reference_model() {
     let corpus: serde_json::Value =
         serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
+    let mut failures = Vec::new();
     let mut observed = std::collections::BTreeSet::new();
-    for case in corpus["cases"].as_array().unwrap() {
-        let Some(expected) = case.get("geometryComparison") else {
-            continue;
-        };
-        let Some(input) = expected["inputJson"].as_str() else {
-            continue;
-        };
-        let report = layout_json(&serde_json::json!({"specJson": input}).to_string());
-        if expected["accepted"] == serde_json::Value::Bool(false) && report.ok {
-            observed.insert(case["id"].as_str().unwrap().to_owned());
+    // Both verdict collections count: an auto-fit case and a boundary case are
+    // the same claim - the engine accepts, the reference model refuses - and each
+    // one needs its own entry and its own proof from real output.
+    for collection in ["cases", "boundaryCases"] {
+        for case in corpus[collection]
+            .as_array()
+            .unwrap_or_else(|| panic!("corpus collection {collection} is missing"))
+        {
+            let Some(expected) = case.get("geometryComparison") else {
+                continue;
+            };
+            let Some(input) = expected["inputJson"].as_str() else {
+                continue;
+            };
+            let report = layout_json(&serde_json::json!({"specJson": input}).to_string());
+            if expected["accepted"] != serde_json::Value::Bool(false) || !report.ok {
+                continue;
+            }
+            let id = case["id"].as_str().expect("case has an id").to_owned();
+            let spec: serde_json::Value = serde_json::from_str(input).expect("case input is JSON");
+            // Ink inside its own node and never below the readable floor: the
+            // part of the proof that does not depend on how the case was won.
+            painted_ink::assert_accepted_text_ink_fits(&report);
+            painted_ink::assert_readable_floors(&report, &id);
+            let actions = painted_ink::observed_auto_fit_actions(&report, &spec);
+            match painted_ink::AUTO_FIT_BEYOND_MODEL
+                .iter()
+                .find(|(recorded, _)| *recorded == id)
+            {
+                Some((_, recorded)) => {
+                    if actions != *recorded {
+                        failures.push(format!(
+                            "{id}: auto-fit actions changed, expected {recorded:?}, observed {actions:?}"
+                        ));
+                    }
+                }
+                None => {
+                    if !painted_ink::BOUNDARY_ACCEPTED_BEFORE_AUTO_FIT.contains(&id.as_str()) {
+                        failures.push(format!(
+                            "{id}: engine accepts where the model refuses with no recorded entry ({actions:?})"
+                        ));
+                    } else if !actions.is_empty() {
+                        failures.push(format!(
+                            "{id}: recorded as a pre-auto-fit difference but now shows auto-fit actions {actions:?}"
+                        ));
+                    }
+                }
+            }
+            observed.insert(id);
         }
     }
-    let recorded: std::collections::BTreeSet<_> = painted_ink::AUTO_FIT_BEYOND_MODEL
+    assert!(
+        failures.is_empty(),
+        "Geometry acceptances beyond the reference model:\n{}",
+        failures.join("\n")
+    );
+    let mut recorded: std::collections::BTreeSet<String> = painted_ink::AUTO_FIT_BEYOND_MODEL
         .iter()
         .map(|(id, _)| (*id).to_owned())
         .collect();
+    recorded.extend(
+        painted_ink::BOUNDARY_ACCEPTED_BEFORE_AUTO_FIT
+            .iter()
+            .map(|id| (*id).to_owned()),
+    );
+    assert_eq!(
+        observed.len(),
+        recorded.len(),
+        "two recorded acceptances describe one case; keep each case in exactly one list"
+    );
     assert_eq!(
         observed, recorded,
-        "the recorded auto-fit cases must be exactly the cases the engine accepts beyond the model"
+        "the recorded cases must be exactly the cases the engine accepts beyond the model"
+    );
+    assert!(
+        !painted_ink::AUTO_FIT_BEYOND_MODEL.is_empty()
+            && painted_ink::AUTO_FIT_BEYOND_MODEL
+                .iter()
+                .all(|(_, actions)| !actions.is_empty()),
+        "every auto-fit acceptance names the actions that won it"
     );
 }
 

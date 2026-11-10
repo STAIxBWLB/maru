@@ -311,7 +311,10 @@ fn check_node_viewbox(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if family.name == "dataflow" {
-        let rects = super::source_budgets::dataflow_node_rects(spec, geometry);
+        let rects = super::source_budgets::emitted_rects(
+            &super::source_budgets::dataflow_node_rects(spec, geometry),
+            geometry,
+        );
         let Some(frame) = super::source_budgets::dataflow_frame(spec) else {
             return;
         };
@@ -354,7 +357,10 @@ fn check_node_viewbox(
                 "increase meta.viewBox[1] to 566 or more, or use a schema-version-2 row layout",
             );
         }
-        let rects = super::source_budgets::lifecycle_state_rects(spec, geometry);
+        let rects = super::source_budgets::emitted_rects(
+            &super::source_budgets::lifecycle_state_rects(spec, geometry),
+            geometry,
+        );
         let Some(frame) = super::source_budgets::lifecycle_frame(spec, geometry) else {
             return;
         };

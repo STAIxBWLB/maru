@@ -17,13 +17,19 @@ pub struct WorkStats {
     /// This proof counter is not added again to `total`.
     #[serde(default)]
     pub masked_astar_expanded_states: u64,
+    /// Scalars scanned by the label wrapping measurer. Wrapping costs one pass
+    /// per line, so this stays proportional to the text, never to its square.
+    #[serde(default)]
+    pub text_scalar_measurements: u64,
 }
 impl WorkStats {
     pub fn total(self) -> u64 {
-        self.astar_expanded_states.checked_add(self.route_evaluations)
-            .and_then(|n|n.checked_add(self.constraint_evaluations))
-            .and_then(|n|n.checked_add(self.endpoint_mask_evaluations))
-            .and_then(|n|n.checked_add(self.endpoint_clearance_evaluations))
+        self.astar_expanded_states
+            .checked_add(self.route_evaluations)
+            .and_then(|n| n.checked_add(self.constraint_evaluations))
+            .and_then(|n| n.checked_add(self.endpoint_mask_evaluations))
+            .and_then(|n| n.checked_add(self.endpoint_clearance_evaluations))
+            .and_then(|n| n.checked_add(self.text_scalar_measurements))
             .expect("logical work total overflowed; reduce the measured fixture before recording a new budget")
     }
 }
@@ -61,6 +67,10 @@ pub(crate) fn record_endpoint_mask_evaluation() {
 /// One node/label candidate in a final authored-via segment clearance scan.
 pub(crate) fn record_endpoint_clearance_evaluation() {
     increment(|s| s.endpoint_clearance_evaluations = next(s.endpoint_clearance_evaluations));
+}
+/// One scalar measured by the label wrapping scan.
+pub(crate) fn record_text_scalar_measurement() {
+    increment(|s| s.text_scalar_measurements = next(s.text_scalar_measurements));
 }
 struct Reset;
 impl Drop for Reset {

@@ -26,6 +26,57 @@ impl SourceRect {
     }
 }
 
+/// The emitted box of a placed node in source space, so the readable-area check
+/// measures what the renderer draws rather than the pre-auto-fit source box. A
+/// grown node keeps its source top and left, so the union with the source
+/// rectangle below is the growth-extended box.
+pub(crate) fn emitted_source_rect(node: &GeometryNode) -> SourceRect {
+    let bounds = node.bounds;
+    SourceRect {
+        x: i64::from(bounds.x) * 2,
+        y: i64::from(bounds.y) * 2,
+        width: i64::from(bounds.width) * 2,
+        height: i64::from(bounds.height) * 2,
+    }
+}
+
+/// Farthest-reaching of two source rectangles. Admission measures the emitted
+/// box wherever auto-fit moved it outward, and never less than the source box
+/// the format authored.
+pub(crate) fn union_source_rects(left: SourceRect, right: SourceRect) -> SourceRect {
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    let max_right = left.right().max(right.right());
+    let max_bottom = left.bottom().max(right.bottom());
+    SourceRect {
+        x,
+        y,
+        width: max_right - x,
+        height: max_bottom - y,
+    }
+}
+
+/// The given source rectangles as admission must measure them, each unioned
+/// with the placed node of the same id.
+pub(crate) fn emitted_rects(
+    rects: &BTreeMap<String, SourceRect>,
+    geometry: &GeometryDocument,
+) -> BTreeMap<String, SourceRect> {
+    rects
+        .iter()
+        .map(|(id, rect)| {
+            let rect = geometry
+                .nodes
+                .iter()
+                .find(|node| node.id == *id)
+                .map_or(*rect, |node| {
+                    union_source_rects(*rect, emitted_source_rect(node))
+                });
+            (id.clone(), rect)
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SourceFrame {
     pub width: i64,
@@ -352,7 +403,7 @@ pub(crate) fn lifecycle_frame(spec: &Value, geometry: &GeometryDocument) -> Opti
         });
     }
 
-    let rects = lifecycle_state_rects(spec, geometry);
+    let rects = emitted_rects(&lifecycle_state_rects(spec, geometry), geometry);
     let max_right = rects.values().map(|rect| rect.right()).max().unwrap_or(0);
     let max_bottom = rects.values().map(|rect| rect.bottom()).max().unwrap_or(0);
     let view = spec

@@ -28,14 +28,22 @@ fn owned_label<'a>(
     report: &'a GeometryReport,
     node_id: &str,
 ) -> &'a maru_diagram_engine::geometry::GeometryLabel {
+    role_label(report, node_id, "label")
+}
+
+fn role_label<'a>(
+    report: &'a GeometryReport,
+    node_id: &str,
+    role: &str,
+) -> &'a maru_diagram_engine::geometry::GeometryLabel {
     report
         .geometry
         .as_ref()
         .expect("accepted layout retains geometry")
         .labels
         .iter()
-        .find(|label| label.id.as_deref() == Some(&format!("node:{node_id}:label")))
-        .unwrap_or_else(|| panic!("missing node:{node_id}:label"))
+        .find(|label| label.id.as_deref() == Some(&format!("node:{node_id}:{role}")))
+        .unwrap_or_else(|| panic!("missing node:{node_id}:{role}"))
 }
 
 fn node_bounds(
@@ -79,6 +87,56 @@ fn architecture(label: &str, size: Option<[f64; 2]>) -> Value {
         "layout": {"mode": "grid", "cols": 4},
         "components": [component],
         "connections": []
+    })
+}
+
+fn workflow(label: &str, tag: Option<&str>) -> Value {
+    let mut node =
+        json!({"id": "a", "type": "backend", "label": label, "lane": "orders", "col": 0});
+    if let Some(tag) = tag {
+        node["tag"] = json!(tag);
+    }
+    json!({
+        "schema_version": 2,
+        "diagram_type": "workflow",
+        "meta": {"title": "auto-fit", "output": "auto-fit.html"},
+        "lanes": [{"id": "orders", "label": "Orders"}, {"id": "delivery", "label": "Delivery"}],
+        "nodes": [node, {"id": "b", "type": "backend", "label": "B", "lane": "delivery", "col": 0}],
+        "phases": [],
+        "edges": []
+    })
+}
+
+fn lifecycle_v1(label: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "diagram_type": "lifecycle",
+        "meta": {"title": "auto-fit", "output": "auto-fit.html"},
+        "lanes": [{"id": "main", "label": "Main"}],
+        "states": [
+            {"id": "a", "type": "start", "label": label, "lane": "main", "col": 0},
+            {"id": "b", "type": "active", "label": "B", "lane": "main", "col": 1}
+        ],
+        "transitions": []
+    })
+}
+
+fn lifecycle_v2(label: &str, view_box_height: f64) -> Value {
+    json!({
+        "schema_version": 2,
+        "diagram_type": "lifecycle",
+        "meta": {"title": "auto-fit", "output": "auto-fit.html", "viewBox": [980, view_box_height]},
+        "lanes": [
+            {"id": "main", "label": "Main"},
+            {"id": "active", "label": "Active"},
+            {"id": "closed", "label": "Closed"}
+        ],
+        "states": [
+            {"id": "a", "type": "start", "label": "A", "lane": "main", "col": 0},
+            {"id": "b", "type": "active", "label": "B", "lane": "active", "col": 0},
+            {"id": "c", "type": "success", "label": label, "lane": "closed", "col": 0}
+        ],
+        "transitions": []
     })
 }
 
@@ -300,6 +358,33 @@ fn a_latin_word_is_cut_only_after_the_whole_word_fails_every_box_and_size() {
 }
 
 #[test]
+fn a_cut_is_granted_only_to_the_role_whose_own_word_fails() {
+    // Both roles carry the same kind of Latin word, but only the sublabel's is
+    // too wide for every box and size. The primary keeps its word whole: a
+    // sibling's cut is not a licence to split it.
+    let mut spec = dataflow("DeploymentService", 118.0, 120.0);
+    spec["nodes"][0]["sublabel"] = json!("DeploymentServiceGateway");
+    let result = report(&spec);
+    assert!(result.ok, "{:?}", result.diagnostics);
+    let primary = owned_label(&result, "a");
+    assert_eq!(
+        primary.text, "DeploymentService",
+        "the primary never needed a cut, so it keeps one whole word"
+    );
+    assert_eq!(
+        primary.font_size, FLOOR,
+        "the primary steps down to the floor rather than cut its word"
+    );
+    let sublabel = role_label(&result, "a", "sublabel");
+    assert!(
+        sublabel.text.contains('\n'),
+        "the sublabel's word alone fails every box and size, so it is cut: {:?}",
+        sublabel.text
+    );
+    assert_eq!(sublabel.text.replace('\n', ""), "DeploymentServiceGateway");
+}
+
+#[test]
 fn refusal_happens_only_when_the_floor_cannot_hold_the_text() {
     let label = "결제 Gateway 확인 처리 모듈";
     let mut refused = 0;
@@ -337,5 +422,169 @@ fn refusal_happens_only_when_the_floor_cannot_hold_the_text() {
     assert!(
         accepted > 0 && refused > 0,
         "the scan must exercise both verdicts: {accepted} accepted, {refused} refused"
+    );
+}
+
+/// Repeatable label text long enough to force box growth.
+fn long_label(words: usize) -> String {
+    const WORDS: [&str; 7] = [
+        "Deploy", "the", "payment", "service", "now", "please", "again",
+    ];
+    WORDS
+        .iter()
+        .cycle()
+        .take(words)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn dataflow_row(label: &str, view_box_height: f64) -> Value {
+    json!({
+        "schema_version": 1,
+        "diagram_type": "dataflow",
+        "meta": {"title": "auto-fit", "output": "auto-fit.html", "viewBox": [940, view_box_height]},
+        "stages": [{"label": "Input"}, {"label": "Output"}],
+        "nodes": [
+            {"id": "a", "type": "frontend", "label": label, "stage": 0, "row": 3},
+            {"id": "b", "type": "backend", "label": "Out", "stage": 1, "row": 1}
+        ],
+        "flows": []
+    })
+}
+
+/// A grown node stops where its own slot ends, measured from its own top: the
+/// workflow lane body below the node, the lifecycle band or row below it, or the
+/// readable area the frame leaves. Growing into the slot the node does not own
+/// would refuse the scene for a limit the auto-fit itself broke.
+#[test]
+fn a_grown_node_stops_at_the_body_below_its_own_top() {
+    // Workflow: the lane body ends at 156px and an untagged default node starts
+    // at 93, so 63px is left under it - not the whole 74px body.
+    let lane = report(&workflow(&long_label(4), None));
+    assert!(lane.ok, "{:?}", lane.diagnostics);
+    let bounds = node_bounds(&lane, "a");
+    assert!(
+        bounds.height > 52 * 64,
+        "the box absorbs the extra line: {bounds:?}"
+    );
+    assert!(
+        bounds.y + bounds.height <= 156 * 64,
+        "growth stays inside the lane body: {bounds:?}"
+    );
+    // One line further and the lane cannot hold the text: the refusal must name
+    // the label, not blame the authored lane offset for a self-made overflow.
+    let over = report(&workflow(&long_label(6), None));
+    assert!(!over.ok, "the lane body cannot hold four lines: {over:?}");
+    assert!(
+        over.diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.code.contains("lane")),
+        "growth never manufactures a lane refusal: {:?}",
+        over.diagnostics
+    );
+
+    // Lifecycle v1: the main band starts at 126 and the event band at 278, so a
+    // main state may grow to 142px and no further.
+    let band = report(&lifecycle_v1(&long_label(13)));
+    assert!(band.ok, "{:?}", band.diagnostics);
+    let state = node_bounds(&band, "a");
+    assert!(state.height > 120 * 64, "the state grew: {state:?}");
+    assert!(
+        state.y + state.height <= 278 * 64,
+        "the grown state never reaches the event band: {state:?}"
+    );
+    assert!(state.height <= 142 * 64, "{state:?}");
+
+    // Lifecycle v2, third row: the canvas leaves 640-96-424 = 120px above the
+    // frame, so a state that needs more steps down instead of being clipped.
+    let canvas = report(&lifecycle_v2(&long_label(15), 640.0));
+    assert!(canvas.ok, "{:?}", canvas.diagnostics);
+    let third = node_bounds(&canvas, "c");
+    assert_eq!(third.y, 424 * 64, "{third:?}");
+    assert!(
+        third.y + third.height <= (640.0 - 96.0) as i32 * 64,
+        "the third row state stays inside the authored canvas: {third:?}"
+    );
+    painted_ink::assert_accepted_text_ink_fits(&canvas);
+    painted_ink::assert_readable_floors(&canvas, "lifecycle-v2");
+
+    // Dataflow: row 3 starts at 470 and the readable area ends at 640-74 = 566,
+    // so the row pitch alone would grow past the canvas.
+    let flow = report(&dataflow_row(&long_label(8), 640.0));
+    assert!(flow.ok, "{:?}", flow.diagnostics);
+    let node = node_bounds(&flow, "a");
+    assert_eq!(node.y, 470 * 64, "{node:?}");
+    assert!(
+        node.y + node.height <= (640.0 - 74.0) as i32 * 64,
+        "the grown node stays inside the readable area: {node:?}"
+    );
+}
+
+/// Growth moves the ports: a left/right port sits at `bounds.y + height/2` and
+/// the bottom port at `bounds.bottom()`. Routing reads the emitted bounds, so a
+/// route authored across the old port still reaches the new one and is admitted.
+#[test]
+fn growth_moves_a_port_and_the_authored_route_still_reaches_it() {
+    let route_between = |label: &str, via: Option<Vec<[f64; 2]>>| {
+        let mut connection = json!({"id": "r", "from": "a", "to": "b"});
+        if let Some(via) = via {
+            connection["via"] = json!(via);
+        }
+        json!({
+            "schema_version": 1,
+            "diagram_type": "architecture",
+            "meta": {"title": "ports", "output": "ports.html"},
+            "layout": {"mode": "grid", "cols": 2},
+            "components": [
+                {"id": "a", "type": "backend", "label": label, "pos": [60, 80]},
+                {"id": "b", "type": "frontend", "label": "Out", "pos": [360, 80], "size": [120, 60]}
+            ],
+            "connections": [connection]
+        })
+    };
+    let short = report(&route_between("A", None));
+    assert!(short.ok, "{:?}", short.diagnostics);
+    let short_node = node_bounds(&short, "a");
+    let short_route = &short.geometry.as_ref().expect("geometry").routes[0];
+    let start = short_route.points[0];
+    assert_eq!(
+        start.x,
+        short_node.x + short_node.width,
+        "the route leaves the right port"
+    );
+    assert_eq!(
+        start.y,
+        short_node.y + short_node.height / 2,
+        "a left/right port sits at the middle of the emitted height"
+    );
+
+    // Keep the middle of that route as an authored via, then grow the source.
+    let via: Vec<[f64; 2]> = short_route.points[1..short_route.points.len() - 1]
+        .iter()
+        .map(|point| [f64::from(point.x) / 64.0, f64::from(point.y) / 64.0])
+        .collect();
+    assert!(!via.is_empty(), "the route needs an interior leg to author");
+    let grown = report(&route_between("Deploy the payment service now", Some(via)));
+    assert!(
+        grown.ok,
+        "an authored via route stays admitted when its endpoint grows: {:?}",
+        grown.diagnostics
+    );
+    let grown_node = node_bounds(&grown, "a");
+    assert!(
+        grown_node.height > short_node.height,
+        "the source grew: {grown_node:?}"
+    );
+    let grown_route = &grown.geometry.as_ref().expect("geometry").routes[0];
+    assert_eq!(
+        grown_route.points[0].x,
+        grown_node.x + grown_node.width,
+        "the route still starts on the emitted right port"
+    );
+    assert_eq!(
+        grown_route.points[0].y,
+        grown_node.y + grown_node.height / 2,
+        "and on the port the grown height moved"
     );
 }

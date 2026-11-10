@@ -7,7 +7,7 @@
 //! Hangul syllables, and a Latin word is split only when it alone overflows the
 //! line.
 
-use super::{measure_text, overflow};
+use super::PaintedWidth;
 use crate::layout::fixed::Coord;
 use crate::Diagnostic;
 
@@ -18,20 +18,6 @@ fn is_hangul(scalar: char) -> bool {
         scalar as u32,
         0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7A3
     )
-}
-
-/// Width a measured line paints. Only ink counts, so the bound is the span the
-/// emission's own admission check measures: a trailing space, or an advance
-/// past the last glyph's ink, never pushes a line into a break on its own.
-fn painted_width(text: &str, weight: u16, size: Coord) -> Result<i64, Diagnostic> {
-    let metrics = measure_text(text, weight, size)?;
-    let right = metrics.ink.right().map_err(|_| overflow())?;
-    let left = metrics.ink.x.min(0);
-    Ok(i64::from(right) - i64::from(left))
-}
-
-fn prefix(chars: &[char], length: usize) -> String {
-    chars[..length].iter().collect()
 }
 
 /// Wrap `text` so no line paints wider than `max_width`.
@@ -70,13 +56,12 @@ fn wrap_paragraph(
     allow_token_split: bool,
     lines: &mut Vec<String>,
 ) -> Result<(), Diagnostic> {
-    let fits = |candidate: &str| -> Result<bool, Diagnostic> {
-        Ok(painted_width(candidate, weight, size)? <= max_width)
-    };
-    let mut rest = paragraph;
+    let chars: Vec<char> = paragraph.chars().collect();
+    let mut measure = PaintedWidth::new(weight, size)?;
+    let mut start = 0;
     let mut emitted = false;
     loop {
-        if rest.is_empty() {
+        if start == chars.len() {
             if !emitted {
                 lines.push(String::new());
             }
@@ -85,34 +70,42 @@ fn wrap_paragraph(
         if emitted {
             // The break swallowed one space; a continuation line never starts
             // with the space it replaced.
-            rest = rest.trim_start_matches(' ');
-            if rest.is_empty() {
+            while start < chars.len() && chars[start] == ' ' {
+                start += 1;
+            }
+            if start == chars.len() {
                 return Ok(());
             }
         }
-        if fits(rest)? {
-            lines.push(rest.to_owned());
-            return Ok(());
-        }
-        let chars: Vec<char> = rest.chars().collect();
+        let rest = &chars[start..];
+        // One forward pass decides both whether the rest of the paragraph fits
+        // and where the next break belongs, so a line is measured once and the
+        // scan never revisits a scalar it already advanced past.
+        measure.reset();
         let mut filled = 0;
         let mut space_break = None;
         let mut hangul_break = None;
-        for length in 1..=chars.len() {
-            if !fits(&prefix(&chars, length))? {
+        for (offset, scalar) in rest.iter().enumerate() {
+            measure.push(*scalar)?;
+            if measure.width() > max_width {
                 break;
             }
+            let length = offset + 1;
             filled = length;
-            if length == chars.len() {
+            if length == rest.len() {
                 break;
             }
-            let previous = chars[length - 1];
+            let previous = rest[offset];
             if previous == ' ' {
                 // The space stays out of both lines; the break replaces it.
-                space_break = Some(length - 1);
-            } else if is_hangul(previous) && is_hangul(chars[length]) {
+                space_break = Some(offset);
+            } else if is_hangul(previous) && is_hangul(rest[length]) {
                 hangul_break = Some(length);
             }
+        }
+        if filled == rest.len() {
+            lines.push(rest.iter().collect());
+            return Ok(());
         }
         // A word earns its own line only when nothing else fits. Cutting a word
         // is the caller's last resort, so without permission the whole token
@@ -123,22 +116,19 @@ fn wrap_paragraph(
         let consumed = match (fitting, allow_token_split) {
             (Some(break_at), _) => break_at,
             (None, true) => filled.max(1),
-            (None, false) => next_token_boundary(&chars)
+            (None, false) => next_token_boundary(rest)
                 .map(|boundary| {
-                    if boundary > 1 && chars[boundary - 1] == ' ' {
+                    if boundary > 1 && rest[boundary - 1] == ' ' {
                         boundary - 1
                     } else {
                         boundary
                     }
                 })
-                .unwrap_or(chars.len()),
+                .unwrap_or(rest.len()),
         };
-        lines.push(prefix(&chars, consumed));
+        lines.push(rest[..consumed].iter().collect());
         emitted = true;
-        rest = &rest[rest
-            .char_indices()
-            .nth(consumed)
-            .map_or(rest.len(), |(offset, _)| offset)..];
+        start += consumed;
     }
 }
 
@@ -152,6 +142,7 @@ fn next_token_boundary(chars: &[char]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::painted_width;
 
     const LABEL: Coord = 13 * 64;
     const BODY: u16 = 400;
@@ -294,5 +285,37 @@ mod tests {
         let squeezed = wrap("주문 처리", 1);
         assert_eq!(squeezed.concat().replace(' ', ""), "주문처리");
         assert!(squeezed.iter().all(|line| line.chars().count() == 1));
+    }
+
+    #[test]
+    fn the_incremental_width_matches_a_full_measurement_at_every_prefix() {
+        let label = "결제 Gateway 승인 처리 모듈 결제 Gateway 확인";
+        let chars: Vec<char> = label.chars().collect();
+        let mut measure = PaintedWidth::new(BODY, LABEL).expect("pinned face");
+        for (index, scalar) in chars.iter().enumerate() {
+            measure.push(*scalar).expect("pinned face");
+            let prefix: String = chars[..=index].iter().collect();
+            assert_eq!(
+                measure.width(),
+                painted_width(&prefix, BODY, LABEL).expect("pinned face"),
+                "prefix of {index} scalars must measure exactly as measure_text does"
+            );
+        }
+        measure.reset();
+        assert_eq!(measure.width(), 0, "a reset measurer starts empty");
+    }
+
+    #[test]
+    fn a_split_word_costs_one_scan_per_line_not_one_per_candidate_break() {
+        // `W` has no space and no Hangul syllable, so every line takes the
+        // last-resort cut and each scan runs exactly one scalar past the fill.
+        let label = "W".repeat(600);
+        let (lines, stats) = crate::work::capture(|| wrap(&label, 400));
+        assert!(lines.len() > 10, "{lines:?}");
+        assert_eq!(
+            stats.text_scalar_measurements,
+            (label.chars().count() + lines.len() - 1) as u64,
+            "each line must measure its own scalars once: a per-prefix measurement would grow with the square of the fill"
+        );
     }
 }

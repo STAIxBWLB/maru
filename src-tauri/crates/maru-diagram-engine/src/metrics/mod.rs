@@ -475,6 +475,105 @@ pub fn measure_text(text: &str, weight: u16, size: Coord) -> Result<TextMetrics,
     })
 }
 
+/// Painted width of one measured run: the span its ink covers, with the box
+/// origin treated as the left clip so a leading bearing counts. `wrap` and the
+/// node admission check both measure ink, so this is the one width they share.
+pub fn painted_width(text: &str, weight: u16, size: Coord) -> Result<i64, Diagnostic> {
+    let metrics = measure_text(text, weight, size)?;
+    let right = metrics.ink.right().map_err(|_| overflow())?;
+    let left = metrics.ink.x.min(0);
+    Ok(i64::from(right) - i64::from(left))
+}
+
+/// Painted width accumulated one scalar at a time.
+///
+/// The wrapping scan pushes the scalars of one candidate line and reads
+/// [`width`](Self::width) after each, so a line costs one pass over its own
+/// scalars instead of one [`measure_text`] per candidate break. The numbers stay
+/// identical to [`painted_width`] because the pen is the same cumulative
+/// font-unit sum and each glyph extent is rounded outward on it.
+pub struct PaintedWidth {
+    table: &'static FontTable,
+    size: Coord,
+    notdef: GlyphUnits,
+    pen_units: i64,
+    ink_left: Option<Coord>,
+    ink_right: Option<Coord>,
+}
+
+impl PaintedWidth {
+    pub fn new(weight: u16, size: Coord) -> Result<Self, Diagnostic> {
+        if size <= 0 {
+            return Err(error(
+                "size",
+                "/size",
+                "font size must be positive fixed-point pixels",
+                "use a positive font size in 1/64 pixel units",
+            ));
+        }
+        let table = table(weight)?;
+        Ok(Self {
+            table,
+            size,
+            notdef: table.glyph(0).ok_or_else(bad_table)?,
+            pen_units: 0,
+            ink_left: None,
+            ink_right: None,
+        })
+    }
+
+    /// Start again at the same face and size, for the next candidate line.
+    pub fn reset(&mut self) {
+        self.pen_units = 0;
+        self.ink_left = None;
+        self.ink_right = None;
+    }
+
+    /// Append one scalar. Work is one glyph lookup and a constant number of
+    /// fixed-point scalings, never a re-measurement of what came before.
+    pub fn push(&mut self, input: char) -> Result<(), Diagnostic> {
+        #[cfg(any(test, feature = "geometry-corpus"))]
+        crate::work::record_text_scalar_measurement();
+        if is_default_ignorable(input) {
+            return Ok(());
+        }
+        let glyph = self.table.lookup(input).unwrap_or(self.notdef);
+        if glyph.has_ink {
+            let left = scaled(
+                self.pen_units
+                    .checked_add(i64::from(glyph.x_min))
+                    .ok_or_else(overflow)?,
+                self.size,
+                self.table.upem,
+                -1,
+            )?;
+            let right = scaled(
+                self.pen_units
+                    .checked_add(i64::from(glyph.x_max))
+                    .ok_or_else(overflow)?,
+                self.size,
+                self.table.upem,
+                1,
+            )?;
+            self.ink_left = Some(self.ink_left.map_or(left, |current| current.min(left)));
+            self.ink_right = Some(self.ink_right.map_or(right, |current| current.max(right)));
+        }
+        self.pen_units = self
+            .pen_units
+            .checked_add(i64::from(glyph.advance))
+            .ok_or_else(overflow)?;
+        Ok(())
+    }
+
+    /// Painted width of everything pushed since the last [`reset`](Self::reset).
+    pub fn width(&self) -> i64 {
+        match self.ink_right {
+            None => 0,
+            Some(right) => i64::from(right) - i64::from(self.ink_left.unwrap_or(0).min(0)),
+        }
+    }
+}
+
 #[cfg(feature = "typegen")]
 pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
     use ts_rs::TS;

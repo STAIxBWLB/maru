@@ -69,6 +69,55 @@ const NODE_LABEL_STEPS: [NodeLabelSizes; 4] = [
     },
 ];
 
+/// Which text roles may have one of their words cut. A cut is the last resort
+/// and costs legibility, so it is granted per role: a role whose words all wrap
+/// whole keeps them whole even when a sibling role in the same node needs one
+/// cut.
+#[derive(Clone, Copy)]
+struct RoleCuts {
+    label: bool,
+    detail: bool,
+    tag: bool,
+}
+
+impl RoleCuts {
+    const NONE: Self = Self {
+        label: false,
+        detail: false,
+        tag: false,
+    };
+
+    fn any(self) -> bool {
+        self.label || self.detail || self.tag
+    }
+}
+
+/// Whether `text` alone still paints past `available` after every break the
+/// whole-word rule can take at the smallest size the ladder tries. Growth only
+/// adds height and a larger size only paints wider, so such a word fails every
+/// box and size and is the one case that earns a cut.
+fn role_needs_cut(
+    text: &str,
+    weight: u16,
+    floor: Coord,
+    available: Coord,
+) -> Result<bool, Diagnostic> {
+    for line in metrics::wrap_label_lines(text, weight, floor, available, false)? {
+        if metrics::painted_width(&line, weight, floor)? > i64::from(available) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn smallest_size(role: impl Fn(&NodeLabelSizes) -> Coord) -> Coord {
+    NODE_LABEL_STEPS
+        .iter()
+        .map(role)
+        .min()
+        .expect("auto-fit has at least one size step")
+}
+
 pub(crate) fn failure(rule: &str, cause: impl Into<String>, fix: &str) -> Diagnostic {
     Diagnostic {
         code: format!("document/{rule}"),
@@ -495,7 +544,8 @@ impl SceneBuilder {
     /// painted ink stays inside the node, down to the readable floor. Cutting a
     /// word runs last, after a whole word has failed at every box and size, and
     /// the readable default is placed when nothing fits at all, so the admission
-    /// check refuses the geometry Maru would actually draw.
+    /// check refuses the geometry Maru would actually draw. The cut is granted
+    /// per role, so one role's unbreakable word never splits a sibling's.
     fn place_node_labels(
         &mut self,
         id: &str,
@@ -507,55 +557,120 @@ impl SceneBuilder {
     ) -> Result<GeometryBox, Diagnostic> {
         let label_mark = self.document.labels.len();
         let diagnostic_mark = self.diagnostics.len();
-        for &allow_token_split in &[false, true] {
-            let mut candidate = bounds;
-            self.place_node_labels_at(
+        if let Some(fitted) = self.place_node_labels_pass(
+            id,
+            label,
+            detail,
+            tag,
+            bounds,
+            grow_height_to,
+            RoleCuts::NONE,
+            label_mark,
+            diagnostic_mark,
+        )? {
+            return Ok(fitted);
+        }
+        // Every word kept whole and nothing fit. A role earns a cut only when
+        // its own word alone overflows the width at the floor size, so a node
+        // whose primary fits whole is never cut because its sublabel did not.
+        let available = bounds.width - NODE_TEXT_INSET;
+        let cuts = RoleCuts {
+            label: role_needs_cut(label, 700, smallest_size(|sizes| sizes.label), available)?,
+            detail: match detail {
+                Some(text) => {
+                    role_needs_cut(text, 400, smallest_size(|sizes| sizes.detail), available)?
+                }
+                None => false,
+            },
+            tag: match tag {
+                Some(text) => {
+                    role_needs_cut(text, 400, smallest_size(|sizes| sizes.tag), available)?
+                }
+                None => false,
+            },
+        };
+        if cuts.any() {
+            if let Some(fitted) = self.place_node_labels_pass(
                 id,
                 label,
                 detail,
                 tag,
-                candidate,
-                NODE_LABEL_STEPS[0],
-                allow_token_split,
-            )?;
-            let (_, overflow_y) = self.placed_node_label_overflow(id, candidate);
-            self.document.labels.truncate(label_mark);
-            self.diagnostics.truncate(diagnostic_mark);
-            if overflow_y > 0 {
-                // The wrapped lines are fixed once the width is, so one growth
-                // step absorbs the whole overflow; only the ceiling limits it.
-                let grown = i64::from(candidate.height) + overflow_y;
-                let ceiling = grow_height_to.map_or(i64::from(candidate.height), i64::from);
-                let grown = grown.min(ceiling.max(i64::from(candidate.height)));
-                candidate.height = Coord::try_from(grown).map_err(|error| {
-                    failure(
-                        "coordinate",
-                        error.to_string(),
-                        "use a smaller node box or shorter label text",
-                    )
-                })?;
-                candidate.bottom().map_err(arithmetic)?;
-            }
-            for &sizes in NODE_LABEL_STEPS.iter() {
-                self.place_node_labels_at(
-                    id,
-                    label,
-                    detail,
-                    tag,
-                    candidate,
-                    sizes,
-                    allow_token_split,
-                )?;
-                if self.placed_node_labels_fit(id, candidate) {
-                    return Ok(candidate);
-                }
-                self.document.labels.truncate(label_mark);
-                self.diagnostics.truncate(diagnostic_mark);
+                bounds,
+                grow_height_to,
+                cuts,
+                label_mark,
+                diagnostic_mark,
+            )? {
+                return Ok(fitted);
             }
         }
-        self.place_node_labels_at(id, label, detail, tag, bounds, NODE_LABEL_STEPS[0], false)?;
+        self.place_node_labels_at(
+            id,
+            label,
+            detail,
+            tag,
+            bounds,
+            NODE_LABEL_STEPS[0],
+            RoleCuts::NONE,
+        )?;
         Ok(bounds)
     }
+
+    /// One full ladder - grow, then every size step - under the given cut
+    /// permissions. Labels left by a failed attempt are discarded so the caller
+    /// sees only the placement that was accepted.
+    #[allow(clippy::too_many_arguments)]
+    fn place_node_labels_pass(
+        &mut self,
+        id: &str,
+        label: &str,
+        detail: Option<&str>,
+        tag: Option<&str>,
+        bounds: GeometryBox,
+        grow_height_to: Option<Coord>,
+        roles: RoleCuts,
+        label_mark: usize,
+        diagnostic_mark: usize,
+    ) -> Result<Option<GeometryBox>, Diagnostic> {
+        let mut candidate = bounds;
+        self.place_node_labels_at(
+            id,
+            label,
+            detail,
+            tag,
+            candidate,
+            NODE_LABEL_STEPS[0],
+            roles,
+        )?;
+        let (_, overflow_y) = self.placed_node_label_overflow(id, candidate);
+        self.document.labels.truncate(label_mark);
+        self.diagnostics.truncate(diagnostic_mark);
+        if overflow_y > 0 {
+            // The wrapped lines are fixed once the width is, so one growth
+            // step absorbs the whole overflow; only the ceiling limits it.
+            let grown = i64::from(candidate.height) + overflow_y;
+            let ceiling = grow_height_to.map_or(i64::from(candidate.height), i64::from);
+            let grown = grown.min(ceiling.max(i64::from(candidate.height)));
+            candidate.height = Coord::try_from(grown).map_err(|error| {
+                failure(
+                    "coordinate",
+                    error.to_string(),
+                    "use a smaller node box or shorter label text",
+                )
+            })?;
+            candidate.bottom().map_err(arithmetic)?;
+        }
+        for &sizes in NODE_LABEL_STEPS.iter() {
+            self.place_node_labels_at(id, label, detail, tag, candidate, sizes, roles)?;
+            if self.placed_node_labels_fit(id, candidate) {
+                return Ok(Some(candidate));
+            }
+            self.document.labels.truncate(label_mark);
+            self.diagnostics.truncate(diagnostic_mark);
+        }
+        Ok(None)
+    }
+
     fn place_node_labels_at(
         &mut self,
         id: &str,
@@ -564,13 +679,13 @@ impl SceneBuilder {
         tag: Option<&str>,
         bounds: GeometryBox,
         sizes: NodeLabelSizes,
-        allow_token_split: bool,
+        roles: RoleCuts,
     ) -> Result<(), Diagnostic> {
         let available = bounds.width - NODE_TEXT_INSET;
         let x = add(bounds.x, NODE_TEXT_INSET)?;
         let mut y = add(bounds.y, NODE_TOP_INSET)?;
         let (wrapped, height) =
-            self.wrap_node_text(label, 700, sizes.label, available, allow_token_split)?;
+            self.wrap_node_text(label, 700, sizes.label, available, roles.label)?;
         self.label(
             &format!("node:{id}:label"),
             id,
@@ -582,7 +697,7 @@ impl SceneBuilder {
         y = add(y, height)?;
         if let Some(text) = detail {
             let (wrapped, height) =
-                self.wrap_node_text(text, 400, sizes.detail, available, allow_token_split)?;
+                self.wrap_node_text(text, 400, sizes.detail, available, roles.detail)?;
             self.label(
                 &format!("node:{id}:sublabel"),
                 id,
@@ -594,8 +709,7 @@ impl SceneBuilder {
             y = add(y, height)?;
         }
         if let Some(text) = tag {
-            let (wrapped, _) =
-                self.wrap_node_text(text, 400, sizes.tag, available, allow_token_split)?;
+            let (wrapped, _) = self.wrap_node_text(text, 400, sizes.tag, available, roles.tag)?;
             self.label(
                 &format!("node:{id}:tag"),
                 id,

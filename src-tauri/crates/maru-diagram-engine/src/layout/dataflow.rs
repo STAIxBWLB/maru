@@ -3,6 +3,7 @@
 use super::{point, px, RouteRequest, SceneBuilder};
 use crate::dataflow::DataflowSpec;
 use crate::geometry::{GeometryBox, GeometryPoint};
+use crate::layout::fixed::Coord;
 use crate::Diagnostic;
 
 const NODE_WIDTH: f64 = 112.0;
@@ -39,6 +40,21 @@ fn node_position(
     )
 }
 
+/// How far a default node may grow: one 10px separation inside the next row,
+/// clamped by the readable area left below the node's own top.
+fn row_growth_limit(view_height: f64, top: Coord, id: &str) -> Result<Coord, Diagnostic> {
+    let frame_bottom = px(view_height - STAGE_BOTTOM_PAD)?;
+    let below = Coord::try_from(i64::from(frame_bottom) - i64::from(top))
+        .map_err(|_| {
+            geometry_error(
+                &format!("/nodes/{id}"),
+                "the readable area below this node is not a representable height",
+            )
+        })?
+        .max(0);
+    Ok(px(ROW_STEP - 10.0)?.min(below))
+}
+
 fn label_segment(value: Option<f64>) -> Result<Option<usize>, Diagnostic> {
     value
         .map(|value| {
@@ -65,6 +81,11 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
         px(width)?;
         px(height)?;
         let stage = f64::from(node.stage);
+        let auto = if let Some(pin) = scene.pinned_position(&node.id) {
+            pin
+        } else {
+            node_position(stage, width, node.row, node.y_offset.unwrap_or(0.0))?
+        };
         scene.add_node(
             &node.id,
             &node.component_type,
@@ -72,17 +93,14 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
             node.decoration.sublabel.as_deref(),
             node.decoration.tag.as_deref(),
             None,
-            if let Some(pin) = scene.pinned_position(&node.id) {
-                pin
-            } else {
-                node_position(stage, width, node.row, node.y_offset.unwrap_or(0.0))?
-            },
+            auto,
             Some([width, height]),
             // Authored heights are respected; a taller default node stops one
-            // 10px separation inside the next row.
+            // 10px separation inside the next row and inside the readable area
+            // below its own top, which is what admission measures.
             match node.height {
                 Some(_) => None,
-                None => Some(px(ROW_STEP - 10.0)?),
+                None => Some(row_growth_limit(view_height, auto.y, &node.id)?),
             },
         )?;
     }

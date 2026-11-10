@@ -39,16 +39,83 @@ pub const AUTO_FIT_BEYOND_MODEL: &[(&str, &[&str])] = &[
     ),
     (
         "e2-lifecycle-geometry-label-fit-primary",
-        &["grow:a:3968", "wrap:a"],
+        // The main band leaves 142px below its own top, so this label grows
+        // into the band instead of past it and takes the 12px step.
+        &["grow:a:3968", "shrink:a:label:768", "wrap:a"],
     ),
     (
         "e2-lifecycle-geometry-label-fit-detail",
-        &["grow:a:3968", "wrap:a"],
+        &[
+            "grow:a:3968",
+            "shrink:a:label:768",
+            "shrink:a:sublabel:640",
+            "wrap:a",
+        ],
     ),
     (
         "e2-lifecycle-geometry-label-fit-tag",
         &["grow:a:3968", "wrap:a"],
     ),
+    // Boundary cases: the same refusal on the model's character-estimate side,
+    // accepted because the engine measures the real Noto ink instead.
+    (
+        "e2-boundary-dataflow-primary-width-below",
+        &["grow:a:3712", "wrap:a"],
+    ),
+    (
+        "e2-boundary-dataflow-detail-width-sublabel-below",
+        &["grow:a:3712", "wrap:a"],
+    ),
+    (
+        "e2-boundary-dataflow-detail-width-tag-below",
+        &["grow:a:3712", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v1-primary-width-below",
+        &["grow:a:3968", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v1-detail-width-sublabel-below",
+        &["grow:a:3968", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v1-detail-width-tag-below",
+        &["grow:a:3968", "wrap:a"],
+    ),
+    ("e2-boundary-lifecycle-v2-primary-width-below", &["wrap:a"]),
+    (
+        "e2-boundary-lifecycle-v2-detail-width-sublabel-below",
+        &["grow:a:4096", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v2-detail-width-tag-below",
+        &["grow:a:4096", "wrap:a"],
+    ),
+    (
+        "e2-boundary-sequence-spread-primary-header-below",
+        &["shrink:a:label:768", "wrap:a"],
+    ),
+    ("e2-boundary-sequence-brand-rail-9", &["wrap:a"]),
+];
+
+/// Boundary cases the engine already accepted beyond the reference model at the
+/// `#567` head, before auto-fit existed. Real measurement alone clears them, so
+/// each must carry no auto-fit action; naming them keeps the T6 allowance above
+/// from absorbing a difference it did not create.
+pub const BOUNDARY_ACCEPTED_BEFORE_AUTO_FIT: &[&str] = &[
+    "e2-boundary-architecture-brand-rail-71",
+    "e2-boundary-dataflow-brand-rail-71",
+    "e2-boundary-lifecycle-brand-rail-71",
+    "e2-boundary-lifecycle-physical-corridor-7",
+    "e2-boundary-lifecycle-band-title-113.984375",
+    "e2-boundary-sequence-family-label-route-below",
+    "e2-boundary-sequence-label-pair-193.984375",
+    "e2-boundary-workflow-brand-rail-71",
+    "e2-boundary-workflow-brand-rail-73",
+    "e2-boundary-workflow-v2-arrow-spacing-8",
+    "e2-boundary-workflow-v2-turn-7",
+    "e2-boundary-workflow-v2-route-legend-191",
+    "e2-boundary-workflow-v2-label-legend-187",
 ];
 
 fn owned_node_labels<'a>(
