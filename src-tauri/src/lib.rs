@@ -1264,17 +1264,31 @@ mod quit_acl_tests {
                     .expect("allowed validation returns its typed report");
                 assert_eq!(report.receipt.engine.id, "maru-diagram-engine");
             } else {
-                let refusal = main_result.expect_err("malformed or missing workspace input reaches the main plugin handler");
-                assert!(refusal.is_object(), "main plugin handler returned ACL denial: {refusal}");
-                assert!(refusal.get("code").is_some(), "main plugin handler did not return its structured error: {refusal}");
+                let refusal = main_result.expect_err(
+                    "malformed or missing workspace input reaches the main plugin handler",
+                );
+                assert!(
+                    refusal.is_object(),
+                    "main plugin handler returned ACL denial: {refusal}"
+                );
+                assert!(
+                    refusal.get("code").is_some(),
+                    "main plugin handler did not return its structured error: {refusal}"
+                );
             }
             main_handler_reached.push(command);
 
             let refused = get_ipc_response(&sites, invoke_json_request(&cmd, body))
                 .expect_err("Sites window must not inherit the main-only diagram capability");
             let message = refused.as_str().unwrap_or_default();
-            assert!(message.contains("not allowed"), "{command} reached the Sites plugin handler: {refused}");
-            assert!(message.contains("sites"), "ACL denial did not identify the Sites window: {refused}");
+            assert!(
+                message.contains("not allowed"),
+                "{command} reached the Sites plugin handler: {refused}"
+            );
+            assert!(
+                message.contains("sites"),
+                "ACL denial did not identify the Sites window: {refused}"
+            );
             sites_denied.push(command);
         }
 
@@ -1289,7 +1303,10 @@ mod quit_acl_tests {
         println!("DIAGRAM_PLUGIN_ACL_EVIDENCE {evidence}");
         if let Ok(path) = std::env::var("MARU_PLUGIN_ACL_EVIDENCE") {
             let path = std::path::PathBuf::from(path);
-            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
                 std::fs::create_dir_all(parent).expect("create requested ACL evidence directory");
             }
             std::fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap())

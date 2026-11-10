@@ -15,9 +15,9 @@ use tauri::{plugin::TauriPlugin, Manager, Runtime};
 pub mod render_store;
 #[cfg(feature = "render-store")]
 pub use render_store::{
-    DiagramRenderReceipt, LegacyArchifyEnginePin, LegacyArchifyReceipt,
-    RenderAndStoreReport, RenderDocumentContext, RenderEntry, RenderGate, RenderGates,
-    RenderGroup, RenderView, RenderStoreHost, StoredRender, StoredRenderReceipt,
+    DiagramRenderReceipt, LegacyArchifyEnginePin, LegacyArchifyReceipt, RenderAndStoreReport,
+    RenderDocumentContext, RenderEntry, RenderGate, RenderGates, RenderGroup, RenderStoreHost,
+    RenderView, StoredRender, StoredRenderReceipt,
 };
 
 pub const PLUGIN_NAME: &str = "maru-diagram";
@@ -398,8 +398,10 @@ impl Builder {
             commands::render_and_store
         ]);
         #[cfg(all(feature = "png", not(feature = "render-store")))]
-        let builder =
-            builder.invoke_handler(tauri::generate_handler![commands::validate, commands::render_png]);
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::render_png
+        ]);
         #[cfg(not(any(feature = "png", feature = "render-store")))]
         let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
         builder

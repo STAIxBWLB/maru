@@ -26,12 +26,7 @@ impl RenderStoreHost for StoreFixture {
         Ok(Vec::new())
     }
 
-    fn prepare_render_view(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-    ) -> Result<RenderView, HostError> {
+    fn prepare_render_view(&self, _: &str, _: &str, _: &str) -> Result<RenderView, HostError> {
         Err(HostError::new(
             "fixture_render_missing",
             "fixture has no stored render",
@@ -54,7 +49,10 @@ impl RenderStoreHost for StoreFixture {
     }
 }
 
-fn fixture() -> (tauri::App<tauri::test::MockRuntime>, tauri::WebviewWindow<tauri::test::MockRuntime>) {
+fn fixture() -> (
+    tauri::App<tauri::test::MockRuntime>,
+    tauri::WebviewWindow<tauri::test::MockRuntime>,
+) {
     let mut context = tauri::test::mock_context(tauri::test::noop_assets());
     for command in [
         "diagram_list_renders",
@@ -80,7 +78,11 @@ fn fixture() -> (tauri::App<tauri::test::MockRuntime>, tauri::WebviewWindow<taur
     (app, view)
 }
 
-fn invoke(view: &tauri::WebviewWindow<tauri::test::MockRuntime>, command: &str, args: Value) -> Result<tauri::ipc::InvokeResponseBody, Value> {
+fn invoke(
+    view: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+    command: &str,
+    args: Value,
+) -> Result<tauri::ipc::InvokeResponseBody, Value> {
     get_ipc_response(
         view,
         InvokeRequest {
@@ -98,10 +100,14 @@ fn invoke(view: &tauri::WebviewWindow<tauri::test::MockRuntime>, command: &str, 
 #[test]
 fn registered_render_store_commands_reach_the_typed_host_adapter() {
     let (_app, view) = fixture();
-    let groups = invoke(&view, "diagram_list_renders", json!({"workspace":"/fixture"}))
-        .expect("registered list command responds")
-        .deserialize::<Vec<RenderGroup>>()
-        .unwrap();
+    let groups = invoke(
+        &view,
+        "diagram_list_renders",
+        json!({"workspace":"/fixture"}),
+    )
+    .expect("registered list command responds")
+    .deserialize::<Vec<RenderGroup>>()
+    .unwrap();
     assert!(groups.is_empty());
 
     let error = invoke(

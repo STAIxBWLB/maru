@@ -284,20 +284,20 @@ mod tests {
 
     #[test]
     fn store_request_preserves_outlines_and_rejects_font_dependent_svg_text() {
-        let outlines = prepare_render_store_request(&source_request(json!({"textMode":"outlines"})))
-            .unwrap();
+        let outlines =
+            prepare_render_store_request(&source_request(json!({"textMode":"outlines"}))).unwrap();
         let request: RenderStoreRequest = serde_json::from_str(&outlines).unwrap();
         assert_eq!(request.text_mode.as_deref(), Some("outlines"));
 
-        let error = prepare_render_store_request(&source_request(json!({"textMode":"text"})))
-            .unwrap_err();
+        let error =
+            prepare_render_store_request(&source_request(json!({"textMode":"text"}))).unwrap_err();
         assert_eq!(error.code, "diagram_render_store_text_mode_invalid");
     }
 
     #[test]
     fn store_request_keeps_png_font_text_and_pixel_ratio() {
-        let default_png = prepare_render_store_request(&source_request(json!({"format":"png"})))
-            .unwrap();
+        let default_png =
+            prepare_render_store_request(&source_request(json!({"format":"png"}))).unwrap();
         let default_png: RenderStoreRequest = serde_json::from_str(&default_png).unwrap();
         assert!(default_png.text_mode.is_none());
         assert_eq!(default_png.pixel_ratio, 1);
@@ -345,6 +345,9 @@ mod tests {
         missing["inputSpecSha256"] = json!("a".repeat(64));
         missing["gates"] = engine_receipt()["gates"].clone();
         let with_future_metadata = serde_json::from_value::<StoredRenderReceipt>(missing).unwrap();
-        assert!(matches!(with_future_metadata, StoredRenderReceipt::Engine(_)));
+        assert!(matches!(
+            with_future_metadata,
+            StoredRenderReceipt::Engine(_)
+        ));
     }
 }
