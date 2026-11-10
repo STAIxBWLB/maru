@@ -38,7 +38,7 @@ describe("engine admission before semantic apply", () => {
         { ...originalComponents[1], id: "b", row: 0, col: 1 },
       ],
       boundaries: [],
-      connections: [{ id: "a", from: "a", to: "b", label: "shared identifier" }],
+      connections: [{ id: "a", from: "a", to: "b", label: "Call" }],
     };
     const dataset: SemanticSpecDataset = {
       id: "ds-shared-id",
