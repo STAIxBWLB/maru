@@ -423,30 +423,34 @@ for `floorplan/architecture@1` maps.
 
 ### Verified static semantic export (T1)
 
-The `archify-svg` and `archify-png` choices render one selected stored semantic
-spec through the pinned bundled Archify engine. Architecture, workflow,
-sequence, dataflow and lifecycle are supported. Canvas annotations, selection,
-zoom and editor state are not renderer inputs. Missing engines and rejected
-specs are errors; these choices never fall back to the canvas renderer.
+The `archify-svg` and `archify-png` codec identifiers remain compatible with
+existing selections, but their product renderer is `maru-diagram-engine` through
+`engine.ts`. Architecture, workflow, sequence, dataflow and lifecycle use the
+selected stored semantic spec. Canvas annotations, selection, zoom and editor
+state are not renderer inputs. Floorplan keeps its local path. Missing engines
+and rejected specs are errors; semantic exports never fall back to canvas.
 
-The native worker validates and renders into private staging, checks the engine
-HTML artifact, and returns bytes plus a versioned receipt. The frontend parses
-that HTML without mounting it, requires exactly one SVG, inlines the supported
-static CSS, and sanitizes SVG with DOMPurify. Scripts, event handlers, external
-URLs and `foreignObject` are removed. Light/dark conversion is explicit; PNG
-uses the existing SVG-to-Canvas rasterizer at pixel ratio 1. Interactive engine
-HTML remains gated for T2 and is not an export choice here.
+The native worker derives validation, layout, SVG and PNG from the source spec
+and returns a v1 engine receipt with independently checked artifact gates.
+Exported SVG uses outlined glyphs; PNG uses the bundled native font faces and
+rasterizer. WASM text-mode SVG remains a separate preview path. Any SVG inserted
+in the app DOM passes through its DOMPurify-backed helper. Theme and PNG pixel
+ratio are explicit inputs; an interactive viewer is a separate artifact.
 
-Export shows the spec hash, engine pin, final artifact hash and separate schema,
-artifact, browser-conversion, visual-review and saved-byte-readback gates.
-Conversion success does not mark visual review as passed. Only a native save
-acknowledgement after byte comparison marks readback passed. The save bridge
-atomically replaces the selected file under its existing lease, preserving the
-previous file on a failed replacement. The final converted-file receipt is shown
-for this operation; no sibling receipt is written next to that export copy.
-When document context is supplied, the backend engine HTML and its own receipt
-are retained in the Renders store below. SVG/PNG remain frontend-converted
-export copies and are not stored there.
+Export shows the spec hash, engine version, output hashes and separate schema,
+artifact, browser, visual-review and saved-byte-readback gates. A successful
+artifact does not imply manual visual review. Native save acknowledges a byte
+comparison before the exported copy's readback becomes passed. The existing
+file lease and atomic replacement preserve the old file on a failed save; no
+sibling receipt is written beside that copy.
+
+When document context is supplied, the render-and-store operation retains its
+engine artifact and receipt independently in Renders. A render already started
+there may complete its immutable history entry for the captured document
+revision even if the later export-copy operation is canceled or becomes stale;
+it never relabels that entry as a newer revision. The frontend stale/cancel gate
+still prevents the final export-copy save. Legacy Archify HTML receipts remain
+readable as legacy entries and are not relabeled as engine-produced artifacts.
 
 A changed document, workspace or closed dialog invalidates an in-flight render
 before save. Once a native file copy has begun it completes atomically; the UI
