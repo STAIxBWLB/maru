@@ -425,6 +425,81 @@ fn refusal_happens_only_when_the_floor_cannot_hold_the_text() {
     );
 }
 
+/// Two dataflow nodes stacked in one stage column, the upper one pushed down
+/// inside its row by an authored offset.
+fn dataflow_column(label: &str, view_box_height: f64) -> Value {
+    json!({
+        "schema_version": 1,
+        "diagram_type": "dataflow",
+        "meta": {"title": "auto-fit", "output": "auto-fit.html", "viewBox": [940, view_box_height]},
+        "stages": [{"label": "Input"}, {"label": "Output"}],
+        "nodes": [
+            {"id": "a", "type": "frontend", "label": label, "stage": 0, "row": 1, "yOffset": 40},
+            {"id": "b", "type": "backend", "label": "B", "stage": 0, "row": 2}
+        ],
+        "flows": []
+    })
+}
+
+/// Two architecture components positioned one above the other, closer than the
+/// automatic cell pitch would put them.
+fn architecture_stack(label: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "diagram_type": "architecture",
+        "meta": {"title": "auto-fit", "output": "auto-fit.html"},
+        "layout": {"mode": "grid", "cols": 2},
+        "components": [
+            {"id": "a", "type": "backend", "label": label, "pos": [60, 80]},
+            {"id": "b", "type": "frontend", "label": "B", "pos": [60, 160]}
+        ],
+        "connections": []
+    })
+}
+
+/// A grown node may not reach into the node below it. The family ceiling is only
+/// an upper bound: when the box a node really grew into breaks the admission
+/// separation, the ladder runs again from the same top with the neighbour's edge
+/// as its ceiling, and the text steps a size down instead of the scene refusing
+/// for a breach auto-fit made itself.
+#[test]
+fn a_grown_node_gives_back_the_height_the_node_below_needs() {
+    // Dataflow: `yOffset: 40` moves the node down inside its row, so only 64px
+    // is left between its own top and the 10px separation above the next row -
+    // not the 104px the row pitch alone would allow.
+    let flow = report(&dataflow_column(&long_label(7), 900.0));
+    assert!(flow.ok, "{:?}", flow.diagnostics);
+    let upper = node_bounds(&flow, "a");
+    let lower = node_bounds(&flow, "b");
+    assert!(
+        upper.height > 58 * 64,
+        "the box grew enough for the check to matter: {upper:?}"
+    );
+    assert!(
+        upper.height <= 64 * 64,
+        "the offset row leaves 64px, not the 104px of the row pitch: {upper:?}"
+    );
+    assert!(
+        upper.y + upper.height + 10 * 64 <= lower.y,
+        "the grown node keeps the 10px separation the admission rule requires: {upper:?} {lower:?}"
+    );
+
+    // Architecture: two components positioned 80px apart. The automatic cell
+    // pitch would allow 96px of growth, but the neighbour leaves 72.
+    let stack = report(&architecture_stack(&long_label(8)));
+    assert!(stack.ok, "{:?}", stack.diagnostics);
+    let upper = node_bounds(&stack, "a");
+    let lower = node_bounds(&stack, "b");
+    assert!(
+        upper.height > 60 * 64,
+        "the component grew enough for the check to matter: {upper:?}"
+    );
+    assert!(
+        upper.y + upper.height + 8 * 64 <= lower.y,
+        "the grown component keeps the 8px separation the admission rule requires: {upper:?} {lower:?}"
+    );
+}
+
 /// Repeatable label text long enough to force box growth.
 fn long_label(words: usize) -> String {
     const WORDS: [&str; 7] = [

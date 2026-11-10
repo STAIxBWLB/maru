@@ -40,9 +40,20 @@ fn hangul(scalar: char) -> Option<Hangul> {
 /// before a leading jamo that starts the next one. A decomposed (NFD) syllable
 /// is a leading, vowel and trailing run, and macOS filenames and some pasted
 /// text arrive that way, so breaking before a vowel or a trailing jamo would
-/// tear one visible syllable across two lines.
+/// tear one visible syllable across two lines. UAX #29 GB6 also forbids a break
+/// after a leading jamo, which is still the same syllable as whatever follows.
 fn is_hangul_break(before: char, after: char) -> bool {
-    hangul(before).is_some() && matches!(hangul(after), Some(Hangul::Syllable | Hangul::Leading))
+    !matches!(hangul(before), None | Some(Hangul::Leading))
+        && matches!(hangul(after), Some(Hangul::Syllable | Hangul::Leading))
+}
+
+/// Whether a cut between `at - 1` and `at` would split one decomposed syllable.
+fn splits_syllable(chars: &[char], at: usize) -> bool {
+    at > 0
+        && at < chars.len()
+        && hangul(chars[at - 1]).is_some()
+        && hangul(chars[at]).is_some()
+        && !is_hangul_break(chars[at - 1], chars[at])
 }
 
 /// Wrap `text` so no line paints wider than `max_width`.
@@ -140,21 +151,38 @@ fn wrap_paragraph(
             .filter(|break_at| *break_at > 0);
         let consumed = match (fitting, allow_token_split) {
             (Some(break_at), _) => break_at,
-            (None, true) => filled.max(1),
-            (None, false) => next_token_boundary(rest)
-                .map(|boundary| {
-                    if boundary > 1 && rest[boundary - 1] == ' ' {
-                        boundary - 1
-                    } else {
-                        boundary
-                    }
-                })
-                .unwrap_or(rest.len()),
+            (None, true) => {
+                // A cut is the last resort and it still never lands inside a
+                // decomposed syllable: when the cut would tear one, the whole
+                // token keeps its overflowing line so the caller steps the sizes
+                // down and refuses instead of drawing half a syllable.
+                let cut = filled.max(1);
+                if splits_syllable(rest, cut) {
+                    whole_token(rest)
+                } else {
+                    cut
+                }
+            }
+            (None, false) => whole_token(rest),
         };
         lines.push(rest[..consumed].iter().collect());
         emitted = true;
         start += consumed;
     }
+}
+
+/// The whole token on one line, so the caller can step the size down instead of
+/// having the word cut. A break replaces the space it lands on.
+fn whole_token(chars: &[char]) -> usize {
+    next_token_boundary(chars)
+        .map(|boundary| {
+            if boundary > 1 && chars[boundary - 1] == ' ' {
+                boundary - 1
+            } else {
+                boundary
+            }
+        })
+        .unwrap_or(chars.len())
 }
 
 /// The first place after the first scalar where a new token could start.
@@ -292,6 +320,56 @@ mod tests {
             assert!(
                 matches!(hangul(last), Some(Hangul::Syllable | Hangul::Trailing)),
                 "line {line:?} ends before syllable {last:?} is finished: {lines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hangul_break_needs_a_finished_syllable_and_a_new_one_after() {
+        // The decomposed form of one syllable: a leading, vowel and trailing
+        // jamo, three scalars for one visible syllable.
+        let decomposed: Vec<char> = "한".chars().collect();
+        assert_eq!(decomposed.len(), 3, "the fixture must stay decomposed");
+        let (leading, vowel, trailing) = (decomposed[0], decomposed[1], decomposed[2]);
+        assert!(is_hangul_break('한', '국'), "between two syllables");
+        assert!(
+            is_hangul_break(trailing, leading),
+            "before the leading jamo that starts the next syllable"
+        );
+        assert!(
+            is_hangul_break(vowel, '한'),
+            "a vowel closes an open syllable"
+        );
+        // UAX #29 GB6: a leading jamo is still one syllable with whatever
+        // follows, so nothing breaks after it.
+        assert!(!is_hangul_break(leading, leading));
+        assert!(!is_hangul_break(leading, '한'));
+        assert!(!is_hangul_break(leading, vowel));
+        assert!(!is_hangul_break(leading, trailing));
+        // GB7 and GB8: never before a vowel or a trailing jamo.
+        assert!(!is_hangul_break('한', vowel));
+        assert!(!is_hangul_break('한', trailing));
+        assert!(!is_hangul_break(vowel, trailing));
+        assert!(!is_hangul_break(trailing, trailing));
+    }
+
+    #[test]
+    fn a_box_narrower_than_one_syllable_keeps_it_whole_instead_of_cutting_it() {
+        // Two decomposed syllables in a box too narrow for even one: the last
+        // resort may not cut inside a syllable, so each keeps its own
+        // overflowing line and the caller is left to step the size down.
+        let label = "한한";
+        let lines = wrap_label_lines(label, BODY, LABEL, 1, true).expect("pinned face");
+        assert_eq!(lines.concat(), label, "wrapping never reorders scalars");
+        for line in &lines {
+            assert_eq!(
+                line.chars().count(),
+                3,
+                "one whole syllable per line: {lines:?}"
+            );
+            assert!(
+                painted_width(line, BODY, LABEL).expect("pinned face") > 1,
+                "the line overflows the box so the caller can step down: {lines:?}"
             );
         }
     }

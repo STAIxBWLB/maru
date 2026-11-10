@@ -1245,18 +1245,27 @@ size, and only in the role that owns it - a sibling role's unbreakable word
 never splits the primary. A Hangul boundary is between two precomposed syllables
 or before a leading jamo that starts the next one, so a decomposed (NFD)
 syllable, which macOS filenames and some pasted text carry, is never split
-between its own jamo. The scan accumulates advances one scalar at a time, so
-a line costs one pass over its own scalars instead of one measurement per
-candidate break, and the work receipt counts those scalar measurements. Growth
-adds height only, from the node's own top down to the first limit that position
-already sets: the lane body below it in workflow, the next band or row minus a
-10px separation in lifecycle, and the readable area the frame leaves in dataflow
-and lifecycle v2 (`layout/workflow.rs`, `layout/lifecycle.rs`,
-`layout/dataflow.rs`). The limit therefore follows a pin or an authored
-`yOffset` instead of assuming a fixed slot, growth never manufactures a
-self-made lane, band, overlap or viewBox refusal, and when the space below the
-node is too short the ladder continues to the next smaller size instead of
-drawing past it. Growing a node does move its ports: a left/right port sits at
+between its own jamo; the last-resort cut obeys the same boundary and leaves the
+token whole on an overflowing line when no cut can, which the ladder answers by
+stepping the size down and refusing. The scan accumulates advances one scalar at
+a time, so a line costs one pass over its own scalars instead of one measurement
+per candidate break, and the work receipt counts those scalar measurements.
+Growth adds height only, from the node's own top down to the first limit that
+position already sets: the lane body below it in workflow, the next band or row
+minus a 10px separation in lifecycle and dataflow, and the readable area the
+frame leaves in dataflow and lifecycle v2 (`layout/workflow.rs`,
+`layout/lifecycle.rs`, `layout/dataflow.rs`). The limit therefore follows a pin
+or an authored `yOffset` instead of assuming a fixed slot, growth never
+manufactures a self-made lane, band, overlap or viewBox refusal, and when the
+space below the node is too short the ladder continues to the next smaller size
+instead of drawing past it. That per-family ceiling is an upper bound, not the
+whole rule: once every node is placed, a grown box that reaches into the
+separation the overlap rule requires of the node below it is placed again from
+its own top with that node's edge as the ceiling, so a positional or pinned
+neighbour the family grid did not predict still steps the text down rather than
+making the scene refuse for an overlap auto-fit created
+(`SceneBuilder::settle_grown_nodes`).
+Growing a node does move its ports: a left/right port sits at
 the middle of the emitted height and the bottom port at the emitted bottom, and
 routing reads the emitted bounds, so a route - including one authored with vias
 - still leaves and enters the port the grown box moved to. A source that authors

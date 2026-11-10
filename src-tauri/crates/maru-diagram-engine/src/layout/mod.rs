@@ -391,6 +391,21 @@ pub(crate) struct SceneBuilder {
     cards: Vec<(String, common::Card)>,
     kinds: BTreeMap<String, String>,
     pins: BTreeMap<String, GeometryPin>,
+    grown: Vec<GrownNode>,
+}
+
+/// A node auto-fit grew before every other node was placed, kept so the scene
+/// can settle its growth against the neighbours it ended up with.
+#[derive(Clone)]
+struct GrownNode {
+    index: usize,
+    id: String,
+    label: String,
+    detail: Option<String>,
+    tag: Option<String>,
+    base: GeometryBox,
+    limit: Option<Coord>,
+    labels: std::ops::Range<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -543,6 +558,7 @@ impl SceneBuilder {
             cards: vec![],
             kinds: BTreeMap::new(),
             pins,
+            grown: vec![],
         }
     }
     pub(crate) fn pinned_position(&self, id: &str) -> Option<GeometryPoint> {
@@ -685,7 +701,23 @@ impl SceneBuilder {
         let bounds = rect(position.x, position.y, width, height)?;
         bounds.right().map_err(arithmetic)?;
         bounds.bottom().map_err(arithmetic)?;
+        let label_mark = self.document.labels.len();
         let bounds = self.place_node_labels(id, label, detail, tag, bounds, grow_height_to)?;
+        if bounds.height > height {
+            // Every other node's top is fixed before this one grows and growth
+            // only extends this box downward, so `settle_grown_nodes` can settle
+            // the whole scene in one pass once the family is placed.
+            self.grown.push(GrownNode {
+                index: self.document.nodes.len(),
+                id: id.into(),
+                label: label.into(),
+                detail: detail.map(str::to_owned),
+                tag: tag.map(str::to_owned),
+                base: rect(position.x, position.y, width, height)?,
+                limit: grow_height_to,
+                labels: label_mark..self.document.labels.len(),
+            });
+        }
         self.document.nodes.push(GeometryNode {
             final_state: None,
             phase_order: None,
@@ -695,6 +727,104 @@ impl SceneBuilder {
         });
         self.kinds.insert(id.into(), kind.into());
         Ok(bounds)
+    }
+
+    /// Give back the height a grown node took from a neighbour.
+    ///
+    /// The per-family ceiling is only an upper bound: it describes the slot the
+    /// node was meant to own, not what its neighbours actually left free. A
+    /// grown candidate that reaches into another node's separation would refuse
+    /// the scene for a breach auto-fit made itself, so the ladder runs again
+    /// from the same box with the neighbour's edge as its ceiling and steps the
+    /// text down until it fits, refusing when no size does.
+    fn settle_grown_nodes(&mut self) -> Result<(), Diagnostic> {
+        let gap = self.node_overlap_gap();
+        for position in (0..self.grown.len()).rev() {
+            let record = self.grown[position].clone();
+            let Some(limit) = record.limit else {
+                continue;
+            };
+            let bottom = self.document.nodes[record.index]
+                .bounds
+                .bottom()
+                .map_err(arithmetic)?;
+            let allowed = self.separation_bottom(&record, gap)?;
+            if bottom <= allowed {
+                continue;
+            }
+            let available = Coord::try_from(i64::from(allowed) - i64::from(record.base.y))
+                .map_err(|_| {
+                    failure(
+                        "node-fit-separation",
+                        "the separation below this node does not fit a coordinate",
+                        "move the node, or reduce its text or dimensions",
+                    )
+                })?
+                .max(record.base.height)
+                .min(limit);
+            self.document.labels.drain(record.labels.clone());
+            let mark = self.document.labels.len();
+            let fitted = self.place_node_labels(
+                &record.id,
+                &record.label,
+                record.detail.as_deref(),
+                record.tag.as_deref(),
+                record.base,
+                Some(available),
+            )?;
+            // Re-placed labels go back where the node's own labels were, so the
+            // document keeps its deterministic label order.
+            let appended = self.document.labels.split_off(mark);
+            self.document
+                .labels
+                .splice(record.labels.start..record.labels.start, appended);
+            self.document.nodes[record.index].bounds = fitted;
+        }
+        Ok(())
+    }
+
+    /// The gap the admission overlap rule requires for this family, in ticks.
+    fn node_overlap_gap(&self) -> Coord {
+        match self.kind.as_str() {
+            "dataflow" | "lifecycle" => 10 * 64,
+            _ => 8 * 64,
+        }
+    }
+
+    /// The lowest bottom this node may reach: its own family ceiling, or the
+    /// edge of the first node that shares its columns and sits below it.
+    fn separation_bottom(&self, record: &GrownNode, gap: Coord) -> Result<Coord, Diagnostic> {
+        let left = i64::from(record.base.x);
+        let right = left + i64::from(record.base.width);
+        let base_bottom = i64::from(record.base.y) + i64::from(record.base.height);
+        let cap = record.limit.map_or(base_bottom, |limit| {
+            i64::from(record.base.y) + i64::from(limit)
+        });
+        let mut allowed = cap;
+        for other in &self.document.nodes {
+            if other.id == record.id {
+                continue;
+            }
+            let other_top = i64::from(other.bounds.y);
+            if other_top < base_bottom {
+                // Above, or beside and overlapping the box it started as: growth
+                // downward cannot reach it.
+                continue;
+            }
+            let other_left = i64::from(other.bounds.x);
+            let other_right = other_left + i64::from(other.bounds.width);
+            if other_right + i64::from(gap) <= left || other_left >= right + i64::from(gap) {
+                continue;
+            }
+            allowed = allowed.min(other_top - i64::from(gap));
+        }
+        Coord::try_from(allowed).map_err(|_| {
+            failure(
+                "node-fit-separation",
+                "the separation below this node is not a representable height",
+                "move the node, or reduce its text or dimensions",
+            )
+        })
     }
     /// Place the three node text roles under the T6 auto-fit ladder.
     ///
@@ -2035,6 +2165,7 @@ impl SceneBuilder {
             .extend(resolve_pins(&self.request, members).diagnostics);
         self.quality_profile = meta.quality_profile.clone();
         self.connections.sort_by(|a, b| a.id.cmp(&b.id));
+        self.settle_grown_nodes()?;
         self.prepare_routing();
         let sequence_anchors = self.sequence_message_anchors()?;
         let mut first_routes = BTreeMap::new();
