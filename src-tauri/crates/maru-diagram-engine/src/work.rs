@@ -237,6 +237,15 @@ pub fn authored_via_benchmark_work() -> ViaBenchmarkWork {
             .any(|segment| segment[0].y != segment[1].y),
         "the unrelated tag obstacle must force an A* detour between the first two vias"
     );
+    // Blank tag lines reserve conservative routing bounds without adding ink.
+    // Keep the showcase profile and force a detour long enough for its rhythm
+    // rules, rather than relaxing those rules to accommodate a 1-2px bend.
+    assert!(
+        route[via_start_index..=via_end_index]
+            .iter()
+            .any(|point| (i64::from(point.y) - i64::from(endpoint_anchor.y)).abs() >= 16 * 64),
+        "the masked A* detour must retain the showcase's 16px interior rhythm"
+    );
     let blocker = geometry
         .nodes
         .iter()
