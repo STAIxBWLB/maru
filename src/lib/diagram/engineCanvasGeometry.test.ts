@@ -23,6 +23,7 @@ import {
   type CanvasGeometry,
 } from "./engineCanvasGeometry";
 import { canonicalSemanticExportInput } from "./export";
+import { renderDocToSvg } from "./renderSvg";
 import type { EngineDiagramType, SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDocument } from "./semantic";
 import { createEmptyDoc, type DiagramDoc, type DiagramNode } from "./types";
@@ -593,6 +594,88 @@ describe("canvas geometry store", () => {
     // The older layout did reach the engine; its answer just never published.
     expect(requests).toHaveLength(2);
     expect(canvasGeometryState(dataset.id)).toBe(newest);
+  });
+});
+
+describe("visual export scene eligibility with the real store", () => {
+  function example() {
+    const { doc, dataset } = docFor("workflow");
+    const member = doc.nodes.find((node) => node.meta?.memberId === `${dataset.id}:m0`)!;
+    member.x = 901;
+    member.y = 902;
+    member.locked = false;
+    member.meta = { ...member.meta, pinned: false };
+    return { doc, dataset, id: member.id };
+  }
+
+  function expectSourcePlacement(doc: DiagramDoc, id: string) {
+    const node = doc.nodes.find((item) => item.id === id)!;
+    const before = JSON.stringify(doc);
+    expect(matchingCanvasGeometry(doc)).toBeNull();
+    expect(renderDocToSvg(doc).svg).toContain(`transform="translate(${node.x},${node.y})" data-node-id="${id}"`);
+    expect(JSON.stringify(doc)).toBe(before);
+  }
+
+  it("uses the matching completed scene instead of the stored source slot", async () => {
+    const { doc, dataset, id } = example();
+    await syncCanvasGeometry(doc, dataset.id, fakeEngine().load);
+    const geometry = matchingCanvasGeometry(doc)!;
+    const box = geometry.boxes.get(id)!;
+    expect([box.x, box.y]).not.toEqual([901, 902]);
+    expect(renderDocToSvg(doc).svg).toContain(`transform="translate(${box.x},${box.y})" data-node-id="${id}"`);
+  });
+
+  it.each(["pending", "stale", "refused", "source mismatch", "pin mismatch", "other document"] as const)(
+    "falls back to source positions for %s",
+    async (kind) => {
+      const { doc, dataset, id } = example();
+      let exported = doc;
+      let cleanup = async () => {};
+      if (kind === "refused") {
+        await syncCanvasGeometry(doc, dataset.id, fakeEngine({ ok: false }).load);
+        expect(canvasGeometryState(dataset.id).status).toBe("refused");
+      } else {
+        const engine = fakeEngine();
+        await syncCanvasGeometry(doc, dataset.id, engine.load);
+        if (kind === "pending") {
+          const edited = structuredClone(doc);
+          ((edited.datasets![0] as SemanticSpecDataset).spec.nodes as Array<Record<string, unknown>>)[0]!.label = "Pending edit";
+          let release!: (value: Awaited<ReturnType<FakeEngine["load"]>>) => void;
+          const held = new Promise<Awaited<ReturnType<FakeEngine["load"]>>>((resolve) => { release = resolve; });
+          const pending = syncCanvasGeometry(edited, dataset.id, () => held);
+          // The old scene remains ready and matches doc's bytes, but a layout
+          // is in flight: exports must still take the source fallback.
+          expect(canvasGeometryState(dataset.id).status).toBe("ready");
+          cleanup = async () => { release(await engine.load()); await pending; };
+        } else {
+          exported = structuredClone(doc);
+          if (kind === "stale" || kind === "source mismatch") {
+            ((exported.datasets![0] as SemanticSpecDataset).spec.nodes as Array<Record<string, unknown>>)[0]!.label = "Changed source";
+            if (kind === "stale") {
+              await syncCanvasGeometry(exported, dataset.id, fakeEngine({ ok: false }).load);
+              expect(canvasGeometryState(dataset.id).status).toBe("stale");
+            }
+          } else if (kind === "pin mismatch") {
+            const node = exported.nodes.find((item) => item.id === id)!;
+            node.x += 55;
+            node.meta = { ...node.meta, pinned: true };
+          } else {
+            exported.id = `${doc.id}-copy`;
+          }
+        }
+      }
+      try { expectSourcePlacement(exported, id); } finally { await cleanup(); }
+    },
+  );
+
+  it("switching document identity clears an equal-key scene before a refusal", async () => {
+    const { doc, dataset } = example();
+    await syncCanvasGeometry(doc, dataset.id, fakeEngine().load);
+    const copy = { ...doc, id: `${doc.id}-copy` };
+    await syncCanvasGeometry(copy, dataset.id, fakeEngine({ ok: false }).load);
+    expect(canvasGeometryState(dataset.id)).toMatchObject({ status: "refused", geometry: null });
+    expect(matchingCanvasGeometry(doc)).toBeNull();
+    expect(matchingCanvasGeometry(copy)).toBeNull();
   });
 });
 

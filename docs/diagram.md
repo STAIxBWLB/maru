@@ -591,8 +591,9 @@ dataset, and `useCanvasGeometry` reads it on the
 canvas side. Node/container and relation labels retain their engine namespaces,
 including when their raw ids coincide; a node named `document` remains a member,
 not a page header. The engine lays out exactly the bytes the export path sends, and the
-canvas carries their SHA-256 in `data-engine-spec-sha256`. When a ready published
-scene matches the current source and pins, the Maru visual exports (Maru SVG,
+canvas carries their SHA-256 in `data-engine-spec-sha256`. When a completed ready
+scene belongs to the current document, has no layout in flight, and matches the
+current source and pins, the Maru visual exports (Maru SVG,
 plain SVG, PNG, PDF and clipboard) reuse its boxes, measured label lines and
 routes. Maru SVG still embeds the original editable source document as metadata.
 While no matching ready scene exists, visual exports keep their source-position

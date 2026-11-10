@@ -378,6 +378,7 @@ export function canvasLabelLines(label: CanvasGeometryLabel, origin: { x: number
 }
 
 interface Entry {
+  documentId: string | null;
   generation: number;
   state: CanvasGeometryState;
   listeners: Set<() => void>;
@@ -409,6 +410,7 @@ function entryFor(datasetId: string): Entry {
   let entry = entries.get(datasetId);
   if (!entry) {
     entry = {
+      documentId: null,
       generation: 0,
       state: { datasetId, status: "idle", geometry: null, diagnostics: [], sourceSpecSha256: null },
       listeners: new Set(),
@@ -440,16 +442,19 @@ export function subscribeCanvasGeometry(datasetId: string, listener: () => void)
   };
 }
 
+function resetEntry(entry: Entry): void {
+  entry.documentId = null;
+  entry.generation += 1;
+  entry.cacheKey = null;
+  entry.pendingKey = null;
+  entry.pending = null;
+  entry.offset = null;
+  publish(entry, { ...IDLE, datasetId: entry.state.datasetId });
+}
+
 /** Invalidate displayed scenes and in-flight work when opening/replacing a document. */
 export function resetCanvasGeometry(): void {
-  for (const entry of entries.values()) {
-    entry.generation += 1;
-    entry.cacheKey = null;
-    entry.pendingKey = null;
-    entry.pending = null;
-    entry.offset = null;
-    publish(entry, { ...IDLE, datasetId: entry.state.datasetId });
-  }
+  for (const entry of entries.values()) resetEntry(entry);
 }
 
 /** Only a ready scene for these exact source and pin bytes may feed visual exports. */
@@ -458,7 +463,8 @@ export function matchingCanvasGeometry(doc: DiagramDoc): CanvasGeometry | null {
   if (!datasetId) return null;
   const entry = entries.get(datasetId);
   const dataset = doc.datasets?.find((item) => item.id === datasetId);
-  if (!entry || dataset?.kind !== "semanticSpec" || entry.state.status !== "ready") return null;
+  if (!entry || dataset?.kind !== "semanticSpec" || entry.documentId !== doc.id
+    || entry.pendingKey !== null || entry.state.status !== "ready") return null;
   try {
     return entry.cacheKey === canvasLayoutKey(JSON.stringify(dataset.spec), doc) ? entry.state.geometry : null;
   } catch {
@@ -569,6 +575,10 @@ export function syncCanvasGeometry(
   load?: CanvasEngineLoader,
 ): Promise<void> {
   const entry = entryFor(datasetId);
+  if (entry.documentId !== doc.id) {
+    if (entry.documentId !== null) resetEntry(entry);
+    entry.documentId = doc.id;
+  }
   if (load && load !== engineLoader) engineLoader = load;
   const dataset = (doc.datasets ?? []).find(
     (item): item is SemanticSpecDataset => item.kind === "semanticSpec" && item.id === datasetId,
