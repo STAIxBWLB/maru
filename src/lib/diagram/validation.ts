@@ -1,4 +1,3 @@
-import { validatePortablePath } from "../../../sidecars/archify/renderers/shared/portable-path.mjs";
 /**
  * Strict validation for AI-generated diagram candidates (issue #433 P1).
  *
@@ -17,8 +16,8 @@ import { validatePortablePath } from "../../../sidecars/archify/renderers/shared
  *   nodes → layers, views → datasets/members, node meta pointers), finite
  *   positive geometry, payload budgets, per-dataset validation (matrix span
  *   invariants, semantic-spec structure), and the schema version pin.
- * - {@link validateArchifySpecPreCheck} — cheap gate run before handing an
- *   AI-produced spec to the pinned Archify engine: known diagram type, plain
+ * - {@link validateEngineSpecPreCheck} — cheap gate before handing a semantic
+ *   spec to the engine: known diagram type, plain
  *   object shape, JSON-serializability within the byte budget, and the
  *   minimum meta contract (`schema_version`, `meta.title`, portable
  *   `meta.output` ending in `.html`).
@@ -28,13 +27,14 @@ import { validatePortablePath } from "../../../sidecars/archify/renderers/shared
  */
 
 import {
-  ARCHIFY_DIAGRAM_TYPES,
   SEMANTIC_SPEC_MAX_BYTES,
   validateMatrix,
   validateSemanticSpec,
   type ReportDataset,
 } from "./reportTypes";
 import { DIAGRAM_SCHEMA_VERSION, type DiagramDoc } from "./types";
+import { validateEngineSpecPreCheck } from "./enginePreflight";
+export { validateEngineSpecPreCheck };
 
 export interface ValidationDiagnostic {
   /** i18n key under `diagram.validation.*`. */
@@ -292,77 +292,5 @@ function validateDataset(dataset: ReportDataset): string[] {
   return [];
 }
 
-/**
- * Cheap pre-flight gate for an AI-produced Archify spec, run before the
- * pinned engine sees it. Reports an unknown diagram type, a non-object spec,
- * an unserializable or oversized payload, and a missing/invalid meta
- * contract. Never throws.
- */
-export function validateArchifySpecPreCheck(
-  diagramType: string,
-  spec: unknown,
-): ValidationResult {
-  const diagnostics: ValidationDiagnostic[] = [];
-
-  // Floorplan has its own floor (`floorplanPreCheck`); this gate is Archify-only.
-  if (!(ARCHIFY_DIAGRAM_TYPES as readonly string[]).includes(diagramType)) {
-    diagnostics.push({
-      key: "diagram.validation.specType",
-      params: { diagramType },
-    });
-  }
-
-  if (!isRecord(spec)) {
-    diagnostics.push({ key: "diagram.validation.specShape" });
-    return { ok: false, diagnostics };
-  }
-
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(spec);
-  } catch {
-    diagnostics.push({
-      key: "diagram.validation.specBudget",
-      params: { bytes: "n/a", maxBytes: SEMANTIC_SPEC_MAX_BYTES },
-    });
-    return { ok: false, diagnostics };
-  }
-  const bytes = new TextEncoder().encode(serialized).length;
-  if (bytes > SEMANTIC_SPEC_MAX_BYTES) {
-    diagnostics.push({
-      key: "diagram.validation.specBudget",
-      params: { bytes, maxBytes: SEMANTIC_SPEC_MAX_BYTES },
-    });
-  }
-
-  if (typeof spec.schema_version !== "number" || !Number.isFinite(spec.schema_version)) {
-    diagnostics.push({
-      key: "diagram.validation.specMeta",
-      params: { field: "schema_version" },
-    });
-  }
-  const meta = spec.meta;
-  if (!isRecord(meta) || typeof meta.title !== "string" || meta.title.length === 0) {
-    diagnostics.push({
-      key: "diagram.validation.specMeta",
-      params: { field: "meta.title" },
-    });
-  }
-  const output = isRecord(meta) ? meta.output : undefined;
-  let outputOk = typeof output === "string" && /[.]html$/i.test(output);
-  if (outputOk) {
-    try {
-      validatePortablePath(output as string, { profile: "output" });
-    } catch {
-      outputOk = false;
-    }
-  }
-  if (!outputOk) {
-    diagnostics.push({
-      key: "diagram.validation.specMeta",
-      params: { field: "meta.output" },
-    });
-  }
-
-  return { ok: diagnostics.length === 0, diagnostics };
-}
+/** Legacy call name while product call sites move to the engine facade. */
+export const validateArchifySpecPreCheck = validateEngineSpecPreCheck;

@@ -8,17 +8,16 @@
  * and also rejects the pending promise locally so `runGenerationJob` settles
  * immediately instead of waiting for the backend to notice.
  *
- * `validateCandidate` forwards to the pinned-engine Rust command via
- * {@link archifyValidateCandidate}; an unavailable engine surfaces as the
- * typed {@link ENGINE_UNAVAILABLE} error (see `src/lib/archify.ts`).
+ * `validateCandidate` runs the asynchronous SDK schema and geometry gate;
+ * SVG artifacts use the native engine render-and-store command.
  */
 
 import { startAgentCliInvocation, stopAiMission, type AgentProvider } from "../api";
-import { archifyRenderCandidate, archifyValidateCandidate } from "../archify";
 import type { AdaptivePolicy } from "../settings";
 import type { GenerationHost } from "./generation";
 import type { SemanticDiagramType } from "./reportTypes";
 import type { AiDoneEvent, AiErrorEvent, AiOutputEvent } from "../aiInvoke";
+import { renderEngineCandidate, validateEngineCandidate } from "./engine";
 
 declare global {
   interface Window {
@@ -138,19 +137,16 @@ export function createGenerationHost(options: GenerationHostOptions): DiagramGen
   const validateCandidate = async (
     diagramType: SemanticDiagramType,
     spec: unknown,
-  ): Promise<{ ok: boolean; errors: string[]; warnings: string[]; candidateSha256?: string }> => {
-    if (!options.workPath) {
-      throw new Error("Diagram generation requires an open workspace.");
-    }
-    return archifyValidateCandidate(options.workPath, diagramType, JSON.stringify(spec));
+  ): Promise<Awaited<ReturnType<typeof validateEngineCandidate>>> => {
+    return validateEngineCandidate(diagramType, spec);
   };
 
   return {
     runAgent,
     validateCandidate,
-    renderCandidate: (type, json, context) => {
+    renderCandidate: (type, json, context, renderOptions) => {
       if (!options.workPath) throw new Error("Engine export needs a workspace; open a workspace and retry.");
-      return archifyRenderCandidate(options.workPath, type, json, context);
+      return renderEngineCandidate(options.workPath, type, json, context, renderOptions);
     },
     cancel: () => cancelCurrent?.(),
   };

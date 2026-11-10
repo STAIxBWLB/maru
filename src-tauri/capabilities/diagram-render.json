@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "diagram-render",
+  "description": "Native diagram rendering and verified render history for the main editor",
+  "windows": ["main"],
+  "permissions": [
+    "maru-diagram:allow-validate",
+    "maru-diagram:allow-render-png",
+    "maru-diagram:allow-render-svg",
+    "maru-diagram:allow-render-and-store",
+    "maru-diagram:allow-diagram-list-renders",
+    "maru-diagram:allow-diagram-prepare-render-view",
+    "maru-diagram:allow-diagram-delete-render"
+  ]
+}

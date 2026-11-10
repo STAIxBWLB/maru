@@ -206,23 +206,28 @@ export interface ScorecardDataset {
 // ---------------------------------------------------------------------------
 
 /**
- * Diagram types whose semantics a semantic dataset can own: the five Archify
+ * Diagram types whose semantics a semantic dataset can own: the five Maru
  * engine types plus Floorplan (`floorplan/architecture@1`, issue #535).
  * Architecture and workflow shipped in issue #433 P1; sequence, dataflow and
  * lifecycle joined in P2. Per-type collections live in the descriptor table
  * in `semantic.ts`.
  */
-export type ArchifyDiagramType = "architecture" | "workflow" | "sequence" | "dataflow" | "lifecycle";
-export type SemanticDiagramType = ArchifyDiagramType | "floorplan";
+export type EngineDiagramType = "architecture" | "workflow" | "sequence" | "dataflow" | "lifecycle";
+/** Legacy source-format alias retained while existing datasets migrate forward. */
+export type ArchifyDiagramType = EngineDiagramType;
+export type SemanticDiagramType = EngineDiagramType | "floorplan";
 
-/** The types the pinned Archify engine validates and renders. */
-export const ARCHIFY_DIAGRAM_TYPES: readonly ArchifyDiagramType[] = [
+/** The five semantic diagram families supported by the Maru geometry engine. */
+export const ENGINE_DIAGRAM_TYPES: readonly EngineDiagramType[] = [
   "architecture",
   "workflow",
   "sequence",
   "dataflow",
   "lifecycle",
 ];
+
+/** Legacy import-format name; new product engine code should use ENGINE_DIAGRAM_TYPES. */
+export const ARCHIFY_DIAGRAM_TYPES = ENGINE_DIAGRAM_TYPES;
 
 export const SEMANTIC_DIAGRAM_TYPES: readonly SemanticDiagramType[] = [...ARCHIFY_DIAGRAM_TYPES, "floorplan"];
 
@@ -232,9 +237,9 @@ export function isArchifyDiagramType(type: string): type is ArchifyDiagramType {
 
 /** The engine (or schema owner) a semantic spec round-trips through. */
 export interface SemanticEngineRef {
-  /** `archify` for the five Archify types, `floorplan` for floorplan specs. */
-  name: "archify" | "floorplan";
-  /** Pinned engine version (see `sidecars/archify/PIN.json`), or the Floorplan schema release. */
+  /** Legacy datasets retain `archify`; new engine-generated datasets use `maru-diagram-engine`. */
+  name: "archify" | "maru-diagram-engine" | "floorplan";
+  /** Source engine or schema-owner version; old Archify values remain valid on read. */
   version: string;
 }
 
@@ -250,11 +255,11 @@ export interface SemanticProvenance {
 
 /**
  * A typed semantic dataset: the canonical, editable meaning of a generated
- * diagram. `spec` is the Archify typed JSON (interchange/renderer input);
+ * diagram. `spec` is engine-typed JSON (interchange/render input);
  * canvas members are a projection owned by the bound pattern view, never a
- * second semantic source. `idMap` is the reversible Archify-safe-id → Maru-id
- * mapping the codec owns (Archify ids forbid `:` and leading digits; Maru
- * member ids like `ds:m0` do not). Fields the pinned engine cannot represent
+ * second semantic source. `idMap` is the reversible source-id → Maru-id
+ * mapping the codec owns (engine ids forbid `:` and leading digits; Maru
+ * member ids like `ds:m0` do not). Fields the selected engine cannot represent
  * are kept verbatim in `preservedExtensions` and reported as fidelity
  * diagnostics — they are never silently stripped, and never re-emitted into
  * the spec as if the engine supported them.
@@ -620,9 +625,9 @@ export function isSemanticSpecDataset(dataset: ReportDataset): dataset is Semant
 
 /**
  * Structural validation of a semantic dataset: known diagram type, object
- * spec, engine identity, unique id-map values, and payload budgets. The
- * authoritative schema check of `spec` itself is the pinned engine's — this
- * is the always-available structural floor.
+ * spec, supported engine identity, unique id-map values, and payload budgets.
+ * The authoritative family-schema check of `spec` is the async SDK engine's
+ * responsibility; this remains the always-available structural floor.
  */
 export function validateSemanticSpec(dataset: SemanticSpecDataset): MatrixValidationResult {
   const errors: string[] = [];
@@ -632,8 +637,10 @@ export function validateSemanticSpec(dataset: SemanticSpecDataset): MatrixValida
   if (!dataset.spec || typeof dataset.spec !== "object" || Array.isArray(dataset.spec)) {
     errors.push("spec must be an object");
   }
-  const expectedEngine = dataset.diagramType === "floorplan" ? "floorplan" : "archify";
-  if (dataset.engine?.name !== expectedEngine) {
+  const acceptedEngines = dataset.diagramType === "floorplan"
+    ? ["floorplan"]
+    : ["archify", "maru-diagram-engine"];
+  if (!acceptedEngines.includes(dataset.engine?.name)) {
     errors.push(`unknown engine: ${String(dataset.engine?.name)}`);
   } else if (typeof dataset.engine.version !== "string" || dataset.engine.version.length === 0) {
     errors.push("engine.version missing");

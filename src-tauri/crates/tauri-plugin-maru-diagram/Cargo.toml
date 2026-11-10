@@ -11,6 +11,7 @@ build = "build.rs"
 [features]
 default = []
 png = ["maru-diagram-engine/render-png"]
+render-store = ["maru-diagram-engine/render-png"]
 
 [dependencies]
 maru-diagram-engine = { path = "../maru-diagram-engine" }

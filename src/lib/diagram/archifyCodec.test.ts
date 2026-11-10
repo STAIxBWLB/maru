@@ -13,6 +13,7 @@ import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { codecForFilename, getCodec } from "./codecs";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import { ARCHIFY_DIAGRAM_TYPES as SEMANTIC_DIAGRAM_TYPES, validateSemanticSpec, type SemanticDiagramType } from "./reportTypes";
+import { createEmptyDoc } from "./types";
 import { SEMANTIC_TYPES, mintRelationIds, sequenceOrder, validateSemanticContent } from "./semantic";
 
 const ARCH_SPEC = {
@@ -54,6 +55,17 @@ describe("archifySpecToDataset", () => {
     expect(dataset.preservedExtensions).toBeUndefined();
     expect(diagnostics).toEqual([{ key: "diagram.archify.relationIdsAssigned", params: { count: 1 } }]);
     expect(validateSemanticSpec(dataset).ok).toBe(true);
+  });
+
+  it("accepts legacy Archify and current Maru engine identities on semantic datasets", () => {
+    const legacy = archifySpecToDataset("architecture", ARCH_SPEC).dataset;
+    const engine = {
+      ...legacy,
+      engine: { name: "maru-diagram-engine" as const, version: "0.1.0" },
+    };
+    expect(validateSemanticSpec(legacy).ok).toBe(true);
+    expect(validateSemanticSpec(engine).ok).toBe(true);
+    expect(engine.spec).toEqual(legacy.spec);
   });
 
   it("preserves unsupported top-level fields verbatim with a fidelity diagnostic", () => {
@@ -102,15 +114,29 @@ describe("parseArchifySpec", () => {
     ]);
   });
 
-  it("rejects unsupported schema versions and missing or malformed components", () => {
+  it("rejects unsupported versions and missing required collections at preflight", () => {
     for (const spec of [
       { ...ARCH_SPEC, schema_version: 2 },
       { ...ARCH_SPEC, components: undefined },
-      { ...ARCH_SPEC, components: [{ id: "web" }] },
     ]) expect(parseArchifySpec(JSON.stringify(spec)).ok).toBe(false);
     expect(parseArchifySpec(JSON.stringify({
       ...ARCH_SPEC, meta: { title: "Shop", output: "docs/SHOP.HTML" },
     })).ok).toBe(true);
+  });
+
+  it("preserves malformed family fields losslessly for async SDK diagnostics", () => {
+    const malformed = { ...ARCH_SPEC, components: [{ id: "web" }] };
+    const parsed = parseArchifySpec(JSON.stringify(malformed));
+    if (!parsed.ok) throw new Error("expected the synchronous codec to preserve an unvalidated family payload");
+    expect(parsed.result.dataset.spec.components).toEqual(malformed.components);
+
+    const doc = createEmptyDoc("malformed-family", 1);
+    doc.datasets = [parsed.result.dataset];
+    const serialized = serializeDoc(doc);
+    const roundTripped = deserializeDoc(serialized);
+    expect(roundTripped.datasets?.[0]?.kind).toBe("semanticSpec");
+    expect((roundTripped.datasets?.[0] as { spec: Record<string, unknown> }).spec.components)
+      .toEqual(malformed.components);
   });
 
   it("refuses unknown diagram types, broken meta, and invalid JSON", () => {

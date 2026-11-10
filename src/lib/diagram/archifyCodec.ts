@@ -28,9 +28,9 @@ import {
   type SemanticSpecDataset,
 } from "./reportTypes";
 import { SEMANTIC_TYPES, collectSemanticIds, mintRelationIds, validateSemanticContent } from "./semantic";
-import { validateArchifySpecPreCheck, type ValidationDiagnostic } from "./validation";
+import { validateEngineSpecPreCheck, type ValidationDiagnostic } from "./validation";
 
-/** Pinned engine identity; the tree hash lives in `sidecars/archify/PIN.json`. */
+/** Legacy identity preserved on imported Archify interchange datasets. */
 export const ARCHIFY_ENGINE = { name: "archify", version: "3.0.0" } as const;
 
 export const ARCHIFY_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
@@ -98,8 +98,8 @@ export interface SpecToDatasetOptions {
 }
 
 /**
- * Wrap a validated Archify spec in a semantic dataset. The id map starts as
- * the identity over the spec's own ids (already Archify-safe); canvas
+ * Wrap a shape-prechecked engine interchange spec in a semantic dataset. The
+ * id map starts as the identity over the spec's own ids (already interchange-safe); canvas
  * projection rewrites the values to Maru member ids. Top-level fields the
  * schema does not define are moved to `preservedExtensions` and reported, and
  * id-less relations get minted ids (reported once per ingest).
@@ -173,11 +173,10 @@ export type ArchifyParseOutcome =
   | { ok: false; diagnostics: ValidationDiagnostic[] };
 
 /**
- * Parse Archify typed JSON into a semantic dataset. Unlike the tolerant
- * document migrator, a structural failure (unknown diagram type, broken meta
- * contract, oversized payload) or a content failure (schema, dangling
- * references, self-messages, duplicate ids) refuses the import with
- * diagnostics — an AI or file candidate is never coerced.
+ * Parse engine interchange JSON into a semantic dataset. Unlike the tolerant
+ * document migrator, a cheap envelope/meta failure or a safe reference/id
+ * failure refuses the import with diagnostics. Full family-schema and geometry
+ * admission are asynchronous SDK engine gates at generation, apply and export.
  */
 export function parseArchifySpec(
   text: string,
@@ -198,7 +197,7 @@ export function parseArchifySpec(
     };
   }
   const diagramType = isRecord(raw) && typeof raw.diagram_type === "string" ? raw.diagram_type : "";
-  const pre = validateArchifySpecPreCheck(diagramType, raw);
+  const pre = validateEngineSpecPreCheck(diagramType, raw);
   if (!pre.ok) return { ok: false, diagnostics: pre.diagnostics };
   if (!isRecord(raw)) {
     // Unreachable after the pre-check, kept for the type system.

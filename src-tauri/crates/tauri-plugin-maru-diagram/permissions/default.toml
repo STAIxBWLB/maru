@@ -3,3 +3,12 @@
 [default]
 description = ""
 permissions = ["allow-validate"]
+
+[render-store]
+description = "List, view, delete, and store verified diagram renders"
+permissions = [
+  "allow-diagram-list-renders",
+  "allow-diagram-prepare-render-view",
+  "allow-diagram-delete-render",
+  "allow-render-and-store",
+]

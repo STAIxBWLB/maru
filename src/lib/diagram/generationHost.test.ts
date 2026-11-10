@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // a real subprocess, mirroring aiInvoke.test.ts.
 const startAgentCliInvocation = vi.fn(async (..._args: unknown[]) => "inv-1");
 const stopAiMission = vi.fn(async (_invocationId: string) => ({}));
-const archifyValidateCandidate = vi.fn(async (_workspace: string, _diagramType: string, _candidateJson: string) => ({
+const validateEngineCandidate = vi.fn(async (_diagramType: string, _spec: unknown) => ({
   ok: true,
   errors: [] as string[],
   warnings: [] as string[],
@@ -16,10 +16,11 @@ vi.mock("../api", () => ({
   stopAiMission: (invocationId: string) => stopAiMission(invocationId),
 }));
 
-vi.mock("../archify", () => ({
-  archifyValidateCandidate: (workspace: string, diagramType: string, candidateJson: string) =>
-    archifyValidateCandidate(workspace, diagramType, candidateJson),
+vi.mock("./engine", () => ({
+  validateEngineCandidate: (diagramType: string, spec: unknown) => validateEngineCandidate(diagramType, spec),
+  renderEngineCandidate: vi.fn(),
 }));
+vi.mock("./engineCandidate", () => ({ renderEngineCandidate: vi.fn() }));
 
 const handlers = new Map<string, (evt: { payload: unknown }) => void>();
 vi.mock("@tauri-apps/api/event", () => ({
@@ -40,7 +41,7 @@ describe("createGenerationHost", () => {
     startAgentCliInvocation.mockReset();
     startAgentCliInvocation.mockResolvedValue("inv-1");
     stopAiMission.mockClear();
-    archifyValidateCandidate.mockClear();
+    validateEngineCandidate.mockClear();
     handlers.clear();
     (globalThis as { window?: unknown }).window = {
       __TAURI_INTERNALS__: {},
@@ -146,21 +147,18 @@ describe("createGenerationHost", () => {
     await expect(host.runAgent("PROMPT")).rejects.toThrow(/Tauri shell/);
   });
 
-  it("validateCandidate forwards the spec as JSON to the engine wrapper", async () => {
+  it("validateCandidate forwards the source spec to SDK validation", async () => {
     const host = createGenerationHost({ workPath: "/tmp/work" });
-    const spec = { schema_version: 1, components: [] };
+    const spec = { schema_version: 1, diagram_type: "architecture", components: [] };
     const receipt = await host.validateCandidate("architecture", spec);
-    expect(archifyValidateCandidate).toHaveBeenCalledWith(
-      "/tmp/work",
-      "architecture",
-      JSON.stringify(spec),
-    );
+    expect(validateEngineCandidate).toHaveBeenCalledWith("architecture", spec);
     expect(receipt.ok).toBe(true);
   });
 
-  it("validateCandidate requires a workspace", async () => {
+  it("keeps validation available without a workspace while render requires one", async () => {
     const host = createGenerationHost({ workPath: null });
-    await expect(host.validateCandidate("architecture", {})).rejects.toThrow(/workspace/);
-    expect(archifyValidateCandidate).not.toHaveBeenCalled();
+    await expect(host.validateCandidate("architecture", {})).resolves.toMatchObject({ ok: true });
+    expect(validateEngineCandidate).toHaveBeenCalledTimes(1);
+    await expect(host.renderCandidate?.("architecture", "{}")).rejects.toThrow(/workspace/);
   });
 });

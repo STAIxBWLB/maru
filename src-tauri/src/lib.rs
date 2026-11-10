@@ -4,6 +4,7 @@ mod agents;
 mod ai_router;
 mod app_menu;
 mod approval;
+#[cfg(test)]
 mod archify;
 mod artifact_checks;
 mod atomic_file;
@@ -242,14 +243,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(site_view::external_link_plugin());
-    // Behind the default-off `native-e2e` feature so this plugin, and the
-    // in-app WebDriver server it starts, never compile into a build a
-    // user can install (D-10, T-06-01). Placed after tauri_plugin_updater
-    // so the shipped plugin order is unchanged when the feature is off.
+    // Keep the in-app WebDriver server behind the default-off `native-e2e`
+    // feature so it never compiles into a build a user can install (D-10,
+    // T-06-01). It remains after tauri_plugin_updater for test builds.
     #[cfg(feature = "native-e2e")]
-    let builder = builder
-        .plugin(tauri_plugin_wdio_webdriver::init())
-        .plugin(diagram_engine_e0::plugin());
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     builder
         .menu(app_menu::build_app_menu)
         .on_menu_event(app_menu::handle_menu_event)
@@ -269,6 +267,7 @@ pub fn run() {
         .manage(BrowserPasskeyState::default())
         .manage(SiteOpenedUrlState::default())
         .setup(|app| {
+            app.plugin(diagram::engine_host::plugin(app.handle().clone()))?;
             #[cfg(feature = "native-e2e")]
             diagram_engine_e0::allow_measurement(app)?;
             #[cfg(all(feature = "native-e2e", target_os = "macos"))]
@@ -324,8 +323,6 @@ pub fn run() {
             git::ipc::git_changes,
             git::ipc::git_diff,
             git::ipc::list_workspace_submodules,
-            archify::ipc::archify_validate_candidate,
-            archify::ipc::archify_render_candidate,
             file_manager::ipc::open_in_file_manager,
             file_manager::ipc::reveal_in_file_manager,
             inbox::ipc::scan_inbox_drop,
@@ -658,9 +655,6 @@ pub fn run() {
             diagram_save_document,
             diagram_load_document,
             diagram_list_documents,
-            diagram::renders::ipc::diagram_list_renders,
-            diagram::renders::ipc::diagram_prepare_render_view,
-            diagram::renders::ipc::diagram_delete_render,
             diagram_delete_document,
             diagram_export_blob,
             diagram_export_blob_to_path,

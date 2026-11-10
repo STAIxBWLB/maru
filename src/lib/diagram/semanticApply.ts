@@ -17,8 +17,8 @@ export async function validateSemanticDraft(
   for (const id of new Set(datasetIds)) {
     const dataset = semanticDatasetsOf(draft).find((item) => item.id === id);
     if (!dataset) return [{ key: "diagram.semantic.editStale" }];
-    // Floorplan has no pinned engine yet (#536): its gate is local validation
-    // only. Every Archify type keeps the pinned-engine gate below.
+    // Floorplan keeps its local validation path; all engine-backed families
+    // use the asynchronous SDK schema and geometry gate below.
     if (dataset.diagramType === "floorplan") {
       const local = validateSemanticContent("floorplan", dataset.spec);
       if (local.length > 0) return local;

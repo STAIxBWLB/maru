@@ -1,6 +1,15 @@
 /** Independent engine measurement facade. Product apply/render paths do not import this. */
 import type { ValidationReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 export type { ValidationReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type {
+  Diagnostic,
+  EngineReceipt,
+  GeometryReport,
+  LayoutRequest,
+} from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type { EngineArtifactReport, EngineArtifactRequest } from "./engineArtifact";
+import type { SemanticDiagramType } from "./reportTypes";
+import type { ValidationDiagnostic } from "./validation";
 export interface DiagramEngine {
   readonly transport: "ipc" | "wasm";
   validate(input: string): Promise<ValidationReport>;
@@ -12,6 +21,9 @@ function checkedReport(value: unknown): ValidationReport {
     throw new Error("E0 engine returned an incompatible report; regenerate the Rust bindings and rebuild the spike.");
   }
   return value as ValidationReport;
+}
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 export function createIpcEngine(): DiagramEngine {
   return { transport: "ipc", async validate(input) {
@@ -36,7 +48,269 @@ export async function loadGeometryFoundation() {
   return (await import("./engineGeometry")).loadGeometryFoundation();
 }
 
-/** Explicit test-only geometry loading; product apply/canvas does not call it. */
+/** Lazy E2 geometry loader; its canvas/SVG preview helpers remain test-gated. */
 export async function loadGeometryEngine() {
   return (await import("./engineGeometry")).loadGeometryEngine();
+}
+
+export interface EngineCandidateValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  candidateSha256?: string;
+  diagnostics: Diagnostic[];
+  receipt?: EngineReceipt;
+}
+
+export interface EngineRenderContext {
+  docId: string;
+  documentName: string;
+  documentRevision: string;
+  diagramType: string;
+  datasetId?: string | null;
+}
+
+export type EngineRenderedCandidate = EngineArtifactReport & { storeWarning?: string | null };
+
+export interface EngineRenderOptions {
+  format?: "svg" | "png";
+  theme?: "light" | "dark";
+  pixelRatio?: number;
+}
+
+export type EngineRenderHost = (
+  diagramType: string,
+  candidateJson: string,
+  context?: EngineRenderContext,
+  options?: EngineRenderOptions,
+) => Promise<EngineRenderedCandidate>;
+
+export interface ProductDiagramEngine {
+  readonly transport: "wasm";
+  validate(input: string): Promise<ValidationReport>;
+  layout(request: LayoutRequest): Promise<GeometryReport>;
+  render(request: EngineArtifactRequest): Promise<EngineArtifactReport>;
+  validateCandidate(diagramType: string, spec: unknown): Promise<EngineCandidateValidation>;
+}
+
+export interface ProductDiagramEnginePorts {
+  validate(input: string): Promise<ValidationReport>;
+  layout(request: LayoutRequest): GeometryReport | Promise<GeometryReport>;
+  render(request: EngineArtifactRequest): Promise<EngineArtifactReport>;
+}
+
+function diagnosticText(diagnostic: Diagnostic): string {
+  return [diagnostic.message.trim(), diagnostic.fix.trim(), `(engine ${diagnostic.code} at ${diagnostic.path})`]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function preflightDiagnosticText(diagnostic: ValidationDiagnostic): string {
+  return diagnostic.params
+    ? `${diagnostic.key} (${Object.entries(diagnostic.params).map(([key, value]) => `${key}: ${value}`).join(", ")})`
+    : diagnostic.key;
+}
+
+const NONBLOCKING_ROUTE_NOTICE_CODES = new Set([
+  "architecture/geometry-route-quality-notice",
+  "workflow/geometry-route-quality-notice",
+  "sequence/geometry-route-quality-notice",
+  "dataflow/geometry-route-quality-notice",
+  "lifecycle/geometry-route-quality-notice",
+]);
+function isRouteNotice(diagnostic: Diagnostic): boolean {
+  return NONBLOCKING_ROUTE_NOTICE_CODES.has(diagnostic.code);
+}
+
+async function sourceSha256(specJson: string): Promise<string> {
+  const bytes = new TextEncoder().encode(specJson);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(bytes).buffer);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function checkReceiptSource(receipt: EngineReceipt, expectedSha: string): void {
+  if (!receipt || typeof receipt.inputSpecSha256 !== "string" || !record(receipt.engine)
+      || typeof receipt.engine.id !== "string" || typeof receipt.engine.version !== "string"
+      || typeof receipt.engine.revision !== "string") {
+    throw new Error("The engine returned an incomplete receipt; update Maru and retry validation.");
+  }
+  if (receipt.inputSpecSha256 !== expectedSha) {
+    throw new Error("The engine receipt does not match the submitted semantic spec; retry validation with the unchanged source.");
+  }
+  if (receipt.engine.id !== "maru-diagram-engine" || !receipt.engine.version || !receipt.engine.revision) {
+    throw new Error("The engine receipt has an unsupported engine identity; update Maru and retry.");
+  }
+}
+
+function candidateFailure(
+  message: string,
+  candidateSha256?: string,
+): EngineCandidateValidation {
+  return {
+    ok: false,
+    errors: [message],
+    warnings: [],
+    ...(candidateSha256 ? { candidateSha256 } : {}),
+    diagnostics: [],
+  };
+}
+
+async function validateEngineCandidateWithPorts(
+  ports: ProductDiagramEnginePorts,
+  diagramType: string,
+  spec: unknown,
+): Promise<EngineCandidateValidation> {
+  let specJson: string;
+  try {
+    specJson = typeof spec === "string" ? spec : JSON.stringify(spec) ?? "";
+  } catch (error) {
+    return candidateFailure(`The semantic spec cannot be serialized: ${error instanceof Error ? error.message : String(error)}.`);
+  }
+  if (!specJson.trim()) return candidateFailure("The semantic spec is empty; provide a valid diagram and retry.");
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(specJson) as unknown;
+  } catch (error) {
+    return candidateFailure(`The semantic spec is not valid JSON: ${error instanceof Error ? error.message : String(error)}.`);
+  }
+  if (!record(parsed) || parsed.diagram_type !== diagramType) {
+    return candidateFailure(
+      `The semantic spec type does not match the selected ${diagramType} dataset; select the matching dataset and retry.`,
+      await sourceSha256(specJson),
+    );
+  }
+
+  const candidateSha256 = await sourceSha256(specJson);
+  const { validateSemanticContentShape } = await import("./semantic");
+  const preflight = validateSemanticContentShape(diagramType as SemanticDiagramType, parsed);
+  if (preflight.length > 0) {
+    return {
+      ok: false,
+      errors: preflight.map(preflightDiagnosticText),
+      warnings: [],
+      candidateSha256,
+      diagnostics: [],
+    };
+  }
+
+  const validation = await ports.validate(specJson);
+  checkReceiptSource(validation.receipt, candidateSha256);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      errors: validation.diagnostics.map(diagnosticText),
+      warnings: [],
+      candidateSha256,
+      diagnostics: validation.diagnostics,
+      receipt: validation.receipt,
+    };
+  }
+
+  const layout = await ports.layout({ specJson });
+  checkReceiptSource(layout.receipt, candidateSha256);
+  const warnings = layout.ok ? layout.diagnostics.map(diagnosticText) : [];
+  const errors = layout.ok
+    ? []
+    : layout.diagnostics.filter((diagnostic) => !isRouteNotice(diagnostic)).map(diagnosticText);
+  if (!layout.ok && errors.length === 0) {
+    errors.push("The geometry engine refused this layout; inspect its diagnostics and repair the source before applying it.");
+  }
+  return {
+    ok: layout.ok,
+    errors,
+    warnings,
+    candidateSha256,
+    diagnostics: [...validation.diagnostics, ...layout.diagnostics],
+    receipt: layout.receipt,
+  };
+}
+
+/** Testable product-engine factory; ports are per-instance, never process-global overrides. */
+export function createProductDiagramEngine(ports: ProductDiagramEnginePorts): ProductDiagramEngine {
+  return {
+    transport: "wasm",
+    validate: (input) => ports.validate(input),
+    async layout(request) {
+      return ports.layout(request);
+    },
+    render: (request) => ports.render(request),
+    validateCandidate: (diagramType, spec) => validateEngineCandidateWithPorts(ports, diagramType, spec),
+  };
+}
+
+type ProductGeometryEngine = Awaited<ReturnType<typeof loadGeometryEngine>>;
+let productDiagramEngine: ProductDiagramEngine | undefined;
+let productValidationEngine: Promise<DiagramEngine> | undefined;
+let productGeometryEngine: Promise<ProductGeometryEngine> | undefined;
+
+async function loadProductValidationEngine(): Promise<DiagramEngine> {
+  productValidationEngine ??= loadWasmEngine().catch((error) => {
+    productValidationEngine = undefined;
+    throw error;
+  });
+  return productValidationEngine;
+}
+
+async function loadProductGeometryEngine(): Promise<ProductGeometryEngine> {
+  productGeometryEngine ??= loadGeometryEngine().catch((error) => {
+    productGeometryEngine = undefined;
+    throw error;
+  });
+  return productGeometryEngine;
+}
+
+/** Cache the facade; each method lazily loads only the SDK artifact it needs. */
+export function loadDiagramEngine(): Promise<ProductDiagramEngine> {
+  productDiagramEngine ??= createProductDiagramEngine({
+    async validate(input) {
+      return (await loadProductValidationEngine()).validate(input);
+    },
+    async layout(request) {
+      return (await loadProductGeometryEngine()).layout(request);
+    },
+    async render(request) {
+      const { renderEngineArtifact } = await import("./engineArtifact");
+      return renderEngineArtifact(request);
+    },
+  });
+  return Promise.resolve(productDiagramEngine);
+}
+
+/** Product facade wrappers keep callers independent of the WASM loader details. */
+export async function validate(input: string): Promise<ValidationReport> {
+  return (await loadDiagramEngine()).validate(input);
+}
+
+export async function layout(request: LayoutRequest): Promise<GeometryReport> {
+  return (await loadDiagramEngine()).layout(request);
+}
+
+/** SVG export defaults to outlined text; previews must request purpose=preview explicitly. */
+export async function render(request: EngineArtifactRequest): Promise<EngineArtifactReport> {
+  return (await loadDiagramEngine()).render({ ...request, purpose: request.purpose ?? "export" });
+}
+
+/** Native render-and-store boundary; loaded dynamically to keep this module safe for E0 data-URL consumers. */
+export async function renderEngineCandidate(
+  workspace: string,
+  diagramType: string,
+  candidateJson: string,
+  context?: EngineRenderContext,
+  options?: EngineRenderOptions,
+): Promise<EngineRenderedCandidate> {
+  const { renderEngineCandidate: renderCandidate } = await import("./engineCandidate");
+  return renderCandidate(workspace, diagramType, candidateJson, context, options);
+}
+
+export async function validateEngineCandidate(
+  diagramType: string,
+  spec: unknown,
+): Promise<EngineCandidateValidation> {
+  return (await loadDiagramEngine()).validateCandidate(diagramType, spec);
+}
+
+/** Verify renderer provenance and bytes at caller-injected export boundaries too. */
+export async function verifyRenderedArtifact(request: EngineArtifactRequest, report: unknown): Promise<EngineArtifactReport> {
+  return (await import("./engineArtifact")).verifyEngineArtifactReport(request, report);
 }

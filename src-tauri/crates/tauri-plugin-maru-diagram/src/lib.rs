@@ -11,6 +11,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{plugin::TauriPlugin, Manager, Runtime};
 
+#[cfg(feature = "render-store")]
+pub mod render_store;
+#[cfg(feature = "render-store")]
+pub use render_store::{
+    DiagramRenderReceipt, LegacyArchifyEnginePin, LegacyArchifyReceipt,
+    RenderAndStoreReport, RenderDocumentContext, RenderEntry, RenderGate, RenderGates,
+    RenderGroup, RenderView, RenderStoreHost, StoredRender, StoredRenderReceipt,
+};
+
 pub const PLUGIN_NAME: &str = "maru-diagram";
 pub const API_VERSION: u32 = 1;
 pub const MAX_SOURCE_DEPTH: u8 = 16;
@@ -44,7 +53,6 @@ pub struct IpcError {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[cfg(feature = "png")]
 impl IpcError {
     fn new(
         code: impl Into<String>,
@@ -331,7 +339,8 @@ impl DiagramSources for FixtureSources {
 pub struct PluginState {
     pub host: Arc<dyn DiagramHost>,
     pub sources: Arc<dyn DiagramSources>,
-    #[cfg(feature = "png")]
+    #[cfg(feature = "render-store")]
+    render_store: Option<Arc<dyn RenderStoreHost>>,
     rendering: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(all(feature = "png", test))]
     worker_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
@@ -340,29 +349,58 @@ pub struct PluginState {
 pub struct Builder {
     host: Arc<dyn DiagramHost>,
     sources: Arc<dyn DiagramSources>,
+    #[cfg(feature = "render-store")]
+    render_store: Option<Arc<dyn RenderStoreHost>>,
 }
 
 impl Builder {
     pub fn new(host: Arc<dyn DiagramHost>, sources: Arc<dyn DiagramSources>) -> Self {
-        Self { host, sources }
+        Self {
+            host,
+            sources,
+            #[cfg(feature = "render-store")]
+            render_store: None,
+        }
+    }
+
+    #[cfg(feature = "render-store")]
+    pub fn with_render_store(mut self, render_store: Arc<dyn RenderStoreHost>) -> Self {
+        self.render_store = Some(render_store);
+        self
     }
 
     pub fn build<R: Runtime>(self) -> TauriPlugin<R> {
         let state = PluginState {
             host: self.host,
             sources: self.sources,
-            #[cfg(feature = "png")]
+            #[cfg(feature = "render-store")]
+            render_store: self.render_store,
             rendering: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(all(feature = "png", test))]
             worker_thread: Arc::new(std::sync::Mutex::new(None)),
         };
         let builder = tauri::plugin::Builder::new(PLUGIN_NAME);
-        #[cfg(feature = "png")]
+        #[cfg(all(feature = "png", feature = "render-store"))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
-            commands::render_png
+            commands::render_png,
+            commands::diagram_list_renders,
+            commands::diagram_prepare_render_view,
+            commands::diagram_delete_render,
+            commands::render_and_store
         ]);
-        #[cfg(not(feature = "png"))]
+        #[cfg(all(feature = "render-store", not(feature = "png")))]
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::diagram_list_renders,
+            commands::diagram_prepare_render_view,
+            commands::diagram_delete_render,
+            commands::render_and_store
+        ]);
+        #[cfg(all(feature = "png", not(feature = "render-store")))]
+        let builder =
+            builder.invoke_handler(tauri::generate_handler![commands::validate, commands::render_png]);
+        #[cfg(not(any(feature = "png", feature = "render-store")))]
         let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
         builder
             .setup(move |app, _api| {
@@ -380,16 +418,179 @@ pub fn init<R: Runtime>(
     Builder::new(host, sources).build()
 }
 
+struct RenderPermit(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for RenderPermit {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+fn acquire_render_permit(
+    flag: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<RenderPermit, IpcError> {
+    if flag
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_err()
+    {
+        return Err(IpcError::new(
+            "diagram_export_busy",
+            "a diagram render is already running",
+            "wait for the current render to finish and retry",
+            Vec::new(),
+        ));
+    }
+    Ok(RenderPermit(Arc::clone(flag)))
+}
+
 mod commands {
     use super::*;
 
-    #[cfg(feature = "png")]
-    struct RenderPermit(Arc<std::sync::atomic::AtomicBool>);
-    #[cfg(feature = "png")]
-    impl Drop for RenderPermit {
-        fn drop(&mut self) {
-            self.0.store(false, std::sync::atomic::Ordering::Release);
+    #[cfg(feature = "render-store")]
+    fn store_host(state: &PluginState) -> Result<Arc<dyn RenderStoreHost>, IpcError> {
+        state.render_store.clone().ok_or_else(|| {
+            IpcError::new(
+                "diagram_render_store_unavailable",
+                "the host has not configured diagram render storage",
+                "rebuild Maru with its workspace render-store adapter and retry",
+                Vec::new(),
+            )
+        })
+    }
+
+    #[cfg(feature = "render-store")]
+    fn map_host_error(error: HostError) -> IpcError {
+        IpcError::new(error.code, error.message, error.next_step, Vec::new())
+    }
+
+    #[cfg(feature = "render-store")]
+    #[tauri::command]
+    pub async fn diagram_list_renders(
+        state: tauri::State<'_, PluginState>,
+        workspace: String,
+    ) -> Result<Vec<RenderGroup>, IpcError> {
+        let host = store_host(&state)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            host.list_renders(&workspace).map_err(map_host_error)
+        })
+        .await
+        .map_err(|cause| {
+            IpcError::new(
+                "diagram_list_renders_worker_failed",
+                format!("render listing worker failed: {cause}"),
+                "refresh the render list; if it repeats, restart Maru and retry",
+                Vec::new(),
+            )
+        })?
+    }
+
+    #[cfg(feature = "render-store")]
+    #[tauri::command]
+    pub async fn diagram_prepare_render_view(
+        state: tauri::State<'_, PluginState>,
+        workspace: String,
+        doc_id: String,
+        render_id: String,
+    ) -> Result<RenderView, IpcError> {
+        let host = store_host(&state)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            host.prepare_render_view(&workspace, &doc_id, &render_id)
+                .map_err(map_host_error)
+        })
+        .await
+        .map_err(|cause| {
+            IpcError::new(
+                "diagram_prepare_render_view_worker_failed",
+                format!("render verification worker failed: {cause}"),
+                "refresh the render and retry",
+                Vec::new(),
+            )
+        })?
+    }
+
+    #[cfg(feature = "render-store")]
+    #[tauri::command]
+    pub async fn diagram_delete_render(
+        state: tauri::State<'_, PluginState>,
+        workspace: String,
+        doc_id: String,
+        render_id: String,
+    ) -> Result<(), IpcError> {
+        let host = store_host(&state)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            host.delete_render(&workspace, &doc_id, &render_id)
+                .map_err(map_host_error)
+        })
+        .await
+        .map_err(|cause| {
+            IpcError::new(
+                "diagram_delete_render_worker_failed",
+                format!("render deletion worker failed: {cause}"),
+                "refresh the render list and retry",
+                Vec::new(),
+            )
+        })?
+    }
+
+    #[cfg(feature = "render-store")]
+    #[tauri::command]
+    pub async fn render_and_store(
+        state: tauri::State<'_, PluginState>,
+        workspace: String,
+        input: String,
+        context: Option<RenderDocumentContext>,
+    ) -> Result<RenderAndStoreReport, IpcError> {
+        if input.len() > maru_diagram_engine::render::MAX_SVG_BYTES {
+            let diagnostic = Diagnostic {
+                code: "diagram_export_size_invalid".into(),
+                path: "/".into(),
+                rule: "render-v1/request-size".into(),
+                message: "render request exceeds 16 MiB".into(),
+                fix: "reduce the source scene and retry".into(),
+            };
+            return Err(IpcError::from_diagnostics(vec![diagnostic]));
         }
+        let worker_input = render_store::prepare_render_store_request(&input)?;
+
+        let permit = acquire_render_permit(&state.rendering)?;
+        let host = state.render_store.clone();
+        let source_request_json = worker_input.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            let report = maru_diagram_engine::render::render_artifact_json(&worker_input);
+            if !report.ok {
+                return Err(IpcError::from_diagnostics(report.diagnostics));
+            }
+            let store_warning = if let Some(context) = context {
+                match host {
+                    Some(host) => host
+                        .store_engine_render(&workspace, context, &source_request_json, report.clone())
+                        .err()
+                        .map(|error| format!("Render was generated but not saved: {}; next step: {}", error.message, error.next_step)),
+                    None => Some("Render was generated but not saved: host storage is unavailable; next step: reopen Maru with the workspace render-store adapter enabled".into()),
+                }
+            } else {
+                None
+            };
+            Ok(RenderAndStoreReport {
+                report,
+                store_warning,
+            })
+        })
+        .await
+        .map_err(|cause| {
+            IpcError::new(
+                "diagram_render_store_worker_failed",
+                format!("render-and-store worker failed: {cause}"),
+                "retry the export; if it repeats, restart Maru and retry",
+                Vec::new(),
+            )
+        })?
     }
     #[cfg(feature = "png")]
     #[tauri::command]
@@ -412,24 +613,7 @@ mod commands {
                 vec![diagnostic],
             ));
         }
-        let flag = Arc::clone(&state.rendering);
-        if flag
-            .compare_exchange(
-                false,
-                true,
-                std::sync::atomic::Ordering::AcqRel,
-                std::sync::atomic::Ordering::Acquire,
-            )
-            .is_err()
-        {
-            return Err(IpcError::new(
-                "diagram_export_busy",
-                "a PNG export is already running",
-                "wait for that export to finish and retry",
-                Vec::new(),
-            ));
-        }
-        let permit = RenderPermit(flag);
+        let permit = acquire_render_permit(&state.rendering)?;
         #[cfg(test)]
         let trace = Arc::clone(&state.worker_thread);
         let report = tauri::async_runtime::spawn_blocking(move || {
@@ -466,6 +650,10 @@ mod commands {
             })?
     }
 }
+
+#[cfg(all(test, feature = "render-store"))]
+#[path = "render_store_tests.rs"]
+mod render_store_tests;
 
 #[cfg(test)]
 mod tests {

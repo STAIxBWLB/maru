@@ -19,11 +19,9 @@
  *
  * - The prompt built by {@link buildGenerationPrompt} marks requirements,
  *   Mermaid and source paths as untrusted data, never instructions.
- * - The structural pre-check ({@link validateArchifySpecPreCheck}) runs before
- *   the engine ever sees the spec; a pre-check failure skips the engine call.
- *   Id-less relations are then minted (`mintRelationIds`) and the content is
- *   validated synchronously (`validateSemanticContent`, an early fail), so the
- *   engine validates (and its receipt hashes) the exact spec that is stored.
+ * - Id-less relations are minted (`mintRelationIds`) before the asynchronous
+ *   engine candidate gate, so SDK validation and its receipt hash cover the
+ *   exact spec that is stored. Floorplan keeps its local validation path.
  * - A job with a `target` regenerates an existing dataset: the prompt carries
  *   the current spec (capped, as untrusted data) and the result reuses the
  *   dataset id, so the upsert replaces it instead of appending a second one.
@@ -31,18 +29,19 @@
  *   but a result arriving after `isCancelled()` is discarded either way. Once
  *   settled (ready/failed/cancelled) the job is never mutated again — every
  *   transition returns a new job object.
- * - On success the candidate is wrapped via `archifySpecToDataset` and the
+ * - On success the candidate is wrapped via the compatibility dataset codec and the
  *   proposal is built via `buildProposalFromCandidate` against the captured
  *   base document.
  */
 
 import { archifySpecToDataset } from "./archifyCodec";
+import type { EngineCandidateValidation, EngineRenderHost } from "./engine";
 import { validateSemanticSpec, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
 import { FLOORPLAN_SCHEMA_ID } from "./floorplan";
 import { floorplanPreCheck, floorplanSpecToDataset } from "./floorplanCodec";
 import { mintRelationIds, validateSemanticContent } from "./semantic";
 import { DIAGRAM_SCHEMA_VERSION, createDiagramId, type DiagramDoc } from "./types";
-import { validateArchifySpecPreCheck, type ValidationDiagnostic } from "./validation";
+import type { ValidationDiagnostic } from "./validation";
 import {
   buildProposalFromCandidate,
   type Proposal,
@@ -86,21 +85,25 @@ export interface GenerationJob {
   doc: DiagramDoc;
   candidate?: SemanticSpecDataset;
   proposal?: Proposal;
-  engineReceipt?: { ok: boolean; errors: string[]; warnings: string[]; candidateSha256?: string };
+  engineReceipt?: GenerationCandidateResult;
   diagnostics: ValidationDiagnostic[];
   error?: string;
 }
 
+/** Older injected hosts may omit additive engine evidence; production supplies the full result. */
+export type GenerationCandidateResult = Pick<EngineCandidateValidation, "ok" | "errors" | "warnings">
+  & Partial<Pick<EngineCandidateValidation, "candidateSha256" | "diagnostics" | "receipt">>;
+
 export interface GenerationHost {
-  /** Static export uses the same injected host seam as generation. */
-  renderCandidate?: import("../archify").ArchifyRenderHost;
+  /** Native engine SVG rendering and render-store host operation. */
+  renderCandidate?: EngineRenderHost;
   /** Run the configured agent host; resolves with raw stdout text. Must reject on cancel/timeout. */
   runAgent(promptText: string): Promise<string>;
-  /** Validate via the pinned engine adapter (Rust command). Injected so tests can stub. */
+  /** Validate through the asynchronous SDK schema and geometry gate. */
   validateCandidate(
     diagramType: SemanticDiagramType,
     spec: unknown,
-  ): Promise<{ ok: boolean; errors: string[]; warnings: string[]; candidateSha256?: string }>;
+  ): Promise<GenerationCandidateResult>;
 }
 
 export interface CreateGenerationJobInput {
@@ -248,9 +251,8 @@ const SCHEMA_ESSENTIALS: Record<SemanticDiagramType, string> = {
 };
 
 /**
- * The bounded prompt for the agent host. Asks for exactly one Archify typed
- * JSON object of the job's diagram type, embeds the vendored schema
- * essentials (see `sidecars/archify/schemas/*.schema.json`), states the
+ * The bounded prompt for the agent host. Asks for exactly one typed JSON
+ * object of the job's diagram type, states the schema essentials and
  * output language, and frames all user-supplied content as untrusted data.
  */
 export function buildGenerationPrompt(job: GenerationJob): string {
@@ -271,14 +273,14 @@ export function buildGenerationPrompt(job: GenerationJob): string {
     `OUTPUT LANGUAGE`,
     `Write all human-readable text (labels, summaries, notes) in ${language}.`,
   ] : [
-    `You are generating a diagram specification for the pinned Archify engine (v3.0.0).`,
+    `You are generating a diagram specification for the Maru diagram engine.`,
     ``,
     `TASK`,
-    `Produce exactly one JSON object: an Archify "${job.diagramType}" diagram spec.`,
+    `Produce exactly one JSON object: a "${job.diagramType}" diagram spec accepted by the Maru diagram engine.`,
     `Output the JSON object only. No prose, no comments; a single fenced code block is tolerated.`,
     `Do not wrap the JSON in an envelope and do not emit more than one object.`,
     ``,
-    `SCHEMA ESSENTIALS (from the vendored pinned schema)`,
+    `SCHEMA ESSENTIALS`,
     `- Every "id" matches ${ARCHIFY_ID_RULE} and is unique within the document.`,
     `- Give every relation (connection, edge, message, flow, transition) a unique "id".`,
     SCHEMA_ESSENTIALS[job.diagramType],
@@ -438,12 +440,11 @@ export async function runGenerationJob(
 
   if (current.diagramType === "floorplan") return emit(finishFloorplanJob(current, parsed));
 
-  // Structural pre-check BEFORE the engine sees the spec.
+  // Reject a declared family mismatch before the engine sees the candidate.
   const declaredType =
     typeof (parsed as Record<string, unknown>).diagram_type === "string"
       ? ((parsed as Record<string, unknown>).diagram_type as string)
       : "";
-  const pre = validateArchifySpecPreCheck(declaredType, parsed);
   const mismatch: ValidationDiagnostic[] =
     declaredType !== "" && declaredType !== current.diagramType
       ? [
@@ -453,14 +454,13 @@ export async function runGenerationJob(
           },
         ]
       : [];
-  current = { ...current, diagnostics: [...current.diagnostics, ...pre.diagnostics, ...mismatch] };
-  if (!pre.ok || mismatch.length > 0) {
-    return emit({ ...current, state: "failed" as const, error: "candidate failed the structural pre-check" });
+  current = { ...current, diagnostics: [...current.diagnostics, ...mismatch] };
+  if (mismatch.length > 0) {
+    return emit({ ...current, state: "failed" as const, error: "candidate diagram type does not match the requested family" });
   }
   if (cancelled()) return emit({ ...current, state: "cancelled" as const });
 
-  // Mint relation ids, then the synchronous content floor (early fail); the
-  // engine stays authoritative and sees exactly the spec that is stored.
+  // Mint relation ids before the SDK validates the exact spec that is stored.
   // Minted ids also avoid every id on the base canvas, so a new dataset's
   // relations never collide with another dataset's edges.
   const { spec: minted, minted: mintedCount } = mintRelationIds(
@@ -474,16 +474,6 @@ export async function runGenerationJob(
       diagnostics: [...current.diagnostics, { key: "diagram.archify.relationIdsAssigned", params: { count: mintedCount } }],
     };
   }
-  const content = validateSemanticContent(current.diagramType, minted);
-  if (content.length > 0) {
-    return emit({
-      ...current,
-      state: "failed" as const,
-      diagnostics: [...current.diagnostics, ...content],
-      error: "candidate failed semantic validation",
-    });
-  }
-
   let receipt: GenerationJob["engineReceipt"];
   try {
     receipt = await host.validateCandidate(current.diagramType, minted);
@@ -508,6 +498,10 @@ export async function runGenerationJob(
     ...(current.target ? { id: current.target.datasetId } : {}),
     provenance: { origin: "generated", capturedAt: Date.now() },
   });
+  const engine = receipt.receipt?.engine;
+  if (engine?.id === "maru-diagram-engine" && engine.version) {
+    dataset.engine = { name: engine.id, version: engine.version };
+  }
   const structural = validateSemanticSpec(dataset);
   if (!structural.ok) {
     return emit({
