@@ -22,8 +22,8 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use tauri::Manager;
 pub use tauri_plugin_maru_diagram::render_store::{
-    DiagramRenderReceipt, RenderDocumentContext, RenderEntry, RenderGroup, RenderView, StoredRender,
-    StoredRenderReceipt,
+    DiagramRenderReceipt, RenderDocumentContext, RenderEntry, RenderGroup, RenderView,
+    StoredRender, StoredRenderReceipt,
 };
 #[cfg(test)]
 use tauri_plugin_maru_diagram::render_store::{
@@ -2332,7 +2332,10 @@ mod tests {
             assert_eq!(report.receipt.conversion.as_ref().unwrap().format, format);
             assert_eq!(report.receipt.conversion.as_ref().unwrap().theme, "dark");
             assert_eq!(report.receipt.conversion.as_ref().unwrap().pixel_ratio, 1);
-            assert_eq!(report.receipt.output_mime_type.as_deref(), Some(expected_mime));
+            assert_eq!(
+                report.receipt.output_mime_type.as_deref(),
+                Some(expected_mime)
+            );
             if format == "svg" {
                 assert_eq!(
                     report.text_mode,
@@ -2354,11 +2357,16 @@ mod tests {
             assert_eq!(stored.receipt.document_name, context.document_name);
             assert_eq!(stored.receipt.document_revision, context.document_revision);
             assert_eq!(stored.receipt.diagram_type, "architecture");
-            assert_eq!(stored.receipt.dataset_id.as_deref(), Some("semantic-source-1"));
+            assert_eq!(
+                stored.receipt.dataset_id.as_deref(),
+                Some("semantic-source-1")
+            );
 
             let engine_receipt = match &stored.receipt.render {
                 StoredRenderReceipt::Engine(receipt) => receipt,
-                StoredRenderReceipt::LegacyArchify(_) => panic!("new engine export used a legacy receipt"),
+                StoredRenderReceipt::LegacyArchify(_) => {
+                    panic!("new engine export used a legacy receipt")
+                }
             };
             assert_eq!(engine_receipt.engine.id, "maru-diagram-engine");
             assert_eq!(
@@ -2367,13 +2375,29 @@ mod tests {
             );
             let expected_svg_hash = report.svg.as_deref().map(|svg| sha256(svg.as_bytes()));
             let expected_output_hash = report.bytes.as_deref().map(sha256);
-            assert_eq!(engine_receipt.engine_output_sha256.as_deref(), expected_svg_hash.as_deref());
-            assert_eq!(engine_receipt.output_sha256.as_deref(), expected_output_hash.as_deref());
-            assert_eq!(engine_receipt.output_mime_type.as_deref(), Some(expected_mime));
+            assert_eq!(
+                engine_receipt.engine_output_sha256.as_deref(),
+                expected_svg_hash.as_deref()
+            );
+            assert_eq!(
+                engine_receipt.output_sha256.as_deref(),
+                expected_output_hash.as_deref()
+            );
+            assert_eq!(
+                engine_receipt.output_mime_type.as_deref(),
+                Some(expected_mime)
+            );
 
             let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
-            let group = groups.iter().find(|group| group.doc_id == fixture.doc_id).unwrap();
-            let entry = group.renders.iter().find(|render| render.render_id == stored.render_id).unwrap();
+            let group = groups
+                .iter()
+                .find(|group| group.doc_id == fixture.doc_id)
+                .unwrap();
+            let entry = group
+                .renders
+                .iter()
+                .find(|render| render.render_id == stored.render_id)
+                .unwrap();
             assert!(entry.verified, "{format}: {:?}", entry.diagnostic);
             assert_eq!(entry.receipt.as_ref(), Some(&stored.receipt));
 
@@ -2393,7 +2417,10 @@ mod tests {
                 .asset_protocol_scope()
                 .is_allowed(fixture.render_dir(&stored.render_id).join(RECEIPT_FILE)));
             let readback = fs::read(view_path).unwrap();
-            assert_eq!(sha256(&readback), engine_receipt.output_sha256.as_deref().unwrap());
+            assert_eq!(
+                sha256(&readback),
+                engine_receipt.output_sha256.as_deref().unwrap()
+            );
             if format == "png" {
                 assert!(readback.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]));
             } else {
@@ -2403,8 +2430,15 @@ mod tests {
         }
 
         let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
-        let group = groups.iter().find(|group| group.doc_id == fixture.doc_id).unwrap();
-        assert_eq!(group.renders.len(), 3, "legacy HTML plus native SVG and PNG");
+        let group = groups
+            .iter()
+            .find(|group| group.doc_id == fixture.doc_id)
+            .unwrap();
+        assert_eq!(
+            group.renders.len(),
+            3,
+            "legacy HTML plus native SVG and PNG"
+        );
         assert!(group.renders.iter().all(|render| render.verified));
         assert_eq!(stored_artifacts.len(), 2);
     }

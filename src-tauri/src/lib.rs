@@ -267,7 +267,8 @@ pub fn run() {
         .manage(BrowserPasskeyState::default())
         .manage(SiteOpenedUrlState::default())
         .setup(|app| {
-            app.handle().plugin(diagram::engine_host::plugin(app.handle().clone()))?;
+            app.handle()
+                .plugin(diagram::engine_host::plugin(app.handle().clone()))?;
             #[cfg(feature = "native-e2e")]
             diagram_engine_e0::allow_measurement(app)?;
             #[cfg(all(feature = "native-e2e", target_os = "macos"))]
@@ -840,7 +841,8 @@ mod quit_acl_tests {
             }))
             .setup(move |app| {
                 if with_diagram_plugin {
-                    app.handle().plugin(crate::diagram::engine_host::plugin(app.handle().clone()))?;
+                    app.handle()
+                        .plugin(crate::diagram::engine_host::plugin(app.handle().clone()))?;
                 }
                 Ok(())
             })
