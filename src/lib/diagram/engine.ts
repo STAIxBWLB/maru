@@ -8,6 +8,8 @@ import type {
   LayoutRequest,
 } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import type { EngineArtifactReport, EngineArtifactRequest } from "./engineArtifact";
+import { productEngineLoadError } from "./engineUnavailable";
+export { EngineUnavailableError, isEngineUnavailable } from "./engineUnavailable";
 import type { SemanticDiagramType } from "./reportTypes";
 import type { ValidationDiagnostic } from "./validation";
 export interface DiagramEngine {
@@ -247,7 +249,7 @@ let productGeometryEngine: Promise<ProductGeometryEngine> | undefined;
 async function loadProductValidationEngine(): Promise<DiagramEngine> {
   productValidationEngine ??= loadWasmEngine().catch((error) => {
     productValidationEngine = undefined;
-    throw error;
+    throw productEngineLoadError("validation", error);
   });
   return productValidationEngine;
 }
@@ -255,7 +257,7 @@ async function loadProductValidationEngine(): Promise<DiagramEngine> {
 async function loadProductGeometryEngine(): Promise<ProductGeometryEngine> {
   productGeometryEngine ??= loadGeometryEngine().catch((error) => {
     productGeometryEngine = undefined;
-    throw error;
+    throw productEngineLoadError("geometry", error);
   });
   return productGeometryEngine;
 }

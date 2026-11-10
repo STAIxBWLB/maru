@@ -43,17 +43,6 @@ accepts an arbitrary executable or unvalidated launch arguments.
 - Agent CLI installation and updates, instructions, and native add-on installers;
   their native skill packages are separate from Maru-owned generic federation
 
-## Diagram engine boundary
-
-Maru owns each semantic dataset's source spec, its apply-time admission, and
-the native rendered artifact and receipt. Canvas nodes and edges are a
-projection, not an export source. Production semantic SVG/PNG export sends the
-selected source spec to `maru-diagram-engine`; the WebAssembly validation and
-layout facade does not replace that native export path. The
-`diagram-render` Tauri capability is granted to the `main` webview only. The
-default-off `native-e2e` bridge is test infrastructure, not a production
-engine interface.
-
 `dotfiles` must not directly copy or rewrite generic skill trees in any agent
 root as skill deployment. Explicit operator-selected peer filesystem transport
 is a separate exception defined by dotfiles `docs/BOUNDARIES.md` (read when
@@ -65,6 +54,17 @@ their own plugin packages; federation and installation must not overwrite the
 other side's entries.
 Global instructions, authentication, trust, hooks and unrelated runtime settings
 remain outside Maru federation.
+
+## Diagram engine boundary
+
+Maru owns each semantic dataset's source spec, its apply-time admission, and
+the native rendered artifact and receipt. Canvas nodes and edges are a
+projection, not an export source. Production semantic SVG/PNG export sends the
+selected source spec to `maru-diagram-engine`; the WebAssembly validation and
+layout facade does not replace that native export path. The
+`diagram-render` Tauri capability is granted to the `main` webview only. The
+default-off `native-e2e` bridge is test infrastructure, not a production
+engine interface.
 
 ## Conflict Rule
 

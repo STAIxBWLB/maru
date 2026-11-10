@@ -327,6 +327,11 @@ describe("SemanticProps", () => {
     expect(q<HTMLInputElement>("semantic-add-y")!.value).toBe("200");
     await typeInto(q<HTMLInputElement>("semantic-add-label")!, "Cache");
     await click("semantic-add-confirm");
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(specOf().components!.at(-1)).toMatchObject({ label: "Cache", pos: [630, 200], size: [160, 64] });
+      });
+    });
     expect(specOf().components!.at(-1)).toMatchObject({ pos: [630, 200], size: [160, 64] });
     expect(probe!.getState().doc.nodes.find((node) => node.title === "Cache")).toMatchObject({ x: 630, y: 200 });
     expect(probe!.getState().ephemeral.history.past).toHaveLength(1);
