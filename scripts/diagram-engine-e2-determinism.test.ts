@@ -7,6 +7,23 @@ const corpusText = JSON.stringify({
   cases: [{ id: "arch-one" }, { id: "arch-two" }, { id: "flow-one" }, { id: "sequence-one" }],
 });
 const corpus = corpusContract(corpusText);
+// Mirrors the six counters work.rs::WorkStats::total sums, plus the masked A*
+// subset it never adds again: 2 + 999 + 3000 + 0 + 0 + 4 = 4005.
+const benchmarkWork = () => ({
+  fixtureSha256: "a".repeat(64),
+  nodes: 1000,
+  routes: 999,
+  stats: {
+    astarExpandedStates: 2,
+    routeEvaluations: 999,
+    constraintEvaluations: 3000,
+    endpointMaskEvaluations: 0,
+    endpointClearanceEvaluations: 0,
+    textScalarMeasurements: 4,
+    maskedAstarExpandedStates: 0,
+  },
+  total: 4005,
+});
 const report = (caseIds = corpus.caseIds, extra = {}) => ({
   apiVersion: 1,
   scope: "whole-scene-geometry",
@@ -15,8 +32,7 @@ const report = (caseIds = corpus.caseIds, extra = {}) => ({
   corpusSha256: corpus.corpusSha256,
   corpusCaseCount: caseIds.length,
   fontManifestSha256: "font-manifest",
-  benchmarkWork: { fixtureSha256: "a".repeat(64), nodes: 1000, routes: 999,
-    stats: { astarExpandedStates: 2, routeEvaluations: 999, constraintEvaluations: 3000 }, total: 4001 },
+  benchmarkWork: benchmarkWork(),
   cases: caseIds.map((id) => ({ id, ok: true, geometryRetained: true, hash: createHash("sha256").update(id).digest("hex"), svg: {light: {hash:"c".repeat(64),bytes:10,artifactGate:true},dark: {hash:"d".repeat(64),bytes:11,artifactGate:true}} })),
   ...extra,
 });
@@ -62,6 +78,27 @@ describe("cross-platform whole-scene receipt comparison", () => {
     changed.benchmarkWork.stats.constraintEvaluations += 1;
     changed.benchmarkWork.total += 1;
     expect(() => compare([report(), changed, report(), report()])).toThrow("manifest metadata");
+  });
+
+  it("refuses a total that leaves the text scalar counter out", () => {
+    // The pre-version-3 receipt: the total covered A*, route and constraint
+    // work only, so a wrapping measurer that records scalars still "added up".
+    const threeCounters = report();
+    threeCounters.benchmarkWork.total =
+      threeCounters.benchmarkWork.stats.astarExpandedStates
+      + threeCounters.benchmarkWork.stats.routeEvaluations
+      + threeCounters.benchmarkWork.stats.constraintEvaluations;
+    expect(() => compare([threeCounters, report(), report(), report()])).toThrow("counter sum");
+    const droppedCounter = report();
+    delete (droppedCounter.benchmarkWork.stats as Partial<ReturnType<typeof benchmarkWork>["stats"]>).textScalarMeasurements;
+    droppedCounter.benchmarkWork.total = 4001;
+    expect(() => compare([report(), droppedCounter, report(), report()])).toThrow("textScalarMeasurements");
+    // Masked A* expansions prove a subset of the expansions and are never a
+    // seventh addend, so counting them again breaks the total.
+    const doubleCounted = report();
+    doubleCounted.benchmarkWork.stats.maskedAstarExpandedStates = 1;
+    doubleCounted.benchmarkWork.total = 4006;
+    expect(() => compare([doubleCounted, report(), report(), report()])).toThrow("counter sum");
   });
 
   it("requires both per-theme SVG hashes and successful artifact gates", () => {
