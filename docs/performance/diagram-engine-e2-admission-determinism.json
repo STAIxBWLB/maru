@@ -7,12 +7,12 @@
     "wasmCommand": "RUSTC=$(rustup which --toolchain 1.98.0 rustc) rustup run 1.98.0 cargo build --locked --release --lib -p maru-diagram-engine --features wasm-render,geometry-corpus --target wasm32-unknown-unknown; then the host --features bindgen-web --bin bindgen-web over that wasm; then node scripts/diagram-engine-e2-wasm-hashes.mjs .engine-e2/determinism-corpus.json .engine-e2/determinism/wasm-macos.json .engine-e2/wasm-test",
     "nativeReportBytes": 340896
   },
-  "sourceCommit": "3e00f34266f630cda118ac98891fd154cf31778d",
+  "sourceCommit": "82dac88ae90d0e0e296b4fa46be018fb3ad59231",
   "sdkTreePath": "src-tauri/crates",
-  "sdkTree": "07b033d6fd4d66fb20d972d9556b90460bc7af51",
+  "sdkTree": "2881434dd5e662f31d376d3a5ecc7936373c97f6",
   "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-  "engineCrateTree": "f6c9bcc051a66b4252a966fea5c79e9d3d921c3b",
-  "baseCommit": "c5d2d989d1540f2292af2f852fbd81590f8457d4",
+  "engineCrateTree": "3bf1048fbe618c2ee8ca44caa9559472f0c205a0",
+  "baseCommit": "0caa8405033dfbd64e196a90dfe9aca460af0992",
   "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
   "fontManifestSha256": "889c9c3b8eeb8b19d68d4de613f7c74224f3bf39a689a9b46c968d62da7cb9ca",
   "corpusCaseCount": 623,
@@ -66,8 +66,8 @@
       "viaPoints": 17
     }
   },
-  "nativeReportSha256": "33c98452f5248abab03c21cfee8ea42f8843111c85bdfceb07625e5e32321cfb",
-  "wasmReportSha256": "33c98452f5248abab03c21cfee8ea42f8843111c85bdfceb07625e5e32321cfb",
+  "nativeReportSha256": "1bf05a3e70f668fafad007a4b2cebb3bd8651c988dbfa4995421eaac1a92015f",
+  "wasmReportSha256": "1bf05a3e70f668fafad007a4b2cebb3bd8651c988dbfa4995421eaac1a92015f",
   "changes": [
     {
       "id": "public-01",

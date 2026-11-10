@@ -1239,10 +1239,13 @@ This measures the visible output rather than legacy character counts or a
 hypothetical minimum-font model. Node text runs through a measured auto-fit
 before admission sees it, in one fixed order: wrap, grow, shrink, then refuse.
 Wrapping measures the same pinned Noto ink the admission check does, so the two
-cannot disagree: it breaks at a space first, then between two Hangul syllables,
+cannot disagree: it breaks at a space first, then at a Hangul syllable boundary,
 and cuts inside a Latin word only when that word alone fails every box and every
 size, and only in the role that owns it - a sibling role's unbreakable word
-never splits the primary. The scan accumulates advances one scalar at a time, so
+never splits the primary. A Hangul boundary is between two precomposed syllables
+or before a leading jamo that starts the next one, so a decomposed (NFD)
+syllable, which macOS filenames and some pasted text carry, is never split
+between its own jamo. The scan accumulates advances one scalar at a time, so
 a line costs one pass over its own scalars instead of one measurement per
 candidate break, and the work receipt counts those scalar measurements. Growth
 adds height only, from the node's own top down to the first limit that position
@@ -1322,9 +1325,9 @@ baseline of 3,371,286, which carries the 15,786 scalars its labels measure. The
 [determinism receipt](performance/diagram-engine-e2-admission-determinism.json)
 records tested source trees and current scene/SVG/work results.
 
-This verification compares 623 cases against the `c5d2d989` head this task is
-stacked on: a native run and a `wasm32-unknown-unknown` run produce the same
-report bytes (`33c98452`), so the corpus identity, both SVG themes and the
+This verification compares 623 cases against the `0caa8405` head of the stack
+this task sits on: a native run and a `wasm32-unknown-unknown` run produce the
+same report bytes (`1bf05a3e`), so the corpus identity, both SVG themes and the
 unchanged re-layout check agree across the two builds. There are 248 accepted
 cases, 405 with geometry (including accepted ones), 157 retained refusals and 218
 pre-placement refusals. The receipt lists 30 changed report hashes and 30 changed
