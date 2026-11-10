@@ -2380,7 +2380,7 @@
     },
     {
       "path": "src-tauri/crates/tauri-plugin-maru-diagram/Cargo.toml",
-      "sha256": "e5ed6d64b0e3191038e31d1b8611b00c0154ee00481ec7a5a8614493bc3c81a0"
+      "sha256": "e50225e985d52ddc042aced4b5185917cf778b2a5072f0acff97ff1a13423252"
     },
     {
       "path": "src-tauri/crates/tauri-plugin-maru-diagram/build.rs",
@@ -2735,5 +2735,5 @@
       "sha256": "32a60394a2b65ba95072774e54b09e557eb31293a232b288fcaea2b74bcd54ad"
     }
   ],
-  "sourceCommit": "235431139d5bd242002ea69d5e13577c292cf2be"
+  "sourceCommit": "1dac39a1133ea8d9169841e3482796237e8f261c"
 }
