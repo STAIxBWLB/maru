@@ -9,6 +9,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sdk = join(root, "src-tauri/crates");
 const output = join(root, "src/lib/diagram/__generated__/engine-e0");
 const scratch = join(root, ".engine-e0");
+const wasmArtifact = join(process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(sdk, "target"), "wasm32-unknown-unknown/release/maru_diagram_engine.wasm");
 mkdirSync(scratch, { recursive: true });
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: root, env: { ...process.env, CARGO_BUILD_JOBS: "2" }, encoding: "utf8", stdio: "pipe", ...options });
@@ -28,17 +29,21 @@ if (action === "types") {
   const before = performance.now();
   process.env.MARU_DIAGRAM_ENGINE_REVISION ||= run("git", ["rev-parse", "HEAD:src-tauri/crates"]).trim();
   sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm", "--target", "wasm32-unknown-unknown"]);
-  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", join(sdk, "target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm"), output]);
+  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, output]);
   // A second WASM artifact includes metric tables. Only its dynamic TS module
   // references these URLs, so validation cannot inline or fetch them eagerly.
   sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-layout", "--target", "wasm32-unknown-unknown"]);
-  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", join(sdk, "target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm"), join(root, "src/lib/diagram/__generated__/engine-geometry")]);
+  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, join(root, "src/lib/diagram/__generated__/engine-geometry")]);
   // Corpus hashing belongs only to the dedicated CI test build, never the
   // normal layout artifact whose bytes and cold load the browser measures.
   run(process.execPath, [join(root, "scripts/diagram-engine-e2-wasm-hashes.mjs"), "--assert-product", join(root, "src/lib/diagram/__generated__/engine-geometry")]);
-  // E3 SVG is a separate test-only artifact; validation and measured normal geometry stay unchanged.
+  // Text SVG preview is a separate lazy product artifact; native outline/fonts never enter WASM.
   sdkCargo("build", ["--locked", "--lib", "--release", "-p", "maru-diagram-engine", "--features", "wasm-render", "--target", "wasm32-unknown-unknown"]);
-  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", join(sdk, "target/wasm32-unknown-unknown/release/maru_diagram_engine.wasm"), join(root, "src/lib/diagram/__generated__/engine-render")]);
+  sdkCargo("run", ["--locked", "-p", "maru-diagram-engine", "--features", "bindgen-web", "--bin", "bindgen-web", "--", wasmArtifact, join(root, "src/lib/diagram/__generated__/engine-render")]);
+  if (process.argv.includes("--assets-only")) {
+    console.log("Generated product validation, layout and text-SVG WebAssembly assets.");
+    process.exit(0);
+  }
   // Build the real browser facade, including generated assets, with Vite's
   // library pipeline. Its output is the artifact the browser measurement loads.
   const { build } = await import("vite");

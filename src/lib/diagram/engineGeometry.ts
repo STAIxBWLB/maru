@@ -1,4 +1,4 @@
-/** Lazy test-only E2 layout/metrics. This module alone owns geometry-WASM asset references. */
+/** Lazy product layout/metrics. This module alone owns geometry-WASM asset references. */
 import type { Diagnostic, TextMetrics, GeometryReport, LayoutRequest } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import type { DiagramDoc } from "./types";
 import type { EngineCanvasPreview } from "./engineGeometryCanvasTestBridge";
@@ -16,7 +16,7 @@ export async function loadGeometryEngine(): Promise<GeometryEngine> {
   const wasmUrl = new URL("./__generated__/engine-geometry/maru_diagram_engine_bg.wasm", import.meta.url);
   const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
   if (typeof bindings.default !== "function" || typeof bindings.measure_text_json !== "function" || typeof bindings.layout_json !== "function") {
-    throw new Error("Geometry layout/metric bindings are missing; run node scripts/diagram-engine-e0.mjs wasm and reload the measurement page.");
+    throw new Error("The diagram layout module is unavailable; reload Maru, or update the app and retry.");
   }
   await bindings.default({ module_or_path: wasmUrl });
   const measure = bindings.measure_text_json as (text: string, weight: number, size: number) => string;

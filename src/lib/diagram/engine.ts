@@ -36,7 +36,7 @@ export async function loadWasmEngine(): Promise<DiagramEngine> {
   const wasmUrl = new URL("./__generated__/engine-e0/maru_diagram_engine_bg.wasm", import.meta.url);
   const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
   if (typeof bindings.default !== "function" || typeof bindings.validate_diagram_json !== "function") {
-    throw new Error("E0 WebAssembly bindings are missing; run the engine-e0 build script before the browser spike.");
+    throw new Error("The diagram validation module is unavailable; reload Maru, or update the app and retry.");
   }
   await bindings.default({ module_or_path: wasmUrl });
   const validate = bindings.validate_diagram_json as (input: string) => string;

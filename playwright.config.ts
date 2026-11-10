@@ -38,7 +38,7 @@ export default defineConfig({
     command: `pnpm exec vite --host 127.0.0.1 --port ${port} --strictPort`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: 300_000,
   },
   projects: [
     {
