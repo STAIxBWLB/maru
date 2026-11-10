@@ -1209,18 +1209,33 @@ hypothetical minimum-font model. Node text runs through a measured auto-fit
 before admission sees it, in one fixed order: wrap, grow, shrink, then refuse.
 Wrapping measures the same pinned Noto ink the admission check does, so the two
 cannot disagree: it breaks at a space first, then between two Hangul syllables,
-and cuts inside a Latin word only after that word alone fails every box and
-every size. Growth adds height only, inside the family's own ceiling
-(`layout/source_budgets.rs`), so wrapping answers width and a taller node moves
-no column centre and no route port. A source that authors `size`/`height` is
-never grown: the authored box stands and the ladder shrinks within it instead.
-Sequence participant headers keep their authored height for the same reason;
-growth would move the ports every message routes to. Shrinking walks whole pixel
-steps 13/12/11/10px and stops at `--type-micro-size`, the 10px step
-`src/foundations.css` already ships as the smallest product type size, so
-auto-fit never draws node text smaller than the product already does. A refusal
-therefore means the floor itself cannot hold the text; it retains geometry and
-names the text or node-size change that would fit.
+and cuts inside a Latin word only when that word alone fails every box and every
+size, and only in the role that owns it - a sibling role's unbreakable word
+never splits the primary. The scan accumulates advances one scalar at a time, so
+a line costs one pass over its own scalars instead of one measurement per
+candidate break, and the work receipt counts those scalar measurements. Growth
+adds height only, from the node's own top down to the first limit that position
+already sets: the lane body below it in workflow, the next band or row minus a
+10px separation in lifecycle, and the readable area the frame leaves in dataflow
+and lifecycle v2 (`layout/workflow.rs`, `layout/lifecycle.rs`,
+`layout/dataflow.rs`). The limit therefore follows a pin or an authored
+`yOffset` instead of assuming a fixed slot, growth never manufactures a
+self-made lane, band, overlap or viewBox refusal, and when the space below the
+node is too short the ladder continues to the next smaller size instead of
+drawing past it. Growing a node does move its ports: a left/right port sits at
+the middle of the emitted height and the bottom port at the emitted bottom, and
+routing reads the emitted bounds, so a route - including one authored with vias
+- still leaves and enters the port the grown box moved to. A source that authors
+`size`/`height` is never grown: the authored box stands and the ladder shrinks
+within it instead. Sequence participant headers keep their authored height for
+the same reason. Shrinking walks whole pixel steps 13/12/11/10px and stops at
+`--type-micro-size`, the 10px step `src/foundations.css` already ships as the
+smallest product type size, so auto-fit never draws node text smaller than the
+product already does. A refusal therefore means the floor itself cannot hold the
+text; it retains geometry and names the text or node-size change that would fit.
+Admission measures the emitted box: `layout/source_budgets.rs` unions each
+source rectangle with the placed node's bounds, so a node auto-fit grew is
+checked where it is drawn, never against the pre-growth rectangle.
 
 Auto-fit makes the previously pinned measured-ink cases readable: `public-01`
 re-breaks its overflowed detail at 11px, `gate-sequence-brand-absent` fits at
@@ -1246,37 +1261,47 @@ empty, and it stays as a guard: `SOURCE_GREEN_INK_CASES` is asserted to be empty
 so a measured-ink refusal the reference model accepts fails the differential test
 instead of being waived. The four cases that used it are accepted above. The
 opposite direction, the engine accepting where the model refuses, is recorded per
-case rather than waived: `AUTO_FIT_BEYOND_MODEL` names each case with the fit
-actions that made it readable, and the test proves from the emitted scene that
-the painted ink fits its node, every node label is at or above the 10px floor,
-and the action list is non-empty. An unlisted case, or one whose actions changed,
-fails. The model's verdicts in `testdata/parity.json` are unchanged.
+case rather than waived, and the guard reads both verdict collections -
+`cases` and `boundaryCases` - because one claim needs one entry wherever the case
+lives. `AUTO_FIT_BEYOND_MODEL` names 16 cases: the five fixture cases and the 11
+width/header boundary cases auto-fit wins (dataflow and lifecycle v1/v2
+primary/sublabel/tag, sequence spread header, sequence brand rail). Each entry
+carries the fit actions that made it readable, and the test proves from the
+emitted scene that the painted ink fits its node, every node label is at or
+above the 10px floor, and the action list is non-empty and unchanged.
+`BOUNDARY_ACCEPTED_BEFORE_AUTO_FIT` names the 13 boundary cases the engine
+already accepted beyond the model at the `#567` head, each with real measurement
+alone and no auto-fit action: they are listed so this task's allowance cannot
+absorb a difference it did not create, and the test fails if any of them starts
+showing a fit action. An unlisted case, a changed action list, or a
+misclassified pre-existing difference fails the guard. The model's verdicts in
+`testdata/parity.json` are unchanged.
 Repairs name sequence's `meta.column_fit`/`meta.viewBox`, architecture's `size`,
 and the other families' `width`/`height`; vertical failures report available height.
 
-The authored-via work probe remeasured at `d67f7ac1` has 27 nodes, 32 labels,
-17 vias and 22 segments. It forces A* on a masked leg: all 81 expansions
-are masked. The fixture uses nonpainting blank tag lines as a conservative
-routing obstacle while every painted glyph stays inside its node, retaining the
-showcase profile and its 16px interior rhythm. Mask construction evaluates
-57 candidates; final clearance evaluates 1,254. Total work is 2,788; the
+The authored-via work probe has 27 nodes, 32 labels, 17 vias and 22 segments.
+It forces A* on a masked leg: all 81 expansions are masked. The fixture uses
+nonpainting blank tag lines as a conservative routing obstacle while every
+painted glyph stays inside its node, retaining the showcase profile and its 16px
+interior rhythm. Mask construction evaluates 57 candidates; final clearance
+evaluates 1,254; the wrapping scan measures 174 scalars. Total work is 2,962; the
 masked-expansion counter is a subset of A*, so it is not added twice. Every
-counter and total has a recorded baseline plus a 25% ceiling, like the unchanged
-1,000-node baseline of 3,355,500. The
+counter and total has a recorded baseline plus a 25% ceiling, like the 1,000-node
+baseline of 3,371,286, which carries the 15,786 scalars its labels measure. The
 [determinism receipt](performance/diagram-engine-e2-admission-determinism.json)
 records tested source trees and current scene/SVG/work results.
 
-This verification at `d67f7ac1` compares 623 cases against the `c5d2d989` head
-this task is stacked on: a native run and a `wasm32-unknown-unknown` run produce
-the same report bytes (`ef90de98`), so the corpus identity, both SVG themes and
-the unchanged re-layout check agree across the two builds. There are 248 accepted
+This verification compares 623 cases against the `c5d2d989` head this task is
+stacked on: a native run and a `wasm32-unknown-unknown` run produce the same
+report bytes (`33c98452`), so the corpus identity, both SVG themes and the
+unchanged re-layout check agree across the two builds. There are 248 accepted
 cases, 405 with geometry (including accepted ones), 157 retained refusals and 218
 pre-placement refusals. The receipt lists 30 changed report hashes and 30 changed
 SVG scenes, each one a case auto-fit makes readable, and no case became newly
 refused. Diagnostics can also change a report hash without moving SVG geometry.
-Logical work is unchanged at 3,355,500 against its 4,194,375 ceiling, and the via
-probe is unchanged at 2,788, because label placement adds no route or clearance
-counter and its work hooks count admission passes, not fit attempts.
+Logical work is 3,371,286 against its 4,214,108 ceiling and the via probe is
+2,962 against 3,703: the only added counter is the wrapping scan's scalar
+measurement, while route, clearance and A* work is unchanged.
 
 Route-quality findings distinguish the offending geometry's provenance.
 Explicit `via` points, channel coordinates, label-position controls, endpoint
@@ -1495,9 +1520,9 @@ intentional ink-fit model differences, replacing the superseded
 40 dispositioned differences across the same 44-case union. The other 39 final
 records remain at their original source stamp; this refresh makes no new
 parity claim for them. Each row and the receipt identify that evidence scope.
-Label auto-fit (`d67f7ac1`) later accepts 11 further cases inside that union, so
-those counts describe the ring-via refresh; the rows keep their recorded stamps
-and the determinism receipt above carries the current verdicts.
+Label auto-fit (`d67f7ac1`) later accepts 11 further boundary cases inside that
+union, so those counts describe the ring-via refresh; the rows keep their
+recorded stamps and the determinism receipt above carries the current verdicts.
 The prior
 native/WASM run at that head covered 623 cases (216 accepted, 405 with geometry present),
 changed 34 scenes and 7 SVGs, and produced matching report hashes; its work

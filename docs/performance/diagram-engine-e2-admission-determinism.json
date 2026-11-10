@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "scope": "fixed-point whole-scene geometry, both SVG themes and logical work hashed on native macOS aarch64 and on a wasm32-unknown-unknown build, compared per case against the #567 head this task is stacked on",
+  "scope": "committed Linux-style fixed-point native and WASM scene/SVG/logical-work comparison against the #567 head this task is stacked on",
   "runner": {
     "host": "macOS aarch64 native and wasm32, rustup toolchain 1.98.0 for the wasm leg",
     "nativeCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-foundation-hashes -- .engine-e2/determinism-corpus.json .engine-e2/determinism/native-macos.json",
-    "wasmCommand": "rustup run 1.98.0 cargo build --locked --release --lib -p maru-diagram-engine --features wasm-render,geometry-corpus --target wasm32-unknown-unknown; then --features bindgen-web --bin bindgen-web; then node scripts/diagram-engine-e2-wasm-hashes.mjs .engine-e2/determinism-corpus.json .engine-e2/determinism/wasm-macos.json .engine-e2/wasm-test",
-    "nativeReportBytes": 340818
+    "wasmCommand": "RUSTC=$(rustup which --toolchain 1.98.0 rustc) rustup run 1.98.0 cargo build --locked --release --lib -p maru-diagram-engine --features wasm-render,geometry-corpus --target wasm32-unknown-unknown; then the host --features bindgen-web --bin bindgen-web over that wasm; then node scripts/diagram-engine-e2-wasm-hashes.mjs .engine-e2/determinism-corpus.json .engine-e2/determinism/wasm-macos.json .engine-e2/wasm-test",
+    "nativeReportBytes": 340896
   },
-  "sourceCommit": "d67f7ac1a86a6ec5e248d60746a82316c00fc2a3",
+  "sourceCommit": "3e00f34266f630cda118ac98891fd154cf31778d",
   "sdkTreePath": "src-tauri/crates",
-  "sdkTree": "76a9c37f2c9639aae2e6c934bbe832e737e5362a",
+  "sdkTree": "07b033d6fd4d66fb20d972d9556b90460bc7af51",
   "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-  "engineCrateTree": "0f95a038724d2346ce8d5ad3ec5537d965c80d63",
+  "engineCrateTree": "f6c9bcc051a66b4252a966fea5c79e9d3d921c3b",
   "baseCommit": "c5d2d989d1540f2292af2f852fbd81590f8457d4",
   "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
   "fontManifestSha256": "889c9c3b8eeb8b19d68d4de613f7c74224f3bf39a689a9b46c968d62da7cb9ca",
@@ -31,7 +31,7 @@
       "constraintEvaluations": 3332334,
       "routeEvaluations": 999
     },
-    "total": 3355500
+    "total": 3371286
   },
   "work": {
     "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
@@ -43,9 +43,10 @@
       "endpointClearanceEvaluations": 0,
       "endpointMaskEvaluations": 0,
       "maskedAstarExpandedStates": 0,
-      "routeEvaluations": 999
+      "routeEvaluations": 999,
+      "textScalarMeasurements": 15786
     },
-    "total": 3355500,
+    "total": 3371286,
     "viaBenchmarkWork": {
       "fixtureSha256": "1e6bd67b66d16371412d73485b25acb640175db2b52dd78b8378ed02b51ab988",
       "labels": 32,
@@ -58,14 +59,15 @@
         "endpointClearanceEvaluations": 1254,
         "endpointMaskEvaluations": 57,
         "maskedAstarExpandedStates": 81,
-        "routeEvaluations": 1
+        "routeEvaluations": 1,
+        "textScalarMeasurements": 174
       },
-      "total": 2788,
+      "total": 2962,
       "viaPoints": 17
     }
   },
-  "nativeReportSha256": "ef90de9848bed5861cb3d236c45aedc6cccde41641322c3a1a6f09740bd50b15",
-  "wasmReportSha256": "ef90de9848bed5861cb3d236c45aedc6cccde41641322c3a1a6f09740bd50b15",
+  "nativeReportSha256": "33c98452f5248abab03c21cfee8ea42f8843111c85bdfceb07625e5e32321cfb",
+  "wasmReportSha256": "33c98452f5248abab03c21cfee8ea42f8843111c85bdfceb07625e5e32321cfb",
   "changes": [
     {
       "id": "public-01",
