@@ -1,5 +1,5 @@
 //! Stable SVG syntax; array order is the E2 scene order, never a map traversal.
-use super::{error, SvgOptions, FONT_FAMILY, MAX_SVG_BYTES};
+use super::{error, SvgOptions, SvgTextMode, FONT_FAMILY, MAX_SVG_BYTES};
 use crate::geometry::{GeometryBox, GeometryDocument, GeometryLabel, GeometryRoute};
 use crate::Diagnostic;
 use serde::Deserialize;
@@ -94,6 +94,72 @@ pub(crate) fn notdef(weight: u16) -> Result<Notdef, Diagnostic> {
         )
     })
 }
+/// Pinned outline faces, loaded at most once per document and used only by
+/// outline label mode (`maru#552`).
+#[cfg(feature = "render-outline")]
+#[derive(Default)]
+struct OutlineFaces(Vec<(u16, Result<super::outline::PinnedFace, Diagnostic>)>);
+
+#[cfg(feature = "render-outline")]
+impl OutlineFaces {
+    fn face(&mut self, weight: u16) -> Result<&mut super::outline::PinnedFace, Diagnostic> {
+        let index = match self.0.iter().position(|(w, _)| *w == weight) {
+            Some(index) => index,
+            None => {
+                self.0
+                    .push((weight, super::outline::PinnedFace::load(weight)));
+                self.0.len() - 1
+            }
+        };
+        self.0[index].1.as_mut().map_err(|cause| cause.clone())
+    }
+}
+
+/// Draws one label as pinned glyph outlines at the positions E2 measured, so
+/// no font has to resolve when the artifact is opened (`maru#552`).
+#[cfg(feature = "render-outline")]
+fn write_outlined_label(
+    out: &mut String,
+    label: &GeometryLabel,
+    colors: &[&str],
+    container_color: &str,
+    faces: &mut OutlineFaces,
+) -> Result<(), Diagnostic> {
+    write!(out,"<g data-kind=\"label-text\" data-render=\"outline\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" fill=\"{container_color}\" aria-hidden=\"true\">",fixed(label.font_size.into()),label.font.weight).unwrap();
+    let upem = {
+        let face = faces.face(label.font.weight)?;
+        if face.units_per_em() != label.font.units_per_em {
+            return Err(error(
+                "font-outline",
+                "/font",
+                "pinned outline face and label font identities differ",
+                "render labels with the pinned Noto metric tables before outlining them",
+            ));
+        }
+        face.units_per_em()
+    };
+    for (j, glyph) in label
+        .glyphs
+        .iter()
+        .enumerate()
+        .filter(|(_, glyph)| !glyph.ignored && !glyph.replaced)
+    {
+        let mut characters = glyph.input.chars();
+        let data = match (characters.next(), characters.next()) {
+            (Some(ch), None) => faces
+                .face(label.font.weight)?
+                .path_data(ch)?
+                .unwrap_or_default(),
+            // A cluster without one pinned glyph keeps its index in the run and
+            // draws nothing, exactly like a space.
+            _ => String::new(),
+        };
+        write!(out,"<path data-kind=\"glyph\" data-index=\"{j}\" d=\"{data}\" transform=\"translate({} {}) scale({} -{})\" fill=\"{}\" aria-hidden=\"true\"/>",fixed(glyph.position.x.into()),fixed(glyph.position.y.into()),scale(label.font_size,upem),scale(label.font_size,upem),colors[j]).unwrap();
+    }
+    out.push_str("</g>");
+    Ok(())
+}
+
 fn rect(
     out: &mut String,
     kind: &str,
@@ -589,6 +655,8 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
     {
         write_primitive(&mut s, p, &t, o);
     }
+    #[cfg(feature = "render-outline")]
+    let mut faces = OutlineFaces::default();
     for (i, l) in g.labels.iter().enumerate() {
         let key = label_key(l, i);
         let colors = super::label_paint::colors(g, o, l);
@@ -606,24 +674,36 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
             ("none", "none", "0"),
             None,
         );
-        write!(s,"<text data-kind=\"label-text\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" font-kerning=\"none\" font-variant-ligatures=\"none\" text-rendering=\"geometricPrecision\" style=\"font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0\" xml:space=\"preserve\" fill=\"{color}\" aria-hidden=\"true\">",fixed(l.font_size.into()),l.font.weight).unwrap();
-        for (j, p) in l
-            .glyphs
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| !p.ignored && !p.replaced)
-        {
-            write!(
-                s,
-                "<tspan data-kind=\"glyph\" data-index=\"{j}\" x=\"{}\" y=\"{}\" fill=\"{}\">{}</tspan>",
-                fixed(p.position.x.into()),
-                fixed(p.position.y.into()),
-                colors[j],
-                escaped(&p.input)
-            )
-            .unwrap();
+        if o.text_mode == SvgTextMode::Outlines {
+            #[cfg(feature = "render-outline")]
+            write_outlined_label(&mut s, l, &colors, color, &mut faces)?;
+            #[cfg(not(feature = "render-outline"))]
+            return Err(error(
+                "font-mode",
+                "/font",
+                "outline label mode is not part of this engine binary",
+                "build the engine with --features render-outline, or omit textMode for positioned text runs",
+            ));
+        } else {
+            write!(s,"<text data-kind=\"label-text\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" font-kerning=\"none\" font-variant-ligatures=\"none\" text-rendering=\"geometricPrecision\" style=\"font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0\" xml:space=\"preserve\" fill=\"{color}\" aria-hidden=\"true\">",fixed(l.font_size.into()),l.font.weight).unwrap();
+            for (j, p) in l
+                .glyphs
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| !p.ignored && !p.replaced)
+            {
+                write!(
+                    s,
+                    "<tspan data-kind=\"glyph\" data-index=\"{j}\" x=\"{}\" y=\"{}\" fill=\"{}\">{}</tspan>",
+                    fixed(p.position.x.into()),
+                    fixed(p.position.y.into()),
+                    colors[j],
+                    escaped(&p.input)
+                )
+                .unwrap();
+            }
+            s.push_str("</text>");
         }
-        s.push_str("</text>");
         for (j, p) in l
             .glyphs
             .iter()

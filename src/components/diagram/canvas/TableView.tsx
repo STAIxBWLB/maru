@@ -90,7 +90,7 @@ function CellText({ cell, rect }: { cell: MatrixCell; rect: CellRect }) {
           padding: "1px 6px",
           boxSizing: "border-box",
           overflow: "hidden",
-          fontFamily: "-apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif",
+          fontFamily: "var(--font-diagram)",
           fontSize: CELL_FONT_SIZE,
           lineHeight: 1.3,
           fontWeight: cell.style?.bold ? 700 : 400,

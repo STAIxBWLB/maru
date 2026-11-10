@@ -213,4 +213,119 @@ test.describe("standalone engine diagram viewer", () => {
       rmSync(temp, { recursive: true, force: true });
     }
   });
+
+  // The outlined fixture is engine output ("svg_viewer_fixture" keeps it exact),
+  // and this measures it where a recipient would open it: a browser with no
+  // Korean face installed. A text-mode artifact resolves whatever fallback the
+  // platform offers; a path cannot. The fixture lives in the engine crate because
+  // the app may read the SDK, never the reverse.
+  test("draws an outlined export inside its measured label frames with no CJK font available", async ({ page }) => {
+    const outlineFixture = resolve("src-tauri/crates/maru-diagram-engine/testdata/architecture-light-outlines.svg");
+    await page.goto(pathToFileURL(outlineFixture).href);
+    // A standalone SVG document has no head for an injected stylesheet, so the
+    // override goes in as an SVG style element before anything is measured.
+    // `document.fonts.check` cannot report a missing family (an unknown family
+    // still "renders" through fallback), so the proof is geometric: the same
+    // artifact drawn under an absent family and under `serif` must not move.
+    const override = (family: string) => page.evaluate((value) => {
+      const svg = document.querySelector("svg");
+      if (!svg) throw new Error("the fixture rendered no svg root");
+      let style = svg.querySelector("style[data-maru-font-probe]");
+      if (!style) {
+        style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+        style.setAttribute("data-maru-font-probe", "1");
+        svg.insertBefore(style, svg.firstChild);
+      }
+      style.textContent = `* { font-family: ${value} !important; }`;
+    }, family);
+    const measure = () => page.evaluate(() => {
+      const svg = document.querySelector("svg");
+      if (!svg) throw new Error("the fixture rendered no svg root");
+      const viewportBox = (element: SVGGraphicsElement) => {
+        const bounds = element.getBBox();
+        const matrix = element.getCTM();
+        if (!matrix) throw new Error("a glyph has no transform to the viewport");
+        const corners = [
+          [bounds.x, bounds.y],
+          [bounds.x + bounds.width, bounds.y],
+          [bounds.x, bounds.y + bounds.height],
+          [bounds.x + bounds.width, bounds.y + bounds.height],
+        ].map(([x, y]) => ({ x: matrix.a * x + matrix.c * y + matrix.e, y: matrix.b * x + matrix.d * y + matrix.f }));
+        const xs = corners.map((point) => point.x);
+        const ys = corners.map((point) => point.y);
+        return { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) };
+      };
+      const labels = [...svg.querySelectorAll('g[data-kind="label"]')].map((label) => {
+        const frame = label.querySelector(':scope > rect[data-kind="label-bounds"]');
+        const glyphs = [...label.querySelectorAll('path[data-kind="glyph"]')];
+        if (!frame || !glyphs.length) throw new Error("a label lost its measured frame or its glyph paths");
+        const boxes = glyphs.map((glyph) => viewportBox(glyph as SVGGraphicsElement));
+        const ink = {
+          left: Math.min(...boxes.map((box) => box.left)),
+          top: Math.min(...boxes.map((box) => box.top)),
+          right: Math.max(...boxes.map((box) => box.right)),
+          bottom: Math.max(...boxes.map((box) => box.bottom)),
+        };
+        const bounds = viewportBox(frame as SVGGraphicsElement);
+        return {
+          label: label.getAttribute("aria-label"),
+          ink,
+          overflow: Math.max(
+            bounds.left - ink.left,
+            ink.right - bounds.right,
+            bounds.top - ink.top,
+            ink.bottom - bounds.bottom,
+          ),
+        };
+      });
+      return {
+        labelCount: labels.length,
+        textNodes: svg.querySelectorAll("text").length,
+        overflowing: labels.filter((entry) => entry.overflow > 0.5).map((entry) => entry.label),
+        worstOverflow: Math.max(...labels.map((entry) => entry.overflow)),
+        ink: labels.map((entry) => ({ label: entry.label, ink: entry.ink })),
+      };
+    });
+    await override('"Maru Absent CJK Face", monospace');
+    const measured = await measure();
+    expect(measured.textNodes).toBe(0);
+    expect(measured.labelCount).toBeGreaterThan(0);
+    // Ink may touch its own frame; anything outside it is a label the artifact
+    // would have to rewrap, which is what a missing face used to cause.
+    expect(measured.overflowing).toEqual([]);
+    expect(measured.worstOverflow).toBeLessThanOrEqual(0.5);
+    await override("serif")
+    expect((await measure()).ink).toEqual(measured.ink);
+  });
+
+  // The measurement above opens the artifact as a file; a recipient runs it
+  // through the viewer profile instead, which is what refused the first real
+  // outlined export: a space leaves a glyph path with no ink.
+  test("builds the offline viewer from the outlined export and opens it", async ({ page }) => {
+    const outlineFixture = resolve("src-tauri/crates/maru-diagram-engine/testdata/architecture-light-outlines.svg");
+    const outlineSpec = resolve("src-tauri/crates/maru-diagram-engine/testdata/viewer-architecture-light.spec.json");
+    const temp = mkdtempSync(join(tmpdir(), "maru-offline-outlined-"));
+    const filePath = join(temp, "outlined-viewer.html");
+    try {
+      const buildOutput = execFileSync(process.execPath, [
+        join(process.cwd(), "scripts/build-diagram-viewer.mjs"), outlineFixture, outlineSpec, filePath,
+      ], { encoding: "utf8" });
+      expect(buildOutput).toContain("OFFLINE_DIAGRAM_VIEWER");
+      const fileUrl = pathToFileURL(filePath).href;
+      const attempts: string[] = [];
+      await page.route("**/*", async (route) => {
+        if (route.request().url() === fileUrl) await route.continue();
+        else { attempts.push(route.request().url()); await route.abort(); }
+      });
+      await page.goto(fileUrl);
+      await expect(page.locator("#stage > svg")).toBeVisible();
+      await expect(page.locator("#stage svg text")).toHaveCount(0);
+      expect(await page.locator('#stage svg path[data-kind="glyph"][d=""]').count()).toBeGreaterThan(0);
+      await page.locator('#stage svg [data-kind="node"][data-source-id="a"]').click({ force: true });
+      await expect(page.locator("#selection")).toContainText("node a");
+      expect(attempts).toEqual([]);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
 });

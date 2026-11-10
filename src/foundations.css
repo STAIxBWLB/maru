@@ -1,3 +1,21 @@
+/* Diagram canvas type: the subset of the two pinned Noto Sans CJK KR faces the
+   engine measures with (maru#552). Bundled locally, never fetched over the
+   network; the subset covers modern Hangul, Latin and common punctuation. */
+@font-face {
+  font-family: "Noto Sans CJK KR Diagram";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("./assets/fonts/NotoSansCJKkr-Regular-diagram.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Noto Sans CJK KR Diagram";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("./assets/fonts/NotoSansCJKkr-Bold-diagram.woff2") format("woff2");
+}
+
 :root {
   color-scheme: light;
   font-family:

@@ -11,6 +11,8 @@ build = "build.rs"
 [features]
 default = []
 png = ["maru-diagram-engine/render-png"]
+# Outlined SVG export: native only, because it carries the pinned CJK faces.
+outline = ["maru-diagram-engine/render-outline"]
 
 [dependencies]
 maru-diagram-engine = { path = "../maru-diagram-engine" }

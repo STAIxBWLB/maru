@@ -7,14 +7,15 @@ import {
 } from "./diagram-engine-e3-integration-coverage.mjs";
 
 const svgSuites = Array.from({ length: EXPECTED_SVG_SUITE_COUNT }, (_, index) => `svg_suite_${index}`);
+const countRefusal = new RegExp(`Expected ${EXPECTED_SVG_SUITE_COUNT} unique svg_\\*\\.rs`);
 
 describe("hosted SVG integration coverage gate", () => {
-  it("requires the current 17 unique svg_ targets", () => {
+  it(`requires the current ${EXPECTED_SVG_SUITE_COUNT} unique svg_ targets`, () => {
     const filenames = svgSuites.map((suite) => `${suite}.rs`);
     expect(assertSvgSuiteCount(filenames)).toHaveLength(EXPECTED_SVG_SUITE_COUNT);
-    expect(() => assertSvgSuiteCount(filenames.slice(1))).toThrow(/Expected 17 unique svg_\*\.rs/);
-    expect(() => assertSvgSuiteCount([...filenames, "svg_extra.rs"])).toThrow(/Expected 17 unique svg_\*\.rs/);
-    expect(() => assertSvgSuiteCount([...filenames.slice(1), filenames[1]])).toThrow(/Expected 17 unique svg_\*\.rs/);
+    expect(() => assertSvgSuiteCount(filenames.slice(1))).toThrow(countRefusal);
+    expect(() => assertSvgSuiteCount([...filenames, "svg_extra.rs"])).toThrow(countRefusal);
+    expect(() => assertSvgSuiteCount([...filenames.slice(1), filenames[1]])).toThrow(countRefusal);
   });
 
   it("requires a successful nonzero Cargo test result for each executed target", () => {

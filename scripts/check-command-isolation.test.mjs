@@ -433,23 +433,26 @@ test("final closure rejects existing-domain-guard exemption from shared admissio
 });
 
 // Synthetic unit fixtures exercise scanner drift; real gate evidence is emitted by Rust IPC tests.
-function pluginFixture(t) {
+function pluginFixture(t, { outline = false } = {}) {
   const f = fixture(t);
   const base = "src-tauri/crates/tauri-plugin-maru-diagram";
   f.write(`${base}/Cargo.toml`, `[package]\nname = "tauri-plugin-maru-diagram"\nversion = "0.1.0"\n`);
   const source = `
-fn build() { tauri::generate_handler![commands::validate, commands::render_png]; }
+fn build() { tauri::generate_handler![commands::validate, commands::render_png${outline ? ", commands::render_svg" : ""}]; }
 mod commands {
   #[tauri::command]
   pub async fn validate() { tauri::async_runtime::spawn_blocking(|| ()).await; }
   #[tauri::command]
-  pub async fn render_png() { tauri::async_runtime::spawn_blocking(|| ()).await; }
+  pub async fn render_png() { tauri::async_runtime::spawn_blocking(|| ()).await; }${outline ? `
+  #[tauri::command]
+  pub async fn render_svg() { tauri::async_runtime::spawn_blocking(|| ()).await; }` : ""}
 }`;
   f.write(`${base}/src/lib.rs`, source);
-  f.write(`${base}/build.rs`, 'const COMMANDS: &[&str] = &["validate", "render_png"];');
+  f.write(`${base}/build.rs`, `const COMMANDS: &[&str] = &[${["\"validate\"", "\"render_png\"", ...(outline ? ["\"render_svg\""] : [])].join(", ")}];`);
   const evidence = {
     schemaVersion: 1, scope: "synthetic MockRuntime scanner unit fixture",
-    pluginCommandCount: 2, pluginCommandsObserved: ["validate", "render_png"],
+    pluginCommandCount: outline ? 3 : 2,
+    pluginCommandsObserved: ["validate", "render_png", ...(outline ? ["render_svg"] : [])],
     differentWorkerThread: true, singleInFlight: true,
     cases: ["typical", "1000"].map((name) => ({ name, requestBytes: 1, responseBytes: 1, pngSha256: "a".repeat(64), roundTripMs: [1] })),
   };
@@ -482,4 +485,21 @@ test("plugin scanner rejects an unawaited worker and failed behavioral evidence"
   f.evidence.singleInFlight = false;
   f.saveEvidence();
   assert.throws(() => checkPluginEvidence(f.root), /single-flight behavior failed/);
+});
+
+test("plugin scanner requires outlined SVG invoke evidence for the registered command", (t) => {
+  const f = pluginFixture(t, { outline: true });
+  assert.throws(() => checkPluginEvidence(f.root), /Outlined SVG evidence is missing a measured scene/);
+  f.evidence.svgCases = ["typical", "1000"].map((name) => ({
+    name, requestBytes: 1, responseBytes: 1, svgBytes: 1, svgSha256: "b".repeat(64), textMode: "outlines", roundTripMs: [1],
+  }));
+  f.saveEvidence();
+  assert.throws(() => checkPluginEvidence(f.root), /share one render permit/);
+  f.evidence.svgCases[1].textMode = "text";
+  f.evidence.sharedPermit = true;
+  f.saveEvidence();
+  assert.throws(() => checkPluginEvidence(f.root), /Outlined SVG evidence has invalid payload, hash, mode or latency data/);
+  f.evidence.svgCases[1].textMode = "outlines";
+  f.saveEvidence();
+  assert.equal(checkPluginEvidence(f.root), 3);
 });
