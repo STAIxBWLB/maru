@@ -246,6 +246,92 @@ fn add_outer_axis(axis: &mut Vec<Coord>) {
     axis.dedup();
 }
 
+/// A* repeatedly tests the same grid rows and columns. Retain only obstacles
+/// whose open interior crosses that axis, preserving the original predicates
+/// and normalized mask indexes. This never materializes the Cartesian grid.
+#[derive(Default)]
+struct AxisCandidates {
+    entries: HashMap<Coord, Vec<Rect>>,
+    retained: usize,
+}
+
+impl AxisCandidates {
+    fn at(
+        &mut self,
+        coordinate: Coord,
+        obstacles: &[Rect],
+        masked: &[usize],
+        horizontal: bool,
+    ) -> &[Rect] {
+        // At most two obstacle lists beyond this threshold can be retained
+        // across the two caches; adversarial wide obstacles cannot turn the
+        // cache into the full grid. Eviction only affects lookup cost.
+        if self.retained > MAX_OBSTACLES {
+            self.entries.clear();
+            self.retained = 0;
+        }
+        self.entries.entry(coordinate).or_insert_with(|| {
+            let candidates: Vec<_> = obstacles
+                .iter()
+                .enumerate()
+                .filter(|(index, rect)| {
+                    let (start, end) = if horizontal {
+                        (rect.top, rect.bottom)
+                    } else {
+                        (rect.left, rect.right)
+                    };
+                    coordinate > start && coordinate < end && !masked.contains(index)
+                })
+                .map(|(_, rect)| *rect)
+                .collect();
+            self.retained += candidates.len();
+            candidates
+        })
+    }
+}
+
+#[derive(Default)]
+struct ClearanceCache {
+    rows: AxisCandidates,
+    columns: AxisCandidates,
+}
+
+impl ClearanceCache {
+    fn point_clear(&mut self, point: GeometryPoint, obstacles: &[Rect], masked: &[usize]) -> bool {
+        !self
+            .rows
+            .at(point.y, obstacles, masked, true)
+            .iter()
+            .any(|rect| point.x > rect.left && point.x < rect.right)
+    }
+
+    fn segment_clear(
+        &mut self,
+        from: GeometryPoint,
+        to: GeometryPoint,
+        obstacles: &[Rect],
+        masked: &[usize],
+    ) -> bool {
+        if from.y == to.y {
+            let (left, right) = (from.x.min(to.x), from.x.max(to.x));
+            !self
+                .rows
+                .at(from.y, obstacles, masked, true)
+                .iter()
+                .any(|rect| left.max(rect.left) < right.min(rect.right))
+        } else if from.x == to.x {
+            let (top, bottom) = (from.y.min(to.y), from.y.max(to.y));
+            !self
+                .columns
+                .at(from.x, obstacles, masked, false)
+                .iter()
+                .any(|rect| top.max(rect.top) < bottom.min(rect.bottom))
+        } else {
+            false
+        }
+    }
+}
+
 fn search_leg(
     start: GeometryPoint,
     end: GeometryPoint,
@@ -314,6 +400,7 @@ fn search_leg(
         y: ys.binary_search(&start.y).map_err(|_| budget())?,
         axis: 2,
     };
+    let mut clearance = ClearanceCache::default();
     let mut visits = HashMap::new();
     visits.insert(
         initial,
@@ -383,8 +470,8 @@ fn search_leg(
                 x: xs[next.x],
                 y: ys[next.y],
             };
-            if !point_clear_except(target, obstacles, masked_obstacle_indices)
-                || !segment_clear_except(point, target, obstacles, masked_obstacle_indices)
+            if !clearance.point_clear(target, obstacles, masked_obstacle_indices)
+                || !clearance.segment_clear(point, target, obstacles, masked_obstacle_indices)
             {
                 continue;
             }
@@ -650,6 +737,38 @@ mod tests {
         assert!(route
             .windows(2)
             .all(|segment| segment_clear(segment[0], segment[1], &normalized)));
+    }
+
+    #[test]
+    fn cached_clearance_matches_scans_at_boundaries_and_with_endpoint_masks() {
+        let obstacles = normalize(&[
+            rect(-4, -3, 6, 5),
+            rect(0, 0, 4, 6),
+            rect(2, -4, 3, 7),
+            rect(-1, 2, 4, 3),
+            rect(0, 0, 0, 0),
+        ])
+        .unwrap();
+        for masked in [vec![], vec![0], vec![1, 3], vec![0, 1, 2, 3]] {
+            let mut cache = ClearanceCache::default();
+            for x in -6..=7 {
+                for y in -6..=8 {
+                    let from = p(x, y);
+                    assert_eq!(
+                        cache.point_clear(from, &obstacles, &masked),
+                        point_clear_except(from, &obstacles, &masked)
+                    );
+                    for other in -6..=8 {
+                        for to in [p(other, y), p(x, other), p(other, other)] {
+                            assert_eq!(
+                                cache.segment_clear(from, to, &obstacles, &masked),
+                                segment_clear_except(from, to, &obstacles, &masked)
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
