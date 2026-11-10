@@ -12,6 +12,7 @@ import {
   canvasDisplayNode,
   canvasGeometryDatasetId,
   canvasGeometryOf,
+  canvasLabelsFor,
   canvasNudgePins,
   canvasGeometryState,
   matchingCanvasGeometry,
@@ -596,6 +597,26 @@ describe("canvas geometry store", () => {
 });
 
 describe("document header and entity label namespaces", () => {
+  it("selects the right published labels when a node and relation share an id", async () => {
+    const spec = mixedSpec("workflow");
+    const nodes = spec.nodes as Array<Record<string, unknown>>;
+    const edges = spec.edges as Array<Record<string, unknown>>;
+    const shared = nodes[0]!.id as string;
+    edges[0]!.id = shared;
+    edges[0]!.label = "연결 Link";
+    const dataset = archifySpecToDataset("workflow", spec, { id: "ds-shared" }).dataset;
+    const doc = projectSemanticDocument(dataset).doc;
+    const id = dataset.idMap[shared]!;
+    expect(doc.edges[0]!.id).toBe(id);
+    await syncCanvasGeometry(doc, dataset.id, fakeEngine().load);
+    const geometry = canvasGeometryState(dataset.id).geometry!;
+    expect(geometry.labels.get(id)!.some((label) => label.id.startsWith("node:"))).toBe(true);
+    expect(geometry.labels.get(id)!.some((label) => label.id.startsWith("edge:"))).toBe(true);
+    expect(canvasLabelsFor(geometry, id, "node").map((label) => label.lines.join(" "))).toContain(MIXED_LABEL);
+    expect(canvasLabelsFor(geometry, id, "node").some((label) => label.id.startsWith("edge:"))).toBe(false);
+    expect(canvasLabelsFor(geometry, id, "edge").map((label) => label.lines.join(" "))).toEqual(["연결 Link"]);
+  });
+
   it("keeps a node named document out of the page header labels", async () => {
     const spec = mixedSpec("architecture");
     const nodes = spec.components as Array<Record<string, unknown>>;

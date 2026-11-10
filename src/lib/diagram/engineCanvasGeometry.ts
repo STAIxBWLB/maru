@@ -83,6 +83,15 @@ export interface CanvasGeometry {
   diagnostics: readonly Diagnostic[];
 }
 
+/** Node/container and relation ids belong to separate label namespaces. */
+export function canvasLabelsFor(
+  geometry: CanvasGeometry,
+  id: string,
+  kind: "node" | "edge",
+): readonly CanvasGeometryLabel[] {
+  return (geometry.labels.get(id) ?? []).filter((label) => label.id.startsWith("edge:") === (kind === "edge"));
+}
+
 export type CanvasGeometryStatus = "idle" | "pending" | "ready" | "stale" | "refused";
 
 export interface CanvasGeometryState {
@@ -189,10 +198,11 @@ export function canvasGeometryOf(
     return doc.edges.some((edge) => edge.id === projected) ? projected : null;
   };
   const labelTarget = (id: string, targetId: string): string | null => {
-    // The document header belongs to the page, not to a canvas member.
-    if (targetId === "document") return null;
     if (id.startsWith("container:")) return canvasId(targetId, "container");
     if (id.startsWith("edge:")) return relationCanvasId(targetId) ?? canvasId(targetId, "node");
+    // A member named document is not the document header: its label still
+    // belongs to the node namespace.
+    if (targetId === "document" && !id.startsWith("node:")) return null;
     return canvasId(targetId, "node");
   };
   const boxes = new Map<string, CanvasGeometryBox>();

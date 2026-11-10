@@ -26,6 +26,7 @@ import { ARROW_MARKER_ID, routeEdge } from "./edgeRouting";
 import {
   canvasDisplayNode,
   canvasLabelLines,
+  canvasLabelsFor,
   matchingCanvasGeometry,
   routePathOf,
   type CanvasGeometry,
@@ -543,8 +544,10 @@ function docBounds(
     }
   }
   if (geometry) {
-    const visibleIds = new Set([...nodes.map((node) => node.id), ...edges.map((edge) => edge.id)]);
-    const labels = [...geometry.labels].filter(([id]) => visibleIds.has(id)).flatMap(([, items]) => items);
+    const labels = [
+      ...nodes.flatMap((node) => canvasLabelsFor(geometry, node.id, "node")),
+      ...edges.flatMap((edge) => canvasLabelsFor(geometry, edge.id, "edge")),
+    ];
     const bounds = [...labels, ...geometry.pageLabels, ...(geometry.page ? [geometry.page] : [])];
     for (const item of bounds) {
       minX = Math.min(minX, item.x);
@@ -602,11 +605,11 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
       nodeById.get(edge.fromNode)!,
       nodeById.get(edge.toNode)!,
       geometry?.routes.get(edge.id),
-      geometry?.labels.get(edge.id)?.[0],
+      geometry ? canvasLabelsFor(geometry, edge.id, "edge")[0] : undefined,
     )).join("") +
     nodes.map((node) => {
       const box = geometry?.boxes.get(node.id);
-      const labels = box ? geometry?.labels.get(node.id)?.map((label) => canvasLabelLines(label, box)) : undefined;
+      const labels = box && geometry ? canvasLabelsFor(geometry, node.id, "node").map((label) => canvasLabelLines(label, box)) : undefined;
       return nodeSvg(node, matrixByNodeId.get(node.id) ?? null, labels);
     }).join("");
 

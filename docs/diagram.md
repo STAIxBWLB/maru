@@ -588,7 +588,9 @@ canvas ids (a relation without an id is named by its ordinal: `<role>:<index>`
 in the report, `<datasetId>-e<index>` on the canvas, and `<role>:<index>:generated`
 when an authored id already holds that name; `:generated` may repeat) and publishes it per
 dataset, and `useCanvasGeometry` reads it on the
-canvas side. The engine lays out exactly the bytes the export path sends, and the
+canvas side. Node/container and relation labels retain their engine namespaces,
+including when their raw ids coincide; a node named `document` remains a member,
+not a page header. The engine lays out exactly the bytes the export path sends, and the
 canvas carries their SHA-256 in `data-engine-spec-sha256`. When a ready published
 scene matches the current source and pins, the Maru visual exports (Maru SVG,
 plain SVG, PNG, PDF and clipboard) reuse its boxes, measured label lines and

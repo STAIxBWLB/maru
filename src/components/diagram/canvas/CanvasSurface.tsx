@@ -29,6 +29,7 @@ import {
 } from "../../../lib/diagram/geometry";
 import {
   canvasDisplayNode,
+  canvasLabelsFor,
   canvasLabelLines,
   canvasMoveBase,
   type CanvasGeometry,
@@ -261,8 +262,8 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
     const map = new Map<NodeId, readonly CanvasLabelLines[]>();
     if (!geometry) return map;
     for (const [id, box] of geometry.boxes) {
-      const labels = geometry.labels.get(id);
-      if (labels) map.set(id, labels.map((label) => canvasLabelLines(label, box)));
+      const labels = canvasLabelsFor(geometry, id, "node");
+      if (labels.length) map.set(id, labels.map((label) => canvasLabelLines(label, box)));
     }
     return map;
   }, [geometry]);
@@ -273,7 +274,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
     for (const edge of edges) {
       const route = geometry.routes.get(edge.id);
       if (!route) continue;
-      const label = geometry.labels.get(edge.id)?.[0] ?? null;
+      const label = canvasLabelsFor(geometry, edge.id, "edge")[0] ?? null;
       map.set(edge.id, { route, label });
     }
     return map;
