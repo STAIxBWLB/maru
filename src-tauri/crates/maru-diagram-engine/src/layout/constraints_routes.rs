@@ -2258,7 +2258,10 @@ mod tests {
                     bounds,
                     entries: vec![],
                 },
-                page: crate::geometry::GeometryPage { bounds },
+                page: crate::geometry::GeometryPage {
+                    bounds,
+                    content_offset: None,
+                },
             },
         )
     }

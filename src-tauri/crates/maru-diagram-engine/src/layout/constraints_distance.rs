@@ -451,6 +451,7 @@ mod tests {
                     width: 920 * 64,
                     height: 760 * 64,
                 },
+                content_offset: None,
             },
         }
     }
