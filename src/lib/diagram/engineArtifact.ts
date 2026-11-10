@@ -294,13 +294,11 @@ export async function renderEngineArtifact(
 let wasmSvgHostPromise: Promise<EngineArtifactHost> | undefined;
 async function wasmSvgPreviewHost(): Promise<EngineArtifactHost> {
   wasmSvgHostPromise ??= (async () => {
-    const moduleUrl = new URL("./__generated__/engine-render/maru_diagram_engine.js", import.meta.url).href;
-    const wasmUrl = new URL("./__generated__/engine-render/maru_diagram_engine_bg.wasm", import.meta.url);
-    const bindings = await import(/* @vite-ignore */ moduleUrl) as Record<string, unknown>;
+    const bindings = await import("./__generated__/engine-render/maru_diagram_engine.js") as unknown as Record<string, unknown>;
     if (typeof bindings.default !== "function" || typeof bindings.render_artifact !== "function") {
       throw new Error("The SVG preview WASM binding is missing; update Maru and retry.");
     }
-    await bindings.default({ module_or_path: wasmUrl });
+    await bindings.default();
     const render = bindings.render_artifact as (input: string) => string;
     return async (input: string) => render(input);
   })().catch((error) => {
