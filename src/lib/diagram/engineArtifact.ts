@@ -89,7 +89,7 @@ export function parseEngineArtifactReport(value: unknown): EngineArtifactReport 
     try {
       report = JSON.parse(report) as unknown;
     } catch {
-      throw new Error("The Rust artifact adapter returned invalid JSON; rebuild the matching engine-render or engine-png WASM asset.");
+      throw new Error("The Rust artifact adapter returned invalid JSON; update Maru and retry.");
     }
   }
   if (!record(report) || report.apiVersion !== 1 || typeof report.ok !== "boolean"
@@ -101,16 +101,16 @@ export function parseEngineArtifactReport(value: unknown): EngineArtifactReport 
       || !validReceiptShape(report.receipt)
       || report.textMode !== undefined && report.textMode !== "text" && report.textMode !== "outlines"
       || report.storeWarning !== undefined && report.storeWarning !== null && typeof report.storeWarning !== "string") {
-    throw new Error("The Rust artifact report has an incompatible shape; rebuild the matching generated bindings.");
+    throw new Error("The Rust artifact report has an incompatible shape; update Maru and retry.");
   }
   if (Array.isArray(report.bytes) && report.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
-    throw new Error("The Rust artifact report contains invalid byte values; update the engine WASM and retry.");
+    throw new Error("The Rust artifact report contains invalid byte values; update Maru and retry.");
   }
   if (report.ok && (report.bytes === null || report.svg === null || report.width === null || report.height === null)) {
-    throw new Error("The Rust engine marked an incomplete artifact successful; rebuild matching engine bindings.");
+    throw new Error("The Rust engine marked an incomplete artifact successful; update Maru and retry.");
   }
   if (!report.ok && (report.bytes !== null || report.svg !== null || report.width !== null || report.height !== null)) {
-    throw new Error("The Rust engine returned artifact data with a refusal; rebuild matching engine bindings.");
+    throw new Error("The Rust engine returned artifact data with a refusal; update Maru and retry.");
   }
   return report as unknown as EngineArtifactReport;
 }
@@ -199,22 +199,22 @@ export async function verifyEngineArtifactReport(
       || receipt.gates.visualReview.scope !== "manual"
       || receipt.readback?.status !== "not-run"
       || receipt.readback.scope !== "saved-file-byte-comparison") {
-    throw new Error("The Rust receipt does not match the semantic source, engine artifact or required gates; rebuild the matching native engine and retry.");
+    throw new Error("The Rust receipt does not match the semantic source, engine artifact or required gates; update Maru and retry.");
   }
 
   if (input.format === "svg") {
     if (svgBytes.length !== outputBytes.length
         || svgBytes.some((byte, index) => byte !== outputBytes[index])) {
-      throw new Error("The Rust SVG bytes differ from the receipt's returned SVG string; regenerate matching engine bindings.");
+      throw new Error("The Rust SVG bytes differ from the receipt's returned SVG string; update Maru and retry.");
     }
     const viewBox = svgViewBox(report.svg!);
     const pixelRatio = input.pixelRatio ?? 1;
     if (!viewBox || Math.ceil(viewBox[0] * pixelRatio) !== report.width
         || Math.ceil(viewBox[1] * pixelRatio) !== report.height) {
-      throw new Error("The Rust engine returned SVG dimensions that do not match its viewBox; regenerate the artifact and retry.");
+      throw new Error("The Rust engine returned SVG dimensions that do not match its viewBox; update Maru and retry.");
     }
   } else if (!validPngSignature(outputBytes)) {
-    throw new Error("The Rust PNG artifact has an invalid signature; rebuild the engine-png artifact and retry.");
+    throw new Error("The Rust PNG artifact has an invalid signature; update Maru and retry.");
   }
   // Export receipts contain the public v1 contract only. Transport diagnostics
   // and future private adapter fields must not become saved sidecar metadata.
@@ -322,7 +322,7 @@ function normalizeTransportError(cause: unknown, format: EngineArtifactFormat): 
       && typeof cause.nextStep === "string") {
     if (cause.diagnostics !== undefined
         && (!Array.isArray(cause.diagnostics) || !cause.diagnostics.every(validDiagnostic))) {
-      return new Error("The native PNG refusal contains malformed diagnostics; rebuild matching plugin bindings and retry.");
+      return new Error("The native PNG refusal contains malformed diagnostics; update Maru and retry.");
     }
     return new EngineArtifactTransportError({
       code: cause.code,

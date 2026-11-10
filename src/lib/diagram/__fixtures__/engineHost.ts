@@ -1,5 +1,6 @@
 /** Node-only test fixture that initializes the generated E1 and geometry WASM artifacts. */
 import { readFileSync } from "node:fs";
+import { fileURLToPath, pathToFileURL, URL as NodeURL } from "node:url";
 import type {
   GeometryReport,
   LayoutRequest,
@@ -18,16 +19,23 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 async function loadBindings(directory: "engine-e0" | "engine-geometry"): Promise<WasmBindings> {
-  const moduleUrl = new URL(`../__generated__/${directory}/maru_diagram_engine.js`, import.meta.url);
-  const wasmUrl = new URL(`../__generated__/${directory}/maru_diagram_engine_bg.wasm`, import.meta.url);
+  const modulePath = fileURLToPath(new NodeURL(`../__generated__/${directory}/maru_diagram_engine.js`, import.meta.url));
+  const wasmPath = fileURLToPath(new NodeURL(`../__generated__/${directory}/maru_diagram_engine_bg.wasm`, import.meta.url));
   let wasm: Uint8Array;
-  let bindings: WasmBindings;
   try {
-    wasm = new Uint8Array(readFileSync(wasmUrl));
-    bindings = await import(moduleUrl.href) as WasmBindings;
-  } catch {
-    throw new Error(`Generated ${directory} WASM assets are missing; run node scripts/diagram-engine-e0.mjs wasm and retry.`);
+    wasm = new Uint8Array(readFileSync(wasmPath));
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`Generated ${directory} WASM binary is missing or unreadable: ${detail}; run node scripts/diagram-engine-e0.mjs wasm and retry.`);
   }
+  let loaded: unknown;
+  try {
+    loaded = await import(pathToFileURL(modulePath).href);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`Generated ${directory} WASM binding could not load: ${detail}; regenerate it with node scripts/diagram-engine-e0.mjs wasm and retry.`);
+  }
+  const bindings = loaded as WasmBindings;
   if (typeof bindings.default !== "function") {
     throw new Error(`Generated ${directory} WASM initializer is missing; run node scripts/diagram-engine-e0.mjs wasm and retry.`);
   }

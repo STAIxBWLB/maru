@@ -255,7 +255,11 @@ untouched members survives. Preview stays synchronous; applying a structural
 edit runs the resulting spec through the pinned engine before committing.
 An engine refusal, unavailable engine or document change during validation
 leaves both the document and undo history untouched. Text write-through and
-explicit detach remain local operations.
+explicit detach remain local operations. When a selected member belongs to an
+existing engine-backed dataset, the inspector also requests SDK diagnostics
+asynchronously. This is read-only feedback: it does not delay loading the
+document, rewrite the stored spec or add history. Results from a previous
+dataset or spec are ignored; Floorplan keeps its local-only validation path.
 
 **Detach and delete.** "Detach to freeform..." drops the dataset and the
 member markers after a confirm listing what is lost (types, order,
@@ -679,9 +683,9 @@ receipt with `engine: { id, version, revision }`, input hash and scoped gates.
 The architecture slice labels its schema scope; artifact/browser/visual gates
 remain not-run. Optional output/engine-output hashes, conversion, readback,
 document identity/name/revision, renderedAt, diagramType and datasetId preserve
-#528/#534 fields. The legacy parser accepts Archify `enginePin.name` (and
-`engine.name`) and normalizes it to `engine.id`; it does not relabel an old
-Archify validation as Maru validation. Product receipt migration is deferred.
+#528/#534 fields. E4 product Renders keeps legacy Archify `enginePin.name`
+receipts readable alongside `engine.id`; it does not relabel old history as a
+Maru validation receipt. See E4 product integration below.
 
 Rust is the type source. `ts-rs` generates the checked-in engine declarations;
 `node scripts/diagram-engine-e0.mjs types` fails CI on drift. Use its `--write`
@@ -2078,3 +2082,47 @@ The CLI creates the output exclusively and refuses existing file/symlink/hardlin
 targets, so it cannot overwrite either input through an alias. Open the result
 directly from disk with `file://`. This viewer is not wired to
 File > Renders, export choices, or a Tauri command; that remains a later stage.
+
+## E4 product integration
+
+The product engine is an integration over the existing v9 semantic datasets,
+not a new document loader. Existing v7, v8 and v9 files continue through the
+permissive migration path: semantic specs and unrecognized dataset payload
+fields remain stored as source JSON. An engine refusal is shown when that
+dataset is inspected or edited; it is not a reason to discard or rewrite an
+existing document on open.
+
+The property inspector's SDK validation runs asynchronously for the active
+engine-backed dataset. It displays SDK diagnostic codes, paths, causes and
+fixes without blocking the panel or creating a document/history change. A
+result is ignored when its dataset or source spec is no longer active.
+Floorplan retains local validation. Structural semantic edits still pass the
+asynchronous engine gate and a current-document check before one undoable
+snapshot is committed; refusal leaves both source and history unchanged.
+
+The semantic SVG/PNG export choices (`archify-svg` and `archify-png`) derive a
+canonical source spec from the selected semantic dataset and send it to the
+native `maru-diagram-engine` host. They do not export canvas projection or
+interactive canvas state. SVG requests outlined text; PNG is produced by the
+native engine path, not the browser Canvas exporter. The separate WebAssembly
+facade remains available for UI-side validation/layout and isolated preview
+tools; it is not a fallback for these native exports.
+
+`pnpm engine:assets` builds the lazy validation, geometry/layout and SVG-preview
+WebAssembly slices used by the frontend; generated bindings and WASM files live
+under ignored `src/lib/diagram/__generated__/` paths and are not checked in.
+`pnpm dev`, `pnpm build:frontend` and `pnpm test` run this asset step first.
+The source Tauri CSP permits `'wasm-unsafe-eval'` for WebAssembly compilation,
+but does not permit ordinary `'unsafe-eval'` or `blob:` script sources. A
+compiled-native-app CSP parity proof remains a separate native gate; the source
+configuration alone is not evidence of the compiled policy.
+
+Before a selected file save proceeds, the frontend verifies the returned
+engine receipt and artifact bytes. The native host separately checks the
+source hash, output hashes and engine receipt before it retains a render.
+Receipts bind the input-spec hash, engine identity, requested format/theme/scale
+and individual gate statuses. Stored render history continues to accept legacy Archify
+`enginePin.name` receipts and normalizes them for display without rebranding
+their engine identity. Production engine IPC is exposed through the
+`diagram-render` capability for the `main` webview; the default-off
+`native-e2e` fixture bridge is separate.

@@ -55,6 +55,15 @@ export interface NativeE2eDiagramStaticExportResult {
   pngPath: "diagrams/native-static-export.png";
   svgReceipt: EngineReceipt;
   pngReceipt: EngineReceipt;
+  applyProbe: {
+    refused: boolean;
+    unchangedAfterRefusal: boolean;
+    historyAfterRefusal: number;
+    refusalKeys: string[];
+    applied: boolean;
+    historyAfterApply: number;
+    undoRestoredDocument: boolean;
+  };
 }
 
 export interface NativeE2eEngineMeasurement {
@@ -361,15 +370,80 @@ function bridgeNamespace(): MaruNativeE2eBridge {
 
         // Keep diagram/renderer modules out of ordinary frontend builds. The
         // literal build gate above is folded away when VITE_NATIVE_E2E is unset.
-        const [{ createEmptyDoc }, { archifySpecToDataset }, { exportVerifiedSemanticArtifact }, { diagramExportBlobToPath }, { NATIVE_EXPORT_SPEC }] = await Promise.all([
+        const [
+          { createInitialEphemeral },
+          { archifySpecToDataset },
+          { SEMANTIC_FIXTURES },
+          { projectSemanticDocument },
+          { createDiagramStore },
+          { applyValidatedSemanticEdit },
+          { addSemanticEntry, removeSemanticEntries },
+          { undo },
+          { validateEngineCandidate },
+          { exportVerifiedSemanticArtifact },
+          { diagramExportBlobToPath },
+        ] = await Promise.all([
           import("./diagram/types"),
           import("./diagram/archifyCodec"),
+          import("./diagram/__fixtures__/semantic"),
+          import("./diagram/semantic"),
+          import("./diagram/state"),
+          import("./diagram/semanticApply"),
+          import("./diagram/semanticEdit"),
+          import("./diagram/actions"),
+          import("./diagram/engine"),
           import("./diagram/verifiedExport"),
           import("./diagram"),
-          import("./diagram/__fixtures__/nativeExport"),
         ]);
-        const { dataset } = archifySpecToDataset("architecture", NATIVE_EXPORT_SPEC, { id: "native-static-export-dataset" });
-        const doc = { ...createEmptyDoc("native-static-export", Date.now()), datasets: [dataset] };
+
+        const workflowSpec = {
+          ...structuredClone(SEMANTIC_FIXTURES.workflow),
+          semanticChecks: { allowedRoots: ["draft"], allowedTerminals: ["merge"] },
+        };
+        const refusedDataset = archifySpecToDataset("workflow", workflowSpec, { id: "native-apply-refusal" }).dataset;
+        const refusedStore = createDiagramStore({
+          doc: projectSemanticDocument(refusedDataset).doc,
+          ephemeral: createInitialEphemeral(),
+        });
+        const beforeRefusal = refusedStore.getState().doc;
+        const removal = removeSemanticEntries("workflow", refusedDataset.spec, [{ field: "nodes", index: 0 }]);
+        const refused = await applyValidatedSemanticEdit(refusedStore, refusedDataset.id, removal.transform, {
+          validateCandidate: (type, spec) => validateEngineCandidate(type, spec),
+        });
+        const refusalProbe = {
+          refused: refused.status === "invalid",
+          unchangedAfterRefusal: refusedStore.getState().doc === beforeRefusal,
+          historyAfterRefusal: refusedStore.getState().ephemeral.history.past.length,
+          refusalKeys: refused.status === "invalid" ? refused.diagnostics.map((item) => item.key) : [],
+        };
+
+        const lifecycleDataset = archifySpecToDataset("lifecycle", SEMANTIC_FIXTURES.lifecycle, { id: "native-apply-undo" }).dataset;
+        const lifecycleStore = createDiagramStore({
+          doc: projectSemanticDocument(lifecycleDataset).doc,
+          ephemeral: createInitialEphemeral(),
+        });
+        const beforeApply = structuredClone(lifecycleStore.getState().doc);
+        const applied = await applyValidatedSemanticEdit(
+          lifecycleStore,
+          lifecycleDataset.id,
+          addSemanticEntry("lifecycle", "states", { type: "active", label: "Native probe", lane: "main", col: 3 }),
+          { validateCandidate: (type, spec) => validateEngineCandidate(type, spec) },
+        );
+        const historyAfterApply = lifecycleStore.getState().ephemeral.history.past.length;
+        if (applied.status === "applied") lifecycleStore.setState(undo());
+        const applyProbe = {
+          ...refusalProbe,
+          applied: applied.status === "applied",
+          historyAfterApply,
+          undoRestoredDocument: JSON.stringify(lifecycleStore.getState().doc) === JSON.stringify(beforeApply),
+        };
+
+        const nativeSpec = structuredClone(SEMANTIC_FIXTURES.architecture);
+        nativeSpec.meta = { ...(nativeSpec.meta as Record<string, unknown>), title: "Native engine export" };
+        const components = nativeSpec.components as Array<Record<string, unknown>>;
+        components[0] = { ...components[0], label: "한日中" };
+        const { dataset } = archifySpecToDataset("architecture", nativeSpec, { id: "native-static-export-dataset" });
+        const doc = projectSemanticDocument(dataset).doc;
         const svg = await exportVerifiedSemanticArtifact({
           doc, datasetId: dataset.id, workspace, format: "svg", theme: "light",
         });
@@ -389,6 +463,7 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           pngPath: "diagrams/native-static-export.png",
           svgReceipt: { ...svg.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } },
           pngReceipt: { ...png.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } },
+          applyProbe,
         };
       },
     };

@@ -32,6 +32,7 @@ Run these passes and tag every finding with its pass:
   not. Nothing imports `src/App.tsx`, and shared state stays on keyed module stores with
   `useSyncExternalStore`.
 - **Approval gates**: seeds never create schedules, and `metadata.origin` is never overwritten.
+- **Semantic diagrams**: loading an existing v7-v9 document must preserve its stored semantic source even when the SDK refuses it. Inspector diagnostics are asynchronous and read-only; structural edits still pass the SDK gate before a history commit. Verify engine SVG/PNG exports from the selected dataset source and keep the `diagram-render` IPC capability main-window-only.
 - **Release surfaces**: version changes touch all five surfaces and never go backwards.
 - **Korean text**: no slicing with backend offsets in JS; IME behavior is not provable in Chromium
   e2e, so macOS-affecting changes need a real-app check.
