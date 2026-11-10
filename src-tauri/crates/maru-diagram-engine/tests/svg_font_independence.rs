@@ -12,6 +12,13 @@ fn spec_with_mixed_label() -> Value {
     let mut spec: Value =
         serde_json::from_str(include_str!("../testdata/valid-architecture.json")).unwrap();
     spec["components"][0]["label"] = json!("주문 처리 Order flow");
+    // The emitted Noto ink of the mixed label runs 13.891px past the right edge
+    // of the default 120px node, so the emitted-ink rule refuses that node and
+    // it never reaches emission. Widening it to 160px holds the ink, and the
+    // neighbour moves one column right so the same rule's 8px node separation
+    // still holds.
+    spec["components"][0]["size"] = json!([160, 60]);
+    spec["components"][1]["col"] = json!(2);
     spec
 }
 
