@@ -846,6 +846,11 @@ fn near_span(a: Point, b: Point, r: Rect, limit: i64, inclusive: bool) -> Option
     } else {
         (r.x - a.0).max(a.0 - r.right()).max(0)
     };
+    // Reject the perpendicular slab before wide multiplication. Most scene
+    // nodes are far from this route; none can contribute a clearance witness.
+    if limit >= 0 && perpendicular > limit {
+        return None;
+    }
     let remaining = i128::from(limit) * i128::from(limit)
         - i128::from(perpendicular) * i128::from(perpendicular)
         - i128::from(!inclusive);
