@@ -424,14 +424,14 @@ test("ArrowRight on a derived dataflow stage changes neither doc nor history", a
     return doc;
   };
   const before = await readDoc() as { nodes: Array<{ id: string; locked?: boolean }> };
-  const stageId = await page.locator('[data-engine-source-id="stage:0"] [data-node-id]').getAttribute("data-node-id");
+  const stageId = await page.locator('[data-engine-source-id="stage:0"] .maru-diagram-node[data-node-id]').getAttribute("data-node-id");
   const storedStage = before.nodes.find((node) => node.id === stageId);
   expect(storedStage).toBeDefined();
   expect(storedStage!.locked).not.toBe(true);
   await page.getByRole("tab", { name: "편집", exact: true }).click();
   const undo = page.getByRole("button", { name: /되돌리기/ });
   await expect(undo).toBeDisabled();
-  const stage = page.locator('[data-engine-source-id="stage:0"] [data-node-id]');
+  const stage = page.locator('[data-engine-source-id="stage:0"] .maru-diagram-node[data-node-id]');
   await stage.click({ position: { x: 20, y: 10 }, force: true });
   await expect(stage).toHaveClass(/is-selected/);
   await page.keyboard.press("ArrowRight");
