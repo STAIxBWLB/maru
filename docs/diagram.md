@@ -1214,13 +1214,16 @@ verdicts remain unchanged. The 2px workflow-column boundary and 8px/9px
 lifecycle rail case are not pursued as compatibility work. Archify comparisons
 remain reference evidence, not a merge or E4 admission gate.
 
-Endpoint masks are route-local: an authored via must lie inside the endpoint's
-clearance-inflated node or contained-label box. Only its incident routing legs
-receive that exemption. The final centerline scan allows the contiguous inside
-run connected to the authorized via, including entry and exit; other legs and
-outside re-entry retain the endpoint as an obstacle. Routing retains full label
-line boxes, including leading, as conservative obstacles; admission instead
-checks painted glyph ink.
+Endpoint masks are route-local: an authored via must lie strictly inside the
+visible endpoint node before its incident routing legs can receive a node mask.
+A via in only the 2px clearance ring never authorizes passage through the node.
+For a via inside that visible node, planning may waive a contained label's
+clearance halo; the final centerline scan still exempts visible label passage
+only for an authored via inside the label itself. The final scan scopes each
+visible obstacle exemption to the contiguous inside run connected to its seed,
+including entry and exit. Other legs and outside re-entry retain the endpoint
+as an obstacle. Routing retains full label line boxes, including leading, as
+conservative obstacles; admission instead checks painted glyph ink.
 
 The source-green ink-refusal allowance is explicit, not open-ended: `public-01`
 (3.53125px), `gate-sequence-brand-absent` (2.8125px),

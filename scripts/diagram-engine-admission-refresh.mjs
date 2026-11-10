@@ -252,7 +252,7 @@ function refreshLedger(ledger, corpus, reports, identity, nativeReport) {
       sdkTree: identity.sdkTree,
       engineCrateTreePath: identity.engineCrateTreePath,
       engineCrateTree: identity.engineCrateTree,
-      engineEvidenceScope: nativeReport ? "current-wasm-layout-with-native-corpus-agreement" : "current-wasm-layout",
+      engineEvidenceScope: nativeReport ? "current-wasm-layout-with-native-acceptance-cross-check" : "current-wasm-layout",
       engine: {
         accepted: report.ok,
         geometry: report.geometry,

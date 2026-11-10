@@ -694,9 +694,9 @@ impl SceneBuilder {
             self.routing_obstacles.insert(clearance, obstacles);
         }
     }
-    fn endpoint_masks(&self, r: &RouteRequest) -> EndpointMasks {
+    fn endpoint_masks(&self, r: &RouteRequest, clearance: Coord) -> Result<EndpointMasks, Diagnostic> {
         if r.waypoints.is_empty() {
-            return EndpointMasks::default();
+            return Ok(EndpointMasks::default());
         }
 
         let mut masks = EndpointMasks {
@@ -743,31 +743,42 @@ impl SceneBuilder {
             {
                 continue;
             }
-            let via_indices: BTreeSet<_> = masks
+            let node_via_indices = masks
                 .nodes
                 .get(node_index)
                 .into_iter()
                 .flat_map(|node| node.waypoint_indices.iter().copied())
+                .collect::<Vec<_>>();
+            let planning_bounds = inflate(label.bounds, clearance)?;
+            let routing_via_indices: BTreeSet<_> = node_via_indices
+                .iter()
+                .copied()
+                .filter(|via_index| point_inside_box(planning_bounds, r.waypoints[*via_index]))
+                .collect();
+            // The planning obstacle includes clearance. An endpoint via may
+            // sit in that padding without owning the visible label itself.
+            for via_index in &routing_via_indices {
+                masks.by_via[*via_index]
+                    .labels_by_node
+                    .entry(*node_index)
+                    .or_default()
+                    .insert(label_index);
+            }
+            let visible_via_indices: BTreeSet<_> = node_via_indices
+                .into_iter()
                 .filter(|via_index| point_inside_box(label.bounds, r.waypoints[*via_index]))
                 .collect();
-            if !via_indices.is_empty() {
+            if !visible_via_indices.is_empty() {
                 masks.labels.insert(
                     label_index,
                     EndpointMaskBounds {
                         bounds: label.bounds,
-                        waypoint_indices: via_indices.clone(),
+                        waypoint_indices: visible_via_indices,
                     },
                 );
-                for via_index in via_indices {
-                    masks.by_via[via_index]
-                        .labels_by_node
-                        .entry(*node_index)
-                        .or_default()
-                        .insert(label_index);
-                }
             }
         }
-        masks
+        Ok(masks)
     }
 
     fn scope_endpoint_masks_to_path(
@@ -968,7 +979,7 @@ impl SceneBuilder {
                 .map(|label| inflate(label.bounds, clearance))
                 .collect::<Result<Vec<_>, _>>()?,
         );
-        let mut endpoint_masks = self.endpoint_masks(r);
+        let mut endpoint_masks = self.endpoint_masks(r, clearance)?;
         let routing_endpoint_masks = if endpoint_masks
             .by_via
             .iter()

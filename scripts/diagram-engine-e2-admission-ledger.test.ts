@@ -20,7 +20,6 @@ interface LedgerRecord {
   pinnedSourceRefs: unknown[];
   engine: { accepted: boolean; geometry: unknown; diagnostics: unknown[] };
   disposition: { status: string; reason: string };
-  pinnedSourceRefs: unknown[];
   numericGeometryEvidence: unknown;
   engineSourceCommit: string;
   sdkTreePath: string;

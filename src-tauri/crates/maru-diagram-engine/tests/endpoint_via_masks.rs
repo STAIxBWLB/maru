@@ -318,8 +318,16 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
         .find(|label| label.id.as_deref() == Some("node:a:label"))
         .unwrap();
     let center_y = f64::from(source.bounds.y + source.bounds.height / 2) / 64.0;
-    let label_ring_x = f64::from(label.bounds.x) / 64.0 - 1.0;
-    let label_center_y = f64::from(label.bounds.y + label.bounds.height / 2) / 64.0;
+    let label_ring = maru_diagram_engine::geometry::GeometryPoint {
+        x: label.bounds.x - 64,
+        y: label.bounds.y + label.bounds.height / 2,
+    };
+    assert!(source.bounds.contains(label_ring).unwrap_or(false));
+    assert!(!label.bounds.contains(label_ring).unwrap_or(false));
+    let label_ring_xy = [
+        f64::from(label_ring.x) / 64.0,
+        f64::from(label_ring.y) / 64.0,
+    ];
     let cases = [
         ("node-clearance-ring", [43.0, 175.0]),
         (
@@ -333,7 +341,7 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
                 f64::from(source.bounds.y) / 64.0 - 2.0,
             ],
         ),
-        ("label-clearance-ring", [label_ring_x, label_center_y]),
+        ("label-clearance-ring", label_ring_xy),
     ];
 
     for (name, first_via) in cases {
@@ -356,13 +364,12 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
             .find(|route| route.id.as_deref() == Some("f"))
             .unwrap_or_else(|| panic!("{name}: authored route record is retained"));
         if name == "inflated-node-corner" {
-            assert!(
-                report.ok,
-                "the exact planning-boundary corner is clear: {:?}",
-                report.diagnostics
-            );
-            assert!(!route.points.is_empty(), "clear corner route is retained");
-        } else {
+            assert!(!report.ok, "diagonal source pin remains refused");
+            assert!(report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "dataflow/geometry-route-quality"
+                    && diagnostic.message.contains("non-orthogonal")
+            }), "corner control must retain the source diagonal cause: {:?}", report.diagnostics);
+        } else if name != "label-clearance-ring" {
             assert!(
                 !report.ok,
                 "a via inside only planning padding must not authorize its visible obstacle"
@@ -375,24 +382,44 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
                 "{name}: refusal must name the blocked route, got {:?}",
                 report.diagnostics
             );
+        } else if !report.ok {
+            assert!(
+                report.diagnostics.iter().any(|diagnostic| matches!(
+                    diagnostic.code.as_str(),
+                    "dataflow/route-blocked" | "dataflow/route-port-blocked"
+                )),
+                "label-ring refusal must name the blocked route: {:?}",
+                report.diagnostics
+            );
         }
         if report.ok {
             assert!(
                 !route.points.is_empty(),
                 "accepted route must retain its points"
             );
+            let authored_via = maru_diagram_engine::geometry::GeometryPoint::from_pixels(
+                first_via[0],
+                first_via[1],
+            )
+            .unwrap();
+            assert!(
+                route.points.contains(&authored_via),
+                "{name}: accepted route must retain its authored via"
+            );
         }
         for segment in route.points.windows(2) {
-            assert!(
-                !axis_segment_hits(source.bounds, segment[0], segment[1]),
-                "{name}: route crossed visible source body: {:?}",
-                route.points
-            );
             assert!(
                 !axis_segment_hits(source_label.bounds, segment[0], segment[1]),
                 "{name}: route crossed visible source label: {:?}",
                 route.points
             );
+            if name != "label-clearance-ring" {
+                assert!(
+                    !axis_segment_hits(source.bounds, segment[0], segment[1]),
+                    "{name}: route crossed visible source body: {:?}",
+                    route.points
+                );
+            }
         }
     }
 }
