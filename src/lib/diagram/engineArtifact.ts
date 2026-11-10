@@ -134,13 +134,6 @@ function validPngSignature(bytes: Uint8Array): boolean {
     && [137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte);
 }
 
-function refusalError(diagnostics: readonly Diagnostic[]): Error {
-  const details = diagnostics
-    .map((diagnostic) => `${diagnostic.message.trim()} ${diagnostic.fix.trim()} (Rust diagnostic ${diagnostic.code} at ${diagnostic.path}).`)
-    .join(" ");
-  return new Error(details || "The Rust engine refused the artifact without an actionable diagnostic; repair the source and retry.");
-}
-
 /** Verify engine provenance and output hashes before a successful artifact reaches callers. */
 export async function verifyEngineArtifactReport(
   input: EngineArtifactRequest,

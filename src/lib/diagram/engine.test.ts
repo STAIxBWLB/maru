@@ -14,7 +14,6 @@ import {
 } from "./engine";
 import {
   renderEngineArtifact,
-  type EngineArtifactPorts,
   type EngineArtifactReport,
   type EngineArtifactRequest,
 } from "./engineArtifact";

@@ -209,7 +209,6 @@ describe("verified semantic export through the engine host", () => {
 
   it("accepts only PNG-signature bytes and preserves the engine output hash lineage", async () => {
     const { doc, dataset } = semanticDoc("sequence");
-    const specJson = JSON.stringify(dataset.spec);
     const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
     const result = await exportVerifiedSemanticArtifact({
       doc, datasetId: dataset.id, workspace: "/fixture", format: "png", theme: "dark",

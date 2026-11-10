@@ -27,7 +27,6 @@
  */
 
 import {
-  SEMANTIC_SPEC_MAX_BYTES,
   validateMatrix,
   validateSemanticSpec,
   type ReportDataset,

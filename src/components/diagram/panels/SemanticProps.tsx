@@ -152,7 +152,7 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
       });
 
     return () => { current = false; };
-  }, [activeDataset?.id, activeDataset?.diagramType, activeDataset?.spec]);
+  }, [activeDataset]);
 
   if (!member) return null;
 
