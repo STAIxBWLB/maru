@@ -3,21 +3,46 @@
 //! Wrapping is measured with the same pinned Noto tables emission uses, so a
 //! line that fits here keeps every painted glyph inside the box the layout
 //! admission check measures (`maru#552` T6, `maru#560`). Break opportunities
-//! are the ones the plan names: a space first, then the boundary between two
-//! Hangul syllables, and a Latin word is split only when it alone overflows the
-//! line.
+//! are the ones the plan names: a space first, then a Hangul syllable boundary
+//! (between syllables or before a leading jamo, never inside a decomposed
+//! syllable), and a Latin word is split only when it alone overflows the line.
 
 use super::PaintedWidth;
 use crate::layout::fixed::Coord;
 use crate::Diagnostic;
 
-/// Scalars a Hangul line may break between: precomposed syllables, the
-/// conjoining jamo around them and the compatibility jamo block.
-fn is_hangul(scalar: char) -> bool {
-    matches!(
-        scalar as u32,
-        0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7A3
-    )
+/// What a scalar is inside a Hangul syllable, the way the Unicode line-breaking
+/// rules see it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Hangul {
+    /// A precomposed syllable (`AC00..=D7A3`) or a compatibility jamo
+    /// (`3130..=318F`), which is a standalone letter rather than a piece.
+    Syllable,
+    /// A leading consonant, the first scalar of a decomposed syllable.
+    Leading,
+    /// A vowel, the middle scalar of a decomposed syllable.
+    Vowel,
+    /// A trailing consonant, the last scalar of a decomposed syllable.
+    Trailing,
+}
+
+fn hangul(scalar: char) -> Option<Hangul> {
+    match scalar as u32 {
+        0xAC00..=0xD7A3 | 0x3130..=0x318F => Some(Hangul::Syllable),
+        0x1100..=0x115F | 0xA960..=0xA97F => Some(Hangul::Leading),
+        0x1160..=0x11A7 | 0xD7B0..=0xD7C6 => Some(Hangul::Vowel),
+        0x11A8..=0x11FF | 0xD7CB..=0xD7FB => Some(Hangul::Trailing),
+        _ => None,
+    }
+}
+
+/// A Hangul break belongs only at a syllable boundary: between two syllables, or
+/// before a leading jamo that starts the next one. A decomposed (NFD) syllable
+/// is a leading, vowel and trailing run, and macOS filenames and some pasted
+/// text arrive that way, so breaking before a vowel or a trailing jamo would
+/// tear one visible syllable across two lines.
+fn is_hangul_break(before: char, after: char) -> bool {
+    hangul(before).is_some() && matches!(hangul(after), Some(Hangul::Syllable | Hangul::Leading))
 }
 
 /// Wrap `text` so no line paints wider than `max_width`.
@@ -99,7 +124,7 @@ fn wrap_paragraph(
             if previous == ' ' {
                 // The space stays out of both lines; the break replaces it.
                 space_break = Some(offset);
-            } else if is_hangul(previous) && is_hangul(rest[length]) {
+            } else if is_hangul_break(previous, rest[length]) {
                 hangul_break = Some(length);
             }
         }
@@ -134,9 +159,8 @@ fn wrap_paragraph(
 
 /// The first place after the first scalar where a new token could start.
 fn next_token_boundary(chars: &[char]) -> Option<usize> {
-    (1..chars.len()).find(|&index| {
-        chars[index - 1] == ' ' || (is_hangul(chars[index - 1]) && is_hangul(chars[index]))
-    })
+    (1..chars.len())
+        .find(|&index| chars[index - 1] == ' ' || is_hangul_break(chars[index - 1], chars[index]))
 }
 
 #[cfg(test)]
@@ -239,6 +263,35 @@ mod tests {
             assert!(
                 painted_width(line, BODY, LABEL).expect("pinned face") <= 40 * 64,
                 "line {line:?} paints wider than the box"
+            );
+        }
+    }
+
+    #[test]
+    fn a_decomposed_syllable_is_never_split_between_its_jamo() {
+        // macOS filenames and some pasted text carry NFD Hangul: one visible
+        // syllable is a leading, vowel and trailing scalar, so a break before a
+        // vowel or a trailing jamo would tear that syllable across two lines.
+        let label = "한한한";
+        let scalars: Vec<char> = label.chars().collect();
+        assert_eq!(scalars.len(), 9, "the fixture must stay decomposed");
+        // Wide enough for one syllable and the leading jamo of the next, which
+        // is exactly where a break between any two Hangul scalars would land
+        // inside a syllable.
+        let box_width: String = scalars[..4].iter().collect();
+        let width = i32::try_from(painted_width(&box_width, BODY, LABEL).expect("pinned face"))
+            .expect("a syllable measures inside the coordinate range");
+        let lines = wrap_label_lines(label, BODY, LABEL, width, true).expect("pinned face");
+        assert_eq!(lines.len(), 3, "one syllable per line: {lines:?}");
+        assert_eq!(lines.concat(), label, "wrapping never reorders scalars");
+        // Checked against the scalar classes, not against the break rule that
+        // produced the lines: a line may end a syllable with its trailing jamo,
+        // never inside one.
+        for line in &lines[..lines.len() - 1] {
+            let last = line.chars().last().expect("no empty line");
+            assert!(
+                matches!(hangul(last), Some(Hangul::Syllable | Hangul::Trailing)),
+                "line {line:?} ends before syllable {last:?} is finished: {lines:?}"
             );
         }
     }
