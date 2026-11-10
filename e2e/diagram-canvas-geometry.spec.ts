@@ -70,12 +70,18 @@ async function importSpec(page: Page, type: EngineDiagramType, spec: Record<stri
   await expect(page.locator("[data-engine-geometry-notice]")).toHaveCount(0);
 }
 
-/** Zoom the canvas out so culling cannot hide a member from the comparison. */
-async function showWholePage(page: Page): Promise<void> {
-  const canvas = page.locator(".maru-diagram-canvas");
-  for (let step = 0; step < 3; step += 1) {
-    await canvas.dispatchEvent("wheel", { ctrlKey: true, deltaY: 400, clientX: 240, clientY: 240 });
-  }
+/**
+ * Zoom the canvas out with the ribbon's own control so culling cannot hide a
+ * member from the comparison. Returns the zoom percent the ribbon shows, which
+ * the caller asserts so a no-op click cannot weaken the probe.
+ */
+async function showWholePage(page: Page): Promise<number> {
+  // The zoom group lives on the view tab, not on the file tab the import used.
+  await page.getByRole("tab", { name: "보기" }).click();
+  const zoomOut = page.getByRole("button", { name: "축소" });
+  for (let step = 0; step < 6; step += 1) await zoomOut.click();
+  const label = (await page.locator(".maru-diagram-zoom-label").textContent()) ?? "";
+  return Number(label.replace("%", "").trim());
 }
 
 interface CanvasProof {
@@ -91,7 +97,10 @@ for (const type of TYPES) {
   test(`the canvas draws the ${type} export geometry`, async ({ page }) => {
     const spec = mixedSpec(type);
     await importSpec(page, type, spec);
-    await showWholePage(page);
+    const zoomPercent = await showWholePage(page);
+    // At this zoom the whole page is inside the surface, so a member missing
+    // from the DOM is a mapping bug rather than culling.
+    expect(zoomPercent).toBeLessThanOrEqual(40);
 
     const proof: CanvasProof = await page.evaluate(async (input) => {
       type Bounds = { x: number; y: number; width: number; height: number };
@@ -145,7 +154,7 @@ for (const type of TYPES) {
           dataset: surface.getAttribute("data-engine-dataset-id"),
           status: surface.getAttribute("data-engine-geometry-status"),
           surface: [rect.width, rect.height],
-          transform: surface.firstElementChild?.getAttribute("transform"),
+          transform: surface.querySelector("[data-engine-source-id]")?.parentElement?.getAttribute("transform"),
           painted: [...surface.querySelectorAll("[data-engine-source-id]")].map((node) => [
             node.getAttribute("data-engine-source-id"),
             node.getAttribute("data-engine-box"),
