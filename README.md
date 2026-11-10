@@ -498,8 +498,13 @@ Requirements:
 - Node.js 22 or newer
 - pnpm 9.15 or newer
 - Rust MSRV 1.90.0; `rust-toolchain.toml` pins the repository verification
-  toolchain
+  toolchain and the `wasm32-unknown-unknown` target used by semantic diagrams
 - Platform libraries required by Tauri 2
+
+Browser development, frontend builds and unit tests generate the ignored diagram
+WASM assets through `pnpm engine:assets` before loading them. The first run
+therefore requires the pinned Rust toolchain as well as Node; native outline
+fonts and PNG rendering stay outside these browser assets.
 
 Common commands:
 
