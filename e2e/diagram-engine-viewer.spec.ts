@@ -297,4 +297,35 @@ test.describe("standalone engine diagram viewer", () => {
     await override("serif")
     expect((await measure()).ink).toEqual(measured.ink);
   });
+
+  // The measurement above opens the artifact as a file; a recipient runs it
+  // through the viewer profile instead, which is what refused the first real
+  // outlined export: a space leaves a glyph path with no ink.
+  test("builds the offline viewer from the outlined export and opens it", async ({ page }) => {
+    const outlineFixture = resolve("src-tauri/crates/maru-diagram-engine/testdata/architecture-light-outlines.svg");
+    const outlineSpec = resolve("src-tauri/crates/maru-diagram-engine/testdata/viewer-architecture-light.spec.json");
+    const temp = mkdtempSync(join(tmpdir(), "maru-offline-outlined-"));
+    const filePath = join(temp, "outlined-viewer.html");
+    try {
+      const buildOutput = execFileSync(process.execPath, [
+        join(process.cwd(), "scripts/build-diagram-viewer.mjs"), outlineFixture, outlineSpec, filePath,
+      ], { encoding: "utf8" });
+      expect(buildOutput).toContain("OFFLINE_DIAGRAM_VIEWER");
+      const fileUrl = pathToFileURL(filePath).href;
+      const attempts: string[] = [];
+      await page.route("**/*", async (route) => {
+        if (route.request().url() === fileUrl) await route.continue();
+        else { attempts.push(route.request().url()); await route.abort(); }
+      });
+      await page.goto(fileUrl);
+      await expect(page.locator("#stage > svg")).toBeVisible();
+      await expect(page.locator("#stage svg text")).toHaveCount(0);
+      expect(await page.locator('#stage svg path[data-kind="glyph"][d=""]').count()).toBeGreaterThan(0);
+      await page.locator('#stage svg [data-kind="node"][data-source-id="a"]').click({ force: true });
+      await expect(page.locator("#selection")).toContainText("node a");
+      expect(attempts).toEqual([]);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
 });
