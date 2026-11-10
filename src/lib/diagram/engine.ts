@@ -108,9 +108,37 @@ function diagnosticText(diagnostic: Diagnostic): string {
 }
 
 function preflightDiagnosticText(diagnostic: ValidationDiagnostic): string {
-  return diagnostic.params
-    ? `${diagnostic.key} (${Object.entries(diagnostic.params).map(([key, value]) => `${key}: ${value}`).join(", ")})`
-    : diagnostic.key;
+  const field = String(diagnostic.params?.field ?? "source");
+  const detail = diagnostic.params
+    ? Object.entries(diagnostic.params).map(([key, value]) => `${key}: ${value}`).join(", ")
+    : "";
+  let cause = `The semantic source failed ${diagnostic.key}`;
+  let fix = `correct ${field} or its referenced entries and retry`;
+  if (diagnostic.key === "diagram.validation.specShape") {
+    cause = "The semantic source must be a JSON object";
+    fix = "provide an object containing the selected diagram type and its required collections";
+  } else if (diagnostic.key === "diagram.validation.specType") {
+    cause = "The selected diagram type is not supported by the SDK";
+    fix = "select architecture, workflow, sequence, dataflow or lifecycle; keep Floorplan on its local path";
+  } else if (diagnostic.key === "diagram.validation.specBudget") {
+    cause = "The semantic source exceeds its UTF-8 byte limit or cannot be serialized";
+    fix = "split the diagram or remove oversized and non-JSON values, then retry";
+  } else if (diagnostic.key === "diagram.validation.specMeta") {
+    cause = `The semantic source has an invalid or missing ${field}`;
+    fix = field === "meta.output"
+      ? "use a relative portable .html output path with each UTF-8 segment at most 255 bytes"
+      : field === "meta.title" ? "set meta.title to a non-empty string"
+      : field === "schema_version" ? "set schema_version to an integer supported by this diagram family"
+      : field === "diagram_type" ? "set diagram_type to the selected dataset type"
+      : `provide the required ${field} collection as an array`;
+  } else if (diagnostic.key === "diagram.semantic.danglingReference") {
+    cause = `The reference at ${field} points to a missing entry`;
+    fix = "restore the referenced entry or update the reference to an existing id";
+  } else if (diagnostic.key === "diagram.semantic.duplicateId") {
+    cause = `The collection at ${field} contains a duplicate id`;
+    fix = "give entries distinct ids within that collection and update their references";
+  }
+  return `${cause}; ${fix}. (${diagnostic.key}${detail ? `: ${detail}` : ""})`;
 }
 
 const NONBLOCKING_ROUTE_NOTICE_CODES = new Set([
@@ -166,7 +194,7 @@ async function validateEngineCandidateWithPorts(
   try {
     specJson = typeof spec === "string" ? spec : JSON.stringify(spec) ?? "";
   } catch (error) {
-    return candidateFailure(`The semantic spec cannot be serialized: ${error instanceof Error ? error.message : String(error)}.`);
+    return candidateFailure(`The semantic spec cannot be serialized: ${error instanceof Error ? error.message : String(error)}; replace cyclic or non-JSON values and retry.`);
   }
   if (!specJson.trim()) return candidateFailure("The semantic spec is empty; provide a valid diagram and retry.");
 
@@ -174,7 +202,7 @@ async function validateEngineCandidateWithPorts(
   try {
     parsed = JSON.parse(specJson) as unknown;
   } catch (error) {
-    return candidateFailure(`The semantic spec is not valid JSON: ${error instanceof Error ? error.message : String(error)}.`);
+    return candidateFailure(`The semantic spec is not valid JSON: ${error instanceof Error ? error.message : String(error)}; repair the JSON syntax and retry.`);
   }
   if (!record(parsed) || parsed.diagram_type !== diagramType) {
     return candidateFailure(

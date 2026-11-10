@@ -12,7 +12,6 @@ import {
   type EngineArtifactHost,
   type EngineArtifactReport,
   type EngineArtifactRequest,
-  type EngineArtifactTheme,
 } from "./engineArtifact";
 export {
   EngineArtifactTransportError,
@@ -26,6 +25,7 @@ export {
 } from "./engineArtifact";
 import { canonicalSemanticExportInput } from "./export";
 import { sanitizeEngineSvgArtifact, type StaticTheme } from "./engineSvg";
+import { serializeDoc } from "./persistence";
 import type { DiagramDoc } from "./types";
 
 export interface VerifiedEngineArtifactForTest { bytes: Uint8Array; svgForDom: string; receipt: EngineReceipt }
@@ -170,6 +170,14 @@ export async function exportVerifiedEngineArtifactForTest(input: {
   };
   current();
   const canonical = canonicalSemanticExportInput(input.doc, input.datasetId);
+  // Match the production export's async source-revision hash boundary. If the
+  // document changes while it is being hashed, stop before invoking the host.
+  const documentBytes = new TextEncoder().encode(serializeDoc(input.doc));
+  await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new Uint8Array(documentBytes).buffer,
+  );
+  current();
   const theme = input.theme ?? "light";
   const pixelRatio = input.pixelRatio ?? 1;
   if (input.format === "svg" && pixelRatio !== 1) {

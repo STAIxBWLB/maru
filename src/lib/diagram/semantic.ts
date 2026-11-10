@@ -291,8 +291,8 @@ export function validateSemanticContentShape(
   const descriptor = SEMANTIC_TYPES[diagramType];
   if (!descriptor) return diagnostics;
 
-  const seen = new Set<string>();
   for (const field of descriptor.idFields) {
+    const seen = new Set<string>();
     specEntries(spec, field).forEach((entry, index) => {
       const id = idOf(entry);
       if (id === null) return;

@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { pinnedEngineHost } from "./__fixtures__/engineHost";
 import { defaultCoalescer, undo, withSnapshot } from "./actions";
 import { archifySpecToDataset } from "./archifyCodec";
+import { applyValidatedSemanticEdit } from "./semanticApply";
 import type { ArchifyDiagramType, SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
-import { projectSemanticDataset, projectSemanticDocument, semanticContainerId, sequenceOrder, validateSemanticContent } from "./semantic";
+import { projectSemanticDataset, projectSemanticDocument, semanticContainerId, sequenceOrder } from "./semantic";
 import {
   detachSemanticDatasetAction,
   addSemanticEntry,
@@ -418,17 +420,23 @@ describe("semantic structural edits", () => {
     validateWithPinnedArchify("sequence", next);
   });
 
-  it("supports boundary membership and lets engine validation reject minimum-count violations", () => {
+  it("supports boundary membership and lets asynchronous engine validation reject minimum-count violations", async () => {
     const source = structuredClone(SEMANTIC_FIXTURES.architecture);
     const next = setBoundaryMembership(0, ["web"])(source)!.spec;
     expect((next.boundaries as Record<string, unknown>[])[0]!.wraps).toEqual(["web"]);
     const lastLane = structuredClone(SEMANTIC_FIXTURES.lifecycle);
+    const store = storeOf("lifecycle", lastLane);
+    const before = JSON.stringify(store.getState().doc);
     const removal = removeSemanticEntries("lifecycle", lastLane, [{ field: "lanes", index: 0 }]);
     expect(removal.transform(lastLane)!.spec.lanes).toEqual([]);
-    expect(validateSemanticContent("lifecycle", removal.transform(lastLane)!.spec).length).toBeGreaterThan(0);
+    expect(planSemanticEdit(store.getState(), "ds", removal.transform).status).toBe("applied");
+    const outcome = await applyValidatedSemanticEdit(store, "ds", removal.transform, pinnedEngineHost);
+    expect(outcome.status).toBe("invalid");
+    expect(JSON.stringify(store.getState().doc)).toBe(before);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
   });
 
-  it("rejects engine-invalid minimum collection removals without mutating state", () => {
+  it("rejects engine-invalid minimum collection removals asynchronously without mutating state", async () => {
     const architecture = structuredClone(SEMANTIC_FIXTURES.architecture);
     architecture.components = [(architecture.components as unknown[])[0]];
     architecture.boundaries = [];
@@ -450,8 +458,10 @@ describe("semantic structural edits", () => {
       const store = storeOf(type, source);
       const before = JSON.stringify(store.getState().doc);
       const { transform } = removeSemanticEntries(type, specOf(store.getState()), [target]);
-      expect(apply(store, transform).status).toBe("invalid");
+      expect(planSemanticEdit(store.getState(), "ds", transform).status).toBe("applied");
+      expect((await applyValidatedSemanticEdit(store, "ds", transform, pinnedEngineHost)).status).toBe("invalid");
       expect(JSON.stringify(store.getState().doc)).toBe(before);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
     }
   });
 

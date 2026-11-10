@@ -310,8 +310,13 @@ describe("validateEngineSpecPreCheck", () => {
       { schema_version: "1", meta: { title: "T", output: "o.html" } },
     ]) {
       const result = validateEngineSpecPreCheck("architecture", spec);
-      const diag = result.diagnostics.find((d) => d.key === "diagram.validation.specMeta");
-      expect(diag?.params?.field).toBe("schema_version");
+      const schemaVersionDiagnostic = result.diagnostics.find((d) =>
+        d.key === "diagram.validation.specMeta" && d.params?.field === "schema_version",
+      );
+      expect(schemaVersionDiagnostic).toEqual({
+        key: "diagram.validation.specMeta",
+        params: { field: "schema_version" },
+      });
     }
   });
 
