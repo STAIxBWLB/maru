@@ -2732,8 +2732,8 @@
     },
     {
       "path": "src-tauri/tauri.conf.json",
-      "sha256": "c63a377c43e7d05f3cf7057891a14cee0ed01a43765a72ea7f45a8a24b9fa223"
+      "sha256": "32a60394a2b65ba95072774e54b09e557eb31293a232b288fcaea2b74bcd54ad"
     }
   ],
-  "sourceCommit": "c99fdbdee59870434b44369e0bf69bb01285719a"
+  "sourceCommit": "235431139d5bd242002ea69d5e13577c292cf2be"
 }
