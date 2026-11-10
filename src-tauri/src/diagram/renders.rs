@@ -13,7 +13,10 @@ use crate::atomic_file::{
 use crate::vault::{lexical_normalize, normalize_existing_dir};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use chrono::{SecondsFormat, Utc};
-use maru_diagram_engine::{geometry::LayoutRequest, render::ArtifactReport, PinSet};
+use maru_diagram_engine::{
+    geometry::{LayoutRequest, PinSet},
+    render::ArtifactReport,
+};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

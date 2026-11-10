@@ -2646,6 +2646,7 @@ dependencies = [
  "dirs 5.0.1",
  "encoding_rs",
  "include_dir",
+ "maru-diagram-engine",
  "mime_guess",
  "minisign-verify 0.2.5",
  "notify",
