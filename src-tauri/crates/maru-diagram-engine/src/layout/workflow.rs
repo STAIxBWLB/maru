@@ -1,6 +1,7 @@
 //! Deterministic workflow lane, phase, group, and edge placement.
 
 use crate::geometry::GeometryBox;
+use crate::layout::fixed::Coord;
 use crate::layout::{point, px, RouteRequest, SceneBuilder};
 use crate::workflow::WorkflowSpec;
 use crate::Diagnostic;
@@ -32,6 +33,18 @@ fn column_center(version: u32, col: u32) -> f64 {
 
 fn lane_top(index: usize) -> f64 {
     LANE_Y + index as f64 * (LANE_HEIGHT + LANE_GAP)
+}
+
+/// Height still available between a node's own top and the bottom of its lane
+/// body, which is how far a default node may grow before it leaves the lane.
+fn lane_body_below(lane: usize, top: Coord, index: usize) -> Result<Coord, Diagnostic> {
+    let bottom = px(lane_top(lane) + LANE_HEIGHT)?;
+    Coord::try_from(i64::from(bottom) - i64::from(top)).map_err(|_| {
+        geometry_error(
+            &format!("/nodes/{index}"),
+            "the lane body below this node is not a representable height",
+        )
+    })
 }
 
 fn geometry_error(path: &str, cause: impl Into<String>) -> Diagnostic {
@@ -122,6 +135,13 @@ pub(crate) fn place(spec: &WorkflowSpec, scene: &mut SceneBuilder) -> Result<(),
             None,
             auto,
             Some([width, height]),
+            // Authored heights are respected; a taller default node grows down
+            // from its own top, so the lane body below that top is what is left
+            // - not the whole body, which a centred node cannot use.
+            match node.height {
+                Some(_) => None,
+                None => Some(lane_body_below(lane, auto.y, index)?),
+            },
         )?;
     }
 

@@ -1,60 +1,127 @@
-use maru_diagram_engine::geometry::{GeometryDocument, GeometryNode, GeometryReport};
-use std::collections::HashSet;
+//! Text-ink evidence shared by the geometry corpus tests.
+//!
+//! Two guards live here. `assert_accepted_text_ink_fits` holds the original
+//! rule: an accepted scene never paints a node's text outside that node.
+//! `assert_auto_fit_readable` records the deliberate inverse: engine auto-fit
+//! (`maru#552` T6) accepts some cases the JS reference model still refuses, and
+//! each of those has to be named and proved readable from the engine's own
+//! output rather than waived.
+//!
+//! Each test binary includes this file separately and uses the part it needs,
+//! so the unused-in-this-binary items are expected rather than dead.
+#![allow(dead_code)]
 
-#[derive(Clone, Copy)]
-struct OverflowAllowance {
-    case_id: &'static str,
-    diagram_type: &'static str,
-    node_id: &'static str,
-    label: &'static str,
-    diagnostic_path: &'static str,
-    font_size_ticks: i64,
-    overflow_ticks: i64,
-}
+use maru_diagram_engine::geometry::{
+    GeometryDocument, GeometryLabel, GeometryNode, GeometryReport,
+};
+use serde_json::Value;
 
-pub const SOURCE_GREEN_INK_CASES: &[&str] = &[
-    "public-01",
-    "gate-sequence-brand-absent",
-    "e2-boundary-sequence-brand-rail-7",
-    "dense-workflow-seed-5502027",
+/// The readable floor auto-fit may shrink to: Maru's `--type-micro-size`, the
+/// smallest type step the product ships (`src/foundations.css`).
+pub const READABLE_FLOOR_TICKS: i64 = 10 * 64;
+
+/// Engine refusals that were once allowed because they were measured Noto ink
+/// overflows. Auto-fit (`maru#560` follow-up, `maru#552` T6) makes every one of
+/// them readable, so the list is empty and any new measured-ink refusal fails.
+pub const SOURCE_GREEN_INK_CASES: &[&str] = &[];
+
+/// Cases where auto-fit accepts what the reference model refuses, one entry per
+/// case: the case id and the fit actions the engine applied, in the canonical
+/// form `kind:node[:role][:ticks]` produced by [`observed_auto_fit_actions`].
+pub const AUTO_FIT_BEYOND_MODEL: &[(&str, &[&str])] = &[
+    (
+        "e2-architecture-geometry-label-fit-primary",
+        &["grow:a:3840", "shrink:a:label:640", "wrap:a"],
+    ),
+    (
+        "e2-dataflow-geometry-label-fit-primary",
+        &["grow:a:3712", "shrink:a:label:640", "wrap:a"],
+    ),
+    (
+        "e2-lifecycle-geometry-label-fit-primary",
+        // The main band leaves 142px below its own top, so this label grows
+        // into the band instead of past it and takes the 12px step.
+        &["grow:a:3968", "shrink:a:label:768", "wrap:a"],
+    ),
+    (
+        "e2-lifecycle-geometry-label-fit-detail",
+        &[
+            "grow:a:3968",
+            "shrink:a:label:768",
+            "shrink:a:sublabel:640",
+            "wrap:a",
+        ],
+    ),
+    (
+        "e2-lifecycle-geometry-label-fit-tag",
+        &["grow:a:3968", "wrap:a"],
+    ),
+    // Boundary cases: the same refusal on the model's character-estimate side,
+    // accepted because the engine measures the real Noto ink instead.
+    (
+        "e2-boundary-dataflow-primary-width-below",
+        &["grow:a:3712", "wrap:a"],
+    ),
+    (
+        "e2-boundary-dataflow-detail-width-sublabel-below",
+        &["grow:a:3712", "wrap:a"],
+    ),
+    (
+        "e2-boundary-dataflow-detail-width-tag-below",
+        &["grow:a:3712", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v1-primary-width-below",
+        &["grow:a:3968", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v1-detail-width-sublabel-below",
+        &["grow:a:3968", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v1-detail-width-tag-below",
+        &["grow:a:3968", "wrap:a"],
+    ),
+    ("e2-boundary-lifecycle-v2-primary-width-below", &["wrap:a"]),
+    (
+        "e2-boundary-lifecycle-v2-detail-width-sublabel-below",
+        &["grow:a:4096", "wrap:a"],
+    ),
+    (
+        "e2-boundary-lifecycle-v2-detail-width-tag-below",
+        &["grow:a:4096", "wrap:a"],
+    ),
+    (
+        "e2-boundary-sequence-spread-primary-header-below",
+        &["shrink:a:label:768", "wrap:a"],
+    ),
+    ("e2-boundary-sequence-brand-rail-9", &["wrap:a"]),
 ];
 
-const OVERFLOW_ALLOWLIST: &[OverflowAllowance] = &[
-    OverflowAllowance {
-        case_id: "public-01",
-        diagram_type: "architecture",
-        node_id: "system",
-        label: "apt, systemd, /etc, homes",
-        diagnostic_path: "/components/4/sublabel",
-        font_size_ticks: 704,
-        overflow_ticks: 226,
-    },
-    OverflowAllowance {
-        case_id: "gate-sequence-brand-absent",
-        diagram_type: "sequence",
-        node_id: "a",
-        label: "BrandBrand",
-        diagnostic_path: "/participants/0/label",
-        font_size_ticks: 832,
-        overflow_ticks: 180,
-    },
-    OverflowAllowance {
-        case_id: "e2-boundary-sequence-brand-rail-7",
-        diagram_type: "sequence",
-        node_id: "a",
-        label: "WWWWWWW",
-        diagnostic_path: "/participants/0/label",
-        font_size_ticks: 832,
-        overflow_ticks: 577,
-    },
+/// Boundary cases the engine already accepted beyond the reference model at the
+/// `#567` head, before auto-fit existed. Real measurement alone clears them, so
+/// each must carry no auto-fit action; naming them keeps the T6 allowance above
+/// from absorbing a difference it did not create.
+pub const BOUNDARY_ACCEPTED_BEFORE_AUTO_FIT: &[&str] = &[
+    "e2-boundary-architecture-brand-rail-71",
+    "e2-boundary-dataflow-brand-rail-71",
+    "e2-boundary-lifecycle-brand-rail-71",
+    "e2-boundary-lifecycle-physical-corridor-7",
+    "e2-boundary-lifecycle-band-title-113.984375",
+    "e2-boundary-sequence-family-label-route-below",
+    "e2-boundary-sequence-label-pair-193.984375",
+    "e2-boundary-workflow-brand-rail-71",
+    "e2-boundary-workflow-brand-rail-73",
+    "e2-boundary-workflow-v2-arrow-spacing-8",
+    "e2-boundary-workflow-v2-turn-7",
+    "e2-boundary-workflow-v2-route-legend-191",
+    "e2-boundary-workflow-v2-label-legend-187",
 ];
 
-const DENSE_OVERFLOW_BY_LAST_DIGIT: [i64; 10] = [268, 252, 262, 258, 281, 259, 269, 264, 266, 262];
-
-fn owned_node_label<'a>(
+fn owned_node_labels<'a>(
     geometry: &'a GeometryDocument,
     node: &GeometryNode,
-) -> Vec<&'a maru_diagram_engine::geometry::GeometryLabel> {
+) -> Vec<&'a GeometryLabel> {
     let prefix = format!("node:{}:", node.id);
     geometry
         .labels
@@ -69,9 +136,7 @@ fn owned_node_label<'a>(
         .collect()
 }
 
-fn ink_bounds(
-    labels: &[&maru_diagram_engine::geometry::GeometryLabel],
-) -> Option<(i64, i64, i64, i64)> {
+fn ink_bounds(labels: &[&GeometryLabel]) -> Option<(i64, i64, i64, i64)> {
     labels
         .iter()
         .flat_map(|label| &label.glyphs)
@@ -109,7 +174,7 @@ fn observed_witnesses(report: &GeometryReport) -> String {
         .nodes
         .iter()
         .filter_map(|node| {
-            let labels = owned_node_label(geometry, node);
+            let labels = owned_node_labels(geometry, node);
             let ink = ink_bounds(&labels)?;
             let overflow = overflow_ticks(node, ink);
             let diagnostic_target = report
@@ -135,6 +200,151 @@ fn observed_witnesses(report: &GeometryReport) -> String {
     )
 }
 
+/// The height a node would carry without auto-fit: the source's authored height
+/// or the family's own default, copied from the layout constants (`120x60`
+/// architecture, `92/52/68` workflow, `112x58` dataflow, `118/62/58/140x64`
+/// lifecycle, `60` sequence header).
+fn base_height_ticks(spec: &Value, node_id: &str) -> i64 {
+    fn authored(items: Option<&Value>, node_id: &str, key: &str) -> Option<f64> {
+        items
+            .and_then(Value::as_array)
+            .and_then(|items| items.iter().find(|item| item["id"] == node_id))
+            .and_then(|item| item[key].as_f64())
+    }
+    let family = spec["diagram_type"].as_str().unwrap_or_default();
+    let collection = match family {
+        "architecture" => "components",
+        "workflow" | "dataflow" => "nodes",
+        "lifecycle" => "states",
+        _ => "",
+    };
+    let items = spec.get(collection);
+    let fallback = match family {
+        "architecture" => 60.0,
+        "workflow" => {
+            let tagged = items
+                .and_then(Value::as_array)
+                .and_then(|items| items.iter().find(|item| item["id"] == node_id))
+                .is_some_and(|item| item.get("tag").is_some_and(|tag| !tag.is_null()));
+            if tagged {
+                68.0
+            } else {
+                52.0
+            }
+        }
+        "dataflow" => 58.0,
+        "lifecycle" => {
+            if spec["schema_version"].as_u64().unwrap_or(1) == 2 {
+                64.0
+            } else {
+                let lane = items
+                    .and_then(Value::as_array)
+                    .and_then(|items| items.iter().find(|item| item["id"] == node_id))
+                    .and_then(|item| item["lane"].as_str().map(str::to_owned))
+                    .unwrap_or_default();
+                if lane == "main" {
+                    62.0
+                } else {
+                    58.0
+                }
+            }
+        }
+        _ => 60.0,
+    };
+    let key = if family == "architecture" {
+        "size"
+    } else {
+        "height"
+    };
+    let authored = if family == "architecture" {
+        items
+            .and_then(Value::as_array)
+            .and_then(|items| items.iter().find(|item| item["id"] == node_id))
+            .and_then(|item| item["size"][1].as_f64())
+    } else {
+        authored(items, node_id, key)
+    };
+    ((authored.unwrap_or(fallback)) * 64.0).round() as i64
+}
+
+/// The fit actions this scene proves from its own output, in the canonical form
+/// `grow:node:baseHeightTicks`, `shrink:node:role:sizeTicks` and `wrap:node`.
+pub fn observed_auto_fit_actions(report: &GeometryReport, spec: &Value) -> Vec<String> {
+    let Some(geometry) = report.geometry.as_ref() else {
+        return Vec::new();
+    };
+    let mut actions = Vec::new();
+    for node in &geometry.nodes {
+        let labels = owned_node_labels(geometry, node);
+        if !labels.is_empty() && i64::from(node.bounds.height) > base_height_ticks(spec, &node.id) {
+            actions.push(format!(
+                "grow:{}:{}",
+                node.id,
+                base_height_ticks(spec, &node.id)
+            ));
+        }
+        for label in labels {
+            let role = label
+                .id
+                .as_deref()
+                .and_then(|id| id.rsplit(':').next())
+                .unwrap_or("label");
+            let base = match role {
+                "label" => 832,
+                "sublabel" => 704,
+                _ => 640,
+            };
+            if i64::from(label.font_size) < base {
+                actions.push(format!("shrink:{}:{}:{}", node.id, role, label.font_size));
+            }
+            if label.text.contains('\n') {
+                actions.push(format!("wrap:{}", node.id));
+            }
+        }
+    }
+    actions.sort();
+    actions.dedup();
+    actions
+}
+
+/// Prove that a scene the reference model refuses is nevertheless accepted and
+/// readable as Maru draws it, and report the fit actions it applied.
+pub fn assert_auto_fit_readable(
+    report: &GeometryReport,
+    spec: &Value,
+    case_id: &str,
+) -> Vec<String> {
+    assert!(report.ok, "case {case_id} is not accepted as claimed");
+    assert_accepted_text_ink_fits(report);
+    assert_readable_floors(report, case_id);
+    let actions = observed_auto_fit_actions(report, spec);
+    assert!(
+        !actions.is_empty(),
+        "case {case_id} accepts beyond the model without naming a fit action: {:?}",
+        observed_witnesses(report)
+    );
+    actions
+}
+
+/// No auto-fit placement draws node text below the readable floor.
+pub fn assert_readable_floors(report: &GeometryReport, case_id: &str) {
+    let Some(geometry) = report.geometry.as_ref() else {
+        return;
+    };
+    for node in &geometry.nodes {
+        for label in owned_node_labels(geometry, node) {
+            assert!(
+                i64::from(label.font_size) >= READABLE_FLOOR_TICKS,
+                "case {case_id}: node {} label {:?} is {} ticks, below the {} tick readable floor",
+                node.id,
+                label.id,
+                label.font_size,
+                READABLE_FLOOR_TICKS
+            );
+        }
+    }
+}
+
 pub fn assert_accepted_text_ink_fits(report: &GeometryReport) {
     if !report.ok {
         return;
@@ -144,7 +354,7 @@ pub fn assert_accepted_text_ink_fits(report: &GeometryReport) {
         .as_ref()
         .expect("accepted layout retains placed geometry");
     for node in &geometry.nodes {
-        if let Some(ink) = ink_bounds(&owned_node_label(geometry, node)) {
+        if let Some(ink) = ink_bounds(&owned_node_labels(geometry, node)) {
             assert_eq!(
                 overflow_ticks(node, ink),
                 0,
@@ -152,182 +362,5 @@ pub fn assert_accepted_text_ink_fits(report: &GeometryReport) {
                 node.id
             );
         }
-    }
-}
-
-/// Permit only a named source-green case with its independently measured Noto
-/// font, label and fixed-point ink overflow. All diagnostic classes remain active.
-pub fn assert_source_green_overflow_exception(
-    report: &GeometryReport,
-    case_id: &str,
-    diagram_type: &str,
-) {
-    assert!(
-        SOURCE_GREEN_INK_CASES.contains(&case_id),
-        "case {case_id} is not in the explicit source-green ink allowlist"
-    );
-    if case_id == "dense-workflow-seed-5502027" {
-        assert_eq!(diagram_type, "workflow", "case {case_id}");
-        assert!(!report.ok, "paint overflow must not be admitted");
-        let geometry = report
-            .geometry
-            .as_ref()
-            .expect("measured text refusal retains placed geometry");
-        assert_dense_overflow_witnesses(report, geometry);
-        return;
-    }
-    let Some(allowance) = OVERFLOW_ALLOWLIST
-        .iter()
-        .find(|allowance| allowance.case_id == case_id)
-    else {
-        panic!(
-            "source-green case {case_id:?} has no numeric overflow allowance: {}",
-            observed_witnesses(report)
-        );
-    };
-    assert_eq!(allowance.diagram_type, diagram_type, "case {case_id}");
-    assert!(!report.ok, "paint overflow must not be admitted");
-    let geometry = report
-        .geometry
-        .as_ref()
-        .expect("measured text refusal retains placed geometry");
-    let expected_overflow = allowance.overflow_ticks;
-    let node = geometry
-        .nodes
-        .iter()
-        .find(|node| !allowance.node_id.is_empty() && node.id == allowance.node_id)
-        .unwrap_or_else(|| {
-            panic!(
-                "case {case_id} has no allowlisted target node {:?}: {}",
-                allowance.node_id,
-                observed_witnesses(report)
-            )
-        });
-    let labels = owned_node_label(geometry, node);
-    let label = labels
-        .iter()
-        .find(|label| label.text == allowance.label)
-        .copied()
-        .unwrap_or_else(|| {
-            panic!(
-                "case {case_id} has no allowlisted Noto label {:?} for node {:?}: {}",
-                allowance.label,
-                node.id,
-                observed_witnesses(report)
-            )
-        });
-    assert_eq!(label.font.id, "noto-sans-cjk-kr", "case {case_id}");
-    assert_eq!(
-        i64::from(label.font_size),
-        allowance.font_size_ticks,
-        "case {case_id}"
-    );
-    let Some(ink) = ink_bounds(&[label]) else {
-        panic!("case {case_id} has no positioned painted glyphs");
-    };
-    let observed_overflow = overflow_ticks(node, ink);
-    assert_eq!(
-        observed_overflow,
-        expected_overflow,
-        "case {case_id} must retain its pinned 1/64px outer-node overflow; {}",
-        observed_witnesses(report)
-    );
-
-    assert!(
-        report.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == format!("{diagram_type}/geometry-label-fit")
-                && diagnostic.message.contains(&format!("{:?}", node.id))
-                && diagnostic.path == allowance.diagnostic_path
-                && !diagnostic.rule.is_empty()
-                && !diagnostic.message.is_empty()
-                && !diagnostic.fix.is_empty()
-                && match diagram_type {
-                    "sequence" => {
-                        diagnostic.fix.contains("shorten")
-                            && diagnostic.fix.contains("meta.column_fit")
-                            && diagnostic.fix.contains("meta.viewBox")
-                    }
-                    "architecture" => diagnostic.fix.contains("size["),
-                    _ => diagnostic.fix.contains("width") || diagnostic.fix.contains("height"),
-                }
-        }),
-        "case {case_id} needs a per-node geometry-label-fit cause and family-specific fix: {:?}",
-        report.diagnostics
-    );
-
-    for diagnostic in &report.diagnostics {
-        if diagnostic.code == format!("{diagram_type}/geometry-route-quality-notice") {
-            continue;
-        }
-        assert!(
-            diagnostic.code == format!("{diagram_type}/geometry-label-fit")
-                && diagnostic.message.contains(&format!("{:?}", node.id)),
-            "measured text overflow must not excuse an unrelated refusal: {diagnostic:?}"
-        );
-    }
-}
-
-fn assert_dense_overflow_witnesses(report: &GeometryReport, geometry: &GeometryDocument) {
-    let mut observed = HashSet::new();
-    for node in &geometry.nodes {
-        let labels = owned_node_label(geometry, node);
-        let Some(ink) = ink_bounds(&labels) else {
-            continue;
-        };
-        let overflow = overflow_ticks(node, ink);
-        let number = node
-            .id
-            .strip_prefix('n')
-            .and_then(|value| value.parse::<u16>().ok());
-        if let Some(number @ 100..=199) = number {
-            let digit = usize::from(number % 10);
-            assert_eq!(
-                overflow, DENSE_OVERFLOW_BY_LAST_DIGIT[digit],
-                "node {}",
-                node.id
-            );
-            assert_eq!(labels.len(), 1, "node {} label count", node.id);
-            let label = labels[0];
-            assert_eq!(label.text, format!("N{number}"), "node {}", node.id);
-            assert_eq!(label.font.id, "noto-sans-cjk-kr", "node {}", node.id);
-            assert_eq!(i64::from(label.font_size), 832, "node {}", node.id);
-            assert!(
-                report.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.code == "workflow/geometry-label-fit"
-                        && diagnostic.message.contains(&format!("{:?}", node.id))
-                        && diagnostic.path == format!("/nodes/{number}/label")
-                        && !diagnostic.rule.is_empty()
-                        && !diagnostic.message.is_empty()
-                        && !diagnostic.fix.is_empty()
-                        && (diagnostic.fix.contains("width") || diagnostic.fix.contains("height"))
-                }),
-                "node {} lacks its workflow geometry-label-fit cause and size fix: {:?}",
-                node.id,
-                report.diagnostics
-            );
-            observed.insert(node.id.as_str());
-        } else {
-            assert_eq!(overflow, 0, "unexpected overflow on node {}", node.id);
-        }
-    }
-
-    let expected: HashSet<_> = (100..=199).map(|number| format!("n{number}")).collect();
-    let observed: HashSet<_> = observed.into_iter().map(str::to_owned).collect();
-    assert_eq!(
-        observed, expected,
-        "dense overflow witness node set differs"
-    );
-
-    for diagnostic in &report.diagnostics {
-        if diagnostic.code == "workflow/geometry-route-quality-notice" {
-            continue;
-        }
-        assert!(
-            diagnostic.code == "workflow/geometry-label-fit"
-                && expected
-                    .iter()
-                    .any(|id| diagnostic.message.contains(&format!("{id:?}"))),
-            "dense text overflow must not excuse an unrelated refusal: {diagnostic:?}"
-        );
     }
 }

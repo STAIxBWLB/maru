@@ -1,7 +1,7 @@
 //! Deterministic lifecycle lane/state placement and transition requests.
 
 use crate::geometry::GeometryBox;
-use crate::layout::{point, px, RouteRequest, SceneBuilder};
+use crate::layout::{point, px, Coord, RouteRequest, SceneBuilder};
 use crate::lifecycle::LifecycleSpec;
 use crate::Diagnostic;
 
@@ -116,6 +116,42 @@ fn lifecycle_v2_centers(spec: &LifecycleSpec) -> [f64; 5] {
         left += widths[column] + V2_MIN_GAP;
     }
     centers
+}
+
+/// How far a default state may grow down from its own top: one 10px separation
+/// before the band or row below it, clamped by the readable area the frame
+/// leaves below that top. Both limits are absolute positions minus the state's
+/// own emitted top, so a pin or an authored `yOffset` moves the limit with the
+/// state instead of eating into the band below.
+fn state_growth_limit(
+    version: u32,
+    band_below: Option<f64>,
+    top: Coord,
+    view_box_height: Option<f64>,
+    index: usize,
+) -> Result<Coord, Diagnostic> {
+    const SEPARATION: i64 = 10 * 64;
+    let mut limit = match band_below {
+        Some(band) => Some(i64::from(px(band)?) - i64::from(top) - SEPARATION),
+        None => None,
+    };
+    if let Some(height) = view_box_height {
+        let frame_pad = if version == 2 { 96.0 } else { 122.0 };
+        let below = i64::from(px(height - frame_pad)?) - i64::from(top);
+        limit = Some(limit.map_or(below, |current| current.min(below)));
+    }
+    let limit = limit.ok_or_else(|| {
+        geometry_error(
+            &format!("/states/{index}"),
+            "state growth has neither a band below it nor an authored viewBox",
+        )
+    })?;
+    Coord::try_from(limit).map_err(|_| {
+        geometry_error(
+            &format!("/states/{index}"),
+            "the space below this state is not a representable height",
+        )
+    })
 }
 
 fn state_position(
@@ -291,6 +327,11 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
         })
         .fold(0.0_f64, f64::max);
     let total_width = max_right.max(980.0);
+    let view_box_height = spec
+        .meta
+        .view_box
+        .map(|view| view[1])
+        .or((version == 1).then_some(660.0));
 
     let semantic_flags = state_semantic_flags(spec);
 
@@ -318,6 +359,18 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             (None, Some(step)) => Some(step.to_owned()),
             (None, None) => None,
         };
+        let band_below = if version == 2 {
+            row_order
+                .iter()
+                .position(|row| row == &state.lane)
+                .map(|row| V2_FIRST_ROW_TOP + (row as f64 + 1.0) * V2_ROW_PITCH)
+        } else if state.lane == "terminal" {
+            None
+        } else if state.lane == "main" {
+            Some(EVENT_TOP)
+        } else {
+            Some(OUTCOME_TOP)
+        };
         let placed = scene.add_node(
             &state.id,
             &state.state_type,
@@ -327,6 +380,19 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
             None,
             auto,
             Some([width, height]),
+            // Authored heights are respected; a taller default state grows down
+            // from its own top into the space its band, row and frame actually
+            // leave, so it never reaches the next band.
+            match state.height {
+                Some(_) => None,
+                None => Some(state_growth_limit(
+                    version,
+                    band_below,
+                    auto.y,
+                    view_box_height,
+                    index,
+                )?),
+            },
         );
         attach_state_semantics(scene, &state.id, &semantic_flags);
         placed?;

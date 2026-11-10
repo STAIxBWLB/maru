@@ -89,6 +89,12 @@ fn assert_stats_below_ceiling(actual: WorkStats, baseline: WorkStats, ceiling: W
             baseline.masked_astar_expanded_states,
             ceiling.masked_astar_expanded_states,
         ),
+        (
+            "wrapping scalar measurements",
+            actual.text_scalar_measurements,
+            baseline.text_scalar_measurements,
+            ceiling.text_scalar_measurements,
+        ),
     ] {
         assert_counter(name, value, base, cap);
     }
@@ -99,7 +105,7 @@ fn seeded_thousand_node_work_is_repeatable_and_below_the_reviewed_ceiling() {
     let budget: Budget =
         serde_json::from_str(include_str!("../testdata/work-budget.json")).unwrap();
     assert_eq!(budget.schema_version, 1);
-    assert_eq!(budget.counter_definition_version, 2);
+    assert_eq!(budget.counter_definition_version, 3);
     let first = benchmark_work();
     assert_eq!(
         first,
@@ -156,6 +162,12 @@ fn seeded_thousand_node_work_is_repeatable_and_below_the_reviewed_ceiling() {
             first.stats.masked_astar_expanded_states,
             budget.baseline.masked_astar_expanded_states,
             budget.ceiling.masked_astar_expanded_states,
+        ),
+        (
+            "wrapping scalar measurements",
+            first.stats.text_scalar_measurements,
+            budget.baseline.text_scalar_measurements,
+            budget.ceiling.text_scalar_measurements,
         ),
     ] {
         assert_counter(name, actual, baseline, ceiling);
@@ -224,6 +236,10 @@ fn seeded_thousand_node_work_is_repeatable_and_below_the_reviewed_ceiling() {
         via.stats.masked_astar_expanded_states > 0,
         "the authored-via fixture must exercise A* while its endpoint mask is active"
     );
+    assert!(
+        via.stats.text_scalar_measurements > 0,
+        "the authored-via fixture must exercise the wrapping measurer"
+    );
     let baseline = budget
         .authored_via
         .baseline
@@ -253,5 +269,9 @@ fn seeded_thousand_node_work_is_repeatable_and_below_the_reviewed_ceiling() {
     );
     assert!(via.total <= total_ceiling);
 
+    assert!(
+        first.stats.text_scalar_measurements > 0,
+        "the 1000-node benchmark must exercise the wrapping measurer; a zero counter means the hook is gone"
+    );
     println!("ENGINE_E2_WORK {}", serde_json::to_string(&first).unwrap());
 }
