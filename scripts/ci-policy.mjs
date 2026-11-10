@@ -40,6 +40,7 @@ export const NATIVE_FILES = [
   "src/components/NativeTerminalView.tsx", "src/components/TerminalPanel.tsx",
   "src/components/skills/SkillEditorWindow.tsx", ".github/workflows/ci.yml",
   ".github/workflows/native-e2e.yml", "scripts/ci-policy.mjs",
+  "scripts/diagram-engine-e0.mjs", "scripts/diagram-engine-e0-cache.mjs", "rust-toolchain.toml",
   "scripts/diagram-engine-e0-paths.mjs", "scripts/diagram-engine-e3-integration-coverage.mjs",
 ];
 

@@ -149,8 +149,11 @@ describe("PR change classification", () => {
     expect(isE0SelectedPath("src/lib/diagram/types.ts")).toBe(false);
   });
 
-  it("runs both costly gates when an E0/E3 selection or coverage harness changes", () => {
+  it("runs both costly gates when an E0/E3 selection, build or coverage harness changes", () => {
     for (const path of [
+      "scripts/diagram-engine-e0.mjs",
+      "scripts/diagram-engine-e0-cache.mjs",
+      "rust-toolchain.toml",
       "scripts/diagram-engine-e0-paths.mjs",
       "scripts/diagram-engine-e3-integration-coverage.mjs",
     ]) {
