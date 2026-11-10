@@ -7,7 +7,7 @@ use crate::geometry::{GeometryDocument, GeometryPoint};
 use crate::layout::fixed::quantize_pixels;
 use crate::Diagnostic;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact nonfatal allowlist. Unknown or forged diagnostic codes remain errors.
 pub(crate) fn is_route_quality_notice(diagnostic: &Diagnostic) -> bool {
@@ -702,6 +702,48 @@ fn path_authored(
     }
     matches!(domain, Domain::Scene) && touches_stub(r, index, a, b, position)
 }
+
+fn raw_via_endpoint_counts(routes: &[Relation<'_>]) -> BTreeMap<Point, usize> {
+    let mut counts = BTreeMap::new();
+    for route in routes {
+        let route_points: BTreeSet<_> = route.via.iter().copied().collect();
+        for point in route_points {
+            *counts.entry(point).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// An endpoint via owns only a scene witness that reaches the same raw
+/// first/last via point explicitly present on at least two distinct raw edges.
+/// The scene-to-raw range prevents an upstream bend or later detour from
+/// inheriting provenance merely because the route contains a shared via.
+fn shared_via_endpoint_witness(
+    route: &Relation<'_>,
+    segment_index: usize,
+    domain: Domain,
+    witness_start: Point,
+    witness_end: Point,
+    via_counts: &BTreeMap<Point, usize>,
+) -> Option<Point> {
+    if !matches!(domain, Domain::Scene) {
+        return None;
+    }
+    let &(raw_start, raw_end) = route.scene_ranges.get(segment_index)?;
+    let candidates: BTreeSet<_> = route
+        .via
+        .first()
+        .copied()
+        .into_iter()
+        .chain(route.via.last().copied())
+        .collect();
+    candidates.into_iter().find(|point| {
+        via_counts.get(point).copied().unwrap_or(0) >= 2
+            && (*point == witness_start || *point == witness_end)
+            && (raw_start..=raw_end).any(|raw_index| route.scene_raw.get(raw_index) == Some(point))
+    })
+}
+
 fn near_ownership(
     r: &Relation<'_>,
     points: &[Point],
@@ -730,6 +772,19 @@ fn pair_owner(
     } else {
         (a.index, b.index, a_owned || b_owned)
     }
+}
+fn coordinate_px(value: i64) -> String {
+    let mut result = format!("{:.6}", value as f64 / U as f64);
+    while result.ends_with('0') {
+        result.pop();
+    }
+    if result.ends_with('.') {
+        result.pop();
+    }
+    result
+}
+fn point_px(point: Point) -> String {
+    format!("[{},{}]", coordinate_px(point.0), coordinate_px(point.1))
 }
 fn overlap_span(a: Point, b: Point, c: Point, d: Point) -> Option<(Point, Point)> {
     if corridor(a, b, c, d) <= 0 {
@@ -1216,6 +1271,7 @@ fn pair_quality(
     if !showcase {
         return;
     }
+    let via_counts = raw_via_endpoint_counts(routes);
     arrows(f, routes, workflow_v2, out);
     for (i, a) in routes.iter().enumerate() {
         for b in routes.iter().skip(i + 1) {
@@ -1254,12 +1310,38 @@ fn pair_quality(
                         {
                             let (p, q) = overlap_span(sa[0], sa[1], sb[0], sb[1])
                                 .expect("positive corridor has overlap span");
+                            let via_a =
+                                shared_via_endpoint_witness(a, ia, domain, p, q, &via_counts);
+                            let via_b =
+                                shared_via_endpoint_witness(b, ib, domain, p, q, &via_counts);
+                            let shared_via = via_a.or(via_b);
                             let (index, other, owned) = pair_owner(
                                 a,
-                                path_authored(a, pa, ia, domain, p, q, true),
+                                path_authored(a, pa, ia, domain, p, q, true) || via_a.is_some(),
                                 b,
-                                path_authored(b, pb, ib, domain, p, q, true),
+                                path_authored(b, pb, ib, domain, p, q, true) || via_b.is_some(),
                             );
+                            let (message, fix) = if let Some(point) = shared_via {
+                                let point = point_px(point);
+                                (
+                                    format!(
+                                        "relationships {} and {} share at least 8px of a corridor at shared authored via {point}",
+                                        a.index, b.index
+                                    ),
+                                    format!(
+                                        "move shared authored via {point} so its first/last endpoint pieces do not share a corridor"
+                                    ),
+                                )
+                            } else {
+                                (
+                                    format!(
+                                        "relationships {} and {} share at least 8px of a corridor",
+                                        a.index, b.index
+                                    ),
+                                    "separate the offending authored route/channel coordinate"
+                                        .into(),
+                                )
+                            };
                             emit(
                                 out,
                                 f,
@@ -1267,11 +1349,8 @@ fn pair_quality(
                                 "geometry-route-quality",
                                 "ambiguous-corridor",
                                 other,
-                                format!(
-                                    "relationships {} and {} share at least 8px of a corridor",
-                                    a.index, b.index
-                                ),
-                                "separate the offending authored route/channel coordinate",
+                                message,
+                                &fix,
                                 owned,
                             );
                         }
@@ -1745,6 +1824,8 @@ pub(crate) fn route_geometry_diagnostics(
                 && (text(r.raw, "fromSide").is_some() || text(r.raw, "toSide").is_some()))
             && raw_path.len() >= 2
         {
+            let has_authored_route_geometry = r.raw.get("via").is_some_and(Value::is_array)
+                || text(r.raw, "route").is_some_and(|route| !route.is_empty() && route != "auto");
             for (id, tip, next, key) in [
                 (
                     r.from,
@@ -1771,7 +1852,12 @@ pub(crate) fn route_geometry_diagnostics(
                 ),
             ] {
                 if let Some(bounds) = boxes.get(id) {
-                    let requested = text(r.raw, key).or_else(|| endpoint_side(tip, *bounds));
+                    let explicit_side =
+                        text(r.raw, key).filter(|side| !side.is_empty() && *side != "auto");
+                    let inferred_side = (!has_authored_route_geometry)
+                        .then(|| endpoint_side(tip, *bounds))
+                        .flatten();
+                    let requested = explicit_side.or(inferred_side);
                     if let Some(side) = requested {
                         if !outward(tip, next, side) {
                             emit(&mut out, f, r.index, "geometry-route-quality",
@@ -1926,6 +2012,37 @@ pub(crate) fn route_geometry_diagnostics(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn via_relation<'a>(
+        index: usize,
+        raw: &'a Value,
+        via: Vec<Point>,
+        scene_raw: Vec<Point>,
+    ) -> Relation<'a> {
+        let (scene, scene_ranges) = scene_analysis(&scene_raw);
+        Relation {
+            index,
+            raw,
+            from: "from",
+            to: "to",
+            scene,
+            scene_raw,
+            scene_ranges,
+            from_fixed: false,
+            to_fixed: false,
+            from_anchor: None,
+            to_anchor: None,
+            via,
+            owned_channel_x: None,
+            owned_channel_y: None,
+            authored: Vec::new(),
+            authored_includes_ports: false,
+            reference: Vec::new(),
+            label: None,
+            reference_label: None,
+        }
+    }
+
     fn seed(kind: &str) -> Value {
         serde_json::from_str(match kind {
             "sequence" => include_str!("../../testdata/valid-sequence.json"),
@@ -2422,6 +2539,177 @@ mod tests {
             }
             assert_authored(&spec, &g, name, 1);
         }
+    }
+    // Private rules run before the page header translation. These two tests
+    // obtain a scene through the public layout API, so restore its source space.
+    fn source_rule_scene(mut scene: GeometryDocument) -> GeometryDocument {
+        if let Some(offset) = scene.page.content_offset {
+            assert_eq!(offset.x, 0, "the reviewed header shift is vertical");
+            super::super::translate_drawing(&mut scene, -offset.y).unwrap();
+            scene.page.content_offset = None;
+        }
+        scene
+    }
+
+    #[test]
+    fn shared_first_via_junction_owns_only_the_endpoint_corridor_piece() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../../testdata/parity.json")).unwrap();
+        let case = corpus["boundaryCases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"].as_str() == Some("e2-boundary-workflow-v2-shared-trunk-25"))
+            .expect("pinned Oracle-red shared-trunk witness");
+        assert_eq!(case["oracle"]["ok"], false);
+        assert!(case["oracle"]["codes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|code| code == "composition/ambiguous-corridor"));
+        let source_json = case["geometryComparison"]["inputJson"]
+            .as_str()
+            .expect("case retains exact compared source");
+        let spec: Value = serde_json::from_str(source_json).unwrap();
+        let report = crate::layout::layout_json(&json!({"specJson":source_json}).to_string());
+        assert!(!report.ok, "the explicitly shared junction is fatal");
+        let scene = source_rule_scene(
+            report
+                .geometry
+                .expect("fatal route finding retains geometry"),
+        );
+        let diagnostics = route_geometry_diagnostics(&spec, &scene);
+        let shared = cause(&diagnostics, "ambiguous-corridor");
+        assert!(
+            shared.iter().any(|diagnostic| {
+                diagnostic.code == "workflow/geometry-route-quality"
+                    && diagnostic.path == "/edges/0"
+                    && diagnostic.message.contains("shared authored via [169,119]")
+                    && diagnostic
+                        .fix
+                        .contains("move shared authored via [169,119]")
+            }),
+            "{diagnostics:?}"
+        );
+
+        // Keep the produced scene fixed. Removing the matching first via from
+        // the second raw edge makes the same scene corridor engine-owned.
+        let mut unshared = spec.clone();
+        unshared["edges"][1].as_object_mut().unwrap().remove("via");
+        let control = route_geometry_diagnostics(&unshared, &scene);
+        let notices = cause(&control, "ambiguous-corridor");
+        assert!(!notices.is_empty(), "{control:?}");
+        assert!(
+            notices.iter().copied().all(is_route_quality_notice),
+            "{control:?}"
+        );
+        assert!(notices
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("shared authored via")));
+    }
+
+    #[test]
+    fn shared_trunk_23_preserves_the_oracle_green_engine_refusal() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../../testdata/parity.json")).unwrap();
+        let case = corpus["boundaryCases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"].as_str() == Some("e2-boundary-workflow-v2-shared-trunk-23"))
+            .expect("pinned Oracle-green placement boundary");
+        assert_eq!(case["oracle"]["ok"], true);
+        let source_json = case["geometryComparison"]["inputJson"]
+            .as_str()
+            .expect("case retains exact compared source");
+        let report = crate::layout::layout_json(&json!({"specJson":source_json}).to_string());
+        assert!(
+            !report.ok,
+            "the shifted E2 25px shared piece is authored/fatal"
+        );
+        let scene = source_rule_scene(report.geometry.expect("refusal retains placed geometry"));
+        let diagnostics =
+            route_geometry_diagnostics(&serde_json::from_str(source_json).unwrap(), &scene);
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "workflow/geometry-route-quality"
+                    && diagnostic.path == "/edges/0"
+                    && diagnostic.message.contains("shared authored via [167,119]")
+            }),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn shared_via_ownership_uses_the_actual_bent_scene_piece_and_raw_edge_count() {
+        let via = (100 * U, 50 * U);
+        let a_raw = json!({"via":[[100,50],[100,100]]});
+        let b_raw = json!({"via":[[20,20],[100,50],[200,50]]});
+        let duplicate_raw = json!({"via":[[100,50],[100,50]]});
+        let duplicate_waypoints =
+            via_relation(0, &duplicate_raw, vec![via, via], vec![(0, 0), via]);
+        assert_eq!(
+            raw_via_endpoint_counts(&[duplicate_waypoints]).get(&via),
+            Some(&1),
+            "repeated points on one raw edge count as one edge"
+        );
+        let a = via_relation(
+            0,
+            &a_raw,
+            vec![via, (100 * U, 100 * U)],
+            vec![
+                (0, 0),
+                (50 * U, 0),
+                (50 * U, 50 * U),
+                via,
+                (100 * U, 100 * U),
+            ],
+        );
+        // This distinct raw edge contains the shared point internally. It
+        // still contributes one raw-edge vote for the first edge's endpoint.
+        let b = via_relation(
+            1,
+            &b_raw,
+            vec![(20 * U, 20 * U), via, (200 * U, 50 * U)],
+            vec![(0, 0), (20 * U, 20 * U), via, (200 * U, 50 * U)],
+        );
+        let routes = [a, b];
+        let counts = raw_via_endpoint_counts(&routes);
+        assert_eq!(counts.get(&via), Some(&2));
+        let a = &routes[0];
+        let bent_piece = a
+            .scene_ranges
+            .iter()
+            .position(|(_, end)| a.scene_raw[*end] == via)
+            .expect("scene range ends at the actual shared via");
+        assert_eq!(
+            shared_via_endpoint_witness(
+                a,
+                bent_piece,
+                Domain::Scene,
+                (50 * U, 50 * U),
+                via,
+                &counts,
+            ),
+            Some(via)
+        );
+        let upstream_piece = a
+            .scene_ranges
+            .iter()
+            .position(|(_, end)| a.scene_raw[*end] == (50 * U, 0))
+            .expect("scene range ends at the earlier bend");
+        assert_eq!(
+            shared_via_endpoint_witness(
+                a,
+                upstream_piece,
+                Domain::Scene,
+                (0, 0),
+                (50 * U, 0),
+                &counts,
+            ),
+            None,
+            "a shared endpoint elsewhere on the route cannot own an upstream span"
+        );
     }
     #[test]
     fn generated_short_segments_stay_notices_despite_authored_side_or_label() {
