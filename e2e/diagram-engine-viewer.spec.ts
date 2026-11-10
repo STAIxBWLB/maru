@@ -217,9 +217,10 @@ test.describe("standalone engine diagram viewer", () => {
   // The outlined fixture is engine output ("svg_viewer_fixture" keeps it exact),
   // and this measures it where a recipient would open it: a browser with no
   // Korean face installed. A text-mode artifact resolves whatever fallback the
-  // platform offers; a path cannot.
+  // platform offers; a path cannot. The fixture lives in the engine crate because
+  // the app may read the SDK, never the reverse.
   test("draws an outlined export inside its measured label frames with no CJK font available", async ({ page }) => {
-    const outlineFixture = resolve("src/lib/diagram/viewer/__fixtures__/architecture-light-outlines.svg");
+    const outlineFixture = resolve("src-tauri/crates/maru-diagram-engine/testdata/architecture-light-outlines.svg");
     await page.goto(pathToFileURL(outlineFixture).href);
     // A standalone SVG document has no head for an injected stylesheet, so the
     // override goes in as an SVG style element before anything is measured.

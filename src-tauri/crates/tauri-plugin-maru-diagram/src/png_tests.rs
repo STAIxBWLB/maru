@@ -266,6 +266,14 @@ fn svg_ipc_rejects_busy_oversized_and_invalid_layout_requests() {
     assert!(oversized.message.contains("16 MiB"));
     assert!(!oversized.next_step.is_empty());
     assert_eq!(oversized.diagnostics.len(), 1);
+    // This build has the rasterizer compiled, so a PNG request would have been
+    // served as an image by the command named SVG without its own guard.
+    let png_request = json!({"specJson":include_str!("../../maru-diagram-engine/testdata/valid-architecture.json"),"format":"png","pixelRatio":1}).to_string();
+    let png_refused = ipc_error(invoke(&view, "render_svg", &png_request).unwrap_err());
+    assert_eq!(png_refused.code, "document/svg-export-format");
+    assert!(png_refused.message.contains("does not export PNG"));
+    assert!(!png_refused.next_step.is_empty());
+    assert_eq!(png_refused.diagnostics.len(), 1);
     let mut invalid_spec: serde_json::Value = serde_json::from_str(include_str!(
         "../../maru-diagram-engine/testdata/valid-architecture.json"
     ))

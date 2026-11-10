@@ -71,20 +71,42 @@ fn failed(mut receipt: EngineReceipt, diagnostics: Vec<Diagnostic>, scope: &str)
         receipt,
     }
 }
+/// Which entry point asked. It fixes both the format that entry may export and
+/// the default label emission, so the two can never disagree (`maru#552`).
+#[derive(Clone, Copy)]
+enum Entry {
+    /// Receipt-bearing request shared by the browser and test facades.
+    Shared,
+    /// Native PNG command: formats other than PNG are refused.
+    Png,
+    /// Native SVG command: formats other than SVG are refused.
+    Svg,
+}
+
+impl Entry {
+    fn default_text_mode(self) -> SvgTextMode {
+        match self {
+            Entry::Svg => SvgTextMode::Outlines,
+            Entry::Shared | Entry::Png => SvgTextMode::Text,
+        }
+    }
+}
+
 pub fn render_artifact_json(input: &str) -> ArtifactReport {
-    render(input, false, SvgTextMode::Text)
+    render(input, Entry::Shared)
 }
 /// Native SVG export: the same receipt-bearing request path as PNG, with
 /// outlined labels unless the caller asks for text (`maru#552`).
 #[cfg(feature = "render-outline")]
 pub fn render_svg_artifact_json(input: &str) -> ArtifactReport {
-    render(input, false, SvgTextMode::Outlines)
+    render(input, Entry::Svg)
 }
 #[cfg(feature = "render-png")]
 pub fn render_png_artifact_json(input: &str) -> ArtifactReport {
-    render(input, true, SvgTextMode::Text)
+    render(input, Entry::Png)
 }
-fn render(input: &str, png_only: bool, default_text_mode: SvgTextMode) -> ArtifactReport {
+fn render(input: &str, entry: Entry) -> ArtifactReport {
+    let default_text_mode = entry.default_text_mode();
     let bad = |cause: Diagnostic| {
         let mut receipt = crate::make_report(input, None, Vec::new()).receipt;
         receipt.gates.schema = crate::gate("not-run", "render-request");
@@ -109,12 +131,23 @@ fn render(input: &str, png_only: bool, default_text_mode: SvgTextMode) -> Artifa
             ))
         }
     };
-    if png_only && !matches!(request.format, ArtifactFormat::Png) {
+    if matches!(entry, Entry::Png) && !matches!(request.format, ArtifactFormat::Png) {
         return bad(super::error(
             "png-command-format",
             "/format",
             "native PNG command does not export SVG",
             "use the WASM SVG renderer or request format png",
+        ));
+    }
+    // The mirror of the PNG guard: without it a `render_svg` request carrying
+    // `format: "png"` rasterizes under a png+outline build and answers with a
+    // PNG from the command named SVG.
+    if matches!(entry, Entry::Svg) && !matches!(request.format, ArtifactFormat::Svg) {
+        return bad(super::error(
+            "export-format",
+            "/format",
+            "native SVG command does not export PNG",
+            "request format svg, or use the native PNG command",
         ));
     }
     let layout = crate::layout::layout_json(

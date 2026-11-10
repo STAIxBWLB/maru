@@ -1,6 +1,8 @@
 #![cfg(all(feature = "render-svg", feature = "render-outline"))]
-//! The viewer fixtures are engine output; this keeps the outlined one honest.
-//! Set `MARU_WRITE_VIEWER_OUTLINE_FIXTURE=1` to regenerate it.
+//! The outlined viewer artifact is engine output, not a hand-written SVG; this
+//! keeps it exact. Set `MARU_WRITE_VIEWER_OUTLINE_FIXTURE=1` to regenerate it.
+//! Both files live in this crate's `testdata/`: the app may read the SDK, never
+//! the other way round, so the test never reaches into `src/lib`.
 use maru_diagram_engine::{
     layout::layout_json,
     render::{render_svg, SvgOptions, SvgTextMode, SvgTheme},
@@ -8,11 +10,8 @@ use maru_diagram_engine::{
 use serde_json::json;
 use std::path::PathBuf;
 
-const SPEC: &str =
-    include_str!("../../../../src/lib/diagram/viewer/__fixtures__/architecture-light.spec.json");
-/// The same fixture from the crate root, three levels above `tests/`.
-const FIXTURE: &str =
-    "../../../src/lib/diagram/viewer/__fixtures__/architecture-light-outlines.svg";
+const SPEC: &str = include_str!("../testdata/viewer-architecture-light.spec.json");
+const FIXTURE: &str = "testdata/architecture-light-outlines.svg";
 
 #[test]
 fn the_outlined_viewer_fixture_is_current_engine_output() {

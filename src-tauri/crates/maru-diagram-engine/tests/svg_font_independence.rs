@@ -133,6 +133,24 @@ fn outlined_glyphs_sit_where_the_text_run_placed_them() {
 }
 
 #[test]
+fn the_native_svg_entry_refuses_png_requests() {
+    use maru_diagram_engine::render::render_svg_artifact_json;
+    let spec = spec_with_mixed_label();
+    let request =
+        json!({"specJson": spec.to_string(), "format": "png", "theme": "light", "pixelRatio": 1})
+            .to_string();
+    let refused = render_svg_artifact_json(&request);
+    assert!(!refused.ok, "a PNG request is not an SVG export");
+    assert!(refused.svg.is_none() && refused.bytes.is_none());
+    assert_eq!(refused.diagnostics.len(), 1);
+    assert_eq!(refused.diagnostics[0].code, "document/svg-export-format");
+    assert!(refused.diagnostics[0]
+        .message
+        .contains("does not export PNG"));
+    assert!(!refused.diagnostics[0].fix.is_empty());
+}
+
+#[test]
 fn the_native_svg_entry_defaults_to_outlines_and_the_shared_entry_keeps_text() {
     use maru_diagram_engine::render::{
         render_artifact_json, render_svg_artifact_json, SvgTextMode,

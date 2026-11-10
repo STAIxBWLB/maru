@@ -1815,7 +1815,9 @@ on every platform. Replaced scalars keep their pinned glyph-zero path. Text mode
 is unaffected and stays the default for the canvas, the preview and the browser
 entry point; the native `plugin:maru-diagram|render_svg` command defaults to
 outlines and returns `textMode` additively in the receipt, so a caller can still
-ask for `textMode: "text"`.
+ask for `textMode: "text"`. Each native command refuses the other's format with a
+structured diagnostic (`document/svg-export-format` for a PNG request on the SVG
+command), so the command named SVG can never answer with an image.
 
 The two modes are tied together by measurement, not shape inspection: one test
 renders a mixed Korean/English label in both modes and requires the ordered
@@ -1862,14 +1864,19 @@ exceeds three times its own text run.
 The canvas cannot use outlines, so it bundles a local subset of the same two
 faces as WOFF2 under `src/assets/fonts/` and `foundations.css` declares
 `Noto Sans CJK KR Diagram` (400/700, `font-display: block`) with
-`.maru-diagram-canvas` consuming `--font-diagram`. Hangul syllables and Jamo,
+`.maru-diagram-canvas` consuming `--font-diagram`, including the table cells that
+`TableView` draws inside a foreign object. Hangul syllables and Jamo,
 ASCII, Latin-1, general punctuation, arrows, box/block drawing and CJK symbols
 cost 1,112,092 B for both weights; covering the whole BMP instead would cost
 10,334,368 B, nine times as much for scripts the diagram fixtures do not carry.
 A label containing Han or kana therefore has no bundled canvas glyph and falls
 back to a local face for those runs on the canvas only; exports are unaffected
-because they carry outlines. No font is fetched over the network: the Vite build
-emits both files from the bundle.
+because they carry outlines. That is a real coverage limit, not a rounding
+difference: E2 measures every scalar with the full Noto CJK metrics, so a label
+carrying CJK ideographs can wrap or space differently on the canvas than in its
+own export. Widen the subset if a fixture starts requiring those scripts. No
+font is fetched over the network: the Vite build emits both files from the
+bundle.
 
 ### Artifact and determinism gates
 
