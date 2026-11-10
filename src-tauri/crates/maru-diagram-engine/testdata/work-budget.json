@@ -25,18 +25,33 @@
   "totalCeiling": 4194375,
   "authoredVia": {
     "fixturePath": "testdata/bench-authored-via.json",
-    "measurementStatus": "pending-remote-capture",
-    "fixtureSha256": null,
-    "nodes": null,
-    "labels": null,
-    "routes": null,
+    "measurementStatus": "measured",
+    "fixtureSha256": "1e6bd67b66d16371412d73485b25acb640175db2b52dd78b8378ed02b51ab988",
+    "nodes": 27,
+    "labels": 32,
+    "routes": 1,
     "viaPoints": 17,
     "minimumRouteSegments": 10,
-    "routeSegments": null,
-    "baseline": null,
-    "ceiling": null,
-    "totalBaseline": null,
-    "totalCeiling": null
+    "routeSegments": 22,
+    "baseline": {
+      "astarExpandedStates": 81,
+      "routeEvaluations": 1,
+      "constraintEvaluations": 1395,
+      "endpointMaskEvaluations": 57,
+      "endpointClearanceEvaluations": 1254,
+      "maskedAstarExpandedStates": 81
+    },
+    "ceiling": {
+      "astarExpandedStates": 102,
+      "routeEvaluations": 2,
+      "constraintEvaluations": 1744,
+      "endpointMaskEvaluations": 72,
+      "endpointClearanceEvaluations": 1568,
+      "maskedAstarExpandedStates": 102
+    },
+    "totalBaseline": 2788,
+    "totalCeiling": 3485,
+    "sourceCommit": "2b6aee92312fcfbd7ecf7f2afcba4ecbb7e02d64"
   },
   "scope": "deterministic logical operations, not elapsed time; normal geometry builds omit all hooks",
   "recordedCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-work"
