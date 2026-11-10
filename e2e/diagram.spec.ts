@@ -502,6 +502,7 @@ test("Renders lists orphaned receipts and shows the native refusal without mount
     contentType: "application/javascript",
     body: `let removed = false;
       export const rendersAvailable = () => true;
+      export const parseRenderReceipt = () => null;
       export const listRenders = async () => removed ? [] : [{docId:"copied",documentName:null,orphaned:true,renders:[{docId:"copied",renderId:"bad",verified:false,diagnostic:"receipt.json missing; re-render"}]}];
       export const prepareRenderView = async () => { throw new Error("index.html hash mismatch; re-render the diagram"); };
       export const deleteRender = async () => { removed = true; };

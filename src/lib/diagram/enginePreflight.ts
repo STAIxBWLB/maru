@@ -15,8 +15,10 @@ function portableHtmlOutput(value: unknown): value is string {
       || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(value) || value.includes("\\")) return false;
   const segments = value.split("/");
   return segments.every((segment) => {
+    const encoded = new TextEncoder().encode(segment);
+    if (encoded.length > 255) return false;
     if (!segment || segment === "." || segment === ".." || /\p{Cc}/u.test(segment)
-        || new TextDecoder().decode(new TextEncoder().encode(segment)) !== segment
+        || new TextDecoder().decode(encoded) !== segment
         || /[<>:"|?*]/u.test(segment) || /[. ]$/u.test(segment)) return false;
     if (/^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(segment)) return false;
     return !/~[1-9][0-9]*(?:\.|$)/iu.test(segment);
