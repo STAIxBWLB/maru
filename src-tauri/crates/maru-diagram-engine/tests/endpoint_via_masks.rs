@@ -25,6 +25,36 @@ fn layout(spec: &Value) -> maru_diagram_engine::geometry::GeometryReport {
     layout_json(&json!({"specJson":spec.to_string()}).to_string())
 }
 
+fn content_offset(geometry: &maru_diagram_engine::geometry::GeometryDocument) -> maru_diagram_engine::geometry::GeometryPoint {
+    geometry.page.content_offset.unwrap_or(maru_diagram_engine::geometry::GeometryPoint { x: 0, y: 0 })
+}
+
+fn source_point_to_rendered(
+    geometry: &maru_diagram_engine::geometry::GeometryDocument,
+    point: maru_diagram_engine::geometry::GeometryPoint,
+) -> maru_diagram_engine::geometry::GeometryPoint {
+    let offset = content_offset(geometry);
+    point.checked_translate(offset.x, offset.y).unwrap()
+}
+
+fn authored_via_from_rendered(
+    geometry: &maru_diagram_engine::geometry::GeometryDocument,
+    point: maru_diagram_engine::geometry::GeometryPoint,
+) -> [f64; 2] {
+    let offset = content_offset(geometry);
+    [f64::from(point.x - offset.x) / 64.0, f64::from(point.y - offset.y) / 64.0]
+}
+
+fn authored_via_to_rendered(
+    geometry: &maru_diagram_engine::geometry::GeometryDocument,
+    point: [f64; 2],
+) -> maru_diagram_engine::geometry::GeometryPoint {
+    source_point_to_rendered(
+        geometry,
+        maru_diagram_engine::geometry::GeometryPoint::from_pixels(point[0], point[1]).unwrap(),
+    )
+}
+
 #[test]
 fn oracle_green_dataflow_routes_keep_vias_inside_the_target_endpoint_mask() {
     for id in [
@@ -37,10 +67,11 @@ fn oracle_green_dataflow_routes_keep_vias_inside_the_target_endpoint_mask() {
         let geometry = report.geometry.expect("accepted layout retains geometry");
         assert_eq!(geometry.routes.len(), 2, "{id}");
         let target = geometry.nodes.iter().find(|node| node.id == "b").unwrap();
-        let final_via = maru_diagram_engine::geometry::GeometryPoint {
+        let source_via = maru_diagram_engine::geometry::GeometryPoint {
             x: 270 * 64,
             y: 157 * 64,
         };
+        let final_via = source_point_to_rendered(&geometry, source_via);
         assert!(
             final_via.x > target.bounds.x
                 && final_via.x < target.bounds.x + target.bounds.width
@@ -317,30 +348,29 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
         .iter()
         .find(|label| label.id.as_deref() == Some("node:a:label"))
         .unwrap();
-    let center_y = f64::from(source.bounds.y + source.bounds.height / 2) / 64.0;
+    let center_y = source.bounds.y + source.bounds.height / 2;
     let label_ring = maru_diagram_engine::geometry::GeometryPoint {
         x: label.bounds.x - 64,
         y: label.bounds.y + label.bounds.height / 2,
     };
     assert!(source.bounds.contains(label_ring).unwrap_or(false));
     assert!(!label.bounds.contains(label_ring).unwrap_or(false));
-    let label_ring_xy = [
-        f64::from(label_ring.x) / 64.0,
-        f64::from(label_ring.y) / 64.0,
-    ];
+    let label_ring_xy = authored_via_from_rendered(&probe_geometry, label_ring);
+    let visible_boundary_xy = authored_via_from_rendered(
+        &probe_geometry,
+        maru_diagram_engine::geometry::GeometryPoint { x: source.bounds.x, y: center_y },
+    );
+    let inflated_corner_xy = authored_via_from_rendered(
+        &probe_geometry,
+        maru_diagram_engine::geometry::GeometryPoint {
+            x: source.bounds.x - 2 * 64,
+            y: source.bounds.y - 2 * 64,
+        },
+    );
     let cases = [
         ("node-clearance-ring", [43.0, 175.0]),
-        (
-            "visible-node-boundary",
-            [f64::from(source.bounds.x) / 64.0, center_y],
-        ),
-        (
-            "inflated-node-corner",
-            [
-                f64::from(source.bounds.x) / 64.0 - 2.0,
-                f64::from(source.bounds.y) / 64.0 - 2.0,
-            ],
-        ),
+        ("visible-node-boundary", visible_boundary_xy),
+        ("inflated-node-corner", inflated_corner_xy),
         ("label-clearance-ring", label_ring_xy),
     ];
 
@@ -401,11 +431,7 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
                 !route.points.is_empty(),
                 "accepted route must retain its points"
             );
-            let authored_via = maru_diagram_engine::geometry::GeometryPoint::from_pixels(
-                first_via[0],
-                first_via[1],
-            )
-            .unwrap();
+            let authored_via = authored_via_to_rendered(&geometry, first_via);
             assert!(
                 route.points.contains(&authored_via),
                 "{name}: accepted route must retain its authored via"
@@ -445,12 +471,12 @@ fn via_inside_source_body_can_enter_and_exit_its_endpoint_mask() {
         .iter()
         .find(|node| node.id == "a")
         .unwrap();
-    let inside = maru_diagram_engine::geometry::GeometryPoint {
+    let inside_rendered = maru_diagram_engine::geometry::GeometryPoint {
         x: source.bounds.x + source.bounds.width - 5 * 64,
         y: source.bounds.y + source.bounds.height / 2,
     };
-    let inside_xy = [f64::from(inside.x) / 64.0, f64::from(inside.y) / 64.0];
-    assert!(source.bounds.contains(inside).unwrap_or(false));
+    let inside_xy = authored_via_from_rendered(&probe_geometry, inside_rendered);
+    assert!(source.bounds.contains(inside_rendered).unwrap_or(false));
     let spec = endpoint_mask_dataflow(vec![inside_xy, [230.0, inside_xy[1]]]);
     let report = layout(&spec);
     assert!(
@@ -460,6 +486,7 @@ fn via_inside_source_body_can_enter_and_exit_its_endpoint_mask() {
     );
     let geometry = report.geometry.expect("accepted layout retains geometry");
     let source = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+    let inside = authored_via_to_rendered(&geometry, inside_xy);
     assert!(source.bounds.contains(inside).unwrap_or(false));
     let route = geometry
         .routes
