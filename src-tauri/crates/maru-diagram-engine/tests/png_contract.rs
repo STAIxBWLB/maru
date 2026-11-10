@@ -4,7 +4,7 @@ use maru_diagram_engine::{
     layout::layout_json,
     render::{
         png::{dimensions, render_png, PngOptions, MAX_PNG_PIXELS},
-        render_artifact_json, SvgOptions, SvgTheme,
+        render_artifact_json, render_png_artifact_json, SvgOptions, SvgTheme,
     },
     API_VERSION,
 };
@@ -106,4 +106,23 @@ fn receipt_export_derives_source_geometry_and_hashes_in_rust() {
     let refused =
         render_artifact_json(&json!({"specJson":bad.to_string(),"format":"png"}).to_string());
     assert!(!refused.ok && refused.bytes.is_none());
+}
+
+#[test]
+fn native_png_rejects_svg_with_the_native_recovery_command() {
+    let request = json!({
+        "specJson": include_str!("../testdata/valid-architecture.json"),
+        "format": "svg"
+    });
+    let report = render_png_artifact_json(&request.to_string());
+    assert!(!report.ok);
+    assert!(report.bytes.is_none() && report.svg.is_none());
+    let diagnostic = report
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "document/svg-png-command-format")
+        .expect("wrong-format request has a specific diagnostic");
+    assert_eq!(diagnostic.path, "/format");
+    assert!(diagnostic.fix.contains("plugin:maru-diagram|render_svg"));
+    assert!(diagnostic.fix.contains("format png"));
 }
