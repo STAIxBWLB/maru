@@ -1,5 +1,5 @@
 /**
- * Pure document→SVG renderer.
+ * Model-driven document→SVG renderer.
  *
  * The old export path deep-cloned the live `<svg class="maru-diagram-canvas">`,
  * which leaked interactive chrome (selection rects, ports, smart guides,
@@ -18,7 +18,7 @@
  * inside each `foreignObject`), so the string can be rasterised via an
  * Image+Canvas trip or saved as a standalone .svg with no external requests.
  *
- * Pure string building: no DOM, no React — safe to call from unit tests in a
+ * DOM-free string building: no React, safe to call from unit tests in a
  * node environment.
  */
 

@@ -21,6 +21,7 @@ import {
   useDiagramStore,
 } from "../DiagramStoreContext";
 import { CanvasSurface } from "./CanvasSurface";
+import { renderDocToSvg } from "../../../lib/diagram/renderSvg";
 import type { DiagramStore } from "../../../lib/diagram/state";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -323,6 +324,26 @@ describe("semantic canvas pins a dropped member", () => {
     expect(nodeGroup(id).getAttribute("transform")).toBe(original);
     expect(JSON.stringify(probe!.getState().doc)).toBe(before);
     expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("Maru SVG uses the same published scene the component paints", async () => {
+    harness = renderCanvas(doc);
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+    const before = JSON.stringify(probe!.getState().doc);
+    const exported = new DOMParser().parseFromString(renderDocToSvg(probe!.getState().doc).svg, "image/svg+xml");
+    const id = (doc.datasets![0] as SemanticSpecDataset).idMap.draft!;
+    expect(exported.querySelector(`[data-node-id="${id}"]`)?.getAttribute("transform"))
+      .toBe(nodeGroup(id).getAttribute("transform"));
+    for (const edge of doc.edges) {
+      expect(exported.querySelector(`[data-edge-id="${edge.id}"] path`)?.getAttribute("d"))
+        .toBe(document.body.querySelector(`[data-edge-id="${edge.id}"] path`)?.getAttribute("d"));
+    }
+    const label = document.body.querySelector("[data-engine-label]")!;
+    expect(exported.querySelector(`[data-engine-label="${label.getAttribute("data-engine-label")}"]`)?.textContent)
+      .toBe(label.textContent);
+    expect(JSON.stringify(probe!.getState().doc)).toBe(before);
   });
 
   it("writes one pin at the dropped canvas position", async () => {
