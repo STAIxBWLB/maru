@@ -246,6 +246,121 @@ fn add_outer_axis(axis: &mut Vec<Coord>) {
     axis.dedup();
 }
 
+/// A* repeatedly tests the same grid rows and columns. Retain only obstacles
+/// whose open interior crosses that axis, preserving the original predicates
+/// and normalized mask indexes. This never materializes the Cartesian grid.
+#[derive(Default)]
+struct AxisCandidates {
+    entries: HashMap<Coord, Vec<Rect>>,
+    retained: usize,
+}
+
+impl AxisCandidates {
+    fn preload(&mut self, axis: &[Coord], obstacles: &[Rect], masked: &[usize], horizontal: bool) {
+        for (index, rect) in obstacles.iter().enumerate() {
+            if masked.contains(&index) {
+                continue;
+            }
+            let (start, end) = if horizontal {
+                (rect.top, rect.bottom)
+            } else {
+                (rect.left, rect.right)
+            };
+            let first = axis.partition_point(|coordinate| *coordinate <= start);
+            let last = axis.partition_point(|coordinate| *coordinate < end);
+            if self.retained + last - first > MAX_OBSTACLES {
+                // Wide overlapping obstacles may cross every grid coordinate.
+                // Keep the bounded lazy cache instead of retaining that product.
+                self.entries.clear();
+                self.retained = 0;
+                return;
+            }
+            for coordinate in &axis[first..last] {
+                self.entries.entry(*coordinate).or_default().push(*rect);
+            }
+            self.retained += last - first;
+        }
+        for coordinate in axis {
+            self.entries.entry(*coordinate).or_default();
+        }
+    }
+
+    fn at(
+        &mut self,
+        coordinate: Coord,
+        obstacles: &[Rect],
+        masked: &[usize],
+        horizontal: bool,
+    ) -> &[Rect] {
+        // Each axis cache retains at most twice MAX_OBSTACLES rectangles;
+        // adversarial wide obstacles cannot materialize the Cartesian grid.
+        // Eviction only affects lookup cost.
+        if self.retained > MAX_OBSTACLES {
+            self.entries.clear();
+            self.retained = 0;
+        }
+        self.entries.entry(coordinate).or_insert_with(|| {
+            let candidates: Vec<_> = obstacles
+                .iter()
+                .enumerate()
+                .filter(|(index, rect)| {
+                    let (start, end) = if horizontal {
+                        (rect.top, rect.bottom)
+                    } else {
+                        (rect.left, rect.right)
+                    };
+                    coordinate > start && coordinate < end && !masked.contains(index)
+                })
+                .map(|(_, rect)| *rect)
+                .collect();
+            self.retained += candidates.len();
+            candidates
+        })
+    }
+}
+
+#[derive(Default)]
+struct ClearanceCache {
+    rows: AxisCandidates,
+    columns: AxisCandidates,
+}
+
+impl ClearanceCache {
+    fn point_clear(&mut self, point: GeometryPoint, obstacles: &[Rect], masked: &[usize]) -> bool {
+        !self
+            .rows
+            .at(point.y, obstacles, masked, true)
+            .iter()
+            .any(|rect| point.x > rect.left && point.x < rect.right)
+    }
+
+    fn segment_clear(
+        &mut self,
+        from: GeometryPoint,
+        to: GeometryPoint,
+        obstacles: &[Rect],
+        masked: &[usize],
+    ) -> bool {
+        if from.y == to.y {
+            let (left, right) = (from.x.min(to.x), from.x.max(to.x));
+            !self
+                .rows
+                .at(from.y, obstacles, masked, true)
+                .iter()
+                .any(|rect| left.max(rect.left) < right.min(rect.right))
+        } else if from.x == to.x {
+            let (top, bottom) = (from.y.min(to.y), from.y.max(to.y));
+            !self
+                .columns
+                .at(from.x, obstacles, masked, false)
+                .iter()
+                .any(|rect| top.max(rect.top) < bottom.min(rect.bottom))
+        } else {
+            false
+        }
+    }
+}
+
 fn search_leg(
     start: GeometryPoint,
     end: GeometryPoint,
@@ -314,6 +429,13 @@ fn search_leg(
         y: ys.binary_search(&start.y).map_err(|_| budget())?,
         axis: 2,
     };
+    let mut clearance = ClearanceCache::default();
+    clearance
+        .rows
+        .preload(&ys, obstacles, masked_obstacle_indices, true);
+    clearance
+        .columns
+        .preload(&xs, obstacles, masked_obstacle_indices, false);
     let mut visits = HashMap::new();
     visits.insert(
         initial,
@@ -383,8 +505,8 @@ fn search_leg(
                 x: xs[next.x],
                 y: ys[next.y],
             };
-            if !point_clear_except(target, obstacles, masked_obstacle_indices)
-                || !segment_clear_except(point, target, obstacles, masked_obstacle_indices)
+            if !clearance.point_clear(target, obstacles, masked_obstacle_indices)
+                || !clearance.segment_clear(point, target, obstacles, masked_obstacle_indices)
             {
                 continue;
             }
@@ -650,6 +772,68 @@ mod tests {
         assert!(route
             .windows(2)
             .all(|segment| segment_clear(segment[0], segment[1], &normalized)));
+    }
+
+    #[test]
+    fn cached_clearance_matches_scans_at_boundaries_and_with_endpoint_masks() {
+        let obstacles = normalize(&[
+            rect(-4, -3, 6, 5),
+            rect(0, 0, 4, 6),
+            rect(2, -4, 3, 7),
+            rect(-1, 2, 4, 3),
+            rect(0, 0, 0, 0),
+        ])
+        .unwrap();
+        for (masked, preload) in [vec![], vec![0], vec![1, 3], vec![0, 1, 2, 3]]
+            .into_iter()
+            .flat_map(|masked| [false, true].map(|preload| (masked.clone(), preload)))
+        {
+            let mut cache = ClearanceCache::default();
+            let axis: Vec<_> = (-6..=8).collect();
+            if preload {
+                cache.rows.preload(&axis, &obstacles, &masked, true);
+                cache.columns.preload(&axis, &obstacles, &masked, false);
+            }
+            for x in -6..=7 {
+                for y in -6..=8 {
+                    let from = p(x, y);
+                    assert_eq!(
+                        cache.point_clear(from, &obstacles, &masked),
+                        point_clear_except(from, &obstacles, &masked)
+                    );
+                    for other in -6..=8 {
+                        for to in [p(other, y), p(x, other), p(other, other)] {
+                            assert_eq!(
+                                cache.segment_clear(from, to, &obstacles, &masked),
+                                segment_clear_except(from, to, &obstacles, &masked)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_obstacle_cache_fallback_preserves_clearance() {
+        let obstacles = normalize(&[rect(-1, -1, 9000, 9000); 9]).unwrap();
+        let axis: Vec<_> = (0..MAX_AXIS_COORDINATES as Coord).collect();
+        let masked = [0, 1];
+        let mut cache = ClearanceCache::default();
+        cache.rows.preload(&axis, &obstacles, &masked, true);
+        cache.columns.preload(&axis, &obstacles, &masked, false);
+        for from in [p(-1, -1), p(0, 0), p(8191, 8191), p(8999, 8999)] {
+            assert_eq!(
+                cache.point_clear(from, &obstacles, &masked),
+                point_clear_except(from, &obstacles, &masked)
+            );
+            for to in [p(from.x, 9000), p(9000, from.y)] {
+                assert_eq!(
+                    cache.segment_clear(from, to, &obstacles, &masked),
+                    segment_clear_except(from, to, &obstacles, &masked)
+                );
+            }
+        }
     }
 
     #[test]

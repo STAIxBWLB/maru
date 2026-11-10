@@ -1410,8 +1410,9 @@ compile/instantiate, excluding the first layout's initialization. Warm layout
 timing includes request serialization, validation, placement, routing and scene
 JSON parsing. The 1,000-node case has 999 real relationships; missing or failed
 routes invalidate the measurement. The 400 ms E2 budget is reported as
-`budgetMet` for hosted-sample evaluation; the sub-200 ms E4 requirement stays
-separately reported for a dedicated stable performance environment. The harness
+`budgetMet` for hosted-sample evaluation; the sub-200 ms E4 requirement is
+separately reported as `targetMet` and must pass in hosted Chromium before the
+canvas switches to engine geometry (#552 AC6). The harness
 uses retry 0 and records each sample as measured.
 
 
@@ -1491,6 +1492,49 @@ The previous source-bound reproduction measured
 305.5 ms p95; the current reproduction is 303.8 ms. Every node, all
 999 routed edges and every geometry check remain present. These source-bound
 reproductions are separate from the hosted run records above.
+
+#### E4 T5 clearance profiling and optimization (#552)
+
+The post-T6 hosted baseline is [CI run 42807825677](https://github.com/STAIxBWLB/maru/actions/runs/42807825677)
+at `908a21fb`: 50/200/1,000-node layout p95 is 7.2/37.2/482.8 ms.
+The merged `b31b276a` engine has the same corpus report bytes. These values
+replace the older E2 timing as the optimization baseline; the 200 ms AC6 target
+is unchanged.
+
+A remote Linux x86_64 Chromium CPU profile of `b31b276a` sampled five warm
+1,000-node calls at a 2 ms interval. Of 856 self samples, the two A* clearance
+scans (`point_clear_except`, `segment_clear_except`) account for 43.3%.
+Grouping the top 60 sampled symbols gives lower bounds of 49.5% for routing,
+11.8% for constraint/route diagnostics, 4.9% for metric lookup/measurement
+(including inlined `PaintedWidth` wrapping), and 7.7% for scene construction.
+These are self-sample groups, not inclusive call-tree shares. The chain has no
+authored endpoint masks; both endpoint work counters are zero, so this workload
+cannot measure masked-via cost.
+
+A* now retains obstacle candidates by grid row and column, populated from each
+obstacle's open interval on the sorted axes. Each axis retains at most twice
+65,536 rectangle records; a wide-overlap request falls back to bounded lazy
+scans. Neither path allocates the Cartesian grid. Candidate filtering preserves
+normalized obstacle indexes, leg-specific endpoint masks, strict interior
+boundaries, queue order and the existing collision predicates. Route diagnostics
+also reuse first-match node/label indexes, and reject a distant perpendicular
+clearance slab before wide multiplication. Work counter definitions and the
+checked-in ceilings are unchanged.
+
+| Remote Chromium diagnostic, p95 ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| `b31b276a` baseline | 5.3 | 27.4 | 361.7 |
+| Optimized engine `9dcf7431` | 4.9 | 21.6 | 190.1 |
+
+Each row contains 20 warm samples after one first layout, including facade
+serialization, validation, placement, routing and scene JSON parsing. CPU
+profiling runs afterward. To avoid repeating a multi-megabyte data URL in every
+CDP profile frame, this diagnostic serves the identical WASM bytes from separate
+loopback files instead of inlining them. It is not a product cold-load or hosted
+acceptance measurement. At the optimized head, the largest remaining named self
+samples are route diagnostics (8.1%), axis population (7.9%), and scene finish
+(6.3% of 492 samples). Hosted before/after numbers and cross-platform CI remain
+the acceptance evidence; a successful functional suite alone does not prove AC6.
 
 The per-PR regression gate is deterministic logical work on the unchanged
 `bench-1000.json` fixture: live A* expansions, route evaluations and constraint
