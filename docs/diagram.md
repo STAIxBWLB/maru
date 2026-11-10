@@ -1234,7 +1234,7 @@ a new refusal or an unexpected overflowing node fails the guard.
 Repairs name sequence's `meta.column_fit`/`meta.viewBox`, architecture's `size`,
 and the other families' `width`/`height`; vertical failures report available height.
 
-The authored-via work probe at `241d65e6` has 27 nodes, 32 labels,
+The authored-via work probe rechecked at `e6fb7973` has 27 nodes, 32 labels,
 17 vias and 22 segments. It forces A* on a masked leg: all 81 expansions
 are masked. The fixture uses nonpainting blank tag lines as a conservative
 routing obstacle while every painted glyph stays inside its node, retaining the
@@ -1246,7 +1246,7 @@ counter and total has a recorded baseline plus a 25% ceiling, like the unchanged
 [determinism receipt](performance/diagram-engine-e2-admission-determinism.json)
 records tested source trees and current scene/SVG/work results.
 
-This merged-S2 verification compares 623 cases against main `010180e2`: native
+This verification at `e6fb7973` compares 623 cases against main `010180e2`: native
 and WASM reports match byte for byte. There are 218 accepted cases, 405 with geometry
 (including accepted ones), 187 retained refusals and 218 pre-placement refusals.
 The receipt lists 53 changed report hashes and 5 changed SVG scenes, including
@@ -1460,7 +1460,18 @@ oracle-green/engine-refused, and 8 are oracle-red/engine-admitted. The
 [per-case admission ledger](performance/diagram-engine-e2-admission-ledger.json)
 records exact source inputs, original oracle results, current geometry and
 diagnostics, numeric boundary evidence, source references, and dispositions.
-These counts and per-case dispositions are stamped to `f4dcf4fe`. The prior
+Those counts describe the historical `f4dcf4fe` snapshot. The ring-via follow-up
+refreshes exactly five brand-rail records from committed source `e6fb7973`:
+architecture/dataflow/lifecycle/workflow at 71px and workflow at 73px. All five
+now admit with their positioned Noto glyph ink contained in the node (0px
+overflow), while their unchanged oracle verdicts remain refusals. They are
+intentional ink-fit model differences, replacing the superseded
+`fixed-by-role-budget` status. Their full earlier evidence is retained under
+`historicalEvidence`. The mixed-source ledger now has four agreements and
+40 dispositioned differences across the same 44-case union. The other 39 final
+records remain at their original source stamp; this refresh makes no new
+parity claim for them. Each row and the receipt identify that evidence scope.
+The prior
 native/WASM run at that head covered 623 cases (216 accepted, 405 with geometry present),
 changed 34 scenes and 7 SVGs, and produced matching report hashes; its work
 receipt is preserved in [diagram-engine-e2-s3.json](diagram-engine-e2-s3.json).
