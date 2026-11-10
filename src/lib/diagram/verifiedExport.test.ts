@@ -1,18 +1,12 @@
 // @vitest-environment jsdom
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { createHash, webcrypto } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { name, revision, version } from "../../../sidecars/archify/PIN.json";
+import type { EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { archifySpecToDataset } from "./archifyCodec";
+import { makeEngineArtifactFixture } from "./__fixtures__/engineArtifact";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
-import { ARCHIFY_STATIC_TYPES } from "./export";
 import { NATIVE_EXPORT_SPEC } from "./__fixtures__/nativeExport";
 import { createEmptyDoc } from "./types";
-import type { ArchifyRenderArtifact } from "../archify";
 
 const { rasteriseMock } = vi.hoisted(() => ({ rasteriseMock: vi.fn() }));
 vi.mock("./export", async (importOriginal) => {
@@ -21,10 +15,6 @@ vi.mock("./export", async (importOriginal) => {
 });
 
 import { exportVerifiedSemanticArtifact } from "./verifiedExport";
-
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const enginePath = join(repoRoot, "sidecars/archify/bin/archify.mjs");
-const renderCache = new Map<string, ArchifyRenderArtifact>();
 
 function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -43,66 +33,6 @@ function cjkFixture(type: keyof typeof SEMANTIC_FIXTURES): Record<string, unknow
   return spec;
 }
 
-function pinnedNodeArtifact(diagramType: string, candidateJson: string): ArchifyRenderArtifact {
-  const cacheKey = `${diagramType}\n${candidateJson}`;
-  const cached = renderCache.get(cacheKey);
-  if (cached) return cached;
-
-  const work = mkdtempSync(join(tmpdir(), "maru-verified-export-"));
-  try {
-    const input = join(work, "candidate.json");
-    const output = join(work, "rendered.html");
-    writeFileSync(input, candidateJson, { encoding: "utf8", flag: "wx" });
-    const validate = spawnSync(process.execPath, [enginePath, "validate", diagramType, input, "--json"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      timeout: 30_000,
-      maxBuffer: 2 * 1024 * 1024,
-    });
-    if (validate.error || validate.status !== 0) {
-      throw new Error(`Pinned validation failed (status ${validate.status}, signal ${validate.signal}): ${validate.error?.message ?? (validate.stderr || validate.stdout)}`);
-    }
-    const validation = JSON.parse(validate.stdout) as {
-      ok?: boolean;
-      candidate?: { sha256?: string };
-      diagnostics?: unknown[];
-    };
-    if (validation.ok !== true || validation.candidate?.sha256 !== digest(new TextEncoder().encode(candidateJson))) {
-      throw new Error(`Pinned validation rejected ${diagramType}: ${JSON.stringify(validation.diagnostics)}`);
-    }
-    const render = spawnSync(process.execPath, [enginePath, "render", diagramType, input, output], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      timeout: 30_000,
-      maxBuffer: 2 * 1024 * 1024,
-    });
-    if (render.error || render.status !== 0) {
-      throw new Error(`Pinned render failed (status ${render.status}, signal ${render.signal}): ${render.error?.message ?? (render.stderr || render.stdout)}`);
-    }
-    const bytes = new Uint8Array(readFileSync(output));
-    const artifact: ArchifyRenderArtifact = {
-      bytes: [...bytes],
-      receipt: {
-        schemaVersion: 1,
-        inputSpecSha256: validation.candidate.sha256,
-        enginePin: { name, version, revision },
-        outputSha256: digest(bytes),
-        outputMimeType: "text/html",
-        gates: {
-          schema: { status: "passed", scope: "pinned-engine-validation" },
-          artifact: { status: "passed", scope: "pinned-engine-rendered-html" },
-          browser: { status: "not-run", scope: "none" },
-          visualReview: { status: "not-run", scope: "manual" },
-        },
-      },
-    };
-    renderCache.set(cacheKey, artifact);
-    return artifact;
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
-}
-
 function semanticDoc(type: keyof typeof SEMANTIC_FIXTURES) {
   const { dataset } = archifySpecToDataset(type, cjkFixture(type));
   const doc = createEmptyDoc(`verified-${type}`, 1);
@@ -110,56 +40,54 @@ function semanticDoc(type: keyof typeof SEMANTIC_FIXTURES) {
   return { doc, dataset };
 }
 
-beforeAll(async () => {
-  const { webcrypto } = await import("node:crypto");
-  vi.stubGlobal("crypto", webcrypto);
-});
+function mockHost(type: string, candidateJson: string, options?: { format?: "svg" | "png"; theme?: "light" | "dark" }) {
+  return makeEngineArtifactFixture({
+    specJson: candidateJson,
+    format: options?.format ?? "svg",
+    theme: options?.theme,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600" data-theme="${options?.theme ?? "light"}"><title>${type}</title><desc>Mock engine artifact</desc><path aria-label="한日中" d="M10 10h30v30H10z"/></svg>`,
+  });
+}
 
-afterAll(() => {
-  vi.unstubAllGlobals();
-  rasteriseMock.mockReset();
-});
+beforeAll(() => vi.stubGlobal("crypto", webcrypto));
+afterAll(() => vi.unstubAllGlobals());
 
-describe("verified semantic export against the pinned renderer", () => {
-  it.each(ARCHIFY_STATIC_TYPES)(
-    "%s preserves CJK in sanitized light and dark SVG and binds both hashes",
+describe("verified semantic export through the engine host", () => {
+  it.each(Object.keys(SEMANTIC_FIXTURES) as Array<keyof typeof SEMANTIC_FIXTURES>)(
+    "%s verifies outlined CJK SVGs in light and dark themes",
     async (type) => {
       const { doc, dataset } = semanticDoc(type);
       const candidate = JSON.stringify(dataset.spec);
-      const host = async (diagramType: string, candidateJson: string) => pinnedNodeArtifact(diagramType, candidateJson);
       for (const theme of ["light", "dark"] as const) {
         const exported = await exportVerifiedSemanticArtifact({
-          doc,
-          datasetId: dataset.id,
-          workspace: "/unused-by-test-host",
-          format: "svg",
-          theme,
-          host,
+          doc, datasetId: dataset.id, workspace: "/unused-by-test-host", format: "svg", theme,
+          host: async (diagramType, candidateJson, _context, options) => mockHost(diagramType, candidateJson, options),
         });
         const svg = new TextDecoder().decode(exported.bytes);
-        const engine = pinnedNodeArtifact(type, candidate);
         expect(svg).toContain("한日中");
         expect(svg).toContain(`data-theme="${theme}"`);
-        expect(svg).not.toMatch(/<script|foreignObject|file:|\/Users\/|\/home\//i);
+        expect(svg).not.toMatch(/<text(?:\s|>)|<script|foreignObject|file:|\/Users\/|\/home\//i);
         expect(exported.receipt.inputSpecSha256).toBe(digest(new TextEncoder().encode(candidate)));
-        expect(exported.receipt.engineOutputSha256).toBe(engine.receipt.outputSha256);
+        expect(exported.receipt.engineOutputSha256).toBe(digest(exported.bytes));
         expect(exported.receipt.outputSha256).toBe(digest(exported.bytes));
         expect(exported.receipt.outputMimeType).toBe("image/svg+xml");
-        expect(exported.receipt.gates.browser.status).toBe("passed");
+        expect(exported.receipt.gates.browser.status).toBe("not-run");
       }
     },
   );
 
   it.each([
-    ["schema version", (artifact: ArchifyRenderArtifact) => ({ ...artifact.receipt, schemaVersion: 2 as 1 })],
-    ["spec hash", (artifact: ArchifyRenderArtifact) => ({ ...artifact.receipt, inputSpecSha256: "0".repeat(64) })],
-    ["pinned revision", (artifact: ArchifyRenderArtifact) => ({ ...artifact.receipt, enginePin: { ...artifact.receipt.enginePin, revision: "wrong" } })],
-    ["output hash", (artifact: ArchifyRenderArtifact) => ({ ...artifact.receipt, outputSha256: "0".repeat(64) })],
-    ["output MIME", (artifact: ArchifyRenderArtifact) => ({ ...artifact.receipt, outputMimeType: "image/svg+xml" })],
-  ])("rejects a mismatched %s before conversion", async (_name, mutateReceipt) => {
+    ["schema version", { schemaVersion: 2 }],
+    ["spec hash", { inputSpecSha256: "0".repeat(64) }],
+    ["engine identity", { engine: { id: "other-engine", version: "1", revision: "r" } }],
+    ["output hash", { outputSha256: "0".repeat(64) }],
+    ["output MIME", { outputMimeType: "text/html" }],
+    ["artifact gate", { gates: { schema: { status: "passed", scope: "architecture-document-validity" }, artifact: { status: "failed", scope: "independent-svg-artifact" }, browser: { status: "not-run", scope: "non-browser-rasterization" }, visualReview: { status: "not-run", scope: "manual" } } }],
+  ])("rejects mismatched %s before conversion", async (_name, receiptOverrides) => {
     const { doc, dataset } = semanticDoc("architecture");
-    const valid = pinnedNodeArtifact("architecture", JSON.stringify(dataset.spec));
-    const host = vi.fn(async () => ({ ...valid, receipt: mutateReceipt(valid) }));
+    const host = vi.fn(async (type: string, candidateJson: string) => makeEngineArtifactFixture({
+      specJson: candidateJson, format: "svg", receiptOverrides: receiptOverrides as Partial<EngineReceipt>,
+    }));
     rasteriseMock.mockClear();
     await expect(exportVerifiedSemanticArtifact({
       doc, datasetId: dataset.id, workspace: "/unused-by-test-host", format: "svg", host,
@@ -168,95 +96,115 @@ describe("verified semantic export against the pinned renderer", () => {
     expect(rasteriseMock).not.toHaveBeenCalled();
   });
 
-
-  it.each([["도식", "Diagram"], ["long-title", "아주 긴 제목".repeat(100)]])("keeps valid static export available for %s when history cannot be kept", async (id, title) => {
+  it("rejects forged outlined-text mode and SVG text content", async () => {
     const { doc, dataset } = semanticDoc("architecture");
-    doc.id = id; doc.docTitle = title;
-    const warning = "Cannot store render: attachments is not a directory; repair the store and retry";
-    const result = await exportVerifiedSemanticArtifact({ doc, workspace: "/fixture", format: "svg", host: async (type, json, context) => {
-      expect(context?.docId).toBe(id);
-      expect(new TextEncoder().encode(context?.documentName).length).toBeLessThanOrEqual(256);
-      expect(title.startsWith(context?.documentName ?? "")).toBe(true);
-      return { ...pinnedNodeArtifact(type, json), storeWarning: warning };
-    } });
-    expect(result.storeWarning).toBe(warning);
-    expect(result.receipt.outputMimeType).toBe("image/svg+xml");
-    expect(result.receipt.outputSha256).toBe(digest(result.bytes));
-    expect(result.receipt.inputSpecSha256).toBe(digest(new TextEncoder().encode(JSON.stringify(dataset.spec))));
+    const specJson = JSON.stringify(dataset.spec);
+    await expect(exportVerifiedSemanticArtifact({
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "svg",
+      host: async () => makeEngineArtifactFixture({ specJson, format: "svg", textMode: "text" }),
+    })).rejects.toThrow(/outlined SVG text/i);
+    await expect(exportVerifiedSemanticArtifact({
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "svg",
+      host: async () => makeEngineArtifactFixture({
+        specJson, format: "svg", svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600"><text>not outlined</text></svg>',
+      }),
+    })).rejects.toThrow(/emitted a text element/i);
   });
 
-  it("validates the exact fixed native fixture and drops unknown receipt diagnostics", async () => {
+  it.each([
+    ["malformed report", async (specJson: string) => ({ ...makeEngineArtifactFixture({ specJson, format: "svg" }), apiVersion: 2 })],
+    ["invalid bytes", async (specJson: string) => ({ ...makeEngineArtifactFixture({ specJson, format: "svg" }), bytes: [256] })],
+  ])("rejects %s at the report boundary", async (_name, hostFactory) => {
+    const { doc, dataset } = semanticDoc("architecture");
+    await expect(exportVerifiedSemanticArtifact({
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "svg",
+      host: async (_type, specJson) => hostFactory(specJson),
+    })).rejects.toThrow();
+  });
+
+  it.each([["도식", "Diagram"], ["long-title", "아주 긴 제목".repeat(100)]])(
+    "keeps static export available for %s when storing the artifact reports a warning",
+    async (id, title) => {
+      const { doc, dataset } = semanticDoc("architecture");
+      doc.id = id; doc.docTitle = title;
+      const warning = "Cannot store render: attachments is not a directory; repair the store and retry";
+      const result = await exportVerifiedSemanticArtifact({
+        doc, workspace: "/fixture", format: "svg",
+        host: async (type, json, context) => {
+          expect(context?.docId).toBe(id);
+          expect(new TextEncoder().encode(context?.documentName).length).toBeLessThanOrEqual(256);
+          expect(title.startsWith(context?.documentName ?? "")).toBe(true);
+          return { ...mockHost(type, json), storeWarning: warning };
+        },
+      });
+      expect(result.storeWarning).toBe(warning);
+      expect(result.receipt.outputMimeType).toBe("image/svg+xml");
+      expect(result.receipt.outputSha256).toBe(digest(result.bytes));
+      expect(result.receipt.inputSpecSha256).toBe(digest(new TextEncoder().encode(JSON.stringify(dataset.spec))));
+    },
+  );
+
+  it("uses the fixed native source fixture and drops untrusted receipt metadata", async () => {
     const { dataset } = archifySpecToDataset("architecture", NATIVE_EXPORT_SPEC);
     const doc = { ...createEmptyDoc("native-fixed", 1), datasets: [dataset] };
-    const exported = await exportVerifiedSemanticArtifact({ doc, workspace: "/unused-by-test-host", format: "svg", host: async (type, json) => {
-      const artifact = pinnedNodeArtifact(type, json);
-      return { ...artifact, receipt: Object.assign({}, artifact.receipt, { privateDiagnostics: "/private/fixture-diagnostic" }) };
-    } });
+    const exported = await exportVerifiedSemanticArtifact({
+      doc, workspace: "/fixture", format: "svg",
+      host: async (_type, specJson) => ({
+        ...makeEngineArtifactFixture({ specJson, format: "svg" }),
+        receipt: Object.assign(makeEngineArtifactFixture({ specJson, format: "svg" }).receipt, { privateDiagnostics: "/private/fixture-diagnostic" }),
+      }),
+    });
     expect(new TextDecoder().decode(exported.bytes)).toContain("한日中");
     expect(JSON.stringify(exported.receipt)).not.toContain("privateDiagnostics");
     expect(JSON.stringify(exported.receipt)).not.toContain("fixture-diagnostic");
   });
 
-  it("rejects cancellation before calling the host and rejects late cancellation before conversion", async () => {
+  it("rejects cancellation before host execution and after a late host result", async () => {
     const { doc, dataset } = semanticDoc("architecture");
-    const host = vi.fn(async (type: string, candidateJson: string) => pinnedNodeArtifact(type, candidateJson));
+    const host = vi.fn(async (type: string, specJson: string) => mockHost(type, specJson));
     rasteriseMock.mockClear();
     await expect(exportVerifiedSemanticArtifact({
-      doc, datasetId: dataset.id, workspace: "/unused-by-test-host", format: "svg", host, isCurrent: () => false,
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "svg", host, isCurrent: () => false,
     })).rejects.toThrow(/cancelled/i);
     expect(host).not.toHaveBeenCalled();
-
-    const lateHost = vi.fn(async (type: string, candidateJson: string) => pinnedNodeArtifact(type, candidateJson));
+    const lateHost = vi.fn(async (type: string, specJson: string) => mockHost(type, specJson));
     await expect(exportVerifiedSemanticArtifact({
-      doc,
-      datasetId: dataset.id,
-      workspace: "/unused-by-test-host",
-      format: "svg",
-      host: lateHost,
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "svg", host: lateHost,
       isCurrent: () => lateHost.mock.results.length === 0,
     })).rejects.toThrow(/cancelled/i);
     expect(lateHost).toHaveBeenCalledTimes(1);
     expect(rasteriseMock).not.toHaveBeenCalled();
   });
 
-  it("propagates renderer failure without attempting a legacy export fallback", async () => {
+  it("propagates host failure without a legacy renderer fallback", async () => {
     const { doc, dataset } = semanticDoc("architecture");
-    const host = vi.fn(async () => { throw new Error("pinned renderer unavailable"); });
+    const host = vi.fn(async () => { throw new Error("native engine unavailable"); });
     rasteriseMock.mockClear();
     await expect(exportVerifiedSemanticArtifact({
-      doc, datasetId: dataset.id, workspace: "/unused-by-test-host", format: "svg", host,
-    })).rejects.toThrow("pinned renderer unavailable");
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "svg", host,
+    })).rejects.toThrow("native engine unavailable");
     expect(host).toHaveBeenCalledTimes(1);
     expect(rasteriseMock).not.toHaveBeenCalled();
   });
 
-  it("uses the sanitized SVG to PNG rasterise boundary and records final-byte hash lineage", async () => {
+  it("accepts only PNG-signature bytes and preserves the engine output hash lineage", async () => {
     const { doc, dataset } = semanticDoc("sequence");
-    const candidate = JSON.stringify(dataset.spec);
-    const engine = pinnedNodeArtifact("sequence", candidate);
-    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
-    rasteriseMock.mockImplementation(async (svg: SVGSVGElement, mime: string, background: string | null, pixelRatio: number) => {
-      expect(svg.localName).toBe("svg");
-      expect(svg.textContent).toContain("한日中");
-      expect(svg.outerHTML).not.toMatch(/<script|foreignObject|file:|\/Users\/|\/home\//i);
-      expect(mime).toBe("image/png");
-      expect(background).toBeNull();
-      expect(pixelRatio).toBe(1);
-      return { blob: new Blob([png], { type: mime }), width: 800, height: 600, mimeType: mime, extension: "png" };
+    const specJson = JSON.stringify(dataset.spec);
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    const result = await exportVerifiedSemanticArtifact({
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "png", theme: "dark",
+      host: async (_type, json, _context, options) => makeEngineArtifactFixture({
+        specJson: json, format: "png", theme: options?.theme, bytes: pngBytes,
+      }),
     });
-    const exported = await exportVerifiedSemanticArtifact({
-      doc,
-      datasetId: dataset.id,
-      workspace: "/unused-by-test-host",
-      format: "png",
-      theme: "dark",
-      host: async (type, candidateJson) => pinnedNodeArtifact(type, candidateJson),
-    });
-    expect([...exported.bytes]).toEqual([...png]);
-    expect(exported.receipt.engineOutputSha256).toBe(engine.receipt.outputSha256);
-    expect(exported.receipt.outputSha256).toBe(digest(png));
-    expect(exported.receipt.outputMimeType).toBe("image/png");
-    expect(exported.receipt.conversion).toEqual({ format: "png", theme: "dark", pixelRatio: 1 });
-    expect(rasteriseMock).toHaveBeenCalledTimes(1);
+    expect([...result.bytes]).toEqual([...pngBytes]);
+    expect(result.receipt.engineOutputSha256).toBeTruthy();
+    expect(result.receipt.outputSha256).toBe(digest(pngBytes));
+    expect(result.receipt.outputMimeType).toBe("image/png");
+    expect(result.receipt.conversion).toEqual({ format: "png", theme: "dark", pixelRatio: 1 });
+    await expect(exportVerifiedSemanticArtifact({
+      doc, datasetId: dataset.id, workspace: "/fixture", format: "png",
+      host: async (_type, json) => makeEngineArtifactFixture({ specJson: json, format: "png", bytes: [1, 2, 3] }),
+    })).rejects.toThrow(/PNG artifact has an invalid signature/i);
   });
 });

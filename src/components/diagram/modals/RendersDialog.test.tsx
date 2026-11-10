@@ -9,7 +9,7 @@ import { RendersDialog } from "./RendersDialog";
 import type { RenderGroup, RenderReceipt } from "../../../lib/diagram/renders";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({ available: vi.fn(), list: vi.fn(), prepare: vi.fn(), remove: vi.fn(), open: vi.fn() }));
-vi.mock("../../../lib/diagram/renders", () => ({ rendersAvailable: mocks.available, listRenders: mocks.list, prepareRenderView: mocks.prepare, deleteRender: mocks.remove, openRender: mocks.open }));
+vi.mock("../../../lib/diagram/renders", async (original) => ({ ...await original<typeof import("../../../lib/diagram/renders")>(), rendersAvailable: mocks.available, listRenders: mocks.list, prepareRenderView: mocks.prepare, deleteRender: mocks.remove, openRender: mocks.open }));
 vi.mock("../../../lib/binaryViewer", () => ({ assetUrlForPath: (file: string) => `asset://localhost/${file}` }));
 const receipt: RenderReceipt = {
   schemaVersion: 1, docId: "doc-a", documentName: "saved", documentRevision: "a".repeat(64), diagramType: "architecture", renderedAt: "2026-11-08T00:00:00Z",

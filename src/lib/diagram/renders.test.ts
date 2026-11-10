@@ -6,7 +6,7 @@ import { createEmptyDoc } from "./types";
 import { parseRenderReceipt, rerenderDocument, type RenderGroup, type RenderReceipt, type StoredRender } from "./renders";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), render: vi.fn() }));
 vi.mock("./persistence", async (original) => ({ ...await original<typeof import("./persistence")>(), readDiagramDetailed: mocks.read }));
-vi.mock("../archify", async (original) => ({ ...await original<typeof import("../archify")>(), archifyRenderCandidate: mocks.render }));
+vi.mock("./engine", async (original) => ({ ...await original<typeof import("./engine")>(), renderEngineCandidate: mocks.render }));
 const receipt: RenderReceipt = {
   schemaVersion: 1, docId: "doc", documentName: "saved", documentRevision: "a".repeat(64), diagramType: "architecture", renderedAt: "2026-11-08T00:00:00Z",
   inputSpecSha256: "b".repeat(64), outputSha256: "c".repeat(64), outputMimeType: "text/html", enginePin: { name: "archify", version: "3.0.0", revision: "pin" },

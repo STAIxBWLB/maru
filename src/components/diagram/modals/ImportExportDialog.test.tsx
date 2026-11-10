@@ -4,7 +4,6 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { name, revision, version } from "../../../../sidecars/archify/PIN.json";
 import { unmountReactRoot } from "../../../lib/testing/unmountReactRoot";
 
 import { matrixFromRowsCols, type MatrixCell, type MatrixDataset } from "../../../lib/diagram/reportTypes";
@@ -13,10 +12,10 @@ import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
 import { serializeDoc } from "../../../lib/diagram/persistence";
 import { canonicalSemanticExportInput } from "../../../lib/diagram/export";
-import { extractEngineSvg } from "../../../lib/diagram/engineSvg";
 import { DiagramStoreProvider } from "../DiagramStoreContext";
 import type { GenerationHost } from "../../../lib/diagram/generation";
-import type { ArchifyRenderArtifact, ArchifyRenderHost } from "../../../lib/archify";
+import type { EngineRenderHost, EngineRenderedCandidate, EngineRenderOptions } from "../../../lib/diagram/engine";
+import { makeEngineArtifactFixture } from "../../../lib/diagram/__fixtures__/engineArtifact";
 import { LocaleContext, t as translate } from "../../../lib/i18n";
 import "../../../lib/i18n/testing";
 import { ImportExportDialog } from "./ImportExportDialog";
@@ -123,26 +122,13 @@ function hash(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-const RENDER_HTML = '<!doctype html><html><body><svg viewBox="0 0 120 60"><text x="2" y="20">한글 다이어그램</text></svg></body></html>';
-
-function renderArtifact(_diagramType: string, candidateJson: string): ArchifyRenderArtifact {
-  const bytes = new TextEncoder().encode(RENDER_HTML);
-  return {
-    bytes: [...bytes],
-    receipt: {
-      schemaVersion: 1,
-      inputSpecSha256: hash(new TextEncoder().encode(candidateJson)),
-      enginePin: { name, version, revision },
-      outputSha256: hash(bytes),
-      outputMimeType: "text/html",
-      gates: {
-        schema: { status: "passed", scope: "pinned-engine-validation" },
-        artifact: { status: "passed", scope: "pinned-engine-rendered-html" },
-        browser: { status: "not-run", scope: "none" },
-        visualReview: { status: "not-run", scope: "manual" },
-      },
-    },
-  };
+function renderArtifact(_diagramType: string, candidateJson: string, _context?: unknown, options?: EngineRenderOptions): EngineRenderedCandidate {
+  return makeEngineArtifactFixture({
+    specJson: candidateJson,
+    format: options?.format ?? "svg",
+    theme: options?.theme ?? "light",
+    pixelRatio: options?.pixelRatio ?? 1,
+  });
 }
 
 function semanticDoc(): { doc: DiagramDoc; dataset: ReturnType<typeof archifySpecToDataset>["dataset"] } {
@@ -151,11 +137,11 @@ function semanticDoc(): { doc: DiagramDoc; dataset: ReturnType<typeof archifySpe
   return { doc, dataset };
 }
 
-function renderHostSpy(): ArchifyRenderHost {
+function renderHostSpy(): EngineRenderHost {
   return vi.fn(async (diagramType, candidateJson) => renderArtifact(diagramType, candidateJson));
 }
 
-function generationHost(renderCandidate?: ArchifyRenderHost): GenerationHost {
+function generationHost(renderCandidate?: EngineRenderHost): GenerationHost {
   return {
     renderCandidate,
     runAgent: vi.fn(async () => ""),
@@ -260,7 +246,10 @@ describe("ImportExportDialog (export)", () => {
     const { doc } = semanticDoc();
     doc.id = "도식";
     doc.docTitle = "아주 긴 제목".repeat(100);
-    const host: ArchifyRenderHost = vi.fn(async (type, json) => ({ ...renderArtifact(type, json), storeWarning: "Cannot keep render: attachments is not a folder; repair the render store and retry" }));
+    const host: EngineRenderHost = vi.fn(async (type, json, context, options) => ({
+      ...renderArtifact(type, json, context, options),
+      storeWarning: "Cannot keep render: attachments is not a folder; repair the render store and retry",
+    }));
     setNativeMode();
     chooseSaveFileMock.mockResolvedValue("/workspace/copy.svg");
     diagramExportBlobToPathMock.mockResolvedValue("/workspace/copy.svg");
@@ -284,9 +273,8 @@ describe("ImportExportDialog (export)", () => {
     expect(host).not.toHaveBeenCalled(); // codec preview is deliberately absent for engine formats
 
     const canonical = canonicalSemanticExportInput(doc, dataset.id);
-    const artifact = renderArtifact(canonical.diagramType, canonical.candidateJson);
-    const expectedSvg = extractEngineSvg(RENDER_HTML, "light");
-    const expectedOutputHash = hash(new TextEncoder().encode(expectedSvg));
+    const artifact = renderArtifact(canonical.diagramType, canonical.candidateJson, undefined, { format: "svg", theme: "light", pixelRatio: 1 });
+    const expectedOutputHash = artifact.receipt.outputSha256!;
     const expectedInputHash = hash(new TextEncoder().encode(canonical.candidateJson));
     await click(query('[data-testid="ie-export-confirm"]')!);
     await waitForCalls(diagramExportBlobToPathMock, 1);
@@ -295,8 +283,8 @@ describe("ImportExportDialog (export)", () => {
     expect(host).toHaveBeenCalledWith("architecture", canonical.candidateJson, {
       docId: doc.id, documentName: doc.docTitle || doc.id, datasetId: dataset.id,
       documentRevision: hash(new TextEncoder().encode(serializeDoc(doc))), diagramType: "architecture",
-    });
-    expect(receipt.textContent).toContain(`${name} ${version} (${revision})`);
+    }, { format: "svg", theme: "light", pixelRatio: 1 });
+    expect(receipt.textContent).toContain(`${artifact.receipt.engine.id} ${artifact.receipt.engine.version} (${artifact.receipt.engine.revision})`);
     expect(receipt.textContent).toContain(expectedInputHash);
     expect(receipt.textContent).toContain(expectedOutputHash);
     expect(receipt.textContent).toContain(translate("ko", "diagram.dialog.ie.gatePassed"));
@@ -306,16 +294,16 @@ describe("ImportExportDialog (export)", () => {
       "svg",
       expect.anything(),
     );
-    expect(receipt.textContent).not.toContain(artifact.receipt.outputSha256); // UI shows the converted SVG hash, not the HTML hash
+    expect(receipt.textContent).toContain(artifact.receipt.outputSha256);
   });
 
   it("cancels a pending render before the native chooser and never saves", async () => {
     const { doc } = semanticDoc();
-    let resolveRender!: (artifact: ArchifyRenderArtifact) => void;
+    let resolveRender!: (artifact: EngineRenderedCandidate) => void;
     let candidateJson = "";
-    const host = vi.fn<ArchifyRenderHost>((_type, candidate) => {
+    const host = vi.fn<EngineRenderHost>((_type, candidate) => {
       candidateJson = candidate;
-      return new Promise<ArchifyRenderArtifact>((resolve) => { resolveRender = resolve; });
+      return new Promise<EngineRenderedCandidate>((resolve) => { resolveRender = resolve; });
     });
     harness = renderDialog("export", doc, generationHost(host), "/workspace");
     setNativeMode();
@@ -334,11 +322,11 @@ describe("ImportExportDialog (export)", () => {
 
   it("unmounts during render without opening the chooser or saving", async () => {
     const { doc } = semanticDoc();
-    let resolveRender!: (artifact: ArchifyRenderArtifact) => void;
+    let resolveRender!: (artifact: EngineRenderedCandidate) => void;
     let candidateJson = "";
-    const host = vi.fn<ArchifyRenderHost>((_type, candidate) => {
+    const host = vi.fn<EngineRenderHost>((_type, candidate) => {
       candidateJson = candidate;
-      return new Promise<ArchifyRenderArtifact>((resolve) => { resolveRender = resolve; });
+      return new Promise<EngineRenderedCandidate>((resolve) => { resolveRender = resolve; });
     });
     harness = renderDialog("export", doc, generationHost(host), "/workspace");
     setNativeMode();
@@ -357,11 +345,11 @@ describe("ImportExportDialog (export)", () => {
 
   it("rejects a document change during render before the native chooser", async () => {
     const { doc } = semanticDoc();
-    let resolveRender!: (artifact: ArchifyRenderArtifact) => void;
+    let resolveRender!: (artifact: EngineRenderedCandidate) => void;
     let candidateJson = "";
-    const host = vi.fn<ArchifyRenderHost>((_type, candidate) => {
+    const host = vi.fn<EngineRenderHost>((_type, candidate) => {
       candidateJson = candidate;
-      return new Promise<ArchifyRenderArtifact>((resolve) => { resolveRender = resolve; });
+      return new Promise<EngineRenderedCandidate>((resolve) => { resolveRender = resolve; });
     });
     harness = renderDialog("export", doc, generationHost(host), "/workspace");
     setNativeMode();

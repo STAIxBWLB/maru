@@ -19,7 +19,7 @@
 // string in production bundles (T-06-01).
 
 import { invoke } from "@tauri-apps/api/core";
-import type { ArchifyRenderReceipt } from "./archify";
+import type { EngineReceipt } from "../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 
 /** Fixed read-only native fixture startup/diagnostic projection, no settings blobs. */
 export interface NativeAppState {
@@ -53,8 +53,8 @@ export type NativeE2eChannelEvalSample = Readonly<{
 export interface NativeE2eDiagramStaticExportResult {
   svgPath: "diagrams/native-static-export.svg";
   pngPath: "diagrams/native-static-export.png";
-  svgReceipt: ArchifyRenderReceipt;
-  pngReceipt: ArchifyRenderReceipt;
+  svgReceipt: EngineReceipt;
+  pngReceipt: EngineReceipt;
 }
 
 export interface NativeE2eEngineMeasurement {

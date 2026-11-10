@@ -20,7 +20,7 @@ import { X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useDiagramHostOverride } from "../DiagramStoreContext";
-import type { ArchifyRenderReceipt } from "../../../lib/archify";
+import type { EngineReceipt } from "../../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { supportsArchifyStaticExport } from "../../../lib/diagram/export";
 import type { StaticTheme } from "../../../lib/diagram/engineSvg";
 import { chooseSaveFile } from "../../../lib/api";
@@ -129,7 +129,7 @@ export function ImportExportDialog({
   const [theme, setTheme] = useState<StaticTheme>("light");
   const [saving, setSaving] = useState(false);
   const [storeWarning, setStoreWarning] = useState<string | null>(null);
-  const [renderReceipt, setRenderReceipt] = useState<ArchifyRenderReceipt | null>(null);
+  const [renderReceipt, setRenderReceipt] = useState<EngineReceipt | null>(null);
   const epoch = useRef(0);
   const latestDoc = useRef(doc);
   const [direction, setDirection] = useState<"import" | "export">(mode);
@@ -570,7 +570,7 @@ export function ImportExportDialog({
           {renderReceipt ? <section className="maru-diagram-ie-receipt" data-testid="engine-export-receipt" aria-label={t("diagram.dialog.ie.engineReceipt")}>
             <strong>{t("diagram.dialog.ie.engineReceipt")}</strong>
             <dl>
-              <dt>{t("diagram.dialog.ie.enginePin")}</dt><dd>{renderReceipt.enginePin.name} {renderReceipt.enginePin.version} ({renderReceipt.enginePin.revision})</dd>
+              <dt>{t("diagram.dialog.ie.enginePin")}</dt><dd>{renderReceipt.engine.id} {renderReceipt.engine.version} ({renderReceipt.engine.revision})</dd>
               <dt>{t("diagram.dialog.ie.specHash")}</dt><dd>{renderReceipt.inputSpecSha256}</dd>
               <dt>{t("diagram.dialog.ie.outputHash")}</dt><dd>{renderReceipt.outputSha256}</dd>
               {Object.entries({ ...renderReceipt.gates, readback: renderReceipt.readback }).map(([name, gate]) => <div key={name}><dt>{t(`diagram.dialog.ie.gate.${name}`)}</dt><dd>{t(gate?.status === "passed" ? "diagram.dialog.ie.gatePassed" : "diagram.dialog.ie.gateNotRun")}</dd></div>)}

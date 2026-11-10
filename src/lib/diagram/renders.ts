@@ -1,9 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
+import { listStoredRenders, prepareStoredRender, deleteStoredRender, renderEngineCandidate } from "./engine";
 import type { ArchifyRenderReceipt } from "../archify";
 import type { EngineIdentity, EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { readDiagramDetailed } from "./persistence";
 import { canonicalSemanticExportInput } from "./export";
-import { archifyRenderCandidate } from "../archify";
 import { openInFileManager, revealInFileManager } from "../api";
 
 export interface RenderDocumentContext {
@@ -13,9 +12,7 @@ export interface RenderDocumentContext {
   diagramType: string;
   datasetId?: string | null;
 }
-export interface RenderReceipt extends ArchifyRenderReceipt, RenderDocumentContext {
-  renderedAt: string;
-}
+export type RenderReceipt = (ArchifyRenderReceipt | EngineReceipt) & RenderDocumentContext & { renderedAt: string };
 export interface StoredRender {
   docId: string;
   renderId: string;
@@ -58,6 +55,7 @@ export function parseRenderReceipt(value: unknown): NormalizedEngineReceipt | nu
       || !object(value.gates)) return null;
   const hasEngine = Object.prototype.hasOwnProperty.call(value, "engine");
   const hasLegacy = Object.prototype.hasOwnProperty.call(value, "enginePin");
+  if (hasEngine && hasLegacy) return null;
   const current = hasEngine ? canonicalIdentity(value.engine, false) : null;
   const old = hasLegacy ? canonicalIdentity(value.enginePin, true) : null;
   if ((hasEngine && !current) || (hasLegacy && !old) || (!current && !old)) return null;
@@ -74,15 +72,17 @@ function requireDesktop(): void {
 }
 export async function listRenders(workspace: string): Promise<RenderGroup[]> {
   requireDesktop();
-  return invoke("diagram_list_renders", { workspace });
+  return listStoredRenders(workspace);
 }
 export async function prepareRenderView(workspace: string, docId: string, renderId: string): Promise<RenderView> {
   requireDesktop();
-  return invoke("diagram_prepare_render_view", { workspace, docId, renderId });
+  const view = await prepareStoredRender(workspace, docId, renderId);
+  if (!parseRenderReceipt(view.receipt)) throw new Error("The stored render receipt has an unsupported engine identity; regenerate it from the current source and retry.");
+  return view;
 }
 export async function deleteRender(workspace: string, docId: string, renderId: string): Promise<void> {
   requireDesktop();
-  return invoke("diagram_delete_render", { workspace, docId, renderId });
+  return deleteStoredRender(workspace, docId, renderId);
 }
 /** Re-check immediately before launching/revealing a stored artifact too. */
 export async function openRender(workspace: string, render: StoredRender, reveal = false): Promise<void> {
@@ -104,7 +104,7 @@ export async function rerenderDocument(workspace: string, group: RenderGroup, re
   const datasetId = requestedId ?? (matchingType.length === 1 ? matchingType[0].id : undefined);
   if (!datasetId) throw new Error("This render has no unique source dataset; open the diagram, select a semantic dataset in Export and create a new render.");
   const canonical = canonicalSemanticExportInput(current.doc, datasetId);
-  const artifact = await archifyRenderCandidate(workspace, canonical.diagramType, canonical.candidateJson, {
+  const artifact = await renderEngineCandidate(workspace, canonical.diagramType, canonical.candidateJson, {
     docId: current.doc.id, documentName: group.documentName,
     documentRevision: current.fileRevision, diagramType: canonical.diagramType, datasetId: canonical.datasetId,
   });

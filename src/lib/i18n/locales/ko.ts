@@ -3698,7 +3698,7 @@ export const ko: Record<string, string> = {
   "diagram.dialog.ie.themeLight": "밝게",
   "diagram.dialog.ie.themeDark": "어둡게",
   "diagram.dialog.ie.engineReceipt": "엔진 내보내기 기록",
-  "diagram.dialog.ie.enginePin": "엔진 고정 버전",
+  "diagram.dialog.ie.enginePin": "엔진 버전",
   "diagram.dialog.ie.specHash": "입력 spec SHA-256",
   "diagram.dialog.ie.outputHash": "최종 결과물 SHA-256",
   "diagram.codec.label.archify-svg": "엔진 SVG (기록 포함)",

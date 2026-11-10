@@ -10,7 +10,7 @@
  * freeform..." drops the dataset after a confirm listing what is lost.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { defaultCoalescer, withSnapshot } from "../../../lib/diagram/actions";
@@ -36,6 +36,7 @@ import {
 import { FLOORPLAN_EDGE_KINDS, FLOORPLAN_NODE_KINDS, floorplanDescendants } from "../../../lib/diagram/floorplan";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { applyValidatedSemanticEdit } from "../../../lib/diagram/semanticApply";
+import { validateEngineCandidate, type EngineCandidateValidation } from "../../../lib/diagram/engine";
 import { deleteSelection } from "../deleteSelection";
 import { useTranslation } from "../../../lib/i18n";
 import { useDiagram, useDiagramStore, useDiagramValidationHost } from "../DiagramStoreContext";
@@ -130,7 +131,29 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
     [doc, nodeId, edgeId],
   );
   const [status, setStatus] = useState<ValidationDiagnostic[]>([]);
+  const [engineValidation, setEngineValidation] = useState<EngineCandidateValidation | null>(null);
+  const [engineValidationError, setEngineValidationError] = useState<string | null>(null);
   const [classificationDraft, setClassificationDraft] = useState<string | null>(null);
+  const activeDataset = member && member.dataset.diagramType !== "floorplan" ? member.dataset : null;
+
+  useEffect(() => {
+    let current = true;
+    setEngineValidation(null);
+    setEngineValidationError(null);
+    if (!activeDataset) return () => { current = false; };
+
+    void validateEngineCandidate(activeDataset.diagramType, activeDataset.spec)
+      .then((result) => {
+        if (current) setEngineValidation(result);
+      })
+      .catch((error: unknown) => {
+        if (!current) return;
+        setEngineValidationError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => { current = false; };
+  }, [activeDataset?.id, activeDataset?.diagramType, activeDataset?.spec]);
+
   if (!member) return null;
 
   const { dataset } = member;
@@ -342,6 +365,22 @@ export function SemanticProps({ nodeId, edgeId }: { nodeId?: string; edgeId?: st
             { nodes: nodeId ? [nodeId] : [], edges: edgeId ? [edgeId] : [] })} />
 
         {validating ? <p role="status">{t("diagram.semantic.validating")}</p> : null}
+        {engineValidationError ? (
+          <p role="alert" data-testid="semantic-engine-error">{engineValidationError}</p>
+        ) : null}
+        {engineValidation && (engineValidation.diagnostics.length > 0 || (!engineValidation.ok && engineValidation.errors.length > 0)) ? (
+          <ul className="maru-diagram-ie-warnings" data-testid="semantic-engine-diagnostics">
+            {engineValidation.diagnostics.map((diagnostic, i) => (
+              <li key={`${diagnostic.code}:${diagnostic.path}:${i}`}>
+                <strong>{diagnostic.code}</strong>{diagnostic.path ? ` (${diagnostic.path})` : ""}: {diagnostic.message}
+                {diagnostic.fix ? ` Fix: ${diagnostic.fix}` : ""}
+              </li>
+            ))}
+            {engineValidation.diagnostics.length === 0 ? engineValidation.errors.map((error, i) => (
+              <li key={`engine-error:${i}`}>{error}</li>
+            )) : null}
+          </ul>
+        ) : null}
         {status.length > 0 ? (
           <ul className="maru-diagram-ie-warnings" data-testid="semantic-status">
             {status.map((diagnostic, i) => (

@@ -216,7 +216,27 @@ export async function verifyEngineArtifactReport(
   } else if (!validPngSignature(outputBytes)) {
     throw new Error("The Rust PNG artifact has an invalid signature; rebuild the engine-png artifact and retry.");
   }
-  return { ...report, ...(textMode ? { textMode } : {}) };
+  // Export receipts contain the public v1 contract only. Transport diagnostics
+  // and future private adapter fields must not become saved sidecar metadata.
+  const gate = (value: EngineReceipt["gates"]["schema"]) => ({ status: value.status, scope: value.scope });
+  const publicReceipt: EngineReceipt = {
+    schemaVersion: receipt.schemaVersion,
+    inputSpecSha256: receipt.inputSpecSha256,
+    engine: { id: receipt.engine.id, version: receipt.engine.version, revision: receipt.engine.revision },
+    engineOutputSha256: receipt.engineOutputSha256,
+    outputSha256: receipt.outputSha256,
+    outputMimeType: receipt.outputMimeType,
+    conversion: conversion ? { format: conversion.format, theme: conversion.theme, pixelRatio: conversion.pixelRatio } : conversion,
+    gates: {
+      schema: gate(receipt.gates.schema), artifact: gate(receipt.gates.artifact),
+      browser: gate(receipt.gates.browser), visualReview: gate(receipt.gates.visualReview),
+    },
+    readback: receipt.readback ? gate(receipt.readback) : receipt.readback,
+  };
+  for (const key of ["docId", "documentName", "documentRevision", "renderedAt", "diagramType", "datasetId"] as const) {
+    if (receipt[key] !== undefined) publicReceipt[key] = receipt[key];
+  }
+  return { ...report, receipt: publicReceipt, ...(textMode ? { textMode } : {}) };
 }
 
 export async function renderEngineArtifact(
@@ -282,7 +302,7 @@ async function wasmSvgPreviewHost(): Promise<EngineArtifactHost> {
     }
     await bindings.default({ module_or_path: wasmUrl });
     const render = bindings.render_artifact as (input: string) => string;
-    return async (input) => render(input);
+    return async (input: string) => render(input);
   })().catch((error) => {
     wasmSvgHostPromise = undefined;
     throw error;

@@ -10,6 +10,7 @@ import { pinnedEngineHost } from "../../../../e2e/helpers/diagramEngineHost";
 import type { GenerationHost } from "../../../lib/diagram/generation";
 import { undo } from "../../../lib/diagram/actions";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
+import { validateEngineCandidate } from "../../../lib/diagram/engine";
 import type { SemanticDiagramType, SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
 import { projectSemanticDocument } from "../../../lib/diagram/semantic";
 import type { DiagramStore } from "../../../lib/diagram/state";
@@ -21,10 +22,15 @@ import { DiagramStoreProvider, _resetDiagramSharedStoreForTests, useDiagramStore
 import { RightPanel } from "./RightPanel";
 
 vi.mock("../../../lib/confirmDialog", () => ({ confirmDialog: vi.fn(async () => true), messageDialog: vi.fn(async () => {}) }));
+vi.mock("../../../lib/diagram/engine", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../lib/diagram/engine")>(),
+  validateEngineCandidate: vi.fn(),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const validateCandidate = vi.fn<GenerationHost["validateCandidate"]>();
+const validateSdkCandidate = vi.mocked(validateEngineCandidate);
 const hostOverride: GenerationHost = { runAgent: async () => "", validateCandidate };
 
 let probe: DiagramStore | null = null;
@@ -100,6 +106,8 @@ describe("SemanticProps", () => {
     probe = null;
     validateCandidate.mockReset();
     validateCandidate.mockResolvedValue({ ok: true, errors: [], warnings: [] });
+    validateSdkCandidate.mockReset();
+    validateSdkCandidate.mockResolvedValue({ ok: true, errors: [], warnings: [], diagnostics: [] });
     _resetDiagramSharedStoreForTests();
     vi.mocked(messageDialog).mockClear();
     vi.mocked(confirmDialog).mockReset();
@@ -127,6 +135,92 @@ describe("SemanticProps", () => {
     expect(text).toContain(ko(`diagram.semantic.role.${role}`));
     expect(text).toContain(`${ko("diagram.semantic.members")}${count}`);
     expect(q("semantic-label")!.textContent).toBe("label" in entry ? entry.label : "API");
+  });
+
+  it("shows asynchronous SDK diagnostics for the selected dataset without changing the document", async () => {
+    const doc = docOf("architecture");
+    const dataset = doc.datasets![0] as SemanticSpecDataset;
+    validateSdkCandidate.mockResolvedValueOnce({
+      ok: false,
+      errors: ["emitted Noto label does not fit"],
+      warnings: [],
+      diagnostics: [{
+        code: "architecture/geometry-label-fit",
+        path: "/components/0/label",
+        rule: "geometry-v1/geometry-label-fit",
+        message: "emitted Noto label for web exceeds its text area",
+        fix: "shorten the label or increase components[0].size[0]",
+      }],
+    });
+    render(doc, { nodes: ["web"] });
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(validateSdkCandidate).toHaveBeenCalledWith("architecture", dataset.spec);
+    expect(q("semantic-engine-diagnostics")!.textContent).toContain("architecture/geometry-label-fit");
+    expect(q("semantic-engine-diagnostics")!.textContent).toContain("increase components[0].size[0]");
+    expect(probe!.getState().doc).toBe(doc);
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("ignores a stale SDK result after the active semantic dataset changes", async () => {
+    let resolveStale!: (result: Awaited<ReturnType<typeof validateEngineCandidate>>) => void;
+    const stale = new Promise<Awaited<ReturnType<typeof validateEngineCandidate>>>((resolve) => {
+      resolveStale = resolve;
+    });
+    validateSdkCandidate.mockReturnValueOnce(stale);
+    const doc = docOf("architecture");
+    render(doc, { nodes: ["web"] });
+    const original = doc.datasets![0] as SemanticSpecDataset;
+    const updated = {
+      ...doc,
+      datasets: [{ ...original, spec: { ...original.spec, meta: { title: "Updated", output: "updated.html" } } }],
+    };
+    validateSdkCandidate.mockResolvedValueOnce({
+      ok: false,
+      errors: ["current dataset warning"],
+      warnings: [],
+      diagnostics: [{
+        code: "architecture/geometry-label-fit",
+        path: "/components/0/label",
+        rule: "geometry-v1/geometry-label-fit",
+        message: "current dataset diagnostic",
+        fix: "increase components[0].size[0]",
+      }],
+    });
+
+    await act(async () => {
+      probe!.setState({ doc: updated });
+      await Promise.resolve();
+    });
+    expect(validateSdkCandidate).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      resolveStale({
+        ok: false,
+        errors: ["stale result"],
+        warnings: [],
+        diagnostics: [{
+          code: "architecture/geometry-label-fit",
+          path: "/components/0/label",
+          rule: "geometry-v1/geometry-label-fit",
+          message: "stale result",
+          fix: "stale fix",
+        }],
+      });
+      await stale;
+    });
+
+    expect(q("semantic-engine-diagnostics")!.textContent).toContain("current dataset diagnostic");
+    expect(q("semantic-engine-diagnostics")!.textContent).not.toContain("stale result");
+    expect(probe!.getState().doc).toBe(updated);
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("keeps floorplan validation local and does not ask the geometry SDK", () => {
+    const doc = docOf("floorplan");
+    render(doc, { nodes: ["ahub"] });
+    expect(validateSdkCandidate).not.toHaveBeenCalled();
+    expect(q("semantic-engine-diagnostics")).toBeNull();
   });
 
   it.each(["architecture", "workflow", "sequence", "dataflow", "lifecycle"] as const)("adds a %s member from typed controls with one undo", async (type) => {

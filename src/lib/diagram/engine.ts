@@ -314,3 +314,17 @@ export async function validateEngineCandidate(
 export async function verifyRenderedArtifact(request: EngineArtifactRequest, report: unknown): Promise<EngineArtifactReport> {
   return (await import("./engineArtifact")).verifyEngineArtifactReport(request, report);
 }
+
+/** Workspace store I/O shares the product plugin entry; paths are authorized by its host. */
+export async function listStoredRenders(workspace: string): Promise<import("./renders").RenderGroup[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("plugin:maru-diagram|diagram_list_renders", { workspace });
+}
+export async function prepareStoredRender(workspace: string, docId: string, renderId: string): Promise<import("./renders").RenderView> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("plugin:maru-diagram|diagram_prepare_render_view", { workspace, docId, renderId });
+}
+export async function deleteStoredRender(workspace: string, docId: string, renderId: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("plugin:maru-diagram|diagram_delete_render", { workspace, docId, renderId });
+}
