@@ -999,7 +999,6 @@ impl SceneBuilder {
             let mut routing_masks = Vec::new();
             for (waypoint_index, via_mask) in endpoint_masks.by_via.iter().enumerate() {
                 for node_index in &via_mask.nodes {
-                    let node = &self.document.nodes[*node_index];
                     let mut obstacle_indices = vec![*node_index];
                     if let Some(label_indices) = via_mask.labels_by_node.get(node_index) {
                         for label_index in label_indices {
