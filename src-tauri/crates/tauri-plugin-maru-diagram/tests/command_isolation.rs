@@ -100,7 +100,7 @@ fn invoke(
 
 #[test]
 fn production_feature_commands_are_invokable_through_mock_runtime() {
-    let commands = [
+    let mut commands = vec![
         "validate",
         "render_png",
         "diagram_list_renders",
@@ -108,8 +108,10 @@ fn production_feature_commands_are_invokable_through_mock_runtime() {
         "diagram_delete_render",
         "render_and_store",
     ];
+    #[cfg(feature = "outline")]
+    commands.push("render_svg");
     let mut context = tauri::test::mock_context(tauri::test::noop_assets());
-    for command in commands {
+    for command in commands.iter().copied() {
         context.runtime_authority_mut().__allow_command(
             format!("plugin:maru-diagram|{command}"),
             tauri::utils::acl::ExecutionContext::Local,
@@ -184,6 +186,23 @@ fn production_feature_commands_are_invokable_through_mock_runtime() {
     assert!(stored.report.ok, "{:?}", stored.report.diagnostics);
     assert!(stored.store_warning.is_none());
     observed.push("render_and_store");
+
+    #[cfg(feature = "outline")]
+    {
+        let svg_request =
+            json!({"specJson":source,"format":"svg","theme":"light","pixelRatio":1}).to_string();
+        let svg = invoke(&main, "render_svg", json!({"input":svg_request}))
+            .expect("outlined SVG command is registered")
+            .deserialize::<maru_diagram_engine::render::ArtifactReport>()
+            .unwrap();
+        assert!(svg.ok, "{:?}", svg.diagnostics);
+        assert_eq!(
+            svg.text_mode,
+            Some(maru_diagram_engine::render::SvgTextMode::Outlines)
+        );
+        assert!(!svg.svg.as_deref().unwrap_or_default().contains("<text "));
+        observed.push("render_svg");
+    }
 
     let evidence = json!({
         "schemaVersion": 1,

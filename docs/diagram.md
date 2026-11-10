@@ -1901,12 +1901,12 @@ Source strings never become element names, CSS rules or external URLs.
 Mapped scalars use `Noto Sans CJK KR, sans-serif`, weights 400/700, with shaping,
 kerning and ligatures disabled and `text-rendering="geometricPrecision"`. Every
 scalar has its E2 origin, so the browser cannot invent wrapping or spacing.
-S1 does not embed original font binaries or a per-document subset: a subsetter
-would add another binary-processing dependency and size surface before S2's
-rasterization measurement. Stack-only SVG bytes are deterministic; physical
-text fidelity requires the pinned font. Fallback pixels are not claimed to
-match E2 metrics. The separate renderer/parser never enters the validation
-artifact or its 400,000 B gzip budget.
+Text-mode SVG embeds no font binary or per-document subset, so its fidelity
+depends on resolving the pinned font and fallback pixels are not claimed to
+match E2 metrics; the outlined export described below carries that guarantee for
+files that leave Maru. Stack-only SVG bytes are deterministic. The separate
+renderer/parser never enters the validation artifact or its 400,000 B gzip
+budget.
 
 Unsupported nonignorables draw the actual pinned font glyph-zero outline, never
 the original scalar through platform fallback. Default-ignorables paint nothing.
@@ -1923,6 +1923,100 @@ bounds using full glyph cells, not E2's line/advance-plus-ink frames. Their
 measured difference is not used to widen a shared-quantity threshold or create
 a new geometry admission rule. Captures prove the intended font was loaded;
 they are not native-app proof or byte/pixel comparison with Archify.
+
+### Font-independent SVG export and the diagram canvas face (E4-B, #552)
+
+An exported or shared diagram must read the same on a machine that has no Korean
+font. The pinned Noto Sans CJK KR faces therefore leave the app as **glyph
+outlines**, not as text: the optional `render-outline` feature reads the same
+OTFs as PNG (`ttf-parser` 0.25.1), takes each visible glyph's original outline,
+and writes it as a path. The artifact names no font family, so nothing resolves
+at view time and no fallback can shift or overflow a label.
+
+The alternative, embedding a per-document subset, was rejected on measured
+grounds. The E2 metric repertoire is 44,074 glyphs across 44,810 cmap entries
+(974,104 B per weight), so a glyph table checked in as data would be tens of
+megabytes, while a real subset needs a CID-keyed CFF subsetter that this tree
+does not carry and would force the offline viewer off `font-src 'none'` to load
+the embedded face. Outlining reuses the writer's existing per-glyph path
+emission and needs no new binary format.
+
+Each label keeps its `aria-label`, and its container is marked
+`data-render="outline"` with the pinned `font-family`, size, weight and fill so
+the semantic role stays inspectable. Visible glyphs become
+`<path data-kind="glyph" data-index="N" d="..." transform="translate(x y) scale(s -s)">`
+where coordinates are rounded to whole font units and
+`s = font_size / (64 * units_per_em)`, so the same source produces the same bytes
+on every platform. Replaced scalars keep their pinned glyph-zero path. Text mode
+is unaffected and stays the default for the canvas, the preview and the browser
+entry point; the native `plugin:maru-diagram|render_svg` command defaults to
+outlines and returns `textMode` additively in the receipt, so a caller can still
+ask for `textMode: "text"`. Each native command refuses the other's format with a
+structured diagnostic (`document/svg-export-format` for a PNG request on the SVG
+command), so the command named SVG can never answer with an image.
+
+The two modes are tied together by measurement, not shape inspection: one test
+renders a mixed Korean/English label in both modes and requires the ordered
+glyph origins (`tspan` `x`/`y` versus the `translate` prefix) to be identical.
+The artifact gate must also learn the outlined form or the feature is
+unverifiable; it re-parses the emitted bytes against the same per-tag attribute
+whitelist, requires the container's `aria-label`, glyph count and `data-index`
+order, and checks each glyph's exact transform. Outlined glyphs carry no text
+node, so glyph *text* cannot be compared in that mode; origin, count and order
+carry identity instead. That is the documented limit of the outlined gate.
+
+Two independent fences keep the faces out of the browser graph. A
+`compile_error!` in `lib.rs` rejects any build that combines `render-outline`
+with `wasm`, `wasm-layout`, `wasm-render`, `wasm-png` or `bindgen-web`, and the
+E0 payload check fails if a diagnostic string that only exists under
+`render-outline` reaches an emitted chunk. Outlined SVG is produced only by the
+native command, never from caller-supplied SVG, and it shares one render permit
+with PNG so the two exports cannot run at once. The plugin's registered-invoke
+evidence records two outlined scenes (SHA-256, byte count, `textMode`) and that
+shared permit next to the PNG cases.
+
+The artifact is also measured where it will be opened. A headless-Chromium test
+loads the outlined viewer fixture, overrides every `font-family` with a family
+that is not installed, and requires that no label's glyph ink leaves its measured
+frame; at the pinned options the tightest label keeps 0.396px of clearance, so
+the 0.5px tolerance still fails a real overflow. That fixture is engine output
+and `tests/svg_viewer_fixture.rs` fails if it drifts from the renderer.
+
+Measured cost, byte counts from `tests/svg_outline_size.rs` (light theme, both
+modes from the same geometry):
+
+| Scene | Text runs | Outlined | Ratio |
+| --- | --- | --- | --- |
+| 50 components | 105,047 B | 193,709 B | 1.84x |
+| 50 components, half the labels Korean | 122,138 B | 259,330 B | 2.12x |
+| 1,000 components | 2,108,529 B | 4,079,636 B | 1.93x |
+| 1,000 components, half the labels Korean | 2,395,655 B | 5,144,752 B | 2.15x |
+
+A Hangul glyph is several CFF contours, so the Korean-labelled scenes cost about
+15% more than their English counterparts, and every scene stays far under the
+16 MiB limit. The 1,000-node outlined export is under 8 MiB, and the test fails
+if any scene exceeds three times its own text run. That limit bounds the request
+and the artifact, not the IPC envelope around them: a successful report carries
+its bytes twice, as the `svg` string and as a numeric `bytes` array, so the
+recorded 1,000-node outlined response is 17,508,365 B for a 4,079,621 B
+artifact, and the PNG response is 3,998,665 B for a 480,455 B image.
+
+The canvas cannot use outlines, so it bundles a local subset of the same two
+faces as WOFF2 under `src/assets/fonts/` and `foundations.css` declares
+`Noto Sans CJK KR Diagram` (400/700, `font-display: block`) with
+`.maru-diagram-canvas` consuming `--font-diagram`, including the table cells that
+`TableView` draws inside a foreign object. Hangul syllables and Jamo,
+ASCII, Latin-1, general punctuation, arrows, box/block drawing and CJK symbols
+cost 1,112,092 B for both weights; covering the whole BMP instead would cost
+10,334,368 B, nine times as much for scripts the diagram fixtures do not carry.
+A label containing Han or kana therefore has no bundled canvas glyph and falls
+back to a local face for those runs on the canvas only; exports are unaffected
+because they carry outlines. That is a real coverage limit, not a rounding
+difference: E2 measures every scalar with the full Noto CJK metrics, so a label
+carrying CJK ideographs can wrap or space differently on the canvas than in its
+own export. Widen the subset if a fixture starts requiring those scripts. No
+font is fetched over the network: the Vite build emits both files from the
+bundle.
 
 ### Artifact and determinism gates
 
@@ -2069,13 +2163,21 @@ assertions.
 
 | Scene | WASM first request / warm samples (ms) | Native raster cold / warm range (ms) | Registered mock IPC samples (ms) | Request / response bytes | PNG bytes |
 | --- | --- | --- | --- | --- | --- |
-| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 62.8, 13.5, 11.3, 11.6 | 693 / 51,447 | 11,088 |
-| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 2298.3, 2269.4, 2508.2, 2259.7 | 130,843 / 3,998,664 | 480,455 |
+| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 94.4, 9.3, 9.0, 9.2 | 693 / 51,448 | 11,088 |
+| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 1294.5, 1258.3, 1305.0, 1251.1 | 130,843 / 3,998,665 | 480,455 |
+
+The response bytes include the `textMode` receipt field added for the outlined
+SVG export, which is exactly 18 bytes on a PNG report (`"textMode":"text",`):
+the same report is 51,430 B with that field removed and 51,448 B with it, both
+measured at this head rather than derived from the previous figure. The mock IPC
+column and both `svgCases` are the current release-mode re-record in
+`png-mock-ipc-transport.json`.
 
 The selected PNG transport is native IPC. The measured 36.3 MB gzip PNG module
 and 4.5s cold module initialization rule out the lazy WASM candidate for this
-prototype. SVG export stays in WASM. The native command accepts only a source
-spec and derives validation, layout, SVG and PNG itself; it returns the SVG hash
+prototype. SVG export stays in WASM for the canvas and preview text runs, while
+the user-facing outlined export is the native command above. A native command
+accepts only a source spec and derives validation, layout, SVG and PNG itself; it returns the SVG hash
 alongside the PNG hash in the receipt. Refused layouts return structured IPC
 errors with their original diagnostics and no image.
 
@@ -2127,12 +2229,13 @@ independently; node sublabels and semantic accents retain their own tokens.
 The PNG command is registered only through the existing `native-e2e` plugin
 integration. Production remains at 390 application commands; the native-e2e
 release guards remain in force. The separate plugin evidence JSON is emitted
-by successful registered MockRuntime invokes of `validate` and `render_png`.
-The isolation scanner independently enumerates the plugin handler and
-permission lists and requires those two measured commands, worker execution,
-single-flight behavior and real scene payload/timing samples. It does not
-merge plugin rows into the 390-command app inventory or re-execute behavioral
-tests during a source scan.
+by successful registered MockRuntime invokes of `validate`, `render_png` and
+the outlined `render_svg`. The isolation scanner independently enumerates the
+plugin handler and permission lists and requires every registered command to be
+measured, along with worker execution, the shared render permit, single-flight
+behavior and real scene payload/timing samples. It does not merge plugin rows
+into the 390-command app inventory or re-execute behavioral tests during a
+source scan.
 
 The hosted native-e2e bridge additionally invokes PNG once for the typical
 2-component architecture and once for the 1,000-component fixture, logging
@@ -2203,10 +2306,12 @@ The viewer supports pointer dragging, wheel zoom, toolbar zoom/fit, arrow-key
 panning, keyboard zoom/fit, and keyboard selection. Its inline runtime and
 stylesheet are authorized by fixed CSP hashes. The CSP denies network
 connections, remote scripts/styles/fonts, frames, forms, objects, and base URL
-changes. The engine SVG's local font lookup is retained; the viewer does not
-fetch or bundle font files; if Noto Sans CJK KR is unavailable, a system font
-fallback may overflow the measured text geometry. The JavaScript runtime source
-has a 12 KiB UTF-8 budget, checked when building the HTML.
+changes. An outlined engine SVG needs no font at all; a text-mode SVG keeps the
+local font lookup, and if Noto Sans CJK KR is unavailable a system fallback may
+overflow the measured text geometry, so the viewer profile admits both forms and
+the outlined one is what leaves Maru. The viewer does not fetch or bundle font
+files. The JavaScript runtime source has a 12 KiB UTF-8 budget, checked when
+building the HTML.
 
 Build a file from a local engine SVG and matching source spec with
 `node scripts/build-diagram-viewer.mjs <engine.svg> <spec.json> <viewer.html>`.

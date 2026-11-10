@@ -1247,6 +1247,7 @@ mod quit_acl_tests {
         let commands = [
             ("validate", serde_json::json!({"input":"{}"})),
             ("render_png", serde_json::json!({"input":"{}"})),
+            ("render_svg", serde_json::json!({"input":"{}"})),
             (
                 "diagram_list_renders",
                 serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__"}),

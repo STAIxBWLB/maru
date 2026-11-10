@@ -40,7 +40,7 @@ native-e2e = ["dep:tauri-plugin-wdio-webdriver", "tauri/custom-protocol"]
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-tauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ["png", "render-store"] }
+tauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ["png", "outline", "render-store"] }
 alacritty_terminal = "0.26.0"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }

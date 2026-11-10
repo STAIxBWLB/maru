@@ -2,7 +2,7 @@
 
 - `png-wasm-transport.json`: real isolated Vite ES adapter with the PNG WASM/font module, measured at `9bace127`. One browser realm measures import/initialization and then typical and dense source-to-artifact calls. The dense first call reuses initialized font state.
 - `png-native-raster.json`: native raster probe at `321a880e`. Layout is measured separately; render includes SVG gates and PNG encode/decode.
-- `png-mock-ipc-transport.json`: registered Tauri MockRuntime dispatch to awaited worker rendering at `45cb00a8`. Both fixture tests passed. This does not measure WebView or OS IPC; do not promote it to native desktop latency evidence.
+- `png-mock-ipc-transport.json`: registered Tauri MockRuntime dispatch to awaited worker rendering, originally recorded at `45cb00a8` and re-recorded for the outlined SVG command. Both fixture tests passed. The `cases` rows are PNG; the `svgCases` rows are the same two sources through the registered `render_svg` command, with `textMode: "outlines"` and the SVG byte count and hash. `sharedPermit` records that PNG and SVG refuse on one held render permit. This does not measure WebView or OS IPC; do not promote it to native desktop latency evidence.
 - `png-native-linux.json`: 12-scene native manifest at `45cb00a8`, including repeated PNG bytes and pinned font identities.
 - `png-wasm-linux.json`: the same 12-scene WASM manifest at `45cb00a8`. It is exactly equal to the native Linux manifest. The same run also byte-compares the native source-to-PNG SVG with WASM `render_scene_svg` for all 12 scenes; `png-svg-parity.json` records those direct comparisons.
 

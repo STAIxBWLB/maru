@@ -434,7 +434,7 @@ test("final closure rejects existing-domain-guard exemption from shared admissio
 });
 
 // Synthetic unit fixtures exercise scanner drift; real gate evidence is emitted by Rust IPC tests.
-function pluginFixture(t) {
+function pluginFixture(t, { outline = false } = {}) {
   const f = fixture(t);
   const base = "src-tauri/crates/tauri-plugin-maru-diagram";
   f.write("scripts/check-command-isolation.mjs", readFileSync(CHECKER, "utf8"));
@@ -442,9 +442,13 @@ function pluginFixture(t) {
   f.write(`${base}/permissions/default.toml`, '[default]\npermissions = ["allow-validate"]\n');
   const source = `
 fn build() {
-  #[cfg(feature = "png")]
+  #[cfg(all(feature = "png", feature = "outline"))]
+  let builder = builder.invoke_handler(tauri::generate_handler![commands::validate, commands::render_png, commands::render_svg]);
+  #[cfg(all(feature = "png", not(feature = "outline")))]
   let builder = builder.invoke_handler(tauri::generate_handler![commands::validate, commands::render_png]);
-  #[cfg(not(feature = "png"))]
+  #[cfg(all(not(feature = "png"), feature = "outline"))]
+  let builder = builder.invoke_handler(tauri::generate_handler![commands::validate, commands::render_svg]);
+  #[cfg(not(any(feature = "png", feature = "outline")))]
   let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
 }
 mod commands {
@@ -452,24 +456,32 @@ mod commands {
   pub async fn validate() { tauri::async_runtime::spawn_blocking(|| ()).await; }
   #[tauri::command]
   pub async fn render_png() { tauri::async_runtime::spawn_blocking(|| ()).await; }
+  #[cfg(feature = "outline")]
+  #[tauri::command]
+  pub async fn render_svg() { tauri::async_runtime::spawn_blocking(|| ()).await; }
 }`;
   f.write(`${base}/src/lib.rs`, source);
-  f.write("src-tauri/Cargo.toml", '[dependencies]\ntauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ["png"] }');
+  const features = ["png", ...(outline ? ["outline"] : [])];
+  f.write("src-tauri/Cargo.toml", `[dependencies]\ntauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ${JSON.stringify(features)} }`);
   f.write("src-tauri/tauri.conf.json", { app: { security: { capabilities: ["default", "diagram-render"] } } });
   f.write(`${base}/build.rs`, `fn main() {
   let mut commands = vec!["validate"];
   if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
+  if std::env::var_os("CARGO_FEATURE_OUTLINE").is_some() { commands.push("render_svg"); }
 }`);
-  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", webviews: ["main"], permissions: ["maru-diagram:allow-validate", "maru-diagram:allow-render-png"] });
+  const names = ["validate", "render_png", ...(outline ? ["render_svg"] : [])];
+  const permissions = names.map((name) => `maru-diagram:allow-${name.replaceAll("_", "-")}`);
+  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", webviews: ["main"], permissions });
   f.write("src-tauri/capabilities/default.json", { identifier: "default", windows: ["main", "skill-editor"], permissions: [] });
   f.write("docs/performance/diagram-engine-e3/plugin-acl-mock-ipc.json", {
     schemaVersion: 1, scope: "synthetic compiled generate_context ACL scanner fixture",
     mainWindowLabel: "main", deniedWindowLabel: "sites", deniedChildWebviewLabel: "sites-child",
-    mainHandlerReached: ["validate", "render_png"], sitesDeniedByAcl: ["validate", "render_png"], sitesChildDeniedByAcl: ["validate", "render_png"],
+    mainHandlerReached: names, sitesDeniedByAcl: names, sitesChildDeniedByAcl: names,
   });
   const evidence = {
     schemaVersion: 1, scope: "synthetic MockRuntime scanner unit fixture",
-    pluginCommandCount: 2, pluginCommandsObserved: ["validate", "render_png"],
+    pluginCommandCount: names.length,
+    pluginCommandsObserved: names,
     differentWorkerThread: true, singleInFlight: true,
     cases: ["typical", "1000"].map((name) => ({ name, requestBytes: 1, responseBytes: 1, pngSha256: "a".repeat(64), roundTripMs: [1] })),
   };
@@ -586,4 +598,21 @@ test("plugin scanner rejects an unawaited worker and failed behavioral evidence"
   f.evidence.singleInFlight = false;
   f.saveEvidence();
   assert.throws(() => checkPluginEvidence(f.root), /single-flight behavior failed/);
+});
+
+test("plugin scanner requires outlined SVG invoke evidence for the registered command", (t) => {
+  const f = pluginFixture(t, { outline: true });
+  assert.throws(() => checkPluginEvidence(f.root), /Outlined SVG evidence is missing a measured scene/);
+  f.evidence.svgCases = ["typical", "1000"].map((name) => ({
+    name, requestBytes: 1, responseBytes: 1, svgBytes: 1, svgSha256: "b".repeat(64), textMode: "outlines", roundTripMs: [1],
+  }));
+  f.saveEvidence();
+  assert.throws(() => checkPluginEvidence(f.root), /share one render permit/);
+  f.evidence.svgCases[1].textMode = "text";
+  f.evidence.sharedPermit = true;
+  f.saveEvidence();
+  assert.throws(() => checkPluginEvidence(f.root), /Outlined SVG evidence has invalid payload, hash, mode or latency data/);
+  f.evidence.svgCases[1].textMode = "outlines";
+  f.saveEvidence();
+  assert.equal(checkPluginEvidence(f.root), 3);
 });

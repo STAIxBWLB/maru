@@ -3,6 +3,9 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_PNG").is_some() {
         commands.push("render_png");
     }
+    if std::env::var_os("CARGO_FEATURE_OUTLINE").is_some() {
+        commands.push("render_svg");
+    }
     if std::env::var_os("CARGO_FEATURE_RENDER_STORE").is_some() {
         commands.extend([
             "diagram_list_renders",

@@ -3,9 +3,13 @@ mod artifact;
 mod gate;
 #[cfg(feature = "render-png")]
 pub use artifact::render_png_artifact_json;
+#[cfg(feature = "render-outline")]
+pub use artifact::render_svg_artifact_json;
 pub use artifact::{render_artifact_json, ArtifactFormat, ArtifactReport};
 mod label_paint;
 mod legend_gate;
+#[cfg(feature = "render-outline")]
+pub mod outline;
 #[cfg(feature = "render-png")]
 pub mod png;
 #[cfg(feature = "png-corpus")]
@@ -32,12 +36,30 @@ pub struct SvgOptions {
     pub description: String,
     #[serde(default)]
     pub semantics: Option<SemanticContext>,
+    /// How label text is emitted. `Text` is the pinned glyph run the viewer
+    /// resolves with `FONT_FAMILY`; `Outlines` draws the same glyphs as paths
+    /// from the pinned faces, so the artifact needs no installed font
+    /// (`maru#552`). Absent reads as `Text`.
+    #[serde(default)]
+    pub text_mode: SvgTextMode,
+}
+
+/// Label emission for the SVG writer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SvgTextMode {
+    /// Positioned `<text>` runs that name `FONT_FAMILY`.
+    #[default]
+    Text,
+    /// The same positions as glyph outlines, with no font dependency.
+    Outlines,
 }
 impl SvgOptions {
     pub fn from_spec(spec: &serde_json::Value, theme: SvgTheme) -> Result<Self, Diagnostic> {
         Ok(Self {
             semantics: Some(SemanticContext::from_spec(spec)?),
             theme,
+            text_mode: SvgTextMode::Text,
             title: spec
                 .pointer("/meta/title")
                 .and_then(|v| v.as_str())

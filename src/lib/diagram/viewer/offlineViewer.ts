@@ -14,7 +14,10 @@ const SVG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
   desc: new Set(["id"]),
   defs: new Set(),
   marker: new Set(["id", "markerWidth", "markerHeight", "refX", "refY", "orient", "markerUnits"]),
-  g: new Set(["id", "data-kind", "data-source-id", "data-target-id", "data-route-role", "data-route-variant", "role", "aria-label"]),
+  g: new Set(["id", "data-kind", "data-source-id", "data-target-id", "data-route-role", "data-route-variant", "role", "aria-label",
+    // An outlined label container records the pinned face and is hidden from
+    // assistive technology, which reads the label group's aria-label instead.
+    "data-render", "font-family", "font-size", "font-weight", "fill", "aria-hidden"]),
   rect: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "x", "y", "width", "height", "rx", "fill", "stroke", "stroke-width", "stroke-dasharray"]),
   polyline: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "data-index", "points", "fill", "stroke", "stroke-width", "stroke-dasharray", "marker-end"]),
   line: new Set(["id", "data-kind", "data-target-id", "aria-hidden", "x1", "y1", "x2", "y2", "fill", "stroke", "stroke-width", "stroke-dasharray", "marker-end"]),
@@ -221,8 +224,13 @@ function validateEngineSvg(svg: string): void {
     if (elements > 250_000) svgProfileError("SVG exceeds the element-count limit");
     if (name === "title") titleCount += 1;
     if (name === "desc") descCount += 1;
-    if (SVG_REQUIRED_ATTRIBUTES[name]!.some((attribute) => !attrs.has(attribute))) svgProfileError(`<${name}> is missing required engine attributes`);
-    if (name === "g" && values.get("data-kind") !== "legend-entry" && !attrs.has("data-source-id")) svgProfileError("semantic SVG group is missing its source id");
+    const outlinedLabel = name === "g" && values.get("data-render") === "outline";
+    if (outlinedLabel) {
+      const required = ["data-kind", "data-render", "font-family", "font-size", "font-weight", "fill", "aria-hidden"];
+      if (required.some((attribute) => !attrs.has(attribute))) svgProfileError("outlined label container is missing its pinned face attributes");
+      if (values.get("data-kind") !== "label-text") svgProfileError("an outlined container may only carry label text");
+    } else if (SVG_REQUIRED_ATTRIBUTES[name]!.some((attribute) => !attrs.has(attribute))) svgProfileError(`<${name}> is missing required engine attributes`);
+    if (name === "g" && !outlinedLabel && values.get("data-kind") !== "legend-entry" && !attrs.has("data-source-id")) svgProfileError("semantic SVG group is missing its source id");
     if (name === "g" && values.get("data-kind") === "label" && !attrs.has("data-target-id")) svgProfileError("label group is missing its target id");
     if (name === "svg") {
       if (selfClosing || values.get("id") !== "maru-svg" || values.get("xmlns") !== "http://www.w3.org/2000/svg" || values.get("role") !== "img" || values.get("aria-labelledby") !== "maru-title maru-desc") svgProfileError("SVG root is missing required engine attributes");

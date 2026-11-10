@@ -24,6 +24,7 @@ fn scene() -> (maru_diagram_engine::geometry::GeometryDocument, SvgOptions) {
             theme: SvgTheme::Light,
             title: "SVG gate fixture".into(),
             description: "Artifact gate integration fixture".into(),
+            text_mode: maru_diagram_engine::render::SvgTextMode::Text,
         },
     )
 }

@@ -626,6 +626,23 @@ export function checkPluginEvidence(root = process.cwd()) {
       && Array.isArray(entry.roundTripMs) && entry.roundTripMs.length > 0
       && entry.roundTripMs.every((value) => Number.isFinite(value) && value > 0), "Plugin evidence has invalid payload, hash or latency data; preserve complete output from a successful real invoke run");
   }
+  // Native SVG export is registered, so its own invoke must be measured too; a
+  // receipt-shaped row copied from the PNG cases would not prove the outlined
+  // artifact, which is the part that must never reach the WASM path (`maru#552`).
+  if (registered.has("render_svg")) {
+    insist(Array.isArray(evidence.svgCases) && evidence.svgCases.length === 2
+      && ["typical", "1000"].every((name) => evidence.svgCases.some((entry) => entry.name === name)), "Outlined SVG evidence is missing a measured scene; invoke typical and 1000-node sources through the registered render_svg command");
+    insist(evidence.sharedPermit === true, "Native SVG and PNG must share one render permit; hold it and rerun both registered invokes");
+    for (const entry of evidence.svgCases) {
+      insist(Number.isInteger(entry.requestBytes) && entry.requestBytes > 0
+        && Number.isInteger(entry.responseBytes) && entry.responseBytes > 0
+        && Number.isInteger(entry.svgBytes) && entry.svgBytes > 0
+        && /^[a-f0-9]{64}$/.test(entry.svgSha256 ?? "")
+        && entry.textMode === "outlines"
+        && Array.isArray(entry.roundTripMs) && entry.roundTripMs.length > 0
+        && entry.roundTripMs.every((value) => Number.isFinite(value) && value > 0), "Outlined SVG evidence has invalid payload, hash, mode or latency data; preserve complete output from a successful registered render_svg invoke run");
+    }
+  }
   return registered.size;
 }
 

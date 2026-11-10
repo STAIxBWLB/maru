@@ -53,6 +53,7 @@ pub struct IpcError {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+#[cfg(any(feature = "png", feature = "outline", feature = "render-store"))]
 impl IpcError {
     fn new(
         code: impl Into<String>,
@@ -341,8 +342,9 @@ pub struct PluginState {
     pub sources: Arc<dyn DiagramSources>,
     #[cfg(feature = "render-store")]
     render_store: Option<Arc<dyn RenderStoreHost>>,
+    #[cfg(any(feature = "png", feature = "outline", feature = "render-store"))]
     rendering: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(all(feature = "png", test))]
+    #[cfg(all(any(feature = "png", feature = "outline"), test))]
     worker_thread: Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>,
 }
 
@@ -375,12 +377,29 @@ impl Builder {
             sources: self.sources,
             #[cfg(feature = "render-store")]
             render_store: self.render_store,
+            #[cfg(any(feature = "png", feature = "outline", feature = "render-store"))]
             rendering: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            #[cfg(all(feature = "png", test))]
+            #[cfg(all(any(feature = "png", feature = "outline"), test))]
             worker_thread: Arc::new(std::sync::Mutex::new(None)),
         };
         let builder = tauri::plugin::Builder::new(PLUGIN_NAME);
-        #[cfg(all(feature = "png", feature = "render-store"))]
+        #[cfg(all(feature = "png", feature = "outline", feature = "render-store"))]
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::render_png,
+            commands::render_svg,
+            commands::diagram_list_renders,
+            commands::diagram_prepare_render_view,
+            commands::diagram_delete_render,
+            commands::render_and_store
+        ]);
+        #[cfg(all(feature = "png", feature = "outline", not(feature = "render-store")))]
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::render_png,
+            commands::render_svg
+        ]);
+        #[cfg(all(feature = "png", not(feature = "outline"), feature = "render-store"))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
             commands::render_png,
@@ -389,7 +408,26 @@ impl Builder {
             commands::diagram_delete_render,
             commands::render_and_store
         ]);
-        #[cfg(all(feature = "render-store", not(feature = "png")))]
+        #[cfg(all(feature = "png", not(feature = "outline"), not(feature = "render-store")))]
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::render_png
+        ]);
+        #[cfg(all(not(feature = "png"), feature = "outline", feature = "render-store"))]
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::render_svg,
+            commands::diagram_list_renders,
+            commands::diagram_prepare_render_view,
+            commands::diagram_delete_render,
+            commands::render_and_store
+        ]);
+        #[cfg(all(not(feature = "png"), feature = "outline", not(feature = "render-store")))]
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::render_svg
+        ]);
+        #[cfg(all(not(feature = "png"), not(feature = "outline"), feature = "render-store"))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
             commands::diagram_list_renders,
@@ -397,13 +435,10 @@ impl Builder {
             commands::diagram_delete_render,
             commands::render_and_store
         ]);
-        #[cfg(all(feature = "png", not(feature = "render-store")))]
+        #[cfg(all(not(feature = "png"), not(feature = "outline"), not(feature = "render-store")))]
         let builder = builder.invoke_handler(tauri::generate_handler![
-            commands::validate,
-            commands::render_png
+            commands::validate
         ]);
-        #[cfg(not(any(feature = "png", feature = "render-store")))]
-        let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
         builder
             .setup(move |app, _api| {
                 app.manage(state.clone());
@@ -420,14 +455,17 @@ pub fn init<R: Runtime>(
     Builder::new(host, sources).build()
 }
 
+#[cfg(any(feature = "png", feature = "outline", feature = "render-store"))]
 struct RenderPermit(Arc<std::sync::atomic::AtomicBool>);
 
+#[cfg(any(feature = "png", feature = "outline", feature = "render-store"))]
 impl Drop for RenderPermit {
     fn drop(&mut self) {
         self.0.store(false, std::sync::atomic::Ordering::Release);
     }
 }
 
+#[cfg(any(feature = "png", feature = "outline", feature = "render-store"))]
 fn acquire_render_permit(
     flag: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<RenderPermit, IpcError> {
@@ -459,7 +497,7 @@ mod commands {
             IpcError::new(
                 "diagram_render_store_unavailable",
                 "the host has not configured diagram render storage",
-                "rebuild Maru with its workspace render-store adapter and retry",
+                "reopen the workspace in Maru; update the app if storage remains unavailable",
                 Vec::new(),
             )
         })
@@ -557,13 +595,12 @@ mod commands {
             };
             return Err(IpcError::from_diagnostics(vec![diagnostic]));
         }
-        let worker_input = render_store::prepare_render_store_request(&input)?;
-
         let permit = acquire_render_permit(&state.rendering)?;
         let host = state.render_store.clone();
-        let source_request_json = worker_input.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let _permit = permit;
+            let worker_input = render_store::prepare_render_store_request(&input)?;
+            let source_request_json = worker_input.clone();
             let report = maru_diagram_engine::render::render_artifact_json(&worker_input);
             if !report.ok {
                 return Err(IpcError::from_diagnostics(report.diagnostics));
@@ -631,7 +668,70 @@ mod commands {
             IpcError::new(
                 "diagram_export_worker_failed",
                 format!("PNG worker failed: {cause}"),
-                "retry the export; if it repeats, rebuild the native engine and report the failure",
+                "retry the export; if it repeats, update Maru and report the failure",
+                Vec::new(),
+            )
+        })?;
+        if !report.ok {
+            return Err(IpcError::from_diagnostics(report.diagnostics));
+        }
+        Ok(report)
+    }
+    #[cfg(feature = "outline")]
+    #[tauri::command]
+    pub async fn render_svg(
+        state: tauri::State<'_, PluginState>,
+        input: String,
+    ) -> Result<maru_diagram_engine::render::ArtifactReport, IpcError> {
+        if input.len() > maru_diagram_engine::render::MAX_SVG_BYTES {
+            let diagnostic = Diagnostic {
+                code: "diagram_export_size_invalid".into(),
+                path: "/".into(),
+                rule: "render-v1/request-size".into(),
+                message: "SVG request exceeds 16 MiB".into(),
+                fix: "reduce the source scene and retry".into(),
+            };
+            return Err(IpcError::new(
+                diagnostic.code.clone(),
+                diagnostic.message.clone(),
+                diagnostic.fix.clone(),
+                vec![diagnostic],
+            ));
+        }
+        let flag = Arc::clone(&state.rendering);
+        if flag
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return Err(IpcError::new(
+                "diagram_export_busy",
+                "another diagram export is already running",
+                "wait for that export to finish and retry",
+                Vec::new(),
+            ));
+        }
+        let permit = RenderPermit(flag);
+        #[cfg(test)]
+        let trace = Arc::clone(&state.worker_thread);
+        let report = tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            #[cfg(test)]
+            {
+                *trace.lock().expect("test worker trace mutex") = Some(std::thread::current().id());
+            }
+            maru_diagram_engine::render::render_svg_artifact_json(&input)
+        })
+        .await
+        .map_err(|cause| {
+            IpcError::new(
+                "diagram_export_worker_failed",
+                format!("SVG worker failed: {cause}"),
+                "retry the export; if it repeats, update Maru and report the failure",
                 Vec::new(),
             )
         })?;
