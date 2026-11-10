@@ -36,15 +36,52 @@ fn hangul(scalar: char) -> Option<Hangul> {
     }
 }
 
+/// Whether a scalar can start a new line's syllable: a precomposed syllable, or
+/// the leading jamo or vowel jamo a decomposed one begins with.
+fn starts_a_syllable(scalar: char) -> bool {
+    matches!(
+        hangul(scalar),
+        Some(Hangul::Syllable | Hangul::Leading | Hangul::Vowel)
+    )
+}
+
+/// A precomposed syllable with no trailing consonant (`LV`), the form GB7 also
+/// forbids a break after. Compatibility jamo are not conjoining, so they are not
+/// decomposed this way.
+fn is_lv_syllable(scalar: char) -> bool {
+    let code = scalar as u32;
+    (0xAC00..=0xD7A3).contains(&code) && (code - 0xAC00) % 28 == 0
+}
+
 /// A Hangul break belongs only at a syllable boundary: between two syllables, or
-/// before a leading jamo that starts the next one. A decomposed (NFD) syllable
-/// is a leading, vowel and trailing run, and macOS filenames and some pasted
-/// text arrive that way, so breaking before a vowel or a trailing jamo would
-/// tear one visible syllable across two lines. UAX #29 GB6 also forbids a break
-/// after a leading jamo, which is still the same syllable as whatever follows.
+/// before the leading or vowel jamo that starts the next one. A decomposed (NFD)
+/// syllable is a leading, vowel and trailing run, and macOS filenames and some
+/// pasted text arrive that way, so breaking before a vowel or a trailing jamo
+/// that continues the same syllable would tear one visible syllable across two
+/// lines.
+///
+/// The rule is UAX #29: GB6 forbids a break after a leading jamo, GB7 forbids one
+/// after `LV` or `V` before a `V` or `T`, and GB8 forbids `T x T`. Nothing
+/// forbids `LVT x V`, so a precomposed syllable that already carries its
+/// trailing consonant ends there and the next vowel jamo may start a line.
 fn is_hangul_break(before: char, after: char) -> bool {
-    !matches!(hangul(before), None | Some(Hangul::Leading))
-        && matches!(hangul(after), Some(Hangul::Syllable | Hangul::Leading))
+    // A trailing jamo never starts a line's syllable, so GB8 (`LVT x T`,
+    // `T x T`) is already answered here for every `before`.
+    if !starts_a_syllable(after) {
+        return false;
+    }
+    match hangul(before) {
+        // GB6: a leading jamo is still one syllable with whatever follows.
+        None | Some(Hangul::Leading) => false,
+        // GB7 forbids `LV x V`. An `LVT` already carries its trailing consonant,
+        // so nothing forbids `LVT x V` and the vowel may start a line.
+        Some(Hangul::Syllable) => {
+            !(is_lv_syllable(before) && matches!(hangul(after), Some(Hangul::Vowel)))
+        }
+        // GB7 `V x V`, and the trailing jamo that would continue a vowel.
+        Some(Hangul::Vowel) => !matches!(hangul(after), Some(Hangul::Vowel)),
+        Some(Hangul::Trailing) => true,
+    }
 }
 
 /// Whether a cut between `at - 1` and `at` would split one decomposed syllable.
@@ -143,12 +180,18 @@ fn wrap_paragraph(
             lines.push(rest.iter().collect());
             return Ok(());
         }
+        // The paragraph has to wrap, so its leading spaces belong to no line:
+        // they are not a word, and letting them form a line of their own would
+        // add an empty line's height to the fit. A paragraph that fits keeps
+        // its authored bytes, which the return above already handled.
+        if rest[0] == ' ' {
+            start += 1;
+            continue;
+        }
         // A word earns its own line only when nothing else fits. Cutting a word
         // is the caller's last resort, so without permission the whole token
         // overflows on its own line and a caller can still grow or shrink.
-        let fitting = space_break
-            .or(hangul_break)
-            .filter(|break_at| *break_at > 0);
+        let fitting = space_break.filter(|break_at| *break_at > 0).or(hangul_break);
         let consumed = match (fitting, allow_token_split) {
             (Some(break_at), _) => break_at,
             (None, true) => {
@@ -241,6 +284,32 @@ mod tests {
             vec!["주문 처리 Order flow"],
             "a fitting mixed line keeps one line"
         );
+    }
+
+    #[test]
+    fn a_paragraphs_leading_space_does_not_become_its_own_line() {
+        // A source may indent a label with a space. It is not a word, so it may
+        // not take a line of its own: that would add a line's height to the fit
+        // for no glyph, and it used to hide a later Hangul break as well.
+        let korean = wrap("  주문처리완료알림", 40);
+        assert!(korean.len() > 1, "the label still wraps: {korean:?}");
+        assert!(
+            korean.iter().all(|line| !line.trim().is_empty()),
+            "no line is a bare run of spaces: {korean:?}"
+        );
+        assert_eq!(korean.concat(), "주문처리완료알림");
+        // The same in Latin text, where the whole token is the last resort.
+        let latin = wrap(" WWWWWWWWWWWW", 70);
+        assert!(
+            !latin[0].starts_with(' '),
+            "the leading space took no line: {latin:?}"
+        );
+    }
+
+    #[test]
+    fn a_paragraph_that_fits_keeps_its_leading_space() {
+        // Nothing wraps, so the authored bytes come back exactly as written.
+        assert_eq!(wrap("  주문", 400), vec!["  주문"]);
     }
 
     #[test]
@@ -346,9 +415,21 @@ mod tests {
         assert!(!is_hangul_break(leading, '한'));
         assert!(!is_hangul_break(leading, vowel));
         assert!(!is_hangul_break(leading, trailing));
+        // GB7 is about LV, not LVT: `가` (U+AC00) carries no trailing consonant,
+        // so a vowel jamo that follows still belongs to it; `한` (U+D55C) already
+        // has its trailing consonant, so nothing forbids LVT x V and the vowel
+        // starts a new line.
+        assert!(
+            !is_hangul_break('가', vowel),
+            "GB7: an LV syllable does not break before a vowel jamo"
+        );
+        assert!(
+            is_hangul_break('한', vowel),
+            "an LVT syllable is finished, so the next vowel jamo starts a line"
+        );
         // GB7 and GB8: never before a vowel or a trailing jamo.
-        assert!(!is_hangul_break('한', vowel));
         assert!(!is_hangul_break('한', trailing));
+        assert!(!is_hangul_break('가', trailing));
         assert!(!is_hangul_break(vowel, trailing));
         assert!(!is_hangul_break(trailing, trailing));
     }

@@ -1243,13 +1243,16 @@ cannot disagree: it breaks at a space first, then at a Hangul syllable boundary,
 and cuts inside a Latin word only when that word alone fails every box and every
 size, and only in the role that owns it - a sibling role's unbreakable word
 never splits the primary. A Hangul boundary is between two precomposed syllables
-or before a leading jamo that starts the next one, so a decomposed (NFD)
-syllable, which macOS filenames and some pasted text carry, is never split
-between its own jamo; the last-resort cut obeys the same boundary and leaves the
-token whole on an overflowing line when no cut can, which the ladder answers by
-stepping the size down and refusing. The scan accumulates advances one scalar at
-a time, so a line costs one pass over its own scalars instead of one measurement
-per candidate break, and the work receipt counts those scalar measurements.
+or before the leading jamo of the next one, and before a vowel jamo only once the
+preceding syllable is `LVT` and so already carries its trailing consonant - the
+`LV` case and an open vowel run both keep that vowel inside the same syllable
+(UAX #29 GB6, GB7, GB8) - so a decomposed (NFD) syllable, which macOS filenames
+and some pasted text carry, is never split between its own jamo; the last-resort
+cut obeys the same boundary and leaves the token whole on an overflowing line
+when no cut can, which the ladder answers by stepping the size down and
+refusing. The scan accumulates advances one scalar at a time, so a line costs one
+pass over its own scalars instead of one measurement per candidate break, and the
+work receipt counts those scalar measurements.
 Growth adds height only, from the node's own top down to the first limit that
 position already sets: the lane body below it in workflow, the next band or row
 minus a 10px separation in lifecycle and dataflow, and the readable area the
