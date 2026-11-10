@@ -6,6 +6,7 @@
 //! fonts. Unsupported scalars use the font's actual glyph 0 (.notdef), never
 //! Unicode substitution or OS fallback. Default-ignorable scalars are skipped.
 mod format;
+mod wrap;
 
 use crate::geometry::{FontIdentity, GeometryBox, GeometryPoint};
 use crate::layout::fixed::Coord;
@@ -298,6 +299,10 @@ fn table(weight: u16) -> Result<&'static FontTable, Diagnostic> {
 pub fn font_identity(weight: u16) -> Result<FontIdentity, Diagnostic> {
     Ok(table(weight)?.identity())
 }
+
+/// Wrap `text` to a measured box. See [`wrap::wrap_label_lines`].
+pub use wrap::wrap_label_lines;
+
 pub fn font_manifest() -> &'static str {
     include_str!("data/manifest.json")
 }
