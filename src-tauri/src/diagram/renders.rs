@@ -22,9 +22,12 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use tauri::Manager;
 pub use tauri_plugin_maru_diagram::render_store::{
-    DiagramRenderReceipt, LegacyArchifyEnginePin, LegacyArchifyReceipt, RenderAndStoreReport,
-    RenderConversion, RenderDocumentContext, RenderEntry, RenderGate, RenderGates, RenderGroup,
-    RenderView, StoredRender, StoredRenderReceipt,
+    DiagramRenderReceipt, RenderDocumentContext, RenderEntry, RenderGroup, RenderView, StoredRender,
+    StoredRenderReceipt,
+};
+#[cfg(test)]
+use tauri_plugin_maru_diagram::render_store::{
+    LegacyArchifyEnginePin, LegacyArchifyReceipt, RenderGate, RenderGates,
 };
 use uuid::Uuid;
 
@@ -225,17 +228,10 @@ fn archify_receipt(receipt: ArchifyRenderReceipt) -> StoredRenderReceipt {
         },
         output_sha256: receipt.output_sha256,
         output_mime_type: receipt.output_mime_type,
-        engine_output_sha256: receipt.engine_output_sha256,
-        conversion: receipt.conversion.map(|conversion| RenderConversion {
-            format: conversion.format,
-            theme: conversion.theme,
-            pixel_ratio: conversion.pixel_ratio,
-        }),
+        engine_output_sha256: None,
+        conversion: None,
         gates,
-        readback: receipt.readback.map(|readback| RenderGate {
-            status: readback.status,
-            scope: readback.scope,
-        }),
+        readback: None,
     })
 }
 
@@ -2289,5 +2285,125 @@ mod tests {
             "{error}"
         );
         assert!(!app.asset_protocol_scope().is_allowed(&artifact));
+    }
+
+    fn source_only_engine_request(format: &str) -> String {
+        let mut request = serde_json::json!({
+            "specJson": include_str!("../../crates/maru-diagram-engine/testdata/valid-architecture.json"),
+            "format": format,
+            "theme": "dark",
+            "pixelRatio": 1,
+        });
+        if format == "svg" {
+            request["textMode"] = serde_json::json!("outlines");
+        }
+        request.to_string()
+    }
+
+    #[test]
+    fn source_only_engine_svg_and_png_round_trip_through_verified_render_store() {
+        let fixture = Fixture::new();
+        // The existing helper continues to create the legacy Archify receipt shape.
+        let legacy = fixture.store(RENDER_A, "text/html", HTML);
+        assert!(matches!(
+            legacy.receipt.render,
+            StoredRenderReceipt::LegacyArchify(_)
+        ));
+
+        let context = RenderDocumentContext {
+            dataset_id: Some("semantic-source-1".into()),
+            ..fixture.context()
+        };
+        let app = tauri::test::mock_app();
+        let mut stored_artifacts = Vec::new();
+        for (format, expected_mime, expected_name) in [
+            ("svg", "image/svg+xml", SVG_FILE),
+            ("png", "image/png", PNG_FILE),
+        ] {
+            let request = source_only_engine_request(format);
+            let report = maru_diagram_engine::render::render_artifact_json(&request);
+            assert!(report.ok, "{format}: {:?}", report.diagnostics);
+            assert_eq!(report.api_version, maru_diagram_engine::API_VERSION);
+            assert_eq!(report.receipt.engine.id, "maru-diagram-engine");
+            assert!(!report.receipt.engine.version.is_empty());
+            assert!(!report.receipt.engine.revision.is_empty());
+            assert_eq!(report.receipt.conversion.as_ref().unwrap().format, format);
+            assert_eq!(report.receipt.conversion.as_ref().unwrap().theme, "dark");
+            assert_eq!(report.receipt.conversion.as_ref().unwrap().pixel_ratio, 1);
+            assert_eq!(report.receipt.output_mime_type.as_deref(), Some(expected_mime));
+            if format == "svg" {
+                assert_eq!(
+                    report.text_mode,
+                    Some(maru_diagram_engine::render::SvgTextMode::Outlines)
+                );
+                assert!(!report.svg.as_deref().unwrap().contains("<text"));
+            }
+
+            let stored = store_engine_render(
+                fixture.work.to_str().unwrap(),
+                context.clone(),
+                &request,
+                report.clone(),
+            )
+            .unwrap();
+            assert_eq!(stored.doc_id, fixture.doc_id);
+            assert_eq!(stored.artifact_name, expected_name);
+            assert_eq!(stored.receipt.doc_id, fixture.doc_id);
+            assert_eq!(stored.receipt.document_name, context.document_name);
+            assert_eq!(stored.receipt.document_revision, context.document_revision);
+            assert_eq!(stored.receipt.diagram_type, "architecture");
+            assert_eq!(stored.receipt.dataset_id.as_deref(), Some("semantic-source-1"));
+
+            let engine_receipt = match &stored.receipt.render {
+                StoredRenderReceipt::Engine(receipt) => receipt,
+                StoredRenderReceipt::LegacyArchify(_) => panic!("new engine export used a legacy receipt"),
+            };
+            assert_eq!(engine_receipt.engine.id, "maru-diagram-engine");
+            assert_eq!(
+                engine_receipt.input_spec_sha256,
+                engine_input_spec_sha256(&request).unwrap()
+            );
+            let expected_svg_hash = report.svg.as_deref().map(|svg| sha256(svg.as_bytes()));
+            let expected_output_hash = report.bytes.as_deref().map(sha256);
+            assert_eq!(engine_receipt.engine_output_sha256.as_deref(), expected_svg_hash.as_deref());
+            assert_eq!(engine_receipt.output_sha256.as_deref(), expected_output_hash.as_deref());
+            assert_eq!(engine_receipt.output_mime_type.as_deref(), Some(expected_mime));
+
+            let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+            let group = groups.iter().find(|group| group.doc_id == fixture.doc_id).unwrap();
+            let entry = group.renders.iter().find(|render| render.render_id == stored.render_id).unwrap();
+            assert!(entry.verified, "{format}: {:?}", entry.diagnostic);
+            assert_eq!(entry.receipt.as_ref(), Some(&stored.receipt));
+
+            let view = prepare_render_view(
+                app.handle(),
+                fixture.work.to_str().unwrap(),
+                &fixture.doc_id,
+                &stored.render_id,
+            )
+            .unwrap();
+            assert_eq!(view.receipt, stored.receipt);
+            assert_eq!(view.mime_type, expected_mime);
+            let view_path = Path::new(&view.path);
+            assert!(view_path.starts_with(&fixture.work));
+            assert!(app.asset_protocol_scope().is_allowed(view_path));
+            assert!(!app
+                .asset_protocol_scope()
+                .is_allowed(fixture.render_dir(&stored.render_id).join(RECEIPT_FILE)));
+            let readback = fs::read(view_path).unwrap();
+            assert_eq!(sha256(&readback), engine_receipt.output_sha256.as_deref().unwrap());
+            if format == "png" {
+                assert!(readback.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]));
+            } else {
+                assert_eq!(readback, report.svg.as_deref().unwrap().as_bytes());
+            }
+            stored_artifacts.push(stored);
+        }
+
+        let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+        let group = groups.iter().find(|group| group.doc_id == fixture.doc_id).unwrap();
+        assert_eq!(group.renders.len(), 3, "legacy HTML plus native SVG and PNG");
+        assert!(group.renders.iter().all(|render| render.verified));
+        assert_eq!(stored_artifacts.len(), 2);
     }
 }
