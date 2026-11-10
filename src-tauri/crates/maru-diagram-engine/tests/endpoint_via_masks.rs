@@ -365,10 +365,14 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
             .unwrap_or_else(|| panic!("{name}: authored route record is retained"));
         if name == "inflated-node-corner" {
             assert!(!report.ok, "diagonal source pin remains refused");
-            assert!(report.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "dataflow/geometry-route-quality"
-                    && diagnostic.message.contains("non-orthogonal")
-            }), "corner control must retain the source diagonal cause: {:?}", report.diagnostics);
+            assert!(
+                report.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "dataflow/geometry-route-quality"
+                        && diagnostic.message.contains("non-orthogonal")
+                }),
+                "corner control must retain the source diagonal cause: {:?}",
+                report.diagnostics
+            );
         } else if name != "label-clearance-ring" {
             assert!(
                 !report.ok,
