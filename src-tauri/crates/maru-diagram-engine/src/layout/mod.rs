@@ -694,7 +694,11 @@ impl SceneBuilder {
             self.routing_obstacles.insert(clearance, obstacles);
         }
     }
-    fn endpoint_masks(&self, r: &RouteRequest, clearance: Coord) -> Result<EndpointMasks, Diagnostic> {
+    fn endpoint_masks(
+        &self,
+        r: &RouteRequest,
+        clearance: Coord,
+    ) -> Result<EndpointMasks, Diagnostic> {
         if r.waypoints.is_empty() {
             return Ok(EndpointMasks::default());
         }
