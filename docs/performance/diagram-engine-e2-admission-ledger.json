@@ -83026,6 +83026,7 @@
         "disposition": "No 8px-versus-9px brand-rail tuning. Node-label admission now checks actual emitted boxes instead of scaling to hypothetical minimum fonts."
       }
     ],
-    "frozenModelDispositions": "The original case inputs, oracle verdicts, source-stamped geometry and remaining model dispositions are final reference evidence; they are not recomputed as a parity gate for the readability change."
+    "frozenModelDispositions": "The original case inputs, oracle verdicts, source-stamped geometry and remaining model dispositions are final reference evidence; they are not recomputed as a parity gate for the readability change.",
+    "historicalRoleBudgetNote": "Five brand-rail records labelled fixed-by-role-budget describe the stamped historical implementation. That role-budget admission code was superseded by emitted glyph-ink admission; the records are preserved as history, not a claim that the removed code remains active."
   }
 }

@@ -217,22 +217,49 @@ fn check_node_labels(
                 } else {
                     format!("/{}/{index}/{field}", family.node_collection)
                 };
+                let available_width =
+                    (text_area_right - label_left.max(text_area_left)).max(0) as f64 / UNITS;
+                let available_height =
+                    (node_bottom - label_top.max(node_top)).max(0) as f64 / UNITS;
+                let available = match (overflow_x > 0, overflow_y > 0) {
+                    (true, true) => format!(
+                        "available width {available_width:.3}px and height {available_height:.3}px"
+                    ),
+                    (false, true) => format!("available height {available_height:.3}px"),
+                    _ => format!("available width {available_width:.3}px"),
+                };
+                let fix = if family.name == "sequence" {
+                    if overflow_x > 0 {
+                        format!("shorten the {field}, or set meta.column_fit to \"spread\" and widen meta.viewBox; remove line breaks if the fixed participant height is exceeded")
+                    } else {
+                        format!("shorten the {field} or remove line breaks to fit the fixed participant height")
+                    }
+                } else {
+                    let dimension = match (family.name, overflow_x > 0, overflow_y > 0) {
+                        ("architecture", true, true) => "size[0] and size[1]",
+                        ("architecture", false, true) => "size[1]",
+                        ("architecture", _, _) => "size[0]",
+                        (_, true, true) => "width and height",
+                        (_, false, true) => "height",
+                        _ => "width",
+                    };
+                    format!("shorten the {field} or increase {}[{index}].{dimension} so its emitted Noto ink fits inside the node", family.node_collection)
+                };
                 push(
                     diagnostics,
                     family,
                     "geometry-label-fit",
                     path,
                     format!(
-                        "emitted Noto {field} box for {:?} is {:.3}px wide by {:.3}px high at {:.1}px and extends {:.3}px horizontally / {:.3}px vertically beyond the node text area (available width {:.3}px)",
+                        "emitted Noto {field} box for {:?} is {:.3}px wide by {:.3}px high at {:.1}px and extends {:.3}px horizontally / {:.3}px vertically beyond the node text area ({available})",
                         id,
                         (label_right - label_left) as f64 / UNITS,
                         (label_bottom - label_top) as f64 / UNITS,
                         font_size,
                         overflow_x as f64 / UNITS,
-                        overflow_y as f64 / UNITS,
-                        (text_area_right - label_left.max(text_area_left)).max(0) as f64 / UNITS
+                        overflow_y as f64 / UNITS
                     ),
-                    format!("shorten the {field} or increase the node width/height so its emitted Noto box fits inside the text area"),
+                    fix,
                 );
             }
         }
