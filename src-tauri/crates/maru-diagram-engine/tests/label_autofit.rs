@@ -470,7 +470,10 @@ fn a_grown_node_stops_at_the_body_below_its_own_top() {
     assert!(lane.ok, "{:?}", lane.diagnostics);
     let bounds = node_bounds(&lane, "a");
     let lane_top_ticks = node_bounds(&report(&workflow("A", None)), "a").y;
-    assert_eq!(bounds.y, lane_top_ticks, "growth adds height, not a new top");
+    assert_eq!(
+        bounds.y, lane_top_ticks,
+        "growth adds height, not a new top"
+    );
     assert!(
         bounds.height > 52 * 64,
         "the box absorbs the extra line: {bounds:?}"
