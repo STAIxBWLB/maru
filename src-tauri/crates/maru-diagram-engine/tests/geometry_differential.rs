@@ -202,7 +202,7 @@ fn only_named_source_green_cases_can_refuse_for_measured_noto_ink_overflow() {
             !report.ok,
             "listed case {id} must retain its measured refusal"
         );
-        painted_ink::assert_source_green_report(&report, id, &diagram_type);
+        painted_ink::assert_source_green_overflow_exception(&report, id, &diagram_type);
         observed.insert(*id);
     }
 

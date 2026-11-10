@@ -1,4 +1,5 @@
 use maru_diagram_engine::geometry::{GeometryDocument, GeometryNode, GeometryReport};
+use std::collections::HashSet;
 
 #[derive(Clone, Copy)]
 struct OverflowAllowance {
@@ -6,8 +7,9 @@ struct OverflowAllowance {
     diagram_type: &'static str,
     node_id: &'static str,
     label: &'static str,
+    diagnostic_path: &'static str,
     font_size_ticks: i64,
-    overflow_ticks: Option<i64>,
+    overflow_ticks: i64,
 }
 
 pub const SOURCE_GREEN_INK_CASES: &[&str] = &[
@@ -23,34 +25,31 @@ const OVERFLOW_ALLOWLIST: &[OverflowAllowance] = &[
         diagram_type: "architecture",
         node_id: "system",
         label: "apt, systemd, /etc, homes",
+        diagnostic_path: "/components/4/sublabel",
         font_size_ticks: 704,
-        overflow_ticks: Some(226),
+        overflow_ticks: 226,
     },
     OverflowAllowance {
         case_id: "gate-sequence-brand-absent",
         diagram_type: "sequence",
         node_id: "a",
         label: "BrandBrand",
+        diagnostic_path: "/participants/0/label",
         font_size_ticks: 832,
-        overflow_ticks: Some(180),
+        overflow_ticks: 180,
     },
     OverflowAllowance {
         case_id: "e2-boundary-sequence-brand-rail-7",
         diagram_type: "sequence",
         node_id: "a",
         label: "WWWWWWW",
+        diagnostic_path: "/participants/0/label",
         font_size_ticks: 832,
-        overflow_ticks: Some(577),
-    },
-    OverflowAllowance {
-        case_id: "dense-workflow-seed-5502027",
-        diagram_type: "workflow",
-        node_id: "",
-        label: "",
-        font_size_ticks: 0,
-        overflow_ticks: None,
+        overflow_ticks: 577,
     },
 ];
+
+const DENSE_OVERFLOW_BY_LAST_DIGIT: [i64; 10] = [268, 252, 262, 258, 281, 259, 269, 264, 266, 262];
 
 fn owned_node_label<'a>(
     geometry: &'a GeometryDocument,
@@ -163,12 +162,26 @@ pub fn assert_source_green_overflow_exception(
     case_id: &str,
     diagram_type: &str,
 ) {
+    assert!(
+        SOURCE_GREEN_INK_CASES.contains(&case_id),
+        "case {case_id} is not in the explicit source-green ink allowlist"
+    );
+    if case_id == "dense-workflow-seed-5502027" {
+        assert_eq!(diagram_type, "workflow", "case {case_id}");
+        assert!(!report.ok, "paint overflow must not be admitted");
+        let geometry = report
+            .geometry
+            .as_ref()
+            .expect("measured text refusal retains placed geometry");
+        assert_dense_overflow_witnesses(report, geometry);
+        return;
+    }
     let Some(allowance) = OVERFLOW_ALLOWLIST
         .iter()
         .find(|allowance| allowance.case_id == case_id)
     else {
         panic!(
-            "unlisted source-green engine refusal {case_id:?}: {}",
+            "source-green case {case_id:?} has no numeric overflow allowance: {}",
             observed_witnesses(report)
         );
     };
@@ -178,12 +191,7 @@ pub fn assert_source_green_overflow_exception(
         .geometry
         .as_ref()
         .expect("measured text refusal retains placed geometry");
-    let Some(expected_overflow) = allowance.overflow_ticks else {
-        panic!(
-            "case {case_id} is listed but its numeric witness is not confirmed: {}",
-            observed_witnesses(report)
-        );
-    };
+    let expected_overflow = allowance.overflow_ticks;
     let node = geometry
         .nodes
         .iter()
@@ -229,7 +237,7 @@ pub fn assert_source_green_overflow_exception(
         report.diagnostics.iter().any(|diagnostic| {
             diagnostic.code == format!("{diagram_type}/geometry-label-fit")
                 && diagnostic.message.contains(&format!("{:?}", node.id))
-                && !diagnostic.path.is_empty()
+                && diagnostic.path == allowance.diagnostic_path
                 && !diagnostic.rule.is_empty()
                 && !diagnostic.message.is_empty()
                 && !diagnostic.fix.is_empty()
@@ -259,10 +267,67 @@ pub fn assert_source_green_overflow_exception(
     }
 }
 
-pub fn assert_source_green_report(report: &GeometryReport, case_id: &str, diagram_type: &str) {
-    if report.ok {
-        assert_accepted_text_ink_fits(report);
-    } else {
-        assert_source_green_overflow_exception(report, case_id, diagram_type);
+fn assert_dense_overflow_witnesses(report: &GeometryReport, geometry: &GeometryDocument) {
+    let mut observed = HashSet::new();
+    for node in &geometry.nodes {
+        let labels = owned_node_label(geometry, node);
+        let Some(ink) = ink_bounds(&labels) else {
+            continue;
+        };
+        let overflow = overflow_ticks(node, ink);
+        let number = node
+            .id
+            .strip_prefix('n')
+            .and_then(|value| value.parse::<u16>().ok());
+        if let Some(number @ 100..=199) = number {
+            let digit = usize::from(number % 10);
+            assert_eq!(
+                overflow, DENSE_OVERFLOW_BY_LAST_DIGIT[digit],
+                "node {}",
+                node.id
+            );
+            assert_eq!(labels.len(), 1, "node {} label count", node.id);
+            let label = labels[0];
+            assert_eq!(label.text, format!("N{number}"), "node {}", node.id);
+            assert_eq!(label.font.id, "noto-sans-cjk-kr", "node {}", node.id);
+            assert_eq!(i64::from(label.font_size), 832, "node {}", node.id);
+            assert!(
+                report.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "workflow/geometry-label-fit"
+                        && diagnostic.message.contains(&format!("{:?}", node.id))
+                        && diagnostic.path == format!("/nodes/{number}/label")
+                        && !diagnostic.rule.is_empty()
+                        && !diagnostic.message.is_empty()
+                        && !diagnostic.fix.is_empty()
+                        && (diagnostic.fix.contains("width") || diagnostic.fix.contains("height"))
+                }),
+                "node {} lacks its workflow geometry-label-fit cause and size fix: {:?}",
+                node.id,
+                report.diagnostics
+            );
+            observed.insert(node.id.as_str());
+        } else {
+            assert_eq!(overflow, 0, "unexpected overflow on node {}", node.id);
+        }
+    }
+
+    let expected: HashSet<_> = (100..=199).map(|number| format!("n{number}")).collect();
+    let observed: HashSet<_> = observed.into_iter().map(str::to_owned).collect();
+    assert_eq!(
+        observed, expected,
+        "dense overflow witness node set differs"
+    );
+
+    for diagnostic in &report.diagnostics {
+        if diagnostic.code == "workflow/geometry-route-quality-notice" {
+            continue;
+        }
+        assert!(
+            diagnostic.code == "workflow/geometry-label-fit"
+                && expected
+                    .iter()
+                    .any(|id| diagnostic.message.contains(&format!("{id:?}"))),
+            "dense text overflow must not excuse an unrelated refusal: {diagnostic:?}"
+        );
     }
 }

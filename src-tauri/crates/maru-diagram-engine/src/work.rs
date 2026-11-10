@@ -244,8 +244,8 @@ pub fn authored_via_benchmark_work() -> ViaBenchmarkWork {
         .expect("authored-via fixture must retain its unrelated blocker");
     assert_eq!(
         endpoint_anchor.y - blocker.bounds.bottom().unwrap(),
-        2 * 64,
-        "blocker body must stay 2px clear while its label line box blocks routing"
+        3 * 64,
+        "blocker body must stay 3px clear while its label line box blocks routing"
     );
     let blocker_tag = geometry
         .labels
