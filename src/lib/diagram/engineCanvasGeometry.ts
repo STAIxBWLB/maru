@@ -304,6 +304,18 @@ export function canvasDisplayNode(
 }
 
 /**
+ * Where an authored move of `node` starts from: the box the canvas paints, or
+ * the member's own position once it is pinned. That stored position is where
+ * the last layout put it, so a second nudge arriving before the box behind it
+ * has been replaced still moves the member on by one step.
+ */
+export function canvasMoveBase(node: DiagramNode, geometry: CanvasGeometry | null): CanvasGeometryPoint {
+  if (node.meta?.pinned === true) return { x: node.x, y: node.y };
+  const box = geometry?.boxes.get(node.id) ?? null;
+  return box ? { x: box.x, y: box.y } : { x: node.x, y: node.y };
+}
+
+/**
  * The pins a keyboard nudge of `ids` authors: a member the engine draws is
  * moved by pinning the box the canvas shows it at, exactly as a drop does,
  * because its doc position is a slot the next layout overwrites. Members the
@@ -322,8 +334,8 @@ export function canvasNudgePins(
   for (const id of ids) {
     const node = doc.nodes.find((candidate) => candidate.id === id);
     if (!node || !isPinnableCanvasMember(doc, datasetId, node)) continue;
-    const box = geometry?.boxes.get(id) ?? null;
-    pins.push({ id, x: (box?.x ?? node.x) + dx, y: (box?.y ?? node.y) + dy });
+    const base = canvasMoveBase(node, geometry);
+    pins.push({ id, x: base.x + dx, y: base.y + dy });
   }
   return pins;
 }

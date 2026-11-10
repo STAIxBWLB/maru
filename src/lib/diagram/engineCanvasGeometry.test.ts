@@ -614,6 +614,13 @@ describe("a keyboard nudge writes what the canvas shows", () => {
     expect(canvasNudgePins(withFree, dataset.id, null, [member.id], 5, -4)).toEqual([
       { id: member.id, x: member.x + 5, y: member.y - 4 },
     ]);
+    // A pinned member moves on from its own position: the box on screen is the
+    // previous one until the layout carrying the last nudge lands.
+    const pinnedMember = { ...member, x: 205, y: 296, meta: { ...member.meta, pinned: true } };
+    const pinnedDoc = { ...doc, nodes: [...withFree.nodes.filter((n) => n.id !== member.id), pinnedMember] };
+    expect(canvasNudgePins(pinnedDoc, dataset.id, geometry, [member.id], 1, 0)).toEqual([
+      { id: member.id, x: 206, y: 296 },
+    ]);
     // Another dataset's canvas pins nothing here.
     expect(canvasNudgePins(withFree, "ds-elsewhere", geometry, [member.id], 5, -4)).toEqual([]);
   });

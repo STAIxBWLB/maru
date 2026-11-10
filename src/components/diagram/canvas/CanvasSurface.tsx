@@ -30,6 +30,7 @@ import {
 import {
   canvasDisplayNode,
   canvasLabelLines,
+  canvasMoveBase,
   type CanvasGeometry,
   type CanvasLabelLines,
   type CanvasDisplayOffset,
@@ -751,16 +752,15 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
           for (const id of gesture.engineIds) {
             // The doc node is the base, never the painted one: a painted node
             // already carries the live gesture offset, and the drop adds it
-            // again (maru#552).
+            // again (maru#552). Without a scene yet (first paint, first-run
+            // refusal) the doc position also stands in for the box.
             const node = nodes.find((candidate) => candidate.id === id);
             if (!node || !isPinnableCanvasMember(doc, datasetId, node)) continue;
-            // Without a scene yet (first paint, first-run refusal) the doc's own
-            // position stands in for the engine box the drag moved away from.
-            const box = geometry?.boxes.get(id) ?? null;
+            const base = canvasMoveBase(node, geometry);
             placed.push({
               id,
-              x: (box?.x ?? node.x) + gesture.lastDx,
-              y: (box?.y ?? node.y) + gesture.lastDy,
+              x: base.x + gesture.lastDx,
+              y: base.y + gesture.lastDy,
             });
           }
         }
