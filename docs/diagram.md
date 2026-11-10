@@ -999,6 +999,37 @@ measured bounds. Page bounds include nodes, ranges, labels, routes, cards and
 legend extents. A passed S2 result does not claim the pinned renderer's full
 label-fit, viewBox or legend-clearance rules; those refusals remain S3 work.
 
+The document header is emitted into the scene's own coordinates: `title` is a
+24px bold label at (32,16) and, when authored, `subtitle` a 12px regular label at
+(32,54). The pinned page keeps both in its HTML template outside the SVG
+(`sidecars/archify/renderers/shared/utils.mjs`, `applyTemplate`), so its own
+drawing starts at the band top instead of below a header: workflow phase rail 27
+and `laneY` 52, dataflow stage 46 with the first node row at 128. A Maru SVG
+carries the header inside its own coordinate space, so the producer measures the
+emitted band (`layout::header_floor`: the lower header label's bottom plus a 12px
+`HEADER_GAP`) and moves the finished drawing below it. Placement and every
+geometry rule run in the pinned source coordinates first; a workflow or dataflow
+scene is then translated as a whole (`layout::translate_drawing`: nodes,
+containers, route points, non-header labels with their glyph ink, legend and page
+bounds), the header labels stay where they were emitted, and the page grows by
+the band. Translating the finished drawing rather than pre-shifting a family
+stack keeps every source-relative predicate, authored route hint (`via`,
+`channelX/Y`, `labelAt`), pin and budget identical to the pinned one. Every
+coordinate an author supplies is a source coordinate, including a pin, so a title
+or subtitle edit moves the pinned and the unpinned content together and can never
+separate them or turn a valid pinned scene into a refusal.
+
+The translation is published, not implied: `page.contentOffset` reports it
+(`{x: 0, y: band}`, present only for the families that draw the header inside the
+page), so emitted = source + `contentOffset`. A consumer that turns an emitted
+canvas position into an authored one subtracts that offset instead of guessing
+the header text's measured height; the test-only canvas adapter does exactly that
+before it writes a pin. This is the E4 contract for interactive pin editing. The
+band is Maru page content above the pinned top, so the authored-canvas budgets
+(`workflow_page_diagnostics`, the workflow/dataflow label canvas) still measure
+the pinned drawing. Nothing moves inside the SVG writer
+([maru#561](https://github.com/STAIxBWLB/maru/issues/561)).
+
 Routing uses deterministic port choices, obstacle visibility fast paths and an
 independently implemented sparse A* over compressed obstacle-edge coordinates.
 It never returns a diagonal or collision fallback. Once placement succeeds,
@@ -2024,16 +2055,30 @@ swatches and retained semantics.
 | Unsupported glyphs | E3 draws a `.notdef` outline generated from the pinned font (`svg.rs:591-608`) rather than asking the platform fallback font. | Intentional deterministic unsupported-scalar behavior; glyph size uses pinned font units-per-em. |
 | Lifecycle v1/v2 band and rail | E3 renders v1 populated bands and producer-supplied rail; v2 omits both. | Matches the pinned version behavior; E2 lane containers remain separately available for standalone grouping. |
 
-### Reviewed geometry limitation
+### Reviewed header band (maru#561, resolved)
 
-The ten captures retain E2 geometry. Workflow/dataflow subtitle frames overlap
-lane/stage captions before SVG serialization; [#561](https://github.com/STAIxBWLB/maru/issues/561)
-tracks the source placement gap as an E4 blocker. S1 does not hide labels or add
-coordinate overrides, as agreed. #560's label-capacity role correction remains
-out of scope. The captures are reviewed projections, not acceptance of these
-source layouts for the product switch. Source-bound verification and screenshot
-hashes are recorded with the PR; hosted agreement and native results remain
-separate from a remote Linux reproduction.
+The ten S1 captures predate [#561](https://github.com/STAIxBWLB/maru/issues/561).
+The pinned page keeps the title and subtitle outside the SVG, so the overlap had
+no source counterpart: it came from emitting the header into the scene's own
+coordinate space without reserving it. E2 now measures the emitted band and
+translates the source drawing below it (§E2 five-type scene layout), and the
+workflow/dataflow subtitle fixtures assert that the measured title, subtitle,
+lane, phase, group and stage-caption boxes do not overlap, in CJK and multi-line
+text, in both themes.
+
+The consequence is a deliberate, uniform vertical shift: every workflow and
+dataflow scene moves down by its measured band (64px for a one-line title, and
+more once a subtitle or a wrapped title extends below it), so their SVG capture
+hashes change with it, while architecture, sequence and lifecycle are untouched.
+The shift is a pure translation of the whole source drawing, including authored
+route hints and pins, and it is published as `page.contentOffset` for the
+consumers that write authored positions. Because nothing changes relative to the
+source, the strict parity corpus, the exact boundary cases and the dense scenes
+keep their recorded verdicts, and the S1 screenshot record remains the historical
+snapshot of that stage. #560's label-capacity role correction remains out of
+scope.
+Source-bound verification and screenshot hashes are recorded with the PR; hosted
+agreement and native results remain separate from a remote Linux reproduction.
 
 ### PNG rasterization and transport measurement (S2)
 
@@ -2172,3 +2217,37 @@ report hashes. All 405 retained scenes pass their artifact gates in both
 themes, including the 185 refused layouts. Logical work remains 3,355,500 for
 the 1,000-node/999-route fixture, within the existing 4,194,375 ceiling. The
 new pinned-boundary regression is separate from that unchanged corpus.
+
+### Offline interactive viewer (T2)
+
+`src/lib/diagram/viewer/offlineViewer.ts` exports the pure
+`createOfflineViewerHtml({ svg, specJson, title? })` function. It embeds one
+engine SVG and its source spec in a standalone HTML file; it does not require
+Maru or connect to an app service. The JSON remains in an inert
+`application/json` script block, with closing-script sequences escaped for
+HTML parsing. Selected node/edge IDs and labels are displayed through
+`textContent`; selection labels come from the engine SVG's own metadata, never
+from source-spec text. The spec remains an inert payload for the later caller
+stage.
+
+Before interpolation, the builder bounds SVG/spec sizes and validates one
+balanced S1 SVG root against its fixed tag/attribute profile. Links, active
+content, external paint URLs and unknown elements/attributes are refused;
+only local engine arrow markers are accepted. Quoted attribute values are
+checked by attribute meaning, so URL-like label text remains inert metadata.
+
+The viewer supports pointer dragging, wheel zoom, toolbar zoom/fit, arrow-key
+panning, keyboard zoom/fit, and keyboard selection. Its inline runtime and
+stylesheet are authorized by fixed CSP hashes. The CSP denies network
+connections, remote scripts/styles/fonts, frames, forms, objects, and base URL
+changes. The engine SVG's local font lookup is retained; the viewer does not
+fetch or bundle font files; if Noto Sans CJK KR is unavailable, a system font
+fallback may overflow the measured text geometry. The JavaScript runtime source
+has a 12 KiB UTF-8 budget, checked when building the HTML.
+
+Build a file from a local engine SVG and matching source spec with
+`node scripts/build-diagram-viewer.mjs <engine.svg> <spec.json> <viewer.html>`.
+The CLI creates the output exclusively and refuses existing file/symlink/hardlink
+targets, so it cannot overwrite either input through an alias. Open the result
+directly from disk with `file://`. This viewer is not wired to
+File > Renders, export choices, or a Tauri command; that remains a later stage.

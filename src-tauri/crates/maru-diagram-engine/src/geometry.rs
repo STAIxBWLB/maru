@@ -261,6 +261,19 @@ pub struct GeometryLegend {
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct GeometryPage {
     pub bounds: GeometryBox,
+    /// Translation this page applies to the source drawing, so an emitted
+    /// position is `source + contentOffset`. It is present only when a family
+    /// draws its header inside the page (workflow, dataflow): every authored
+    /// coordinate stays in source space, so a consumer that turns an emitted
+    /// canvas position back into an authored one subtracts this offset
+    /// (`maru#561`). Absent fields read as (0,0).
+    #[serde(
+        default,
+        rename = "contentOffset",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "typegen", ts(rename = "contentOffset", optional = nullable))]
+    pub content_offset: Option<GeometryPoint>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
