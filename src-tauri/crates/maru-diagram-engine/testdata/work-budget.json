@@ -51,7 +51,7 @@
     },
     "totalBaseline": 2788,
     "totalCeiling": 3485,
-    "sourceCommit": "2b6aee92312fcfbd7ecf7f2afcba4ecbb7e02d64"
+    "sourceCommit": "d67f7ac1a86a6ec5e248d60746a82316c00fc2a3"
   },
   "scope": "deterministic logical operations, not elapsed time; normal geometry builds omit all hooks",
   "recordedCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-work"

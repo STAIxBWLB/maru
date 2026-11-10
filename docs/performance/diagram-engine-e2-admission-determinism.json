@@ -1,20 +1,27 @@
 {
   "schemaVersion": 1,
-  "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against merged E3 S2 main",
-  "sourceCommit": "e6fb7973fcd7eb7117edcfd25948fb6fd1206842",
+  "scope": "fixed-point whole-scene geometry, both SVG themes and logical work hashed on native macOS aarch64 and on a wasm32-unknown-unknown build, compared per case against the #567 head this task is stacked on",
+  "runner": {
+    "host": "macOS aarch64 native and wasm32, rustup toolchain 1.98.0 for the wasm leg",
+    "nativeCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-foundation-hashes -- .engine-e2/determinism-corpus.json .engine-e2/determinism/native-macos.json",
+    "wasmCommand": "rustup run 1.98.0 cargo build --locked --release --lib -p maru-diagram-engine --features wasm-render,geometry-corpus --target wasm32-unknown-unknown; then --features bindgen-web --bin bindgen-web; then node scripts/diagram-engine-e2-wasm-hashes.mjs .engine-e2/determinism-corpus.json .engine-e2/determinism/wasm-macos.json .engine-e2/wasm-test",
+    "nativeReportBytes": 340818
+  },
+  "sourceCommit": "d67f7ac1a86a6ec5e248d60746a82316c00fc2a3",
   "sdkTreePath": "src-tauri/crates",
-  "sdkTree": "3a47428ca7a92c764bed88e761cece5caa704c49",
+  "sdkTree": "76a9c37f2c9639aae2e6c934bbe832e737e5362a",
   "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-  "engineCrateTree": "84e4bf303f12543306470a59369cbc1334a7c89c",
-  "baseCommit": "010180e23a7191dddfc72a7c74fa0745c74cb7bf",
+  "engineCrateTree": "0f95a038724d2346ce8d5ad3ec5537d965c80d63",
+  "baseCommit": "c5d2d989d1540f2292af2f852fbd81590f8457d4",
   "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
+  "fontManifestSha256": "889c9c3b8eeb8b19d68d4de613f7c74224f3bf39a689a9b46c968d62da7cb9ca",
   "corpusCaseCount": 623,
-  "acceptedCaseCount": 218,
+  "acceptedCaseCount": 248,
   "retainedCaseCount": 405,
   "geometryPresentCaseCount": 405,
-  "retainedRefusalCaseCount": 187,
+  "retainedRefusalCaseCount": 157,
   "prePlacementRefusalCaseCount": 218,
-  "countSemantics": "retainedCaseCount is the legacy alias for all geometry-present reports, including accepted cases; retainedRefusalCaseCount and prePlacementRefusalCaseCount count only refused reports.",
+  "countSemantics": "retainedCaseCount is the legacy alias for all geometry-present reports, including accepted cases; retainedRefusalCaseCount and prePlacementRefusalCaseCount partition the remaining refusals",
   "baselineWork": {
     "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
     "nodes": 1000,
@@ -57,521 +64,396 @@
       "viaPoints": 17
     }
   },
-  "nativeReportSha256": "41876771681b93317be62fb2907f046c6151251f1e4a8ed79d7c3ec24755bf7c",
-  "wasmReportSha256": "41876771681b93317be62fb2907f046c6151251f1e4a8ed79d7c3ec24755bf7c",
+  "nativeReportSha256": "ef90de9848bed5861cb3d236c45aedc6cccde41641322c3a1a6f09740bd50b15",
+  "wasmReportSha256": "ef90de9848bed5861cb3d236c45aedc6cccde41641322c3a1a6f09740bd50b15",
   "changes": [
     {
       "id": "public-01",
-      "oldAccepted": true,
-      "accepted": false,
+      "oldAccepted": false,
+      "accepted": true,
       "oldCodes": [
-        "architecture/geometry-route-quality-notice"
-      ],
-      "codes": [
         "architecture/geometry-label-fit",
         "architecture/geometry-route-quality-notice"
       ],
+      "codes": [
+        "architecture/geometry-route-quality-notice"
+      ],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-architecture-geometry-label-fit-primary",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "architecture/geometry-label-fit"
       ],
-      "codes": [
-        "architecture/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-architecture-geometry-label-fit-detail",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "architecture/geometry-label-fit"
-      ],
-      "codes": [
-        "architecture/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-architecture-geometry-label-fit-tag",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "architecture/geometry-label-fit"
-      ],
-      "codes": [
-        "architecture/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-workflow-geometry-label-fit-primary",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "workflow/geometry-label-fit"
-      ],
-      "codes": [
-        "workflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-workflow-geometry-label-fit-detail",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "workflow/geometry-label-fit"
-      ],
-      "codes": [
-        "workflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-workflow-geometry-label-fit-tag",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "workflow/geometry-label-fit"
-      ],
-      "codes": [
-        "workflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-sequence-geometry-label-fit-primary",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "sequence/geometry-label-fit"
-      ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-sequence-geometry-label-fit-detail",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "sequence/geometry-label-fit"
-      ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-dataflow-geometry-label-fit-primary",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "dataflow/geometry-label-fit"
       ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-dataflow-geometry-label-fit-detail",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "dataflow/geometry-label-fit"
-      ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-dataflow-geometry-label-fit-tag",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "dataflow/geometry-label-fit"
-      ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-lifecycle-geometry-label-fit-primary",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-lifecycle-geometry-label-fit-detail",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-lifecycle-geometry-label-fit-tag",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-dataflow-primary-width-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "dataflow/geometry-label-fit"
       ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-dataflow-primary-width-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "dataflow/geometry-label-fit"
       ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-dataflow-detail-width-sublabel-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "dataflow/geometry-label-fit"
       ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-dataflow-detail-width-sublabel-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "dataflow/geometry-label-fit"
       ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-dataflow-detail-width-tag-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "dataflow/geometry-label-fit"
       ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-dataflow-detail-width-tag-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "dataflow/geometry-label-fit"
       ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v1-primary-width-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v1-primary-width-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v1-detail-width-sublabel-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v1-detail-width-sublabel-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v1-detail-width-tag-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v1-detail-width-tag-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-sequence-spread-primary-header-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "sequence/geometry-label-fit"
       ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-sequence-spread-primary-header-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "sequence/geometry-label-fit"
       ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-sequence-spread-sublabel-header-below",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "sequence/geometry-label-fit"
-      ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-sequence-spread-sublabel-header-above",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "sequence/geometry-label-fit"
-      ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v2-primary-width-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v2-primary-width-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v2-detail-width-sublabel-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v2-detail-width-sublabel-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v2-detail-width-tag-below",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-lifecycle-v2-detail-width-tag-above",
       "oldAccepted": false,
-      "accepted": false,
+      "accepted": true,
       "oldCodes": [
         "lifecycle/geometry-label-fit"
       ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-sequence-brand-rail-7",
-      "oldAccepted": true,
-      "accepted": false,
-      "oldCodes": [],
-      "codes": [
+      "oldAccepted": false,
+      "accepted": true,
+      "oldCodes": [
         "sequence/geometry-label-fit"
       ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "e2-boundary-sequence-brand-rail-9",
       "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "sequence/geometry-label-fit"
-      ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-sequence-family-label-route-below",
-      "oldAccepted": false,
       "accepted": true,
       "oldCodes": [
-        "sequence/route-blocked"
+        "sequence/geometry-label-fit"
       ],
       "codes": [],
       "sceneChanged": true,
@@ -579,180 +461,34 @@
         "light",
         "dark"
       ]
-    },
-    {
-      "id": "e2-boundary-sequence-family-label-route-above",
-      "oldAccepted": false,
-      "accepted": true,
-      "oldCodes": [
-        "sequence/route-blocked"
-      ],
-      "codes": [],
-      "sceneChanged": true,
-      "svgChanged": [
-        "light",
-        "dark"
-      ]
-    },
-    {
-      "id": "e2-boundary-architecture-clear-margin-text-1",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "architecture/geometry-label-fit"
-      ],
-      "codes": [
-        "architecture/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-workflow-clear-margin-text-1",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "workflow/geometry-label-fit"
-      ],
-      "codes": [
-        "workflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-sequence-clear-margin-text-1",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "sequence/geometry-label-fit"
-      ],
-      "codes": [
-        "sequence/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-dataflow-clear-margin-text-1",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "dataflow/geometry-label-fit"
-      ],
-      "codes": [
-        "dataflow/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-lifecycle-clear-margin-text-1",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "lifecycle/geometry-label-fit"
-      ],
-      "codes": [
-        "lifecycle/geometry-label-fit"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-architecture-endpoint-conflict",
-      "oldAccepted": false,
-      "accepted": false,
-      "oldCodes": [
-        "architecture/geometry-route-quality",
-        "architecture/route-blocked"
-      ],
-      "codes": [
-        "architecture/geometry-route-quality"
-      ],
-      "sceneChanged": true,
-      "svgChanged": [
-        "light",
-        "dark"
-      ]
-    },
-    {
-      "id": "e2-boundary-dataflow-label-route-3",
-      "oldAccepted": false,
-      "accepted": true,
-      "oldCodes": [
-        "dataflow/geometry-route-quality",
-        "dataflow/route-blocked"
-      ],
-      "codes": [],
-      "sceneChanged": true,
-      "svgChanged": [
-        "light",
-        "dark"
-      ]
-    },
-    {
-      "id": "e2-boundary-dataflow-label-route-5",
-      "oldAccepted": false,
-      "accepted": true,
-      "oldCodes": [
-        "dataflow/geometry-route-quality",
-        "dataflow/route-blocked"
-      ],
-      "codes": [],
-      "sceneChanged": true,
-      "svgChanged": [
-        "light",
-        "dark"
-      ]
-    },
-    {
-      "id": "e2-boundary-workflow-v2-shared-trunk-23",
-      "oldAccepted": true,
-      "accepted": false,
-      "oldCodes": [
-        "workflow/geometry-route-quality-notice"
-      ],
-      "codes": [
-        "workflow/geometry-route-quality"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
-    },
-    {
-      "id": "e2-boundary-workflow-v2-shared-trunk-25",
-      "oldAccepted": true,
-      "accepted": false,
-      "oldCodes": [
-        "workflow/geometry-route-quality-notice"
-      ],
-      "codes": [
-        "workflow/geometry-route-quality"
-      ],
-      "sceneChanged": true,
-      "svgChanged": []
     },
     {
       "id": "gate-sequence-brand-absent",
-      "oldAccepted": true,
-      "accepted": false,
-      "oldCodes": [],
-      "codes": [
+      "oldAccepted": false,
+      "accepted": true,
+      "oldCodes": [
         "sequence/geometry-label-fit"
       ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     },
     {
       "id": "dense-workflow-seed-5502027",
-      "oldAccepted": true,
-      "accepted": false,
-      "oldCodes": [],
-      "codes": [
+      "oldAccepted": false,
+      "accepted": true,
+      "oldCodes": [
         "workflow/geometry-label-fit"
       ],
+      "codes": [],
       "sceneChanged": true,
-      "svgChanged": []
+      "svgChanged": [
+        "light",
+        "dark"
+      ]
     }
   ]
 }
