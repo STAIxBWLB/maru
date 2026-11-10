@@ -122,9 +122,9 @@ fn write_outlined_label(
     out: &mut String,
     label: &GeometryLabel,
     colors: &[&str],
+    container_color: &str,
     faces: &mut OutlineFaces,
 ) -> Result<(), Diagnostic> {
-    let container_color = colors.first().copied().unwrap_or("#000000");
     write!(out,"<g data-kind=\"label-text\" data-render=\"outline\" font-family=\"{FONT_FAMILY}\" font-size=\"{}\" font-weight=\"{}\" fill=\"{container_color}\" aria-hidden=\"true\">",fixed(label.font_size.into()),label.font.weight).unwrap();
     let upem = {
         let face = faces.face(label.font.weight)?;
@@ -676,7 +676,7 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         );
         if o.text_mode == SvgTextMode::Outlines {
             #[cfg(feature = "render-outline")]
-            write_outlined_label(&mut s, l, &colors, &mut faces)?;
+            write_outlined_label(&mut s, l, &colors, color, &mut faces)?;
             #[cfg(not(feature = "render-outline"))]
             return Err(error(
                 "font-mode",

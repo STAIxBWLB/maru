@@ -189,3 +189,50 @@ fn the_native_svg_entry_defaults_to_outlines_and_the_shared_entry_keeps_text() {
         "a caller can still ask the native export for text runs"
     );
 }
+
+#[test]
+fn a_label_with_no_glyphs_is_painted_alike_in_both_modes() {
+    // An empty `meta.subtitle` is valid source and survives layout as a label
+    // with no glyph records, so both modes have to fall back to the same theme
+    // colour. The outlined container used to fall back to `#000000`, which the
+    // artifact gate then rejected for an export text mode accepted.
+    let mut spec = spec_with_mixed_label();
+    spec["meta"]["subtitle"] = json!("");
+    let layout = layout_json(&json!({"specJson": spec.to_string()}).to_string());
+    let geometry = layout.geometry.expect("fixture retains geometry");
+    assert!(
+        geometry.labels.iter().any(|label| label.glyphs.is_empty()),
+        "an empty subtitle survives layout as a zero-glyph label"
+    );
+
+    let text = render_svg(&geometry, &options(&spec, SvgTextMode::Text));
+    let outlined = render_svg(&geometry, &options(&spec, SvgTextMode::Outlines));
+    assert!(text.ok, "{:?}", text.diagnostics);
+    assert!(outlined.ok, "{:?}", outlined.diagnostics);
+    let text_svg = text.svg.expect("text mode has bytes");
+    let outlined_svg = outlined.svg.expect("outline mode has bytes");
+
+    let fills = |svg: &str| -> Vec<(String, String)> {
+        let doc = roxmltree::Document::parse(svg).expect("SVG is well-formed");
+        doc.descendants()
+            .filter(|node| node.attribute("data-kind") == Some("label"))
+            .filter_map(|group| {
+                let id = group.attribute("id")?.to_owned();
+                let container = group
+                    .descendants()
+                    .find(|node| node.attribute("data-kind") == Some("label-text"))?;
+                Some((
+                    id,
+                    container.attribute("fill").unwrap_or_default().to_owned(),
+                ))
+            })
+            .collect()
+    };
+    let text_fills = fills(&text_svg);
+    assert!(!text_fills.is_empty(), "the fixture draws labelled groups");
+    assert_eq!(
+        text_fills,
+        fills(&outlined_svg),
+        "every label container carries the fill the gate expects, in either mode"
+    );
+}
