@@ -457,20 +457,27 @@ fn dataflow_row(label: &str, view_box_height: f64) -> Value {
 /// workflow lane body below the node, the lifecycle band or row below it, or the
 /// readable area the frame leaves. Growing into the slot the node does not own
 /// would refuse the scene for a limit the auto-fit itself broke.
+///
+/// Every expectation is a distance below the node's own top, taken from the same
+/// fixture with a label that fits, never an absolute page coordinate: a measured
+/// header band moves the whole page down by the same amount, and the limit moves
+/// with it.
 #[test]
 fn a_grown_node_stops_at_the_body_below_its_own_top() {
-    // Workflow: the lane body ends at 156px and an untagged default node starts
-    // at 93, so 63px is left under it - not the whole 74px body.
+    // Workflow: the lane body ends 63px below an untagged default node's top -
+    // not the whole 74px body, which a centred node cannot use.
     let lane = report(&workflow(&long_label(4), None));
     assert!(lane.ok, "{:?}", lane.diagnostics);
     let bounds = node_bounds(&lane, "a");
+    let lane_top_ticks = node_bounds(&report(&workflow("A", None)), "a").y;
+    assert_eq!(bounds.y, lane_top_ticks, "growth adds height, not a new top");
     assert!(
         bounds.height > 52 * 64,
         "the box absorbs the extra line: {bounds:?}"
     );
     assert!(
-        bounds.y + bounds.height <= 156 * 64,
-        "growth stays inside the lane body: {bounds:?}"
+        bounds.y + bounds.height <= lane_top_ticks + 63 * 64,
+        "growth stays inside the lane body below the node: {bounds:?}"
     );
     // One line further and the lane cannot hold the text: the refusal must name
     // the label, not blame the authored lane offset for a self-made overflow.
@@ -484,39 +491,44 @@ fn a_grown_node_stops_at_the_body_below_its_own_top() {
         over.diagnostics
     );
 
-    // Lifecycle v1: the main band starts at 126 and the event band at 278, so a
-    // main state may grow to 142px and no further.
+    // Lifecycle v1: the event band starts 152px below the main band, so a main
+    // state keeps 10px of separation and may grow 142px from its own top.
     let band = report(&lifecycle_v1(&long_label(13)));
     assert!(band.ok, "{:?}", band.diagnostics);
     let state = node_bounds(&band, "a");
+    let band_top_ticks = node_bounds(&report(&lifecycle_v1("A")), "a").y;
+    assert_eq!(state.y, band_top_ticks, "the state keeps its own top");
     assert!(state.height > 120 * 64, "the state grew: {state:?}");
     assert!(
-        state.y + state.height <= 278 * 64,
+        state.y + state.height <= band_top_ticks + 142 * 64,
         "the grown state never reaches the event band: {state:?}"
     );
-    assert!(state.height <= 142 * 64, "{state:?}");
 
-    // Lifecycle v2, third row: the canvas leaves 640-96-424 = 120px above the
-    // frame, so a state that needs more steps down instead of being clipped.
+    // Lifecycle v2, third row: the canvas leaves 120px below the row top, so a
+    // state that needs more steps down instead of being clipped.
     let canvas = report(&lifecycle_v2(&long_label(15), 640.0));
     assert!(canvas.ok, "{:?}", canvas.diagnostics);
     let third = node_bounds(&canvas, "c");
-    assert_eq!(third.y, 424 * 64, "{third:?}");
+    let row_top_ticks = node_bounds(&report(&lifecycle_v2("A", 640.0)), "c").y;
+    assert_eq!(third.y, row_top_ticks, "the third row keeps its own top");
+    assert!(third.height > 64 * 64, "the state grew: {third:?}");
     assert!(
-        third.y + third.height <= (640.0 - 96.0) as i32 * 64,
+        third.y + third.height <= row_top_ticks + 120 * 64,
         "the third row state stays inside the authored canvas: {third:?}"
     );
     painted_ink::assert_accepted_text_ink_fits(&canvas);
     painted_ink::assert_readable_floors(&canvas, "lifecycle-v2");
 
-    // Dataflow: row 3 starts at 470 and the readable area ends at 640-74 = 566,
-    // so the row pitch alone would grow past the canvas.
+    // Dataflow: row 3 leaves 96px below its own top once the stage bottom pad is
+    // taken out, so the row pitch alone would grow past the canvas.
     let flow = report(&dataflow_row(&long_label(8), 640.0));
     assert!(flow.ok, "{:?}", flow.diagnostics);
     let node = node_bounds(&flow, "a");
-    assert_eq!(node.y, 470 * 64, "{node:?}");
+    let flow_top_ticks = node_bounds(&report(&dataflow_row("A", 640.0)), "a").y;
+    assert_eq!(node.y, flow_top_ticks, "the row keeps its own top");
+    assert!(node.height > 58 * 64, "the node grew: {node:?}");
     assert!(
-        node.y + node.height <= (640.0 - 74.0) as i32 * 64,
+        node.y + node.height <= flow_top_ticks + 96 * 64,
         "the grown node stays inside the readable area: {node:?}"
     );
 }
