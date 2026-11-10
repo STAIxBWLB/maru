@@ -25,8 +25,13 @@ fn layout(spec: &Value) -> maru_diagram_engine::geometry::GeometryReport {
     layout_json(&json!({"specJson":spec.to_string()}).to_string())
 }
 
-fn content_offset(geometry: &maru_diagram_engine::geometry::GeometryDocument) -> maru_diagram_engine::geometry::GeometryPoint {
-    geometry.page.content_offset.unwrap_or(maru_diagram_engine::geometry::GeometryPoint { x: 0, y: 0 })
+fn content_offset(
+    geometry: &maru_diagram_engine::geometry::GeometryDocument,
+) -> maru_diagram_engine::geometry::GeometryPoint {
+    geometry
+        .page
+        .content_offset
+        .unwrap_or(maru_diagram_engine::geometry::GeometryPoint { x: 0, y: 0 })
 }
 
 fn source_point_to_rendered(
@@ -42,7 +47,10 @@ fn authored_via_from_rendered(
     point: maru_diagram_engine::geometry::GeometryPoint,
 ) -> [f64; 2] {
     let offset = content_offset(geometry);
-    [f64::from(point.x - offset.x) / 64.0, f64::from(point.y - offset.y) / 64.0]
+    [
+        f64::from(point.x - offset.x) / 64.0,
+        f64::from(point.y - offset.y) / 64.0,
+    ]
 }
 
 fn authored_via_to_rendered(
@@ -358,7 +366,10 @@ fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
     let label_ring_xy = authored_via_from_rendered(&probe_geometry, label_ring);
     let visible_boundary_xy = authored_via_from_rendered(
         &probe_geometry,
-        maru_diagram_engine::geometry::GeometryPoint { x: source.bounds.x, y: center_y },
+        maru_diagram_engine::geometry::GeometryPoint {
+            x: source.bounds.x,
+            y: center_y,
+        },
     );
     let inflated_corner_xy = authored_via_from_rendered(
         &probe_geometry,
