@@ -2375,7 +2375,10 @@ mod tests {
                     bounds,
                     entries: vec![],
                 },
-                page: crate::geometry::GeometryPage { bounds },
+                page: crate::geometry::GeometryPage {
+                    bounds,
+                    content_offset: None,
+                },
             },
         )
     }
@@ -2537,6 +2540,17 @@ mod tests {
             assert_authored(&spec, &g, name, 1);
         }
     }
+    // Private rules run before the page header translation. These two tests
+    // obtain a scene through the public layout API, so restore its source space.
+    fn source_rule_scene(mut scene: GeometryDocument) -> GeometryDocument {
+        if let Some(offset) = scene.page.content_offset {
+            assert_eq!(offset.x, 0, "the reviewed header shift is vertical");
+            super::super::translate_drawing(&mut scene, -offset.y).unwrap();
+            scene.page.content_offset = None;
+        }
+        scene
+    }
+
     #[test]
     fn shared_first_via_junction_owns_only_the_endpoint_corridor_piece() {
         let corpus: Value =
@@ -2559,9 +2573,11 @@ mod tests {
         let spec: Value = serde_json::from_str(source_json).unwrap();
         let report = crate::layout::layout_json(&json!({"specJson":source_json}).to_string());
         assert!(!report.ok, "the explicitly shared junction is fatal");
-        let scene = report
-            .geometry
-            .expect("fatal route finding retains geometry");
+        let scene = source_rule_scene(
+            report
+                .geometry
+                .expect("fatal route finding retains geometry"),
+        );
         let diagnostics = route_geometry_diagnostics(&spec, &scene);
         let shared = cause(&diagnostics, "ambiguous-corridor");
         assert!(
@@ -2611,7 +2627,7 @@ mod tests {
             !report.ok,
             "the shifted E2 25px shared piece is authored/fatal"
         );
-        let scene = report.geometry.expect("refusal retains placed geometry");
+        let scene = source_rule_scene(report.geometry.expect("refusal retains placed geometry"));
         let diagnostics =
             route_geometry_diagnostics(&serde_json::from_str(source_json).unwrap(), &scene);
         assert!(

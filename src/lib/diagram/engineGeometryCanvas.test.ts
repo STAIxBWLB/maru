@@ -97,6 +97,23 @@ describe("test-only engine canvas pin adapter", () => {
     expect(await buildEngineCanvasLayoutRequest(source, "ds")).toEqual(before);
   });
 
+  it("subtracts the page content offset so a canvas position becomes an authored pin", async () => {
+    const source = doc([node("canvas-a", "ds:m0", { x: 20, y: 94 })]);
+    // Canvas y=94 under a 64px header band is source y=30, and adding the offset
+    // back reproduces the canvas position the author dragged.
+    const request = await buildEngineCanvasLayoutRequest(source, "ds", { contentOffset: { x: 0, y: 64 * 64 } });
+    expect(request.pinSet?.pins).toEqual([
+      { targetId: "source", targetKind: "node", position: { x: 20 * 64, y: 30 * 64 } },
+    ]);
+    expect(request.pinSet!.pins![0].position.y + 64 * 64).toBe(94 * 64);
+  });
+
+  it("refuses a non fixed-point content offset and can skip pins for the offset probe", async () => {
+    await expect(buildEngineCanvasLayoutRequest(doc([node("canvas-a", "ds:m0")]), "ds", { contentOffset: { x: 0, y: 1.5 } })).rejects.toThrow(/content offset/);
+    const probe = await buildEngineCanvasLayoutRequest(doc([node("canvas-a", "ds:m0")]), "ds", { pins: false });
+    expect(probe.pinSet?.pins).toEqual([]);
+  });
+
   it.each(["architecture", "sequence", "dataflow", "lifecycle"] as const)("resolves %s entity collections without canvas ID inference", async (diagramType) => {
     const selected = dataset();
     selected.diagramType = diagramType;

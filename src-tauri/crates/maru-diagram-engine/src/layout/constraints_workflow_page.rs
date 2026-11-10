@@ -217,14 +217,16 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(json!({"id":"other","label":"Other"}));
-        spec["meta"]["viewBox"] = json!([700, 341]);
+        // The scene below carries the emitted header band, and this unit test
+        // hands it straight to the budget: the pinned 342px plus the 64px band.
+        spec["meta"]["viewBox"] = json!([700, 405]);
         assert!(crate::validate_json(&spec.to_string()).ok);
         let g = scene(&spec);
         assert!(g.page.bounds.height > 341 * 64);
         assert!(workflow_page_diagnostics(&spec, &g)
             .iter()
             .any(|d| d.path == "/meta/viewBox/1"));
-        spec["meta"]["viewBox"] = json!([700, 343]);
+        spec["meta"]["viewBox"] = json!([700, 407]);
         assert!(workflow_page_diagnostics(&spec, &scene(&spec)).is_empty());
     }
     #[test]

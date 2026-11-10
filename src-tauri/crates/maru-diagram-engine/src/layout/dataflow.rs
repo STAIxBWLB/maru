@@ -164,6 +164,7 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::header_support::{label, overlap};
 
     fn spec() -> serde_json::Value {
         serde_json::json!({
@@ -256,7 +257,9 @@ mod tests {
     fn dataflow_layout_uses_rows_offsets_and_actual_stage_bounds() {
         let geometry = layout(&spec(), None);
         let node = geometry.nodes.iter().find(|node| node.id == "b").unwrap();
-        assert_eq!(node.bounds.y, px(254.0).unwrap());
+        // Row 1 (128 + 114) plus the 12px offset, plus the 64px header band the
+        // drawing moves below (maru#561).
+        assert_eq!(node.bounds.y, px(318.0).unwrap());
         let stage = geometry
             .containers
             .iter()
@@ -301,7 +304,16 @@ mod tests {
                 .bounds
         };
         assert_eq!(bounds(&before), bounds(&after));
-        assert_eq!(bounds(&after).y, px(500.0).unwrap());
+        // A pin is an authored source position, like `via` and `labelAt`: the
+        // header band moves it with the rest of the drawing, and the page offset
+        // converts it back to the canvas (maru#561).
+        let offset = after
+            .page
+            .content_offset
+            .expect("a dataflow page draws the header band inside itself")
+            .y;
+        assert_eq!(offset, 64 * 64);
+        assert_eq!(bounds(&after).y, px(500.0).unwrap() + offset);
         let stage = after
             .containers
             .iter()
@@ -327,7 +339,10 @@ mod tests {
     fn default_nodes_and_stage_frames_use_documented_geometry() {
         let geometry = layout(&spec(), None);
         let first = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
-        assert_eq!((first.bounds.x, first.bounds.y), (44 * 64, 128 * 64));
+        // The drawing moves below the emitted header band: a one-line 24px title
+        // ends at 52, plus the 12px gap, is a 64px band above the pinned y=46
+        // stage top and the y=128 first row (maru#561).
+        assert_eq!((first.bounds.x, first.bounds.y), (44 * 64, 192 * 64));
         assert_eq!(
             (first.bounds.width, first.bounds.height),
             (112 * 64, 58 * 64)
@@ -337,11 +352,212 @@ mod tests {
             .iter()
             .find(|container| container.id == "stage:0")
             .unwrap();
-        assert_eq!((stage.bounds.x, stage.bounds.y), (16 * 64, 46 * 64));
+        assert_eq!((stage.bounds.x, stage.bounds.y), (16 * 64, 110 * 64));
         assert_eq!(
             (stage.bounds.width, stage.bounds.height),
             (168 * 64, 600 * 64)
         );
+        // The pinned stage body keeps its internal spacing exactly.
+        assert_eq!(first.bounds.y - stage.bounds.y, (128 - 46) * 64);
+    }
+
+    fn header_spec(subtitle: &str) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "diagram_type": "dataflow",
+            "meta": {
+                "title": "주문 흐름 Order flow",
+                "subtitle": subtitle,
+                "output": "dataflow.html",
+            },
+            "stages": [{ "label": "입력 단계" }, { "label": "출력 단계" }],
+            "nodes": [
+                { "id": "a", "type": "frontend", "label": "수집", "stage": 0, "row": 0 },
+                { "id": "b", "type": "backend", "label": "전달", "stage": 1, "row": 0 },
+            ],
+            "flows": [{ "id": "ab", "from": "a", "to": "b", "label": "데이터" }],
+        })
+    }
+
+    /// maru#561: the stage band's caption is the first thing under the emitted
+    /// header, so the band and the node rows translate by the measured band
+    /// together. A CJK subtitle and a multi-line subtitle both clear the
+    /// caption, the pinned caption-to-row spacing survives, and the SVG writer
+    /// is not involved.
+    #[test]
+    fn header_subtitle_clears_stage_captions() {
+        for subtitle in ["결정적 SVG · 접근성 검증", "결정적 SVG\n접근성 검증"] {
+            let source = header_spec(subtitle);
+            let geometry = layout(&source, None);
+            let header = [label(&geometry, "title"), label(&geometry, "subtitle")];
+            for id in ["container:stage:0:label", "container:stage:1:label"] {
+                let caption = label(&geometry, id);
+                for header in header {
+                    assert!(
+                        !overlap(header.bounds, caption.bounds),
+                        "header {:?} overlaps the stage caption {:?}: {:?} vs {:?}",
+                        header.text,
+                        caption.text,
+                        header.bounds,
+                        caption.bounds,
+                    );
+                }
+            }
+            // The band and the first row move by the same measured amount, so a
+            // top-channel corridor between the caption and the row survives.
+            let stage = geometry
+                .containers
+                .iter()
+                .find(|container| container.id == "stage:0")
+                .unwrap();
+            let first = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+            assert!(stage.bounds.y >= 46 * 64, "{subtitle:?}");
+            assert_eq!(
+                first.bounds.y - stage.bounds.y,
+                (128 - 46) * 64,
+                "{subtitle:?}: the stage body must keep its internal spacing"
+            );
+            #[cfg(feature = "render-svg")]
+            for theme in [
+                crate::render::SvgTheme::Light,
+                crate::render::SvgTheme::Dark,
+            ] {
+                let options = crate::render::SvgOptions::from_spec(&source, theme).unwrap();
+                let report = crate::render::render_svg(&geometry, &options);
+                assert!(report.ok, "{theme:?}: {:?}", report.diagnostics);
+                let svg = report.svg.unwrap();
+                assert!(
+                    svg.contains("입력 단계"),
+                    "{theme:?} lost the stage caption"
+                );
+            }
+        }
+    }
+
+    /// maru#561 review: a dataflow pin is an authored source coordinate, like
+    /// the flow hints beside it, so a header edit moves the pinned node, the
+    /// automatic row and the hint together and never refuses the scene.
+    #[test]
+    fn a_header_edit_moves_dataflow_pins_and_flow_hints_together() {
+        let pin_y = 158;
+        let mut offsets = Vec::new();
+        for subtitle in [
+            None,
+            Some("결정적 SVG · 접근성 검증"),
+            Some("결정적 SVG\n접근성 검증\n다국어 라벨"),
+        ] {
+            let mut source = header_spec("결정적 SVG · 접근성 검증");
+            match subtitle {
+                Some(text) => source["meta"]["subtitle"] = serde_json::json!(text),
+                None => {
+                    source["meta"].as_object_mut().unwrap().remove("subtitle");
+                }
+            }
+            // An orthogonal path between the two port heights, authored in the
+            // same source space as the pin: a right port at 158+29, b left port
+            // at 128+29.
+            source["flows"][0]["via"] = serde_json::json!([[210, 187], [210, 157]]);
+            let original = crate::validate_json(&source.to_string())
+                .receipt
+                .input_spec_sha256;
+            let pins = serde_json::json!({
+                "sourceSpecSha256": original,
+                "pins": [{
+                    "targetId": "a", "targetKind": "node",
+                    "position": {"x": 44 * 64, "y": pin_y * 64}
+                }],
+            });
+            let geometry = layout(&source, Some(pins));
+            let offset = geometry
+                .page
+                .content_offset
+                .expect("a dataflow page draws the header band inside itself")
+                .y;
+            let bounds = |id: &str| {
+                geometry
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == id)
+                    .unwrap()
+                    .bounds
+            };
+            let (a, b) = (bounds("a"), bounds("b"));
+            assert_eq!(a.y, pin_y * 64 + offset, "{subtitle:?}");
+            assert_eq!(b.y, 128 * 64 + offset, "{subtitle:?}");
+            assert_eq!(a.y - b.y, (pin_y - 128) * 64, "{subtitle:?}");
+            for (x, y) in [(210, 187), (210, 157)] {
+                assert!(
+                    geometry.routes[0]
+                        .points
+                        .iter()
+                        .any(|point| point.x == x * 64 && point.y == y * 64 + offset),
+                    "{subtitle:?}: the source flow hint at ({x},{y}) left the source drawing"
+                );
+            }
+            let round_trip = a.y - offset;
+            assert_eq!(round_trip / 64, pin_y, "{subtitle:?}");
+            offsets.push(offset);
+        }
+        assert!(
+            offsets[1] > offsets[0] && offsets[2] > offsets[1],
+            "a subtitle and a wrapped subtitle must widen the band: {offsets:?}"
+        );
+    }
+
+    /// Owner direction (2026-11-10, hub memory "Diagram engine priority"):
+    /// Maru usability and readable Korean together with English come before
+    /// Archify parity, so the band and the stage-caption clearance are measured
+    /// for a mixed-script header, not only for one script at a time.
+    #[test]
+    fn a_mixed_korean_and_english_header_is_measured_and_clears_stage_captions() {
+        let mixed = header_spec("결제·배송 Payment and shipping");
+        let geometry = layout(&mixed, None);
+        let header = [label(&geometry, "title"), label(&geometry, "subtitle")];
+        assert_eq!(header[0].text, "주문 흐름 Order flow");
+        assert_eq!(header[1].text, "결제·배송 Payment and shipping");
+        for id in ["container:stage:0:label", "container:stage:1:label"] {
+            let caption = label(&geometry, id);
+            for header in header {
+                assert!(
+                    !overlap(header.bounds, caption.bounds),
+                    "header {:?} overlaps the stage caption {:?}: {:?} vs {:?}",
+                    header.text,
+                    caption.text,
+                    header.bounds,
+                    caption.bounds,
+                );
+            }
+        }
+        let band = geometry
+            .page
+            .content_offset
+            .expect("a dataflow page draws the header band inside itself")
+            .y;
+        assert_eq!(band, header[1].bounds.bottom().unwrap() + 12 * 64);
+        // Both runs are measured: the mixed title is wider than its Latin half.
+        let mut latin = header_spec("결제·배송 Payment and shipping");
+        latin["meta"]["title"] = serde_json::json!("Order flow");
+        assert!(
+            header[0].bounds.width > label(&layout(&latin, None), "title").bounds.width,
+            "the Hangul run must add measured width to the title"
+        );
+        #[cfg(feature = "render-svg")]
+        for theme in [
+            crate::render::SvgTheme::Light,
+            crate::render::SvgTheme::Dark,
+        ] {
+            let options = crate::render::SvgOptions::from_spec(&mixed, theme).unwrap();
+            let report = crate::render::render_svg(&geometry, &options);
+            assert!(report.ok, "{theme:?}: {:?}", report.diagnostics);
+            let svg = report.svg.unwrap();
+            for text in [
+                "주문 흐름 Order flow",
+                "결제·배송 Payment and shipping",
+                "입력 단계",
+            ] {
+                assert!(svg.contains(text), "{theme:?} lost {text}");
+            }
+        }
     }
 
     #[test]

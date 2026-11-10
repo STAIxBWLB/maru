@@ -104,6 +104,7 @@ export type WorkspaceProvider =
 export const IPC_ERROR_CODES = [
   "skills_source_busy",
   "skills_source_stale",
+  "hwped_feature_requires_version",
   "today_conflict",
   "task_conflict",
   "document_conflict",
