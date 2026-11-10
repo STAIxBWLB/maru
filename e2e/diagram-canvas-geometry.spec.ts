@@ -139,12 +139,20 @@ for (const type of TYPES) {
       const pixelBox = (bounds: Bounds) => [px(bounds.x), px(bounds.y), px(bounds.width), px(bounds.height)];
       const failures: string[] = [];
       // What the canvas actually painted, so a mismatch names the mismatch.
-      const inventory = () => ({
-        dataset: surface.getAttribute("data-engine-dataset-id"),
-        status: surface.getAttribute("data-engine-geometry-status"),
-        canvasIds: [...surface.querySelectorAll("[data-node-id]")].map((node) => node.getAttribute("data-node-id")).slice(0, 10),
-        sourceIds: [...surface.querySelectorAll("[data-engine-source-id]")].map((node) => node.getAttribute("data-engine-source-id")).slice(0, 10),
-      });
+      const inventory = () => {
+        const rect = surface.getBoundingClientRect();
+        return {
+          dataset: surface.getAttribute("data-engine-dataset-id"),
+          status: surface.getAttribute("data-engine-geometry-status"),
+          surface: [rect.width, rect.height],
+          transform: surface.firstElementChild?.getAttribute("transform"),
+          painted: [...surface.querySelectorAll("[data-engine-source-id]")].map((node) => [
+            node.getAttribute("data-engine-source-id"),
+            node.getAttribute("data-engine-box"),
+          ]),
+          engine: scene.nodes.map((node) => [node.id, pixelBox(node.bounds)]),
+        };
+      };
       const groupOf = (sourceId: string) => surface.querySelector(`[data-engine-source-id="${sourceId}"]`);
       const boxDiff = (group: Element, expected: number[]) => {
         const actual = (group.getAttribute("data-engine-box") ?? "").split(" ").map(Number);
