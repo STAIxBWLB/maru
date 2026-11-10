@@ -54,6 +54,8 @@ export function ipcErrorMessage(reason: unknown): string {
   const normalized = body && typeof body.message === "string" && !(reason instanceof Error)
     ? normalizeIpcError({ code: typeof body.code === "string" ? body.code : "", message: body.message })
     : normalizeIpcError(reason);
-  const message = normalized instanceof Error ? normalized.message : String(normalized);
-  return [message, typeof body?.nextStep === "string" ? body.nextStep : ""].filter(Boolean).join(" ");
+  const message = normalized instanceof Error ? normalized.message : typeof normalized === "string"
+    ? normalized : "The request returned an unrecognized error response; retry the operation.";
+  const nextStep = typeof body?.message === "string" && typeof body.nextStep === "string" ? body.nextStep : "";
+  return nextStep && !message.includes(nextStep) ? `${message} ${nextStep}` : message;
 }

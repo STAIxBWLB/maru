@@ -80,3 +80,9 @@ describe("ipcErrorMessage", () => {
     expect(ipcErrorMessage("Plain failure; retry.")).toBe("Plain failure; retry.");
   });
 });
+
+it("shows malformed IPC bodies without object coercion or duplicate recovery text", () => {
+  expect(ipcErrorMessage({ code: {}, message: {} })).toBe("The request returned an unrecognized error response; retry the operation.");
+  expect(ipcErrorMessage(Object.assign(new Error("Read failed; retry."), { nextStep: "retry." })))
+    .toBe("Read failed; retry.");
+});
