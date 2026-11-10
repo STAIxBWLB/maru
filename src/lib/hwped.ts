@@ -100,7 +100,8 @@ export async function hwpedRender(
 }
 
 /** `opsArgv` is @hwp-editor/core `opsToArgv(ops)` output: `--flag value`
- *  pairs, spliced into `hwp edit` verbatim (no shell anywhere). */
+ *  pairs checked against the Rust operation allowlist (no shell). Image/seal
+ *  assets must resolve to existing files canonically inside workspaceRoot. */
 export async function hwpedEdit(
   document: HwpedDocumentRef,
   opsArgv: string[],
