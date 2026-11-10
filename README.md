@@ -638,10 +638,11 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
   mutation-admission and processing-caller evidence against the 392-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 392`). The current source manifest records 385 app handlers
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 392`).
+  The current source manifest records 385 app handlers
   plus seven production plugin commands. Historical Phase 08 behavior evidence
   remains archival for retired entries; plugin invocation and compiled-capability
-  MockRuntime results are recorded separately and do not certify native WebView transport
+  MockRuntime results are recorded separately and do not certify native WebView transport.
 
 The iframe source guard prevents accidental reintroduction, rather than
 analyzing adversarial JavaScript. Its regressions cover factory aliases,
