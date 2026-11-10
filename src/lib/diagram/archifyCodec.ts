@@ -178,8 +178,9 @@ export type ArchifyParseOutcome =
 
 /**
  * Parse engine interchange JSON into a semantic dataset. Unlike the tolerant
- * document migrator, a cheap envelope/meta failure or a safe reference/id
- * failure refuses the import with diagnostics. Full family-schema and geometry
+ * document migrator, a cheap envelope/meta failure refuses the import with diagnostics. Dangling
+ * references are preserved; projection draws no edge for a missing endpoint.
+ * Full family-schema and geometry
  * admission are asynchronous SDK engine gates at generation, apply and export.
  */
 export function parseArchifySpec(

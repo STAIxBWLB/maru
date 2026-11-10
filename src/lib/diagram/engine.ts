@@ -1,6 +1,6 @@
 import wasmUrl from "./__generated__/engine-e0/maru_diagram_engine_bg.wasm?url";
 import initializeValidation, * as validationBindings from "./__generated__/engine-e0/maru_diagram_engine.js";
-/** Independent engine measurement facade. Product apply/render paths do not import this. */
+/** Product entry for engine validation, layout, rendering and render history. */
 import type { ValidationReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 export type { ValidationReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import type {

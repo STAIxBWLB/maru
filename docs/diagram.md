@@ -418,7 +418,8 @@ semantic dataset warns that its semantics are lost
 (`diagram.mermaid.semanticLoss`). Archify JSON (`<name>.architecture.json`,
 `.workflow.json`, `.sequence.json`, `.dataflow.json`, `.lifecycle.json`)
 imports a projected canvas (members and containers) and exports the spec
-verbatim. Floorplan JSON (`floorplan-json`, see "Floorplan") does the same
+verbatim. A dangling relation endpoint remains in the stored source; projection
+draws no edge until both endpoints exist. Floorplan JSON (`floorplan-json`, see "Floorplan") does the same
 for `floorplan/architecture@1` maps.
 
 ### Verified static semantic export (T1)
@@ -2262,10 +2263,11 @@ gate status. Browser rendering, visual review and saved-file readback remain
 `not-run` unless their own checks actually run. Legacy Archify receipts retain
 their identity when parsed; fixtures cover old and new receipt shapes.
 
-The frontend entrypoints remain behind `VITE_ENGINE_GEOMETRY_TEST=1`. They
+The separate test adapters remain behind `VITE_ENGINE_GEOMETRY_TEST=1`. They
 verify the returned receipt and hashes before accepting bytes, and provide a
 separate DOMPurify-backed SVG string for app DOM insertion. They do not alter
-the product export, render store or canvas. The direct sanitizer supports the
+the canvas. Product export and render history use `engine.ts` as described above.
+The direct sanitizer supports the
 PNG geometry limits without weakening the legacy Archify SVG extraction path.
 
 Secondary captions now use the pinned renderer's `t-dim` token (#475569 dark,
@@ -2274,16 +2276,15 @@ referenced by `render-sequence.mjs:450`, `render-dataflow.mjs:466`,
 `render-lifecycle.mjs:843` and `workflow-compiler.mjs:4660`. Writer and artifact-gate reference colors derive these roles
 independently; node sublabels and semantic accents retain their own tokens.
 
-The PNG command is registered only through the existing `native-e2e` plugin
-integration. Production remains at 390 application commands; the native-e2e
-release guards remain in force. The separate plugin evidence JSON is emitted
-by successful registered MockRuntime invokes of `validate`, `render_png` and
-the outlined `render_svg`. The isolation scanner independently enumerates the
-plugin handler and permission lists and requires every registered command to be
-measured, along with worker execution, the shared render permit, single-flight
-behavior and real scene payload/timing samples. It does not merge plugin rows
-into the 390-command app inventory or re-execute behavioral tests during a
-source scan.
+The PNG, outlined SVG and render-store commands are production-registered by
+`tauri-plugin-maru-diagram`, with a capability for the main webview only.
+Production has 392 commands: 385 application handlers and seven plugin
+commands. Separate real MockRuntime evidence records every plugin handler and
+main-webview access versus Sites-window and same-window Sites-child denial.
+The current registration manifest and isolation scanner check the combined
+inventory; historical command evidence remains explicitly archival. Source
+scans do not re-execute behavioral tests. The native-e2e release guards remain
+in force.
 
 The hosted native-e2e bridge additionally invokes PNG once for the typical
 2-component architecture and once for the 1,000-component fixture, logging

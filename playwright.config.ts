@@ -35,7 +35,7 @@ export default defineConfig({
     trace: { mode: "retain-on-failure", snapshots: false, screenshots: false },
   },
   webServer: {
-    command: `pnpm exec vite --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `pnpm engine:assets && pnpm exec vite --host 127.0.0.1 --port ${port} --strictPort`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,

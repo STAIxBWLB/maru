@@ -1,5 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ipcErrorMessage } from "../../../lib/ipcError";
 import { assetUrlForPath } from "../../../lib/binaryViewer";
 import { useTranslation } from "../../../lib/i18n";
 import { deleteRender, listRenders, openRender, prepareRenderView, rendersAvailable,
@@ -30,7 +31,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
     const ticket = ++epoch.current;
     setBusy(true); setError(null); setView(null); setSelected(null); setPendingDelete(false);
     try { const result = await listRenders(workspace); if (ticket === epoch.current) setGroups(result); }
-    catch (err) { if (ticket === epoch.current) setError(String(err)); }
+    catch (err) { if (ticket === epoch.current) setError(ipcErrorMessage(err)); }
     finally { if (ticket === epoch.current) setBusy(false); }
   }, [workspace]);
   useEffect(() => {
@@ -44,7 +45,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
     try {
       const next = await prepareRenderView(workspace, render.docId, render.renderId);
       if (ticket === epoch.current) { setView(next); setPreparedTheme(theme); }
-    } catch (err) { if (ticket === epoch.current) setError(String(err)); }
+    } catch (err) { if (ticket === epoch.current) setError(ipcErrorMessage(err)); }
     finally { if (ticket === epoch.current) setBusy(false); }
   }, [workspace, theme]);
   useEffect(() => {
@@ -56,7 +57,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
     const ticket = epoch.current;
     setBusy(true); setError(null);
     try { await operation(); if (reload && ticket === epoch.current) await refresh(); }
-    catch (err) { if (ticket === epoch.current) setError(String(err)); }
+    catch (err) { if (ticket === epoch.current) setError(ipcErrorMessage(err)); }
     finally { if (ticket === epoch.current) setBusy(false); }
   };
   const group = groups.find((item) => item.docId === selected?.docId);

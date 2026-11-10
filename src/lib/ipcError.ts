@@ -44,3 +44,16 @@ export function normalizeIpcError(reason: unknown): unknown {
   }
   return reason;
 }
+
+/** Display-only IPC errors, including plugin messages with a recovery step.
+ * Unknown codes stay plain text and never acquire a contract error type. */
+export function ipcErrorMessage(reason: unknown): string {
+  const body = typeof reason === "object" && reason !== null
+    ? reason as { code?: unknown; message?: unknown; nextStep?: unknown }
+    : undefined;
+  const normalized = body && typeof body.message === "string" && !(reason instanceof Error)
+    ? normalizeIpcError({ code: typeof body.code === "string" ? body.code : "", message: body.message })
+    : normalizeIpcError(reason);
+  const message = normalized instanceof Error ? normalized.message : String(normalized);
+  return [message, typeof body?.nextStep === "string" ? body.nextStep : ""].filter(Boolean).join(" ");
+}

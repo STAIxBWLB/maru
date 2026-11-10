@@ -364,3 +364,12 @@ describe("geometry intent on main pushes", () => {
     expect(geometryForPushComparison({ status: "ahead", files: Array.from({ length: 300 }, () => ({ filename: "docs/page.md" })) })).toBe(true);
   });
 });
+
+describe("shared browser test bootstrap", () => {
+  it("builds ignored engine assets even when a non-engine change skips geometry CI", () => {
+    const policy = classifyPrChanges(["src/components/UnrelatedPane.tsx"]);
+    expect(policy.run_geometry).toBe(false);
+    const config = readFileSync(resolve(process.cwd(), "playwright.config.ts"), "utf8");
+    expect(config).toContain("command: `pnpm engine:assets && pnpm exec vite");
+  });
+});

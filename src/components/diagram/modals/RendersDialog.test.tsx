@@ -32,6 +32,23 @@ describe("RendersDialog", () => {
     expect(document.body.textContent).toContain("require the desktop app");
     expect(mocks.list).not.toHaveBeenCalled(); expect(document.querySelector("iframe")).toBeNull();
   });
+  it.each(["render_store_failed", "<script>forged</script>", 42])("shows structured list errors as inert text (%s)", async (code) => {
+    mocks.list.mockRejectedValue({ code, message: "History cannot be read.", nextStep: "Reopen the workspace and refresh." });
+    await mount();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("History cannot be read. Reopen the workspace and refresh.");
+    expect(document.body.textContent).not.toContain("[object Object]");
+    expect(document.querySelector("script")).toBeNull();
+  });
+  it("shows structured preparation and delete recovery messages", async () => {
+    mocks.prepare.mockRejectedValue({ code: "render_invalid", message: "Artifact changed.", nextStep: "Re-render the diagram." });
+    await mount(); await click('[data-testid="diagram-render-entry"]');
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Artifact changed. Re-render the diagram.");
+    mocks.remove.mockRejectedValue({ code: "render_delete_failed", message: "History is busy.", nextStep: "Close the viewer and retry." });
+    const buttons = () => [...document.querySelectorAll<HTMLButtonElement>("button")];
+    await act(async () => buttons().find((button) => button.textContent === "Delete render")!.click());
+    await act(async () => buttons().find((button) => button.textContent === "Confirm deletion")!.click());
+    expect(document.body.textContent).toContain("History is busy. Close the viewer and retry.");
+  });
   it("only mounts a prepared viewer, preserves sandbox and remounts for theme changes", async () => {
     await mount(); expect(document.querySelector("iframe")).toBeNull();
     await click('[data-testid="diagram-render-entry"]');

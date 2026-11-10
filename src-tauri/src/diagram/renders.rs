@@ -5,7 +5,6 @@
 //! verified file at a time.
 
 #[cfg(test)]
-#[cfg(test)]
 use crate::archify::{ArchifyRenderArtifact, ArchifyRenderReceipt};
 use crate::atomic_file::{
     with_path_transactions, write_atomic_create, PathTransactionLease, PathTransactionRequest,
@@ -197,7 +196,6 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-#[cfg(test)]
 #[cfg(test)]
 fn archify_receipt(receipt: ArchifyRenderReceipt) -> StoredRenderReceipt {
     let gates = RenderGates {
