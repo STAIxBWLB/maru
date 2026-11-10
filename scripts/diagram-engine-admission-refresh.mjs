@@ -26,6 +26,67 @@ function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
 }
 
+function sha256Bytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+// The stamped identity comes from HEAD, so a tracked modification would describe
+// bytes that no commit contains; refusing here keeps a receipt honest even when
+// the run itself succeeded.
+export function assertCleanSource(statusText) {
+  const dirty = statusText.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (dirty.length > 0) {
+    throw new Error(`Refusing to stamp HEAD over a dirty source tree (${dirty.join(", ")}); commit or stash every tracked change so the stamped commit describes the bytes that were measured, then rerun the refresh`);
+  }
+}
+
+function requireCleanSource() {
+  const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: ROOT, encoding: "utf8" });
+  assertCleanSource(status);
+}
+
+// bindgen-web writes no provenance of its own, so the bindings are pinned by the
+// hashes of the exact bytes this process imported and initialized with, never by
+// a second read of the same path.
+/**
+ * @param {{ js: Uint8Array | string, wasm: Uint8Array | string }} bytes
+ */
+export function bindingProvenance({ js, wasm }) {
+  return {
+    jsSha256: sha256Bytes(js),
+    wasmSha256: sha256Bytes(wasm),
+  };
+}
+
+const NATIVE_IDENTITY_FIELDS = [
+  ["sourceCommit", "engineSourceCommit"],
+  ["sdkTree", "sdkTree"],
+  ["engineCrateTree", "engineCrateTree"],
+];
+
+// The native corpus runner emits no source identity, so a same-head cross-check is
+// only a claim this script may make when the report carries all three fields and
+// every one of them matches HEAD; a partial or absent identity lowers the scope to
+// the hashes it did read rather than claiming a comparison that never ran.
+/**
+ * @param {Record<string, unknown> | null} nativeReport
+ * @param {Record<string, string>} identity
+ */
+export function nativeIdentityScope(nativeReport, identity) {
+  if (!nativeReport) return "recorded-hashes-only";
+  let present = 0;
+  for (const [field, key] of NATIVE_IDENTITY_FIELDS) {
+    if (nativeReport[field] === undefined) continue;
+    if (nativeReport[field] !== identity[key]) {
+      throw new Error(`Native corpus report ${field} does not match the current committed engine source`);
+    }
+    present += 1;
+  }
+  return present === NATIVE_IDENTITY_FIELDS.length
+    ? "cross-checked-against-same-head-native-corpus-report"
+    : "recorded-hashes-only";
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -333,6 +394,7 @@ export function refreshAdmissionLedger(ledger, corpus, reports, identity, native
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  requireCleanSource();
   const bindingDir = resolve(ROOT, options["wasm-bindings"]);
   const ledgerPath = resolve(ROOT, options.ledger);
   const outputPath = resolve(ROOT, options.output);
@@ -341,25 +403,22 @@ async function main() {
   if (!existsSync(jsBinding) || !existsSync(wasmBinding)) {
     throw new Error(`Generated WASM bindings not found in ${bindingDir}; pass a completed bindgen-web directory`);
   }
+  const jsSource = readFileSync(jsBinding);
+  const wasmSource = readFileSync(wasmBinding);
+  const bindingHashes = bindingProvenance({ js: jsSource, wasm: wasmSource });
   const bindings = await import(pathToFileURL(jsBinding).href);
   if (typeof bindings.default !== "function" || typeof bindings.layout_json !== "function") {
     throw new Error("Generated WASM module is missing initialization or layout_json; rebuild wasm-layout bindings");
   }
-  await bindings.default({ module_or_path: new Uint8Array(readFileSync(wasmBinding)) });
+  await bindings.default({ module_or_path: wasmSource });
 
   const ledger = JSON.parse(readFileSync(ledgerPath, "utf8"));
   const corpus = JSON.parse(readFileSync(join(ROOT, "src-tauri/crates/maru-diagram-engine/testdata/parity.json"), "utf8"));
   const nativeReport = options["native-corpus-report"]
     ? JSON.parse(readFileSync(resolve(ROOT, options["native-corpus-report"]), "utf8"))
     : null;
-  if (nativeReport) {
-    const identity = currentIdentity();
-    for (const [field, actual] of [["sourceCommit", identity.engineSourceCommit], ["sdkTree", identity.sdkTree], ["engineCrateTree", identity.engineCrateTree]]) {
-      if (nativeReport[field] !== undefined && nativeReport[field] !== actual) {
-        throw new Error(`Native corpus report ${field} does not match the current committed engine source`);
-      }
-    }
-  }
+  const identity = currentIdentity();
+  const identityScope = nativeIdentityScope(nativeReport, identity);
   const reports = new Map();
   const corpusCases = new Map([...corpus.cases, ...corpus.boundaryCases].map((row) => [row.id, row]));
   for (const id of BRAND_RAIL_CASES) {
@@ -371,7 +430,12 @@ async function main() {
     if (typeof raw !== "string") throw new Error(`${id}: WASM layout_json did not return JSON text`);
     reports.set(id, JSON.parse(raw));
   }
-  const output = refreshAdmissionLedger(ledger, corpus, reports, currentIdentity(), nativeReport);
+  const output = refreshAdmissionLedger(ledger, corpus, reports, identity, nativeReport);
+  output.wasmBindings = {
+    directory: options["wasm-bindings"],
+    ...bindingHashes,
+    identityScope,
+  };
   const temporary = `${outputPath}.tmp-${process.pid}`;
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(temporary, `${JSON.stringify(output, null, 2)}\n`);
@@ -382,6 +446,7 @@ async function main() {
     unionCases: output.counts.unionCases,
     currentMismatches: output.counts.currentMismatches,
     refreshedCaseIds: BRAND_RAIL_CASES,
+    wasmBindingsSha256: bindingHashes.wasmSha256,
     output: outputPath,
   })}`);
 }

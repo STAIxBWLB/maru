@@ -285,8 +285,17 @@ fn endpoint_mask_dataflow(via: Vec<[f64; 2]>) -> Value {
 
 #[test]
 fn via_outside_source_does_not_exempt_a_route_that_would_cut_through_source_ink() {
+    // An authored via left of the source node makes the route travel back past
+    // that node. A via outside the visible endpoint owns no mask, so the route
+    // detours around the node: the outcome is acceptance with a detour, not a
+    // waiver of the crossing and not a refusal.
     let spec = endpoint_mask_dataflow(vec![[10.0, 157.0], [230.0, 157.0]]);
     let report = layout(&spec);
+    assert!(
+        report.ok,
+        "a via outside the source must be routed around it instead of refusing: {:?}",
+        report.diagnostics
+    );
     let geometry = report.geometry.expect("accepted layout retains geometry");
     let source = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
     let source_label = geometry
@@ -299,38 +308,22 @@ fn via_outside_source_does_not_exempt_a_route_that_would_cut_through_source_ink(
         .iter()
         .find(|route| route.id.as_deref() == Some("f"))
         .expect("authored route is retained");
-    if !report.ok {
+    assert!(
+        route.points.len() >= 2,
+        "an accepted authored route must retain at least one segment: {:?}",
+        route.points
+    );
+    for segment in route.points.windows(2) {
         assert!(
-            report.diagnostics.iter().any(|diagnostic| matches!(
-                diagnostic.code.as_str(),
-                "dataflow/route-blocked" | "dataflow/route-port-blocked"
-            )),
-            "refusal must identify the blocked authored route: {:?}",
-            report.diagnostics
+            !axis_segment_hits(source.bounds, segment[0], segment[1]),
+            "outside via route crossed source body: {:?}",
+            route.points
         );
-    }
-    if route.points.is_empty() {
         assert!(
-            report.diagnostics.iter().any(|diagnostic| matches!(
-                diagnostic.code.as_str(),
-                "dataflow/route-blocked" | "dataflow/route-port-blocked"
-            )),
-            "an empty retained route requires an actionable route refusal: {:?}",
-            report.diagnostics
+            !axis_segment_hits(source_label.bounds, segment[0], segment[1]),
+            "outside via route crossed source label ink box: {:?}",
+            route.points
         );
-    } else {
-        for segment in route.points.windows(2) {
-            assert!(
-                !axis_segment_hits(source.bounds, segment[0], segment[1]),
-                "outside via route crossed source body: {:?}",
-                route.points
-            );
-            assert!(
-                !axis_segment_hits(source_label.bounds, segment[0], segment[1]),
-                "outside via route crossed source label ink box: {:?}",
-                route.points
-            );
-        }
     }
 }
 
