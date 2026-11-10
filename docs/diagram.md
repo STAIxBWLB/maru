@@ -418,9 +418,10 @@ semantic dataset warns that its semantics are lost
 (`diagram.mermaid.semanticLoss`). Archify JSON (`<name>.architecture.json`,
 `.workflow.json`, `.sequence.json`, `.dataflow.json`, `.lifecycle.json`)
 imports a projected canvas (members and containers) and exports the spec
-verbatim. A dangling relation endpoint remains in the stored source; projection
-draws no edge until both endpoints exist. Floorplan JSON (`floorplan-json`, see "Floorplan") does the same
-for `floorplan/architecture@1` maps.
+verbatim. Floorplan JSON (`floorplan-json`, see "Floorplan") likewise imports a
+projected canvas and exports the spec for `floorplan/architecture@1` maps.
+A dangling relation endpoint remains in the stored source; projection draws
+no edge until both endpoints exist.
 
 ### Verified static semantic export (T1)
 
@@ -437,6 +438,14 @@ Exported SVG uses outlined glyphs; PNG uses the bundled native font faces and
 rasterizer. WASM text-mode SVG remains a separate preview path. Any SVG inserted
 in the app DOM passes through its DOMPurify-backed helper. Theme and PNG pixel
 ratio are explicit inputs; an interactive viewer is a separate artifact.
+
+`engineOutputSha256` binds each successful request's own returned SVG source.
+For an SVG export this is the outlined SVG, also covered by the final output
+hash. For PNG it is the text-mode SVG actually supplied to the rasterizer;
+`outputSha256` binds the resulting PNG bytes. Different themes and text modes
+produce different SVG hashes, so a PNG receipt never borrows the separate
+outlined SVG export's hash. The native probe hashes both returned sources
+independently and checks each saved file against its final artifact hash.
 
 Export shows the spec hash, engine version, output hashes and separate schema,
 artifact, browser, visual-review and saved-byte-readback gates. A successful
@@ -2261,7 +2270,10 @@ cannot certify it. API v1 receipts keep the existing schema and use
 SVG hash, requested output hash, conversion options and independent artifact
 gate status. Browser rendering, visual review and saved-file readback remain
 `not-run` unless their own checks actually run. Legacy Archify receipts retain
-their identity when parsed; fixtures cover old and new receipt shapes.
+their identity when parsed, including pins with additional vendor provenance
+fields. The legacy reader extracts name, version and revision without rewriting
+the stored receipt; modern input validation remains strict. Fixtures cover old
+and new receipt shapes.
 
 The separate test adapters remain behind `VITE_ENGINE_GEOMETRY_TEST=1`. They
 verify the returned receipt and hashes before accepting bytes, and provide a

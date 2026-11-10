@@ -14,6 +14,10 @@ interface DiagramStaticExportResult {
   pngPath: "diagrams/native-static-export.png";
   svgReceipt: EngineReceipt;
   pngReceipt: EngineReceipt;
+  svgEngineSource: string;
+  pngEngineSource: string;
+  svgTextMode: "text" | "outlines";
+  pngTextMode: "text" | "outlines";
   applyProbe: {
     refused: boolean;
     unchangedAfterRefusal: boolean;
@@ -105,7 +109,6 @@ describe("native diagram engine apply and export", () => {
     const svgBytes = new Uint8Array(await fs.readFile(path.join(workspace, result.svgPath)));
     const pngBytes = new Uint8Array(await fs.readFile(path.join(workspace, result.pngPath)));
     const svg = new TextDecoder("utf-8", { fatal: true }).decode(svgBytes);
-    const svgHash = sha256(new TextEncoder().encode(svg));
     assert.equal(sha256(svgBytes), result.svgReceipt.outputSha256, "saved SVG bytes must match the final receipt hash");
     assert.equal(sha256(pngBytes), result.pngReceipt.outputSha256, "saved PNG bytes must match the final receipt hash");
     for (const receipt of [result.svgReceipt, result.pngReceipt]) {
@@ -121,9 +124,27 @@ describe("native diagram engine apply and export", () => {
       assert.equal(receipt.readback?.status, "passed", "readback is passed only after the native bridge verifies saved bytes");
       assert.equal(receipt.readback?.scope, "native-saved-file-byte-comparison");
       assert.match(receipt.engineOutputSha256 ?? "", /^[0-9a-f]{64}$/);
-      assert.equal(receipt.engineOutputSha256, svgHash, "engine output hash must bind the emitted SVG source");
       assert.match(receipt.outputSha256 ?? "", /^[0-9a-f]{64}$/);
     }
+    assert.equal(result.svgTextMode, "outlines");
+    assert.equal(result.pngTextMode, "text");
+    assert.equal(result.svgEngineSource, svg, "saved SVG must be the engine source SVG for the outlined receipt");
+    assert.match(result.svgEngineSource, /data-theme="light"/);
+    assert.equal(
+      sha256(new TextEncoder().encode(result.svgEngineSource)),
+      result.svgReceipt.engineOutputSha256,
+      "outlined SVG receipt must bind its returned intermediate SVG source",
+    );
+    assert.equal(
+      sha256(new TextEncoder().encode(result.pngEngineSource)),
+      result.pngReceipt.engineOutputSha256,
+      "PNG receipt must bind its own text-mode intermediate SVG source",
+    );
+    assert.notEqual(result.pngEngineSource, result.svgEngineSource, "dark PNG source is independently rendered in text mode");
+    assert.doesNotMatch(result.svgEngineSource, /<text(?:\s|>)/i);
+    assert.match(result.pngEngineSource, /<text(?:\s|>)/i, "PNG rasterization source retains text-mode label elements");
+    assert.match(result.pngEngineSource, /data-theme="dark"/);
+    assert.ok(result.pngEngineSource.includes("한日中"), "PNG source must contain the same semantic CJK label before rasterization");
     assert.equal(result.svgReceipt.outputMimeType, "image/svg+xml");
     assert.equal(result.svgReceipt.conversion?.format, "svg");
     assert.equal(result.svgReceipt.conversion?.theme, "light");
@@ -154,8 +175,12 @@ describe("native diagram engine apply and export", () => {
     assert.ok(width > 0 && height > 0, `PNG has invalid dimensions ${width}x${height}`);
     assert.ok(width <= 8192 && height <= 8192, `PNG dimensions are unexpectedly large ${width}x${height}`);
     console.log(`NATIVE_DIAGRAM_ENGINE_ARTIFACTS ${JSON.stringify({
-      svg: { engine: result.svgReceipt.engine, engineOutputSha256: result.svgReceipt.engineOutputSha256, outputSha256: result.svgReceipt.outputSha256 },
-      png: { engine: result.pngReceipt.engine, engineOutputSha256: result.pngReceipt.engineOutputSha256, outputSha256: result.pngReceipt.outputSha256 },
+      svg: { engine: result.svgReceipt.engine, engineOutputSha256: result.svgReceipt.engineOutputSha256, outputSha256: result.svgReceipt.outputSha256, textMode: result.svgTextMode },
+      png: { engine: result.pngReceipt.engine, engineOutputSha256: result.pngReceipt.engineOutputSha256, outputSha256: result.pngReceipt.outputSha256, textMode: result.pngTextMode },
+      engineSources: {
+        svgSha256: sha256(new TextEncoder().encode(result.svgEngineSource)),
+        pngSha256: sha256(new TextEncoder().encode(result.pngEngineSource)),
+      },
       applyProbe: result.applyProbe,
     })}`);
   }).timeout(120_000);

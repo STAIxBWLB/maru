@@ -99,7 +99,7 @@ pub struct RenderConversion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct LegacyArchifyEnginePin {
     pub name: String,
     pub version: String,
@@ -349,5 +349,47 @@ mod tests {
             with_future_metadata,
             StoredRenderReceipt::Engine(_)
         ));
+    }
+
+    #[test]
+    fn legacy_engine_pin_ignores_extra_pin_provenance_but_receipt_envelope_stays_strict() {
+        let legacy = json!({
+            "schemaVersion": 1,
+            "inputSpecSha256": "a".repeat(64),
+            "enginePin": {
+                "schemaVersion": 1,
+                "name": "archify",
+                "version": "3.0.0",
+                "repository": "https://example.invalid/archify",
+                "revision": "0123456789abcdef0123456789abcdef01234567",
+                "revisionRef": "refs/tags/v3.0.0",
+                "pinnedAt": "2026-10-05",
+                "license": "MIT",
+                "licenseHolders": ["Archify"],
+                "fileHashes": {"bin/archify.mjs": "b".repeat(64)}
+            },
+            "outputSha256": "c".repeat(64),
+            "outputMimeType": "text/html",
+            "gates": {
+                "schema": {"status":"passed", "scope":"pinned-engine-validation"},
+                "artifact": {"status":"passed", "scope":"pinned-engine-rendered-html"},
+                "browser": {"status":"not-run", "scope":"none"},
+                "visualReview": {"status":"not-run", "scope":"manual"}
+            }
+        });
+        let parsed = serde_json::from_value::<StoredRenderReceipt>(legacy.clone()).unwrap();
+        let StoredRenderReceipt::LegacyArchify(pin) = &parsed else {
+            panic!("enginePin identity must retain the legacy receipt variant")
+        };
+        assert_eq!(pin.engine_pin.name, "archify");
+        assert_eq!(pin.engine_pin.version, "3.0.0");
+        assert_eq!(pin.engine_pin.revision, "0123456789abcdef0123456789abcdef01234567");
+        let serialized = serde_json::to_value(parsed).unwrap();
+        assert_eq!(serialized["enginePin"]["name"], "archify");
+        assert!(serialized["enginePin"].get("fileHashes").is_none());
+
+        let mut unknown_receipt_field = legacy;
+        unknown_receipt_field["futureReceiptField"] = json!(true);
+        assert!(serde_json::from_value::<StoredRenderReceipt>(unknown_receipt_field).is_err());
     }
 }

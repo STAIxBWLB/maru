@@ -26,3 +26,9 @@ tauri-plugin = { version = "=2.7.2", features = ["build"] }
 
 [dev-dependencies]
 tauri = { version = "=2.12.5", default-features = false, features = ["test"] }
+
+# This fixture exercises the complete production handler set; default-feature
+# consumers keep the validation-only contract and do not compile render DTOs.
+[[test]]
+name = "command_isolation"
+required-features = ["png", "outline", "render-store"]

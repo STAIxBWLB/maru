@@ -55,6 +55,10 @@ export interface NativeE2eDiagramStaticExportResult {
   pngPath: "diagrams/native-static-export.png";
   svgReceipt: EngineReceipt;
   pngReceipt: EngineReceipt;
+  svgEngineSource: string;
+  pngEngineSource: string;
+  svgTextMode: "text" | "outlines";
+  pngTextMode: "text" | "outlines";
   applyProbe: {
     refused: boolean;
     unchangedAfterRefusal: boolean;
@@ -379,7 +383,7 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           { applyValidatedSemanticEdit },
           { addSemanticEntry, removeSemanticEntries },
           { undo },
-          { validateEngineCandidate },
+          { validateEngineCandidate, renderEngineCandidate },
           { exportVerifiedSemanticArtifact },
           { diagramExportBlobToPath },
         ] = await Promise.all([
@@ -444,12 +448,33 @@ function bridgeNamespace(): MaruNativeE2eBridge {
         components[0] = { ...components[0], label: "한日中" };
         const { dataset } = archifySpecToDataset("architecture", nativeSpec, { id: "native-static-export-dataset" });
         const doc = projectSemanticDocument(dataset).doc;
+        let svgEngineSource: string | null = null;
+        let pngEngineSource: string | null = null;
+        let svgTextMode: "text" | "outlines" | null = null;
+        let pngTextMode: "text" | "outlines" | null = null;
+        // Capture the SVG from each same render-and-store report: a PNG receipt
+        // hashes its text-mode rasterization source, not the separate outlined SVG.
         const svg = await exportVerifiedSemanticArtifact({
           doc, datasetId: dataset.id, workspace, format: "svg", theme: "light",
+          host: async (type, json, context, options) => {
+            const rendered = await renderEngineCandidate(workspace, type, json, context, options);
+            svgEngineSource = rendered.svg;
+            svgTextMode = rendered.textMode ?? null;
+            return rendered;
+          },
         });
         const png = await exportVerifiedSemanticArtifact({
           doc, datasetId: dataset.id, workspace, format: "png", theme: "dark",
+          host: async (type, json, context, options) => {
+            const rendered = await renderEngineCandidate(workspace, type, json, context, options);
+            pngEngineSource = rendered.svg;
+            pngTextMode = rendered.textMode ?? null;
+            return rendered;
+          },
         });
+        if (svgEngineSource === null || pngEngineSource === null || svgTextMode === null || pngTextMode === null) {
+          throw new Error("The native diagram engine omitted an intermediate SVG source or text-mode receipt; rebuild the matching engine and retry.");
+        }
         const svgPath = `${workspace}/diagrams/native-static-export.svg`;
         const pngPath = `${workspace}/diagrams/native-static-export.png`;
         const savedSvgPath = await diagramExportBlobToPath(svgPath, "svg", svg.bytes);
@@ -463,6 +488,10 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           pngPath: "diagrams/native-static-export.png",
           svgReceipt: { ...svg.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } },
           pngReceipt: { ...png.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } },
+          svgEngineSource,
+          pngEngineSource,
+          svgTextMode,
+          pngTextMode,
           applyProbe,
         };
       },

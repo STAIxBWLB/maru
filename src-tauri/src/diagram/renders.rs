@@ -1897,6 +1897,71 @@ mod tests {
     }
 
     #[test]
+    fn prepares_native_legacy_html_with_the_full_archify_pin_metadata() {
+        let fixture = Fixture::new();
+        let render_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let render_dir = fixture.render_dir(render_id);
+        fs::create_dir_all(&render_dir).unwrap();
+        let source_path = fixture.work.join(DIAGRAMS_ROOT).join("render-test.cmd.json");
+        let source = fs::read(&source_path).unwrap();
+        fs::write(render_dir.join(HTML_FILE), HTML).unwrap();
+        let pin: serde_json::Value = serde_json::from_str(include_str!("../../../sidecars/archify/PIN.json")).unwrap();
+        let receipt = serde_json::json!({
+            "schemaVersion": 1,
+            "docId": fixture.doc_id.clone(),
+            "documentName": "Native render fixture",
+            "documentRevision": sha256(&source),
+            "renderedAt": "2026-11-09T00:00:00Z",
+            "diagramType": "architecture",
+            "inputSpecSha256": sha256(b"legacy fixture input"),
+            "outputSha256": sha256(HTML),
+            "outputMimeType": "text/html",
+            "enginePin": pin,
+            "gates": {
+                "schema": {"status": "passed", "scope": "pinned-engine-validation"},
+                "artifact": {"status": "passed", "scope": "pinned-engine-rendered-html"},
+                "browser": {"status": "not-run", "scope": "none"},
+                "visualReview": {"status": "not-run", "scope": "manual"}
+            }
+        });
+        fs::write(receipt_path(&render_dir), serde_json::to_vec_pretty(&receipt).unwrap()).unwrap();
+        fs::write(render_dir.join("neighbor.html"), b"not the receipt-verified artifact").unwrap();
+
+        let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].renders.len(), 1);
+        assert!(groups[0].renders[0].verified);
+        assert!(matches!(
+            &groups[0].renders[0].receipt.as_ref().unwrap().render,
+            StoredRenderReceipt::LegacyArchify(_)
+        ));
+
+        let app = tauri::test::mock_app();
+        let view = prepare_render_view(
+            &app.handle().clone(),
+            fixture.work.to_str().unwrap(),
+            &fixture.doc_id,
+            render_id,
+        )
+        .unwrap();
+        assert_eq!(view.mime_type, "text/html");
+        assert_eq!(view.receipt.doc_id, fixture.doc_id);
+        let StoredRenderReceipt::LegacyArchify(base_receipt) = &view.receipt.render else {
+            panic!("legacy enginePin fixture must stay a legacy receipt")
+        };
+        assert_eq!(base_receipt.output_sha256, sha256(HTML));
+        let serialized = serde_json::to_value(&view).unwrap();
+        assert_eq!(serialized["mimeType"], "text/html");
+        assert_eq!(serialized["receipt"]["enginePin"]["name"], "archify");
+        assert_eq!(serialized["receipt"]["enginePin"]["revision"], receipt["enginePin"]["revision"]);
+        assert!(serialized["receipt"]["enginePin"].get("fileHashes").is_none());
+        assert!(view.path.ends_with(HTML_FILE));
+        assert!(app.asset_protocol_scope().is_allowed(Path::new(&view.path)));
+        assert!(!app.asset_protocol_scope().is_allowed(receipt_path(&render_dir)));
+        assert!(!app.asset_protocol_scope().is_allowed(render_dir.join("neighbor.html")));
+    }
+
+    #[test]
     fn unicode_document_ids_keep_logical_identity_and_long_titles_are_bounded_utf8() {
         let fixture = Fixture::new();
         let logical_id = "도식";
