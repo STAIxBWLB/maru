@@ -48,7 +48,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 
 ## Things the agent gets wrong
 
-- **Semantic apply (2026-11-08)**: when changing diagram structural apply/delete paths, preserve the pinned-engine gate in `src/lib/diagram/semanticApply.ts` and test renderer rejection without a doc/history commit; see `docs/diagram.md` §Semantic editing.
+- **Semantic apply (2026-11-10)**: preserve the SDK gate before structural semantic edits commit in `src/lib/diagram/semanticApply.ts`; test refusal without a doc/history commit. Diagnostics shown when inspecting an existing dataset are asynchronous and read-only: do not gate load, rewrite source or apply stale results; keep Floorplan local-only. See `docs/diagram.md` §Semantic editing.
 
 - **Iframe source checks (2026-11-05)**: when changing `scripts/check-main-iframes.mjs`, preserve lexical binding, non-call factory-reference and file-discovery regressions in its test file.
 
@@ -67,7 +67,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
   touches `src-tauri/build.rs` first. A webview stuck on `about:blank` is this.
 - **`VITE_NATIVE_E2E=1` output is not shippable**: re-run `pnpm build:frontend` before inspecting a
   production artifact. The `native-e2e` cargo feature must never reach a release; three guards check.
-- **Command isolation count**: `check-command-isolation` expects exactly **390** registered commands
+- **Command isolation count**: `check-command-isolation` expects exactly **392** registered commands
   with recorded evidence. Adding or removing a `#[tauri::command]` means updating the evidence JSON
   under `docs/performance/`, which is input to the gate and must not be hand-forged.
 - **No raw `font-size: Npx` in `src/styles.css`**: use the `--type-*` / `--read-*` scale in

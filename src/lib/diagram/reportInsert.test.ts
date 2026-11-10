@@ -11,7 +11,7 @@ import {
 import { IpcError } from "../ipcError";
 import { buildManagedBlock } from "./reportLink";
 import { createEmptyDoc, type DiagramDoc, type DiagramEdge, type DiagramNode } from "./types";
-import type { ArchifyRenderReceipt } from "../archify";
+import type { EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 
 function makeDoc(id: string = "doc-1") {
   return { ...createEmptyDoc(id, 0), docTitle: "Weekly chart" };
@@ -44,24 +44,27 @@ function verifiedAssets() {
   const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>검증된 다이어그램</text></svg>');
   const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
   const inputSpecSha256 = byteHash(new TextEncoder().encode('{"diagram_type":"architecture","fixture":true}'));
-  const enginePin = {
-    name: "archify",
-    version: "3.0.0",
-    revision: "9286c3b9c2cef359e98586b420d769d87bcb163f",
+  const engineOutputSha256 = byteHash(svg);
+  const engine = {
+    id: "maru-diagram-engine",
+    version: "0.2.0",
+    revision: "render-v1",
   };
-  const receipt = (bytes: Uint8Array, outputMimeType: string): ArchifyRenderReceipt => ({
+  const receipt = (bytes: Uint8Array, outputMimeType: string): EngineReceipt => ({
     schemaVersion: 1,
     inputSpecSha256,
-    enginePin,
+    engine,
     outputSha256: byteHash(bytes),
     outputMimeType,
-    engineOutputSha256: byteHash(new TextEncoder().encode("pinned engine html bytes")),
+    engineOutputSha256,
+    conversion: { format: outputMimeType === "image/svg+xml" ? "svg" : "png", theme: "light", pixelRatio: 1 },
     gates: {
-      schema: { status: "passed", scope: "pinned-engine-validation" },
-      artifact: { status: "passed", scope: "pinned-engine-rendered-html" },
-      browser: { status: "passed", scope: "verified-static-conversion" },
-      visualReview: { status: "not-run", scope: "manual-visual-review" },
+      schema: { status: "passed", scope: "architecture-document-validity" },
+      artifact: { status: "passed", scope: outputMimeType === "image/svg+xml" ? "independent-svg-artifact" : "independent-svg-and-png-artifacts" },
+      browser: { status: "not-run", scope: "non-browser-rasterization" },
+      visualReview: { status: "not-run", scope: "manual" },
     },
+    readback: { status: "not-run", scope: "saved-file-byte-comparison" },
   });
   return { svg, png, receipts: { svg: receipt(svg, "image/svg+xml"), png: receipt(png, "image/png") } };
 }
@@ -286,7 +289,7 @@ describe("insertDiagramIntoReport", () => {
       svg: assets.receipts.svg.outputSha256,
       png: assets.receipts.png.outputSha256,
       input: assets.receipts.svg.inputSpecSha256,
-      engine: assets.receipts.svg.enginePin,
+      engine: assets.receipts.svg.engine,
     }));
     expect(first.saves[0]!.content).toContain(`"renderHash":"sha256:${expectedRenderHash}"`);
 

@@ -2,12 +2,15 @@
 // Evidence/registration drift gate, not a Rust call-graph or thread-safety proof.
 // Run from the repository root. --expected-count also permits tiny test repositories.
 // Later producers extend their evidence, never the production command count via overlays.
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
 const LIB = "src-tauri/src/lib.rs";
+const CURRENT_REGISTRATIONS = "docs/performance/phase08-current-registrations.json";
 const EARLY = new Set(["08-01", "08-02", "08-03", "08-04", "08-05"]);
 const INTEGRATIONS = new Map([
   ["src-tauri/src/skill_host/store.rs", "08-29"],
@@ -412,7 +415,7 @@ function requirePairs(cases, right, label, actual, sources) {
 }
 function validateOverlay(overlay, state) {
   const { sources, owners, rows, all } = state;
-  insist(overlay.plan === "08-29" && overlay.commandCount === rows.size, "08-29 overlay: wrong plan/commandCount");
+  insist(overlay.plan === "08-29" && overlay.commandCount === state.historicalRowsCount, "08-29 overlay: wrong archival commandCount");
   insist(!("commands" in overlay), "08-29 overlay cannot inject commands");
   insist(Array.isArray(overlay.integrations) && overlay.integrations.length === 7, "08-29 overlay requires exactly seven module integrations");
   const modules = new Set(), ids = new Set();
@@ -483,11 +486,26 @@ function validateOverlay(overlay, state) {
     requirePairs(result.testCases, DOCUMENTS, "07 document consumer", true, sources);
   }
 }
+function cfgFeatureEnabled(expression, enabledFeatures) {
+  const value = expression.trim();
+  const operator = value.match(/^(all|any|not)\(([\s\S]*)\)$/);
+  if (operator) {
+    const children = splitTop(operator[2]).map((part) => cfgFeatureEnabled(part, enabledFeatures));
+    if (operator[1] === "all") return children.every(Boolean);
+    if (operator[1] === "any") return children.some(Boolean);
+    insist(children.length === 1, `Unparsed plugin cfg not() expression ${value}`);
+    return !children[0];
+  }
+  const feature = value.match(/^feature\s*=\s*"([a-z][a-z0-9-]*)"$/);
+  insist(feature, `Unparsed plugin handler cfg expression ${value}`);
+  return enabledFeatures.has(feature[1]);
+}
 export function parseArgs(argv) {
-  const options = { expectedCount: 365 };
+  const options = { expectedCount: 392 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--all") { insist(!options.all, "Duplicate --all"); options.all = true; }
+    else if (arg === "--refresh-current-manifest") { insist(!options.refreshCurrentManifest, "Duplicate --refresh-current-manifest"); options.refreshCurrentManifest = true; }
     else if (["--plan", "--integration", "--expected-count"].includes(arg)) {
       const value = argv[++i];
       insist(value && /^\d+$/.test(value), `${arg} requires a positive number`);
@@ -497,45 +515,107 @@ export function parseArgs(argv) {
       else options[field] = value.padStart(2, "0");
     } else throw new Error(`Unknown argument ${arg}`);
   }
+  if (options.refreshCurrentManifest) {
+    insist(!options.plan && !options.all && !options.integration, "--refresh-current-manifest cannot be combined with a validation mode");
+    return options;
+  }
   insist([Boolean(options.plan), Boolean(options.all), Boolean(options.integration)].filter(Boolean).length === 1, "Choose exactly one: --plan NN, --all, --integration 29");
   insist(!options.integration || options.integration === "29", "Only --integration 29 is defined");
   insist(!options.plan || (+options.plan >= 1 && +options.plan <= 24), "Command shard plan must be 01-24");
   return options;
 }
-// Plugin prototype evidence stays separate from the 390 production app commands.
-export function checkPluginEvidence(root = process.cwd()) {
+// Resolve the feature-selected plugin command set from its actual build script,
+// then require one registered handler variant to match it exactly.
+function pluginRegistrationScan(root = process.cwd()) {
   const base = "src-tauri/crates/tauri-plugin-maru-diagram";
-  if (!existsSync(resolve(root, `${base}/Cargo.toml`))) return 0;
+  if (!existsSync(resolve(root, `${base}/Cargo.toml`))) return { base, registered: new Set(), expected: [] };
   const sources = new Sources(resolve(root));
-  const { code, functions } = sources.get(`${base}/src/lib.rs`);
-  const registered = new Set();
+  const { raw, code, functions } = sources.get(`${base}/src/lib.rs`);
+  const appCargo = sources.read("src-tauri/Cargo.toml");
+  const appDependency = appCargo.match(/tauri-plugin-maru-diagram\s*=\s*\{([^}]*)\}/s);
+  insist(appDependency, "Production app does not declare the diagram plugin dependency");
+  const featureList = appDependency[1].match(/features\s*=\s*\[([^\]]*)\]/);
+  const enabledFeatures = new Set(featureList ? [...featureList[1].matchAll(/"([a-z][a-z0-9-]*)"/g)].map((match) => match[1]) : []);
+  const handlerSets = [];
   for (const match of code.matchAll(/\bgenerate_handler!\s*\[/g)) {
+    const cfgStart = code.lastIndexOf("#[cfg", match.index);
+    insist(cfgStart >= 0, "Plugin handler lacks an explicit feature cfg; update the feature-aware scanner");
+    const cfgOpen = code.indexOf("(", cfgStart);
+    const cfgClose = closeAt(code, cfgOpen, "(", ")");
+    const cfg = raw.slice(cfgOpen + 1, cfgClose);
+    const cfgEnd = code.indexOf("]", cfgClose);
+    const statement = code.slice(cfgEnd + 1, match.index);
+    insist(/\blet\s+builder\s*=\s*builder\.invoke_handler\s*\(\s*tauri::$/.test(statement), "Plugin handler cfg is not attached to a recognized invoke_handler assignment");
+    if (!cfgFeatureEnabled(cfg, enabledFeatures)) continue;
     const start = code.indexOf("[", match.index);
     const end = closeAt(code, start, "[", "]");
+    const handlerSet = new Set();
     for (const item of splitTop(code.slice(start + 1, end))) {
       insist(/^commands::[a-z_]\w*$/.test(item), `Unparsed plugin registration ${item}; extend the plugin scanner before adding another handler form`);
       const name = item.slice("commands::".length);
       const definition = functions.find((entry) => entry.symbol === item);
       insist(definition?.async && /#\[tauri::command\]/.test(definition.prefix), `Plugin command ${name} has no async Tauri command definition`);
       insist(/spawn_blocking/.test(definition.body) && /\.await\b/.test(definition.body), `Plugin command ${name} lost its awaited worker boundary`);
-      registered.add(name);
+      handlerSet.add(name);
     }
+    handlerSets.push(handlerSet);
   }
-  insist(registered.size > 0, "Plugin has no registered commands; inspect its handlers before accepting isolation evidence");
   const buildSource = sources.read(`${base}/build.rs`);
-  const declaration = buildSource.match(/const COMMANDS:\s*&\[&str\]\s*=\s*&\[([^\]]*)\]/);
-  insist(declaration, "Plugin permission command list cannot be read; keep COMMANDS as an explicit string list");
-  const permissionNames = splitTop(declaration[1]).map((entry) => {
-    insist(/^"[a-z_]\w*"$/.test(entry), "Plugin permission command names must be explicit literals");
-    return JSON.parse(entry);
-  });
+  const commandList = buildSource.match(/let\s+mut\s+commands\s*=\s*vec!\s*\[([^\]]*)\]\s*;/);
+  insist(commandList, "Plugin build script has no readable initial permission command list");
+  const permissionNames = [...commandList[1].matchAll(/"([a-z_]\w*)"/g)].map((match) => match[1]);
+  let permissionBuildBody = buildSource.slice(commandList.index + commandList[0].length);
+  for (const match of permissionBuildBody.matchAll(/if\s+std::env::var_os\("CARGO_FEATURE_([A-Z0-9_]+)"\)\.is_some\(\)\s*\{([^{}]*)\}/g)) {
+    const feature = match[1].toLowerCase().replaceAll("_", "-");
+    const body = match[2];
+    const commands = [];
+    for (const push of body.matchAll(/commands\.push\("([a-z_]\w*)"\)\s*;/g)) commands.push(push[1]);
+    for (const extension of body.matchAll(/commands\.extend\(\s*\[([^\]]*)\]\s*\)\s*;/g)) {
+      commands.push(...[...extension[1].matchAll(/"([a-z_]\w*)"/g)].map((item) => item[1]));
+    }
+    const residual = body.replace(/commands\.push\("[a-z_]\w*"\)\s*;/g, "").replace(/commands\.extend\(\s*\[[^\]]*\]\s*\)\s*;/g, "").trim();
+    insist(!residual && commands.length > 0, `Unparsed plugin permission builder for feature ${feature}; update the production scanner`);
+    if (enabledFeatures.has(feature)) permissionNames.push(...commands);
+    permissionBuildBody = permissionBuildBody.replace(match[0], "");
+  }
+  insist(!/commands\.(?:push|extend)\s*\(/.test(permissionBuildBody), "Unparsed plugin permission command mutation; update the production scanner");
+  const registeredSet = handlerSets.find((set) => set.size === permissionNames.length && permissionNames.every((name) => set.has(name)));
+  insist(registeredSet, "No plugin handler matches the production app's enabled feature command list");
+  const registered = registeredSet;
+  insist(registered.size > 0, "Plugin has no registered commands; inspect its handlers before accepting isolation evidence");
   const expected = [...registered].sort();
   insist(permissionNames.length === registered.size && new Set(permissionNames).size === registered.size
     && permissionNames.every((name) => registered.has(name)), "Plugin permissions and registered commands differ; regenerate permissions for the exact handler list");
+  const capabilityDir = "src-tauri/capabilities";
+  const capabilities = readdirSync(resolve(root, capabilityDir)).filter((file) => file.endsWith(".json")).map((file) => JSON.parse(sources.read(`${capabilityDir}/${file}`)));
+  const scoped = capabilities.find((capability) => capability.identifier === "diagram-render");
+  const pluginPermissions = expected.map((name) => `maru-diagram:allow-${name.replaceAll("_", "-")}`);
+  insist(scoped && !Object.hasOwn(scoped, "windows") && JSON.stringify(scoped.webviews) === JSON.stringify(["main"])
+    && pluginPermissions.every((permission) => scoped.permissions.includes(permission)), "Diagram plugin commands must use the main-only capability (diagram-render, webviews=[main], no window-wide grants)");
+  insist(capabilities.filter((capability) => capability.identifier !== "diagram-render")
+    .every((capability) => !(capability.permissions ?? []).some((permission) => permission.startsWith("maru-diagram:allow-"))), "Diagram plugin permission escaped the main-only capability (Sites and other windows must remain denied)");
+  return { base, registered, expected, sources };
+}
+
+// The plugin is part of the production command surface, but its behavior is
+// evidenced by real MockRuntime invocations rather than app-handler shards.
+export function checkPluginEvidence(root = process.cwd()) {
+  const { registered, expected } = pluginRegistrationScan(root);
+  if (!registered.size) return 0;
+  const sources = new Sources(resolve(root));
+  const aclEvidence = JSON.parse(sources.read("docs/performance/diagram-engine-e3/plugin-acl-mock-ipc.json"));
+  insist(aclEvidence.schemaVersion === 1 && /compiled generate_context/.test(aclEvidence.scope ?? "")
+    && aclEvidence.mainWindowLabel === "main" && aclEvidence.deniedWindowLabel === "sites"
+    && aclEvidence.deniedChildWebviewLabel === "sites-child", "Plugin ACL evidence must come from the app MockRuntime and its compiled capabilities");
+  for (const [field, label] of [["mainHandlerReached", "main allow"], ["sitesDeniedByAcl", "Sites window deny"], ["sitesChildDeniedByAcl", "Sites child-webview deny"]]) {
+    insist(Array.isArray(aclEvidence[field]) && JSON.stringify([...aclEvidence[field]].sort()) === JSON.stringify(expected), `Plugin ACL evidence drifted for ${label}; rerun the real app capability MockRuntime test`);
+  }
+  const invokeEvidence = JSON.parse(sources.read("docs/performance/diagram-engine-e3/plugin-command-mock-ipc.json"));
+  insist(invokeEvidence.schemaVersion === 1 && /MockRuntime/.test(invokeEvidence.scope ?? "") && invokeEvidence.windowLabel === "main", "Plugin evidence has no scoped main-window MockRuntime invoke contract; run the production plugin evidence test");
+  insist(invokeEvidence.pluginCommandCount === registered.size && Array.isArray(invokeEvidence.pluginCommandsObserved)
+    && JSON.stringify([...invokeEvidence.pluginCommandsObserved].sort()) === JSON.stringify(expected), "Plugin command evidence drift; rerun the registered invoke fixture for the current production command list");
   const evidence = JSON.parse(sources.read("docs/performance/diagram-engine-e3/png-mock-ipc-transport.json"));
-  insist(evidence.schemaVersion === 1 && /MockRuntime/.test(evidence.scope ?? ""), "Plugin evidence has no scoped real-invoke contract; rerun the MockRuntime evidence test");
-  insist(evidence.pluginCommandCount === registered.size && Array.isArray(evidence.pluginCommandsObserved)
-    && JSON.stringify([...evidence.pluginCommandsObserved].sort()) === JSON.stringify(expected), "Plugin command evidence drift; rerun the registered invoke fixture for the current command list");
+  insist(evidence.schemaVersion === 1 && /MockRuntime/.test(evidence.scope ?? ""), "PNG evidence has no scoped real-invoke contract; rerun the MockRuntime evidence test");
   insist(evidence.differentWorkerThread === true && evidence.singleInFlight === true, "Plugin worker or single-flight behavior failed; repair it and rerun the invoke fixture");
   insist(Array.isArray(evidence.cases) && evidence.cases.length === 2
     && ["typical", "1000"].every((name) => evidence.cases.some((entry) => entry.name === name)), "Plugin evidence is missing a measured scene; invoke typical and 1000-node sources");
@@ -566,11 +646,124 @@ export function checkPluginEvidence(root = process.cwd()) {
   return registered.size;
 }
 
+function currentRegistrationSource(root = process.cwd()) {
+  const sources = new Sources(resolve(root));
+  requireProductionInvokeHandlerGuard(sources);
+  requireProductionChannelInterceptorGuard(sources);
+  const app = registrations(sources).filter((registration) => !registration.native);
+  const plugin = pluginRegistrationScan(root);
+  const sourcePaths = new Set([
+    LIB,
+    "src-tauri/Cargo.toml",
+    "src-tauri/tauri.conf.json",
+    "src-tauri/crates/tauri-plugin-maru-diagram/Cargo.toml",
+    "src-tauri/crates/tauri-plugin-maru-diagram/build.rs",
+    "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs",
+    "src-tauri/crates/tauri-plugin-maru-diagram/permissions/default.toml",
+    "scripts/check-command-isolation.mjs",
+  ]);
+  for (const file of readdirSync(resolve(root, "src-tauri/capabilities"))) {
+    if (file.endsWith(".json")) sourcePaths.add(`src-tauri/capabilities/${file}`);
+  }
+  for (const registration of app) sourcePaths.add(registration.fn.path);
+  const commands = [
+    ...app.map((registration) => ({
+      surface: "app",
+      name: registration.name,
+      registrationPath: registration.canonical,
+      sourcePath: registration.fn.path,
+    })),
+    ...plugin.expected.map((name) => ({
+      surface: "plugin:maru-diagram",
+      name,
+      registrationPath: `${plugin.base}/src/lib.rs::commands::${name}`,
+      sourcePath: `${plugin.base}/src/lib.rs`,
+    })),
+  ].sort((a, b) => {
+    const left = `${a.surface}:${a.name}`, right = `${b.surface}:${b.name}`;
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
+  const names = new Set();
+  for (const command of commands) {
+    const key = `${command.surface}:${command.name}`;
+    insist(!names.has(key), `Duplicate current production registration ${key}`);
+    names.add(key);
+  }
+  const sourceFiles = [...sourcePaths].sort().map((path) => ({
+    path,
+    sha256: createHash("sha256").update(readFileSync(resolve(root, path))).digest("hex"),
+  }));
+  return {
+    schemaVersion: 1,
+    kind: "maru.current-production-registrations.v1",
+    evidenceClass: "SOURCE-SCAN only; this manifest is not behavioral evidence",
+    commands,
+    counts: {
+      app: commands.filter((command) => command.surface === "app").length,
+      plugin: commands.filter((command) => command.surface === "plugin:maru-diagram").length,
+      total: commands.length,
+    },
+    sourceFiles,
+  };
+}
+
+function verifyManifestSourceCommit(manifest) {
+  // sourceCommit records generation provenance; exact current file hashes are
+  // compared below so squashed PR history does not invalidate the manifest.
+  insist(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(manifest.sourceCommit ?? ""), "Current registration manifest has no full sourceCommit hash");
+  insist(Array.isArray(manifest.sourceFiles) && manifest.sourceFiles.every((file) => typeof file.path === "string" && /^[a-f0-9]{64}$/.test(file.sha256 ?? "")), "Current registration manifest has invalid source file hashes");
+}
+
+export function createCurrentRegistrationManifest(root = process.cwd(), sourceCommit) {
+  insist(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sourceCommit ?? ""), "A full committed sourceCommit hash is required");
+  return { ...currentRegistrationSource(root), sourceCommit };
+}
+
+export function filterHistoricalRegistrations(rows, owners, activeNames) {
+  const active = activeNames instanceof Set ? activeNames : new Set(activeNames);
+  const missing = [...active].filter((name) => !rows.has(name) || !owners.has(name));
+  insist(!missing.length, `Current app command lacks historical Phase 08 evidence/ownership: ${missing.join(", ")}`);
+  const archivalNames = [...rows.keys()].filter((name) => !active.has(name)).sort();
+  return {
+    rows: new Map([...rows].filter(([name]) => active.has(name))),
+    owners: new Map([...owners].filter(([name]) => active.has(name))),
+    archivalNames,
+  };
+}
+
+export function refreshCurrentRegistrationManifest(root = process.cwd()) {
+  const absoluteRoot = resolve(root);
+  const scanned = currentRegistrationSource(absoluteRoot);
+  const paths = scanned.sourceFiles.map((file) => file.path);
+  for (const path of paths) {
+    execFileSync("git", ["ls-files", "--error-unmatch", "--", path], { cwd: absoluteRoot, stdio: "ignore" });
+  }
+  const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=all", "--", ...paths], { cwd: absoluteRoot, encoding: "utf8" }).trim();
+  insist(!dirty, "Current registration manifest must be generated from clean tracked source files");
+  const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: absoluteRoot, encoding: "utf8" }).trim();
+  const manifest = { ...scanned, sourceCommit };
+  const output = resolve(absoluteRoot, CURRENT_REGISTRATIONS);
+  writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifest;
+}
+
+function readCurrentRegistrationManifest(root, sources) {
+  const manifest = JSON.parse(sources.read(CURRENT_REGISTRATIONS));
+  insist(manifest.schemaVersion === 1 && manifest.kind === "maru.current-production-registrations.v1"
+    && manifest.evidenceClass === "SOURCE-SCAN only; this manifest is not behavioral evidence", "Current production registration manifest must remain explicitly source-scan evidence");
+  verifyManifestSourceCommit(manifest);
+  const actual = createCurrentRegistrationManifest(root, manifest.sourceCommit);
+  insist(JSON.stringify(manifest.commands) === JSON.stringify(actual.commands)
+    && JSON.stringify(manifest.counts) === JSON.stringify(actual.counts)
+    && JSON.stringify(manifest.sourceFiles) === JSON.stringify(actual.sourceFiles), "Current production registration manifest is stale; run --refresh-current-manifest from a clean committed source head");
+  return manifest;
+}
+
 export function checkIsolation(options, root = process.cwd()) {
   const sources = new Sources(resolve(root));
   requireProductionInvokeHandlerGuard(sources);
   requireProductionChannelInterceptorGuard(sources);
-  const rows = inventory(sources), owners = ownership(sources);
+  let rows = inventory(sources), owners = ownership(sources);
   const readJson = (path) => JSON.parse(sources.read(path));
   const changesPath = "docs/performance/phase08-registration-changes.json";
   if (existsSync(resolve(root, changesPath))) {
@@ -581,13 +774,12 @@ export function checkIsolation(options, root = process.cwd()) {
       rows.set(addition.name, addition);
     }
   }
-  insist(rows.size === options.expectedCount, `Inventory count ${rows.size} differs from expected ${options.expectedCount}`);
-  for (const [name, row] of rows) insist(owners.get(name)?.module === row.module, `Missing/mismatched inventory owner ${name}`);
-  insist(owners.size === rows.size, "Ownership/inventory count mismatch");
+  const historicalRowsCount = rows.size;
+  const historicalOwners = owners;
   const nativePath = "docs/performance/phase08-native-allowlist.json";
   const native = existsSync(resolve(root, nativePath)) ? readJson(nativePath).commands : [];
   insist(Array.isArray(native), "Native allowlist commands must be an array");
-  const registered = new Map(), seenNative = new Set();
+  const liveApp = new Map(), seenNative = new Set();
   for (const reg of registrations(sources)) {
     if (reg.native) {
       insist(sources.nativeDefinition(reg.fn), `Native command definition is not feature-gated: ${reg.name}`);
@@ -595,20 +787,45 @@ export function checkIsolation(options, root = process.cwd()) {
       insist(!rows.has(reg.name) && !seenNative.has(reg.name) && entry?.feature === "native-e2e" && entry.registrationPath === reg.canonical && nonempty(entry.reason), `Native feature command missing separate allowlist: ${reg.name}`);
       seenNative.add(reg.name);
     } else {
-      insist(!registered.has(reg.name), `Duplicate production registration ${reg.name}`);
+      insist(!liveApp.has(reg.name), `Duplicate production registration ${reg.name}`);
       insist(rows.has(reg.name), `New production registration needs explicit reconciliation: ${reg.name}`);
-      registered.set(reg.name, reg);
+      liveApp.set(reg.name, reg);
     }
   }
   insist(native.length === seenNative.size, "Stale/duplicate native command allowlist");
-  insist(registered.size === rows.size, `Current production registration count ${registered.size} differs from inventory ${rows.size}`);
+  const manifestPath = resolve(root, CURRENT_REGISTRATIONS);
+  let manifest = null;
+  let archivalNames = [];
+  const useCurrentManifest = Boolean(options.all || options.integration || options.plan);
+  if (useCurrentManifest && existsSync(manifestPath)) {
+    manifest = readCurrentRegistrationManifest(root, sources);
+    const activeNames = new Set(manifest.commands.filter((command) => command.surface === "app").map((command) => command.name));
+    insist(activeNames.size === liveApp.size && [...liveApp.keys()].every((name) => activeNames.has(name)), "Current manifest app command set differs from live app registrations");
+    ({ rows, owners, archivalNames } = filterHistoricalRegistrations(rows, historicalOwners, activeNames));
+  } else if (useCurrentManifest) {
+    const stale = [...rows.keys()].filter((name) => !liveApp.has(name));
+    insist(!stale.length, `Current registration manifest is required to distinguish ${stale.length} historical inactive app rows; run --refresh-current-manifest`);
+  }
+  if (!useCurrentManifest) insist(historicalRowsCount === options.expectedCount, `Inventory count ${historicalRowsCount} differs from expected ${options.expectedCount}`);
+  else if (!options.all) {
+    const currentCount = manifest ? manifest.commands.length : liveApp.size;
+    insist(currentCount === options.expectedCount, `Current production registration count ${currentCount} differs from expected ${options.expectedCount}`);
+  }
+  for (const [name, row] of rows) insist(owners.get(name)?.module === row.module, `Missing/mismatched inventory owner ${name}`);
+  insist(owners.size === rows.size, "Ownership/inventory count mismatch");
+  if (manifest) insist(liveApp.size === rows.size, `Current app registration count ${liveApp.size} differs from active Phase 08 evidence ${rows.size}`);
+  const registered = new Map([...liveApp].filter(([name]) => rows.has(name)));
   const files = readdirSync(resolve(root, "docs/performance")).filter((file) => /^phase08-\d\d\.json$/.test(file));
   const shards = files.map((file) => {
     const shard = readJson(`docs/performance/${file}`);
     insist(shard.plan === `08-${file.slice(8, 10)}` && Array.isArray(shard.commands), `Invalid shard identity/schema: ${file}`);
+    if (manifest) {
+      const active = new Set(rows.keys());
+      return { ...shard, commands: shard.commands.filter((row) => active.has(row.name)) };
+    }
     return shard;
   });
-  const state = { sources, rows, owners, registered, shards, all: Boolean(options.all) };
+  const state = { sources, rows, owners, registered, shards, all: Boolean(options.all), historicalRowsCount, archivalNames };
   if (options.all || options.integration) {
     state.overlay = readJson("docs/performance/phase08-29-integration.json");
     validateOverlay(state.overlay, state);
@@ -627,12 +844,21 @@ export function checkIsolation(options, root = process.cwd()) {
   }
   if (options.all) insist(seen.size === rows.size, `Incomplete command closure: ${seen.size}/${rows.size}`);
   const plugin = options.all ? checkPluginEvidence(root) : 0;
-  return { plugin, commands: seen.size, production: registered.size, native: seenNative.size, integration: Boolean(state.overlay), scope: options.plan ? `08-${options.plan}` : options.integration ? "08-29 integration" : "all" };
+  const production = registered.size + plugin;
+  if (options.all) insist(production === options.expectedCount, `App and plugin production registration count ${production} differs from expected ${options.expectedCount}`);
+  return { plugin, commands: seen.size, production, appProduction: registered.size, archivalRows: archivalNames.length, archivalNames, native: seenNative.size, integration: Boolean(state.overlay), scope: options.plan ? `08-${options.plan}` : options.integration ? "08-29 integration" : "all" };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const result = checkIsolation(parseArgs(process.argv.slice(2)));
-    console.log(`command-isolation: PASS ${result.scope}; ${result.commands} command evidence rows, ${result.production} production registrations, ${result.native} native-only commands, ${result.plugin} separately evidenced plugin commands. Source scans are drift alarms; recorded behavioral evidence is not re-executed by this gate.`);
+    const options = parseArgs(process.argv.slice(2));
+    if (options.refreshCurrentManifest) {
+      const manifest = refreshCurrentRegistrationManifest();
+      console.log(`command-isolation: wrote ${CURRENT_REGISTRATIONS}; sourceCommit ${manifest.sourceCommit}; ${manifest.counts.app} app + ${manifest.counts.plugin} plugin commands (${manifest.counts.total} total), SOURCE-SCAN only`);
+    } else {
+      const result = checkIsolation(options);
+      const inactive = result.archivalNames.length ? ` (${result.archivalNames.join(", ")})` : "";
+      console.log(`command-isolation: PASS ${result.scope}; ${result.commands} active app evidence rows, ${result.appProduction} app registrations plus ${result.plugin} production plugin commands (${result.production} total); ${result.archivalRows} historical app rows inactive${inactive}; ${result.native} native-only commands. Source scans are drift alarms; recorded behavioral evidence is not re-executed by this gate.`);
+    }
   } catch (error) {
     console.error(`command-isolation: FAIL ${error.message}`);
     process.exitCode = 1;

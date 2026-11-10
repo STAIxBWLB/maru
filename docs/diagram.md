@@ -255,7 +255,11 @@ untouched members survives. Preview stays synchronous; applying a structural
 edit runs the resulting spec through the pinned engine before committing.
 An engine refusal, unavailable engine or document change during validation
 leaves both the document and undo history untouched. Text write-through and
-explicit detach remain local operations.
+explicit detach remain local operations. When a selected member belongs to an
+existing engine-backed dataset, the inspector also requests SDK diagnostics
+asynchronously. This is read-only feedback: it does not delay loading the
+document, rewrite the stored spec or add history. Results from a previous
+dataset or spec are ignored; Floorplan keeps its local-only validation path.
 
 **Detach and delete.** "Detach to freeform..." drops the dataset and the
 member markers after a confirm listing what is lost (types, order,
@@ -414,35 +418,49 @@ semantic dataset warns that its semantics are lost
 (`diagram.mermaid.semanticLoss`). Archify JSON (`<name>.architecture.json`,
 `.workflow.json`, `.sequence.json`, `.dataflow.json`, `.lifecycle.json`)
 imports a projected canvas (members and containers) and exports the spec
-verbatim. Floorplan JSON (`floorplan-json`, see "Floorplan") does the same
-for `floorplan/architecture@1` maps.
+verbatim. Floorplan JSON (`floorplan-json`, see "Floorplan") likewise imports a
+projected canvas and exports the spec for `floorplan/architecture@1` maps.
+A dangling relation endpoint remains in the stored source; projection draws
+no edge until both endpoints exist.
 
 ### Verified static semantic export (T1)
 
-The `archify-svg` and `archify-png` choices render one selected stored semantic
-spec through the pinned bundled Archify engine. Architecture, workflow,
-sequence, dataflow and lifecycle are supported. Canvas annotations, selection,
-zoom and editor state are not renderer inputs. Missing engines and rejected
-specs are errors; these choices never fall back to the canvas renderer.
+The `archify-svg` and `archify-png` codec identifiers remain compatible with
+existing selections, but their product renderer is `maru-diagram-engine` through
+`engine.ts`. Architecture, workflow, sequence, dataflow and lifecycle use the
+selected stored semantic spec. Canvas annotations, selection, zoom and editor
+state are not renderer inputs. Floorplan keeps its local path. Missing engines
+and rejected specs are errors; semantic exports never fall back to canvas.
 
-The native worker validates and renders into private staging, checks the engine
-HTML artifact, and returns bytes plus a versioned receipt. The frontend parses
-that HTML without mounting it, requires exactly one SVG, inlines the supported
-static CSS, and sanitizes SVG with DOMPurify. Scripts, event handlers, external
-URLs and `foreignObject` are removed. Light/dark conversion is explicit; PNG
-uses the existing SVG-to-Canvas rasterizer at pixel ratio 1. Interactive engine
-HTML remains gated for T2 and is not an export choice here.
+The native worker derives validation, layout, SVG and PNG from the source spec
+and returns a v1 engine receipt with independently checked artifact gates.
+Exported SVG uses outlined glyphs; PNG uses the bundled native font faces and
+rasterizer. WASM text-mode SVG remains a separate preview path. Any SVG inserted
+in the app DOM passes through its DOMPurify-backed helper. Theme and PNG pixel
+ratio are explicit inputs; an interactive viewer is a separate artifact.
 
-Export shows the spec hash, engine pin, final artifact hash and separate schema,
-artifact, browser-conversion, visual-review and saved-byte-readback gates.
-Conversion success does not mark visual review as passed. Only a native save
-acknowledgement after byte comparison marks readback passed. The save bridge
-atomically replaces the selected file under its existing lease, preserving the
-previous file on a failed replacement. The final converted-file receipt is shown
-for this operation; no sibling receipt is written next to that export copy.
-When document context is supplied, the backend engine HTML and its own receipt
-are retained in the Renders store below. SVG/PNG remain frontend-converted
-export copies and are not stored there.
+`engineOutputSha256` binds each successful request's own returned SVG source.
+For an SVG export this is the outlined SVG, also covered by the final output
+hash. For PNG it is the text-mode SVG actually supplied to the rasterizer;
+`outputSha256` binds the resulting PNG bytes. Different themes and text modes
+produce different SVG hashes, so a PNG receipt never borrows the separate
+outlined SVG export's hash. The native probe hashes both returned sources
+independently and checks each saved file against its final artifact hash.
+
+Export shows the spec hash, engine version, output hashes and separate schema,
+artifact, browser, visual-review and saved-byte-readback gates. A successful
+artifact does not imply manual visual review. Native save acknowledges a byte
+comparison before the exported copy's readback becomes passed. The existing
+file lease and atomic replacement preserve the old file on a failed save; no
+sibling receipt is written beside that copy.
+
+When document context is supplied, the render-and-store operation retains its
+engine artifact and receipt independently in Renders. A render already started
+there may complete its immutable history entry for the captured document
+revision even if the later export-copy operation is canceled or becomes stale;
+it never relabels that entry as a newer revision. The frontend stale/cancel gate
+still prevents the final export-copy save. Legacy Archify HTML receipts remain
+readable as legacy entries and are not relabeled as engine-produced artifacts.
 
 A changed document, workspace or closed dialog invalidates an in-flight render
 before save. Once a native file copy has begun it completes atomically; the UI
@@ -679,9 +697,9 @@ receipt with `engine: { id, version, revision }`, input hash and scoped gates.
 The architecture slice labels its schema scope; artifact/browser/visual gates
 remain not-run. Optional output/engine-output hashes, conversion, readback,
 document identity/name/revision, renderedAt, diagramType and datasetId preserve
-#528/#534 fields. The legacy parser accepts Archify `enginePin.name` (and
-`engine.name`) and normalizes it to `engine.id`; it does not relabel an old
-Archify validation as Maru validation. Product receipt migration is deferred.
+#528/#534 fields. E4 product Renders keeps legacy Archify `enginePin.name`
+receipts readable alongside `engine.id`; it does not relabel old history as a
+Maru validation receipt. See E4 product integration below.
 
 Rust is the type source. `ts-rs` generates the checked-in engine declarations;
 `node scripts/diagram-engine-e0.mjs types` fails CI on drift. Use its `--write`
@@ -2319,12 +2337,16 @@ cannot certify it. API v1 receipts keep the existing schema and use
 SVG hash, requested output hash, conversion options and independent artifact
 gate status. Browser rendering, visual review and saved-file readback remain
 `not-run` unless their own checks actually run. Legacy Archify receipts retain
-their identity when parsed; fixtures cover old and new receipt shapes.
+their identity when parsed, including pins with additional vendor provenance
+fields. The legacy reader extracts name, version and revision without rewriting
+the stored receipt; modern input validation remains strict. Fixtures cover old
+and new receipt shapes.
 
-The frontend entrypoints remain behind `VITE_ENGINE_GEOMETRY_TEST=1`. They
+The separate test adapters remain behind `VITE_ENGINE_GEOMETRY_TEST=1`. They
 verify the returned receipt and hashes before accepting bytes, and provide a
 separate DOMPurify-backed SVG string for app DOM insertion. They do not alter
-the product export, render store or canvas. The direct sanitizer supports the
+the canvas. Product export and render history use `engine.ts` as described above.
+The direct sanitizer supports the
 PNG geometry limits without weakening the legacy Archify SVG extraction path.
 
 Secondary captions now use the pinned renderer's `t-dim` token (#475569 dark,
@@ -2333,16 +2355,17 @@ referenced by `render-sequence.mjs:450`, `render-dataflow.mjs:466`,
 `render-lifecycle.mjs:843` and `workflow-compiler.mjs:4660`. Writer and artifact-gate reference colors derive these roles
 independently; node sublabels and semantic accents retain their own tokens.
 
-The PNG command is registered only through the existing `native-e2e` plugin
-integration. Production remains at 390 application commands; the native-e2e
-release guards remain in force. The separate plugin evidence JSON is emitted
-by successful registered MockRuntime invokes of `validate`, `render_png` and
-the outlined `render_svg`. The isolation scanner independently enumerates the
-plugin handler and permission lists and requires every registered command to be
-measured, along with worker execution, the shared render permit, single-flight
-behavior and real scene payload/timing samples. It does not merge plugin rows
-into the 390-command app inventory or re-execute behavioral tests during a
-source scan.
+The PNG, outlined SVG and render-store commands are production-registered by
+`tauri-plugin-maru-diagram`, with a capability for the main webview only.
+Production has 392 commands: 385 application handlers and seven plugin
+commands. Separate real MockRuntime evidence records every plugin handler
+(`validate`, `render_png`, the outlined `render_svg` and the four render-store
+commands) and main-webview access versus Sites-window and same-window
+Sites-child denial, along with worker execution, the shared render permit,
+single-flight behavior and real scene payload/timing samples. The current
+registration manifest and isolation scanner check the combined inventory;
+historical command evidence remains explicitly archival. Source scans do not
+re-execute behavioral tests. The native-e2e release guards remain in force.
 
 The hosted native-e2e bridge additionally invokes PNG once for the typical
 2-component architecture and once for the 1,000-component fixture, logging
@@ -2426,3 +2449,47 @@ The CLI creates the output exclusively and refuses existing file/symlink/hardlin
 targets, so it cannot overwrite either input through an alias. Open the result
 directly from disk with `file://`. This viewer is not wired to
 File > Renders, export choices, or a Tauri command; that remains a later stage.
+
+## E4 product integration
+
+The product engine is an integration over the existing v9 semantic datasets,
+not a new document loader. Existing v7, v8 and v9 files continue through the
+permissive migration path: semantic specs and unrecognized dataset payload
+fields remain stored as source JSON. An engine refusal is shown when that
+dataset is inspected or edited; it is not a reason to discard or rewrite an
+existing document on open.
+
+The property inspector's SDK validation runs asynchronously for the active
+engine-backed dataset. It displays SDK diagnostic codes, paths, causes and
+fixes without blocking the panel or creating a document/history change. A
+result is ignored when its dataset or source spec is no longer active.
+Floorplan retains local validation. Structural semantic edits still pass the
+asynchronous engine gate and a current-document check before one undoable
+snapshot is committed; refusal leaves both source and history unchanged.
+
+The semantic SVG/PNG export choices (`archify-svg` and `archify-png`) derive a
+canonical source spec from the selected semantic dataset and send it to the
+native `maru-diagram-engine` host. They do not export canvas projection or
+interactive canvas state. SVG requests outlined text; PNG is produced by the
+native engine path, not the browser Canvas exporter. The separate WebAssembly
+facade remains available for UI-side validation/layout and isolated preview
+tools; it is not a fallback for these native exports.
+
+`pnpm engine:assets` builds the lazy validation, geometry/layout and SVG-preview
+WebAssembly slices used by the frontend; generated bindings and WASM files live
+under ignored `src/lib/diagram/__generated__/` paths and are not checked in.
+`pnpm dev`, `pnpm build:frontend` and `pnpm test` run this asset step first.
+The source Tauri CSP permits `'wasm-unsafe-eval'` for WebAssembly compilation,
+but does not permit ordinary `'unsafe-eval'` or `blob:` script sources. A
+compiled-native-app CSP parity proof remains a separate native gate; the source
+configuration alone is not evidence of the compiled policy.
+
+Before a selected file save proceeds, the frontend verifies the returned
+engine receipt and artifact bytes. The native host separately checks the
+source hash, output hashes and engine receipt before it retains a render.
+Receipts bind the input-spec hash, engine identity, requested format/theme/scale
+and individual gate statuses. Stored render history continues to accept legacy Archify
+`enginePin.name` receipts and normalizes them for display without rebranding
+their engine identity. Production engine IPC is exposed through the
+`diagram-render` capability for the `main` webview; the default-off
+`native-e2e` fixture bridge is separate.

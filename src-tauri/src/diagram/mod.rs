@@ -4,6 +4,7 @@
 //! rejects path traversal (`..`, `/`, `\\`, NUL) and leading-dot entries, mirroring
 //! the safety rules in `studio/mod.rs` and the workspace write-allow guard.
 //!
+pub mod engine_host;
 pub mod renders;
 
 use crate::atomic_file::{

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { pinnedEngineHost } from "./__fixtures__/engineHost";
 import {
   CURRENT_SPEC_PROMPT_MAX_BYTES,
   buildGenerationPrompt,
@@ -149,6 +150,24 @@ describe("createGenerationJob", () => {
 // ---------------------------------------------------------------------------
 
 describe("runGenerationJob", () => {
+  it("generates a semantic dataset when node and edge namespaces share a raw id", async () => {
+    const spec = structuredClone(SEMANTIC_FIXTURES.architecture);
+    const components = spec.components as Record<string, unknown>[];
+    components[0]!.id = "a";
+    components[1]!.id = "b";
+    spec.boundaries = [];
+    spec.connections = [{ id: "a", from: "a", to: "b", label: "Call" }];
+    const host = hostOf({
+      runAgent: async () => JSON.stringify(spec),
+      validateCandidate: pinnedEngineHost.validateCandidate,
+    });
+
+    const job = await runGenerationJob(jobOf(), host);
+    expect(job.state).toBe("ready");
+    expect(job.candidate?.spec).toEqual(spec);
+    expect(job.candidate?.idMap).toEqual({ a: "a", b: "b", db: "db" });
+  });
+
   it("runs the full pipeline to ready and builds the proposal", async () => {
     const host = hostOf();
     const updates: string[] = [];
@@ -176,17 +195,51 @@ describe("runGenerationJob", () => {
     expect(job.error).toBeUndefined();
   });
 
-  it("fails on the structural pre-check and never calls the engine", async () => {
-    const validateCandidate = vi.fn();
-    const host = hostOf({ runAgent: async () => "{}", validateCandidate });
+  it("delegates malformed candidate admission to the engine", async () => {
+    const validateCandidate = vi.fn(async () => ({ ok: false, errors: ["missing components"], warnings: [] }));
+    const malformed = { schema_version: 1, diagram_type: "architecture", meta: { title: "x", output: "x.html" }, components: [] };
+    const host = hostOf({ runAgent: async () => JSON.stringify(malformed), validateCandidate });
     const job = await runGenerationJob(jobOf(), host);
 
     expect(job.state).toBe("failed");
-    expect(job.error).toBe("candidate failed the structural pre-check");
-    expect(job.diagnostics.length).toBeGreaterThan(0);
-    expect(validateCandidate).not.toHaveBeenCalled();
-    expect(job.engineReceipt).toBeUndefined();
+    expect(job.error).toBe("missing components");
+    expect(validateCandidate).toHaveBeenCalledTimes(1);
+    expect(job.engineReceipt?.errors).toEqual(["missing components"]);
     expect(job.candidate).toBeUndefined();
+  });
+
+  it("stores the engine identity and full receipt from accepted SDK validation", async () => {
+    const engineReceipt = {
+      schemaVersion: 1,
+      inputSpecSha256: "sha-1",
+      engine: { id: "maru-diagram-engine", version: "0.2.0", revision: "sdk-revision" },
+      gates: {
+        schema: { status: "passed", scope: "architecture-document-validity" },
+        artifact: { status: "passed", scope: "geometry-layout" },
+        browser: { status: "not-run", scope: "non-browser-rasterization" },
+        visualReview: { status: "not-run", scope: "manual" },
+      },
+      readback: { status: "not-run", scope: "saved-file-byte-comparison" },
+    };
+    const engineDiagnostic = {
+      code: "architecture/geometry-route-quality-notice",
+      path: "/connections/0",
+      rule: "geometry-v1/route-quality",
+      message: "Route quality notice.",
+      fix: "Review the route.",
+    };
+    const accepted = {
+      ok: true,
+      errors: [],
+      warnings: ["Route quality notice."],
+      candidateSha256: "sha-1",
+      diagnostics: [engineDiagnostic],
+      receipt: engineReceipt,
+    };
+    const job = await runGenerationJob(jobOf(), hostOf({ validateCandidate: async () => accepted }));
+    expect(job.state).toBe("ready");
+    expect(job.engineReceipt).toEqual(accepted);
+    expect(job.candidate?.engine).toEqual({ name: "maru-diagram-engine", version: "0.2.0" });
   });
 
   it("fails when the agent asks for the wrong diagram type", async () => {
@@ -290,15 +343,16 @@ describe("P2 generation", () => {
     }
   });
 
-  it("fails semantic validation before the engine runs", async () => {
+  it("lets the engine reject semantic reference errors", async () => {
     const spec = structuredClone(SEMANTIC_FIXTURES.sequence);
     (spec.messages as Record<string, unknown>[])[0]!.to = "web";
-    const host = fixtureHost(spec);
+    const validateCandidate = vi.fn(async () => ({ ok: false, errors: ["Message endpoint is invalid."], warnings: [] }));
+    const host = hostOf({ runAgent: async () => JSON.stringify(spec), validateCandidate });
     const job = await runGenerationJob(jobOf({ diagramType: "sequence" }), host);
     expect(job.state).toBe("failed");
-    expect(job.error).toBe("candidate failed semantic validation");
-    expect(job.diagnostics.map((d) => d.key)).toContain("diagram.semantic.selfMessage");
-    expect(host.validateCandidate).not.toHaveBeenCalled();
+    expect(job.error).toBe("Message endpoint is invalid.");
+    expect(validateCandidate).toHaveBeenCalledTimes(1);
+    expect(job.engineReceipt?.errors).toEqual(["Message endpoint is invalid."]);
   });
 
   it("regenerates a target dataset: current spec in the prompt, dataset id reused", async () => {

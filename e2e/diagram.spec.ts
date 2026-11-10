@@ -1,6 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { pinnedEngineHost } from "./helpers/diagramEngineHost";
 import { SEMANTIC_FIXTURES } from "../src/lib/diagram/__fixtures__/semantic";
 import type { SemanticDiagramType } from "../src/lib/diagram/reportTypes";
 
@@ -242,22 +241,7 @@ test("rejects a Unicode output segment exceeding the pinned UTF-8 budget in the 
 // Semantic types and semantic editing (issue #433 P2)
 // ---------------------------------------------------------------------------
 
-async function installSemanticValidationHost(page: Page) {
-  // Browser-only replacement of the generation host factory, not a production
-  // bypass. Structural apply uses the same host contract and pinned CLI.
-  await page.exposeFunction("diagramValidateFixture", pinnedEngineHost.validateCandidate);
-  await page.route("**/src/lib/diagram/generationHost.ts*", (route) => route.fulfill({
-    contentType: "application/javascript",
-    body: `export function createGenerationHost() { return {
-      runAgent: async () => { throw new Error("Diagram generation is only available inside the Tauri shell."); },
-      validateCandidate: (type, spec) => window.diagramValidateFixture(type, spec),
-      cancel() {}
-    }; }`,
-  }));
-}
-
 async function importSemanticSpec(page: Page, type: SemanticDiagramType) {
-  await installSemanticValidationHost(page);
   await page.goto("/");
   await page.getByRole("button", { name: "다이어그램", exact: true }).click();
   await page.getByRole("tab", { name: "파일" }).click();
@@ -273,12 +257,95 @@ async function importSemanticSpec(page: Page, type: SemanticDiagramType) {
   await expect(dialog).toBeHidden();
 }
 
+async function runBrowserSdkEdit(
+  page: Page,
+  type: "architecture" | "lifecycle",
+  spec: Record<string, unknown>,
+  field: string,
+  index: number,
+  key: string,
+  value: unknown,
+) {
+  return page.evaluate(async (input) => {
+    const load = (specifier: string) => import(specifier);
+    const [codec, semantic, state, types, edit, apply, actions, engine] = await Promise.all([
+      load("/src/lib/diagram/archifyCodec.ts"),
+      load("/src/lib/diagram/semantic.ts"),
+      load("/src/lib/diagram/state.ts"),
+      load("/src/lib/diagram/types.ts"),
+      load("/src/lib/diagram/semanticEdit.ts"),
+      load("/src/lib/diagram/semanticApply.ts"),
+      load("/src/lib/diagram/actions.ts"),
+      load("/src/lib/diagram/engine.ts"),
+    ]);
+    const { dataset } = codec.archifySpecToDataset(input.type, input.spec, { id: `ds-${input.type}` });
+    const doc = semantic.projectSemanticDocument(dataset).doc;
+    const store = state.createDiagramStore({ doc, ephemeral: types.createInitialEphemeral() });
+    const before = store.getState();
+    let engineCalls = 0;
+    const result = await apply.applyValidatedSemanticEdit(
+      store,
+      dataset.id,
+      edit.setSpecField(input.field, input.index, input.key, input.value),
+      {
+        validateCandidate: async (family: string, candidate: unknown) => {
+          engineCalls += 1;
+          return engine.validateEngineCandidate(family, candidate);
+        },
+      },
+    );
+    const refusedState = store.getState();
+    store.setState(actions.undo());
+    const afterUndo = store.getState();
+    return {
+      result,
+      engineCalls,
+      refusedDocUnchanged: refusedState.doc === before.doc,
+      historyPastAfterRefusal: refusedState.ephemeral.history.past.length,
+      undoDocUnchanged: afterUndo.doc === before.doc,
+    };
+  }, { type, spec, field, index, key, value });
+}
+
 async function selectEdge(page: Page, edgeId: string) {
   // A bracket's bounding-box centre is empty canvas, so dispatch on the edge.
   await page.locator(`[data-edge-id="${edgeId}"]`).dispatchEvent("pointerdown", { button: 0 });
 }
 
 const propertiesPanel = (page: Page) => page.getByRole("complementary", { name: "속성" });
+
+test("generated WebAssembly rejects malformed components and lifecycle col 9 without applying or recording history", async ({ page }) => {
+  await page.goto("/");
+  const malformed = structuredClone(SEMANTIC_FIXTURES.architecture);
+  (malformed.components as Array<Record<string, unknown>>)[0]!.type = "invalid-component";
+  const e1Report = await page.evaluate(async (spec) => {
+    const load = (specifier: string) => import(specifier);
+    const { loadWasmEngine } = await load("/src/lib/diagram/engine.ts");
+    return (await loadWasmEngine()).validate(JSON.stringify(spec));
+  }, malformed);
+  expect(e1Report.ok).toBe(false);
+  expect(e1Report.diagnostics.some((diagnostic: { path: string }) => diagnostic.path === "/components/0/type")).toBe(true);
+
+  const componentRefusal = await runBrowserSdkEdit(
+    page, "architecture", SEMANTIC_FIXTURES.architecture, "components", 0, "type", "invalid-component",
+  );
+  expect(componentRefusal.engineCalls).toBe(1);
+  expect(componentRefusal.result.status).toBe("invalid");
+  expect(JSON.stringify(componentRefusal.result.diagnostics)).toContain("/components/0/type");
+  expect(componentRefusal.refusedDocUnchanged).toBe(true);
+  expect(componentRefusal.historyPastAfterRefusal).toBe(0);
+  expect(componentRefusal.undoDocUnchanged).toBe(true);
+
+  const columnRefusal = await runBrowserSdkEdit(
+    page, "lifecycle", SEMANTIC_FIXTURES.lifecycle, "states", 0, "col", 9,
+  );
+  expect(columnRefusal.engineCalls).toBe(1);
+  expect(columnRefusal.result.status).toBe("invalid");
+  expect(JSON.stringify(columnRefusal.result.diagnostics)).toContain("/states/0/col");
+  expect(columnRefusal.refusedDocUnchanged).toBe(true);
+  expect(columnRefusal.historyPastAfterRefusal).toBe(0);
+  expect(columnRefusal.undoDocUnchanged).toBe(true);
+});
 
 test("reorders an imported sequence message, undoes it, and persists the order", async ({ page }) => {
   const forbidden = watchForbiddenRequests(page);
@@ -435,6 +502,7 @@ test("Renders lists orphaned receipts and shows the native refusal without mount
     contentType: "application/javascript",
     body: `let removed = false;
       export const rendersAvailable = () => true;
+      export const parseRenderReceipt = () => null;
       export const listRenders = async () => removed ? [] : [{docId:"copied",documentName:null,orphaned:true,renders:[{docId:"copied",renderId:"bad",verified:false,diagnostic:"receipt.json missing; re-render"}]}];
       export const prepareRenderView = async () => { throw new Error("index.html hash mismatch; re-render the diagram"); };
       export const deleteRender = async () => { removed = true; };

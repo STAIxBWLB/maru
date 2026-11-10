@@ -1,9 +1,10 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ipcErrorMessage } from "../../../lib/ipcError";
 import { assetUrlForPath } from "../../../lib/binaryViewer";
 import { useTranslation } from "../../../lib/i18n";
 import { deleteRender, listRenders, openRender, prepareRenderView, rendersAvailable,
-  type RenderGroup, type RenderView, type StoredRender } from "../../../lib/diagram/renders";
+  parseRenderReceipt, type RenderGroup, type RenderView, type StoredRender } from "../../../lib/diagram/renders";
 
 const FRAME_SANDBOX = "allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox";
 export interface RendersDialogProps {
@@ -30,7 +31,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
     const ticket = ++epoch.current;
     setBusy(true); setError(null); setView(null); setSelected(null); setPendingDelete(false);
     try { const result = await listRenders(workspace); if (ticket === epoch.current) setGroups(result); }
-    catch (err) { if (ticket === epoch.current) setError(String(err)); }
+    catch (err) { if (ticket === epoch.current) setError(ipcErrorMessage(err)); }
     finally { if (ticket === epoch.current) setBusy(false); }
   }, [workspace]);
   useEffect(() => {
@@ -44,7 +45,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
     try {
       const next = await prepareRenderView(workspace, render.docId, render.renderId);
       if (ticket === epoch.current) { setView(next); setPreparedTheme(theme); }
-    } catch (err) { if (ticket === epoch.current) setError(String(err)); }
+    } catch (err) { if (ticket === epoch.current) setError(ipcErrorMessage(err)); }
     finally { if (ticket === epoch.current) setBusy(false); }
   }, [workspace, theme]);
   useEffect(() => {
@@ -56,7 +57,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
     const ticket = epoch.current;
     setBusy(true); setError(null);
     try { await operation(); if (reload && ticket === epoch.current) await refresh(); }
-    catch (err) { if (ticket === epoch.current) setError(String(err)); }
+    catch (err) { if (ticket === epoch.current) setError(ipcErrorMessage(err)); }
     finally { if (ticket === epoch.current) setBusy(false); }
   };
   const group = groups.find((item) => item.docId === selected?.docId);
@@ -74,7 +75,7 @@ export function RendersDialog({ open, workspace, theme, onRerender, onClose }: R
             {entry.diagnostic && <p role="status">{entry.diagnostic}</p>}
             {entry.renders.map((render) => <button type="button" key={render.renderId} data-testid="diagram-render-entry" aria-pressed={selected?.docId === render.docId && selected.renderId === render.renderId} disabled={busy} onClick={() => void select(render)}>
               <span>{render.receipt?.renderedAt ?? render.renderId}</span>
-              <span>{render.verified && render.receipt ? `${render.receipt.enginePin.name} ${render.receipt.enginePin.version} / ${render.receipt.diagramType}` : t("diagram.renders.unverified")}</span>
+              <span>{render.verified && render.receipt ? `${parseRenderReceipt(render.receipt)?.engine.id ?? ""} ${parseRenderReceipt(render.receipt)?.engine.version ?? ""} / ${render.receipt.diagramType}` : t("diagram.renders.unverified")}</span>
               <span>{render.verified && render.receipt ? `${render.receipt.gates.schema.status} / ${render.receipt.gates.artifact.status} / ${render.receipt.gates.visualReview.status}` : render.diagnostic}</span>
             </button>)}
           </section>)}

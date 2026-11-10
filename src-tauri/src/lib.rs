@@ -4,6 +4,7 @@ mod agents;
 mod ai_router;
 mod app_menu;
 mod approval;
+#[cfg(test)]
 mod archify;
 mod artifact_checks;
 mod atomic_file;
@@ -242,14 +243,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(site_view::external_link_plugin());
-    // Behind the default-off `native-e2e` feature so this plugin, and the
-    // in-app WebDriver server it starts, never compile into a build a
-    // user can install (D-10, T-06-01). Placed after tauri_plugin_updater
-    // so the shipped plugin order is unchanged when the feature is off.
+    // Keep the in-app WebDriver server behind the default-off `native-e2e`
+    // feature so it never compiles into a build a user can install (D-10,
+    // T-06-01). It remains after tauri_plugin_updater for test builds.
     #[cfg(feature = "native-e2e")]
-    let builder = builder
-        .plugin(tauri_plugin_wdio_webdriver::init())
-        .plugin(diagram_engine_e0::plugin());
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     builder
         .menu(app_menu::build_app_menu)
         .on_menu_event(app_menu::handle_menu_event)
@@ -269,6 +267,8 @@ pub fn run() {
         .manage(BrowserPasskeyState::default())
         .manage(SiteOpenedUrlState::default())
         .setup(|app| {
+            app.handle()
+                .plugin(diagram::engine_host::plugin(app.handle().clone()))?;
             #[cfg(feature = "native-e2e")]
             diagram_engine_e0::allow_measurement(app)?;
             #[cfg(all(feature = "native-e2e", target_os = "macos"))]
@@ -324,8 +324,6 @@ pub fn run() {
             git::ipc::git_changes,
             git::ipc::git_diff,
             git::ipc::list_workspace_submodules,
-            archify::ipc::archify_validate_candidate,
-            archify::ipc::archify_render_candidate,
             file_manager::ipc::open_in_file_manager,
             file_manager::ipc::reveal_in_file_manager,
             inbox::ipc::scan_inbox_drop,
@@ -658,9 +656,6 @@ pub fn run() {
             diagram_save_document,
             diagram_load_document,
             diagram_list_documents,
-            diagram::renders::ipc::diagram_list_renders,
-            diagram::renders::ipc::diagram_prepare_render_view,
-            diagram::renders::ipc::diagram_delete_render,
             diagram_delete_document,
             diagram_export_blob,
             diagram_export_blob_to_path,
@@ -808,6 +803,13 @@ mod quit_acl_tests {
         build_test_app_from(mock_builder().channel_interceptor(crate::channel_delivery::intercept))
     }
 
+    fn build_diagram_acl_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        build_test_app_with_diagram_plugin(
+            mock_builder().channel_interceptor(crate::channel_delivery::intercept),
+            true,
+        )
+    }
+
     #[derive(Default)]
     struct PolicyDispatchCount(AtomicUsize);
 
@@ -818,7 +820,14 @@ mod quit_acl_tests {
     fn build_test_app_from(
         builder: tauri::Builder<tauri::test::MockRuntime>,
     ) -> tauri::App<tauri::test::MockRuntime> {
-        builder
+        build_test_app_with_diagram_plugin(builder, false)
+    }
+
+    fn build_test_app_with_diagram_plugin(
+        builder: tauri::Builder<tauri::test::MockRuntime>,
+        with_diagram_plugin: bool,
+    ) -> tauri::App<tauri::test::MockRuntime> {
+        let app = builder
             .manage(PolicyDispatchCount::default())
             .invoke_handler(crate::ipc_policy::restrict_app_commands(|invoke| {
                 invoke
@@ -831,7 +840,20 @@ mod quit_acl_tests {
                 true
             }))
             .build(tauri::generate_context!())
-            .expect("failed to build the app with this crate's real context/capabilities")
+            .expect("failed to build the app with this crate's real context/capabilities");
+        // MockRuntime build does not drive the application's setup callback.
+        if with_diagram_plugin {
+            app.handle()
+                .plugin(crate::diagram::engine_host::plugin(app.handle().clone()))
+                .expect("install the production diagram plugin in the ACL fixture");
+        }
+        app
+    }
+
+    fn invoke_json_request(cmd: &str, body: serde_json::Value) -> InvokeRequest {
+        let mut request = invoke_request(cmd);
+        request.body = InvokeBody::Json(body);
+        request
     }
 
     fn isolated_channel_case() {
@@ -1199,6 +1221,131 @@ mod quit_acl_tests {
                 "{origin}: {refused}"
             );
             assert_eq!(policy_dispatch_count(&app), 0);
+        }
+    }
+
+    #[test]
+    fn diagram_plugin_commands_are_allowed_only_in_main_window() {
+        let app = build_diagram_acl_test_app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("main mock window builds with the real app capabilities");
+        let sites = WebviewWindowBuilder::new(&app, "sites", Default::default())
+            .build()
+            .expect("Sites mock window builds without diagram permissions");
+        let sites_child = main
+            .as_ref()
+            .window()
+            .add_child(
+                tauri::WebviewBuilder::new(
+                    "sites-child",
+                    tauri::WebviewUrl::App("index.html".into()),
+                ),
+                tauri::Position::Logical(tauri::LogicalPosition::new(0.0, 0.0)),
+                tauri::Size::Logical(tauri::LogicalSize::new(200.0, 100.0)),
+            )
+            .expect("local Sites child webview attaches to the main window");
+        let sites_child_ipc = ChildIpc(&sites_child);
+
+        let commands = [
+            ("validate", serde_json::json!({"input":"{}"})),
+            ("render_png", serde_json::json!({"input":"{}"})),
+            ("render_svg", serde_json::json!({"input":"{}"})),
+            (
+                "diagram_list_renders",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__"}),
+            ),
+            (
+                "diagram_prepare_render_view",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__","docId":"doc","renderId":"00000000000000000000000000000000"}),
+            ),
+            (
+                "diagram_delete_render",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__","docId":"doc","renderId":"00000000000000000000000000000000"}),
+            ),
+            (
+                "render_and_store",
+                serde_json::json!({"workspace":"/__maru_acl_probe_missing_workspace__","input":"{}","context":null}),
+            ),
+        ];
+        let mut main_handler_reached = Vec::new();
+        let mut sites_denied = Vec::new();
+        let mut sites_child_denied = Vec::new();
+
+        for (command, body) in commands {
+            let cmd = format!("plugin:maru-diagram|{command}");
+            let main_result = get_ipc_response(&main, invoke_json_request(&cmd, body.clone()));
+            if command == "validate" {
+                let report = main_result
+                    .expect("validate is allowed in main")
+                    .deserialize::<maru_diagram_engine::ValidationReport>()
+                    .expect("allowed validation returns its typed report");
+                assert_eq!(report.receipt.engine.id, "maru-diagram-engine");
+            } else {
+                let refusal = main_result.expect_err(
+                    "malformed or missing workspace input reaches the main plugin handler",
+                );
+                assert!(
+                    refusal.is_object(),
+                    "main plugin handler returned ACL denial: {refusal}"
+                );
+                assert!(
+                    refusal.get("code").is_some(),
+                    "main plugin handler did not return its structured error: {refusal}"
+                );
+            }
+            main_handler_reached.push(command);
+
+            let refused = get_ipc_response(&sites, invoke_json_request(&cmd, body.clone()))
+                .expect_err("Sites window must not inherit the main-only diagram capability");
+            let message = refused.as_str().unwrap_or_default();
+            assert!(
+                message.contains("not allowed"),
+                "{command} reached the Sites plugin handler: {refused}"
+            );
+            assert!(
+                message.contains("sites"),
+                "ACL denial did not identify the Sites window: {refused}"
+            );
+            sites_denied.push(command);
+
+            let mut child_request = invoke_json_request(&cmd, body);
+            child_request.url = sites_child.url().expect("Sites child URL is local");
+            let child_refused = get_ipc_response(&sites_child_ipc, child_request)
+                .expect_err("Sites child webview inside main must not inherit diagram commands");
+            let child_message = child_refused.as_str().unwrap_or_default();
+            assert!(
+                child_message.contains("not allowed"),
+                "{command} reached the local Sites child webview: {child_refused}"
+            );
+            assert!(
+                child_message.contains("sites-child"),
+                "ACL denial did not identify the Sites child webview: {child_refused}"
+            );
+            sites_child_denied.push(command);
+        }
+
+        let evidence = serde_json::json!({
+            "schemaVersion": 1,
+            "scope": "Tauri MockRuntime invocation with the app's compiled generate_context capabilities; not native WebView transport evidence",
+            "mainWindowLabel": "main",
+            "deniedWindowLabel": "sites",
+            "deniedChildWebviewLabel": "sites-child",
+            "mainHandlerReached": main_handler_reached,
+            "sitesDeniedByAcl": sites_denied,
+            "sitesChildDeniedByAcl": sites_child_denied,
+        });
+        println!("DIAGRAM_PLUGIN_ACL_EVIDENCE {evidence}");
+        if let Ok(path) = std::env::var("MARU_PLUGIN_ACL_EVIDENCE") {
+            let path = std::path::PathBuf::from(path);
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                std::fs::create_dir_all(parent).expect("create requested ACL evidence directory");
+            }
+            std::fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap())
+                .expect("write generated app capability invocation evidence");
         }
     }
 

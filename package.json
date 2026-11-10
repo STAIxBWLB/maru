@@ -9,10 +9,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 5307",
+    "dev": "pnpm engine:assets && vite --host 127.0.0.1 --port 5307",
     "build": "pnpm typecheck && pnpm build:frontend",
-    "build:frontend": "vite build && node scripts/check-bundle-budget.mjs && node scripts/check-native-e2e-isolation.mjs && node scripts/check-csp-blob.mjs && node scripts/check-mode-css-ownership.mjs",
-    "build:frontend:native-e2e": "VITE_NATIVE_E2E=1 vite build",
+    "build:frontend": "pnpm engine:assets && vite build && node scripts/check-bundle-budget.mjs && node scripts/check-native-e2e-isolation.mjs && node scripts/check-csp-blob.mjs && node scripts/check-mode-css-ownership.mjs",
+    "build:frontend:native-e2e": "pnpm engine:assets && VITE_NATIVE_E2E=1 vite build",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
     "check:native-e2e-isolation": "node scripts/check-native-e2e-isolation.mjs",
     "check:csp-blob": "node scripts/check-csp-blob.mjs",
@@ -28,14 +28,15 @@
     "clean:tauri-debug": "node scripts/prune-tauri-debug.mjs",
     "tauri:dev": "pnpm clean:tauri-bundles && pnpm clean:tauri-debug && tauri dev",
     "tauri:build": "pnpm clean:tauri-bundles && pnpm clean:tauri-debug && tauri build",
-    "test": "node scripts/run-vitest.mjs src scripts --exclude '**/check-command-isolation.test.mjs' && node --test scripts/check-command-isolation.test.mjs",
+    "test": "pnpm engine:assets && node scripts/run-vitest.mjs src scripts --exclude '**/check-command-isolation.test.mjs' && node --test scripts/check-command-isolation.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:graph": "pnpm test:e2e:graph:behavior && pnpm test:e2e:graph:shell",
     "test:e2e:graph:behavior": "playwright test e2e/graph.spec.ts",
     "test:e2e:graph:shell": "playwright test e2e/graph-shell.spec.ts",
     "test:e2e:native": "wdio run e2e-native/wdio.conf.ts",
     "bench:graph": "vitest bench src/lib/graph/perf.bench.ts --run",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "engine:assets": "node scripts/diagram-engine-e0.mjs wasm --assets-only"
   },
   "dependencies": {
     "@blocknote/core": "^0.49.0",

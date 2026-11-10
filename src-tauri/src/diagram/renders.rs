@@ -4,6 +4,7 @@
 //! are fixed by the receipt MIME type, and the asset protocol receives one
 //! verified file at a time.
 
+#[cfg(test)]
 use crate::archify::{ArchifyRenderArtifact, ArchifyRenderReceipt};
 use crate::atomic_file::{
     with_path_transactions, write_atomic_create, PathTransactionLease, PathTransactionRequest,
@@ -11,13 +12,22 @@ use crate::atomic_file::{
 use crate::vault::{lexical_normalize, normalize_existing_dir};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use chrono::{SecondsFormat, Utc};
-use serde::{Deserialize, Serialize};
+use maru_diagram_engine::render::ArtifactReport;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use tauri::Manager;
+pub use tauri_plugin_maru_diagram::render_store::{
+    DiagramRenderReceipt, RenderDocumentContext, RenderEntry, RenderGroup, RenderView,
+    StoredRender, StoredRenderReceipt,
+};
+#[cfg(test)]
+use tauri_plugin_maru_diagram::render_store::{
+    LegacyArchifyEnginePin, LegacyArchifyReceipt, RenderGate, RenderGates,
+};
 use uuid::Uuid;
 
 const RENDER_ROOT: &str = "attachments/diagrams";
@@ -39,77 +49,6 @@ const MAX_LOGICAL_DOC_ID_BYTES: usize = 64 * 1024;
 // `~` was excluded by the legacy safe-component grammar, keeping hashed
 // folders disjoint from every compatible pre-existing ASCII folder key.
 const HASHED_DOC_PREFIX: &str = "~doc-";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RenderDocumentContext {
-    pub(crate) doc_id: String,
-    pub(crate) document_name: String,
-    pub(crate) document_revision: String,
-    pub(crate) diagram_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) dataset_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct DiagramRenderReceipt {
-    #[serde(flatten)]
-    pub render: ArchifyRenderReceipt,
-    pub doc_id: String,
-    pub document_name: String,
-    pub document_revision: String,
-    pub rendered_at: String,
-    pub diagram_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dataset_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StoredRender {
-    pub doc_id: String,
-    pub render_id: String,
-    pub artifact_name: String,
-    pub receipt: DiagramRenderReceipt,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RenderEntry {
-    pub doc_id: String,
-    pub render_id: String,
-    pub receipt: Option<DiagramRenderReceipt>,
-    pub verified: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub artifact_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RenderGroup {
-    pub doc_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub original_doc_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub document_name: Option<String>,
-    pub orphaned: bool,
-    #[serde(default)]
-    pub ambiguous: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<String>,
-    pub renders: Vec<RenderEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RenderView {
-    pub path: String,
-    pub mime_type: String,
-    pub receipt: DiagramRenderReceipt,
-}
 
 #[derive(Debug, Clone)]
 struct DocumentIdentity {
@@ -257,31 +196,167 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn validate_base_receipt(receipt: &ArchifyRenderReceipt) -> Result<&'static str, String> {
-    if receipt.schema_version != 1 {
-        return Err("Render receipt schema is unsupported; regenerate the render with the current Maru version".into());
-    }
-    if receipt.engine_pin.name != "archify"
-        || receipt.engine_pin.version.trim().is_empty()
-        || receipt.engine_pin.revision.trim().is_empty()
-    {
-        return Err("Render receipt engine identity is incomplete; regenerate the render with the pinned Archify engine".into());
-    }
-    if !valid_sha256(&receipt.input_spec_sha256) || !valid_sha256(&receipt.output_sha256) {
-        return Err(
+#[cfg(test)]
+fn archify_receipt(receipt: ArchifyRenderReceipt) -> StoredRenderReceipt {
+    let gates = RenderGates {
+        schema: RenderGate {
+            status: receipt.gates.schema.status,
+            scope: receipt.gates.schema.scope,
+        },
+        artifact: RenderGate {
+            status: receipt.gates.artifact.status,
+            scope: receipt.gates.artifact.scope,
+        },
+        browser: RenderGate {
+            status: receipt.gates.browser.status,
+            scope: receipt.gates.browser.scope,
+        },
+        visual_review: RenderGate {
+            status: receipt.gates.visual_review.status,
+            scope: receipt.gates.visual_review.scope,
+        },
+    };
+    StoredRenderReceipt::LegacyArchify(LegacyArchifyReceipt {
+        schema_version: receipt.schema_version,
+        input_spec_sha256: receipt.input_spec_sha256,
+        engine_pin: LegacyArchifyEnginePin {
+            name: receipt.engine_pin.name,
+            version: receipt.engine_pin.version,
+            revision: receipt.engine_pin.revision,
+        },
+        output_sha256: receipt.output_sha256,
+        output_mime_type: receipt.output_mime_type,
+        engine_output_sha256: None,
+        conversion: None,
+        gates,
+        readback: None,
+    })
+}
+
+fn validate_base_receipt(receipt: &StoredRenderReceipt) -> Result<&'static str, String> {
+    match receipt {
+        StoredRenderReceipt::LegacyArchify(receipt) => {
+            if receipt.schema_version != 1 {
+                return Err("Render receipt schema is unsupported; regenerate the render with the current Maru version".into());
+            }
+            if receipt.engine_pin.name != "archify"
+                || receipt.engine_pin.version.trim().is_empty()
+                || receipt.engine_pin.revision.trim().is_empty()
+            {
+                return Err("Render receipt engine identity is incomplete; restore its original legacy receipt or rerender with the current diagram engine".into());
+            }
+            if !valid_sha256(&receipt.input_spec_sha256) || !valid_sha256(&receipt.output_sha256) {
+                return Err(
             "Render receipt contains an invalid SHA-256 value; regenerate the render and receipt"
                 .into(),
         );
+            }
+            if receipt.gates.schema.status != "passed" || receipt.gates.artifact.status != "passed"
+            {
+                return Err("Render receipt is missing a passed schema or artifact gate; regenerate the render before viewing it".into());
+            }
+            let Some(artifact_name) = artifact_for_mime(&receipt.output_mime_type) else {
+                return Err(
+                    "Render receipt MIME type is unsupported; use an HTML, SVG, or PNG render"
+                        .into(),
+                );
+            };
+            Ok(artifact_name)
+        }
+        StoredRenderReceipt::Engine(receipt) => {
+            if receipt.schema_version != 1 {
+                return Err(
+                    "Engine render receipt schema is unsupported; regenerate the render".into(),
+                );
+            }
+            if receipt.engine.id != "maru-diagram-engine"
+                || receipt.engine.version.trim().is_empty()
+                || receipt.engine.revision.trim().is_empty()
+            {
+                return Err("Engine render receipt identity is incomplete; regenerate the render with the native diagram engine".into());
+            }
+            let (Some(output_hash), Some(mime_type)) = (
+                receipt.output_sha256.as_deref(),
+                receipt.output_mime_type.as_deref(),
+            ) else {
+                return Err(
+                    "Engine render receipt lacks an output hash or MIME type; rerender the diagram"
+                        .into(),
+                );
+            };
+            let Some(engine_output_hash) = receipt.engine_output_sha256.as_deref() else {
+                return Err(
+                    "Engine render receipt lacks the native SVG output hash; rerender the diagram"
+                        .into(),
+                );
+            };
+            if !valid_sha256(&receipt.input_spec_sha256)
+                || !valid_sha256(output_hash)
+                || !valid_sha256(engine_output_hash)
+            {
+                return Err(
+                    "Engine render receipt contains an invalid SHA-256 value; rerender the diagram"
+                        .into(),
+                );
+            }
+            if receipt.gates.schema.status != "passed" || receipt.gates.artifact.status != "passed"
+            {
+                return Err("Engine render receipt is missing a passed schema or artifact gate; rerender before viewing".into());
+            }
+            let conversion = receipt
+                .conversion
+                .as_ref()
+                .ok_or("Engine render receipt lacks conversion details; rerender the artifact")?;
+            if !matches!(conversion.theme.as_str(), "light" | "dark") {
+                return Err("Engine render receipt theme is invalid; rerender the artifact".into());
+            }
+            match (mime_type, conversion.format.as_str(), conversion.pixel_ratio) {
+                ("image/svg+xml", "svg", 1) => Ok(SVG_FILE),
+                ("image/png", "png", 1..=4) => Ok(PNG_FILE),
+                _ => Err("Engine render receipt MIME type, format, or pixel ratio is unsupported; rerender as SVG or PNG".into()),
+            }
+        }
     }
-    if receipt.gates.schema.status != "passed" || receipt.gates.artifact.status != "passed" {
-        return Err("Render receipt is missing a passed schema or artifact gate; regenerate the render before viewing it".into());
+}
+
+fn receipt_output_sha256(receipt: &StoredRenderReceipt) -> &str {
+    match receipt {
+        StoredRenderReceipt::LegacyArchify(receipt) => &receipt.output_sha256,
+        StoredRenderReceipt::Engine(receipt) => receipt
+            .output_sha256
+            .as_deref()
+            .expect("validated engine receipt has output hash"),
     }
-    let Some(artifact_name) = artifact_for_mime(&receipt.output_mime_type) else {
-        return Err(
-            "Render receipt MIME type is unsupported; use an HTML, SVG, or PNG render".into(),
-        );
-    };
-    Ok(artifact_name)
+}
+
+fn receipt_output_mime_type(receipt: &StoredRenderReceipt) -> &str {
+    match receipt {
+        StoredRenderReceipt::LegacyArchify(receipt) => &receipt.output_mime_type,
+        StoredRenderReceipt::Engine(receipt) => receipt
+            .output_mime_type
+            .as_deref()
+            .expect("validated engine receipt has output MIME type"),
+    }
+}
+
+#[cfg(test)]
+impl PartialEq<ArchifyRenderReceipt> for StoredRenderReceipt {
+    fn eq(&self, other: &ArchifyRenderReceipt) -> bool {
+        let expected = archify_receipt(other.clone());
+        matches!((self, expected), (Self::LegacyArchify(actual), StoredRenderReceipt::LegacyArchify(expected)) if actual == &expected)
+    }
+}
+
+fn engine_input_spec_sha256(request_json: &str) -> Result<String, String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RequestSource {
+        spec_json: String,
+    }
+
+    let source: RequestSource = serde_json::from_str(request_json)
+        .map_err(|error| format!("Cannot validate SVG source request: {error}"))?;
+    Ok(sha256(source.spec_json.as_bytes()))
 }
 
 fn validate_extended_receipt(receipt: &DiagramRenderReceipt) -> Result<&'static str, String> {
@@ -314,7 +389,7 @@ fn validate_extended_receipt(receipt: &DiagramRenderReceipt) -> Result<&'static 
 
 fn extended_receipt(
     context: &RenderDocumentContext,
-    receipt: ArchifyRenderReceipt,
+    mut receipt: StoredRenderReceipt,
 ) -> Result<DiagramRenderReceipt, String> {
     validate_doc_id(&context.doc_id)?;
     validate_diagram_type(&context.diagram_type)?;
@@ -324,6 +399,16 @@ fn extended_receipt(
         );
     }
     validate_base_receipt(&receipt)?;
+    // The outer document envelope owns these keys. Avoid duplicate JSON keys
+    // when flattening the canonical receipt, whose context is optional.
+    if let StoredRenderReceipt::Engine(native) = &mut receipt {
+        native.doc_id = None;
+        native.document_name = None;
+        native.document_revision = None;
+        native.rendered_at = None;
+        native.diagram_type = None;
+        native.dataset_id = None;
+    }
     let extended = DiagramRenderReceipt {
         render: receipt,
         doc_id: context.doc_id.clone(),
@@ -844,7 +929,7 @@ fn inspect_render(workspace: &Path, doc_id: &str, render_id: &str) -> Result<Ren
             ))
         }
     };
-    if sha256(&bytes) != receipt.render.output_sha256 {
+    if sha256(&bytes) != receipt_output_sha256(&receipt.render) {
         return Ok(unverified_entry(
             doc_id,
             render_id,
@@ -1041,7 +1126,7 @@ fn read_verified_render(
     let artifact_name = validate_extended_receipt(&receipt)?;
     let artifact_file = artifact_path(&dir, artifact_name);
     let artifact_bytes = read_bounded_file(workspace, &artifact_file, MAX_ARTIFACT_BYTES)?;
-    if sha256(&artifact_bytes) != receipt.render.output_sha256 {
+    if sha256(&artifact_bytes) != receipt_output_sha256(&receipt.render) {
         return Err(operation_error(
             "verify render artifact",
             workspace,
@@ -1068,7 +1153,11 @@ fn read_verified_render(
             "repair the render store and retry",
         ));
     }
-    Ok((canonical, receipt.render.output_mime_type.clone(), receipt))
+    Ok((
+        canonical,
+        receipt_output_mime_type(&receipt.render).to_string(),
+        receipt,
+    ))
 }
 
 pub fn prepare_render_view<R: tauri::Runtime>(
@@ -1368,15 +1457,17 @@ pub fn delete_render(workspace: &str, doc_id: &str, render_id: &str) -> Result<(
     })
 }
 
+#[cfg(test)]
 fn build_context_receipt(
     context: &RenderDocumentContext,
     base: ArchifyRenderReceipt,
 ) -> Result<DiagramRenderReceipt, String> {
     let mut context = context.clone();
     context.document_name = bounded_display_name(&context.document_name, &context.doc_id);
-    extended_receipt(&context, base)
+    extended_receipt(&context, archify_receipt(base))
 }
 
+#[cfg(test)]
 pub(crate) fn store_render(
     workspace: &str,
     context: RenderDocumentContext,
@@ -1386,22 +1477,85 @@ pub(crate) fn store_render(
     store_render_with_id(workspace, context, artifact, &render_id)
 }
 
+#[cfg(test)]
 fn store_render_with_id(
     workspace: &str,
     context: RenderDocumentContext,
     artifact: ArchifyRenderArtifact,
     render_id: &str,
 ) -> Result<StoredRender, String> {
+    store_render_base_with_id(
+        workspace,
+        context,
+        archify_receipt(artifact.receipt),
+        artifact.bytes,
+        render_id,
+    )
+}
+
+pub(crate) fn store_engine_render(
+    workspace: &str,
+    context: RenderDocumentContext,
+    source_request_json: &str,
+    report: ArtifactReport,
+) -> Result<StoredRender, String> {
+    if report.api_version != maru_diagram_engine::API_VERSION {
+        return Err("Cannot store diagram render: engine API version is unsupported; update Maru and rerender".into());
+    }
+    if !report.ok {
+        return Err("Cannot store diagram render: the native engine report is not successful; repair the source and rerender".into());
+    }
+    let expected_input_hash = engine_input_spec_sha256(source_request_json)?;
+    if report.receipt.input_spec_sha256 != expected_input_hash {
+        return Err("Cannot store diagram render: the engine receipt does not match the supplied source request; rerender from the unchanged source".into());
+    }
+    if report.receipt.diagram_type.as_deref() != Some(context.diagram_type.as_str()) {
+        return Err("Cannot store diagram render: the render context diagram type differs from its source receipt; refresh the source and rerender".into());
+    }
+    let svg = report.svg.as_deref().ok_or_else(|| {
+        "Cannot store diagram render: the engine report has no source SVG; rerender the diagram"
+            .to_string()
+    })?;
+    let outlined_svg_hash = sha256(svg.as_bytes());
+    if report.receipt.engine_output_sha256.as_deref() != Some(outlined_svg_hash.as_str()) {
+        return Err("Cannot store diagram render: source SVG differs from the engine-output receipt; rerender the diagram".into());
+    }
+    let bytes = report
+        .bytes
+        .ok_or_else(|| "Cannot store diagram render: the successful engine report has no output bytes; rerender the diagram".to_string())?;
+    let base = StoredRenderReceipt::Engine(report.receipt);
+    let artifact_name = validate_base_receipt(&base)?;
+    match artifact_name {
+        SVG_FILE if svg.as_bytes() != bytes.as_slice() => {
+            return Err("Cannot store diagram render: SVG output bytes differ from the engine source SVG; rerender the artifact".into());
+        }
+        PNG_FILE if !bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]) => {
+            return Err("Cannot store diagram render: PNG output lacks the PNG signature; rerender the artifact".into());
+        }
+        SVG_FILE | PNG_FILE => {}
+        _ => return Err("Cannot store diagram render: only native SVG and PNG artifacts can enter render history".into()),
+    }
+    let render_id = Uuid::new_v4().simple().to_string();
+    store_render_base_with_id(workspace, context, base, bytes, &render_id)
+}
+
+fn store_render_base_with_id(
+    workspace: &str,
+    context: RenderDocumentContext,
+    base: StoredRenderReceipt,
+    bytes: Vec<u8>,
+    render_id: &str,
+) -> Result<StoredRender, String> {
     let root = normalize_existing_dir(workspace).map_err(|error| {
         format!("Cannot store diagram render: workspace is unavailable ({error}); open the workspace and retry")
     })?;
-    let receipt = build_context_receipt(&context, artifact.receipt)?;
+    let receipt = extended_receipt(&context, base)?;
     let artifact_name = validate_base_receipt(&receipt.render)?;
     validate_render_id(render_id)?;
-    if artifact.bytes.is_empty() || artifact.bytes.len() as u64 > MAX_ARTIFACT_BYTES {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_ARTIFACT_BYTES {
         return Err(format!("Cannot store diagram render: artifact is empty or exceeds {MAX_ARTIFACT_BYTES} bytes; simplify the diagram and render it again"));
     }
-    if sha256(&artifact.bytes) != receipt.render.output_sha256 {
+    if sha256(&bytes) != receipt_output_sha256(&receipt.render) {
         return Err("Cannot store diagram render: artifact bytes do not match the receipt hash; rerender the diagram and retry".into());
     }
     let doc_key = document_directory_key(&receipt.doc_id)?;
@@ -1475,7 +1629,7 @@ fn store_render_with_id(
             operation_error("create immutable render folder", &root, &dir, error, "refresh the render list and render again")
         })?;
         let write_result = (|| {
-            write_atomic_create(&artifact_path, &artifact.bytes).map_err(|error| {
+            write_atomic_create(&artifact_path, &bytes).map_err(|error| {
                 operation_error("write render artifact", &root, &artifact_path, error, "check workspace permissions and retry")
             })?;
             write_atomic_create(&receipt_path, &receipt_bytes).map_err(|error| {
@@ -1507,6 +1661,7 @@ fn store_render_with_id(
     })
 }
 
+#[cfg(test)]
 pub mod ipc {
     use super::{delete_render, list_renders, prepare_render_view, RenderGroup, RenderView};
     #[cfg(test)]
@@ -1739,6 +1894,92 @@ mod tests {
             fs::read(fixture.render_dir(RENDER_A).join(HTML_FILE)).unwrap(),
             HTML
         );
+    }
+
+    #[test]
+    fn prepares_native_legacy_html_with_the_full_archify_pin_metadata() {
+        let fixture = Fixture::new();
+        let render_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let render_dir = fixture.render_dir(render_id);
+        fs::create_dir_all(&render_dir).unwrap();
+        let source_path = fixture
+            .work
+            .join(DIAGRAMS_ROOT)
+            .join("render-test.cmd.json");
+        let source = fs::read(&source_path).unwrap();
+        fs::write(render_dir.join(HTML_FILE), HTML).unwrap();
+        let pin: serde_json::Value =
+            serde_json::from_str(include_str!("../../../sidecars/archify/PIN.json")).unwrap();
+        let receipt = serde_json::json!({
+            "schemaVersion": 1,
+            "docId": fixture.doc_id.clone(),
+            "documentName": "Native render fixture",
+            "documentRevision": sha256(&source),
+            "renderedAt": "2026-11-09T00:00:00Z",
+            "diagramType": "architecture",
+            "inputSpecSha256": sha256(b"legacy fixture input"),
+            "outputSha256": sha256(HTML),
+            "outputMimeType": "text/html",
+            "enginePin": pin,
+            "gates": {
+                "schema": {"status": "passed", "scope": "pinned-engine-validation"},
+                "artifact": {"status": "passed", "scope": "pinned-engine-rendered-html"},
+                "browser": {"status": "not-run", "scope": "none"},
+                "visualReview": {"status": "not-run", "scope": "manual"}
+            }
+        });
+        fs::write(
+            receipt_path(&render_dir),
+            serde_json::to_vec_pretty(&receipt).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            render_dir.join("neighbor.html"),
+            b"not the receipt-verified artifact",
+        )
+        .unwrap();
+
+        let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].renders.len(), 1);
+        assert!(groups[0].renders[0].verified);
+        assert!(matches!(
+            &groups[0].renders[0].receipt.as_ref().unwrap().render,
+            StoredRenderReceipt::LegacyArchify(_)
+        ));
+
+        let app = tauri::test::mock_app();
+        let view = prepare_render_view(
+            &app.handle().clone(),
+            fixture.work.to_str().unwrap(),
+            &fixture.doc_id,
+            render_id,
+        )
+        .unwrap();
+        assert_eq!(view.mime_type, "text/html");
+        assert_eq!(view.receipt.doc_id, fixture.doc_id);
+        let StoredRenderReceipt::LegacyArchify(base_receipt) = &view.receipt.render else {
+            panic!("legacy enginePin fixture must stay a legacy receipt")
+        };
+        assert_eq!(base_receipt.output_sha256, sha256(HTML));
+        let serialized = serde_json::to_value(&view).unwrap();
+        assert_eq!(serialized["mimeType"], "text/html");
+        assert_eq!(serialized["receipt"]["enginePin"]["name"], "archify");
+        assert_eq!(
+            serialized["receipt"]["enginePin"]["revision"],
+            receipt["enginePin"]["revision"]
+        );
+        assert!(serialized["receipt"]["enginePin"]
+            .get("fileHashes")
+            .is_none());
+        assert!(view.path.ends_with(HTML_FILE));
+        assert!(app.asset_protocol_scope().is_allowed(Path::new(&view.path)));
+        assert!(!app
+            .asset_protocol_scope()
+            .is_allowed(receipt_path(&render_dir)));
+        assert!(!app
+            .asset_protocol_scope()
+            .is_allowed(render_dir.join("neighbor.html")));
     }
 
     #[test]
@@ -2130,5 +2371,159 @@ mod tests {
             "{error}"
         );
         assert!(!app.asset_protocol_scope().is_allowed(&artifact));
+    }
+
+    fn source_only_engine_request(format: &str) -> String {
+        let mut request = serde_json::json!({
+            "specJson": include_str!("../../crates/maru-diagram-engine/testdata/valid-architecture.json"),
+            "format": format,
+            "theme": "dark",
+            "pixelRatio": 1,
+        });
+        if format == "svg" {
+            request["textMode"] = serde_json::json!("outlines");
+        }
+        request.to_string()
+    }
+
+    #[test]
+    fn source_only_engine_svg_and_png_round_trip_through_verified_render_store() {
+        let fixture = Fixture::new();
+        // The existing helper continues to create the legacy Archify receipt shape.
+        let legacy = fixture.store(RENDER_A, "text/html", HTML);
+        assert!(matches!(
+            legacy.receipt.render,
+            StoredRenderReceipt::LegacyArchify(_)
+        ));
+
+        let context = RenderDocumentContext {
+            dataset_id: Some("semantic-source-1".into()),
+            ..fixture.context()
+        };
+        let app = tauri::test::mock_app();
+        let mut stored_artifacts = Vec::new();
+        for (format, expected_mime, expected_name) in [
+            ("svg", "image/svg+xml", SVG_FILE),
+            ("png", "image/png", PNG_FILE),
+        ] {
+            let request = source_only_engine_request(format);
+            let report = maru_diagram_engine::render::render_artifact_json(&request);
+            assert!(report.ok, "{format}: {:?}", report.diagnostics);
+            assert_eq!(report.api_version, maru_diagram_engine::API_VERSION);
+            assert_eq!(report.receipt.engine.id, "maru-diagram-engine");
+            assert!(!report.receipt.engine.version.is_empty());
+            assert!(!report.receipt.engine.revision.is_empty());
+            assert_eq!(report.receipt.conversion.as_ref().unwrap().format, format);
+            assert_eq!(report.receipt.conversion.as_ref().unwrap().theme, "dark");
+            assert_eq!(report.receipt.conversion.as_ref().unwrap().pixel_ratio, 1);
+            assert_eq!(
+                report.receipt.output_mime_type.as_deref(),
+                Some(expected_mime)
+            );
+            if format == "svg" {
+                assert_eq!(
+                    report.text_mode,
+                    Some(maru_diagram_engine::render::SvgTextMode::Outlines)
+                );
+                assert!(!report.svg.as_deref().unwrap().contains("<text"));
+            }
+
+            let stored = store_engine_render(
+                fixture.work.to_str().unwrap(),
+                context.clone(),
+                &request,
+                report.clone(),
+            )
+            .unwrap();
+            assert_eq!(stored.doc_id, fixture.doc_id);
+            assert_eq!(stored.artifact_name, expected_name);
+            assert_eq!(stored.receipt.doc_id, fixture.doc_id);
+            assert_eq!(stored.receipt.document_name, context.document_name);
+            assert_eq!(stored.receipt.document_revision, context.document_revision);
+            assert_eq!(stored.receipt.diagram_type, "architecture");
+            assert_eq!(
+                stored.receipt.dataset_id.as_deref(),
+                Some("semantic-source-1")
+            );
+
+            let engine_receipt = match &stored.receipt.render {
+                StoredRenderReceipt::Engine(receipt) => receipt,
+                StoredRenderReceipt::LegacyArchify(_) => {
+                    panic!("new engine export used a legacy receipt")
+                }
+            };
+            assert_eq!(engine_receipt.engine.id, "maru-diagram-engine");
+            assert_eq!(
+                engine_receipt.input_spec_sha256,
+                engine_input_spec_sha256(&request).unwrap()
+            );
+            let expected_svg_hash = report.svg.as_deref().map(|svg| sha256(svg.as_bytes()));
+            let expected_output_hash = report.bytes.as_deref().map(sha256);
+            assert_eq!(
+                engine_receipt.engine_output_sha256.as_deref(),
+                expected_svg_hash.as_deref()
+            );
+            assert_eq!(
+                engine_receipt.output_sha256.as_deref(),
+                expected_output_hash.as_deref()
+            );
+            assert_eq!(
+                engine_receipt.output_mime_type.as_deref(),
+                Some(expected_mime)
+            );
+
+            let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+            let group = groups
+                .iter()
+                .find(|group| group.doc_id == fixture.doc_id)
+                .unwrap();
+            let entry = group
+                .renders
+                .iter()
+                .find(|render| render.render_id == stored.render_id)
+                .unwrap();
+            assert!(entry.verified, "{format}: {:?}", entry.diagnostic);
+            assert_eq!(entry.receipt.as_ref(), Some(&stored.receipt));
+
+            let view = prepare_render_view(
+                app.handle(),
+                fixture.work.to_str().unwrap(),
+                &fixture.doc_id,
+                &stored.render_id,
+            )
+            .unwrap();
+            assert_eq!(view.receipt, stored.receipt);
+            assert_eq!(view.mime_type, expected_mime);
+            let view_path = Path::new(&view.path);
+            assert!(view_path.starts_with(&fixture.work));
+            assert!(app.asset_protocol_scope().is_allowed(view_path));
+            assert!(!app
+                .asset_protocol_scope()
+                .is_allowed(fixture.render_dir(&stored.render_id).join(RECEIPT_FILE)));
+            let readback = fs::read(view_path).unwrap();
+            assert_eq!(
+                sha256(&readback),
+                engine_receipt.output_sha256.as_deref().unwrap()
+            );
+            if format == "png" {
+                assert!(readback.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]));
+            } else {
+                assert_eq!(readback, report.svg.as_deref().unwrap().as_bytes());
+            }
+            stored_artifacts.push(stored);
+        }
+
+        let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+        let group = groups
+            .iter()
+            .find(|group| group.doc_id == fixture.doc_id)
+            .unwrap();
+        assert_eq!(
+            group.renders.len(),
+            3,
+            "legacy HTML plus native SVG and PNG"
+        );
+        assert!(group.renders.iter().all(|render| render.verified));
+        assert_eq!(stored_artifacts.len(), 2);
     }
 }

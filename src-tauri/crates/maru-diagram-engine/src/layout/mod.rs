@@ -962,6 +962,7 @@ impl SceneBuilder {
         Ok(None)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn place_node_labels_at(
         &mut self,
         id: &str,

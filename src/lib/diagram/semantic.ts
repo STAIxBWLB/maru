@@ -1,11 +1,3 @@
-import { DEFAULT_GRID } from "../../../sidecars/archify/renderers/architecture/grid.mjs";
-import {
-  architecture,
-  dataflow,
-  lifecycle,
-  sequence,
-  workflow,
-} from "../../../sidecars/archify/renderers/shared/generated-validators.mjs";
 /**
  * Typed semantic datasets: per-type descriptor, content validation, relation
  * id minting, canvas projection, member resolution, text write-through and
@@ -17,10 +9,10 @@ import {
  *   relation and container collections, the fields the pinned schema knows,
  *   and the fields the canvas does not project. Callers never branch on the
  *   diagram type for collection names.
- * - **Validation.** {@link validateSemanticContent} runs the generated schema
- *   validator plus reference checks JSON Schema cannot express (dangling
- *   endpoints, lanes, stages, wraps; self-messages; duplicate ids). It is the
- *   synchronous floor for every path that skips the engine.
+ * - **Validation.** {@link validateSemanticContentShape} runs a cheap engine
+ *   envelope precheck plus reference checks the generated DTO cannot express
+ *   (dangling endpoints, lanes, stages, wraps; self-messages; duplicate ids).
+ *   Full family schema and geometry admission come from the async SDK engine.
  * - **Projection.** Entities become nodes (`meta.memberId =
  *   <datasetId>:m<index>`), relations become edges (id = relation id, or the
  *   legacy `<datasetId>-e<index>` for id-less P1 relations), and lanes,
@@ -45,6 +37,7 @@ import {
   validateFloorplanSpec,
 } from "./floorplan";
 import { LAYOUT_DEFAULT_ORIGIN, LAYOUT_STEP_X, LAYOUT_STEP_Y, layoutDoc } from "./layout";
+import { validateEngineSpecPreCheck } from "./enginePreflight";
 import { isSemanticSpecDataset, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
 import {
   createDiagramId,
@@ -182,7 +175,16 @@ export function semanticContainers(descriptor: SemanticTypeDescriptor): readonly
   return [...(descriptor.container ? [descriptor.container] : []), ...(descriptor.additionalContainers ?? [])];
 }
 
-const VALIDATORS = { architecture, workflow, sequence, dataflow, lifecycle };
+// Keep Archify's legacy projection coordinates unchanged while the semantic
+// canvas moves to engine geometry. This is placement data only, not a validator.
+const DEFAULT_GRID = {
+  origin: [40, 80],
+  cols: 4,
+  gapX: 30,
+  gapY: 40,
+  cellW: 130,
+  cellH: 64,
+};
 
 export const LIFECYCLE_STATE_TYPES = [
   "start",
@@ -273,27 +275,24 @@ export function sequenceOrder(spec: Record<string, unknown>): number[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Schema, reference and structural-range validation of a spec. Schema errors reuse
- * `diagram.validation.specMeta`; references, self-messages and duplicate ids
- * get `diagram.semantic.*` keys. Duplicate ids are checked across every
- * id-bearing collection because the id map must stay reversible.
+ * Cheap preflight, reference and structural-range validation before the async
+ * SDK engine call. The engine owns the full family schema and geometry checks;
+ * this helper keeps safe references and id maps usable in synchronous edits.
  */
-export function validateSemanticContent(
+export function validateSemanticContentShape(
   diagramType: SemanticDiagramType,
-  spec: Record<string, unknown>,
+  spec: unknown,
 ): ValidationDiagnostic[] {
-  if (diagramType === "floorplan") return validateFloorplanSpec(spec);
-  const descriptor = SEMANTIC_TYPES[diagramType];
-  const diagnostics: ValidationDiagnostic[] = [];
-  const validator = VALIDATORS[diagramType];
-  if (!validator(spec)) {
-    for (const error of validator.errors ?? []) {
-      diagnostics.push({ key: "diagram.validation.specMeta", params: { field: error.instancePath || "spec" } });
-    }
+  if (diagramType === "floorplan") {
+    return isRecord(spec) ? validateFloorplanSpec(spec) : [{ key: "diagram.validation.specShape" }];
   }
+  const diagnostics = validateEngineSpecPreCheck(diagramType, spec).diagnostics;
+  if (!isRecord(spec)) return diagnostics;
+  const descriptor = SEMANTIC_TYPES[diagramType];
+  if (!descriptor) return diagnostics;
 
-  const seen = new Set<string>();
   for (const field of descriptor.idFields) {
+    const seen = new Set<string>();
     specEntries(spec, field).forEach((entry, index) => {
       const id = idOf(entry);
       if (id === null) return;
@@ -402,6 +401,9 @@ export function validateSemanticContent(
   }
   return diagnostics;
 }
+
+/** Compatibility name for synchronous callers; this is not full SDK validation. */
+export const validateSemanticContent = validateSemanticContentShape;
 
 // ---------------------------------------------------------------------------
 // Relation id minting

@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { undo } from "./actions";
 import { archifySpecToDataset } from "./archifyCodec";
-import { pinnedEngineHost as engineHost } from "../../../e2e/helpers/diagramEngineHost";
-import type { SemanticDiagramType } from "./reportTypes";
+import { pinnedEngineHost as engineHost } from "./__fixtures__/engineHost";
+import type { SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDocument } from "./semantic";
 import { applyValidatedSemanticEdit } from "./semanticApply";
-import { addSemanticEntry, removeSemanticEntries } from "./semanticEdit";
+import { addSemanticEntry, removeSemanticEntries, setSpecField } from "./semanticEdit";
 import { createDiagramStore } from "./state";
 import { createInitialEphemeral } from "./types";
 
@@ -26,6 +26,58 @@ describe("engine admission before semantic apply", () => {
     expect(store.getState().ephemeral.history.past).toHaveLength(1);
     store.setState(undo());
     expect(store.getState().doc).toEqual(before);
+  });
+
+  it("admits a node and edge sharing an id, edits and undoes it, while same-collection duplicates remain refused", async () => {
+    const source = structuredClone(SEMANTIC_FIXTURES.architecture);
+    const originalComponents = source.components as Record<string, unknown>[];
+    const spec = {
+      ...source,
+      components: [
+        { ...originalComponents[0], id: "a", row: 0, col: 0 },
+        { ...originalComponents[1], id: "b", row: 0, col: 1 },
+      ],
+      boundaries: [],
+      connections: [{ id: "a", from: "a", to: "b", label: "Call" }],
+    };
+    const dataset: SemanticSpecDataset = {
+      id: "ds-shared-id",
+      kind: "semanticSpec",
+      name: "Shared identifier namespaces",
+      diagramType: "architecture",
+      spec,
+      idMap: { a: "a", b: "b" },
+      engine: { name: "maru-diagram-engine", version: "test" },
+    };
+    const doc = projectSemanticDocument(dataset).doc;
+    const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
+    const before = store.getState().doc;
+
+    const admitted = await engineHost.validateCandidate("architecture", spec);
+    expect(admitted.ok).toBe(true);
+    const edited = await applyValidatedSemanticEdit(
+      store,
+      dataset.id,
+      setSpecField("components", 0, "label", "Updated API"),
+      engineHost,
+    );
+    expect(edited.status).toBe("applied");
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    store.setState(undo());
+    expect(store.getState().doc).toEqual(before);
+
+    const beforeDuplicate = store.getState().doc;
+    const duplicateRefusal = await applyValidatedSemanticEdit(
+      store,
+      dataset.id,
+      setSpecField("components", 1, "id", "a"),
+      engineHost,
+    );
+    expect(duplicateRefusal.status).toBe("invalid");
+    if (duplicateRefusal.status !== "invalid") throw new Error("Expected duplicate id refusal");
+    expect(duplicateRefusal.diagnostics).toContainEqual(expect.objectContaining({ key: "diagram.semantic.duplicateId" }));
+    expect(store.getState().doc).toBe(beforeDuplicate);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
   });
 
   it("refuses new workflow roots outside the surviving allowlist", async () => {

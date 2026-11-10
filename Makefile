@@ -198,8 +198,8 @@ check-csp-blob: ## Static guard: the shipped CSP script-src carries no blob: (SE
 # the reconciled additions in docs/performance/phase08-registration-changes.json.
 # Hermetic - source and recorded evidence only, no binary or browser needed.
 .PHONY: check-command-isolation
-check-command-isolation: ## Phase 08 closure gate: 390 production commands carry final justified evidence
-	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 390
+check-command-isolation: ## Phase 08 closure gate: 392 production commands carry final justified evidence
+	$(NODE) scripts/check-command-isolation.mjs --all --expected-count 392
 
 # The type scale is the single source of truth (PR #137). A raw px font-size in
 # styles.css silently opts that rule out of any future --type-* retune, so the
@@ -224,6 +224,10 @@ test-ts: node_modules ## TypeScript / React unit tests (vitest)
 .PHONY: test-rust
 test-rust: $(ICON_PATH) ## Rust unit + integration tests (cargo test --lib)
 	cd $(TAURI_DIR) && $(CARGO) test --lib
+
+.PHONY: test-diagram-plugin
+test-diagram-plugin: ## Production diagram plugin IPC/store contracts, including real invocation evidence
+	$(CARGO) test --locked --manifest-path $(TAURI_DIR)/crates/Cargo.toml -p tauri-plugin-maru-diagram --features png,render-store,outline --lib --tests -- --test-threads=2
 
 .PHONY: fmt-check
 fmt-check: ## Rust format check (no changes written)
@@ -409,7 +413,7 @@ homebrew-fetch: homebrew-trust ## Fetch the published Maru cask and CLI formula
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-main-iframes check-type-tokens check-archify-pin test-ts test-rust fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
+verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-main-iframes check-type-tokens check-archify-pin test-ts test-rust test-diagram-plugin fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
 
 # ---------------------------------------------------------------------------
 # Clean

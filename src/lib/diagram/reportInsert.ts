@@ -1,7 +1,7 @@
 /**
  * "Insert/Update in report" flow (Report Pattern Studio Phase 4).
  *
- * Semantic datasets use pinned-engine SVG + pixel-ratio-1 PNG with receipts
+ * Semantic datasets use engine-produced SVG + pixel-ratio-1 PNG with receipts
  * and immutable full-64-hex pair-hash names. Other diagrams retain model SVG
  * + 2x PNG and legacy hash8 names. Both paths write under
  * `attachments/diagrams/<docId>/<scope>-<hash>.{svg,png}` through
@@ -26,7 +26,8 @@ import { IpcError } from "../ipcError";
 import { serializeDoc } from "./persistence";
 import { renderDocToSvg } from "./renderSvg";
 import { bytesSha256, exportVerifiedSemanticArtifact } from "./verifiedExport";
-import type { ArchifyRenderHost, ArchifyRenderReceipt } from "../archify";
+import type { EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type { EngineRenderHost } from "./engine";
 import { buildManagedBlock, spliceManagedBlock } from "./reportLink";
 import type { DiagramDoc } from "./types";
 
@@ -47,7 +48,7 @@ export interface ReportInsertDeps {
     content: string,
     expectedRevision: string | null,
   ) => Promise<unknown>;
-  renderAssets: (doc: DiagramDoc) => Promise<{ svg: Uint8Array; png: Uint8Array; receipts?: { svg: ArchifyRenderReceipt; png: ArchifyRenderReceipt }; storeWarnings?: string[] }>;
+  renderAssets: (doc: DiagramDoc) => Promise<{ svg: Uint8Array; png: Uint8Array; receipts?: { svg: EngineReceipt; png: EngineReceipt }; storeWarnings?: string[] }>;
   digestHex: (text: string) => Promise<string>;
 }
 
@@ -147,10 +148,11 @@ export async function insertDiagramIntoReport(
     if (assets.receipts) {
       const { svg, png } = assets.receipts;
       if (svg.outputSha256 !== await bytesSha256(assets.svg) || png.outputSha256 !== await bytesSha256(assets.png)
-          || svg.inputSpecSha256 !== png.inputSpecSha256 || svg.enginePin.revision !== png.enginePin.revision) {
+          || svg.inputSpecSha256 !== png.inputSpecSha256
+          || svg.engine.id !== png.engine.id || svg.engine.version !== png.engine.version || svg.engine.revision !== png.engine.revision) {
         throw new Error("Report artifact receipts do not match their bytes or semantic source; regenerate the engine exports before inserting.");
       }
-      hex = await deps.digestHex(JSON.stringify({ svg: svg.outputSha256, png: png.outputSha256, input: svg.inputSpecSha256, engine: svg.enginePin }));
+      hex = await deps.digestHex(JSON.stringify({ svg: svg.outputSha256, png: png.outputSha256, input: svg.inputSpecSha256, engine: svg.engine }));
       renderHash = `sha256:${hex}`;
       fileHash = hex;
     }
@@ -227,7 +229,7 @@ export async function renderReportAssets(
 export function defaultReportInsertDeps(
   workspace: string,
   saveTarget: ReportInsertDeps["saveTarget"],
-  renderHost?: ArchifyRenderHost,
+  renderHost?: EngineRenderHost,
 ): ReportInsertDeps {
   return {
     writeAsset: (docId, fileName, bytes) =>

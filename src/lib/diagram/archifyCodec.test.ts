@@ -10,9 +10,11 @@ import {
   toArchifyId,
 } from "./archifyCodec";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { pinnedEngineHost } from "./__fixtures__/engineHost";
 import { codecForFilename, getCodec } from "./codecs";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import { ARCHIFY_DIAGRAM_TYPES as SEMANTIC_DIAGRAM_TYPES, validateSemanticSpec, type SemanticDiagramType } from "./reportTypes";
+import { createEmptyDoc } from "./types";
 import { SEMANTIC_TYPES, mintRelationIds, sequenceOrder, validateSemanticContent } from "./semantic";
 
 const ARCH_SPEC = {
@@ -54,6 +56,42 @@ describe("archifySpecToDataset", () => {
     expect(dataset.preservedExtensions).toBeUndefined();
     expect(diagnostics).toEqual([{ key: "diagram.archify.relationIdsAssigned", params: { count: 1 } }]);
     expect(validateSemanticSpec(dataset).ok).toBe(true);
+  });
+
+  it("maps a node and edge sharing a raw id once and preserves the SDK-valid spec on import", async () => {
+    const spec = structuredClone(SEMANTIC_FIXTURES.architecture);
+    const components = spec.components as Record<string, unknown>[];
+    components[0]!.id = "a";
+    components[1]!.id = "b";
+    spec.boundaries = [];
+    spec.connections = [{ id: "a", from: "a", to: "b", label: "Call" }];
+
+    const { dataset } = archifySpecToDataset("architecture", spec);
+    expect(dataset.spec).toEqual(spec);
+    expect(dataset.idMap).toEqual({ a: "a", b: "b", db: "db" });
+    expect(validateSemanticSpec(dataset).ok).toBe(true);
+    expect((await pinnedEngineHost.validateCandidate("architecture", dataset.spec)).ok).toBe(true);
+
+    const imported = parseArchifySpec(JSON.stringify(spec));
+    if (!imported.ok) throw new Error(JSON.stringify(imported.diagnostics));
+    expect(imported.result.dataset.idMap).toEqual({ a: "a", b: "b", db: "db" });
+    expect(imported.result.dataset.spec).toEqual(spec);
+    expect((await pinnedEngineHost.validateCandidate("architecture", imported.result.dataset.spec)).ok).toBe(true);
+
+    const sameCollectionDuplicate = structuredClone(spec);
+    (sameCollectionDuplicate.components as Record<string, unknown>[])[1]!.id = "a";
+    expect((await pinnedEngineHost.validateCandidate("architecture", sameCollectionDuplicate)).ok).toBe(false);
+  });
+
+  it("accepts legacy Archify and current Maru engine identities on semantic datasets", () => {
+    const legacy = archifySpecToDataset("architecture", ARCH_SPEC).dataset;
+    const engine = {
+      ...legacy,
+      engine: { name: "maru-diagram-engine" as const, version: "0.1.0" },
+    };
+    expect(validateSemanticSpec(legacy).ok).toBe(true);
+    expect(validateSemanticSpec(engine).ok).toBe(true);
+    expect(engine.spec).toEqual(legacy.spec);
   });
 
   it("preserves unsupported top-level fields verbatim with a fidelity diagnostic", () => {
@@ -102,15 +140,29 @@ describe("parseArchifySpec", () => {
     ]);
   });
 
-  it("rejects unsupported schema versions and missing or malformed components", () => {
+  it("rejects unsupported versions and missing required collections at preflight", () => {
     for (const spec of [
       { ...ARCH_SPEC, schema_version: 2 },
       { ...ARCH_SPEC, components: undefined },
-      { ...ARCH_SPEC, components: [{ id: "web" }] },
     ]) expect(parseArchifySpec(JSON.stringify(spec)).ok).toBe(false);
     expect(parseArchifySpec(JSON.stringify({
       ...ARCH_SPEC, meta: { title: "Shop", output: "docs/SHOP.HTML" },
     })).ok).toBe(true);
+  });
+
+  it("preserves malformed family fields losslessly for async SDK diagnostics", () => {
+    const malformed = { ...ARCH_SPEC, components: [{ id: "web" }] };
+    const parsed = parseArchifySpec(JSON.stringify(malformed));
+    if (!parsed.ok) throw new Error("expected the synchronous codec to preserve an unvalidated family payload");
+    expect(parsed.result.dataset.spec.components).toEqual(malformed.components);
+
+    const doc = createEmptyDoc("malformed-family", 1);
+    doc.datasets = [parsed.result.dataset];
+    const serialized = serializeDoc(doc);
+    const roundTripped = deserializeDoc(serialized);
+    expect(roundTripped.datasets?.[0]?.kind).toBe("semanticSpec");
+    expect((roundTripped.datasets?.[0] as { spec: Record<string, unknown> }).spec.components)
+      .toEqual(malformed.components);
   });
 
   it("refuses unknown diagram types, broken meta, and invalid JSON", () => {
@@ -176,11 +228,6 @@ describe("P2 semantic types (issue #433)", () => {
     mutate?.(spec);
     return JSON.stringify(spec);
   };
-  const refusalKeys = (text: string) => {
-    const outcome = parseArchifySpec(text);
-    return outcome.ok ? [] : outcome.diagnostics.map((d) => d.key);
-  };
-
   it("parses the sequence, dataflow and lifecycle fixtures", () => {
     for (const type of ["sequence", "dataflow", "lifecycle"] as const) {
       const outcome = parseArchifySpec(fixtureText(type));
@@ -189,30 +236,35 @@ describe("P2 semantic types (issue #433)", () => {
     }
   });
 
-  it("refuses broken references with diagram.semantic diagnostics", () => {
+  it("preserves broken references through import for asynchronous SDK admission", async () => {
     const messages = (spec: Record<string, unknown>) => spec.messages as Record<string, unknown>[];
-    expect(refusalKeys(fixtureText("sequence", (s) => { messages(s)[0]!.to = "ghost"; }))).toContain(
-      "diagram.semantic.danglingReference",
-    );
-    expect(refusalKeys(fixtureText("sequence", (s) => { messages(s)[0]!.to = "web"; }))).toContain(
-      "diagram.semantic.selfMessage",
-    );
-    expect(
-      refusalKeys(fixtureText("lifecycle", (s) => { (s.states as Record<string, unknown>[])[0]!.lane = "side"; })),
-    ).toContain("diagram.semantic.danglingReference");
-    expect(
-      refusalKeys(fixtureText("dataflow", (s) => { (s.nodes as Record<string, unknown>[])[0]!.stage = 5; })),
-    ).toContain("diagram.semantic.danglingReference");
-    expect(
-      refusalKeys(
-        fixtureText("lifecycle", (s) => {
+    const cases: Array<{ type: "sequence" | "lifecycle" | "dataflow"; text: string; path: string; retained: string }> = [
+      { type: "sequence", text: fixtureText("sequence", (s) => { messages(s)[0]!.to = "ghost"; }), path: "ghost", retained: "ghost" },
+      { type: "sequence", text: fixtureText("sequence", (s) => { messages(s)[0]!.to = "web"; }), path: "messages[0]", retained: "web" },
+      { type: "lifecycle", text: fixtureText("lifecycle", (s) => { (s.states as Record<string, unknown>[])[0]!.lane = "side"; }), path: "side", retained: "side" },
+      { type: "dataflow", text: fixtureText("dataflow", (s) => { (s.nodes as Record<string, unknown>[])[0]!.stage = 5; }), path: "stage", retained: "5" },
+      {
+        type: "lifecycle",
+        text: fixtureText("lifecycle", (s) => {
           s.transitions = [
             { id: "t", from: "queued", to: "running" },
             { id: "t", from: "running", to: "done" },
           ];
         }),
-      ),
-    ).toContain("diagram.semantic.duplicateId");
+        path: "transitions",
+        retained: '"id":"t"',
+      },
+    ];
+    for (const { type, text, path, retained } of cases) {
+      const parsed = parseArchifySpec(text);
+      expect(parsed.ok, `${type} import should preserve the source for diagnosis`).toBe(true);
+      if (!parsed.ok) continue;
+      expect(JSON.stringify(parsed.result.dataset.spec)).toContain(retained);
+      const validation = await pinnedEngineHost.validateCandidate(type, parsed.result.dataset.spec);
+      expect(validation.ok, `${type} SDK admission should refuse ${path}`).toBe(false);
+      expect([...validation.errors, ...validation.diagnostics.map((diagnostic) => diagnostic.path)]
+        .join(" ")).toContain(path);
+    }
   });
 
   it("preserves and reports an unknown top-level field for each new type", () => {

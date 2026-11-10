@@ -27,10 +27,10 @@ import {
   type SemanticProvenance,
   type SemanticSpecDataset,
 } from "./reportTypes";
-import { SEMANTIC_TYPES, collectSemanticIds, mintRelationIds, validateSemanticContent } from "./semantic";
-import { validateArchifySpecPreCheck, type ValidationDiagnostic } from "./validation";
+import { SEMANTIC_TYPES, collectSemanticIds, mintRelationIds } from "./semantic";
+import { validateEngineSpecPreCheck, type ValidationDiagnostic } from "./validation";
 
-/** Pinned engine identity; the tree hash lives in `sidecars/archify/PIN.json`. */
+/** Legacy identity preserved on imported Archify interchange datasets. */
 export const ARCHIFY_ENGINE = { name: "archify", version: "3.0.0" } as const;
 
 export const ARCHIFY_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
@@ -98,8 +98,8 @@ export interface SpecToDatasetOptions {
 }
 
 /**
- * Wrap a validated Archify spec in a semantic dataset. The id map starts as
- * the identity over the spec's own ids (already Archify-safe); canvas
+ * Wrap a shape-prechecked engine interchange spec in a semantic dataset. The
+ * id map starts as the identity over the spec's own ids (already interchange-safe); canvas
  * projection rewrites the values to Maru member ids. Top-level fields the
  * schema does not define are moved to `preservedExtensions` and reported, and
  * id-less relations get minted ids (reported once per ingest).
@@ -125,7 +125,11 @@ export function archifySpecToDataset(
     diagnostics.push({ key: "diagram.archify.unsupportedField", params: { field: key, diagramType } });
   }
 
-  const ids = collectArchifyIds(diagramType, minted);
+  // IDs are unique within each semantic collection, but the engine permits
+  // the same raw id in separate namespaces (for example, a component and a
+  // connection). Build the reversible map once per raw id while retaining
+  // collision handling for distinct ids that sanitize to the same Archify id.
+  const ids = [...new Set(collectArchifyIds(diagramType, minted))];
   const idMap: Record<string, string> = {};
   const taken = new Set<string>();
   for (const id of ids) {
@@ -173,11 +177,11 @@ export type ArchifyParseOutcome =
   | { ok: false; diagnostics: ValidationDiagnostic[] };
 
 /**
- * Parse Archify typed JSON into a semantic dataset. Unlike the tolerant
- * document migrator, a structural failure (unknown diagram type, broken meta
- * contract, oversized payload) or a content failure (schema, dangling
- * references, self-messages, duplicate ids) refuses the import with
- * diagnostics — an AI or file candidate is never coerced.
+ * Parse engine interchange JSON into a semantic dataset. Unlike the tolerant
+ * document migrator, a cheap envelope/meta failure refuses the import with diagnostics. Dangling
+ * references are preserved; projection draws no edge for a missing endpoint.
+ * Full family-schema and geometry
+ * admission are asynchronous SDK engine gates at generation, apply and export.
  */
 export function parseArchifySpec(
   text: string,
@@ -198,7 +202,7 @@ export function parseArchifySpec(
     };
   }
   const diagramType = isRecord(raw) && typeof raw.diagram_type === "string" ? raw.diagram_type : "";
-  const pre = validateArchifySpecPreCheck(diagramType, raw);
+  const pre = validateEngineSpecPreCheck(diagramType, raw);
   if (!pre.ok) return { ok: false, diagnostics: pre.diagnostics };
   if (!isRecord(raw)) {
     // Unreachable after the pre-check, kept for the type system.
@@ -209,8 +213,6 @@ export function parseArchifySpec(
     raw,
     opts,
   );
-  const content = validateSemanticContent(dataset.diagramType, dataset.spec);
-  if (content.length > 0) return { ok: false, diagnostics: content };
   return { ok: true, result: { dataset, diagnostics } };
 }
 

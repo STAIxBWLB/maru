@@ -1,0 +1,15 @@
+{
+  "pluginCommandCount": 7,
+  "pluginCommandsObserved": [
+    "validate",
+    "render_png",
+    "diagram_list_renders",
+    "diagram_prepare_render_view",
+    "diagram_delete_render",
+    "render_and_store",
+    "render_svg"
+  ],
+  "schemaVersion": 1,
+  "scope": "Tauri MockRuntime invoke responses from production-feature plugin builder; main window only; capability policy checked separately by command-isolation source gate",
+  "windowLabel": "main"
+}

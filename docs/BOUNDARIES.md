@@ -55,6 +55,17 @@ other side's entries.
 Global instructions, authentication, trust, hooks and unrelated runtime settings
 remain outside Maru federation.
 
+## Diagram engine boundary
+
+Maru owns each semantic dataset's source spec, its apply-time admission, and
+the native rendered artifact and receipt. Canvas nodes and edges are a
+projection, not an export source. Production semantic SVG/PNG export sends the
+selected source spec to `maru-diagram-engine`; the WebAssembly validation and
+layout facade does not replace that native export path. The
+`diagram-render` Tauri capability is granted to the `main` webview only. The
+default-off `native-e2e` bridge is test infrastructure, not a production
+engine interface.
+
 ## Conflict Rule
 
 If a change needs to alter this ownership table, update both repositories'

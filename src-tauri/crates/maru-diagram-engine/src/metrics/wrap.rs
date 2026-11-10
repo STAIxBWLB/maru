@@ -50,7 +50,7 @@ fn starts_a_syllable(scalar: char) -> bool {
 /// decomposed this way.
 fn is_lv_syllable(scalar: char) -> bool {
     let code = scalar as u32;
-    (0xAC00..=0xD7A3).contains(&code) && (code - 0xAC00) % 28 == 0
+    (0xAC00..=0xD7A3).contains(&code) && (code - 0xAC00).is_multiple_of(28)
 }
 
 /// A Hangul break belongs only at a syllable boundary: between two syllables, or

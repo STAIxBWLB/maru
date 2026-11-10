@@ -20,7 +20,8 @@
 
 import { rasterise } from "./export";
 import { exportVerifiedSemanticArtifact } from "./verifiedExport";
-import type { ArchifyRenderHost, ArchifyRenderReceipt } from "../archify";
+import type { EngineRenderHost } from "./engine";
+import type { EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import type { StaticTheme } from "./engineSvg";
 import { docToMermaid, mermaidToDocDetailed } from "./mermaid";
 import { datasetToArchifySpec, parseArchifySpec } from "./archifyCodec";
@@ -74,7 +75,7 @@ export interface CodecParseOutcome {
 
 export interface CodecSerializeOutcome {
   storeWarning?: string;
-  receipt?: ArchifyRenderReceipt;
+  receipt?: EngineReceipt;
   bytes: string | Uint8Array;
   fidelity: CodecFidelity;
   warnings: CodecWarning[];
@@ -101,7 +102,7 @@ export interface DiagramCodec {
     doc: DiagramDoc;
     datasetId?: string;
     workspace?: string;
-    renderHost?: ArchifyRenderHost;
+    renderHost?: EngineRenderHost;
     isCurrent?: () => boolean;
     theme?: StaticTheme;
   }): CodecSerializeOutcome | Promise<CodecSerializeOutcome>;

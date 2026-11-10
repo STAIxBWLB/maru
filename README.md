@@ -143,7 +143,7 @@ brew upgrade maru-cli
   ISOLATED commands run on awaited `spawn_blocking` workers and
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  390-command inventory, worker-boundary, and admission evidence are gated by
+  392-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 - Diagram's File > Renders keeps immutable engine HTML plus receipts in the
   workspace, verifies artifact hashes before exact-file grants, and uses an
@@ -498,8 +498,13 @@ Requirements:
 - Node.js 22 or newer
 - pnpm 9.15 or newer
 - Rust MSRV 1.90.0; `rust-toolchain.toml` pins the repository verification
-  toolchain
+  toolchain and the `wasm32-unknown-unknown` target used by semantic diagrams
 - Platform libraries required by Tauri 2
+
+Browser development, frontend builds and unit tests generate the ignored diagram
+WASM assets through `pnpm engine:assets` before loading them. The first run
+therefore requires the pinned Rust toolchain as well as Node; native outline
+fonts and PNG rendering stay outside these browser assets.
 
 Common commands:
 
@@ -528,8 +533,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (390 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 390
+# Phase 08 evidence closure gate alone (392 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 392
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -632,8 +637,12 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 390-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 390`)
+  mutation-admission and processing-caller evidence against the 392-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 392`).
+  The current source manifest records 385 app handlers
+  plus seven production plugin commands. Historical Phase 08 behavior evidence
+  remains archival for retired entries; plugin invocation and compiled-capability
+  MockRuntime results are recorded separately and do not certify native WebView transport.
 
 The iframe source guard prevents accidental reintroduction, rather than
 analyzing adversarial JavaScript. Its regressions cover factory aliases,

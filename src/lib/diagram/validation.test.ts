@@ -6,7 +6,7 @@ import {
   type SemanticSpecDataset,
 } from "./reportTypes";
 import { createEmptyDoc, type DiagramDoc } from "./types";
-import { validateArchifySpecPreCheck, validateCandidateDoc } from "./validation";
+import { validateEngineSpecPreCheck, validateCandidateDoc } from "./validation";
 
 function keysOf(result: ReturnType<typeof validateCandidateDoc>): string[] {
   return result.diagnostics.map((d) => d.key);
@@ -251,38 +251,39 @@ describe("validateCandidateDoc", () => {
   });
 });
 
-describe("validateArchifySpecPreCheck", () => {
+describe("validateEngineSpecPreCheck", () => {
   const validSpec = {
     schema_version: 1,
+    diagram_type: "architecture",
     meta: { title: "System overview", output: "diagram.html" },
-    nodes: [],
+    components: [],
   };
 
   it("accepts a well-formed spec", () => {
-    const result = validateArchifySpecPreCheck("architecture", validSpec);
+    const result = validateEngineSpecPreCheck("architecture", validSpec);
     expect(result.ok).toBe(true);
     expect(result.diagnostics).toEqual([]);
   });
 
   it("accepts portable subdirectories and counts Korean payload bytes", () => {
-    expect(validateArchifySpecPreCheck("architecture", {
+    expect(validateEngineSpecPreCheck("architecture", {
       ...validSpec, meta: { title: "T", output: "docs/out.html" },
     }).ok).toBe(true);
     const spec = { ...validSpec, blob: "가".repeat(SEMANTIC_SPEC_MAX_BYTES / 2) };
-    const result = validateArchifySpecPreCheck("architecture", spec);
+    const result = validateEngineSpecPreCheck("architecture", spec);
     expect(result.diagnostics.find((d) => d.key === "diagram.validation.specBudget")?.params?.bytes)
       .toBe(new TextEncoder().encode(JSON.stringify(spec)).length);
   });
 
   it("rejects an unknown diagram type", () => {
-    const result = validateArchifySpecPreCheck("gantt", validSpec);
+    const result = validateEngineSpecPreCheck("gantt", validSpec);
     expect(result.ok).toBe(false);
     expect(result.diagnostics.map((d) => d.key)).toContain("diagram.validation.specType");
   });
 
   it("rejects non-object and array specs", () => {
     for (const spec of [null, 42, "spec", [1, 2]]) {
-      const result = validateArchifySpecPreCheck("workflow", spec);
+      const result = validateEngineSpecPreCheck("workflow", spec);
       expect(result.ok).toBe(false);
       expect(result.diagnostics.map((d) => d.key)).toContain("diagram.validation.specShape");
     }
@@ -291,13 +292,13 @@ describe("validateArchifySpecPreCheck", () => {
   it("rejects an unserializable spec", () => {
     const circular: Record<string, unknown> = { schema_version: 1 };
     circular.self = circular;
-    const result = validateArchifySpecPreCheck("architecture", circular);
+    const result = validateEngineSpecPreCheck("architecture", circular);
     expect(result.diagnostics.map((d) => d.key)).toContain("diagram.validation.specBudget");
   });
 
   it("rejects an oversized spec", () => {
     const spec = { ...validSpec, blob: "x".repeat(SEMANTIC_SPEC_MAX_BYTES) };
-    const result = validateArchifySpecPreCheck("architecture", spec);
+    const result = validateEngineSpecPreCheck("architecture", spec);
     const diag = result.diagnostics.find((d) => d.key === "diagram.validation.specBudget");
     expect(diag).toBeDefined();
     expect(diag?.params?.maxBytes).toBe(SEMANTIC_SPEC_MAX_BYTES);
@@ -308,14 +309,41 @@ describe("validateArchifySpecPreCheck", () => {
       { meta: { title: "T", output: "o.html" } },
       { schema_version: "1", meta: { title: "T", output: "o.html" } },
     ]) {
-      const result = validateArchifySpecPreCheck("architecture", spec);
-      const diag = result.diagnostics.find((d) => d.key === "diagram.validation.specMeta");
-      expect(diag?.params?.field).toBe("schema_version");
+      const result = validateEngineSpecPreCheck("architecture", spec);
+      const schemaVersionDiagnostic = result.diagnostics.find((d) =>
+        d.key === "diagram.validation.specMeta" && d.params?.field === "schema_version",
+      );
+      expect(schemaVersionDiagnostic).toEqual({
+        key: "diagram.validation.specMeta",
+        params: { field: "schema_version" },
+      });
     }
   });
 
+  it("uses each family’s supported schema-version envelope", () => {
+    const envelope = (diagramType: string, schema_version: number, collections: Record<string, unknown>) => ({
+      schema_version,
+      diagram_type: diagramType,
+      meta: { title: "T", output: "o.html" },
+      ...collections,
+    });
+    expect(validateEngineSpecPreCheck("workflow", envelope("workflow", 2, {
+      lanes: [], nodes: [], edges: [],
+    })).ok).toBe(true);
+    expect(validateEngineSpecPreCheck("lifecycle", envelope("lifecycle", 2, {
+      lanes: [], states: [], transitions: [],
+    })).ok).toBe(true);
+    const architectureV2 = validateEngineSpecPreCheck("architecture", envelope("architecture", 2, {
+      components: [],
+    }));
+    expect(architectureV2.diagnostics).toContainEqual({
+      key: "diagram.validation.specMeta",
+      params: { field: "schema_version" },
+    });
+  });
+
   it("rejects a missing meta.title", () => {
-    const result = validateArchifySpecPreCheck("architecture", {
+    const result = validateEngineSpecPreCheck("architecture", {
       schema_version: 1,
       meta: { output: "o.html" },
     });
@@ -326,8 +354,11 @@ describe("validateArchifySpecPreCheck", () => {
   });
 
   it("rejects a meta.output that is not a portable .html filename", () => {
-    for (const output of ["out.svg", "/out.html", "../out.html", "a\\b.html", 42]) {
-      const result = validateArchifySpecPreCheck("architecture", {
+    for (const output of [
+      "out.svg", "/out.html", "../out.html", "a\\b.html", 42,
+      "docs//out.html", "CON.html", "folder/item~1.html", "folder/stream:name.html",
+    ]) {
+      const result = validateEngineSpecPreCheck("architecture", {
         schema_version: 1,
         meta: { title: "T", output },
       });

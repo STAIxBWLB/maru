@@ -1,0 +1,34 @@
+{
+  "deniedChildWebviewLabel": "sites-child",
+  "deniedWindowLabel": "sites",
+  "mainHandlerReached": [
+    "validate",
+    "render_png",
+    "render_svg",
+    "diagram_list_renders",
+    "diagram_prepare_render_view",
+    "diagram_delete_render",
+    "render_and_store"
+  ],
+  "mainWindowLabel": "main",
+  "schemaVersion": 1,
+  "scope": "Tauri MockRuntime invocation with the app's compiled generate_context capabilities; not native WebView transport evidence",
+  "sitesChildDeniedByAcl": [
+    "validate",
+    "render_png",
+    "render_svg",
+    "diagram_list_renders",
+    "diagram_prepare_render_view",
+    "diagram_delete_render",
+    "render_and_store"
+  ],
+  "sitesDeniedByAcl": [
+    "validate",
+    "render_png",
+    "render_svg",
+    "diagram_list_renders",
+    "diagram_prepare_render_view",
+    "diagram_delete_render",
+    "render_and_store"
+  ]
+}

@@ -12,7 +12,7 @@ import {
   projectSemanticDocument,
   resolveSemanticMember,
   semanticDatasetsIn,
-  validateSemanticContent,
+  validateSemanticContentShape,
   writeThroughText,
 } from "./semantic";
 import type { DiagramDoc, DiagramNode } from "./types";
@@ -24,7 +24,7 @@ const docOf = (type: SemanticDiagramType, spec = fixture(type)) =>
   projectSemanticDocument(datasetOf(type, spec)).doc;
 
 const keys = (type: SemanticDiagramType, spec: Record<string, unknown>) =>
-  validateSemanticContent(type, spec).map((d) => d.key);
+  validateSemanticContentShape(type, spec).map((d) => d.key);
 
 function contains(outer: DiagramNode, inner: DiagramNode): boolean {
   return (
@@ -35,25 +35,25 @@ function contains(outer: DiagramNode, inner: DiagramNode): boolean {
   );
 }
 
-describe("validateSemanticContent", () => {
+describe("validateSemanticContentShape", () => {
   it("accepts every fixture, with and without minted relation ids", () => {
     for (const type of SEMANTIC_DIAGRAM_TYPES) {
-      expect(validateSemanticContent(type, fixture(type))).toEqual([]);
-      expect(validateSemanticContent(type, mintRelationIds(type, fixture(type)).spec)).toEqual([]);
+      expect(validateSemanticContentShape(type, fixture(type))).toEqual([]);
+      expect(validateSemanticContentShape(type, mintRelationIds(type, fixture(type)).spec)).toEqual([]);
     }
   });
 
   it("reports references the schema cannot express", () => {
     const sequence = fixture("sequence");
     (sequence.messages as Record<string, unknown>[])[0]!.to = "ghost";
-    expect(validateSemanticContent("sequence", sequence)).toContainEqual({
+    expect(validateSemanticContentShape("sequence", sequence)).toContainEqual({
       key: "diagram.semantic.danglingReference",
       params: { field: "messages[0].to", id: "ghost" },
     });
 
     const self = fixture("sequence");
     (self.messages as Record<string, unknown>[])[1]!.to = "api";
-    expect(validateSemanticContent("sequence", self)).toContainEqual({
+    expect(validateSemanticContentShape("sequence", self)).toContainEqual({
       key: "diagram.semantic.selfMessage",
       params: { field: "messages[1]" },
     });
@@ -64,7 +64,7 @@ describe("validateSemanticContent", () => {
 
     const dataflow = fixture("dataflow");
     (dataflow.nodes as Record<string, unknown>[])[1]!.stage = 2;
-    expect(validateSemanticContent("dataflow", dataflow)).toContainEqual({
+    expect(validateSemanticContentShape("dataflow", dataflow)).toContainEqual({
       key: "diagram.semantic.danglingReference",
       params: { field: "nodes[1].stage", id: "2" },
     });
@@ -103,16 +103,21 @@ describe("validateSemanticContent", () => {
       { id: "f", from: "app", to: "wh", label: "a" },
       { id: "f", from: "wh", to: "app", label: "b" },
     ];
-    expect(validateSemanticContent("dataflow", spec)).toContainEqual({
+    expect(validateSemanticContentShape("dataflow", spec)).toContainEqual({
       key: "diagram.semantic.duplicateId",
       params: { field: "flows[1]", id: "f" },
     });
   });
 
-  it("reports schema errors as specMeta", () => {
+  it("reports malformed shared envelope metadata before SDK family-schema validation", () => {
     const spec = fixture("lifecycle");
-    (spec.states as Record<string, unknown>[])[0]!.col = 9;
-    expect(keys("lifecycle", spec)).toContain("diagram.validation.specMeta");
+    delete spec.schema_version;
+    expect(validateSemanticContentShape("lifecycle", spec)).toContainEqual({
+      key: "diagram.validation.specMeta",
+      params: { field: "schema_version" },
+    });
+    // Family-specific fields such as states[*].col are checked by the async
+    // SDK engine integration, not duplicated in this synchronous shape helper.
   });
 });
 
@@ -239,7 +244,7 @@ describe("projectSemanticDataset", () => {
     spec.phases = [{ id: "build", label: "Build", fromCol: 0, toCol: 2 }];
     spec.groups = [{ id: "publish", label: "Publish", lane: "author", fromCol: 2, toCol: 2 }];
     const dataset = datasetOf("workflow", spec);
-    expect(validateSemanticContent("workflow", spec)).toEqual([]);
+    expect(validateSemanticContentShape("workflow", spec)).toEqual([]);
     const projected = projectSemanticDataset(dataset, { containers: true });
     expect(projected.diagnostics).toEqual([]);
     expect(projected.nodes[0]!.id).toBe("ds-workflow:phase:build");
@@ -282,7 +287,7 @@ describe("projectSemanticDataset", () => {
     const spec = fixture("sequence");
     spec.segments = [{ from: 170, to: 290, label: "Lookup" }];
     spec.activations = [{ participant: "api", from: 180, to: 280 }];
-    expect(validateSemanticContent("sequence", spec)).toEqual([]);
+    expect(validateSemanticContentShape("sequence", spec)).toEqual([]);
     const dataset = datasetOf("sequence", spec);
     const doc = projectSemanticDocument(dataset).doc;
     const segment = doc.nodes.find((node) => node.id === "ds-sequence:segment:0")!;

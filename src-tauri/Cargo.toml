@@ -34,13 +34,14 @@ default = []
 # `cargo build` binary points its window at devUrl and embeds no assets.
 # The runner has no vite dev server; without this feature the webview
 # stays on about:blank forever (the 06-01 white-screen bug).
-native-e2e = ["dep:tauri-plugin-wdio-webdriver", "tauri/custom-protocol", "dep:tauri-plugin-maru-diagram", "tauri-plugin-maru-diagram/png"]
+native-e2e = ["dep:tauri-plugin-wdio-webdriver", "tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-tauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", optional = true }
+maru-diagram-engine = { path = "crates/maru-diagram-engine", features = ["render-png", "render-outline"] }
+tauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ["png", "outline", "render-store"] }
 alacritty_terminal = "0.26.0"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }

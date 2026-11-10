@@ -117,10 +117,18 @@ describe("verified native engine artifact test adapter", () => {
 
   it("rejects SVG byte/string disagreement and untrusted PNG bytes", async () => {
     const { doc } = sourceDoc();
-    const changedSvgBytes = hostWith((report) => { report.bytes = [1, 2, 3]; });
+    const changedBytes = [1, 2, 3];
+    const changedBytesSha256 = await digest(new Uint8Array(changedBytes));
+    const changedSvgBytes = hostWith((report) => {
+      report.bytes = changedBytes;
+      (report.receipt as Record<string, unknown>).outputSha256 = changedBytesSha256;
+    });
     await expect(exportVerifiedEngineArtifactForTest({ doc, format: "svg", host: changedSvgBytes }))
       .rejects.toThrow(/differ from the receipt/i);
-    const invalidPng = hostWith((report) => { report.bytes = [1, 2, 3]; });
+    const invalidPng = hostWith((report) => {
+      report.bytes = changedBytes;
+      (report.receipt as Record<string, unknown>).outputSha256 = changedBytesSha256;
+    });
     await expect(exportVerifiedEngineArtifactForTest({ doc, format: "png", host: invalidPng }))
       .rejects.toThrow(/invalid signature/i);
   });

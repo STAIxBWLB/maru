@@ -3703,7 +3703,7 @@ export const en: Record<string, string> = {
   "diagram.dialog.ie.themeLight": "Light",
   "diagram.dialog.ie.themeDark": "Dark",
   "diagram.dialog.ie.engineReceipt": "Engine export receipt",
-  "diagram.dialog.ie.enginePin": "Engine pin",
+  "diagram.dialog.ie.enginePin": "Engine version",
   "diagram.dialog.ie.specHash": "Input spec SHA-256",
   "diagram.dialog.ie.outputHash": "Final artifact SHA-256",
   "diagram.codec.label.archify-svg": "Engine SVG (receipt)",

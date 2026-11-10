@@ -7,6 +7,7 @@ import { unmountReactRoot } from "../../../lib/testing/unmountReactRoot";
 
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { withSnapshot } from "../../../lib/diagram/actions";
+import { EngineUnavailableError } from "../../../lib/diagram/engine";
 import type { GenerationHost } from "../../../lib/diagram/generation";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
@@ -151,7 +152,8 @@ async function runGeneration() {
     const status = query('[data-testid="gen-status"]');
     const preview = query('[data-testid="gen-preview"]');
     const failed = query('[data-testid="gen-failed"]');
-    expect(status !== null || preview !== null || failed !== null).toBe(true);
+    const unavailable = query('[data-testid="gen-engine-unavailable"]');
+    expect(status !== null || preview !== null || failed !== null || unavailable !== null).toBe(true);
   });
 }
 
@@ -252,6 +254,37 @@ describe("GenerateDiagramDialog", () => {
     await vi.waitFor(() => expect(query('[data-testid="gen-failed"]')).not.toBeNull());
     expect(query('[data-testid="gen-failed"]')!.textContent).toContain("bad spec");
     expect(query('[data-testid="gen-apply-new"]')).toBeNull();
+  });
+
+  it("shows the unavailable state only for a typed product engine load failure", async () => {
+    const host = stubHost({
+      validateCandidate: vi.fn(async () => {
+        throw new EngineUnavailableError(
+          "The diagram validation engine is unavailable. Reload Maru and retry.",
+          new Error("generated WASM asset could not be loaded"),
+        );
+      }),
+    });
+    harness = renderDialog({ host });
+    await runGeneration();
+    await vi.waitFor(() => expect(query('[data-testid="gen-engine-unavailable"]')).not.toBeNull());
+    expect(query('[data-testid="gen-failed"]')).toBeNull();
+    expect(query('[data-testid="gen-mermaid"]')).not.toBeNull();
+    expect(host.validateCandidate).toHaveBeenCalled();
+  });
+
+  it("keeps unrelated native-plugin errors in the ordinary failed state", async () => {
+    harness = renderDialog({
+      host: stubHost({
+        validateCandidate: vi.fn(async () => {
+          throw new Error("unknown command plugin:maru-diagram|render_and_store");
+        }),
+      }),
+    });
+    await runGeneration();
+    await vi.waitFor(() => expect(query('[data-testid="gen-failed"]')).not.toBeNull());
+    expect(query('[data-testid="gen-engine-unavailable"]')).toBeNull();
+    expect(query('[data-testid="gen-failed"]')!.textContent).toContain("unknown command");
   });
 
   it("disables Apply when the proposal carries blocking diagnostics", async () => {

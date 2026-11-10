@@ -116,6 +116,19 @@ describe("PR change classification", () => {
 
   it("selects both geometry and native gates and the E0 build for every artifact adapter", () => {
     const paths = [
+      "src/lib/diagram/engine.ts",
+      "src/lib/diagram/engineArtifact.ts",
+      "src/lib/diagram/engineCandidate.ts",
+      "src/lib/diagram/enginePreflight.ts",
+      "src/lib/diagram/engineUnavailable.ts",
+      "src/lib/diagram/semanticApply.ts",
+      "src/lib/diagram/generation.ts",
+      "src/lib/diagram/generationHost.ts",
+      "src/lib/diagram/validation.ts",
+      "src/lib/diagram/semantic.ts",
+      "src/lib/diagram/codecs.ts",
+      "src/lib/diagram/reportInsert.ts",
+      "src/components/diagram/panels/SemanticProps.tsx",
       "src/lib/diagram/engineArtifactForTest.ts",
       "src/lib/diagram/engineSvg.ts",
       "src/lib/diagram/verifiedExport.ts",
@@ -136,8 +149,11 @@ describe("PR change classification", () => {
     expect(isE0SelectedPath("src/lib/diagram/types.ts")).toBe(false);
   });
 
-  it("runs both costly gates when an E0/E3 selection or coverage harness changes", () => {
+  it("runs both costly gates when an E0/E3 selection, build or coverage harness changes", () => {
     for (const path of [
+      "scripts/diagram-engine-e0.mjs",
+      "scripts/diagram-engine-e0-cache.mjs",
+      "rust-toolchain.toml",
       "scripts/diagram-engine-e0-paths.mjs",
       "scripts/diagram-engine-e3-integration-coverage.mjs",
     ]) {
@@ -346,5 +362,14 @@ describe("geometry intent on main pushes", () => {
       expect(() => geometryForPushComparison(value)).toThrow("keep the geometry gate enabled");
     }
     expect(geometryForPushComparison({ status: "ahead", files: Array.from({ length: 300 }, () => ({ filename: "docs/page.md" })) })).toBe(true);
+  });
+});
+
+describe("shared browser test bootstrap", () => {
+  it("builds ignored engine assets even when a non-engine change skips geometry CI", () => {
+    const policy = classifyPrChanges(["src/components/UnrelatedPane.tsx"]);
+    expect(policy.run_geometry).toBe(false);
+    const config = readFileSync(resolve(process.cwd(), "playwright.config.ts"), "utf8");
+    expect(config).toContain("command: `pnpm engine:assets && pnpm exec vite");
   });
 });

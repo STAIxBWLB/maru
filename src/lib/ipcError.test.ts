@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IpcError, isIpcErrorCode, normalizeIpcError } from "./ipcError";
+import { IpcError, ipcErrorMessage, isIpcErrorCode, normalizeIpcError } from "./ipcError";
 
 describe("isIpcErrorCode", () => {
   it("accepts only the four contract codes", () => {
@@ -66,4 +66,23 @@ describe("normalizeIpcError", () => {
       message: "code not a string",
     });
   });
+});
+
+describe("ipcErrorMessage", () => {
+  it.each(["render_store_failed", "<script>forged</script>", 42])("displays unknown code %s as text with its recovery step", (code) => {
+    expect(ipcErrorMessage({ code, message: "Store unavailable.", nextStep: "Refresh the workspace." }))
+      .toBe(`${typeof code === "string" ? `${code}: ` : ""}Store unavailable. Refresh the workspace.`);
+  });
+  it("keeps contract codes normalized and ignores non-text recovery fields", () => {
+    expect(ipcErrorMessage({ code: "today_conflict", message: "Stale revision.", nextStep: {} }))
+      .toBe("today_conflict: Stale revision.");
+    expect(ipcErrorMessage(new Error("Read failed; retry."))).toBe("Read failed; retry.");
+    expect(ipcErrorMessage("Plain failure; retry.")).toBe("Plain failure; retry.");
+  });
+});
+
+it("shows malformed IPC bodies without object coercion or duplicate recovery text", () => {
+  expect(ipcErrorMessage({ code: {}, message: {} })).toBe("The request returned an unrecognized error response; retry the operation.");
+  expect(ipcErrorMessage(Object.assign(new Error("Read failed; retry."), { nextStep: "retry." })))
+    .toBe("Read failed; retry.");
 });

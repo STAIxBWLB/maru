@@ -14,6 +14,7 @@ import type {
   EdgeDash,
   EdgeRouteMode,
 } from "../../../lib/diagram/types";
+import { semanticDatasetsOf } from "../../../lib/diagram/semantic";
 import { useTranslation } from "../../../lib/i18n";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
 import { SemanticProps } from "./SemanticProps";
@@ -328,14 +329,24 @@ function EdgeProps({ edge }: { edge: DiagramEdge }) {
 export function RightPanel() {
   const { t } = useTranslation();
   const selection = useDiagram((s) => s.ephemeral.selection);
-  const nodes = useDiagram((s) => s.doc.nodes);
-  const edges = useDiagram((s) => s.doc.edges);
+  const doc = useDiagram((s) => s.doc);
+  const nodes = doc.nodes;
+  const edges = doc.edges;
 
   const nodeCount = selection.nodes.size;
   const edgeCount = selection.edges.size;
   const total = nodeCount + edgeCount;
 
   if (total === 0) {
+    const datasets = semanticDatasetsOf(doc);
+    if (datasets.length === 1 && datasets[0]!.diagramType !== "floorplan") {
+      return (
+        <aside className="maru-diagram-side-panel" aria-label={t("diagram.panel.properties")}>
+          <h2>{t("diagram.panel.properties")}</h2>
+          <SemanticProps key={datasets[0]!.id} datasetId={datasets[0]!.id} />
+        </aside>
+      );
+    }
     return (
       <aside className="maru-diagram-side-panel" aria-label={t("diagram.panel.properties")}>
         <h2>{t("diagram.panel.properties")}</h2>

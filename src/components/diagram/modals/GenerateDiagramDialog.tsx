@@ -17,8 +17,8 @@
  *   whole dataset (shown before Run), locks the type, and regenerates the
  *   dataset in place; members of several datasets cannot run.
  *
- * The engine validation step degrades gracefully: an unavailable engine
- * surfaces as the typed ENGINE_UNAVAILABLE diagnostic and the Mermaid paste
+ * The engine validation step degrades gracefully: a product WASM load failure
+ * surfaces as a typed engine-unavailable diagnostic, and the Mermaid paste
  * import path (agent- and engine-free) keeps working.
  */
 
@@ -27,9 +27,9 @@ import { X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { confirmDialog } from "../../../lib/confirmDialog";
-import { isEngineUnavailable } from "../../../lib/archify";
 import { diagramRevision } from "../../../lib/diagram";
 import { withSnapshot } from "../../../lib/diagram/actions";
+import { isEngineUnavailable } from "../../../lib/diagram/engine";
 import {
   createGenerationJob,
   markStaleIfBaseChanged,
