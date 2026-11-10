@@ -191,7 +191,9 @@ fn wrap_paragraph(
         // A word earns its own line only when nothing else fits. Cutting a word
         // is the caller's last resort, so without permission the whole token
         // overflows on its own line and a caller can still grow or shrink.
-        let fitting = space_break.filter(|break_at| *break_at > 0).or(hangul_break);
+        let fitting = space_break
+            .filter(|break_at| *break_at > 0)
+            .or(hangul_break);
         let consumed = match (fitting, allow_token_split) {
             (Some(break_at), _) => break_at,
             (None, true) => {

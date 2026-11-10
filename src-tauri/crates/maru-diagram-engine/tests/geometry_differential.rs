@@ -263,8 +263,15 @@ fn the_dense_workflow_seed_is_accepted_and_readable_after_auto_fit() {
     let spec = &case["spec"];
     let report = layout_json(&serde_json::json!({"specJson": spec.to_string()}).to_string());
     assert!(report.ok, "{id}: {:?}", report.diagnostics);
-    let geometry = report.geometry.as_ref().expect("an accepted scene keeps geometry");
-    assert_eq!(geometry.nodes.len(), 200, "{id}: every seeded node is placed");
+    let geometry = report
+        .geometry
+        .as_ref()
+        .expect("an accepted scene keeps geometry");
+    assert_eq!(
+        geometry.nodes.len(),
+        200,
+        "{id}: every seeded node is placed"
+    );
     painted_ink::assert_accepted_text_ink_fits(&report);
     painted_ink::assert_readable_floors(&report, id);
 }
