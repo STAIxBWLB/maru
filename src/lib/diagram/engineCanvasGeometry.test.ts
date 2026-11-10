@@ -14,6 +14,7 @@ import {
   canvasGeometryOf,
   canvasLabelsFor,
   canvasNudgePins,
+  canvasEngineDrawnIds,
   canvasGeometryState,
   matchingCanvasGeometry,
   resetCanvasGeometry,
@@ -25,7 +26,7 @@ import {
 import { canonicalSemanticExportInput } from "./export";
 import { renderDocToSvg } from "./renderSvg";
 import type { EngineDiagramType, SemanticSpecDataset } from "./reportTypes";
-import { projectSemanticDocument } from "./semantic";
+import { projectSemanticDocument, resolveSemanticMember } from "./semantic";
 import { createEmptyDoc, type DiagramDoc, type DiagramNode } from "./types";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 
@@ -396,6 +397,37 @@ describe("canvas geometry source agreement with the export path", () => {
     expect(geometry.routes.has(generatedId)).toBe(false);
     expect(geometry.labels.get("ds-collide-e0")?.[0]?.lines).toEqual(["first"]);
     expect(geometry.labels.get("edge:0")?.[0]?.lines).toEqual(["second"]);
+  });
+
+  it.each([
+    { ids: ["ds-e1", null, "ds-e1-2"], index: 1, expected: "ds-e1-2" },
+    { ids: ["ds-e2", "ds-e2-2", null], index: 2, expected: "ds-e2-2-2" },
+  ])("shares projection collision allocation for id-less ordinal $index", ({ ids, index, expected }) => {
+    const spec = mixedSpec("workflow");
+    spec.edges = ids.map((id) => ({ ...(id === null ? {} : { id }), from: "draft", to: "review", role: "main" }));
+    const base = archifySpecToDataset("workflow", spec, { id: "ds" }).dataset;
+    const legacySpec = structuredClone(base.spec);
+    const relations = legacySpec.edges as Array<Record<string, unknown>>;
+    ids.forEach((id, ordinal) => { if (id === null) delete relations[ordinal]!.id; else relations[ordinal]!.id = id; });
+    const dataset = { ...base, idMap: {}, spec: legacySpec };
+    const doc = projectSemanticDocument(dataset).doc;
+    expect(doc.edges[index]!.id).toBe(expected);
+    const scene = sceneFor({ specJson: JSON.stringify(legacySpec) });
+    scene.labels = [];
+    scene.routes.forEach((route, ordinal) => { route.id = ids[ordinal] ?? `edge:${ordinal}`; });
+    const geometry = canvasGeometryOf({ apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() }, doc, dataset)!;
+    doc.edges.forEach((edge, ordinal) => {
+      expect(geometry.routes.get(edge.id)?.sourceId).toBe(ids[ordinal] ?? `edge:${ordinal}`);
+      expect(resolveSemanticMember(doc, { edgeId: edge.id })).toMatchObject({ kind: "relation", index: ordinal });
+    });
+  });
+
+  it("classifies a dataflow stage as engine-drawn even before a scene exists", () => {
+    const { doc, dataset } = docFor("dataflow");
+    const stage = doc.nodes.find((node) => node.meta?.semanticContainer === "stage")!;
+    expect(stage).toBeDefined();
+    expect(canvasEngineDrawnIds(doc, dataset.id, null).has(stage.id)).toBe(true);
+    expect(canvasNudgePins(doc, dataset.id, null, [stage.id], 1, 0)).toEqual([]);
   });
 
   it("treats a refused report as no scene at all", () => {

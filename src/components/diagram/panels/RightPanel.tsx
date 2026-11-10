@@ -164,7 +164,8 @@ function NodeProps({
   const memo = typeof node.meta?.memo === "string" ? (node.meta.memo as string) : "";
   // An engine-drawn member's doc position is a slot the layout overwrites, so a
   // typed coordinate changes stored data and history with nothing on screen.
-  // Once the member is pinned the typed position is the pin and does land.
+  // Once pinned, the doc position is the authored pin. A pending layout may
+  // still paint the old box, so editable inputs must keep reading the doc.
   const positionStuck = engineOwned && node.locked !== true && node.meta?.pinned !== true;
 
   return (
@@ -226,13 +227,13 @@ function NodeProps({
         <div className="maru-diagram-prop-row">
           <NumberField
             labelKey="diagram.properties.x"
-            value={shown.x}
+            value={positionStuck ? shown.x : node.x}
             onCommit={(v) => patch({ x: v })}
             disabled={positionStuck}
           />
           <NumberField
             labelKey="diagram.properties.y"
-            value={shown.y}
+            value={positionStuck ? shown.y : node.y}
             onCommit={(v) => patch({ y: v })}
             disabled={positionStuck}
           />

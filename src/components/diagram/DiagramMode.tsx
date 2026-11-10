@@ -49,7 +49,7 @@ import {
 } from "../../lib/diagram/tableEditing";
 import { nextTableKeyAction } from "../../lib/diagram/tableKeys";
 import { isDiagramKeystroke, matchesShortcut } from "../../lib/diagram/shortcuts";
-import { canvasNudgePins } from "../../lib/diagram/engineCanvasGeometry";
+import { canvasEngineDrawnIds, canvasNudgePins } from "../../lib/diagram/engineCanvasGeometry";
 import { fitView } from "../../lib/diagram/geometry";
 import {
   clipboardWriteHtml,
@@ -1256,7 +1256,7 @@ function DiagramShell({
         dx,
         dy,
       );
-      store.setState(withSnapshot(nudgeSelection(dx, dy, pins), coalescer, { coalesce: true }));
+      store.setState(withSnapshot(nudgeSelection(dx, dy, pins, canvasEngineDrawnIds(state.doc, canvasDisplay.datasetId, canvasDisplay.geometry)), coalescer, { coalesce: true }));
     },
     [canvasDisplay.datasetId, canvasDisplay.geometry, coalescer, store],
   );

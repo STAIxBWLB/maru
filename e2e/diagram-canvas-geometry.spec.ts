@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 
 import { SEMANTIC_FIXTURES } from "../src/lib/diagram/__fixtures__/semantic";
@@ -401,4 +402,39 @@ test("an arrow-key nudge moves the painted box and pins it", async ({ page }) =>
   );
   expect(await page.locator(".maru-diagram-canvas").getAttribute("data-engine-spec-sha256")).toBe(specSha);
   console.log(`CANVAS_CHROME ${JSON.stringify({ scope: "arrow nudge pins the painted box, chromium only", target, before, after })}`);
+});
+
+
+test("ArrowRight on a derived dataflow stage changes neither doc nor history", async ({ page }) => {
+  await importSpec(page, "dataflow", mixedSpec("dataflow"));
+  await showWholePage(page);
+  const readDoc = async () => {
+    await page.getByRole("tab", { name: "파일", exact: true }).click();
+    await page.getByRole("button", { name: "내보내기", exact: true }).click();
+    const dialog = page.locator(".dialog-content", { hasText: "내보내기" });
+    await dialog.getByTestId("ie-format-select").selectOption("maru-json");
+    const downloadPromise = page.waitForEvent("download");
+    await dialog.getByTestId("ie-export-confirm").click();
+    const download = await downloadPromise;
+    const filePath = await download.path();
+    if (!filePath) throw new Error("The JSON export did not produce a readable download");
+    const doc = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+    await dialog.getByRole("button", { name: "취소", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    return doc;
+  };
+  const before = await readDoc() as { nodes: Array<{ id: string; locked?: boolean }> };
+  const stageId = await page.locator('[data-engine-source-id="stage:0"] [data-node-id]').getAttribute("data-node-id");
+  const storedStage = before.nodes.find((node) => node.id === stageId);
+  expect(storedStage).toBeDefined();
+  expect(storedStage!.locked).not.toBe(true);
+  await page.getByRole("tab", { name: "편집", exact: true }).click();
+  const undo = page.getByRole("button", { name: /되돌리기/ });
+  await expect(undo).toBeDisabled();
+  const stage = page.locator('[data-engine-source-id="stage:0"] [data-node-id]');
+  await stage.click({ position: { x: 20, y: 10 }, force: true });
+  await expect(stage).toHaveClass(/is-selected/);
+  await page.keyboard.press("ArrowRight");
+  await expect(undo).toBeDisabled();
+  expect(await readDoc()).toEqual(before);
 });

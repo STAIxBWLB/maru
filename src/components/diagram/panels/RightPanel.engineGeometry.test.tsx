@@ -206,6 +206,83 @@ describe("property fields follow what the canvas shows", () => {
     expect(section("diagram.panel.properties.size").inputs.every((input) => input.disabled)).toBe(true);
   });
 
+  it("keeps each typed digit of a pinned position while the next layout is held", async () => {
+    const { doc, dataset } = semanticDoc();
+    const draftId = dataset.idMap.draft!;
+    const pinned = {
+      ...doc,
+      nodes: doc.nodes.map((node) => node.id === draftId
+        ? { ...node, x: 200, y: 300, meta: { ...node.meta, pinned: true } }
+        : node),
+    };
+    await syncCanvasGeometry(pinned, dataset.id, async () => engine);
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const loaderEntered = new Promise<void>((resolve) => { entered = resolve; });
+    _setCanvasEngineLoaderForTests(async () => {
+      entered();
+      await held;
+      return engine;
+    });
+    renderPanel(pinned, draftId);
+    await settle();
+    const position = section("diagram.panel.properties.position");
+    const [x, y] = position.inputs as [HTMLInputElement, HTMLInputElement];
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    const typeDigit = async (input: HTMLInputElement, digit: string, replace = false) => {
+      await act(async () => {
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: digit, bubbles: true }));
+        setter.call(input, replace ? digit : input.value + digit);
+        input.dispatchEvent(new InputEvent("input", { data: digit, inputType: "insertText", bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keyup", { key: digit, bubbles: true }));
+      });
+      await settle();
+    };
+    const stored = () => probe!.getState().doc.nodes.find((node) => node.id === draftId)!;
+    try {
+      // Replacing the selected number and then appending one character at a
+      // time exercises the controlled input, rather than writing the store.
+      await typeDigit(x, "1", true);
+      await act(async () => { await loaderEntered; });
+      expect([x.value, stored().x]).toEqual(["1", 1]);
+      await typeDigit(x, "2");
+      expect([x.value, stored().x]).toEqual(["12", 12]);
+      await typeDigit(x, "3");
+      expect([x.value, stored().x]).toEqual(["123", 123]);
+      await typeDigit(y, "4", true);
+      expect([y.value, stored().y]).toEqual(["4", 4]);
+      await typeDigit(y, "5");
+      expect([y.value, stored().y]).toEqual(["45", 45]);
+      await typeDigit(y, "6");
+      expect([y.value, stored().y]).toEqual(["456", 456]);
+      expect(canvasGeometryState(dataset.id).geometry?.boxes.get(draftId)).toMatchObject({ x: 200, y: 300 });
+      expect(section("diagram.panel.properties.size").inputs.every((input) => input.disabled)).toBe(true);
+    } finally {
+      await act(async () => {
+        release();
+        await syncCanvasGeometry(probe!.getState().doc, dataset.id);
+      });
+    }
+    expect(section("diagram.panel.properties.position").inputs.map((input) => input.value)).toEqual(["123", "456"]);
+  });
+
+  it("shows a locked engine member's authored coordinates instead of its published box", async () => {
+    const { doc, dataset } = semanticDoc();
+    const draftId = dataset.idMap.draft!;
+    const locked = {
+      ...doc,
+      nodes: doc.nodes.map((node) => node.id === draftId ? { ...node, x: 44, y: 55, locked: true } : node),
+    };
+    await syncCanvasGeometry(locked, dataset.id, async () => engine);
+    renderPanel(locked, draftId);
+    await settle();
+    expect(section("diagram.panel.properties.position").inputs.map((input) => input.value)).toEqual(["44", "55"]);
+    expect(section("diagram.panel.properties.size").inputs.every((input) => input.disabled)).toBe(true);
+  });
+
   it("leaves a free-form node's fields editable and reads its own position", async () => {
     const { doc } = semanticDoc();
     const free = { ...doc, datasets: [], nodes: [{ id: "free", kind: "simple" as const, x: 12, y: 34, w: 80, h: 40 }] };

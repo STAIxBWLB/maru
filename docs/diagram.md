@@ -608,7 +608,10 @@ export path independently lays out its source request.
 - Document replacement clears the published scene and invalidates in-flight
   layouts, including when a copied file keeps the same dataset id. Returning to
   an already cached revision also supersedes a different pending layout.
-- Escape cancels an uncommitted drag offset without changing the document.
+- Escape cancels live drag positions without changing the document or losing
+  an earlier pending drop. Consecutive drags retain each member's painted start
+  position until a new scene arrives; a committed overlay also disappears when
+  its pin is undone, even if the cached scene does not publish again.
 - A drag authors a pin, not a placement. Engine-drawn members move on the canvas
   during the gesture and the drop records one pin entry (`pinSemanticNodes`), in
   one undo step. A pin is an authored source position, so the adapter subtracts
@@ -619,11 +622,13 @@ export path independently lays out its source request.
   computed from its members) pins nothing: its drop returns to the engine's box
   instead of leaving an offset no layout would replace.
 - Every path that acts on a member acts on what the canvas shows. An arrow-key
-  nudge pins the engine-drawn members at their painted box (`canvasNudgePins`)
-  and moves the rest in the doc, as one edit. The property panel reports the
+  nudge pins pinnable engine members at their painted box (`canvasNudgePins`),
+  leaves derived engine frames unchanged, and moves only non-engine members in
+  the doc, as one edit. The property panel reports the
   painted box: its position fields are read-only for an unpinned engine member
   (a pinned one's typed position *is* the pin) and its size fields are always
-  the engine's. The inline editor, fit view and find navigation read the same
+  the engine's. Pinned coordinate inputs read the authored doc position while
+  an async scene is pending, so typing a number keeps every digit. The inline editor, fit view and find navigation read the same
   displayed nodes (`useCanvasDisplay`), so none of them aims at the coarse slot
   the doc still stores under an engine member.
 - A refused or unavailable layout keeps the last good scene (or the projected

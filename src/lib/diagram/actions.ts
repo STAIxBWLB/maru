@@ -297,16 +297,17 @@ export function toggleFocusMode(value?: boolean): StateTransformer {
 /**
  * Arrow-key nudge of the selection, in one edit. A member the engine draws has
  * no useful doc position, so the caller passes the pin it authors for that
- * member (see `canvasNudgePins`); every other selected member keeps the plain
- * doc move, and a locked one stays put either way.
+ * member (see `canvasNudgePins`); other engine-drawn members stay put while
+ * non-engine members keep the plain doc move, and a locked one stays put either way.
  */
 export function nudgeSelection(
   dx: number,
   dy: number,
   pins: Iterable<{ id: NodeId; x: number; y: number }> = [],
+  engineDrawnIds: Iterable<NodeId> = [],
 ): StateTransformer {
   const entries = [...pins];
-  const pinned = new Set(entries.map((entry) => entry.id));
+  const pinned = new Set([...engineDrawnIds, ...entries.map((entry) => entry.id)]);
   return (state) => {
     const plain = [...state.ephemeral.selection.nodes].filter((id) => !pinned.has(id));
     const placed = pinSemanticNodes(entries)(state);

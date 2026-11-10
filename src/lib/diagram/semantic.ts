@@ -643,6 +643,21 @@ export function projectedRelationEdgeId(datasetId: string, index: number): strin
   return `${datasetId}-e${index}`;
 }
 
+/** Relation ids in source order, with the projection's collision resolution. */
+export function projectedRelationEdgeIds(dataset: SemanticSpecDataset): Array<string | null> {
+  const descriptor = descriptorFor(dataset);
+  if (!descriptor) return [];
+  const used = new Set<string>();
+  return specEntries(dataset.spec, descriptor.relations).map((entry, index) => {
+    if (typeof entry.from !== "string" || typeof entry.to !== "string") return null;
+    const sourceId = idOf(entry);
+    let id = sourceId !== null ? maruIdFor(dataset, sourceId) : projectedRelationEdgeId(dataset.id, index);
+    while (used.has(id)) id = `${id}-2`;
+    used.add(id);
+    return id;
+  });
+}
+
 export function isSemanticContainerNode(node: DiagramNode): boolean {
   return typeof node.meta?.semanticContainer === "string";
 }
@@ -941,13 +956,11 @@ export function projectSemanticDataset(
     sequenceOrder(spec).forEach((index, order) => rank.set(index, order));
   }
   const edges: DiagramEdge[] = [];
-  const edgeIds = new Set<string>();
+  const relationIds = projectedRelationEdgeIds(dataset);
   specEntries(spec, descriptor.relations).forEach((entry, index) => {
     if (typeof entry.from !== "string" || typeof entry.to !== "string") return;
-    const specId = idOf(entry);
-    let id = specId !== null ? maruIdFor(dataset, specId) : projectedRelationEdgeId(dataset.id, index);
-    while (edgeIds.has(id)) id = `${id}-2`;
-    edgeIds.add(id);
+    const id = relationIds[index];
+    if (id === null || id === undefined) return;
     const label = typeof entry.label === "string" ? entry.label : undefined;
     if (dataset.diagramType === "sequence") {
       edges.push({
@@ -1110,11 +1123,11 @@ export function resolveSemanticMember(
     const descriptor = descriptorFor(dataset);
     if (!descriptor) continue;
     const entries = specEntries(dataset.spec, descriptor.relations);
-    const index = entries.findIndex((entry, i) => {
-      const specId = idOf(entry);
-      // Floorplan edges are index-keyed even when an `id` extension is present.
-      return specId !== null && !descriptor.noRelationIds ? maruIdFor(dataset, specId) === target.edgeId : projectedRelationEdgeId(dataset.id, i) === target.edgeId;
-    });
+    // Floorplan keeps its local index-keyed extension behavior.
+    const ids = descriptor.noRelationIds
+      ? entries.map((_, i) => projectedRelationEdgeId(dataset.id, i))
+      : projectedRelationEdgeIds(dataset);
+    const index = ids.findIndex((id) => id !== null && id === target.edgeId);
     if (index >= 0) {
       return { kind: "relation", dataset, field: descriptor.relations, index, entry: entries[index]! };
     }

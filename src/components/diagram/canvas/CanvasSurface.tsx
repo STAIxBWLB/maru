@@ -29,10 +29,12 @@ import {
 } from "../../../lib/diagram/geometry";
 import {
   canvasDisplayNode,
+  canvasEngineDrawnIds,
   canvasLabelsFor,
   canvasLabelLines,
   canvasMoveBase,
   type CanvasGeometry,
+  type CanvasGeometryState,
   type CanvasLabelLines,
   type CanvasDisplayOffset,
 } from "../../../lib/diagram/engineCanvasGeometry";
@@ -92,16 +94,31 @@ interface DragState {
   coalescer: Coalescer;
 }
 
-/**
- * Live displacement of engine-drawn nodes. A committed offset outlives the
- * gesture until the layout that carries the new pins arrives, so a dropped
- * node never snaps back to the previous scene for a frame.
- */
+type CanvasPositions = ReadonlyMap<NodeId, { x: number; y: number }>;
+
+/** Dropped positions remain painted only while the same scene is published. */
 interface CanvasOffset {
-  ids: ReadonlySet<NodeId>;
-  dx: number;
-  dy: number;
-  committed: boolean;
+  scene: CanvasGeometryState;
+  positions: CanvasPositions;
+}
+
+function committedCanvasPositions(
+  offset: CanvasOffset | null,
+  scene: CanvasGeometryState,
+  nodes: readonly DiagramNode[],
+): Map<NodeId, { x: number; y: number }> {
+  const positions = new Map<NodeId, { x: number; y: number }>();
+  if (!offset || offset.scene !== scene) return positions;
+  const storedNodes = new Map(nodes.map((node) => [node.id, node]));
+  for (const [id, position] of offset.positions) {
+    const stored = storedNodes.get(id);
+    // Undo may return to a cached scene without a publish. Keep the overlay
+    // only while the doc still carries that exact authored pin.
+    if (stored?.meta?.pinned === true && stored.x === position.x && stored.y === position.y) {
+      positions.set(id, position);
+    }
+  }
+  return positions;
 }
 
 interface PanState {
@@ -227,6 +244,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [guides, setGuides] = useState<GuideLine[]>([]);
   const [canvasOffset, setCanvasOffset] = useState<CanvasOffset | null>(null);
+  const [liveCanvasPositions, setLiveCanvasPositions] = useState<CanvasPositions | null>(null);
   const [connectGhost, setConnectGhost] = useState<{
     x1: number;
     y1: number;
@@ -240,13 +258,14 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   // geometry: any publish means the layout that carries the pins was tried, and
   // a refusal must not leave a painting that no later layout will replace.
   useEffect(() => {
-    setCanvasOffset((current) => (current?.committed ? null : current));
+    setCanvasOffset((current) => current?.scene === canvasGeometry ? current : null);
   }, [canvasGeometry]);
 
-  const offset: CanvasDisplayOffset | null = useMemo(
-    () => (canvasOffset ? { ids: canvasOffset.ids, dx: canvasOffset.dx, dy: canvasOffset.dy } : null),
-    [canvasOffset],
-  );
+  const offset: CanvasDisplayOffset | null = useMemo(() => {
+    const positions = committedCanvasPositions(canvasOffset, canvasGeometry, nodes);
+    for (const [id, position] of liveCanvasPositions ?? []) positions.set(id, position);
+    return positions.size > 0 ? { ids: new Set(positions.keys()), dx: 0, dy: 0, positions } : null;
+  }, [canvasGeometry, canvasOffset, liveCanvasPositions, nodes]);
 
   // The boxes the canvas paints: engine scene geometry when the document has a
   // semantic dataset, the doc's own placement otherwise (free-form, templates,
@@ -381,6 +400,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         const n = nodeById.get(id);
         if (n) origins.set(id, { x: n.x, y: n.y, w: n.w, h: n.h });
       }
+      const drawnIds = canvasEngineDrawnIds(state.doc, datasetId, geometry);
       gestureRef.current = {
         kind: "node",
         startCanvasX: canvas.x,
@@ -388,21 +408,16 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         lastDx: 0,
         lastDy: 0,
         ids,
-        // A member the engine draws moves on the canvas, not in the doc. Before
-        // the first scene arrives there is no box yet, but a pinnable semantic
-        // member still must not be moved in the doc: the layout would put the
-        // engine's box over it and the drag would vanish.
-        engineIds: ids.filter((id) => {
-          if (geometry?.boxes.has(id)) return true;
-          const node = nodeById.get(id);
-          return node != null && datasetId != null && isPinnableCanvasMember(doc, datasetId, node);
-        }),
+        // All semantic members, including derived frames before their first
+        // scene, stay engine-owned. Only pinnable members author a pin on drop;
+        // a plain doc move would be hidden when the engine box arrives.
+        engineIds: ids.filter((id) => drawnIds.has(id)),
         origins,
         linkedViewIds: analysis.full,
         coalescer: defaultCoalescer(),
       };
     },
-    [datasetId, doc, geometry, nodeById, store, t, viewport],
+    [datasetId, geometry, nodeById, store, t, viewport],
   );
 
   const beginConnect = useCallback(
@@ -695,12 +710,12 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
           );
         }
         if (gesture.engineIds.length > 0) {
-          setCanvasOffset({
-            ids: new Set(gesture.engineIds),
-            dx: proposedDx,
-            dy: proposedDy,
-            committed: false,
-          });
+          const positions = new Map<NodeId, { x: number; y: number }>();
+          for (const id of gesture.engineIds) {
+            const origin = gesture.origins.get(id);
+            if (origin) positions.set(id, { x: origin.x + proposedDx, y: origin.y + proposedDy });
+          }
+          setLiveCanvasPositions(positions);
         }
         setGuides(smartGuideOut);
       }
@@ -772,12 +787,18 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         // scene the engine box hides the doc position, so the gesture offset
         // holds the drop. Without one, or when nothing was pinnable, the offset
         // must go, or the canvas keeps a displacement no layout will replace.
+        setLiveCanvasPositions(null);
         if (moved && gesture.engineIds.length > 0) {
-          setCanvasOffset(
-            placed.length > 0 && geometry
-              ? { ids: new Set(gesture.engineIds), dx: gesture.lastDx, dy: gesture.lastDy, committed: true }
-              : null,
-          );
+          setCanvasOffset((current) => {
+            const positions = committedCanvasPositions(current, canvasGeometry, nodes);
+            // A separate drop may still await this same scene's replacement.
+            // Retain those members, but a non-pinnable drop keeps no ghost.
+            for (const id of gesture.engineIds) positions.delete(id);
+            if (geometry) {
+              for (const { id, x, y } of placed) positions.set(id, { x, y });
+            }
+            return positions.size > 0 ? { scene: canvasGeometry, positions } : null;
+          });
         }
       }
       if (gesture.kind === "connect") {
@@ -797,7 +818,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       }
       gestureRef.current = null;
     },
-    [datasetId, displayNodes, doc, geometry, nodes, store],
+    [canvasGeometry, datasetId, displayNodes, doc, geometry, nodes, store],
   );
 
   const onWheel = useCallback(
@@ -827,7 +848,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (!isDiagramKeystroke(event.target)) return;
       if (event.key === "Escape") {
         gestureRef.current = null;
-        setCanvasOffset((current) => current?.committed ? current : null);
+        setLiveCanvasPositions(null);
         setMarquee(null);
         setGuides([]);
         setConnectGhost(null);

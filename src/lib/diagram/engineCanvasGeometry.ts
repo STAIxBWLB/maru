@@ -18,7 +18,7 @@ import type { Diagnostic, GeometryReport } from "../../../src-tauri/crates/maru-
 import { fixedToPixels, isPinnableCanvasMember, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
 import { ENGINE_DIAGRAM_TYPES, type SemanticSpecDataset } from "./reportTypes";
-import { descriptorFor, projectedRelationEdgeId, specEntries } from "./semantic";
+import { descriptorFor, projectedRelationEdgeIds, semanticMemberNodeIds, specEntries } from "./semantic";
 import type { DiagramDoc, DiagramNode, NodeId } from "./types";
 
 export interface CanvasGeometryPoint {
@@ -179,22 +179,24 @@ export function canvasGeometryOf(
   const relationPrefix = RELATION_ROUTE_PREFIX[dataset.diagramType] ?? null;
   const descriptor = descriptorFor(dataset);
   const relations = descriptor ? specEntries(dataset.spec, descriptor.relations) : [];
-  const authoredRelations = new Set(
-    relations
-      .map((relation) => relation.id)
-      .filter((id): id is string => typeof id === "string" && id.length > 0),
-  );
+  const projectedIds = projectedRelationEdgeIds(dataset);
+  const authoredCanvasIds = new Map<string, string | null>();
+  relations.forEach((relation, index) => {
+    if (typeof relation.id === "string" && relation.id.length > 0 && !authoredCanvasIds.has(relation.id)) {
+      authoredCanvasIds.set(relation.id, projectedIds[index] ?? null);
+    }
+  });
   const relationCanvasId = (sourceId: string): string | null => {
-    if (Object.hasOwn(dataset.idMap, sourceId)) return dataset.idMap[sourceId]!;
+    if (authoredCanvasIds.has(sourceId)) return authoredCanvasIds.get(sourceId) ?? null;
     if (!relationPrefix || !sourceId.startsWith(`${relationPrefix}:`)) return null;
-    if (authoredRelations.has(sourceId)) return null;
     let index = sourceId.slice(relationPrefix.length + 1);
     while (index.endsWith(GENERATED_ROUTE_SUFFIX)) index = index.slice(0, -GENERATED_ROUTE_SUFFIX.length);
     if (!/^(0|[1-9][0-9]*)$/.test(index)) return null;
     const relation = relations[Number(index)];
     const idLess = relation !== undefined && (typeof relation.id !== "string" || relation.id.length === 0);
     if (!idLess) return null;
-    const projected = projectedRelationEdgeId(dataset.id, Number(index));
+    const projected = projectedIds[Number(index)];
+    if (projected === null || projected === undefined) return null;
     return doc.edges.some((edge) => edge.id === projected) ? projected : null;
   };
   const labelTarget = (id: string, targetId: string): string | null => {
@@ -291,6 +293,8 @@ export interface CanvasDisplayOffset {
   ids: ReadonlySet<string>;
   dx: number;
   dy: number;
+  /** Per-member painted positions, including earlier drops awaiting a scene. */
+  positions?: ReadonlyMap<NodeId, CanvasGeometryPoint>;
 }
 
 /**
@@ -308,9 +312,12 @@ export function canvasDisplayNode(
   const dx = moved && offset ? offset.dx : 0;
   const dy = moved && offset ? offset.dy : 0;
   const box = geometry?.boxes.get(node.id) ?? null;
-  if (!box) return dx !== 0 || dy !== 0 ? { ...node, x: node.x + dx, y: node.y + dy } : node;
-  if (node.x === box.x + dx && node.y === box.y + dy && node.w === box.w && node.h === box.h) return node;
-  return { ...node, x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
+  const position = offset?.positions?.get(node.id);
+  const x = position?.x ?? (box?.x ?? node.x) + dx;
+  const y = position?.y ?? (box?.y ?? node.y) + dy;
+  const w = box?.w ?? node.w;
+  const h = box?.h ?? node.h;
+  return node.x === x && node.y === y && node.w === w && node.h === h ? node : { ...node, x, y, w, h };
 }
 
 /**
@@ -323,6 +330,14 @@ export function canvasMoveBase(node: DiagramNode, geometry: CanvasGeometry | nul
   if (node.meta?.pinned === true) return { x: node.x, y: node.y };
   const box = geometry?.boxes.get(node.id) ?? null;
   return box ? { x: box.x, y: box.y } : { x: node.x, y: node.y };
+}
+
+/** All members whose placement belongs to the drawn engine dataset. */
+export function canvasEngineDrawnIds(doc: DiagramDoc, datasetId: string | null, geometry: CanvasGeometry | null): ReadonlySet<NodeId> {
+  return new Set([
+    ...(geometry?.boxes.keys() ?? []),
+    ...(datasetId ? semanticMemberNodeIds(doc, datasetId) : []),
+  ]);
 }
 
 /**
