@@ -155,7 +155,9 @@ fn the_native_svg_entry_defaults_to_outlines_and_the_shared_entry_keeps_text() {
     use maru_diagram_engine::render::{
         render_artifact_json, render_svg_artifact_json, SvgTextMode,
     };
-    let spec = spec_with_mixed_label();
+    let mut spec = spec_with_mixed_label();
+    // Source-valid export is required here; overflow is tested by the layout suite.
+    spec["components"][0]["size"] = json!([160, 60]);
     let request =
         json!({"specJson": spec.to_string(), "format": "svg", "theme": "light"}).to_string();
 
