@@ -388,9 +388,11 @@ test("edits an imported lifecycle state type and label from the property panel",
   await page.locator('.maru-diagram-node[data-node-id="running"]').click();
   await expect(page.getByTestId("semantic-props")).toBeVisible();
   await page.getByTestId("semantic-state-type").selectOption("decision");
+  // The canvas draws the engine's state box (140x64) rather than the doc's own
+  // 160x64 slot, so the diamond is asserted over the engine width.
   await expect(page.locator('.maru-diagram-node[data-node-id="running"] path').first()).toHaveAttribute(
     "d",
-    /^M 80 0 L 160 32/,
+    "M 70 0 L 140 32 L 70 64 L 0 32 Z",
   );
 
   await propertiesPanel(page).getByLabel("제목", { exact: true }).fill("실행 중");

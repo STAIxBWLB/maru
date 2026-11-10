@@ -138,6 +138,13 @@ for (const type of TYPES) {
       const px = (value: number) => value / 64;
       const pixelBox = (bounds: Bounds) => [px(bounds.x), px(bounds.y), px(bounds.width), px(bounds.height)];
       const failures: string[] = [];
+      // What the canvas actually painted, so a mismatch names the mismatch.
+      const inventory = () => ({
+        dataset: surface.getAttribute("data-engine-dataset-id"),
+        status: surface.getAttribute("data-engine-geometry-status"),
+        canvasIds: [...surface.querySelectorAll("[data-node-id]")].map((node) => node.getAttribute("data-node-id")).slice(0, 10),
+        sourceIds: [...surface.querySelectorAll("[data-engine-source-id]")].map((node) => node.getAttribute("data-engine-source-id")).slice(0, 10),
+      });
       const groupOf = (sourceId: string) => surface.querySelector(`[data-engine-source-id="${sourceId}"]`);
       const boxDiff = (group: Element, expected: number[]) => {
         const actual = (group.getAttribute("data-engine-box") ?? "").split(" ").map(Number);
@@ -224,7 +231,9 @@ for (const type of TYPES) {
       }
 
       if (failures.length > 0) {
-        throw new Error(`canvas geometry mismatches: ${failures.join("; ")}; fix the canvas mapper instead of the fixture.`);
+        throw new Error(
+          `canvas geometry mismatches: ${failures.join("; ")}; the canvas painted ${JSON.stringify(inventory())}; fix the canvas mapper instead of the fixture.`,
+        );
       }
       return { specSha256, nodes: scene.nodes.length, containers, labels, koreanLines, routes };
     }, { type, spec });
