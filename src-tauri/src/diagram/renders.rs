@@ -13,10 +13,7 @@ use crate::atomic_file::{
 use crate::vault::{lexical_normalize, normalize_existing_dir};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
 use chrono::{SecondsFormat, Utc};
-use maru_diagram_engine::{
-    geometry::{LayoutRequest, PinSet},
-    render::ArtifactReport,
-};
+use maru_diagram_engine::render::ArtifactReport;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -248,7 +245,7 @@ fn validate_base_receipt(receipt: &StoredRenderReceipt) -> Result<&'static str, 
                 || receipt.engine_pin.version.trim().is_empty()
                 || receipt.engine_pin.revision.trim().is_empty()
             {
-                return Err("Render receipt engine identity is incomplete; regenerate the render with the pinned Archify engine".into());
+                return Err("Render receipt engine identity is incomplete; restore its original legacy receipt or rerender with the current diagram engine".into());
             }
             if !valid_sha256(&receipt.input_spec_sha256) || !valid_sha256(&receipt.output_sha256) {
                 return Err(
@@ -357,19 +354,11 @@ fn engine_input_spec_sha256(request_json: &str) -> Result<String, String> {
     #[serde(rename_all = "camelCase")]
     struct RequestSource {
         spec_json: String,
-        #[serde(default)]
-        pin_set: Option<PinSet>,
     }
 
     let source: RequestSource = serde_json::from_str(request_json)
         .map_err(|error| format!("Cannot validate SVG source request: {error}"))?;
-    let layout_request = LayoutRequest {
-        spec_json: source.spec_json,
-        pin_set: source.pin_set,
-    };
-    let layout_json = serde_json::to_string(&layout_request)
-        .map_err(|error| format!("Cannot canonicalize SVG source request: {error}"))?;
-    Ok(sha256(layout_json.as_bytes()))
+    Ok(sha256(source.spec_json.as_bytes()))
 }
 
 fn validate_extended_receipt(receipt: &DiagramRenderReceipt) -> Result<&'static str, String> {
@@ -402,7 +391,7 @@ fn validate_extended_receipt(receipt: &DiagramRenderReceipt) -> Result<&'static 
 
 fn extended_receipt(
     context: &RenderDocumentContext,
-    receipt: StoredRenderReceipt,
+    mut receipt: StoredRenderReceipt,
 ) -> Result<DiagramRenderReceipt, String> {
     validate_doc_id(&context.doc_id)?;
     validate_diagram_type(&context.diagram_type)?;
@@ -412,6 +401,16 @@ fn extended_receipt(
         );
     }
     validate_base_receipt(&receipt)?;
+    // The outer document envelope owns these keys. Avoid duplicate JSON keys
+    // when flattening the canonical receipt, whose context is optional.
+    if let StoredRenderReceipt::Engine(native) = &mut receipt {
+        native.doc_id = None;
+        native.document_name = None;
+        native.document_revision = None;
+        native.rendered_at = None;
+        native.diagram_type = None;
+        native.dataset_id = None;
+    }
     let extended = DiagramRenderReceipt {
         render: receipt,
         doc_id: context.doc_id.clone(),
@@ -1503,7 +1502,7 @@ pub(crate) fn store_engine_render(
     report: ArtifactReport,
 ) -> Result<StoredRender, String> {
     if report.api_version != maru_diagram_engine::API_VERSION {
-        return Err("Cannot store diagram render: engine API version is unsupported; rebuild Maru and rerender".into());
+        return Err("Cannot store diagram render: engine API version is unsupported; update Maru and rerender".into());
     }
     if !report.ok {
         return Err("Cannot store diagram render: the native engine report is not successful; repair the source and rerender".into());
