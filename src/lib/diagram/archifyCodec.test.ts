@@ -10,6 +10,7 @@ import {
   toArchifyId,
 } from "./archifyCodec";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { pinnedEngineHost } from "./__fixtures__/engineHost";
 import { codecForFilename, getCodec } from "./codecs";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import { ARCHIFY_DIAGRAM_TYPES as SEMANTIC_DIAGRAM_TYPES, validateSemanticSpec, type SemanticDiagramType } from "./reportTypes";
@@ -202,11 +203,6 @@ describe("P2 semantic types (issue #433)", () => {
     mutate?.(spec);
     return JSON.stringify(spec);
   };
-  const refusalKeys = (text: string) => {
-    const outcome = parseArchifySpec(text);
-    return outcome.ok ? [] : outcome.diagnostics.map((d) => d.key);
-  };
-
   it("parses the sequence, dataflow and lifecycle fixtures", () => {
     for (const type of ["sequence", "dataflow", "lifecycle"] as const) {
       const outcome = parseArchifySpec(fixtureText(type));
@@ -215,30 +211,35 @@ describe("P2 semantic types (issue #433)", () => {
     }
   });
 
-  it("refuses broken references with diagram.semantic diagnostics", () => {
+  it("preserves broken references through import for asynchronous SDK admission", async () => {
     const messages = (spec: Record<string, unknown>) => spec.messages as Record<string, unknown>[];
-    expect(refusalKeys(fixtureText("sequence", (s) => { messages(s)[0]!.to = "ghost"; }))).toContain(
-      "diagram.semantic.danglingReference",
-    );
-    expect(refusalKeys(fixtureText("sequence", (s) => { messages(s)[0]!.to = "web"; }))).toContain(
-      "diagram.semantic.selfMessage",
-    );
-    expect(
-      refusalKeys(fixtureText("lifecycle", (s) => { (s.states as Record<string, unknown>[])[0]!.lane = "side"; })),
-    ).toContain("diagram.semantic.danglingReference");
-    expect(
-      refusalKeys(fixtureText("dataflow", (s) => { (s.nodes as Record<string, unknown>[])[0]!.stage = 5; })),
-    ).toContain("diagram.semantic.danglingReference");
-    expect(
-      refusalKeys(
-        fixtureText("lifecycle", (s) => {
+    const cases: Array<{ type: "sequence" | "lifecycle" | "dataflow"; text: string; path: string; retained: string }> = [
+      { type: "sequence", text: fixtureText("sequence", (s) => { messages(s)[0]!.to = "ghost"; }), path: "ghost", retained: "ghost" },
+      { type: "sequence", text: fixtureText("sequence", (s) => { messages(s)[0]!.to = "web"; }), path: "messages[0]", retained: "web" },
+      { type: "lifecycle", text: fixtureText("lifecycle", (s) => { (s.states as Record<string, unknown>[])[0]!.lane = "side"; }), path: "side", retained: "side" },
+      { type: "dataflow", text: fixtureText("dataflow", (s) => { (s.nodes as Record<string, unknown>[])[0]!.stage = 5; }), path: "stage", retained: "5" },
+      {
+        type: "lifecycle",
+        text: fixtureText("lifecycle", (s) => {
           s.transitions = [
             { id: "t", from: "queued", to: "running" },
             { id: "t", from: "running", to: "done" },
           ];
         }),
-      ),
-    ).toContain("diagram.semantic.duplicateId");
+        path: "transitions",
+        retained: '"id":"t"',
+      },
+    ];
+    for (const { type, text, path, retained } of cases) {
+      const parsed = parseArchifySpec(text);
+      expect(parsed.ok, `${type} import should preserve the source for diagnosis`).toBe(true);
+      if (!parsed.ok) continue;
+      expect(JSON.stringify(parsed.result.dataset.spec)).toContain(retained);
+      const validation = await pinnedEngineHost.validateCandidate(type, parsed.result.dataset.spec);
+      expect(validation.ok, `${type} SDK admission should refuse ${path}`).toBe(false);
+      expect([...validation.errors, ...validation.diagnostics.map((diagnostic) => diagnostic.path)]
+        .join(" ")).toContain(path);
+    }
   });
 
   it("preserves and reports an unknown top-level field for each new type", () => {
