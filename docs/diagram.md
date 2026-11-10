@@ -1857,9 +1857,13 @@ modes from the same geometry):
 | 1,000 components, half the labels Korean | 2,395,655 B | 5,144,752 B | 2.15x |
 
 A Hangul glyph is several CFF contours, so the Korean-labelled scenes cost about
-15% more than their English counterparts; nothing near the 16 MiB request cap.
-The 1,000-node outlined export stays under 8 MiB, and the test fails if any scene
-exceeds three times its own text run.
+15% more than their English counterparts, and every scene stays far under the
+16 MiB limit. The 1,000-node outlined export is under 8 MiB, and the test fails
+if any scene exceeds three times its own text run. That limit bounds the request
+and the artifact, not the IPC envelope around them: a successful report carries
+its bytes twice, as the `svg` string and as a numeric `bytes` array, so the
+recorded 1,000-node outlined response is 17,508,365 B for a 4,079,621 B
+artifact, and the PNG response is 3,998,665 B for a 480,455 B image.
 
 The canvas cannot use outlines, so it bundles a local subset of the same two
 faces as WOFF2 under `src/assets/fonts/` and `foundations.css` declares
@@ -2026,9 +2030,12 @@ assertions.
 | Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 94.4, 9.3, 9.0, 9.2 | 693 / 51,448 | 11,088 |
 | 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 1294.5, 1258.3, 1305.0, 1251.1 | 130,843 / 3,998,665 | 480,455 |
 
-The response bytes include the one-byte-wider `textMode` receipt field added for
-the outlined SVG export; the mock IPC column is the current release-mode
-re-record in `png-mock-ipc-transport.json`.
+The response bytes include the `textMode` receipt field added for the outlined
+SVG export, which is exactly 18 bytes on a PNG report (`"textMode":"text",`):
+the same report is 51,430 B with that field removed and 51,448 B with it, both
+measured at this head rather than derived from the previous figure. The mock IPC
+column and both `svgCases` are the current release-mode re-record in
+`png-mock-ipc-transport.json`.
 
 The selected PNG transport is native IPC. The measured 36.3 MB gzip PNG module
 and 4.5s cold module initialization rule out the lazy WASM candidate for this
