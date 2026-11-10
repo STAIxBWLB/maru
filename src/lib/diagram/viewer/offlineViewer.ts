@@ -135,7 +135,10 @@ function validateSvgAttribute(element: string, name: string, value: string, ids:
   if (name === "stroke-dasharray" && !numericList(value)) svgProfileError("dash pattern is outside the engine SVG profile");
   if (name === "font-weight" && !["400", "700"].includes(value)) svgProfileError("font weight is outside the pinned S1 profile");
   if (name === "data-index" && !/^\d+$/.test(value)) svgProfileError("glyph index is malformed");
-  if (name === "d" && !/^[MmLlHhVvCcSsQqTtAaZz0-9+.,\s-]+$/.test(value)) svgProfileError("glyph outline path contains unsupported syntax");
+  // An outlined glyph with no ink (a space, or a cluster without one pinned
+  // glyph) is emitted with an empty `d` so it keeps its data-index slot. The
+  // element check below confines that form to path[data-kind="glyph"].
+  if (name === "d" && value !== "" && !/^[MmLlHhVvCcSsQqTtAaZz0-9+.,\s-]+$/.test(value)) svgProfileError("glyph outline path contains unsupported syntax");
   if (name === "transform" && !/^translate\(-?(?:\d+(?:\.\d+)?|\.\d+)\s+-?(?:\d+(?:\.\d+)?|\.\d+)\)\s+scale\(-?(?:\d+(?:\.\d+)?|\.\d+)\s+-?(?:\d+(?:\.\d+)?|\.\d+)\)$/.test(value)) svgProfileError("glyph transform is outside the pinned S1 profile");
 }
 
@@ -231,6 +234,8 @@ function validateEngineSvg(svg: string): void {
       if (values.get("data-kind") !== "label-text") svgProfileError("an outlined container may only carry label text");
     } else if (SVG_REQUIRED_ATTRIBUTES[name]!.some((attribute) => !attrs.has(attribute))) svgProfileError(`<${name}> is missing required engine attributes`);
     if (name === "g" && !outlinedLabel && values.get("data-kind") !== "legend-entry" && !attrs.has("data-source-id")) svgProfileError("semantic SVG group is missing its source id");
+    // Only a glyph may draw nothing; every other path has to carry its geometry.
+    if (name === "path" && values.get("d") === "" && values.get("data-kind") !== "glyph") svgProfileError("only a glyph path may have empty path data");
     if (name === "g" && values.get("data-kind") === "label" && !attrs.has("data-target-id")) svgProfileError("label group is missing its target id");
     if (name === "svg") {
       if (selfClosing || values.get("id") !== "maru-svg" || values.get("xmlns") !== "http://www.w3.org/2000/svg" || values.get("role") !== "img" || values.get("aria-labelledby") !== "maru-title maru-desc") svgProfileError("SVG root is missing required engine attributes");

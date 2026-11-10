@@ -1811,7 +1811,10 @@ the semantic role stays inspectable. Visible glyphs become
 `<path data-kind="glyph" data-index="N" d="..." transform="translate(x y) scale(s -s)">`
 where coordinates are rounded to whole font units and
 `s = font_size / (64 * units_per_em)`, so the same source produces the same bytes
-on every platform. Replaced scalars keep their pinned glyph-zero path. Text mode
+on every platform. Replaced scalars keep their pinned glyph-zero path, and a
+space or a cluster without one pinned glyph keeps its `data-index` slot with an
+empty `d`: the viewer admits that form only on a glyph path, so a label's glyph
+count and order stay checkable while a space still draws nothing. Text mode
 is unaffected and stays the default for the canvas, the preview and the browser
 entry point; the native `plugin:maru-diagram|render_svg` command defaults to
 outlines and returns `textMode` additively in the receipt, so a caller can still
@@ -2027,8 +2030,8 @@ assertions.
 
 | Scene | WASM first request / warm samples (ms) | Native raster cold / warm range (ms) | Registered mock IPC samples (ms) | Request / response bytes | PNG bytes |
 | --- | --- | --- | --- | --- | --- |
-| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 94.4, 9.3, 9.0, 9.2 | 693 / 51,448 | 11,088 |
-| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 1294.5, 1258.3, 1305.0, 1251.1 | 130,843 / 3,998,665 | 480,455 |
+| Typical, 920 x 640 | 517.7 / 28.7, 26.8, 26.5 | 51.6 / 11.5-11.7 | 148.7, 9.3, 9.0, 8.9 | 693 / 51,448 | 11,088 |
+| 1,000 nodes, 1968 x 8878 | 3630.8 / 3475.7, 3468.1, 3451.0 | 2176.7 / 2130.1-2145.7 | 1251.0, 1245.0, 1239.7, 1222.7 | 130,843 / 3,998,665 | 480,455 |
 
 The response bytes include the `textMode` receipt field added for the outlined
 SVG export, which is exactly 18 bytes on a PNG report (`"textMode":"text",`):

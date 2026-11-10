@@ -211,4 +211,26 @@ describe("outlined label containers (maru#552)", () => {
     const svg = outlined(realSvg).replace(' font-weight="400"', "");
     expect(() => createOfflineViewerHtml({ svg, specJson: realSpec })).toThrow(/pinned face attributes/);
   });
+
+  // The synthetic form above proves the container is admitted; this reads the
+  // export the engine actually writes, which is what a viewer receives. Its
+  // labels contain spaces, and a space keeps its data-index slot with no path
+  // data, so the profile has to admit an empty `d` there and nowhere else.
+  const engineSvg = readFileSync("src-tauri/crates/maru-diagram-engine/testdata/architecture-light-outlines.svg", "utf8");
+  const engineSpec = readFileSync("src-tauri/crates/maru-diagram-engine/testdata/viewer-architecture-light.spec.json", "utf8");
+
+  it("accepts the engine's own outlined export, empty glyph paths included", () => {
+    expect(engineSvg.match(/d=""/g)?.length ?? 0).toBeGreaterThan(0);
+    expect(engineSvg.match(/<path[^>]*d=""[^>]*>/g)?.every((path) => path.includes('data-kind="glyph"'))).toBe(true);
+    const html = createOfflineViewerHtml({ svg: engineSvg, specJson: engineSpec });
+    expect(html).toContain('data-render="outline"');
+    expect(html).not.toContain("<text ");
+    expect(html).toContain("font-src 'none'");
+  });
+
+  it("still refuses empty path data on a path that is not a glyph", () => {
+    const svg = engineSvg.replace(/data-kind="glyph" (data-index="\d+") d=""/, 'data-kind="route-ready" $1 d=""');
+    expect(svg).not.toBe(engineSvg);
+    expect(() => createOfflineViewerHtml({ svg, specJson: engineSpec })).toThrow(/only a glyph path may have empty path data/);
+  });
 });
