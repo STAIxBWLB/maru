@@ -1787,35 +1787,81 @@
   ],
   "deterministicWorkGate": {
     "scope": "test/corpus feature only; checked-in unmodified bench-1000.json; counters are per-thread logical operations, not elapsed time",
-    "definitionVersion": 1,
+    "definitionVersion": 3,
     "measurement": {
       "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
       "nodes": 1000,
       "routes": 999,
       "stats": {
         "astarExpandedStates": 22167,
+        "routeEvaluations": 999,
         "constraintEvaluations": 3332334,
-        "routeEvaluations": 999
+        "endpointMaskEvaluations": 0,
+        "endpointClearanceEvaluations": 0,
+        "maskedAstarExpandedStates": 0,
+        "textScalarMeasurements": 15786
       },
-      "total": 3355500
+      "total": 3371286
     },
     "baseline": {
       "astarExpandedStates": 22167,
       "routeEvaluations": 999,
-      "constraintEvaluations": 3332334
+      "constraintEvaluations": 3332334,
+      "endpointMaskEvaluations": 0,
+      "endpointClearanceEvaluations": 0,
+      "maskedAstarExpandedStates": 0,
+      "textScalarMeasurements": 15786
     },
     "ceiling": {
       "astarExpandedStates": 27709,
       "routeEvaluations": 1249,
-      "constraintEvaluations": 4165418
+      "constraintEvaluations": 4165418,
+      "endpointMaskEvaluations": 0,
+      "endpointClearanceEvaluations": 0,
+      "maskedAstarExpandedStates": 0,
+      "textScalarMeasurements": 19733
     },
-    "totalCeiling": 4194375,
+    "totalCeiling": 4214108,
     "headroomPercent": 25,
     "nativeWasmCountsIdentical": true,
     "hostedThreeOsCounts": "pending",
-    "counted": "live A* expansions including goal, route_points calls, logical constraint predicates and collection-pair evaluations",
+    "authoredVia": {
+      "measurementStatus": "measured",
+      "fixturePath": "testdata/bench-authored-via.json",
+      "fixtureSha256": "1e6bd67b66d16371412d73485b25acb640175db2b52dd78b8378ed02b51ab988",
+      "nodes": 27,
+      "labels": 32,
+      "routes": 1,
+      "viaPoints": 17,
+      "minimumRouteSegments": 10,
+      "routeSegments": 22,
+      "baseline": {
+        "astarExpandedStates": 81,
+        "routeEvaluations": 1,
+        "constraintEvaluations": 1395,
+        "endpointMaskEvaluations": 57,
+        "endpointClearanceEvaluations": 1254,
+        "maskedAstarExpandedStates": 81,
+        "textScalarMeasurements": 174
+      },
+      "ceiling": {
+        "astarExpandedStates": 102,
+        "routeEvaluations": 2,
+        "constraintEvaluations": 1744,
+        "endpointMaskEvaluations": 72,
+        "endpointClearanceEvaluations": 1568,
+        "maskedAstarExpandedStates": 102,
+        "textScalarMeasurements": 218
+      },
+      "totalBaseline": 2962,
+      "totalCeiling": 3703,
+      "sourceCommit": "997dd6a10b051846893d9e4c4f28131cdf9a47c6"
+    },
+    "counted": "live A* expansions including goal, route_points calls, logical constraint predicates and collection-pair evaluations, endpoint-mask candidate evaluations, endpoint-clearance evaluations, A* expansions taken on a masked leg (a subset of the A* counter, so not summed twice) and text-scalar measurements from the wrapping scan",
     "excluded": "wall-clock time, allocation/hashbucket/lookup/glyph/sqrt internals; no hooks compiled into normal geometry builds",
     "ceilingPath": "src-tauri/crates/maru-diagram-engine/testdata/work-budget.json",
+    "recordedCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-work",
+    "sourceCommit": "b31b276a6d230a197025046c25bb29b2f6114ea7",
     "e4Requirement": "sub200ms needs a dedicated stable performance environment (#552 AC6)"
   },
   "lifecycleV2Regression": {
@@ -1871,27 +1917,37 @@
   },
   "verifiedNativeWasm": {
     "schemaVersion": 1,
-    "scope": "committed Linux native/WASM scene/SVG/logical-work comparison against approved S1",
-    "sourceCommit": "af582230b41f5f34c9620da463eb6fd40af2c2c0",
+    "scope": "committed Linux native/WASM scene/SVG/logical-work comparison of merged main b31b276a against the stack base 0caa8405",
+    "sourceCommit": "b31b276a6d230a197025046c25bb29b2f6114ea7",
     "sdkTreePath": "src-tauri/crates",
-    "sdkTree": "4b02633660fbc471e7daa9a3024064e11bba6cb7",
+    "sdkTree": "4c12bc4459eceb184bb5c4a84945f8adef8f5aed",
     "engineCrateTreePath": "src-tauri/crates/maru-diagram-engine",
-    "engineCrateTree": "58022b926f0b2656379037c8a78b64d6c6ea77c1",
-    "baseCommit": "4d12957f1e9ed7100263115fae6c2aec74976a84",
+    "engineCrateTree": "4be8e0e24132a760cac5359c99b87c0bb30828be",
+    "baseCommit": "0caa8405033dfbd64e196a90dfe9aca460af0992",
+    "baseReportSha256": "da072ca34a5ebfe57b4a75cb70407c723b40de162f9c46f7a910c30fb275e32b",
     "corpusSha256": "c45611f6dd0d41182dc5729a908abb680e48c23468d25241fa91e42f2e8367ea",
     "corpusCaseCount": 623,
-    "acceptedCaseCount": 216,
+    "fontManifestSha256": "889c9c3b8eeb8b19d68d4de613f7c74224f3bf39a689a9b46c968d62da7cb9ca",
+    "acceptedCaseCount": 248,
+    "geometryPresentCaseCount": 405,
     "retainedCaseCount": 405,
+    "countSemantics": "retainedCaseCount is the legacy alias for every geometry-present report, accepted cases included; geometryPresentCaseCount names the same measured quantity",
+    "retainedRefusalCaseCount": 157,
+    "prePlacementRefusalCaseCount": 218,
     "baselineWork": {
       "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
       "nodes": 1000,
       "routes": 999,
       "stats": {
         "astarExpandedStates": 22167,
+        "routeEvaluations": 999,
         "constraintEvaluations": 3332334,
-        "routeEvaluations": 999
+        "endpointMaskEvaluations": 0,
+        "endpointClearanceEvaluations": 0,
+        "maskedAstarExpandedStates": 0,
+        "textScalarMeasurements": 15786
       },
-      "total": 3355500
+      "total": 3371286
     },
     "work": {
       "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
@@ -1899,17 +1955,40 @@
       "routes": 999,
       "stats": {
         "astarExpandedStates": 22167,
+        "routeEvaluations": 999,
         "constraintEvaluations": 3332334,
-        "routeEvaluations": 999
+        "endpointMaskEvaluations": 0,
+        "endpointClearanceEvaluations": 0,
+        "maskedAstarExpandedStates": 0,
+        "textScalarMeasurements": 15786
       },
-      "total": 3355500
+      "total": 3371286,
+      "viaBenchmarkWork": {
+        "fixtureSha256": "1e6bd67b66d16371412d73485b25acb640175db2b52dd78b8378ed02b51ab988",
+        "nodes": 27,
+        "labels": 32,
+        "routes": 1,
+        "viaPoints": 17,
+        "routeSegments": 22,
+        "stats": {
+          "astarExpandedStates": 81,
+          "routeEvaluations": 1,
+          "constraintEvaluations": 1395,
+          "endpointMaskEvaluations": 57,
+          "endpointClearanceEvaluations": 1254,
+          "maskedAstarExpandedStates": 81,
+          "textScalarMeasurements": 174
+        },
+        "total": 2962
+      }
     },
-    "nativeReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
-    "wasmReportSha256": "288c6f3dd4ca43c27e608418c35f507ab5504b2dfc1ad0676e7c13911b5be956",
+    "nativeReportSha256": "1bf05a3e70f668fafad007a4b2cebb3bd8651c988dbfa4995421eaac1a92015f",
+    "wasmReportSha256": "1bf05a3e70f668fafad007a4b2cebb3bd8651c988dbfa4995421eaac1a92015f",
     "nativeWasmReportsEqual": true,
-    "changedSceneCaseCount": 34,
-    "changedSvgCaseCount": 7,
-    "scopeNote": "Final implementation SDK tree verified at af582230, including the shared-trunk-23 regression. Later receipt-only commits preserve this SDK tree. Historical timing receipts and the separately stamped boundary export are not restamped.",
+    "changedSceneCaseCount": 30,
+    "changedSvgCaseCount": 30,
+    "changedCaseSemantics": "whole-scene report hashes and per-theme SVG hashes of the baseCommit report against this head; every changed case is one auto-fit makes readable, and no case became newly refused",
+    "scopeNote": "Restamped from a native run of merged main b31b276a and one of baseCommit 0caa8405 on Linux x86_64, plus a wasm32 build of the same commit hashed through the generated bindings. The native and WASM reports are byte-identical (340,896 bytes each), and both equal the committed determinism artifact, so corpus identity, both SVG themes and the unchanged re-layout check agree across the two builds. The same head report was reproduced byte for byte at 400ac88a, so the tree hashes moved with #573 while no measured byte did. This branch's only engine-crate delta is tests/endpoint_via_masks.rs, which the corpus does not compile. The previous stamp described the pre-rescope implementation run at af582230 (216 accepted, 34 changed scenes, 7 changed SVGs); that record remains as priorVerifiedNativeWasm at its own f4dcf4fe stamp.",
     "changedCasesArtifact": "docs/performance/diagram-engine-e2-admission-determinism.json"
   }
 }

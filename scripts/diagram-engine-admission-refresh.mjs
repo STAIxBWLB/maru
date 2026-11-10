@@ -26,6 +26,38 @@ function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
 }
 
+function sha256Bytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+// The stamped identity comes from HEAD, so a tracked modification would describe
+// bytes that no commit contains; refusing here keeps a receipt honest even when
+// the run itself succeeded.
+export function assertCleanSource(statusText) {
+  const dirty = statusText.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (dirty.length > 0) {
+    throw new Error(`Refusing to stamp HEAD over a dirty source tree (${dirty.join(", ")}); commit or stash every tracked change so the stamped commit describes the bytes that were measured, then rerun the refresh`);
+  }
+}
+
+function requireCleanSource() {
+  const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: ROOT, encoding: "utf8" });
+  assertCleanSource(status);
+}
+
+// bindgen-web writes no provenance of its own, so the bindings are pinned by the
+// hashes of the exact files that were loaded into this process.
+/**
+ * @param {string} bindingDir
+ * @param {(path: string) => Uint8Array | string} [read]
+ */
+export function bindingProvenance(bindingDir, read = readFileSync) {
+  return {
+    jsSha256: sha256Bytes(read(join(bindingDir, "maru_diagram_engine.js"))),
+    wasmSha256: sha256Bytes(read(join(bindingDir, "maru_diagram_engine_bg.wasm"))),
+  };
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -333,6 +365,7 @@ export function refreshAdmissionLedger(ledger, corpus, reports, identity, native
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  requireCleanSource();
   const bindingDir = resolve(ROOT, options["wasm-bindings"]);
   const ledgerPath = resolve(ROOT, options.ledger);
   const outputPath = resolve(ROOT, options.output);
@@ -341,6 +374,7 @@ async function main() {
   if (!existsSync(jsBinding) || !existsSync(wasmBinding)) {
     throw new Error(`Generated WASM bindings not found in ${bindingDir}; pass a completed bindgen-web directory`);
   }
+  const bindingHashes = bindingProvenance(bindingDir);
   const bindings = await import(pathToFileURL(jsBinding).href);
   if (typeof bindings.default !== "function" || typeof bindings.layout_json !== "function") {
     throw new Error("Generated WASM module is missing initialization or layout_json; rebuild wasm-layout bindings");
@@ -372,6 +406,11 @@ async function main() {
     reports.set(id, JSON.parse(raw));
   }
   const output = refreshAdmissionLedger(ledger, corpus, reports, currentIdentity(), nativeReport);
+  output.wasmBindings = {
+    directory: options["wasm-bindings"],
+    ...bindingHashes,
+    identityScope: nativeReport ? "cross-checked-against-same-head-native-corpus-report" : "recorded-hashes-only",
+  };
   const temporary = `${outputPath}.tmp-${process.pid}`;
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(temporary, `${JSON.stringify(output, null, 2)}\n`);
@@ -382,6 +421,7 @@ async function main() {
     unionCases: output.counts.unionCases,
     currentMismatches: output.counts.currentMismatches,
     refreshedCaseIds: BRAND_RAIL_CASES,
+    wasmBindingsSha256: bindingHashes.wasmSha256,
     output: outputPath,
   })}`);
 }
