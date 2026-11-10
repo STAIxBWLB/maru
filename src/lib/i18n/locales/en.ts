@@ -3873,6 +3873,7 @@ export const en: Record<string, string> = {
   "diagram.semantic.collection.semanticChecks.allowedTerminals": "Allowed terminals",
   "diagram.semantic.collection.semanticChecks.requiredEdges": "Required edges",
   "diagram.semantic.collection.semanticChecks.requiredPaths": "Required paths",
+  "diagram.engineGeometry.refused": "The engine cannot draw this layout, so the last one stays",
   "diagram.semantic.title": "Semantics",
   "diagram.semantic.type": "Type",
   "diagram.semantic.dataset": "Diagram",

@@ -36,7 +36,6 @@ import {
   layoutFloorplan,
   validateFloorplanSpec,
 } from "./floorplan";
-import { LAYOUT_DEFAULT_ORIGIN, LAYOUT_STEP_X, LAYOUT_STEP_Y, layoutDoc } from "./layout";
 import { validateEngineSpecPreCheck } from "./enginePreflight";
 import { isSemanticSpecDataset, type SemanticDiagramType, type SemanticSpecDataset } from "./reportTypes";
 import {
@@ -450,14 +449,17 @@ export function mintRelationIds(
 // Projection
 // ---------------------------------------------------------------------------
 
-const ORIGIN = LAYOUT_DEFAULT_ORIGIN;
+/** Coarse source placement for a fresh projection; the engine owns display layout. */
+const ORIGIN = { x: 40, y: 40 } as const;
+const COLUMN_STEP = 200;
+const LAYER_STEP = 120;
 const NODE_W = 160;
 const NODE_H = 64;
 const GAP = 16;
 const HEADER = 32;
 const INSET = 24;
 const ROW_STEP = NODE_H + GAP;
-const STAGE_W = LAYOUT_STEP_X - GAP;
+const STAGE_W = COLUMN_STEP - GAP;
 const ARCHITECTURE_GRID_COLS = 4;
 const BOUNDARY_PAD = 24;
 
@@ -531,7 +533,7 @@ function laneGrid(spec: Record<string, unknown>, descriptor: SemanticTypeDescrip
   const placed = new Map<number, Rect>();
   entities.forEach((entry, index) => {
     placed.set(index, {
-      x: ORIGIN.x + INSET + gridIndex(entry.col) * LAYOUT_STEP_X,
+      x: ORIGIN.x + INSET + gridIndex(entry.col) * COLUMN_STEP,
       y: tops[bandOf(entry)]! + HEADER + stacks[index]! * ROW_STEP,
       w: NODE_W,
       h: NODE_H,
@@ -546,7 +548,7 @@ function laneGrid(spec: Record<string, unknown>, descriptor: SemanticTypeDescrip
       label: labelOf(lane, id),
       x: ORIGIN.x,
       y: tops[index]!,
-      w: 2 * INSET + maxCol * LAYOUT_STEP_X + NODE_W,
+      w: 2 * INSET + maxCol * COLUMN_STEP + NODE_W,
       h: heights[index]!,
     });
   });
@@ -569,7 +571,7 @@ function stageColumns(spec: Record<string, unknown>): GridPlacement {
       .sort((a, b) => gridIndex(entities[a]!.row) - gridIndex(entities[b]!.row) || a - b)
       .forEach((index, slot) => {
         placed.set(index, {
-          x: ORIGIN.x + stage * LAYOUT_STEP_X + (STAGE_W - NODE_W) / 2,
+          x: ORIGIN.x + stage * COLUMN_STEP + (STAGE_W - NODE_W) / 2,
           y: ORIGIN.y + HEADER + slot * ROW_STEP,
           w: NODE_W,
           h: NODE_H,
@@ -579,7 +581,7 @@ function stageColumns(spec: Record<string, unknown>): GridPlacement {
   const containers = stages.map((stage, index) => ({
     key: String(index),
     label: labelOf(stage, String(index + 1)),
-    x: ORIGIN.x + index * LAYOUT_STEP_X,
+    x: ORIGIN.x + index * COLUMN_STEP,
     y: ORIGIN.y,
     w: STAGE_W,
     h: HEADER + Math.max(1, byStage.get(index)?.length ?? 0) * ROW_STEP + GAP,
@@ -590,7 +592,7 @@ function stageColumns(spec: Record<string, unknown>): GridPlacement {
 function rowPlacement(count: number): GridPlacement {
   const placed = new Map<number, Rect>();
   for (let index = 0; index < count; index += 1) {
-    placed.set(index, { x: ORIGIN.x + index * LAYOUT_STEP_X, y: ORIGIN.y, w: NODE_W, h: NODE_H });
+    placed.set(index, { x: ORIGIN.x + index * COLUMN_STEP, y: ORIGIN.y, w: NODE_W, h: NODE_H });
   }
   return { entities: placed, containers: [] };
 }
@@ -610,8 +612,8 @@ function architecturePlacement(entities: Record<string, unknown>[], spec: Record
     const row = isFiniteNumber(entry.row) ? entry.row : Math.floor(index / cols);
     const col = isFiniteNumber(entry.col) ? entry.col : index % cols;
     placed.set(index, {
-      x: pos ? pos[0] : layout ? origin[0] + col * (cellW + gapX) : ORIGIN.x + (index % ARCHITECTURE_GRID_COLS) * LAYOUT_STEP_X,
-      y: pos ? pos[1] : layout ? origin[1] + row * (cellH + gapY) : ORIGIN.y + Math.floor(index / ARCHITECTURE_GRID_COLS) * LAYOUT_STEP_Y,
+      x: pos ? pos[0] : layout ? origin[0] + col * (cellW + gapX) : ORIGIN.x + (index % ARCHITECTURE_GRID_COLS) * COLUMN_STEP,
+      y: pos ? pos[1] : layout ? origin[1] + row * (cellH + gapY) : ORIGIN.y + Math.floor(index / ARCHITECTURE_GRID_COLS) * LAYER_STEP,
       w: size ? size[0] : NODE_W,
       h: size ? size[1] : NODE_H,
     });
@@ -734,9 +736,9 @@ function workflowRangeRects(
     return [{
       key,
       label: labelOf(entry, key),
-      x: ORIGIN.x + entry.fromCol * LAYOUT_STEP_X + INSET - GAP,
+      x: ORIGIN.x + entry.fromCol * COLUMN_STEP + INSET - GAP,
       y: role === "phase" ? top - HEADER - GAP : top,
-      w: (entry.toCol - entry.fromCol) * LAYOUT_STEP_X + NODE_W + 2 * GAP,
+      w: (entry.toCol - entry.fromCol) * COLUMN_STEP + NODE_W + 2 * GAP,
       h: bottom - top + (role === "phase" ? HEADER + GAP : 0),
     }];
   });
@@ -977,24 +979,23 @@ export function projectSemanticDataset(
 }
 
 /**
- * A fresh document projecting `dataset`: members (architecture reflowed with
- * `layoutDoc`, grid types at their projected slots) plus containers first in
- * `nodes`. Used by apply-new, the gallery copy and archify-json import.
+ * A fresh document projecting `dataset`: members at their coarse source slots
+ * plus containers first in `nodes`. Used by apply-new, the gallery copy and
+ * archify-json import. The slots are a fallback the canvas shows until (and
+ * unless) the engine lays the dataset out; they are never the display layout
+ * (issue #552 E4 T3).
  */
 export function projectSemanticDocument(
   dataset: SemanticSpecDataset,
 ): { doc: DiagramDoc; diagnostics: ValidationDiagnostic[] } {
   const members = projectSemanticDataset(dataset);
-  let doc: DiagramDoc = {
+  const doc: DiagramDoc = {
     ...createEmptyDoc(createDiagramId()),
     docTitle: dataset.name,
     nodes: members.nodes,
     edges: members.edges,
     datasets: [dataset],
   };
-  const authoredArchitecturePlacement = dataset.diagramType === "architecture" &&
-    specEntries(dataset.spec, "components").some((entry) => isPoint(entry.pos) || isFiniteNumber(entry.row) || isFiniteNumber(entry.col));
-  if (dataset.diagramType === "architecture" && !authoredArchitecturePlacement) doc = layoutDoc(doc).doc;
   const containers = projectSemanticDataset(dataset, { containers: true, doc }).nodes.filter(
     isSemanticContainerNode,
   );

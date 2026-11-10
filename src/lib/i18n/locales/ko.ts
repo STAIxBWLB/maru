@@ -3868,6 +3868,7 @@ export const ko: Record<string, string> = {
   "diagram.semantic.collection.semanticChecks.allowedTerminals": "허용 종점",
   "diagram.semantic.collection.semanticChecks.requiredEdges": "필수 연결",
   "diagram.semantic.collection.semanticChecks.requiredPaths": "필수 경로",
+  "diagram.engineGeometry.refused": "엔진 배치를 표시할 수 없어 마지막 배치를 유지합니다",
   "diagram.semantic.title": "구조 의미",
   "diagram.semantic.type": "유형",
   "diagram.semantic.dataset": "다이어그램",

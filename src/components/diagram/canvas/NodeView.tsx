@@ -1,5 +1,6 @@
 import { memo, useCallback, type MouseEvent, type PointerEvent, type ReactElement } from "react";
 
+import type { CanvasLabelLines } from "../../../lib/diagram/engineCanvasGeometry";
 import { portPoint } from "../../../lib/diagram/geometry";
 import type { MatrixDataset } from "../../../lib/diagram/reportTypes";
 import type {
@@ -17,6 +18,11 @@ export interface NodeViewProps {
   selected: boolean;
   showPorts: boolean;
   pendingConnectActive: boolean;
+  /**
+   * Engine label lines for a semantic member: the engine wrapped and measured
+   * them, so the canvas paints them instead of laying the text out again.
+   */
+  engineLabels?: readonly CanvasLabelLines[] | null;
   onPointerDown: (event: PointerEvent<SVGGElement>, nodeId: NodeId) => void;
   onPortPointerDown: (event: PointerEvent<SVGCircleElement>, nodeId: NodeId, port: EdgePort) => void;
   onMemoOpen?: (nodeId: NodeId) => void;
@@ -69,7 +75,9 @@ function polygonPath(points: Array<[number, number]>): string {
   return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0]} ${p[1]}`).join(" ") + " Z";
 }
 
-function NodeBody({ node }: { node: DiagramNode }) {
+/** `band` is off when the engine supplies the container title, so the canvas
+ *  does not paint a header strip the export never draws. */
+function NodeBody({ node, band = true }: { node: DiagramNode; band?: boolean }) {
   const s = shapeFor(node);
   const w = node.w;
   const h = node.h;
@@ -158,16 +166,20 @@ function NodeBody({ node }: { node: DiagramNode }) {
       return (
         <g>
           <rect width={w} height={h} rx={s.br} ry={s.br} fill={s.bg} stroke={s.border} strokeWidth={s.bw} />
-          <rect
-            width={w}
-            height={headerH}
-            rx={s.br}
-            ry={s.br}
-            fill={node.style?.bg ? "#1f2937" : "#1f2937"}
-            stroke={s.border}
-            strokeWidth={s.bw}
-          />
-          <rect width={w} height={headerH - s.br} fill="#1f2937" />
+          {band ? (
+            <g>
+              <rect
+                width={w}
+                height={headerH}
+                rx={s.br}
+                ry={s.br}
+                fill={node.style?.bg ? "#1f2937" : "#1f2937"}
+                stroke={s.border}
+                strokeWidth={s.bw}
+              />
+              <rect width={w} height={headerH - s.br} fill="#1f2937" />
+            </g>
+          ) : null}
         </g>
       );
     case "split-box": {
@@ -262,6 +274,37 @@ function NodeLabel({ node }: { node: DiagramNode }) {
   );
 }
 
+/**
+ * Engine label lines for a semantic member. The line breaks, the wrap width and
+ * the size are the engine's, so nothing here measures or splits the text; only
+ * the line advance is repeated (the engine steps a line by 1.5× its size when
+ * the font's own ascender/descender span is narrower).
+ */
+function EngineLabels({ labels, color }: { labels: readonly CanvasLabelLines[]; color: string }) {
+  return (
+    <g className="maru-diagram-engine-labels" pointerEvents="none">
+      {labels.map((label) => (
+        <text
+          key={label.id}
+          data-engine-label={label.id}
+          x={label.x}
+          y={label.y}
+          fill={color}
+          fontSize={label.fontSize}
+          fontWeight={label.weight}
+          dominantBaseline="text-before-edge"
+        >
+          {label.lines.map((line, index) => (
+            <tspan key={index} x={label.x} dy={index === 0 ? 0 : label.fontSize * 1.5}>
+              {line}
+            </tspan>
+          ))}
+        </text>
+      ))}
+    </g>
+  );
+}
+
 function SectionHeader({ node }: { node: DiagramNode }) {
   if (node.kind !== "section" && node.kind !== "titled-box") return null;
   return (
@@ -286,6 +329,7 @@ function NodeViewBase({
   selected,
   showPorts,
   pendingConnectActive,
+  engineLabels = null,
   onPointerDown,
   onPortPointerDown,
   onMemoOpen,
@@ -348,10 +392,16 @@ function NodeViewBase({
           }
         />
       ) : (
-        <NodeBody node={node} />
+        <NodeBody node={node} band={!engineLabels || engineLabels.length === 0} />
       )}
-      <SectionHeader node={node} />
-      {matrixTable ? null : <NodeLabel node={node} />}
+      {engineLabels && engineLabels.length > 0 ? (
+        <EngineLabels labels={engineLabels} color={s.fc} />
+      ) : (
+        <>
+          <SectionHeader node={node} />
+          {matrixTable ? null : <NodeLabel node={node} />}
+        </>
+      )}
       {selected ? (
         <rect
           data-export-ignore
