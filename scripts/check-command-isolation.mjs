@@ -486,6 +486,20 @@ function validateOverlay(overlay, state) {
     requirePairs(result.testCases, DOCUMENTS, "07 document consumer", true, sources);
   }
 }
+function cfgFeatureEnabled(expression, enabledFeatures) {
+  const value = expression.trim();
+  const operator = value.match(/^(all|any|not)\(([\s\S]*)\)$/);
+  if (operator) {
+    const children = splitTop(operator[2]).map((part) => cfgFeatureEnabled(part, enabledFeatures));
+    if (operator[1] === "all") return children.every(Boolean);
+    if (operator[1] === "any") return children.some(Boolean);
+    insist(children.length === 1, `Unparsed plugin cfg not() expression ${value}`);
+    return !children[0];
+  }
+  const feature = value.match(/^feature\s*=\s*"([a-z][a-z0-9-]*)"$/);
+  insist(feature, `Unparsed plugin handler cfg expression ${value}`);
+  return enabledFeatures.has(feature[1]);
+}
 export function parseArgs(argv) {
   const options = { expectedCount: 365 };
   for (let i = 0; i < argv.length; i++) {
@@ -516,9 +530,23 @@ function pluginRegistrationScan(root = process.cwd()) {
   const base = "src-tauri/crates/tauri-plugin-maru-diagram";
   if (!existsSync(resolve(root, `${base}/Cargo.toml`))) return { base, registered: new Set(), expected: [] };
   const sources = new Sources(resolve(root));
-  const { code, functions } = sources.get(`${base}/src/lib.rs`);
+  const { raw, code, functions } = sources.get(`${base}/src/lib.rs`);
+  const appCargo = sources.read("src-tauri/Cargo.toml");
+  const appDependency = appCargo.match(/tauri-plugin-maru-diagram\s*=\s*\{([^}]*)\}/s);
+  insist(appDependency, "Production app does not declare the diagram plugin dependency");
+  const featureList = appDependency[1].match(/features\s*=\s*\[([^\]]*)\]/);
+  const enabledFeatures = new Set(featureList ? [...featureList[1].matchAll(/"([a-z][a-z0-9-]*)"/g)].map((match) => match[1]) : []);
   const handlerSets = [];
   for (const match of code.matchAll(/\bgenerate_handler!\s*\[/g)) {
+    const cfgStart = code.lastIndexOf("#[cfg", match.index);
+    insist(cfgStart >= 0, "Plugin handler lacks an explicit feature cfg; update the feature-aware scanner");
+    const cfgOpen = code.indexOf("(", cfgStart);
+    const cfgClose = closeAt(code, cfgOpen, "(", ")");
+    const cfg = raw.slice(cfgOpen + 1, cfgClose);
+    const cfgEnd = code.indexOf("]", cfgClose);
+    const statement = code.slice(cfgEnd + 1, match.index);
+    insist(/\blet\s+builder\s*=\s*builder\.invoke_handler\s*\(\s*tauri::$/.test(statement), "Plugin handler cfg is not attached to a recognized invoke_handler assignment");
+    if (!cfgFeatureEnabled(cfg, enabledFeatures)) continue;
     const start = code.indexOf("[", match.index);
     const end = closeAt(code, start, "[", "]");
     const handlerSet = new Set();
@@ -533,11 +561,6 @@ function pluginRegistrationScan(root = process.cwd()) {
     handlerSets.push(handlerSet);
   }
   const buildSource = sources.read(`${base}/build.rs`);
-  const appCargo = sources.read("src-tauri/Cargo.toml");
-  const appDependency = appCargo.match(/tauri-plugin-maru-diagram\s*=\s*\{([^}]*)\}/s);
-  insist(appDependency, "Production app does not declare the diagram plugin dependency");
-  const featureList = appDependency[1].match(/features\s*=\s*\[([^\]]*)\]/);
-  const enabledFeatures = new Set(featureList ? [...featureList[1].matchAll(/"([a-z][a-z0-9-]*)"/g)].map((match) => match[1]) : []);
   const commandList = buildSource.match(/let\s+mut\s+commands\s*=\s*vec!\s*\[([^\]]*)\]\s*;/);
   insist(commandList, "Plugin build script has no readable initial permission command list");
   const permissionNames = [...commandList[1].matchAll(/"([a-z_]\w*)"/g)].map((match) => match[1]);
@@ -614,6 +637,7 @@ function currentRegistrationSource(root = process.cwd()) {
   const sourcePaths = new Set([
     LIB,
     "src-tauri/Cargo.toml",
+    "src-tauri/tauri.conf.json",
     "src-tauri/crates/tauri-plugin-maru-diagram/Cargo.toml",
     "src-tauri/crates/tauri-plugin-maru-diagram/build.rs",
     "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs",
@@ -637,7 +661,10 @@ function currentRegistrationSource(root = process.cwd()) {
       registrationPath: `${plugin.base}/src/lib.rs::commands::${name}`,
       sourcePath: `${plugin.base}/src/lib.rs`,
     })),
-  ].sort((a, b) => `${a.surface}:${a.name}`.localeCompare(`${b.surface}:${b.name}`));
+  ].sort((a, b) => {
+    const left = `${a.surface}:${a.name}`, right = `${b.surface}:${b.name}`;
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
   const names = new Set();
   for (const command of commands) {
     const key = `${command.surface}:${command.name}`;
@@ -662,16 +689,11 @@ function currentRegistrationSource(root = process.cwd()) {
   };
 }
 
-function verifyManifestSourceCommit(root, manifest) {
+function verifyManifestSourceCommit(manifest) {
+  // sourceCommit records generation provenance; exact current file hashes are
+  // compared below so squashed PR history does not invalidate the manifest.
   insist(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(manifest.sourceCommit ?? ""), "Current registration manifest has no full sourceCommit hash");
-  const execGit = (args, options = {}) => execFileSync("git", args, { cwd: root, ...options });
-  execGit(["cat-file", "-e", `${manifest.sourceCommit}^{commit}`]);
-  execGit(["merge-base", "--is-ancestor", manifest.sourceCommit, "HEAD"]);
-  for (const file of manifest.sourceFiles ?? []) {
-    const committed = execGit(["show", `${manifest.sourceCommit}:${file.path}`]);
-    const hash = createHash("sha256").update(committed).digest("hex");
-    insist(hash === file.sha256, `Current registration source hash differs at ${file.path}; regenerate the manifest from the intended committed head`);
-  }
+  insist(Array.isArray(manifest.sourceFiles) && manifest.sourceFiles.every((file) => typeof file.path === "string" && /^[a-f0-9]{64}$/.test(file.sha256 ?? "")), "Current registration manifest has invalid source file hashes");
 }
 
 export function createCurrentRegistrationManifest(root = process.cwd(), sourceCommit) {
@@ -711,7 +733,7 @@ function readCurrentRegistrationManifest(root, sources) {
   const manifest = JSON.parse(sources.read(CURRENT_REGISTRATIONS));
   insist(manifest.schemaVersion === 1 && manifest.kind === "maru.current-production-registrations.v1"
     && manifest.evidenceClass === "SOURCE-SCAN only; this manifest is not behavioral evidence", "Current production registration manifest must remain explicitly source-scan evidence");
-  verifyManifestSourceCommit(resolve(root), manifest);
+  verifyManifestSourceCommit(manifest);
   const actual = createCurrentRegistrationManifest(root, manifest.sourceCommit);
   insist(JSON.stringify(manifest.commands) === JSON.stringify(actual.commands)
     && JSON.stringify(manifest.counts) === JSON.stringify(actual.counts)
@@ -755,7 +777,7 @@ export function checkIsolation(options, root = process.cwd()) {
   const manifestPath = resolve(root, CURRENT_REGISTRATIONS);
   let manifest = null;
   let archivalNames = [];
-  const useCurrentManifest = Boolean(options.all || options.integration);
+  const useCurrentManifest = Boolean(options.all || options.integration || options.plan);
   if (useCurrentManifest && existsSync(manifestPath)) {
     manifest = readCurrentRegistrationManifest(root, sources);
     const activeNames = new Set(manifest.commands.filter((command) => command.surface === "app").map((command) => command.name));
@@ -766,6 +788,7 @@ export function checkIsolation(options, root = process.cwd()) {
     insist(!stale.length, `Current registration manifest is required to distinguish ${stale.length} historical inactive app rows; run --refresh-current-manifest`);
   }
   if (!useCurrentManifest) insist(historicalRowsCount === options.expectedCount, `Inventory count ${historicalRowsCount} differs from expected ${options.expectedCount}`);
+  else if (!options.all) insist(liveApp.size === options.expectedCount, `Current app registration count ${liveApp.size} differs from expected ${options.expectedCount}`);
   for (const [name, row] of rows) insist(owners.get(name)?.module === row.module, `Missing/mismatched inventory owner ${name}`);
   insist(owners.size === rows.size, "Ownership/inventory count mismatch");
   if (manifest) insist(liveApp.size === rows.size, `Current app registration count ${liveApp.size} differs from active Phase 08 evidence ${rows.size}`);

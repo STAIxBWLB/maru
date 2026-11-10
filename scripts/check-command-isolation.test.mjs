@@ -437,10 +437,16 @@ test("final closure rejects existing-domain-guard exemption from shared admissio
 function pluginFixture(t) {
   const f = fixture(t);
   const base = "src-tauri/crates/tauri-plugin-maru-diagram";
+  f.write("scripts/check-command-isolation.mjs", readFileSync(CHECKER, "utf8"));
   f.write(`${base}/Cargo.toml`, `[package]\nname = "tauri-plugin-maru-diagram"\nversion = "0.1.0"\n`);
   f.write(`${base}/permissions/default.toml`, '[default]\npermissions = ["allow-validate"]\n');
   const source = `
-fn build() { tauri::generate_handler![commands::validate, commands::render_png]; }
+fn build() {
+  #[cfg(feature = "png")]
+  let builder = builder.invoke_handler(tauri::generate_handler![commands::validate, commands::render_png]);
+  #[cfg(not(feature = "png"))]
+  let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
+}
 mod commands {
   #[tauri::command]
   pub async fn validate() { tauri::async_runtime::spawn_blocking(|| ()).await; }
@@ -449,6 +455,7 @@ mod commands {
 }`;
   f.write(`${base}/src/lib.rs`, source);
   f.write("src-tauri/Cargo.toml", '[dependencies]\ntauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ["png"] }');
+  f.write("src-tauri/tauri.conf.json", { app: { security: { capabilities: ["default", "diagram-render"] } } });
   f.write(`${base}/build.rs`, `fn main() {
   let mut commands = vec!["validate"];
   if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
@@ -492,6 +499,45 @@ test("current registration manifest is explicitly source-scan provenance", (t) =
   assert.ok(manifest.commands.every((entry) => ["app", "plugin:maru-diagram"].includes(entry.surface)));
 });
 
+test("current production plugin count follows enabled render-store features and handler cfg", (t) => {
+  const f = pluginFixture(t);
+  const names = ["validate", "render_png", "diagram_list_renders", "diagram_prepare_render_view", "diagram_delete_render", "render_and_store"];
+  const all = names.map((name) => `commands::${name}`).join(", ");
+  const stores = names.slice(2).map((name) => `commands::${name}`).join(", ");
+  const functions = names.map((name) => `#[tauri::command]\npub async fn ${name}() { tauri::async_runtime::spawn_blocking(|| ()).await; }`).join("\n");
+  f.write(`${f.base}/src/lib.rs`, `fn build() {
+    #[cfg(all(feature = "png", feature = "render-store"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![${all}]);
+    #[cfg(all(feature = "render-store", not(feature = "png")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![commands::validate, ${stores}]);
+    #[cfg(all(feature = "png", not(feature = "render-store")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![commands::validate, commands::render_png]);
+    #[cfg(not(any(feature = "png", feature = "render-store")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
+  }
+  mod commands { ${functions} }`);
+  f.write("src-tauri/Cargo.toml", '[dependencies]\ntauri-plugin-maru-diagram = { path = "crates/tauri-plugin-maru-diagram", features = ["png", "render-store"] }');
+  f.write(`${f.base}/build.rs`, `fn main() {
+    let mut commands = vec!["validate"];
+    if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
+    if std::env::var_os("CARGO_FEATURE_RENDER_STORE").is_some() {
+      commands.extend(["diagram_list_renders", "diagram_prepare_render_view", "diagram_delete_render", "render_and_store"]);
+    }
+  }`);
+  const permissions = names.map((name) => `maru-diagram:allow-${name.replaceAll("_", "-")}`);
+  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", windows: ["main"], permissions });
+  f.evidence.pluginCommandCount = names.length;
+  f.evidence.pluginCommandsObserved = names;
+  f.saveEvidence();
+  f.write("docs/performance/diagram-engine-e3/plugin-acl-mock-ipc.json", {
+    schemaVersion: 1, scope: "synthetic compiled generate_context ACL scanner fixture",
+    mainWindowLabel: "main", deniedWindowLabel: "sites",
+    mainHandlerReached: names, sitesDeniedByAcl: names,
+  });
+  const manifest = createCurrentRegistrationManifest(f.root, "b".repeat(40));
+  assert.deepEqual(manifest.counts, { app: 1, plugin: 6, total: 7 });
+});
+
 test("historical phase evidence keeps inactive rows archival while active rows retain ownership", () => {
   const rows = new Map([["active", { module: "src-tauri/src/active.rs" }], ["retired", { module: "src-tauri/src/retired.rs" }]]);
   const owners = new Map([["active", { module: "src-tauri/src/active.rs" }], ["retired", { module: "src-tauri/src/retired.rs" }]]);
@@ -512,9 +558,8 @@ test("plugin scanner refuses stale permission and observed command lists", (t) =
   const f = pluginFixture(t);
   f.write(`${f.base}/build.rs`, `fn main() {
   let mut commands = vec!["validate"];
-  if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
 }`);
-  assert.throws(() => checkPluginEvidence(f.root), /permissions and registered commands differ/);
+  assert.throws(() => checkPluginEvidence(f.root), /No plugin handler matches/);
   f.write(`${f.base}/build.rs`, `fn main() {
   let mut commands = vec!["validate"];
   if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
