@@ -2364,7 +2364,7 @@
   "sourceFiles": [
     {
       "path": "scripts/check-command-isolation.mjs",
-      "sha256": "bf9ac5c929b76c2a2eec44b0bd610d803b0d85700193b6b5f637043199423ac4"
+      "sha256": "58b2d2e7692fdbfa1bbfde36c65c960b78e938ee251c6437de0c6fee4aa7e741"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -2735,5 +2735,5 @@
       "sha256": "c63a377c43e7d05f3cf7057891a14cee0ed01a43765a72ea7f45a8a24b9fa223"
     }
   ],
-  "sourceCommit": "8b6bf29f09fafd7ecfa829c7c74ef94bbbd26742"
+  "sourceCommit": "107c29af9b829fb54a7c8d4d74da1b611afe25fb"
 }
