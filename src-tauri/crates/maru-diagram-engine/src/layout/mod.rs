@@ -242,7 +242,6 @@ pub(crate) mod header_support {
             && left.y < right.y + right.height
             && right.y < left.y + left.height
     }
-
 }
 
 /// Preserve authored names and reserve them all before naming anonymous routes.
