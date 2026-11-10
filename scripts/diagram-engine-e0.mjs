@@ -46,7 +46,7 @@ function readManifest() {
 }
 function sdkSnapshot() {
   const trackedChanges = run("git", ["status", "--porcelain", "--untracked-files=no", "--", "src-tauri/crates"]);
-  const untrackedFiles = run("git", ["ls-files", "--others", "--exclude-standard", "--", "src-tauri/crates"])
+  const untrackedFiles = run("git", ["ls-files", "--others", "--exclude-standard", "--directory", "--", "src-tauri/crates"])
     .split("\n").filter(Boolean);
   const targetRelative = relative(root, cargoTargetDirectory).replaceAll("\\", "/");
   return {
