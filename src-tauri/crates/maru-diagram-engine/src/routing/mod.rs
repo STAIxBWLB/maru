@@ -256,6 +256,35 @@ struct AxisCandidates {
 }
 
 impl AxisCandidates {
+    fn preload(&mut self, axis: &[Coord], obstacles: &[Rect], masked: &[usize], horizontal: bool) {
+        for (index, rect) in obstacles.iter().enumerate() {
+            if masked.contains(&index) {
+                continue;
+            }
+            let (start, end) = if horizontal {
+                (rect.top, rect.bottom)
+            } else {
+                (rect.left, rect.right)
+            };
+            let first = axis.partition_point(|coordinate| *coordinate <= start);
+            let last = axis.partition_point(|coordinate| *coordinate < end);
+            if self.retained + last - first > MAX_OBSTACLES {
+                // Wide overlapping obstacles may cross every grid coordinate.
+                // Keep the bounded lazy cache instead of retaining that product.
+                self.entries.clear();
+                self.retained = 0;
+                return;
+            }
+            for coordinate in &axis[first..last] {
+                self.entries.entry(*coordinate).or_default().push(*rect);
+            }
+            self.retained += last - first;
+        }
+        for coordinate in axis {
+            self.entries.entry(*coordinate).or_default();
+        }
+    }
+
     fn at(
         &mut self,
         coordinate: Coord,
@@ -401,6 +430,12 @@ fn search_leg(
         axis: 2,
     };
     let mut clearance = ClearanceCache::default();
+    clearance
+        .rows
+        .preload(&ys, obstacles, masked_obstacle_indices, true);
+    clearance
+        .columns
+        .preload(&xs, obstacles, masked_obstacle_indices, false);
     let mut visits = HashMap::new();
     visits.insert(
         initial,
@@ -751,6 +786,9 @@ mod tests {
         .unwrap();
         for masked in [vec![], vec![0], vec![1, 3], vec![0, 1, 2, 3]] {
             let mut cache = ClearanceCache::default();
+            let axis: Vec<_> = (-6..=8).collect();
+            cache.rows.preload(&axis, &obstacles, &masked, true);
+            cache.columns.preload(&axis, &obstacles, &masked, false);
             for x in -6..=7 {
                 for y in -6..=8 {
                     let from = p(x, y);
