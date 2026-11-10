@@ -158,6 +158,7 @@ fn the_native_svg_entry_defaults_to_outlines_and_the_shared_entry_keeps_text() {
     let mut spec = spec_with_mixed_label();
     // Source-valid export is required here; overflow is tested by the layout suite.
     spec["components"][0]["size"] = json!([160, 60]);
+    spec["components"][1]["col"] = json!(2);
     let request =
         json!({"specJson": spec.to_string(), "format": "svg", "theme": "light"}).to_string();
 
