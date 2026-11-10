@@ -19,6 +19,10 @@
      moments — pane titles and empty-state headlines. Body/prose stay
      Pretendard; the document reading scale never touches this. */
   --font-display: "Noto Serif KR", "Noto Serif CJK KR", "Apple SD Gothic Neo", serif;
+  /* Diagram canvas text uses the bundled local subset of the two faces the
+     engine measures with, so labels do not rewrap against a system fallback
+     (maru#552). No network font loading. */
+  --font-diagram: "Noto Sans CJK KR Diagram", "Noto Sans CJK KR", "Apple SD Gothic Neo", sans-serif;
   --bg: #f5f1e6;
   --bg-tint: #ece6d6;
   --panel: #fcfaf3;

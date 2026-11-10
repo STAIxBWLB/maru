@@ -54,6 +54,12 @@ if (action === "types") {
   const payload = payloadReport(outputs.filter((item) => item.type === "chunk"));
   if (payload.validationGzipBytes > 400_000) throw new Error(`Validation payload is ${payload.validationGzipBytes} gzip bytes, above 400000; move geometry dependencies behind the lazy boundary before merging.`);
   if (!payload.lazyGeometryGzipBytes) throw new Error("Geometry metric chunk is missing; keep its WASM URLs inside the dynamic engineGeometry module and rebuild.");
+  // Outlined SVG carries the pinned OTFs and must stay a native export
+  // (`maru#552`). This diagnostic string only exists when the render-outline
+  // feature is compiled, so finding it means the 33.4 MiB faces reached the
+  // browser graph.
+  const outlineCanary = "no pinned face carries weight";
+  if (outputs.some((chunk) => chunk.type === "chunk" && chunk.code.includes(outlineCanary))) throw new Error("Pinned glyph outlines leaked into the browser artifact; keep render-outline out of every WASM feature set and produce outlined SVG natively.");
   if (outputs.some((chunk) => chunk.type === "chunk" && (chunk.name.includes("engineGeometryCanvas") || chunk.name === "engineSvgForTest"))) throw new Error("Test canvas bridge leaked into the normal product artifact; keep its feature guard false in production.");
   const productBuildMs = performance.now() - before;
   const testBuildStarted = performance.now();

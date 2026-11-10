@@ -4,36 +4,68 @@
       "name": "typical",
       "pngSha256": "592fb70d1f2bba426d8ab6ba32bacb92d61941c2a71de410b1fd8cdd83edd011",
       "requestBytes": 693,
-      "responseBytes": 51447,
+      "responseBytes": 51448,
       "roundTripMs": [
-        62.809988999999995,
-        13.513627,
-        11.270574,
-        11.552538
+        148.68625,
+        9.286459,
+        8.973333,
+        8.917334
       ]
     },
     {
       "name": "1000",
       "pngSha256": "0fc1c4536e61a630de13455bdba200ad3dfa01219adc4f8ad2079211b9270c71",
       "requestBytes": 130843,
-      "responseBytes": 3998664,
+      "responseBytes": 3998665,
       "roundTripMs": [
-        2298.347134,
-        2269.373432,
-        2508.1530770000004,
-        2259.698373
+        1250.990708,
+        1244.958,
+        1239.662125,
+        1222.732667
       ]
     }
   ],
   "command": "plugin:maru-diagram|render_png",
   "differentWorkerThread": true,
   "hostFilesystemAccess": "none; fixture host panics on any access",
-  "pluginCommandCount": 2,
+  "pluginCommandCount": 3,
   "pluginCommandsObserved": [
     "validate",
-    "render_png"
+    "render_png",
+    "render_svg"
   ],
   "schemaVersion": 1,
   "scope": "Tauri MockRuntime registered IPC -> awaited spawn_blocking; no real WebView/OS transport claim",
-  "singleInFlight": true
+  "sharedPermit": true,
+  "singleInFlight": true,
+  "svgCases": [
+    {
+      "name": "typical",
+      "requestBytes": 693,
+      "responseBytes": 102377,
+      "roundTripMs": [
+        58.103792,
+        57.268917,
+        56.547374999999995,
+        57.499333
+      ],
+      "svgBytes": 23632,
+      "svgSha256": "308466b098813d947e081af1875a1d5f17e7353cb6344b24b74d034ac1a4a548",
+      "textMode": "outlines"
+    },
+    {
+      "name": "1000",
+      "requestBytes": 130843,
+      "responseBytes": 17508365,
+      "roundTripMs": [
+        894.224542,
+        884.099458,
+        886.765083,
+        895.7819999999999
+      ],
+      "svgBytes": 4079621,
+      "svgSha256": "05a0ee2d98e9ba91c01ea0b8c814692c347f0f994ac88f086bb556f8b0d737cb",
+      "textMode": "outlines"
+    }
+  ]
 }

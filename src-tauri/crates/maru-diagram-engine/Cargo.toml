@@ -17,6 +17,9 @@ geometry = []
 # Test/CI corpus tooling is never linked by the normal lazy geometry build.
 geometry-corpus = ["geometry", "render-svg"]
 render-svg = ["geometry", "dep:roxmltree"]
+# Glyph outlines for font-independent SVG output (`maru#552`); carries the two
+# pinned OTFs like render-png, so no font has to resolve at view time.
+render-outline = ["render-svg", "dep:ttf-parser"]
 render-png = ["render-svg", "dep:resvg"]
 wasm-png = ["wasm-render", "render-png"]
 png-corpus = ["render-png"]
