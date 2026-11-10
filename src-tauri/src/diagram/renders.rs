@@ -1650,6 +1650,7 @@ fn store_render_base_with_id(
     })
 }
 
+#[cfg(test)]
 pub mod ipc {
     use super::{delete_render, list_renders, prepare_render_view, RenderGroup, RenderView};
     #[cfg(test)]
