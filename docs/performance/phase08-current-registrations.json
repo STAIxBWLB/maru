@@ -1,0 +1,2739 @@
+{
+  "schemaVersion": 1,
+  "kind": "maru.current-production-registrations.v1",
+  "evidenceClass": "SOURCE-SCAN only; this manifest is not behavioral evidence",
+  "commands": [
+    {
+      "surface": "app",
+      "name": "accept_inbox_item",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::accept_inbox_item",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "accept_inbox_items",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::accept_inbox_items",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "accept_telegram_item",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::accept_telegram_item",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "add_workspace_root",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::add_workspace_root",
+      "sourcePath": "src-tauri/src/vault_list.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agent_apply_skill_proposal",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::proposal::ipc::agent_apply_skill_proposal",
+      "sourcePath": "src-tauri/src/agent_host/proposal.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agent_export_redacted_run_summary",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::cloud_dashboard::ipc::agent_export_redacted_run_summary",
+      "sourcePath": "src-tauri/src/agent_host/cloud_dashboard.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agent_parse_skill_proposal",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::proposal::ipc::agent_parse_skill_proposal",
+      "sourcePath": "src-tauri/src/agent_host/proposal.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agent_read_run_events",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::event_store::ipc::agent_read_run_events",
+      "sourcePath": "src-tauri/src/agent_host/event_store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agent_replay_run_summary",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::event_store::ipc::agent_replay_run_summary",
+      "sourcePath": "src-tauri/src/agent_host/event_store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agent_run_structured_loop",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::structured_loop::ipc::agent_run_structured_loop",
+      "sourcePath": "src-tauri/src/agent_host/structured_loop.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agent_write_redacted_run_summary",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::cloud_dashboard::ipc::agent_write_redacted_run_summary",
+      "sourcePath": "src-tauri/src/agent_host/cloud_dashboard.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agents_account_status",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::status::ipc::agents_account_status",
+      "sourcePath": "src-tauri/src/agent_host/status.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agents_delete",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_delete",
+      "sourcePath": "src-tauri/src/agents.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agents_list",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_list",
+      "sourcePath": "src-tauri/src/agents.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agents_reset",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_reset",
+      "sourcePath": "src-tauri/src/agents.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agents_upsert",
+      "registrationPath": "src-tauri/src/lib.rs::agents::ipc::agents_upsert",
+      "sourcePath": "src-tauri/src/agents.rs"
+    },
+    {
+      "surface": "app",
+      "name": "agents_usage_status",
+      "registrationPath": "src-tauri/src/lib.rs::agent_host::status::ipc::agents_usage_status",
+      "sourcePath": "src-tauri/src/agent_host/status.rs"
+    },
+    {
+      "surface": "app",
+      "name": "append_meetings_log",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::append_meetings_log",
+      "sourcePath": "src-tauri/src/meetings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "append_tasks_log",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::append_tasks_log",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "apply_file_queue",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::apply_file_queue",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "apply_inbox_decisions",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::apply_inbox_decisions",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "binary_viewer_classify",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_classify",
+      "sourcePath": "src-tauri/src/binary_viewer.rs"
+    },
+    {
+      "surface": "app",
+      "name": "binary_viewer_extract_hwpx",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_extract_hwpx",
+      "sourcePath": "src-tauri/src/binary_viewer.rs"
+    },
+    {
+      "surface": "app",
+      "name": "binary_viewer_open_external",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_open_external",
+      "sourcePath": "src-tauri/src/binary_viewer.rs"
+    },
+    {
+      "surface": "app",
+      "name": "binary_viewer_prepare_asset",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_prepare_asset",
+      "sourcePath": "src-tauri/src/binary_viewer.rs"
+    },
+    {
+      "surface": "app",
+      "name": "binary_viewer_preview_external",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_preview_external",
+      "sourcePath": "src-tauri/src/binary_viewer.rs"
+    },
+    {
+      "surface": "app",
+      "name": "binary_viewer_read_archive",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_read_archive",
+      "sourcePath": "src-tauri/src/binary_viewer.rs"
+    },
+    {
+      "surface": "app",
+      "name": "binary_viewer_read_text",
+      "registrationPath": "src-tauri/src/lib.rs::binary_viewer::ipc::binary_viewer_read_text",
+      "sourcePath": "src-tauri/src/binary_viewer.rs"
+    },
+    {
+      "surface": "app",
+      "name": "bootstrap_maru_dir",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::bootstrap_maru_dir",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "browser_passkey_request_authorization",
+      "registrationPath": "src-tauri/src/lib.rs::browser_passkeys::ipc::browser_passkey_request_authorization",
+      "sourcePath": "src-tauri/src/browser_passkeys.rs"
+    },
+    {
+      "surface": "app",
+      "name": "browser_passkey_status",
+      "registrationPath": "src-tauri/src/lib.rs::browser_passkeys::ipc::browser_passkey_status",
+      "sourcePath": "src-tauri/src/browser_passkeys.rs"
+    },
+    {
+      "surface": "app",
+      "name": "build_inbox_classification_prompt",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_classifier::ipc::build_inbox_classification_prompt",
+      "sourcePath": "src-tauri/src/inbox_classifier.rs"
+    },
+    {
+      "surface": "app",
+      "name": "calendar_sync_run",
+      "registrationPath": "src-tauri/src/lib.rs::calendar_sync::ipc::calendar_sync_run",
+      "sourcePath": "src-tauri/src/calendar_sync.rs"
+    },
+    {
+      "surface": "app",
+      "name": "catalog_drilldown",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::ipc::catalog_drilldown",
+      "sourcePath": "src-tauri/src/ops_catalog/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "catalog_query",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::ipc::catalog_query",
+      "sourcePath": "src-tauri/src/ops_catalog/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "catalog_scan",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::ipc::catalog_scan",
+      "sourcePath": "src-tauri/src/ops_catalog/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "catalog_watcher_start",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::watcher::ipc::catalog_watcher_start",
+      "sourcePath": "src-tauri/src/ops_catalog/watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "catalog_watcher_stop",
+      "registrationPath": "src-tauri/src/lib.rs::ops_catalog::watcher::ipc::catalog_watcher_stop",
+      "sourcePath": "src-tauri/src/ops_catalog/watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "check_gws_auth",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::check_gws_auth",
+      "sourcePath": "src-tauri/src/gmail_gws.rs"
+    },
+    {
+      "surface": "app",
+      "name": "check_mso_auth",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::check_mso_auth",
+      "sourcePath": "src-tauri/src/outlook_mso.rs"
+    },
+    {
+      "surface": "app",
+      "name": "check_telegram_auth",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::check_telegram_auth",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "checkpoint_meeting_source",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::checkpoint_meeting_source",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "confirm_meeting_source",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::confirm_meeting_source",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "count_inbox_processed_by_channel",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::count_inbox_processed_by_channel",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "create_document",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::create_document",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "create_meeting_source_session",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::create_meeting_source_session",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "create_task_note",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::create_task_note",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "create_version",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::create_version",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "create_workspace_directory",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::create_workspace_directory",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "decide_gmail_item",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::decide_gmail_item",
+      "sourcePath": "src-tauri/src/gmail_gws.rs"
+    },
+    {
+      "surface": "app",
+      "name": "decide_gmail_items",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::decide_gmail_items",
+      "sourcePath": "src-tauri/src/gmail_gws.rs"
+    },
+    {
+      "surface": "app",
+      "name": "decide_outlook_item",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::decide_outlook_item",
+      "sourcePath": "src-tauri/src/outlook_mso.rs"
+    },
+    {
+      "surface": "app",
+      "name": "decide_outlook_items",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::decide_outlook_items",
+      "sourcePath": "src-tauri/src/outlook_mso.rs"
+    },
+    {
+      "surface": "app",
+      "name": "delete_maru_rule",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::delete_maru_rule",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "delete_maru_template",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::delete_maru_template",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "delete_meeting_source_session",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::delete_meeting_source_session",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "delete_memo",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::delete_memo",
+      "sourcePath": "src-tauri/src/shelf.rs"
+    },
+    {
+      "surface": "app",
+      "name": "describe_file_queue_sources",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::describe_file_queue_sources",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "detect_legacy_telegram_launchd",
+      "registrationPath": "src-tauri/src/lib.rs::launchd_migration::ipc::detect_legacy_telegram_launchd",
+      "sourcePath": "src-tauri/src/launchd_migration.rs"
+    },
+    {
+      "surface": "app",
+      "name": "detect_workspace",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::detect_workspace",
+      "sourcePath": "src-tauri/src/workspace.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_backup_document",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_backup_document",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_delete_document",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_delete_document",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_export_blob",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_export_blob",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_export_blob_to_path",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_export_blob_to_path",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_list_documents",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_list_documents",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_list_snapshots",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_list_snapshots",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_load_document",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_load_document",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_pattern_delete",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_pattern_delete",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_pattern_list",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_pattern_list",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_pattern_save",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_pattern_save",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_restore_snapshot",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_restore_snapshot",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_save_document",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_save_document",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_save_snapshot",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_save_snapshot",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "diagram_write_report_asset",
+      "registrationPath": "src-tauri/src/lib.rs::diagram::ipc::diagram_write_report_asset",
+      "sourcePath": "src-tauri/src/diagram/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "document_delete_plan",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::document_delete_plan",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "dot_sync_overview",
+      "registrationPath": "src-tauri/src/lib.rs::dot_sync::dot_sync_overview",
+      "sourcePath": "src-tauri/src/dot_sync.rs"
+    },
+    {
+      "surface": "app",
+      "name": "dot_sync_run",
+      "registrationPath": "src-tauri/src/lib.rs::dot_sync::dot_sync_run",
+      "sourcePath": "src-tauri/src/dot_sync.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_create",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_create",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_discard",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_discard",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_list",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_list",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_promote",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_promote",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_promote_default_dir",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_promote_default_dir",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_read",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_read",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_relink_promoted",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_relink_promoted",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_save",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_save",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "drafts_set_status",
+      "registrationPath": "src-tauri/src/lib.rs::drafts::ipc::drafts_set_status",
+      "sourcePath": "src-tauri/src/drafts.rs"
+    },
+    {
+      "surface": "app",
+      "name": "duplicate_document",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::duplicate_document",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "duplicate_workspace_entries",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::duplicate_workspace_entries",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "enqueue_kakao_send",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::enqueue_kakao_send",
+      "sourcePath": "src-tauri/src/kakao_relay.rs"
+    },
+    {
+      "surface": "app",
+      "name": "ensure_share_outbox_root",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::ensure_share_outbox_root",
+      "sourcePath": "src-tauri/src/share_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "evidence_binder_mutate",
+      "registrationPath": "src-tauri/src/lib.rs::evidence_binder::ipc::evidence_binder_mutate",
+      "sourcePath": "src-tauri/src/evidence_binder.rs"
+    },
+    {
+      "surface": "app",
+      "name": "evidence_binder_read",
+      "registrationPath": "src-tauri/src/lib.rs::evidence_binder::ipc::evidence_binder_read",
+      "sourcePath": "src-tauri/src/evidence_binder.rs"
+    },
+    {
+      "surface": "app",
+      "name": "export_dispatch",
+      "registrationPath": "src-tauri/src/lib.rs::export::dispatch::ipc::export_dispatch",
+      "sourcePath": "src-tauri/src/export/dispatch.rs"
+    },
+    {
+      "surface": "app",
+      "name": "export_plan",
+      "registrationPath": "src-tauri/src/lib.rs::export::ipc::export_plan",
+      "sourcePath": "src-tauri/src/export/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "export_validate",
+      "registrationPath": "src-tauri/src/lib.rs::export::ipc::export_validate",
+      "sourcePath": "src-tauri/src/export/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "family_tools_status",
+      "registrationPath": "src-tauri/src/lib.rs::family_tools::ipc::family_tools_status",
+      "sourcePath": "src-tauri/src/family_tools.rs"
+    },
+    {
+      "surface": "app",
+      "name": "fetch_gmail_unread",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::fetch_gmail_unread",
+      "sourcePath": "src-tauri/src/gmail_gws.rs"
+    },
+    {
+      "surface": "app",
+      "name": "fetch_outlook_unread",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::fetch_outlook_unread",
+      "sourcePath": "src-tauri/src/outlook_mso.rs"
+    },
+    {
+      "surface": "app",
+      "name": "fetch_telegram_recent",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::fetch_telegram_recent",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "gaejosik_lint",
+      "registrationPath": "src-tauri/src/lib.rs::linter::gaejosik::ipc::gaejosik_lint",
+      "sourcePath": "src-tauri/src/linter/gaejosik.rs"
+    },
+    {
+      "surface": "app",
+      "name": "gap_analyze",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_analyze",
+      "sourcePath": "src-tauri/src/gap.rs"
+    },
+    {
+      "surface": "app",
+      "name": "gap_append_log",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_append_log",
+      "sourcePath": "src-tauri/src/gap.rs"
+    },
+    {
+      "surface": "app",
+      "name": "gap_log_list",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_log_list",
+      "sourcePath": "src-tauri/src/gap.rs"
+    },
+    {
+      "surface": "app",
+      "name": "gap_reports_list",
+      "registrationPath": "src-tauri/src/lib.rs::gap::ipc::gap_reports_list",
+      "sourcePath": "src-tauri/src/gap.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_changes",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_changes",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_commit",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_commit",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_diff",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_diff",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_generate_commit_message",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_generate_commit_message",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_status",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_status",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_sync_commit_push",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_sync_commit_push",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_sync_pull_rebase",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_sync_pull_rebase",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "git_sync_scan",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::git_sync_scan",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "graph_link_apply",
+      "registrationPath": "src-tauri/src/lib.rs::graph_authoring::ipc::graph_link_apply",
+      "sourcePath": "src-tauri/src/graph_authoring.rs"
+    },
+    {
+      "surface": "app",
+      "name": "graph_link_preview",
+      "registrationPath": "src-tauri/src/lib.rs::graph_authoring::ipc::graph_link_preview",
+      "sourcePath": "src-tauri/src/graph_authoring.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hub_fetch_catalog",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_fetch_catalog",
+      "sourcePath": "src-tauri/src/hub_client/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hub_poll_gate",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_poll_gate",
+      "sourcePath": "src-tauri/src/hub_client/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hub_queue_drain",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_queue_drain",
+      "sourcePath": "src-tauri/src/hub_client/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hub_status",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_status",
+      "sourcePath": "src-tauri/src/hub_client/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hub_submit_gate",
+      "registrationPath": "src-tauri/src/lib.rs::hub_client::ipc::hub_submit_gate",
+      "sourcePath": "src-tauri/src/hub_client/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwp_cli_template_fields",
+      "registrationPath": "src-tauri/src/lib.rs::hwp_cli_template::ipc::hwp_cli_template_fields",
+      "sourcePath": "src-tauri/src/hwp_cli_template.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwp_cli_template_fill",
+      "registrationPath": "src-tauri/src/lib.rs::hwp_cli_template::ipc::hwp_cli_template_fill",
+      "sourcePath": "src-tauri/src/hwp_cli_template.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwped_capabilities",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_capabilities",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwped_compose",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_compose",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwped_edit",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_edit",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwped_read",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_read",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwped_render",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_render",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwped_validate",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_validate",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
+      "name": "import_meeting_source",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::import_meeting_source",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "jobs_install",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_install",
+      "sourcePath": "src-tauri/src/jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "jobs_list",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_list",
+      "sourcePath": "src-tauri/src/jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "jobs_read_log",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_read_log",
+      "sourcePath": "src-tauri/src/jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "jobs_run_now",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_run_now",
+      "sourcePath": "src-tauri/src/jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "jobs_start",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_start",
+      "sourcePath": "src-tauri/src/jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "jobs_stop",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_stop",
+      "sourcePath": "src-tauri/src/jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "jobs_uninstall",
+      "registrationPath": "src-tauri/src/lib.rs::jobs::ipc::jobs_uninstall",
+      "sourcePath": "src-tauri/src/jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "kg_document_refs",
+      "registrationPath": "src-tauri/src/lib.rs::kg_refs::ipc::kg_document_refs",
+      "sourcePath": "src-tauri/src/kg_refs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "kg_refs_clear",
+      "registrationPath": "src-tauri/src/lib.rs::kg_refs::ipc::kg_refs_clear",
+      "sourcePath": "src-tauri/src/kg_refs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_ai_missions",
+      "registrationPath": "src-tauri/src/lib.rs::mission_state::ipc::list_ai_missions",
+      "sourcePath": "src-tauri/src/mission_state.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_maru_rules",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::list_maru_rules",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_maru_templates",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::list_maru_templates",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_meeting_correction_examples",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::list_meeting_correction_examples",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_meeting_source_sessions",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::list_meeting_source_sessions",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_memos",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::list_memos",
+      "sourcePath": "src-tauri/src/shelf.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_workspace_projects",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::list_workspace_projects",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_workspace_roots",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::list_workspace_roots",
+      "sourcePath": "src-tauri/src/vault_list.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_workspace_submodules",
+      "registrationPath": "src-tauri/src/lib.rs::git::ipc::list_workspace_submodules",
+      "sourcePath": "src-tauri/src/git.rs"
+    },
+    {
+      "surface": "app",
+      "name": "list_workspaces",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::list_workspaces",
+      "sourcePath": "src-tauri/src/workspace.rs"
+    },
+    {
+      "surface": "app",
+      "name": "maru_e2e_read",
+      "registrationPath": "src-tauri/src/lib.rs::e2e_flow::ipc::maru_e2e_read",
+      "sourcePath": "src-tauri/src/e2e_flow.rs"
+    },
+    {
+      "surface": "app",
+      "name": "maru_e2e_run",
+      "registrationPath": "src-tauri/src/lib.rs::e2e_flow::ipc::maru_e2e_run",
+      "sourcePath": "src-tauri/src/e2e_flow.rs"
+    },
+    {
+      "surface": "app",
+      "name": "move_document",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::move_document",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "move_task_note",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::move_task_note",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "open_in_file_manager",
+      "registrationPath": "src-tauri/src/lib.rs::file_manager::ipc::open_in_file_manager",
+      "sourcePath": "src-tauri/src/file_manager.rs"
+    },
+    {
+      "surface": "app",
+      "name": "parse_inbox_classification",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_classifier::ipc::parse_inbox_classification",
+      "sourcePath": "src-tauri/src/inbox_classifier.rs"
+    },
+    {
+      "surface": "app",
+      "name": "parse_korean_date_cmd",
+      "registrationPath": "src-tauri/src/lib.rs::korean_date::ipc::parse_korean_date_cmd",
+      "sourcePath": "src-tauri/src/korean_date.rs"
+    },
+    {
+      "surface": "app",
+      "name": "paste_workspace_entries",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::paste_workspace_entries",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "prepare_approval",
+      "registrationPath": "src-tauri/src/lib.rs::approval::ipc::prepare_approval",
+      "sourcePath": "src-tauri/src/approval.rs"
+    },
+    {
+      "surface": "app",
+      "name": "prepare_html_editor_assets",
+      "registrationPath": "src-tauri/src/lib.rs::html_editor::ipc::prepare_html_editor_assets",
+      "sourcePath": "src-tauri/src/html_editor.rs"
+    },
+    {
+      "surface": "app",
+      "name": "prepare_share_outbox_files",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::prepare_share_outbox_files",
+      "sourcePath": "src-tauri/src/share_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_ai_mission_log",
+      "registrationPath": "src-tauri/src/lib.rs::mission_state::ipc::read_ai_mission_log",
+      "sourcePath": "src-tauri/src/mission_state.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_document",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::read_document",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_inbox_processed_item",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::read_inbox_processed_item",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_inbox_runtime_config",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::read_inbox_runtime_config",
+      "sourcePath": "src-tauri/src/inbox_settings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_inbox_settings",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::read_inbox_settings",
+      "sourcePath": "src-tauri/src/inbox_settings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_inbox_source_runs",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::read_inbox_source_runs",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_kakao_relay_messages",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::read_kakao_relay_messages",
+      "sourcePath": "src-tauri/src/kakao_relay.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_kakao_relay_status",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::read_kakao_relay_status",
+      "sourcePath": "src-tauri/src/kakao_relay.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_kakao_send_results",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::read_kakao_send_results",
+      "sourcePath": "src-tauri/src/kakao_relay.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_ignore",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_ignore",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_mcp",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_mcp",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_projects",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_projects",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_rule",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_rule",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_settings",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_settings",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_skills",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_skills",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_template",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_template",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_maru_workspace",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::read_maru_workspace",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_meeting_guides",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::read_meeting_guides",
+      "sourcePath": "src-tauri/src/meetings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_meeting_metadata",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::read_meeting_metadata",
+      "sourcePath": "src-tauri/src/meetings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_meeting_source_session",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::read_meeting_source_session",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_meeting_source_version",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::read_meeting_source_version",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_meetings_log",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::read_meetings_log",
+      "sourcePath": "src-tauri/src/meetings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_memo",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::read_memo",
+      "sourcePath": "src-tauri/src/shelf.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_share_outbox_config",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::read_share_outbox_config",
+      "sourcePath": "src-tauri/src/share_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_sites",
+      "registrationPath": "src-tauri/src/lib.rs::sites::ipc::read_sites",
+      "sourcePath": "src-tauri/src/sites.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_task_events",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::read_task_events",
+      "sourcePath": "src-tauri/src/today_store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_task_integrations",
+      "registrationPath": "src-tauri/src/lib.rs::today_outbox::ipc::read_task_integrations",
+      "sourcePath": "src-tauri/src/today_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_task_metadata",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::read_task_metadata",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_tasks_log",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::read_tasks_log",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_telegram_monitor_config",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_config::ipc::read_telegram_monitor_config",
+      "sourcePath": "src-tauri/src/telegram_config.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_vault_cache",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::read_vault_cache",
+      "sourcePath": "src-tauri/src/vault.rs"
+    },
+    {
+      "surface": "app",
+      "name": "read_workspace_config",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::read_workspace_config",
+      "sourcePath": "src-tauri/src/workspace.rs"
+    },
+    {
+      "surface": "app",
+      "name": "record_approval",
+      "registrationPath": "src-tauri/src/lib.rs::approval::ipc::record_approval",
+      "sourcePath": "src-tauri/src/approval.rs"
+    },
+    {
+      "surface": "app",
+      "name": "refresh_workspace_capabilities",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::refresh_workspace_capabilities",
+      "sourcePath": "src-tauri/src/vault_list.rs"
+    },
+    {
+      "surface": "app",
+      "name": "register_workspace_roots",
+      "registrationPath": "src-tauri/src/lib.rs::workspace::ipc::register_workspace_roots",
+      "sourcePath": "src-tauri/src/workspace.rs"
+    },
+    {
+      "surface": "app",
+      "name": "reject_inbox_item",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::reject_inbox_item",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "reject_inbox_items",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::reject_inbox_items",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "reject_telegram_item",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::reject_telegram_item",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "remove_agent_context_hint",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::remove_agent_context_hint",
+      "sourcePath": "src-tauri/src/terminal_hooks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "remove_workspace_root",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::remove_workspace_root",
+      "sourcePath": "src-tauri/src/vault_list.rs"
+    },
+    {
+      "surface": "app",
+      "name": "rename_workspace_entry",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::rename_workspace_entry",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "restore_meeting_source_version",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::restore_meeting_source_version",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "reveal_in_file_manager",
+      "registrationPath": "src-tauri/src/lib.rs::file_manager::ipc::reveal_in_file_manager",
+      "sourcePath": "src-tauri/src/file_manager.rs"
+    },
+    {
+      "surface": "app",
+      "name": "sample_workspace_path",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::sample_workspace_path",
+      "sourcePath": "src-tauri/src/vault.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_document",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::save_document",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_inbox_runtime_config",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::save_inbox_runtime_config",
+      "sourcePath": "src-tauri/src/inbox_settings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_inbox_settings",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_settings::ipc::save_inbox_settings",
+      "sourcePath": "src-tauri/src/inbox_settings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_maru_ignore",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_ignore",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_maru_mcp",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_mcp",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_maru_projects",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_projects",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_maru_rule",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_rule",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_maru_settings",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_settings",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_maru_template",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::save_maru_template",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_meeting_correction_example",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::save_meeting_correction_example",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_meeting_source_draft",
+      "registrationPath": "src-tauri/src/lib.rs::meeting_sources::save_meeting_source_draft",
+      "sourcePath": "src-tauri/src/meeting_sources.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_memo",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::save_memo",
+      "sourcePath": "src-tauri/src/shelf.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_memo_as",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::save_memo_as",
+      "sourcePath": "src-tauri/src/shelf.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_share_outbox_root",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::save_share_outbox_root",
+      "sourcePath": "src-tauri/src/share_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_sites",
+      "registrationPath": "src-tauri/src/lib.rs::sites::ipc::save_sites",
+      "sourcePath": "src-tauri/src/sites.rs"
+    },
+    {
+      "surface": "app",
+      "name": "save_telegram_monitor_config",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_config::ipc::save_telegram_monitor_config",
+      "sourcePath": "src-tauri/src/telegram_config.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_inbox_drop",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::scan_inbox_drop",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_inbox_entries",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::scan_inbox_entries",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_inbox_processed_items",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::scan_inbox_processed_items",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_inbox_processed_snapshot",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::scan_inbox_processed_snapshot",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_meeting_notes",
+      "registrationPath": "src-tauri/src/lib.rs::meetings::ipc::scan_meeting_notes",
+      "sourcePath": "src-tauri/src/meetings.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_project_activity",
+      "registrationPath": "src-tauri/src/lib.rs::project_activity::ipc::scan_project_activity",
+      "sourcePath": "src-tauri/src/project_activity.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_share_outbox",
+      "registrationPath": "src-tauri/src/lib.rs::share_outbox::ipc::scan_share_outbox",
+      "sourcePath": "src-tauri/src/share_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_task_notes",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::scan_task_notes",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_vault",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::scan_vault",
+      "sourcePath": "src-tauri/src/vault.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_vault_paths",
+      "registrationPath": "src-tauri/src/lib.rs::vault::ipc::scan_vault_paths",
+      "sourcePath": "src-tauri/src/vault.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_work_sites",
+      "registrationPath": "src-tauri/src/lib.rs::sites::ipc::scan_work_sites",
+      "sourcePath": "src-tauri/src/sites.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_workspace_entries",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::scan_workspace_entries",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scan_workspace_files",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::scan_workspace_files",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scheduler_add",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_add",
+      "sourcePath": "src-tauri/src/scheduler.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scheduler_list",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_list",
+      "sourcePath": "src-tauri/src/scheduler.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scheduler_remove",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_remove",
+      "sourcePath": "src-tauri/src/scheduler.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scheduler_run_now",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_run_now",
+      "sourcePath": "src-tauri/src/scheduler.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scheduler_set_enabled",
+      "registrationPath": "src-tauri/src/lib.rs::scheduler::ipc::scheduler_set_enabled",
+      "sourcePath": "src-tauri/src/scheduler.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_cleanup_apply",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_cleanup_apply",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_cleanup_plan",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_cleanup_plan",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_create_idea",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_create_idea",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_list",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_list",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_migrate_legacy_memos",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_migrate_legacy_memos",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_read",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_read",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_rename",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_rename",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_save",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_save",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_transition_idea",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_transition_idea",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "scratchpad_trash",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad::ipc::scratchpad_trash",
+      "sourcePath": "src-tauri/src/scratchpad.rs"
+    },
+    {
+      "surface": "app",
+      "name": "search_calendar_notes",
+      "registrationPath": "src-tauri/src/lib.rs::calendar_search::ipc::search_calendar_notes",
+      "sourcePath": "src-tauri/src/calendar_search.rs"
+    },
+    {
+      "surface": "app",
+      "name": "search_workspace_contents",
+      "registrationPath": "src-tauri/src/lib.rs::content_search::ipc::search_workspace_contents",
+      "sourcePath": "src-tauri/src/content_search.rs"
+    },
+    {
+      "surface": "app",
+      "name": "secrets_delete_text",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_delete_text",
+      "sourcePath": "src-tauri/src/secrets.rs"
+    },
+    {
+      "surface": "app",
+      "name": "secrets_doctor",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_doctor",
+      "sourcePath": "src-tauri/src/secrets.rs"
+    },
+    {
+      "surface": "app",
+      "name": "secrets_migrate",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_migrate",
+      "sourcePath": "src-tauri/src/secrets.rs"
+    },
+    {
+      "surface": "app",
+      "name": "secrets_read_text",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_read_text",
+      "sourcePath": "src-tauri/src/secrets.rs"
+    },
+    {
+      "surface": "app",
+      "name": "secrets_scan",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_scan",
+      "sourcePath": "src-tauri/src/secrets.rs"
+    },
+    {
+      "surface": "app",
+      "name": "secrets_write_text",
+      "registrationPath": "src-tauri/src/lib.rs::secrets::ipc::secrets_write_text",
+      "sourcePath": "src-tauri/src/secrets.rs"
+    },
+    {
+      "surface": "app",
+      "name": "set_active_workspace_root",
+      "registrationPath": "src-tauri/src/lib.rs::vault_list::ipc::set_active_workspace_root",
+      "sourcePath": "src-tauri/src/vault_list.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_back",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_back",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_close",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_close",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_close_all",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_close_all",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_forward",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_forward",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_hide",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_hide",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_navigate",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_navigate",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_open",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_open",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_open_external",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_open_external",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_open_safari",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_open_safari",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_reload",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_reload",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_set_bounds",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_set_bounds",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_show",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::site_view_show",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "site_view_take_opened_urls",
+      "registrationPath": "src-tauri/src/lib.rs::site_view::ipc::site_view_take_opened_urls",
+      "sourcePath": "src-tauri/src/site_view.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_add_source",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_add_source",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_adopt_external_links",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_adopt_external_links",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_apply_bundle_update",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_apply_bundle_update",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_bundle_status",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_bundle_status",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_check_bundle_update",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_check_bundle_update",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_create_skill",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_create_skill",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_delete_skill",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_delete_skill",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_dispatch_background",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_dispatch_background",
+      "sourcePath": "src-tauri/src/skill_host/dispatch.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_dispatch_compose",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_dispatch_compose",
+      "sourcePath": "src-tauri/src/skill_host/dispatch.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_dispatch_terminal",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_dispatch_terminal",
+      "sourcePath": "src-tauri/src/skill_host/dispatch.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_doctor",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_doctor",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_env_bootstrap",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::env::ipc::skills_env_bootstrap",
+      "sourcePath": "src-tauri/src/skill_host/env.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_env_repair",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::env::ipc::skills_env_repair",
+      "sourcePath": "src-tauri/src/skill_host/env.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_env_status",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::env::ipc::skills_env_status",
+      "sourcePath": "src-tauri/src/skill_host/env.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_import_external",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_import_external",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_import_unmanage",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_import_unmanage",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_install_skill",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_install_skill",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_list_dirty",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_dirty",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_list_installs",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_installs",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_list_skills",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_skills",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_list_sources",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_list_sources",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_read_skill",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_read_skill",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_read_skill_file",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_read_skill_file",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_reconcile_skill",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_reconcile_skill",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_remove_source",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_remove_source",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_rescan_source",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_rescan_source",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_reset_registry",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_reset_registry",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_runtime_status",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::dispatch::ipc::skills_runtime_status",
+      "sourcePath": "src-tauri/src/skill_host/dispatch.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_save_skill_as",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_save_skill_as",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_save_skill_file",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_save_skill_file",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_sync_all_sources",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::skills_sync_all_sources",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_sync_source",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::skills_sync_source",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "skills_uninstall_skill",
+      "registrationPath": "src-tauri/src/lib.rs::skill_host::store::ipc::skills_uninstall_skill",
+      "sourcePath": "src-tauri/src/skill_host/store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stage_gmail_items",
+      "registrationPath": "src-tauri/src/lib.rs::gmail_gws::ipc::stage_gmail_items",
+      "sourcePath": "src-tauri/src/gmail_gws.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stage_inbox_drop_files",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::stage_inbox_drop_files",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stage_kakao_relay_new",
+      "registrationPath": "src-tauri/src/lib.rs::kakao_relay::stage_kakao_relay_new",
+      "sourcePath": "src-tauri/src/kakao_relay.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stage_outlook_items",
+      "registrationPath": "src-tauri/src/lib.rs::outlook_mso::ipc::stage_outlook_items",
+      "sourcePath": "src-tauri/src/outlook_mso.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stage_telegram_items",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::stage_telegram_items",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "start_agent_cli_invocation",
+      "registrationPath": "src-tauri/src/lib.rs::ai_router::ipc::start_agent_cli_invocation",
+      "sourcePath": "src-tauri/src/ai_router.rs"
+    },
+    {
+      "surface": "app",
+      "name": "start_claude_cli_invocation",
+      "registrationPath": "src-tauri/src/lib.rs::ai_router::ipc::start_claude_cli_invocation",
+      "sourcePath": "src-tauri/src/ai_router.rs"
+    },
+    {
+      "surface": "app",
+      "name": "start_inbox_watcher",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_watcher::ipc::start_inbox_watcher",
+      "sourcePath": "src-tauri/src/inbox_watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "start_scratchpad_watcher",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad_watcher::ipc::start_scratchpad_watcher",
+      "sourcePath": "src-tauri/src/scratchpad_watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "start_telegram_polling",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::start_telegram_polling",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "start_vault_watcher",
+      "registrationPath": "src-tauri/src/lib.rs::vault_watcher::ipc::start_vault_watcher",
+      "sourcePath": "src-tauri/src/vault_watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stop_ai_mission",
+      "registrationPath": "src-tauri/src/lib.rs::mission_state::ipc::stop_ai_mission",
+      "sourcePath": "src-tauri/src/mission_state.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stop_inbox_watcher",
+      "registrationPath": "src-tauri/src/lib.rs::inbox_watcher::ipc::stop_inbox_watcher",
+      "sourcePath": "src-tauri/src/inbox_watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stop_scratchpad_watcher",
+      "registrationPath": "src-tauri/src/lib.rs::scratchpad_watcher::ipc::stop_scratchpad_watcher",
+      "sourcePath": "src-tauri/src/scratchpad_watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stop_telegram_polling",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::stop_telegram_polling",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "stop_vault_watcher",
+      "registrationPath": "src-tauri/src/lib.rs::vault_watcher::ipc::stop_vault_watcher",
+      "sourcePath": "src-tauri/src/vault_watcher.rs"
+    },
+    {
+      "surface": "app",
+      "name": "store_shelf_files",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::store_shelf_files",
+      "sourcePath": "src-tauri/src/shelf.rs"
+    },
+    {
+      "surface": "app",
+      "name": "store_shelf_files_as",
+      "registrationPath": "src-tauri/src/lib.rs::shelf::ipc::store_shelf_files_as",
+      "sourcePath": "src-tauri/src/shelf.rs"
+    },
+    {
+      "surface": "app",
+      "name": "studio_apply_body",
+      "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_apply_body",
+      "sourcePath": "src-tauri/src/studio/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "studio_state_delete",
+      "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_delete",
+      "sourcePath": "src-tauri/src/studio/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "studio_state_list",
+      "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_list",
+      "sourcePath": "src-tauri/src/studio/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "studio_state_read",
+      "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_read",
+      "sourcePath": "src-tauri/src/studio/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "studio_state_save",
+      "registrationPath": "src-tauri/src/lib.rs::studio::ipc::studio_state_save",
+      "sourcePath": "src-tauri/src/studio/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "system_crontab_remove",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_crontab_remove",
+      "sourcePath": "src-tauri/src/system_jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "system_job_run_now",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_job_run_now",
+      "sourcePath": "src-tauri/src/system_jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "system_job_set_enabled",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_job_set_enabled",
+      "sourcePath": "src-tauri/src/system_jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "system_jobs_list",
+      "registrationPath": "src-tauri/src/lib.rs::system_jobs::ipc::system_jobs_list",
+      "sourcePath": "src-tauri/src/system_jobs.rs"
+    },
+    {
+      "surface": "app",
+      "name": "task_calendar_set_sync",
+      "registrationPath": "src-tauri/src/lib.rs::today_calendar::ipc::task_calendar_set_sync",
+      "sourcePath": "src-tauri/src/today_calendar.rs"
+    },
+    {
+      "surface": "app",
+      "name": "task_integrations_drain",
+      "registrationPath": "src-tauri/src/lib.rs::today_outbox::ipc::task_integrations_drain",
+      "sourcePath": "src-tauri/src/today_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "task_integrations_retry",
+      "registrationPath": "src-tauri/src/lib.rs::today_outbox::ipc::task_integrations_retry",
+      "sourcePath": "src-tauri/src/today_outbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "task_transition",
+      "registrationPath": "src-tauri/src/lib.rs::today_lifecycle::ipc::task_transition",
+      "sourcePath": "src-tauri/src/today_lifecycle.rs"
+    },
+    {
+      "surface": "app",
+      "name": "task_trash",
+      "registrationPath": "src-tauri/src/lib.rs::today_lifecycle::ipc::task_trash",
+      "sourcePath": "src-tauri/src/today_lifecycle.rs"
+    },
+    {
+      "surface": "app",
+      "name": "telegram_polling_status",
+      "registrationPath": "src-tauri/src/lib.rs::telegram_io::ipc::telegram_polling_status",
+      "sourcePath": "src-tauri/src/telegram_io.rs"
+    },
+    {
+      "surface": "app",
+      "name": "template_fill_hwpx",
+      "registrationPath": "src-tauri/src/lib.rs::template_fill::ipc::template_fill_hwpx",
+      "sourcePath": "src-tauri/src/template_fill.rs"
+    },
+    {
+      "surface": "app",
+      "name": "template_get_fields",
+      "registrationPath": "src-tauri/src/lib.rs::template_fill::ipc::template_get_fields",
+      "sourcePath": "src-tauri/src/template_fill.rs"
+    },
+    {
+      "surface": "app",
+      "name": "template_prepare_hwpx_template",
+      "registrationPath": "src-tauri/src/lib.rs::template_fill::ipc::template_prepare_hwpx_template",
+      "sourcePath": "src-tauri/src/template_fill.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_ack",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_ack",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_clear",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_clear",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_copy_selection",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_copy_selection",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_hooks_install",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::terminal_hooks_install",
+      "sourcePath": "src-tauri/src/terminal_hooks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_hooks_status",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::terminal_hooks_status",
+      "sourcePath": "src-tauri/src/terminal_hooks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_hooks_uninstall",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::terminal_hooks_uninstall",
+      "sourcePath": "src-tauri/src/terminal_hooks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_input",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_input",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_input_batch",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_input_batch",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_kill",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_kill",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_request_full",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_request_full",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_resize",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_resize",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_scroll",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_scroll",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_search",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_search",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_selection",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_selection",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_set_visibility",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_set_visibility",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_spawn",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_spawn",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_text",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_text",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "terminal_write",
+      "registrationPath": "src-tauri/src/lib.rs::terminal::ipc::terminal_write",
+      "sourcePath": "src-tauri/src/terminal/mod.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_apply_plan_result",
+      "registrationPath": "src-tauri/src/lib.rs::today_ai::ipc::today_apply_plan_result",
+      "sourcePath": "src-tauri/src/today_ai.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_build_plan_request",
+      "registrationPath": "src-tauri/src/lib.rs::today_ai::ipc::today_build_plan_request",
+      "sourcePath": "src-tauri/src/today_ai.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_calendar_commitments",
+      "registrationPath": "src-tauri/src/lib.rs::today_calendar::ipc::today_calendar_commitments",
+      "sourcePath": "src-tauri/src/today_calendar.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_calendar_publish",
+      "registrationPath": "src-tauri/src/lib.rs::today_calendar::ipc::today_calendar_publish",
+      "sourcePath": "src-tauri/src/today_calendar.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_finalize_setup",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_finalize_setup",
+      "sourcePath": "src-tauri/src/today_store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_logical_day",
+      "registrationPath": "src-tauri/src/lib.rs::today::ipc::today_logical_day",
+      "sourcePath": "src-tauri/src/today.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_mutate",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_mutate",
+      "sourcePath": "src-tauri/src/today_store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_notify_new_day",
+      "registrationPath": "src-tauri/src/lib.rs::today_notify::ipc::today_notify_new_day",
+      "sourcePath": "src-tauri/src/today_notify.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_open",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_open",
+      "sourcePath": "src-tauri/src/today_store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "today_rollover",
+      "registrationPath": "src-tauri/src/lib.rs::today_store::ipc::today_rollover",
+      "sourcePath": "src-tauri/src/today_store.rs"
+    },
+    {
+      "surface": "app",
+      "name": "trash_document",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::trash_document",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "trash_inbox_items",
+      "registrationPath": "src-tauri/src/lib.rs::inbox::ipc::trash_inbox_items",
+      "sourcePath": "src-tauri/src/inbox.rs"
+    },
+    {
+      "surface": "app",
+      "name": "trash_workspace_entries",
+      "registrationPath": "src-tauri/src/lib.rs::workspace_files::ipc::trash_workspace_entries",
+      "sourcePath": "src-tauri/src/workspace_files.rs"
+    },
+    {
+      "surface": "app",
+      "name": "unload_legacy_telegram_launchd",
+      "registrationPath": "src-tauri/src/lib.rs::launchd_migration::ipc::unload_legacy_telegram_launchd",
+      "sourcePath": "src-tauri/src/launchd_migration.rs"
+    },
+    {
+      "surface": "app",
+      "name": "update_frontmatter_field",
+      "registrationPath": "src-tauri/src/lib.rs::document::ipc::update_frontmatter_field",
+      "sourcePath": "src-tauri/src/document.rs"
+    },
+    {
+      "surface": "app",
+      "name": "update_maru_workspace",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::update_maru_workspace",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "app",
+      "name": "update_task_details",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::update_task_details",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "update_task_schedule_fields",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::update_task_schedule_fields",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "update_task_status",
+      "registrationPath": "src-tauri/src/lib.rs::tasks::ipc::update_task_status",
+      "sourcePath": "src-tauri/src/tasks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "vault_graph_layout_read",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_layout_read",
+      "sourcePath": "src-tauri/src/vault_graph.rs"
+    },
+    {
+      "surface": "app",
+      "name": "vault_graph_layout_save",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_layout_save",
+      "sourcePath": "src-tauri/src/vault_graph.rs"
+    },
+    {
+      "surface": "app",
+      "name": "vault_graph_read",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_read",
+      "sourcePath": "src-tauri/src/vault_graph.rs"
+    },
+    {
+      "surface": "app",
+      "name": "vault_graph_root",
+      "registrationPath": "src-tauri/src/lib.rs::vault_graph::ipc::vault_graph_root",
+      "sourcePath": "src-tauri/src/vault_graph.rs"
+    },
+    {
+      "surface": "app",
+      "name": "vault_validate_note",
+      "registrationPath": "src-tauri/src/lib.rs::vault_guard::ipc::vault_validate_note",
+      "sourcePath": "src-tauri/src/vault_guard.rs"
+    },
+    {
+      "surface": "app",
+      "name": "web_action_repair_task_list_linkage",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_action_repair_task_list_linkage",
+      "sourcePath": "src-tauri/src/web_actions.rs"
+    },
+    {
+      "surface": "app",
+      "name": "web_actions_apply",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_actions_apply",
+      "sourcePath": "src-tauri/src/web_actions.rs"
+    },
+    {
+      "surface": "app",
+      "name": "web_actions_import_top",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_actions_import_top",
+      "sourcePath": "src-tauri/src/web_actions.rs"
+    },
+    {
+      "surface": "app",
+      "name": "web_actions_scan",
+      "registrationPath": "src-tauri/src/lib.rs::web_actions::ipc::web_actions_scan",
+      "sourcePath": "src-tauri/src/web_actions.rs"
+    },
+    {
+      "surface": "app",
+      "name": "write_agent_context_hint",
+      "registrationPath": "src-tauri/src/lib.rs::terminal_hooks::ipc::write_agent_context_hint",
+      "sourcePath": "src-tauri/src/terminal_hooks.rs"
+    },
+    {
+      "surface": "app",
+      "name": "write_recovery_copy",
+      "registrationPath": "src-tauri/src/lib.rs::maru_dir::ipc::write_recovery_copy",
+      "sourcePath": "src-tauri/src/maru_dir.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
+      "name": "diagram_delete_render",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::diagram_delete_render",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
+      "name": "diagram_list_renders",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::diagram_list_renders",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
+      "name": "diagram_prepare_render_view",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::diagram_prepare_render_view",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
+      "name": "render_and_store",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::render_and_store",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
+      "name": "render_png",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::render_png",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
+      "name": "render_svg",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::render_svg",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
+      "name": "validate",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::validate",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    }
+  ],
+  "counts": {
+    "app": 385,
+    "plugin": 7,
+    "total": 392
+  },
+  "sourceFiles": [
+    {
+      "path": "scripts/check-command-isolation.mjs",
+      "sha256": "bf9ac5c929b76c2a2eec44b0bd610d803b0d85700193b6b5f637043199423ac4"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "sha256": "c43b8af760bc733febf9f4f1558aac5fba981740fc3a79eabb78e56e585b4c67"
+    },
+    {
+      "path": "src-tauri/capabilities/default.json",
+      "sha256": "64e078f0f3bdac449ceb33b6e308aeb50b45e7ced09abc098ed551bd6b135a9c"
+    },
+    {
+      "path": "src-tauri/capabilities/diagram-render.json",
+      "sha256": "d3f981c364860fb5d23be897ad1b3a1a36b692fafc0efcc69548c03f7ee9f64f"
+    },
+    {
+      "path": "src-tauri/crates/tauri-plugin-maru-diagram/Cargo.toml",
+      "sha256": "e5ed6d64b0e3191038e31d1b8611b00c0154ee00481ec7a5a8614493bc3c81a0"
+    },
+    {
+      "path": "src-tauri/crates/tauri-plugin-maru-diagram/build.rs",
+      "sha256": "5a853a1d034bf7f9e8656f5ad8be4a183130ad764378aa69df0fbb84ea3791a9"
+    },
+    {
+      "path": "src-tauri/crates/tauri-plugin-maru-diagram/permissions/default.toml",
+      "sha256": "4d86bcb70d0ffb7e1d016994b1967f5aaf8d9f81b5dfbedf7d2c3c1cde790f48"
+    },
+    {
+      "path": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs",
+      "sha256": "2e0b375f80a996fce97cc4cedd2c643f80f386615e80bd822f7a67d57bf6a4d0"
+    },
+    {
+      "path": "src-tauri/src/agent_host/cloud_dashboard.rs",
+      "sha256": "9f02b46cc2b26a3eeea0f990c9950e0d0c395ce1896e0777b4492033f551bf98"
+    },
+    {
+      "path": "src-tauri/src/agent_host/event_store.rs",
+      "sha256": "20d8f723d2b00d701a533fe594003dae6baa361802d7fbf34d46a0eaae6ff1af"
+    },
+    {
+      "path": "src-tauri/src/agent_host/proposal.rs",
+      "sha256": "5c8fc9fe1a2795f1ee2787bc83718b0307ff2619d868e9b2c08364f1f5d3cc57"
+    },
+    {
+      "path": "src-tauri/src/agent_host/status.rs",
+      "sha256": "e0984f35830339321d0a55acef26cbb27d42e5e39a51ed10ec26c798be950484"
+    },
+    {
+      "path": "src-tauri/src/agent_host/structured_loop.rs",
+      "sha256": "67a36481baa39358ad8bbcbd0d58ffb8fb849a715c85597563bdc86efdca72e8"
+    },
+    {
+      "path": "src-tauri/src/agents.rs",
+      "sha256": "beee3738e2a3f7691f4eb7211c85b17172272b7ca038419cc55c162f62df9dc9"
+    },
+    {
+      "path": "src-tauri/src/ai_router.rs",
+      "sha256": "cf092afd16fd19563417862d993095f62e5f890f9f52c3653c47c6e23c2a9bc4"
+    },
+    {
+      "path": "src-tauri/src/approval.rs",
+      "sha256": "fd5a11f585f0653d06a3c13efcb261b01ab6775453d019b7c75c76e75182493c"
+    },
+    {
+      "path": "src-tauri/src/binary_viewer.rs",
+      "sha256": "4f8f0a979db451683265d917a746b280f411cc2afbcd74993bc2d5542e6194d2"
+    },
+    {
+      "path": "src-tauri/src/browser_passkeys.rs",
+      "sha256": "a4aca26afa754d94db75ffbd32a266e695157cf2284922b7474b75b6a2145315"
+    },
+    {
+      "path": "src-tauri/src/calendar_search.rs",
+      "sha256": "0835fd18c2a86e1c671b6d4d324cbae9b4338412ee326786d1b46fd442d896af"
+    },
+    {
+      "path": "src-tauri/src/calendar_sync.rs",
+      "sha256": "17b364662e8ac6b9058dbb458775ff40c590f286936528adf7878d6ee503a9df"
+    },
+    {
+      "path": "src-tauri/src/content_search.rs",
+      "sha256": "59c3484e10f36e66c3fac53ad57009454c6184912a605373317dc2971ef67e3b"
+    },
+    {
+      "path": "src-tauri/src/diagram/mod.rs",
+      "sha256": "8b65f7c9a1d895cc9a58e4b9a58ec7c9912f7f9c8ae4570c90385342b9ea23b7"
+    },
+    {
+      "path": "src-tauri/src/document.rs",
+      "sha256": "e09c2746176f377cf9e2063346d6b817ee9d4674a3de191a98c2536c45c8aae6"
+    },
+    {
+      "path": "src-tauri/src/dot_sync.rs",
+      "sha256": "0752402316c680ce3fd096bebd5897cc7b6e0ec30f42b7c4fe2ff3fceee02c17"
+    },
+    {
+      "path": "src-tauri/src/drafts.rs",
+      "sha256": "1db6b4e9eedae94b78917f42e3a1cefe3576fbe0da1d04e7915a724d41ff29de"
+    },
+    {
+      "path": "src-tauri/src/e2e_flow.rs",
+      "sha256": "e8acc328b26101c74c4ec159515fc46305fdc54bd47037dbf46df587cf8f2041"
+    },
+    {
+      "path": "src-tauri/src/evidence_binder.rs",
+      "sha256": "d29fe3b85274f1d04705dfd5d8fe593d727d75c9cd31eafd9eef8386a125056f"
+    },
+    {
+      "path": "src-tauri/src/export/dispatch.rs",
+      "sha256": "7f5e21e8c8103a79a96cf72fc718e0083879e51aae3d2304f84285f449ed3792"
+    },
+    {
+      "path": "src-tauri/src/export/mod.rs",
+      "sha256": "3575484dda3657d4a064314cae2685aa3b9e4c8fa4f4bf1631958d255e8262aa"
+    },
+    {
+      "path": "src-tauri/src/family_tools.rs",
+      "sha256": "c36f39e480bf9ffecf55de060c5ef4cf510674bbea4b0af7a3d5b76236050d0c"
+    },
+    {
+      "path": "src-tauri/src/file_manager.rs",
+      "sha256": "7b7d414977f748f3f5963b4da712a0043d1425113d25ce721afeb9f0819565f6"
+    },
+    {
+      "path": "src-tauri/src/gap.rs",
+      "sha256": "4c39da66a3629d3698db0e595756dabe309eb043d56493e522e702dff4e0d526"
+    },
+    {
+      "path": "src-tauri/src/git.rs",
+      "sha256": "92a78b2ef6cf5a0c4a0b51eaeabd9105ccd90cff43870aa7dfb2892484802eca"
+    },
+    {
+      "path": "src-tauri/src/gmail_gws.rs",
+      "sha256": "3496c285f212888af41d10bb6ff113952a9277eb7939ef4c656113bb3ff64906"
+    },
+    {
+      "path": "src-tauri/src/graph_authoring.rs",
+      "sha256": "7f674f250205b7ec0411c11b93c99d10c31c557145c774bd56c728c799e366d7"
+    },
+    {
+      "path": "src-tauri/src/html_editor.rs",
+      "sha256": "36dd18cc88dc8579088e909f8b0cc0535b47abbbd5bb7e0f7d39b68621972ed5"
+    },
+    {
+      "path": "src-tauri/src/hub_client/mod.rs",
+      "sha256": "7c456ecb56d5c7b5c5a3e85e658ce5b16f61290008bb5f50047fdc5e27736cce"
+    },
+    {
+      "path": "src-tauri/src/hwp_cli_template.rs",
+      "sha256": "8a598883342de447cf0a6be277283afbafbd51e5365cd3218861f3c31f1bc8eb"
+    },
+    {
+      "path": "src-tauri/src/hwped.rs",
+      "sha256": "2fc38e59ad47de893e2d534c1f63392ec94c0b1f64626be25abb04ca61caa70a"
+    },
+    {
+      "path": "src-tauri/src/inbox.rs",
+      "sha256": "c2ca019a7959d073deb0de2db52a92e2a129fd50c28db538c80e675693009b84"
+    },
+    {
+      "path": "src-tauri/src/inbox_classifier.rs",
+      "sha256": "fecafaba65f0c885a497c13a5c2cba5be8f47a6e34227744002106f35524f2f5"
+    },
+    {
+      "path": "src-tauri/src/inbox_settings.rs",
+      "sha256": "0733039ca3c0e290f662a3e3cb58703ad87cabd9bc9c5fb46a57107721335075"
+    },
+    {
+      "path": "src-tauri/src/inbox_watcher.rs",
+      "sha256": "ca893781f588aa6a5f5509baf94e49333528c2f9c5e04a7d6dae39e45c2ede31"
+    },
+    {
+      "path": "src-tauri/src/jobs.rs",
+      "sha256": "5bf2ac3cd70b23d13286d26f2690195b3ace42d940afa429321716e11616751f"
+    },
+    {
+      "path": "src-tauri/src/kakao_relay.rs",
+      "sha256": "881260fc29200675d0a5a0ad4c862bab1372d4cf439a4bf7d0e1219b665e73a3"
+    },
+    {
+      "path": "src-tauri/src/kg_refs.rs",
+      "sha256": "74ab811b95bb8f16d05e394435d9ace53c5ff1cc94ce0f3e130323543962c187"
+    },
+    {
+      "path": "src-tauri/src/korean_date.rs",
+      "sha256": "2442cb931b3e2a0b2bda6a76cd0f95db96388944298242ef228c1ed830b90d38"
+    },
+    {
+      "path": "src-tauri/src/launchd_migration.rs",
+      "sha256": "45edfdf624019f7857ed0c519e260c4aa55841a62738e13acaffb60260e92e74"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "5ac953f18e25181139584e9c650f58c7070c0b653959b4f8fd80e48a13ff9498"
+    },
+    {
+      "path": "src-tauri/src/linter/gaejosik.rs",
+      "sha256": "c2ef234c14bfe29dbf75b4898589a1c8da1b371fbae3d0b74d6c402d915838a6"
+    },
+    {
+      "path": "src-tauri/src/maru_dir.rs",
+      "sha256": "44f2fff5874ac86b2aa72251c5a4048839b8fc91f1fb1596400164554a1e42d7"
+    },
+    {
+      "path": "src-tauri/src/meeting_sources.rs",
+      "sha256": "9110c56b68f080b4361df9c14ca11e4f381a5ecefe91f83b932d92e48fd6613d"
+    },
+    {
+      "path": "src-tauri/src/meetings.rs",
+      "sha256": "ec58a77d3b1d8a2a67f43c66af9d3a1a4170b4ed9c7e1ac49bd8c5796800c7a4"
+    },
+    {
+      "path": "src-tauri/src/mission_state.rs",
+      "sha256": "f696b7dd7025ae20939fcdee31a3a0f78c50f7a730f136ad35888d793710b266"
+    },
+    {
+      "path": "src-tauri/src/ops_catalog/mod.rs",
+      "sha256": "9f3e95992fa74f6ac80d2d5c498be845c6f5e24cdc943321b0362d2dd20f1e96"
+    },
+    {
+      "path": "src-tauri/src/ops_catalog/watcher.rs",
+      "sha256": "9e4f22e245ac5848985f615d673c5d7e36695e04ca15e1a52c9238751fe221b3"
+    },
+    {
+      "path": "src-tauri/src/outlook_mso.rs",
+      "sha256": "2c2e331e8c47643f9aca51feee11cad6596119a3aa6245a37e03ded109dc3e67"
+    },
+    {
+      "path": "src-tauri/src/project_activity.rs",
+      "sha256": "a6e7d050d307ef96dd95935996fe57e60496b727eeed5b7f1c45868d8d52f38b"
+    },
+    {
+      "path": "src-tauri/src/scheduler.rs",
+      "sha256": "5fb6ae5200b267a5698bc083cc751568d301a55af25ca7bccbcd97e0c1219aee"
+    },
+    {
+      "path": "src-tauri/src/scratchpad.rs",
+      "sha256": "a4d5874f835ff6d7a81ad0d93ee7326f5968edc8701ac8e00ef467d76a4af059"
+    },
+    {
+      "path": "src-tauri/src/scratchpad_watcher.rs",
+      "sha256": "a61c64881e834a9fae42614753e035e5e9438fb36bce13260fe6a2ce234f125c"
+    },
+    {
+      "path": "src-tauri/src/secrets.rs",
+      "sha256": "92fef8f3cff6bdec3bef8ad4a31391929f52087ce37c6b042f2dceb686d8c79e"
+    },
+    {
+      "path": "src-tauri/src/share_outbox.rs",
+      "sha256": "7e0c2555f4e947fec52557f6db0513d615415d40607900b495cc2a0a1a5f4aba"
+    },
+    {
+      "path": "src-tauri/src/shelf.rs",
+      "sha256": "3176dfe012634c8d3926ea85c4677df9384355cfda28faf9ef0b9650ea265b02"
+    },
+    {
+      "path": "src-tauri/src/site_view.rs",
+      "sha256": "8b9fc95649689b4e9c694be1cca3d283bd0016ed6b872d788054ad4b32cb1955"
+    },
+    {
+      "path": "src-tauri/src/sites.rs",
+      "sha256": "c98ec509203eeaf1c0383e757e926fc5cff217ea92a1bbc5265fa11fac0e459b"
+    },
+    {
+      "path": "src-tauri/src/skill_host/dispatch.rs",
+      "sha256": "e11720c3be2799c8d454af0bd54d640b05c6440d8869c6016eecf818b950b5b7"
+    },
+    {
+      "path": "src-tauri/src/skill_host/env.rs",
+      "sha256": "2b2b3041d3d347b8d98987fe12775ade99da1304b8faeaa3e1bcebb181f554e5"
+    },
+    {
+      "path": "src-tauri/src/skill_host/store.rs",
+      "sha256": "609f1feaf6d030ccc6383cc1ea0af02f3312ac5c99bb976b67410ad892ad49b9"
+    },
+    {
+      "path": "src-tauri/src/studio/mod.rs",
+      "sha256": "7585e8c352f498d526f6f71df5240ab42c6f2e7c2648c41245b0665a6dc0dbeb"
+    },
+    {
+      "path": "src-tauri/src/system_jobs.rs",
+      "sha256": "7b3f1a15d4784a33891f49f153ac500e6dcc54a013886c1c9ea313a2137385bf"
+    },
+    {
+      "path": "src-tauri/src/tasks.rs",
+      "sha256": "da07ced1b6da1969551d13aa9c2081ff85445bd9d61d35cf42d8e8cc554964b9"
+    },
+    {
+      "path": "src-tauri/src/telegram_config.rs",
+      "sha256": "273a8de5a3a4750674689620e363783c00ebeb2e20a4debd7687f5e3efaffb33"
+    },
+    {
+      "path": "src-tauri/src/telegram_io.rs",
+      "sha256": "00a7a93920414559351f0a8136f4ab27e943e3911c00fdf0f0ad5ba714a33564"
+    },
+    {
+      "path": "src-tauri/src/template_fill.rs",
+      "sha256": "a2f83d5b371694c1c4f1381dccf1f6b0726fd4e316b64c85500eb4cf2dab90df"
+    },
+    {
+      "path": "src-tauri/src/terminal/mod.rs",
+      "sha256": "b604a371da0eb2e3baa41dea87cd4bf5e587607a145aec03017d0c39d05931f7"
+    },
+    {
+      "path": "src-tauri/src/terminal_hooks.rs",
+      "sha256": "e8a408acdbeb6d03a10fbb0ea62d88d0594ae4e824c613eb863ce11edff6a65c"
+    },
+    {
+      "path": "src-tauri/src/today.rs",
+      "sha256": "73995b88e89ce4285b7c9f97b236f231db47b6ea36a7c43e85283efe03b822eb"
+    },
+    {
+      "path": "src-tauri/src/today_ai.rs",
+      "sha256": "8676926bd1465bec4099483423a6c5bad766300f64266a3026ba5da852b9fe82"
+    },
+    {
+      "path": "src-tauri/src/today_calendar.rs",
+      "sha256": "d215088de0e8d6a10a4549b61c9e37a0107fad90a28b9eea28bcab2bd6953dd3"
+    },
+    {
+      "path": "src-tauri/src/today_lifecycle.rs",
+      "sha256": "fabafc0d0a73f5b3e61c61a7e22434b0f8ac9767bdc50957a4b7875450c5abcb"
+    },
+    {
+      "path": "src-tauri/src/today_notify.rs",
+      "sha256": "c9cd2ad4e9472a1498785f28084338e5de3f0e36cc7a6b6eb6487de8014121ee"
+    },
+    {
+      "path": "src-tauri/src/today_outbox.rs",
+      "sha256": "33149426554793b9aede707a8a4187b775bd12520a5bc22a27a7884c3ad19328"
+    },
+    {
+      "path": "src-tauri/src/today_store.rs",
+      "sha256": "18bc847b44b0aef5f488bf672b0960634d95bcc6b8fdafb263f1dfe667f18928"
+    },
+    {
+      "path": "src-tauri/src/vault.rs",
+      "sha256": "40f9d731ad173e49c8b78ddd136f02a83bf411fec585400eddf991e1532622e7"
+    },
+    {
+      "path": "src-tauri/src/vault_graph.rs",
+      "sha256": "343d4be46ab8202b3fe48f39d4316130ad84313e01128624ff713e2f0eb549b8"
+    },
+    {
+      "path": "src-tauri/src/vault_guard.rs",
+      "sha256": "482ff68b9d0e577a874813123d07c51c7c4f617e63f7da4d2674c1b71020d8f0"
+    },
+    {
+      "path": "src-tauri/src/vault_list.rs",
+      "sha256": "b61faccc9ffa29432ca365a0b664ed02b0405c04eb18137b18c0ebca2b532e62"
+    },
+    {
+      "path": "src-tauri/src/vault_watcher.rs",
+      "sha256": "7d7415e930d4c52edc31a127b2777d23a626165bc332cd93cd10011d1b512b63"
+    },
+    {
+      "path": "src-tauri/src/web_actions.rs",
+      "sha256": "867afebe836e68c1a762f1d1588f9f0d6345f56b132c3b7e2a075fab5b1eb1e0"
+    },
+    {
+      "path": "src-tauri/src/workspace.rs",
+      "sha256": "af6f3531e39fdc2b0c5d9252fcdb801d013554ec671c80312b1fb454e7106a27"
+    },
+    {
+      "path": "src-tauri/src/workspace_files.rs",
+      "sha256": "62497b4c7554e1d30e008d729ac2a0091fd76f4c7fa43fe25deb798c2e42483e"
+    },
+    {
+      "path": "src-tauri/tauri.conf.json",
+      "sha256": "c63a377c43e7d05f3cf7057891a14cee0ed01a43765a72ea7f45a8a24b9fa223"
+    }
+  ],
+  "sourceCommit": "8b6bf29f09fafd7ecfa829c7c74ef94bbbd26742"
+}

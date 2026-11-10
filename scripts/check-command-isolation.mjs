@@ -501,7 +501,7 @@ function cfgFeatureEnabled(expression, enabledFeatures) {
   return enabledFeatures.has(feature[1]);
 }
 export function parseArgs(argv) {
-  const options = { expectedCount: 365 };
+  const options = { expectedCount: 392 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--all") { insist(!options.all, "Duplicate --all"); options.all = true; }
@@ -807,7 +807,10 @@ export function checkIsolation(options, root = process.cwd()) {
     insist(!stale.length, `Current registration manifest is required to distinguish ${stale.length} historical inactive app rows; run --refresh-current-manifest`);
   }
   if (!useCurrentManifest) insist(historicalRowsCount === options.expectedCount, `Inventory count ${historicalRowsCount} differs from expected ${options.expectedCount}`);
-  else if (!options.all) insist(liveApp.size === options.expectedCount, `Current app registration count ${liveApp.size} differs from expected ${options.expectedCount}`);
+  else if (!options.all) {
+    const currentCount = manifest ? manifest.commands.length : liveApp.size;
+    insist(currentCount === options.expectedCount, `Current production registration count ${currentCount} differs from expected ${options.expectedCount}`);
+  }
   for (const [name, row] of rows) insist(owners.get(name)?.module === row.module, `Missing/mismatched inventory owner ${name}`);
   insist(owners.size === rows.size, "Ownership/inventory count mismatch");
   if (manifest) insist(liveApp.size === rows.size, `Current app registration count ${liveApp.size} differs from active Phase 08 evidence ${rows.size}`);
