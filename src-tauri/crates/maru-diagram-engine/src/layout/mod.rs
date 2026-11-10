@@ -157,8 +157,8 @@ struct SequenceMessageAnchorIndex {
     max_clearance: Coord,
 }
 
-/// An endpoint obstacle is exempt only for via anchors inside its inflated
-/// bounds. The indexes remain tied to the current node/label order.
+/// Visible endpoint bounds authorize a mask; routing-clearance padding never
+/// does. The indexes remain tied to the current node/label order.
 #[derive(Debug, Clone)]
 struct EndpointMaskBounds {
     bounds: GeometryBox,
@@ -694,13 +694,9 @@ impl SceneBuilder {
             self.routing_obstacles.insert(clearance, obstacles);
         }
     }
-    fn endpoint_masks(
-        &self,
-        r: &RouteRequest,
-        clearance: Coord,
-    ) -> Result<EndpointMasks, Diagnostic> {
+    fn endpoint_masks(&self, r: &RouteRequest) -> EndpointMasks {
         if r.waypoints.is_empty() {
-            return Ok(EndpointMasks::default());
+            return EndpointMasks::default();
         }
 
         let mut masks = EndpointMasks {
@@ -712,20 +708,19 @@ impl SceneBuilder {
             #[cfg(any(test, feature = "geometry-corpus"))]
             crate::work::record_endpoint_mask_evaluation();
             if node.id == r.from || node.id == r.to {
-                let obstacle = inflate(node.bounds, clearance)?;
                 let via_indices: BTreeSet<_> = r
                     .waypoints
                     .iter()
                     .enumerate()
                     .filter_map(|(index, point)| {
-                        point_inside_box(obstacle, *point).then_some(index)
+                        point_inside_box(node.bounds, *point).then_some(index)
                     })
                     .collect();
                 if !via_indices.is_empty() {
                     masks.nodes.insert(
                         node_index,
                         EndpointMaskBounds {
-                            bounds: obstacle,
+                            bounds: node.bounds,
                             waypoint_indices: via_indices.clone(),
                         },
                     );
@@ -748,19 +743,18 @@ impl SceneBuilder {
             {
                 continue;
             }
-            let obstacle = inflate(label.bounds, clearance)?;
             let via_indices: BTreeSet<_> = masks
                 .nodes
                 .get(node_index)
                 .into_iter()
                 .flat_map(|node| node.waypoint_indices.iter().copied())
-                .filter(|via_index| point_inside_box(obstacle, r.waypoints[*via_index]))
+                .filter(|via_index| point_inside_box(label.bounds, r.waypoints[*via_index]))
                 .collect();
             if !via_indices.is_empty() {
                 masks.labels.insert(
                     label_index,
                     EndpointMaskBounds {
-                        bounds: obstacle,
+                        bounds: label.bounds,
                         waypoint_indices: via_indices.clone(),
                     },
                 );
@@ -773,7 +767,7 @@ impl SceneBuilder {
                 }
             }
         }
-        Ok(masks)
+        masks
     }
 
     fn scope_endpoint_masks_to_path(
@@ -974,7 +968,7 @@ impl SceneBuilder {
                 .map(|label| inflate(label.bounds, clearance))
                 .collect::<Result<Vec<_>, _>>()?,
         );
-        let mut endpoint_masks = self.endpoint_masks(r, clearance)?;
+        let mut endpoint_masks = self.endpoint_masks(r);
         let routing_endpoint_masks = if endpoint_masks
             .by_via
             .iter()
@@ -1015,7 +1009,6 @@ impl SceneBuilder {
                         }
                     }
                     routing_masks.push(crate::routing::EndpointObstacleMask {
-                        owner_id: node.id.clone(),
                         waypoint_index,
                         obstacle_indices,
                     });
@@ -1229,18 +1222,12 @@ impl SceneBuilder {
                             &routing_endpoint_masks,
                             budget,
                         )
-                        .map(|route| {
-                            (
-                                route.points,
-                                route.segment_legs,
-                                route.waypoint_point_indices,
-                            )
-                        })
+                        .map(|route| (route.points, route.waypoint_point_indices))
                     }
                     Some(budget) => crate::routing::route_orthogonal_with_budget(
                         source, target, &obstacles, &waypoints, budget,
                     )
-                    .map(|points| (points, Vec::new(), Vec::new())),
+                    .map(|points| (points, Vec::new())),
                     None if !routing_endpoint_masks.is_empty() => {
                         crate::routing::route_orthogonal_with_endpoint_masks(
                             source,
@@ -1249,23 +1236,17 @@ impl SceneBuilder {
                             &waypoints,
                             &routing_endpoint_masks,
                         )
-                        .map(|route| {
-                            (
-                                route.points,
-                                route.segment_legs,
-                                route.waypoint_point_indices,
-                            )
-                        })
+                        .map(|route| (route.points, route.waypoint_point_indices))
                     }
                     None => {
                         crate::routing::route_orthogonal(source, target, &obstacles, &waypoints)
-                            .map(|points| (points, Vec::new(), Vec::new()))
+                            .map(|points| (points, Vec::new()))
                     }
                 };
                 #[cfg(not(test))]
                 let routed = if routing_endpoint_masks.is_empty() {
                     crate::routing::route_orthogonal(source, target, &obstacles, &waypoints)
-                        .map(|points| (points, Vec::new(), Vec::new()))
+                        .map(|points| (points, Vec::new()))
                 } else {
                     crate::routing::route_orthogonal_with_endpoint_masks(
                         source,
@@ -1274,16 +1255,10 @@ impl SceneBuilder {
                         &waypoints,
                         &routing_endpoint_masks,
                     )
-                    .map(|route| {
-                        (
-                            route.points,
-                            route.segment_legs,
-                            route.waypoint_point_indices,
-                        )
-                    })
+                    .map(|route| (route.points, route.waypoint_point_indices))
                 };
                 match routed {
-                    Ok((mut points, _segment_legs, waypoint_point_indices)) => {
+                    Ok((mut points, waypoint_point_indices)) => {
                         points.insert(0, tip);
                         points.push(target_tip);
                         if !routing_endpoint_masks.is_empty() {

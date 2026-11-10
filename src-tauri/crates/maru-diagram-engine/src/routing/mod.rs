@@ -23,18 +23,15 @@ const MAX_QUEUED_STATES: usize = 4 * MAX_SEARCH_STATES;
 /// obstacle indexes are exempt only on the two route legs incident to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EndpointObstacleMask {
-    pub owner_id: String,
     pub waypoint_index: usize,
     pub obstacle_indices: Vec<usize>,
 }
 
-/// A routed path retains the leg owning each segment and the output index of
-/// every mandatory waypoint. Layout uses these to keep endpoint exemptions
-/// local to the legs that actually touch an authorized via anchor.
+/// A routed path retains the output index of every mandatory waypoint. Layout
+/// uses these to scope the final exemption to the visible inside run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MaskedRoute {
     pub points: Vec<GeometryPoint>,
-    pub segment_legs: Vec<usize>,
     pub waypoint_point_indices: Vec<usize>,
 }
 
@@ -547,7 +544,6 @@ fn route_with_budget(
         ));
     }
     let mut route = Vec::new();
-    let mut segment_legs = Vec::new();
     let mut waypoint_point_indices = Vec::with_capacity(waypoints.len());
     let mut previous = start;
     for (leg_index, target) in waypoints
@@ -563,12 +559,10 @@ fn route_with_budget(
         let leg = search_leg(previous, target, &obstacles, leg_masks, max_search_states)?;
         if route.is_empty() {
             route.extend(leg.iter().copied());
-            segment_legs.extend(std::iter::repeat_n(leg_index, leg.len().saturating_sub(1)));
         } else {
             for point in leg.into_iter().skip(1) {
                 if route.last() != Some(&point) {
                     route.push(point);
-                    segment_legs.push(leg_index);
                 }
             }
         }
@@ -579,7 +573,6 @@ fn route_with_budget(
     }
     Ok(MaskedRoute {
         points: route,
-        segment_legs,
         waypoint_point_indices,
     })
 }
@@ -699,7 +692,6 @@ mod tests {
     fn authored_via_can_enter_only_its_indexed_endpoint_mask() {
         let inflated = rect(75, -15, 40, 30);
         let mask = EndpointObstacleMask {
-            owner_id: "target".into(),
             waypoint_index: 0,
             obstacle_indices: vec![0],
         };
@@ -712,7 +704,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(route.points, [p(0, 0), p(90, 0), p(120, 0)]);
-        assert_eq!(route.segment_legs, [0, 1]);
         assert_eq!(route.waypoint_point_indices, [1]);
     }
 
@@ -720,7 +711,6 @@ mod tests {
     fn endpoint_mask_is_limited_to_the_two_legs_incident_to_its_inside_via() {
         let endpoint = rect(40, 40, 40, 40);
         let mask = EndpointObstacleMask {
-            owner_id: "source".into(),
             waypoint_index: 0,
             obstacle_indices: vec![0],
         };
@@ -734,35 +724,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(route.waypoint_point_indices.len(), 2);
-        assert_eq!(route.segment_legs.len(), route.points.len() - 1);
+        let inside_via = route.waypoint_point_indices[0];
+        let outside_via = route.waypoint_point_indices[1];
         let normalized = normalize(&[endpoint]).unwrap();
         assert!(
-            route
-                .segment_legs
-                .iter()
-                .enumerate()
-                .filter(|(_, leg)| **leg < 2)
-                .any(|(index, _)| {
-                    !segment_clear(route.points[index], route.points[index + 1], &normalized)
-                }),
+            route.points[..=inside_via]
+                .windows(2)
+                .any(|segment| { !segment_clear(segment[0], segment[1], &normalized) }),
             "an incident leg must be allowed to enter or leave its endpoint mask"
         );
-        for (index, leg) in route.segment_legs.iter().enumerate() {
-            if *leg == 2 {
-                assert!(
-                    segment_clear(route.points[index], route.points[index + 1], &normalized),
-                    "outside-to-outside leg must keep the endpoint obstacle active: {:?}",
-                    route.points
-                );
-            }
-        }
+        assert!(route.points[inside_via..=outside_via]
+            .windows(2)
+            .any(|segment| !segment_clear(segment[0], segment[1], &normalized)));
+        assert!(
+            route.points[outside_via..]
+                .windows(2)
+                .all(|segment| segment_clear(segment[0], segment[1], &normalized)),
+            "outside-to-outside leg must keep the endpoint obstacle active: {:?}",
+            route.points
+        );
     }
 
     #[test]
     fn endpoint_mask_never_exempts_a_co_located_third_party_obstacle() {
         let inflated = rect(75, -15, 40, 30);
         let mask = EndpointObstacleMask {
-            owner_id: "target".into(),
             waypoint_index: 0,
             obstacle_indices: vec![0],
         };

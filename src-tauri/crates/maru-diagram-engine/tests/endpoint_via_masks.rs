@@ -296,6 +296,108 @@ fn via_outside_source_does_not_exempt_a_route_that_would_cut_through_source_ink(
 }
 
 #[test]
+fn clearance_ring_and_visible_boundaries_never_authorize_endpoint_masks() {
+    let probe = endpoint_mask_dataflow(vec![[230.0, 157.0]]);
+    let probe_report = layout(&probe);
+    assert!(
+        probe_report.ok,
+        "probe layout refused: {:?}",
+        probe_report.diagnostics
+    );
+    let probe_geometry = probe_report
+        .geometry
+        .expect("probe layout retains geometry");
+    let source = probe_geometry
+        .nodes
+        .iter()
+        .find(|node| node.id == "a")
+        .unwrap();
+    let label = probe_geometry
+        .labels
+        .iter()
+        .find(|label| label.id.as_deref() == Some("node:a:label"))
+        .unwrap();
+    let center_y = f64::from(source.bounds.y + source.bounds.height / 2) / 64.0;
+    let label_ring_x = f64::from(label.bounds.x) / 64.0 - 1.0;
+    let label_center_y = f64::from(label.bounds.y + label.bounds.height / 2) / 64.0;
+    let cases = [
+        ("node-clearance-ring", [43.0, 175.0]),
+        (
+            "visible-node-boundary",
+            [f64::from(source.bounds.x) / 64.0, center_y],
+        ),
+        (
+            "inflated-node-corner",
+            [
+                f64::from(source.bounds.x) / 64.0 - 2.0,
+                f64::from(source.bounds.y) / 64.0 - 2.0,
+            ],
+        ),
+        ("label-clearance-ring", [label_ring_x, label_center_y]),
+    ];
+
+    for (name, first_via) in cases {
+        let report = layout(&endpoint_mask_dataflow(vec![
+            first_via,
+            [230.0, first_via[1]],
+        ]));
+        let geometry = report
+            .geometry
+            .unwrap_or_else(|| panic!("{name}: refusal must retain geometry"));
+        let source = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
+        let source_label = geometry
+            .labels
+            .iter()
+            .find(|label| label.id.as_deref() == Some("node:a:label"))
+            .unwrap();
+        let route = geometry
+            .routes
+            .iter()
+            .find(|route| route.id.as_deref() == Some("f"))
+            .unwrap_or_else(|| panic!("{name}: authored route record is retained"));
+        if name == "inflated-node-corner" {
+            assert!(
+                report.ok,
+                "the exact planning-boundary corner is clear: {:?}",
+                report.diagnostics
+            );
+            assert!(!route.points.is_empty(), "clear corner route is retained");
+        } else {
+            assert!(
+                !report.ok,
+                "a via inside only planning padding must not authorize its visible obstacle"
+            );
+            assert!(
+                report.diagnostics.iter().any(|diagnostic| matches!(
+                    diagnostic.code.as_str(),
+                    "dataflow/route-blocked" | "dataflow/route-port-blocked"
+                )),
+                "{name}: refusal must name the blocked route, got {:?}",
+                report.diagnostics
+            );
+        }
+        if report.ok {
+            assert!(
+                !route.points.is_empty(),
+                "accepted route must retain its points"
+            );
+        }
+        for segment in route.points.windows(2) {
+            assert!(
+                !axis_segment_hits(source.bounds, segment[0], segment[1]),
+                "{name}: route crossed visible source body: {:?}",
+                route.points
+            );
+            assert!(
+                !axis_segment_hits(source_label.bounds, segment[0], segment[1]),
+                "{name}: route crossed visible source label: {:?}",
+                route.points
+            );
+        }
+    }
+}
+
+#[test]
 fn via_inside_source_body_can_enter_and_exit_its_endpoint_mask() {
     let probe = endpoint_mask_dataflow(vec![[230.0, 157.0]]);
     let probe_report = layout(&probe);

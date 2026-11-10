@@ -158,8 +158,8 @@ fn check_node_labels(
             continue;
         };
         let source = &items(spec, family.node_collection)[index];
-        // Font bearings may extend left of the 12px text origin while still
-        // remaining safely inside the node padding. The origin is not a clip.
+        // Font bearings may extend left of the 12px text origin while remaining
+        // inside the outer node rectangle. The origin is not a clip boundary.
         let text_area_left = i64::from(node.bounds.x);
         let text_area_right = text_area_left + i64::from(node.bounds.width);
         let node_top = i64::from(node.bounds.y);
