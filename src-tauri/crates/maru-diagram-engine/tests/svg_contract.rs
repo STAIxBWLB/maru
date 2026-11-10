@@ -32,6 +32,7 @@ fn cjk_xml_multiline_replacement_and_ignorable_glyphs_preserve_metric_positions(
             theme,
             title: "검증 & <제목>".into(),
             description: "CJK 줄바꿈·대체 글리프".into(),
+            text_mode: maru_diagram_engine::render::SvgTextMode::Text,
         };
         let report = render_svg(&geometry, &options);
         assert!(report.ok, "{:?}", report.diagnostics);
@@ -73,6 +74,7 @@ fn namespaced_ids_and_captions_survive_node_edge_identity_collisions() {
         theme: SvgTheme::Light,
         title: "Collision".into(),
         description: "Node and edge have the same source id".into(),
+        text_mode: maru_diagram_engine::render::SvgTextMode::Text,
     };
     let result = render_svg(&layout.geometry.unwrap(), &options);
     assert!(result.ok, "{:?}", result.diagnostics);

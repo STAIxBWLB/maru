@@ -539,6 +539,15 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "data-target-id",
                 "role",
                 "aria-label",
+                // An outlined label container records the pinned face it was
+                // drawn from and is hidden from assistive technology, which
+                // reads the label group's aria-label instead (`maru#552`).
+                "data-render",
+                "font-family",
+                "font-size",
+                "font-weight",
+                "aria-hidden",
+                "fill",
             ],
         ),
         (
@@ -835,16 +844,21 @@ fn check_label(
         return;
     };
     require_attr(text, "font-family", super::FONT_FAMILY, &path, errors);
-    require_attr(
-        text,
-        "style",
-        "font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0",
-        &path,
-        errors,
-    );
-    require_attr(text, "font-kerning", "none", &path, errors);
-    require_attr(text, "font-variant-ligatures", "none", &path, errors);
-    require_attr(text, "text-rendering", "geometricPrecision", &path, errors);
+    // Outlined labels carry the same positioned glyph records, with path data
+    // instead of text runs, so the artifact needs no installed font (`maru#552`).
+    let outlined = text.attribute("data-render") == Some("outline");
+    if !outlined {
+        require_attr(
+            text,
+            "style",
+            "font-feature-settings:'liga' 0,'clig' 0,'calt' 0,'locl' 0,'kern' 0,'mark' 0,'mkmk' 0",
+            &path,
+            errors,
+        );
+        require_attr(text, "font-kerning", "none", &path, errors);
+        require_attr(text, "font-variant-ligatures", "none", &path, errors);
+        require_attr(text, "text-rendering", "geometricPrecision", &path, errors);
+    }
     require_attr(
         text,
         "font-size",
@@ -905,28 +919,52 @@ fn check_label(
             &glyph_path,
             errors,
         );
-        if glyph_node.text() != Some(glyph.input.as_str()) {
-            errors.push(diagnostic(
-                "glyph-text",
+        if outlined {
+            require_attr(
+                *glyph_node,
+                "transform",
+                &format!(
+                    "translate({} {}) scale({} -{})",
+                    super::svg::fixed(glyph.position.x.into()),
+                    super::svg::fixed(glyph.position.y.into()),
+                    super::svg::scale(label.font_size, label.font.units_per_em),
+                    super::svg::scale(label.font_size, label.font.units_per_em)
+                ),
                 &glyph_path,
-                "visible glyph text differs from the geometry input",
-                "preserve the exact known glyph input from geometry",
-            ));
+                errors,
+            );
+            if glyph_node.attribute("d").is_none() {
+                errors.push(diagnostic(
+                    "glyph-shape",
+                    &glyph_path,
+                    "outlined glyph is missing its path data",
+                    "emit the pinned outline path for every visible glyph",
+                ));
+            }
+        } else {
+            if glyph_node.text() != Some(glyph.input.as_str()) {
+                errors.push(diagnostic(
+                    "glyph-text",
+                    &glyph_path,
+                    "visible glyph text differs from the geometry input",
+                    "preserve the exact known glyph input from geometry",
+                ));
+            }
+            check_number(
+                *glyph_node,
+                "x",
+                glyph.position.x as f64 / 64.0,
+                &glyph_path,
+                errors,
+            );
+            check_number(
+                *glyph_node,
+                "y",
+                glyph.position.y as f64 / 64.0,
+                &glyph_path,
+                errors,
+            );
         }
-        check_number(
-            *glyph_node,
-            "x",
-            glyph.position.x as f64 / 64.0,
-            &glyph_path,
-            errors,
-        );
-        check_number(
-            *glyph_node,
-            "y",
-            glyph.position.y as f64 / 64.0,
-            &glyph_path,
-            errors,
-        );
     }
     let replacements: Vec<_> = label
         .glyphs
@@ -996,7 +1034,7 @@ fn check_label(
         .flat_map(|glyph| glyph.input.chars())
         .filter(|character| *character != '\n' && *character != '\r')
         .collect();
-    if emitted != glyphs_without_newlines {
+    if emitted != glyphs_without_newlines && !outlined {
         errors.push(diagnostic(
             "label-content",
             &path,

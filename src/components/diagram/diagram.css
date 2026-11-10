@@ -1581,6 +1581,9 @@
   touch-action: none;
   user-select: none;
   cursor: default;
+  /* Labels are laid out with the pinned Noto metrics, so the canvas draws them
+     with the bundled local subset of the same faces (maru#552). */
+  font-family: var(--font-diagram);
 }
 
 .maru-diagram-node {

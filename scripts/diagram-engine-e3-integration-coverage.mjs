@@ -4,7 +4,7 @@ import { readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const EXPECTED_SVG_SUITE_COUNT = 17;
+export const EXPECTED_SVG_SUITE_COUNT = 19;
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TEST_DIR = join(ROOT, "src-tauri/crates/maru-diagram-engine/tests");
 
@@ -76,7 +76,7 @@ export function runSvgIntegrationCoverage({ root = ROOT, suites = discoverSuites
       "-p",
       "maru-diagram-engine",
       "--features",
-      "render-svg,render-png",
+      "render-svg,render-png,render-outline",
       "--test",
       suite,
       "--",

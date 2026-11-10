@@ -45,6 +45,28 @@ recorded alongside each path. For SVG-only builds, original font binaries are re
 not embedded in the validator or SVG. Supported scalars reference the Noto font
 family with shaping disabled; unsupported scalars draw the actual glyph zero.
 
+## Outlined SVG export and the bundled diagram-canvas subsets
+
+The optional `render-outline` feature converts each visible label glyph to an
+SVG path at export time from the same pinned Noto Sans CJK KR Regular/Bold OTFs
+as the PNG feature. The artifact embeds no font binary, per-document subset or
+font reference, so a viewer never resolves a face. The faces remain under
+OFL-1.1; the complete copyright/licence is retained in
+`src-tauri/crates/maru-diagram-engine/src/metrics/data/LICENSE.OFL` and the
+attribution record in `NOTICE.md` beside it. Their SHA-256 values match the
+metric manifest and are checked before any outline is read.
+
+The diagram canvas draws its labels with two locally subset WOFF2 faces derived
+from those OTFs, `src/assets/fonts/NotoSansCJKkr-Regular-diagram.woff2`
+(545,356 B) and `src/assets/fonts/NotoSansCJKkr-Bold-diagram.woff2` (566,736 B),
+covering Hangul syllables/Jamo, ASCII, Latin-1, general punctuation, arrows,
+box/block drawing and CJK symbols. They are served from the app bundle; no font
+is fetched over the network. As subset copies of an OFL-1.1 work they remain
+under OFL-1.1, keep the original copyright notice, are declared under the
+distinct CSS family `Noto Sans CJK KR Diagram` rather than the upstream family
+name, and are not sold separately. The complete licence and copyright are
+retained at the engine path above.
+
 ## PNG rasterizer and bundled fonts
 
 The optional `render-png` feature uses resvg/usvg 0.49.0 (Apache-2.0 OR MIT,

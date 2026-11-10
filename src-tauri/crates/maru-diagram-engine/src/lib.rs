@@ -3,6 +3,26 @@
 //! The default feature validates typed JSON only. Opt-in geometry foundations
 //! add fixed-point contracts and pinned font metrics, with no rendering or app access.
 
+// Glyph outlines need the two pinned OTFs (33.4 MiB), which belong to native
+// exports only: E3 S2 moved PNG out of WASM for the same reason, and the browser
+// payload is measured per lazy chunk (`maru#552`). This is a build error rather
+// than a size regression someone has to notice later.
+#[cfg(all(
+    feature = "render-outline",
+    any(
+        feature = "wasm",
+        feature = "wasm-layout",
+        feature = "wasm-render",
+        feature = "wasm-png",
+        feature = "bindgen-web"
+    )
+))]
+compile_error!(
+    "render-outline cannot be built for WASM: it embeds the pinned Noto CJK OTFs. \
+     Produce outlined SVG natively through tauri-plugin-maru-diagram and keep the \
+     WASM artifacts in text mode."
+);
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

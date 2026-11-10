@@ -1,5 +1,5 @@
 //! Receipt-bearing exports always derive geometry from this request's source.
-use super::{render_svg, SvgOptions, SvgTheme, MAX_SVG_BYTES};
+use super::{render_svg, SvgOptions, SvgTextMode, SvgTheme, MAX_SVG_BYTES};
 use crate::{
     geometry::{LayoutRequest, PinSet},
     Diagnostic, EngineReceipt, ReceiptConversion, API_VERSION,
@@ -29,6 +29,11 @@ struct Request {
     pixel_ratio: u32,
     #[serde(default)]
     pin_set: Option<PinSet>,
+    /// `text` or `outlines`. Absent uses the entry point's default, so the
+    /// native export reads as `outlines` while the browser entry stays `text`
+    /// (`maru#552`).
+    #[serde(default)]
+    text_mode: Option<SvgTextMode>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +46,11 @@ pub struct ArtifactReport {
     pub height: Option<u32>,
     pub pixels_sha256: Option<String>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Label emission the artifact was produced with, so a caller can tell an
+    /// outlined export from a text run. Absent in older receipts reads as
+    /// text (`maru#552`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_mode: Option<SvgTextMode>,
     pub receipt: EngineReceipt,
 }
 fn hash(bytes: &[u8]) -> String {
@@ -57,17 +67,24 @@ fn failed(mut receipt: EngineReceipt, diagnostics: Vec<Diagnostic>, scope: &str)
         height: None,
         pixels_sha256: None,
         diagnostics,
+        text_mode: None,
         receipt,
     }
 }
 pub fn render_artifact_json(input: &str) -> ArtifactReport {
-    render(input, false)
+    render(input, false, SvgTextMode::Text)
+}
+/// Native SVG export: the same receipt-bearing request path as PNG, with
+/// outlined labels unless the caller asks for text (`maru#552`).
+#[cfg(feature = "render-outline")]
+pub fn render_svg_artifact_json(input: &str) -> ArtifactReport {
+    render(input, false, SvgTextMode::Outlines)
 }
 #[cfg(feature = "render-png")]
 pub fn render_png_artifact_json(input: &str) -> ArtifactReport {
-    render(input, true)
+    render(input, true, SvgTextMode::Text)
 }
-fn render(input: &str, png_only: bool) -> ArtifactReport {
+fn render(input: &str, png_only: bool, default_text_mode: SvgTextMode) -> ArtifactReport {
     let bad = |cause: Diagnostic| {
         let mut receipt = crate::make_report(input, None, Vec::new()).receipt;
         receipt.gates.schema = crate::gate("not-run", "render-request");
@@ -130,8 +147,12 @@ fn render(input: &str, png_only: bool) -> ArtifactReport {
     }
     let geometry = layout.geometry.expect("successful layout retains geometry");
     let spec = serde_json::from_str(&request.spec_json).expect("validated spec JSON");
+    let text_mode = request.text_mode.unwrap_or(default_text_mode);
     let options = match SvgOptions::from_spec(&spec, request.theme) {
-        Ok(options) => options,
+        Ok(mut options) => {
+            options.text_mode = text_mode;
+            options
+        }
         Err(error) => return failed(receipt, vec![error], "independent-svg-artifact"),
     };
     let svg = render_svg(&geometry, &options);
@@ -215,6 +236,7 @@ fn render(input: &str, png_only: bool) -> ArtifactReport {
         height: Some(height),
         pixels_sha256,
         diagnostics: layout.diagnostics,
+        text_mode: Some(text_mode),
         receipt,
     }
 }

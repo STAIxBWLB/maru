@@ -177,3 +177,38 @@ describe("offline engine viewer HTML", () => {
     );
   });
 });
+
+describe("outlined label containers (maru#552)", () => {
+  // The native export draws each label glyph as a path from the pinned faces,
+  // so the viewer must accept that form and still deny every font source.
+  function outlined(svg: string): string {
+    return svg.replace(
+      /<text data-kind="label-text"([^>]*)>([\s\S]*?)<\/text>/g,
+      (_match, attributes: string, body: string) => {
+        const fontFamily = /font-family="([^"]+)"/.exec(attributes)?.[1] ?? "Noto Sans CJK KR, sans-serif";
+        const fontSize = /font-size="([^"]+)"/.exec(attributes)?.[1] ?? "12";
+        const fontWeight = /font-weight="([^"]+)"/.exec(attributes)?.[1] ?? "400";
+        const fill = /fill="([^"]+)"/.exec(attributes)?.[1] ?? "#111827";
+        const glyphs = [...body.matchAll(/<tspan data-kind="glyph" data-index="(\d+)" x="([^"]+)" y="([^"]+)" fill="([^"]+)">[^<]*<\/tspan>/g)]
+          .map(([, index, x, y, glyphFill]) =>
+            `<path data-kind="glyph" data-index="${index}" d="M 0 0 L 100 0 L 100 100 Z" transform="translate(${x} ${y}) scale(0.012 -0.012)" fill="${glyphFill}" aria-hidden="true"/>`)
+          .join("");
+        return `<g data-kind="label-text" data-render="outline" font-family="${fontFamily}" font-size="${fontSize}" font-weight="${fontWeight}" fill="${fill}" aria-hidden="true">${glyphs}</g>`;
+      },
+    );
+  }
+
+  it("accepts an outlined artifact and still denies every font source", () => {
+    const svg = outlined(realSvg);
+    expect(svg).not.toContain("<text ");
+    expect(svg).toContain('data-render="outline"');
+    const html = createOfflineViewerHtml({ svg, specJson: realSpec });
+    expect(html).toContain("font-src 'none'");
+    expect(html).toContain('data-render="outline"');
+  });
+
+  it("still rejects an outlined container that drops its pinned face attributes", () => {
+    const svg = outlined(realSvg).replace(' font-weight="400"', "");
+    expect(() => createOfflineViewerHtml({ svg, specJson: realSpec })).toThrow(/pinned face attributes/);
+  });
+});
