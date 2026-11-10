@@ -1,7 +1,10 @@
 #![cfg(feature = "geometry")]
 
+use maru_diagram_engine::geometry::GeometryReport;
 use maru_diagram_engine::layout::layout_json;
 use serde_json::{json, Value};
+#[path = "support/painted_ink.rs"]
+mod painted_ink;
 
 fn spec(label: &str, width: f64) -> Value {
     json!({
@@ -17,13 +20,31 @@ fn spec(label: &str, width: f64) -> Value {
     })
 }
 
-fn report(label: &str, width: f64) -> maru_diagram_engine::geometry::GeometryReport {
+fn report(label: &str, width: f64) -> GeometryReport {
     layout_json(&json!({"specJson": spec(label, width).to_string()}).to_string())
 }
 
-fn assert_refused_for_emitted_box(report: &maru_diagram_engine::geometry::GeometryReport) {
-    assert!(!report.ok, "oversized emitted Noto text must refuse");
-    let geometry = report.geometry.as_ref().expect("refusal retains geometry");
+struct FittedLabel {
+    text: String,
+    lines: usize,
+    font_size: i64,
+    ink_width: i64,
+}
+
+/// The result of placing this label: accepted, holding its own painted glyph ink
+/// inside the node it belongs to, with no line below the readable floor. The
+/// width that decided the fit is the emitted Noto ink, so equal character counts
+/// and different glyph classes can land on different line counts.
+fn fitted_primary_label(report: &GeometryReport) -> FittedLabel {
+    assert!(
+        report.ok,
+        "auto-fit must make this label readable: {:?}",
+        report.diagnostics
+    );
+    let geometry = report
+        .geometry
+        .as_ref()
+        .expect("accepted layout has geometry");
     let node = geometry.nodes.iter().find(|node| node.id == "a").unwrap();
     let label = geometry
         .labels
@@ -31,24 +52,52 @@ fn assert_refused_for_emitted_box(report: &maru_diagram_engine::geometry::Geomet
         .find(|label| label.id.as_deref() == Some("node:a:label"))
         .unwrap();
     let area_left = i64::from(node.bounds.x);
-    let area_right = i64::from(node.bounds.x) + i64::from(node.bounds.width);
+    let area_top = i64::from(node.bounds.y);
+    let area_right = area_left + i64::from(node.bounds.width);
+    let area_bottom = area_top + i64::from(node.bounds.height);
+    let painted = label
+        .glyphs
+        .iter()
+        .filter(|glyph| glyph.ink.width > 0 && glyph.ink.height > 0)
+        .map(|glyph| {
+            let left = i64::from(glyph.ink.x);
+            let top = i64::from(glyph.ink.y);
+            (
+                left,
+                top,
+                left + i64::from(glyph.ink.width),
+                top + i64::from(glyph.ink.height),
+            )
+        })
+        .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+        .expect("a fitted label paints at least one glyph");
     assert!(
-        i64::from(label.bounds.x) + i64::from(label.bounds.width) > area_right,
-        "test input must exceed the emitted node text area"
+        painted.0 >= area_left && painted.1 >= area_top,
+        "fitted ink {:?} starts outside node a {:?}",
+        painted,
+        node.bounds
     );
     assert!(
-        report.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "dataflow/geometry-label-fit"
-                && diagnostic.path == "/nodes/0/label"
-                && diagnostic.message.contains("emitted Noto label box")
-        }),
-        "{:?}",
-        report.diagnostics
+        painted.2 <= area_right && painted.3 <= area_bottom,
+        "fitted ink {:?} runs past node a {:?}",
+        painted,
+        node.bounds
     );
-    assert!(i64::from(label.bounds.x) >= area_left);
+    let font_size = i64::from(label.font_size);
+    assert!(
+        font_size >= painted_ink::READABLE_FLOOR_TICKS,
+        "fitted label is {font_size} ticks, below the {} tick readable floor",
+        painted_ink::READABLE_FLOOR_TICKS
+    );
+    FittedLabel {
+        text: label.text.clone(),
+        lines: label.text.split('\n').count(),
+        font_size,
+        ink_width: painted.2 - painted.0,
+    }
 }
 
-fn assert_emitted_box_fits(report: &maru_diagram_engine::geometry::GeometryReport) {
+fn assert_emitted_box_fits(report: &GeometryReport) {
     assert!(report.ok, "{:?}", report.diagnostics);
     let geometry = report
         .geometry
@@ -68,25 +117,56 @@ fn assert_emitted_box_fits(report: &maru_diagram_engine::geometry::GeometryRepor
 
 #[test]
 fn long_latin_primary_label_uses_emitted_noto_width_at_narrow_and_wide_sizes() {
+    // One unbroken Latin word: no space and no Hangul syllable to break at, so
+    // only the box and the type ladder can hold it. At 118px the emitted Noto
+    // ink overflows the text area and the engine re-breaks the word; at 220px
+    // the same text stays on one line, which is the measured width deciding.
     let label = "BrandBrandBrandBrandBran";
-    assert_refused_for_emitted_box(&report(label, 118.0));
-    assert_emitted_box_fits(&report(label, 220.0));
+    let narrow = fitted_primary_label(&report(label, 118.0));
+    assert_eq!(narrow.lines, 2, "narrow box: {:?}", narrow.text);
+    assert_eq!(narrow.font_size, 832, "13px holds it once re-broken");
+    let wide = fitted_primary_label(&report(label, 220.0));
+    assert_eq!(wide.lines, 1, "wide box keeps one line: {:?}", wide.text);
+    assert!(wide.ink_width > narrow.ink_width);
 }
 
 #[test]
 fn mixed_korean_and_english_primary_label_fits_only_when_the_actual_text_area_allows_it() {
     let label = "결제 Gateway API 2025";
-    assert_refused_for_emitted_box(&report(label, 118.0));
-    assert_emitted_box_fits(&report(label, 220.0));
+    let narrow = fitted_primary_label(&report(label, 118.0));
+    assert_eq!(narrow.lines, 2, "narrow box: {:?}", narrow.text);
+    assert_eq!(
+        narrow.text, "결제 Gateway\nAPI 2025",
+        "the space is the break point, so the Hangul word stays whole"
+    );
+    assert_eq!(narrow.font_size, 832);
+    let wide = fitted_primary_label(&report(label, 220.0));
+    assert_eq!(wide.lines, 1, "wide box keeps one line: {:?}", wide.text);
 }
 
 #[test]
 fn equal_length_latin_glyph_classes_have_distinct_physical_widths() {
+    // Both labels are 24 characters; only the emitted Noto widths differ.
     let narrow_i = "i".repeat(24);
     let wide_w = "W".repeat(24);
-    assert_emitted_box_fits(&report(&narrow_i, 118.0));
-    assert_refused_for_emitted_box(&report(&wide_w, 118.0));
-    assert_emitted_box_fits(&report(&wide_w, 340.0));
+    let short = fitted_primary_label(&report(&narrow_i, 118.0));
+    assert_eq!(short.lines, 1, "i-class ink fits the narrow box whole");
+    assert_eq!(short.font_size, 832);
+    let tall = fitted_primary_label(&report(&wide_w, 118.0));
+    assert_eq!(
+        tall.lines, 3,
+        "W-class ink needs three lines: {:?}",
+        tall.text
+    );
+    assert_eq!(tall.font_size, 768, "and the ladder drops one step to 12px");
+    let roomy = fitted_primary_label(&report(&wide_w, 340.0));
+    assert_eq!(roomy.lines, 1, "a wide box holds the same text on one line");
+    assert!(
+        roomy.ink_width > short.ink_width,
+        "equal character counts, different physical widths: {} vs {}",
+        roomy.ink_width,
+        short.ink_width
+    );
 }
 
 #[test]

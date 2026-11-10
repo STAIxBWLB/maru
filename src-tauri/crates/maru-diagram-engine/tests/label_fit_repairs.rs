@@ -35,24 +35,19 @@ fn corpus_spec(id: &str) -> Value {
 }
 
 #[test]
-fn sequence_repair_names_spread_and_viewbox_instead_of_nonexistent_participant_sizes() {
-    let result = report(&corpus_spec("gate-sequence-brand-absent"));
-    let diagnostic = fit(&result, "/participants/0/label");
-    assert!(diagnostic.fix.contains("shorten"));
-    assert!(diagnostic.fix.contains("meta.column_fit") && diagnostic.fix.contains("spread"));
-    assert!(diagnostic.fix.contains("meta.viewBox"));
-    assert!(
-        !diagnostic.fix.contains("participant.width")
-            && !diagnostic.fix.contains("node width/height")
-    );
-}
+fn an_overlong_word_that_no_box_or_floor_can_hold_names_its_family_size_field() {
+    // Auto-fit wraps, grows the box and shrinks to the 10px floor first; what is
+    // left is a word too wide for the node even then, and the repair names the
+    // field that would fix it.
+    let architecture = corpus_spec("e2-architecture-geometry-label-fit-detail");
+    let architecture_report = report(&architecture);
+    let diagnostic = fit(&architecture_report, "/components/0/sublabel");
+    assert!(diagnostic.fix.contains("size[0]") || diagnostic.fix.contains("size[1]"));
+    assert!(!diagnostic.message.is_empty());
 
-#[test]
-fn architecture_horizontal_repair_names_the_size_field() {
-    let result = report(&corpus_spec("public-01"));
-    let diagnostic = fit(&result, "/components/4/sublabel");
-    assert!(diagnostic.fix.contains("components[4].size[0]"));
-    assert!(diagnostic.message.contains("available width"));
+    let dataflow = corpus_spec("e2-dataflow-geometry-label-fit-detail");
+    let dataflow_report = report(&dataflow);
+    fit(&dataflow_report, "/nodes/0/sublabel");
 }
 
 #[test]
@@ -61,6 +56,9 @@ fn vertical_repair_reports_available_height_and_the_height_size_entry() {
         serde_json::from_str(include_str!("../testdata/valid-architecture.json")).unwrap();
     spec["components"][0]["size"] = json!([160, 2]);
     spec["connections"] = json!([]);
+    // One node only: auto-fit grows the box, and a neighbour a cell away would
+    // report its own separation refusal instead of the label fit.
+    spec["components"] = json!([spec["components"][0].clone()]);
     let result = report(&spec);
     let diagnostic = fit(&result, "/components/0/label");
     assert!(diagnostic.message.contains("available height"));
@@ -69,14 +67,35 @@ fn vertical_repair_reports_available_height_and_the_height_size_entry() {
 }
 
 #[test]
-fn dataflow_repair_names_its_width_field() {
-    let mut spec: Value =
-        serde_json::from_str(include_str!("../testdata/valid-dataflow.json")).unwrap();
-    spec["nodes"][0]["label"] = json!("BrandBrandBrandBrandBran");
-    spec["nodes"][0]["width"] = json!(118);
-    spec["flows"] = json!([]);
-    let result = report(&spec);
-    assert!(fit(&result, "/nodes/0/label")
-        .fix
-        .contains("nodes[0].width"));
+fn a_label_that_auto_fit_makes_readable_is_accepted_and_wraps_its_own_text() {
+    let result = report(&corpus_spec("public-01"));
+    assert!(
+        result.ok,
+        "auto-fit makes this source readable: {:?}",
+        result.diagnostics
+    );
+    let geometry = result.geometry.expect("accepted layout retains geometry");
+    let wrapped = geometry
+        .labels
+        .iter()
+        .filter(|label| label.target_id == "system")
+        .any(|label| label.text.contains('\n'));
+    assert!(
+        wrapped,
+        "the overflowing detail is re-broken to fit instead of refused: {:?}",
+        geometry
+            .labels
+            .iter()
+            .filter(|label| label.target_id == "system")
+            .map(|label| (&label.id, &label.text))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        geometry
+            .labels
+            .iter()
+            .filter(|label| label.target_id == "system")
+            .all(|label| label.font.id == "noto-sans-cjk-kr"),
+        "the fitted lines stay in the pinned face"
+    );
 }

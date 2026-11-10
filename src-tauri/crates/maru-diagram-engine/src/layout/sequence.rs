@@ -161,6 +161,9 @@ pub(crate) fn place(spec: &SequenceSpec, scene: &mut SceneBuilder) -> Result<(),
             None,
             automatic,
             Some([header_width, HEADER_HEIGHT]),
+            // A participant header is the anchor every message routes to, so it
+            // keeps its authored height; measured growth would move the ports.
+            None,
         )?;
     }
     let route_ids = super::allocate_route_ids(

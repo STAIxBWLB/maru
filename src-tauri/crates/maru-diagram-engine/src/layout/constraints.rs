@@ -164,9 +164,10 @@ fn check_node_labels(
         let text_area_right = text_area_left + i64::from(node.bounds.width);
         let node_top = i64::from(node.bounds.y);
         let node_bottom = node_top + i64::from(node.bounds.height);
-        // The E2 node producer emits fixed-size Noto lines and has no fit or
-        // wrap pass. Admission checks that actual box instead of scaling it
-        // down to a hypothetical minimum font that the scene never emitted.
+        // The E2 node producer has already run T6 auto-fit: it wrapped, grew the
+        // box within its family ceiling and shrank to the 10px floor before
+        // this check sees the scene. What is left is checked as the actual
+        // emitted box, never scaled down to a hypothetical smaller font.
         for label in geometry
             .labels
             .iter()
@@ -310,7 +311,10 @@ fn check_node_viewbox(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if family.name == "dataflow" {
-        let rects = super::source_budgets::dataflow_node_rects(spec, geometry);
+        let rects = super::source_budgets::emitted_rects(
+            &super::source_budgets::dataflow_node_rects(spec, geometry),
+            geometry,
+        );
         let Some(frame) = super::source_budgets::dataflow_frame(spec) else {
             return;
         };
@@ -353,7 +357,10 @@ fn check_node_viewbox(
                 "increase meta.viewBox[1] to 566 or more, or use a schema-version-2 row layout",
             );
         }
-        let rects = super::source_budgets::lifecycle_state_rects(spec, geometry);
+        let rects = super::source_budgets::emitted_rects(
+            &super::source_budgets::lifecycle_state_rects(spec, geometry),
+            geometry,
+        );
         let Some(frame) = super::source_budgets::lifecycle_frame(spec, geometry) else {
             return;
         };

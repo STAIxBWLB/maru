@@ -45,8 +45,6 @@ fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
     );
     let mut failures = Vec::new();
     let mut exact = 0;
-    let mut measured_text_refusals = 0;
-    let mut measured_text_refusal_ids = HashSet::new();
     let mut models = BTreeMap::<String, serde_json::Value>::new();
     let include_case_ledger = std::env::var_os("MARU_E2_BOUNDARY_CASE_LEDGER").is_some();
     let mut model_case_ledger = Vec::new();
@@ -59,15 +57,12 @@ fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
                 exact += 1;
                 if report.ok != expected.accepted {
                     if expected.accepted && !report.ok {
-                        // Keep exact source data intact; accept only the
-                        // physically measured Noto overflow refusal.
-                        painted_ink::assert_source_green_overflow_exception(
-                            &report,
-                            &case.id,
-                            &case.diagram_type,
-                        );
-                        measured_text_refusals += 1;
-                        measured_text_refusal_ids.insert(case.id.clone());
+                        // Auto-fit leaves no measured-ink refusal allowance, so
+                        // an exact case the model accepts has to be accepted.
+                        failures.push(format!(
+                            "{}: the engine refuses an exact boundary the model accepts: {:?}",
+                            case.id, report.diagnostics
+                        ));
                     } else {
                         failures.push(format!(
                             "{}: oracle accepted={} engine accepted={}, diagnostics {:?}",
@@ -131,7 +126,7 @@ fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
     }
     println!(
         "ENGINE_E2_BOUNDARIES {}",
-        serde_json::json!({"exactCases":exact,"exactFailures":failures.len(),"measuredTextRefusals":measured_text_refusals,"modelCategories":models})
+        serde_json::json!({"exactCases":exact,"exactFailures":failures.len(),"modelCategories":models})
     );
     if include_case_ledger {
         println!(
@@ -144,9 +139,8 @@ fn exact_boundaries_preserve_source_evidence_and_check_actual_text() {
         "Exact geometry boundary drift:\n{}",
         failures.join("\n")
     );
-    assert_eq!(
-        measured_text_refusal_ids,
-        HashSet::from(["gate-sequence-brand-absent".to_string()]),
-        "only the named sequence control may differ for measured text ink"
+    assert!(
+        painted_ink::SOURCE_GREEN_INK_CASES.is_empty(),
+        "auto-fit leaves no measured-ink refusal allowance for a boundary case"
     );
 }

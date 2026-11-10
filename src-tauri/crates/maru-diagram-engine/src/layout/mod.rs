@@ -29,6 +29,95 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Distance from a node's left edge to its text origin, which is also the span
+/// a wrapped node line may not paint past (T6 auto-fit).
+const NODE_TEXT_INSET: Coord = 12 * 64;
+/// Distance from a node's top edge to the first line's origin.
+const NODE_TOP_INSET: Coord = 8 * 64;
+
+/// The three node text roles at one auto-fit step.
+#[derive(Clone, Copy)]
+struct NodeLabelSizes {
+    label: Coord,
+    detail: Coord,
+    tag: Coord,
+}
+
+/// Whole-pixel steps the T6 auto-fit may shrink node text by. The floor is
+/// `--type-micro-size` (10px), the smallest type step Maru ships, so auto-fit
+/// never draws text smaller than the product already does.
+const NODE_LABEL_STEPS: [NodeLabelSizes; 4] = [
+    NodeLabelSizes {
+        label: 13 * 64,
+        detail: 11 * 64,
+        tag: 10 * 64,
+    },
+    NodeLabelSizes {
+        label: 12 * 64,
+        detail: 10 * 64,
+        tag: 10 * 64,
+    },
+    NodeLabelSizes {
+        label: 11 * 64,
+        detail: 10 * 64,
+        tag: 10 * 64,
+    },
+    NodeLabelSizes {
+        label: 10 * 64,
+        detail: 10 * 64,
+        tag: 10 * 64,
+    },
+];
+
+/// Which text roles may have one of their words cut. A cut is the last resort
+/// and costs legibility, so it is granted per role: a role whose words all wrap
+/// whole keeps them whole even when a sibling role in the same node needs one
+/// cut.
+#[derive(Clone, Copy)]
+struct RoleCuts {
+    label: bool,
+    detail: bool,
+    tag: bool,
+}
+
+impl RoleCuts {
+    const NONE: Self = Self {
+        label: false,
+        detail: false,
+        tag: false,
+    };
+
+    fn any(self) -> bool {
+        self.label || self.detail || self.tag
+    }
+}
+
+/// Whether `text` alone still paints past `available` after every break the
+/// whole-word rule can take at the smallest size the ladder tries. Growth only
+/// adds height and a larger size only paints wider, so such a word fails every
+/// box and size and is the one case that earns a cut.
+fn role_needs_cut(
+    text: &str,
+    weight: u16,
+    floor: Coord,
+    available: Coord,
+) -> Result<bool, Diagnostic> {
+    for line in metrics::wrap_label_lines(text, weight, floor, available, false)? {
+        if metrics::painted_width(&line, weight, floor)? > i64::from(available) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn smallest_size(role: impl Fn(&NodeLabelSizes) -> Coord) -> Coord {
+    NODE_LABEL_STEPS
+        .iter()
+        .map(role)
+        .min()
+        .expect("auto-fit has at least one size step")
+}
+
 pub(crate) fn failure(rule: &str, cause: impl Into<String>, fix: &str) -> Diagnostic {
     Diagnostic {
         code: format!("document/{rule}"),
@@ -302,6 +391,21 @@ pub(crate) struct SceneBuilder {
     cards: Vec<(String, common::Card)>,
     kinds: BTreeMap<String, String>,
     pins: BTreeMap<String, GeometryPin>,
+    grown: Vec<GrownNode>,
+}
+
+/// A node auto-fit grew before every other node was placed, kept so the scene
+/// can settle its growth against the neighbours it ended up with.
+#[derive(Clone)]
+struct GrownNode {
+    index: usize,
+    id: String,
+    label: String,
+    detail: Option<String>,
+    tag: Option<String>,
+    base: GeometryBox,
+    limit: Option<Coord>,
+    labels: std::ops::Range<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -454,6 +558,7 @@ impl SceneBuilder {
             cards: vec![],
             kinds: BTreeMap::new(),
             pins,
+            grown: vec![],
         }
     }
     pub(crate) fn pinned_position(&self, id: &str) -> Option<GeometryPoint> {
@@ -558,6 +663,7 @@ impl SceneBuilder {
         authored: Option<Point>,
         automatic: GeometryPoint,
         size: Option<Point>,
+        grow_height_to: Option<Coord>,
     ) -> Result<GeometryBox, Diagnostic> {
         let (tw, th) = self.text_size(label, 700, 13 * 64)?;
         let (dw, dh) = match detail {
@@ -581,6 +687,10 @@ impl SceneBuilder {
                 "use positive authored dimensions or remove the size override",
             ));
         }
+        // T6 auto-fit. The text origin sits one inset inside the node and the
+        // admission rule measures painted ink against the node's own edge, so a
+        // line wrapped to the same span is admissible by construction. A label
+        // that already fits is returned unchanged and keeps its exact bytes.
         let (position, source) = if let Some(pin) = self.pins.get(id) {
             (pin.position, GeometryPositionSource::PlannedPin)
         } else if let Some(p) = authored {
@@ -591,6 +701,23 @@ impl SceneBuilder {
         let bounds = rect(position.x, position.y, width, height)?;
         bounds.right().map_err(arithmetic)?;
         bounds.bottom().map_err(arithmetic)?;
+        let label_mark = self.document.labels.len();
+        let bounds = self.place_node_labels(id, label, detail, tag, bounds, grow_height_to)?;
+        if bounds.height > height {
+            // Every other node's top is fixed before this one grows and growth
+            // only extends this box downward, so `settle_grown_nodes` can settle
+            // the whole scene in one pass once the family is placed.
+            self.grown.push(GrownNode {
+                index: self.document.nodes.len(),
+                id: id.into(),
+                label: label.into(),
+                detail: detail.map(str::to_owned),
+                tag: tag.map(str::to_owned),
+                base: rect(position.x, position.y, width, height)?,
+                limit: grow_height_to,
+                labels: label_mark..self.document.labels.len(),
+            });
+        }
         self.document.nodes.push(GeometryNode {
             final_state: None,
             phase_order: None,
@@ -599,39 +726,341 @@ impl SceneBuilder {
             position_source: source,
         });
         self.kinds.insert(id.into(), kind.into());
-        let x = add(position.x, 12 * 64)?;
-        let mut y = add(position.y, 8 * 64)?;
+        Ok(bounds)
+    }
+
+    /// Give back the height a grown node took from a neighbour.
+    ///
+    /// The per-family ceiling is only an upper bound: it describes the slot the
+    /// node was meant to own, not what its neighbours actually left free. A
+    /// grown candidate that reaches into another node's separation would refuse
+    /// the scene for a breach auto-fit made itself, so the ladder runs again
+    /// from the same box with the neighbour's edge as its ceiling and steps the
+    /// text down until it fits, refusing when no size does.
+    fn settle_grown_nodes(&mut self) -> Result<(), Diagnostic> {
+        let gap = self.node_overlap_gap();
+        for position in (0..self.grown.len()).rev() {
+            let record = self.grown[position].clone();
+            let Some(limit) = record.limit else {
+                continue;
+            };
+            let bottom = self.document.nodes[record.index]
+                .bounds
+                .bottom()
+                .map_err(arithmetic)?;
+            let allowed = self.separation_bottom(&record, gap)?;
+            if bottom <= allowed {
+                continue;
+            }
+            let available = Coord::try_from(i64::from(allowed) - i64::from(record.base.y))
+                .map_err(|_| {
+                    failure(
+                        "node-fit-separation",
+                        "the separation below this node does not fit a coordinate",
+                        "move the node, or reduce its text or dimensions",
+                    )
+                })?
+                .max(record.base.height)
+                .min(limit);
+            self.document.labels.drain(record.labels.clone());
+            let mark = self.document.labels.len();
+            let fitted = self.place_node_labels(
+                &record.id,
+                &record.label,
+                record.detail.as_deref(),
+                record.tag.as_deref(),
+                record.base,
+                Some(available),
+            )?;
+            // Re-placed labels go back where the node's own labels were, so the
+            // document keeps its deterministic label order.
+            let appended = self.document.labels.split_off(mark);
+            self.document
+                .labels
+                .splice(record.labels.start..record.labels.start, appended);
+            self.document.nodes[record.index].bounds = fitted;
+        }
+        Ok(())
+    }
+
+    /// The gap the admission overlap rule requires for this family, in ticks.
+    fn node_overlap_gap(&self) -> Coord {
+        match self.kind.as_str() {
+            "dataflow" | "lifecycle" => 10 * 64,
+            _ => 8 * 64,
+        }
+    }
+
+    /// The lowest bottom this node may reach: its own family ceiling, or the
+    /// edge of the first node that shares its columns and sits below it.
+    fn separation_bottom(&self, record: &GrownNode, gap: Coord) -> Result<Coord, Diagnostic> {
+        let left = i64::from(record.base.x);
+        let right = left + i64::from(record.base.width);
+        let base_bottom = i64::from(record.base.y) + i64::from(record.base.height);
+        let cap = record.limit.map_or(base_bottom, |limit| {
+            i64::from(record.base.y) + i64::from(limit)
+        });
+        let mut allowed = cap;
+        for other in &self.document.nodes {
+            if other.id == record.id {
+                continue;
+            }
+            let other_top = i64::from(other.bounds.y);
+            if other_top < base_bottom {
+                // Above, or beside and overlapping the box it started as: growth
+                // downward cannot reach it.
+                continue;
+            }
+            let other_left = i64::from(other.bounds.x);
+            let other_right = other_left + i64::from(other.bounds.width);
+            if other_right + i64::from(gap) <= left || other_left >= right + i64::from(gap) {
+                continue;
+            }
+            allowed = allowed.min(other_top - i64::from(gap));
+        }
+        Coord::try_from(allowed).map_err(|_| {
+            failure(
+                "node-fit-separation",
+                "the separation below this node is not a representable height",
+                "move the node, or reduce its text or dimensions",
+            )
+        })
+    }
+    /// Place the three node text roles under the T6 auto-fit ladder.
+    ///
+    /// The box grows down first, because a taller box keeps the readable
+    /// default size; growth stops at the caller's slot ceiling and leaves the
+    /// width alone, because wrapping - not a wider box - is what makes a line
+    /// fit. Then each step wraps at its own size and keeps the first step whose
+    /// painted ink stays inside the node, down to the readable floor. Cutting a
+    /// word runs last, after a whole word has failed at every box and size, and
+    /// the readable default is placed when nothing fits at all, so the admission
+    /// check refuses the geometry Maru would actually draw. The cut is granted
+    /// per role, so one role's unbreakable word never splits a sibling's.
+    fn place_node_labels(
+        &mut self,
+        id: &str,
+        label: &str,
+        detail: Option<&str>,
+        tag: Option<&str>,
+        bounds: GeometryBox,
+        grow_height_to: Option<Coord>,
+    ) -> Result<GeometryBox, Diagnostic> {
+        let label_mark = self.document.labels.len();
+        let diagnostic_mark = self.diagnostics.len();
+        if let Some(fitted) = self.place_node_labels_pass(
+            id,
+            label,
+            detail,
+            tag,
+            bounds,
+            grow_height_to,
+            RoleCuts::NONE,
+            label_mark,
+            diagnostic_mark,
+        )? {
+            return Ok(fitted);
+        }
+        // Every word kept whole and nothing fit. A role earns a cut only when
+        // its own word alone overflows the width at the floor size, so a node
+        // whose primary fits whole is never cut because its sublabel did not.
+        let available = bounds.width - NODE_TEXT_INSET;
+        let cuts = RoleCuts {
+            label: role_needs_cut(label, 700, smallest_size(|sizes| sizes.label), available)?,
+            detail: match detail {
+                Some(text) => {
+                    role_needs_cut(text, 400, smallest_size(|sizes| sizes.detail), available)?
+                }
+                None => false,
+            },
+            tag: match tag {
+                Some(text) => {
+                    role_needs_cut(text, 400, smallest_size(|sizes| sizes.tag), available)?
+                }
+                None => false,
+            },
+        };
+        if cuts.any() {
+            if let Some(fitted) = self.place_node_labels_pass(
+                id,
+                label,
+                detail,
+                tag,
+                bounds,
+                grow_height_to,
+                cuts,
+                label_mark,
+                diagnostic_mark,
+            )? {
+                return Ok(fitted);
+            }
+        }
+        self.place_node_labels_at(
+            id,
+            label,
+            detail,
+            tag,
+            bounds,
+            NODE_LABEL_STEPS[0],
+            RoleCuts::NONE,
+        )?;
+        Ok(bounds)
+    }
+
+    /// One full ladder - grow, then every size step - under the given cut
+    /// permissions. Labels left by a failed attempt are discarded so the caller
+    /// sees only the placement that was accepted.
+    #[allow(clippy::too_many_arguments)]
+    fn place_node_labels_pass(
+        &mut self,
+        id: &str,
+        label: &str,
+        detail: Option<&str>,
+        tag: Option<&str>,
+        bounds: GeometryBox,
+        grow_height_to: Option<Coord>,
+        roles: RoleCuts,
+        label_mark: usize,
+        diagnostic_mark: usize,
+    ) -> Result<Option<GeometryBox>, Diagnostic> {
+        let mut candidate = bounds;
+        self.place_node_labels_at(
+            id,
+            label,
+            detail,
+            tag,
+            candidate,
+            NODE_LABEL_STEPS[0],
+            roles,
+        )?;
+        let (_, overflow_y) = self.placed_node_label_overflow(id, candidate);
+        self.document.labels.truncate(label_mark);
+        self.diagnostics.truncate(diagnostic_mark);
+        if overflow_y > 0 {
+            // The wrapped lines are fixed once the width is, so one growth
+            // step absorbs the whole overflow; only the ceiling limits it.
+            let grown = i64::from(candidate.height) + overflow_y;
+            let ceiling = grow_height_to.map_or(i64::from(candidate.height), i64::from);
+            let grown = grown.min(ceiling.max(i64::from(candidate.height)));
+            candidate.height = Coord::try_from(grown).map_err(|error| {
+                failure(
+                    "coordinate",
+                    error.to_string(),
+                    "use a smaller node box or shorter label text",
+                )
+            })?;
+            candidate.bottom().map_err(arithmetic)?;
+        }
+        for &sizes in NODE_LABEL_STEPS.iter() {
+            self.place_node_labels_at(id, label, detail, tag, candidate, sizes, roles)?;
+            if self.placed_node_labels_fit(id, candidate) {
+                return Ok(Some(candidate));
+            }
+            self.document.labels.truncate(label_mark);
+            self.diagnostics.truncate(diagnostic_mark);
+        }
+        Ok(None)
+    }
+
+    fn place_node_labels_at(
+        &mut self,
+        id: &str,
+        label: &str,
+        detail: Option<&str>,
+        tag: Option<&str>,
+        bounds: GeometryBox,
+        sizes: NodeLabelSizes,
+        roles: RoleCuts,
+    ) -> Result<(), Diagnostic> {
+        let available = bounds.width - NODE_TEXT_INSET;
+        let x = add(bounds.x, NODE_TEXT_INSET)?;
+        let mut y = add(bounds.y, NODE_TOP_INSET)?;
+        let (wrapped, height) =
+            self.wrap_node_text(label, 700, sizes.label, available, roles.label)?;
         self.label(
             &format!("node:{id}:label"),
             id,
-            label,
+            &wrapped,
             GeometryPoint { x, y },
             700,
-            13 * 64,
+            sizes.label,
         )?;
-        y = add(y, th)?;
-        if let Some(detail) = detail {
+        y = add(y, height)?;
+        if let Some(text) = detail {
+            let (wrapped, height) =
+                self.wrap_node_text(text, 400, sizes.detail, available, roles.detail)?;
             self.label(
                 &format!("node:{id}:sublabel"),
                 id,
-                detail,
+                &wrapped,
                 GeometryPoint { x, y },
                 400,
-                11 * 64,
+                sizes.detail,
             )?;
-            y = add(y, dh)?;
+            y = add(y, height)?;
         }
-        if let Some(tag) = tag {
+        if let Some(text) = tag {
+            let (wrapped, _) = self.wrap_node_text(text, 400, sizes.tag, available, roles.tag)?;
             self.label(
                 &format!("node:{id}:tag"),
                 id,
-                tag,
+                &wrapped,
                 GeometryPoint { x, y },
                 400,
-                10 * 64,
+                sizes.tag,
             )?;
         }
-        Ok(bounds)
+        Ok(())
+    }
+    /// How far this node's painted glyphs reach past its own bounds, which is
+    /// the span the admission check measures. Zero on both axes means the text
+    /// fits as drawn.
+    fn placed_node_label_overflow(&self, id: &str, bounds: GeometryBox) -> (i64, i64) {
+        let prefix = format!("node:{id}:");
+        let left = i64::from(bounds.x);
+        let top = i64::from(bounds.y);
+        let right = left + i64::from(bounds.width);
+        let bottom = top + i64::from(bounds.height);
+        let mut overflow_x = 0;
+        let mut overflow_y = 0;
+        for label in self.document.labels.iter().filter(|label| {
+            label
+                .id
+                .as_deref()
+                .is_some_and(|label_id| label_id.starts_with(&prefix))
+        }) {
+            for glyph in label
+                .glyphs
+                .iter()
+                .filter(|glyph| glyph.ink.width > 0 && glyph.ink.height > 0)
+            {
+                let glyph_left = i64::from(glyph.ink.x);
+                let glyph_top = i64::from(glyph.ink.y);
+                let glyph_right = glyph_left + i64::from(glyph.ink.width);
+                let glyph_bottom = glyph_top + i64::from(glyph.ink.height);
+                overflow_x = overflow_x.max(left - glyph_left).max(glyph_right - right);
+                overflow_y = overflow_y.max(top - glyph_top).max(glyph_bottom - bottom);
+            }
+        }
+        (overflow_x.max(0), overflow_y.max(0))
+    }
+    fn placed_node_labels_fit(&self, id: &str, bounds: GeometryBox) -> bool {
+        self.placed_node_label_overflow(id, bounds) == (0, 0)
+    }
+    /// Wrap one node text role into `available` and report the height of the
+    /// lines it produced, so the next role stacks below them.
+    fn wrap_node_text(
+        &self,
+        text: &str,
+        weight: u16,
+        size: Coord,
+        available: Coord,
+        allow_token_split: bool,
+    ) -> Result<(String, Coord), Diagnostic> {
+        let lines = metrics::wrap_label_lines(text, weight, size, available, allow_token_split)?;
+        let wrapped = lines.join("\n");
+        let (_, height) = self.text_size(&wrapped, weight, size)?;
+        Ok((wrapped, height))
     }
     pub(crate) fn add_container(
         &mut self,
@@ -1736,6 +2165,7 @@ impl SceneBuilder {
             .extend(resolve_pins(&self.request, members).diagnostics);
         self.quality_profile = meta.quality_profile.clone();
         self.connections.sort_by(|a, b| a.id.cmp(&b.id));
+        self.settle_grown_nodes()?;
         self.prepare_routing();
         let sequence_anchors = self.sequence_message_anchors()?;
         let mut first_routes = BTreeMap::new();

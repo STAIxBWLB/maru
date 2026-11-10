@@ -3,10 +3,13 @@
 use super::{point, px, RouteRequest, SceneBuilder};
 use crate::dataflow::DataflowSpec;
 use crate::geometry::{GeometryBox, GeometryPoint};
+use crate::layout::fixed::Coord;
 use crate::Diagnostic;
 
 const NODE_WIDTH: f64 = 112.0;
 const NODE_HEIGHT: f64 = 58.0;
+const ROW_TOP: f64 = 128.0;
+const ROW_STEP: f64 = 114.0;
 const STAGE_X: f64 = 100.0;
 const STAGE_STEP: f64 = 215.0;
 const STAGE_Y: f64 = 46.0;
@@ -33,8 +36,39 @@ fn node_position(
     // pixel boundary rejects a position that cannot be represented.
     point(
         STAGE_X + stage * STAGE_STEP - width / 2.0,
-        128.0 + row * 114.0 + offset,
+        ROW_TOP + row * ROW_STEP + offset,
     )
+}
+
+/// How far a default node may grow from its own top: up to 10px above the next
+/// row's top, clamped by the readable area left below that top.
+///
+/// The row's nominal top is not the node's top - an authored `yOffset` or a pin
+/// moves the node inside its row - so the space it really leaves above the next
+/// row is measured from where it was placed. `settle_grown_nodes` then checks
+/// the neighbours that actually share its columns; this ceiling describes the
+/// slot the row itself owns.
+fn row_growth_limit(view_height: f64, row: f64, top: Coord, id: &str) -> Result<Coord, Diagnostic> {
+    let next_row_top = px(ROW_TOP + (row + 1.0) * ROW_STEP)?;
+    let row_below =
+        Coord::try_from(i64::from(next_row_top) - i64::from(top) - i64::from(px(10.0)?))
+            .map_err(|_| {
+                geometry_error(
+                    &format!("/nodes/{id}"),
+                    "the row below this node is not a representable height",
+                )
+            })?
+            .max(0);
+    let frame_bottom = px(view_height - STAGE_BOTTOM_PAD)?;
+    let below = Coord::try_from(i64::from(frame_bottom) - i64::from(top))
+        .map_err(|_| {
+            geometry_error(
+                &format!("/nodes/{id}"),
+                "the readable area below this node is not a representable height",
+            )
+        })?
+        .max(0);
+    Ok(row_below.min(below))
 }
 
 fn label_segment(value: Option<f64>) -> Result<Option<usize>, Diagnostic> {
@@ -63,6 +97,11 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
         px(width)?;
         px(height)?;
         let stage = f64::from(node.stage);
+        let auto = if let Some(pin) = scene.pinned_position(&node.id) {
+            pin
+        } else {
+            node_position(stage, width, node.row, node.y_offset.unwrap_or(0.0))?
+        };
         scene.add_node(
             &node.id,
             &node.component_type,
@@ -70,12 +109,15 @@ pub(crate) fn place(spec: &DataflowSpec, scene: &mut SceneBuilder) -> Result<(),
             node.decoration.sublabel.as_deref(),
             node.decoration.tag.as_deref(),
             None,
-            if let Some(pin) = scene.pinned_position(&node.id) {
-                pin
-            } else {
-                node_position(stage, width, node.row, node.y_offset.unwrap_or(0.0))?
-            },
+            auto,
             Some([width, height]),
+            // Authored heights are respected; a taller default node stops one
+            // 10px separation above the next row and inside the readable area
+            // below its own top, which is what admission measures.
+            match node.height {
+                Some(_) => None,
+                None => Some(row_growth_limit(view_height, node.row, auto.y, &node.id)?),
+            },
         )?;
     }
     for (index, stage) in spec.stages.iter().enumerate() {

@@ -4,14 +4,15 @@
   "fixtureSha256": "b76a335131aa1c80ae38323bee8de438ea8221ee386ee98b8ea3984c23f21414",
   "nodes": 1000,
   "routes": 999,
-  "counterDefinitionVersion": 2,
+  "counterDefinitionVersion": 3,
   "baseline": {
     "astarExpandedStates": 22167,
     "routeEvaluations": 999,
     "constraintEvaluations": 3332334,
     "endpointMaskEvaluations": 0,
     "endpointClearanceEvaluations": 0,
-    "maskedAstarExpandedStates": 0
+    "maskedAstarExpandedStates": 0,
+    "textScalarMeasurements": 15786
   },
   "ceiling": {
     "astarExpandedStates": 27709,
@@ -19,10 +20,11 @@
     "constraintEvaluations": 4165418,
     "endpointMaskEvaluations": 0,
     "endpointClearanceEvaluations": 0,
-    "maskedAstarExpandedStates": 0
+    "maskedAstarExpandedStates": 0,
+    "textScalarMeasurements": 19733
   },
-  "totalBaseline": 3355500,
-  "totalCeiling": 4194375,
+  "totalBaseline": 3371286,
+  "totalCeiling": 4214108,
   "authoredVia": {
     "fixturePath": "testdata/bench-authored-via.json",
     "measurementStatus": "measured",
@@ -39,7 +41,8 @@
       "constraintEvaluations": 1395,
       "endpointMaskEvaluations": 57,
       "endpointClearanceEvaluations": 1254,
-      "maskedAstarExpandedStates": 81
+      "maskedAstarExpandedStates": 81,
+      "textScalarMeasurements": 174
     },
     "ceiling": {
       "astarExpandedStates": 102,
@@ -47,11 +50,12 @@
       "constraintEvaluations": 1744,
       "endpointMaskEvaluations": 72,
       "endpointClearanceEvaluations": 1568,
-      "maskedAstarExpandedStates": 102
+      "maskedAstarExpandedStates": 102,
+      "textScalarMeasurements": 218
     },
-    "totalBaseline": 2788,
-    "totalCeiling": 3485,
-    "sourceCommit": "2b6aee92312fcfbd7ecf7f2afcba4ecbb7e02d64"
+    "totalBaseline": 2962,
+    "totalCeiling": 3703,
+    "sourceCommit": "997dd6a10b051846893d9e4c4f28131cdf9a47c6"
   },
   "scope": "deterministic logical operations, not elapsed time; normal geometry builds omit all hooks",
   "recordedCommand": "cargo run --locked --manifest-path src-tauri/crates/Cargo.toml -p maru-diagram-engine --features geometry-corpus --bin geometry-work"

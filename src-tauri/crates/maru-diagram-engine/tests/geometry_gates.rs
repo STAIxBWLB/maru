@@ -43,8 +43,6 @@ fn audited_controls_preserve_source_verdicts_and_check_actual_text_bounds() {
                 .contains(&row["key"]));
         }
     }
-    let mut measured_text_refusals = 0;
-    let mut measured_text_refusal_ids = BTreeSet::new();
     for (id, case) in &controls {
         assert_eq!(
             case["geometryComparison"]["accepted"], true,
@@ -68,24 +66,15 @@ fn audited_controls_preserve_source_verdicts_and_check_actual_text_bounds() {
         let input = case["geometryComparison"]["inputJson"].as_str().unwrap();
         let report = layout_json(&serde_json::json!({"specJson":input}).to_string());
         painted_ink::assert_accepted_text_ink_fits(&report);
-        if !report.ok {
-            measured_text_refusals += 1;
-            measured_text_refusal_ids.insert(id.to_owned());
-            painted_ink::assert_source_green_overflow_exception(
-                &report,
-                id,
-                case["diagramType"].as_str().unwrap(),
-            );
-        }
+        assert!(
+            report.ok,
+            "{id}: auto-fit leaves no measured-ink refusal allowance, so a gate control must be accepted: {:?}",
+            report.diagnostics
+        );
         assert!(report.geometry.is_some());
     }
-    assert_eq!(
-        measured_text_refusal_ids,
-        BTreeSet::from(["gate-sequence-brand-absent"]),
-        "only the named sequence gate control may have measured text overflow"
-    );
     println!(
         "ENGINE_E2_GATES {}",
-        serde_json::json!({"auditedRows":audit.len(),"sourceAcceptedControls":controls.len(),"engineAcceptedControls":controls.len()-measured_text_refusals,"measuredTextRefusals":measured_text_refusals})
+        serde_json::json!({"auditedRows":audit.len(),"sourceAcceptedControls":controls.len(),"engineAcceptedControls":controls.len()})
     );
 }

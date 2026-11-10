@@ -28,6 +28,50 @@ export function corpusContract(contents) {
   };
 }
 
+// The SDK's WorkStats::total sums exactly these counters (src/work.rs), and the
+// masked A* expansions are a proof subset of the expansions, never a seventh
+// addend, so a total that leaves a counter out is refused here.
+export const WORK_COUNTERS = Object.freeze([
+  "astarExpandedStates",
+  "routeEvaluations",
+  "constraintEvaluations",
+  "endpointMaskEvaluations",
+  "endpointClearanceEvaluations",
+  "textScalarMeasurements",
+]);
+export const WORK_SUBSET_COUNTERS = Object.freeze(["maskedAstarExpandedStates"]);
+// The 1,000-node fixture exercises these four; the two endpoint counters are
+// zero on it because no leg carries an endpoint mask.
+const WORK_COUNTERS_THAT_MUST_BE_EXERCISED = Object.freeze([
+  "astarExpandedStates",
+  "routeEvaluations",
+  "constraintEvaluations",
+  "textScalarMeasurements",
+]);
+
+function validateWorkReceipt(work, label) {
+  const receiptIsMalformed = `${label} has no valid deterministic 1000-node work receipt; rebuild all OS/WASM reports with geometry-corpus before comparing them.`;
+  if (!work || !/^[a-f0-9]{64}$/.test(work.fixtureSha256 ?? "") || work.nodes !== 1000 || work.routes !== 999 || !work.stats) {
+    throw new Error(receiptIsMalformed);
+  }
+  const missing = [...WORK_COUNTERS, ...WORK_SUBSET_COUNTERS].filter(
+    (name) => !Number.isSafeInteger(work.stats[name]) || work.stats[name] < 0,
+  );
+  if (missing.length > 0) {
+    throw new Error(`${label} work receipt is missing or malformed on ${missing.join(", ")}; rebuild all OS/WASM reports with the pinned SDK so the total covers every counter work.rs sums.`);
+  }
+  if (WORK_COUNTERS_THAT_MUST_BE_EXERCISED.some((name) => work.stats[name] === 0)) {
+    throw new Error(`${label} work receipt has a zero counter on the 1000-node fixture (${WORK_COUNTERS_THAT_MUST_BE_EXERCISED.join(", ")}); the benchmark did not run its normal path.`);
+  }
+  if (work.stats.maskedAstarExpandedStates > work.stats.astarExpandedStates) {
+    throw new Error(`${label} work receipt counts more masked A* expansions than expansions; masked work is a subset of the expansions and never a separate addend.`);
+  }
+  const total = WORK_COUNTERS.reduce((sum, name) => sum + work.stats[name], 0);
+  if (work.total !== total) {
+    throw new Error(`${label} work receipt total ${work.total} does not equal the counter sum ${total} (${WORK_COUNTERS.join(" + ")}); the receipt was built against a different counter definition.`);
+  }
+}
+
 function validateReport(report, expected, index) {
   const label = `scene report ${index + 1}`;
   if (!report || report.apiVersion !== 1 || report.scope !== "whole-scene-geometry" || report.repeatCheck !== true || !Array.isArray(report.cases)) {
@@ -39,13 +83,7 @@ function validateReport(report, expected, index) {
   if (report.corpusCaseCount !== expected.caseCount || report.cases.length !== expected.caseCount) {
     throw new Error(`${label} has ${report.cases.length} case records but the corpus has ${expected.caseCount}; regenerate the complete whole-scene report.`);
   }
-  const work = report.benchmarkWork;
-  const workValues = work?.stats && [work.stats.astarExpandedStates, work.stats.routeEvaluations, work.stats.constraintEvaluations];
-  if (!work || !/^[a-f0-9]{64}$/.test(work.fixtureSha256 ?? "") || work.nodes !== 1000 || work.routes !== 999
-      || !Array.isArray(workValues) || workValues.some((n) => !Number.isSafeInteger(n) || n < 0)
-      || workValues.some((n) => n === 0) || work.total !== workValues.reduce((sum, n) => sum + n, 0)) {
-    throw new Error(`${label} has no valid deterministic1000-node work receipt; rebuild all OS/WASM reports with geometry-corpus before comparing them.`);
-  }
+  validateWorkReceipt(report.benchmarkWork, label);
   if (report.svgHashVersion !== 1) throw new Error(`${label} has no SVG hash contract; regenerate all native/WASM reports with E3 artifact gates.`);
   for (let caseIndex = 0; caseIndex < expected.caseCount; caseIndex += 1) {
     if (!/^[a-f0-9]{64}$/.test(report.cases[caseIndex]?.hash ?? "")) {
