@@ -590,7 +590,7 @@ function pluginRegistrationScan(root = process.cwd()) {
   const capabilities = readdirSync(resolve(root, capabilityDir)).filter((file) => file.endsWith(".json")).map((file) => JSON.parse(sources.read(`${capabilityDir}/${file}`)));
   const scoped = capabilities.find((capability) => capability.identifier === "diagram-render");
   const pluginPermissions = expected.map((name) => `maru-diagram:allow-${name.replaceAll("_", "-")}`);
-  insist(scoped && JSON.stringify(scoped.windows) === JSON.stringify(["main"])
+  insist(scoped && !Object.hasOwn(scoped, "windows") && JSON.stringify(scoped.webviews) === JSON.stringify(["main"])
     && pluginPermissions.every((permission) => scoped.permissions.includes(permission)), "Diagram plugin commands must be granted to the main-only diagram-render capability");
   insist(capabilities.filter((capability) => capability.identifier !== "diagram-render")
     .every((capability) => !(capability.permissions ?? []).some((permission) => permission.startsWith("maru-diagram:allow-"))), "Diagram plugin permission escaped the main-only capability (Sites and other windows must remain denied)");
@@ -605,8 +605,9 @@ export function checkPluginEvidence(root = process.cwd()) {
   const sources = new Sources(resolve(root));
   const aclEvidence = JSON.parse(sources.read("docs/performance/diagram-engine-e3/plugin-acl-mock-ipc.json"));
   insist(aclEvidence.schemaVersion === 1 && /compiled generate_context/.test(aclEvidence.scope ?? "")
-    && aclEvidence.mainWindowLabel === "main" && aclEvidence.deniedWindowLabel === "sites", "Plugin ACL evidence must come from the app MockRuntime and its compiled capabilities");
-  for (const [field, label] of [["mainHandlerReached", "main allow"], ["sitesDeniedByAcl", "Sites deny"]]) {
+    && aclEvidence.mainWindowLabel === "main" && aclEvidence.deniedWindowLabel === "sites"
+    && aclEvidence.deniedChildWebviewLabel === "sites-child", "Plugin ACL evidence must come from the app MockRuntime and its compiled capabilities");
+  for (const [field, label] of [["mainHandlerReached", "main allow"], ["sitesDeniedByAcl", "Sites window deny"], ["sitesChildDeniedByAcl", "Sites child-webview deny"]]) {
     insist(Array.isArray(aclEvidence[field]) && JSON.stringify([...aclEvidence[field]].sort()) === JSON.stringify(expected), `Plugin ACL evidence drifted for ${label}; rerun the real app capability MockRuntime test`);
   }
   const invokeEvidence = JSON.parse(sources.read("docs/performance/diagram-engine-e3/plugin-command-mock-ipc.json"));
@@ -770,6 +771,7 @@ export function checkIsolation(options, root = process.cwd()) {
       seenNative.add(reg.name);
     } else {
       insist(!liveApp.has(reg.name), `Duplicate production registration ${reg.name}`);
+      insist(rows.has(reg.name), `New production registration needs explicit reconciliation: ${reg.name}`);
       liveApp.set(reg.name, reg);
     }
   }

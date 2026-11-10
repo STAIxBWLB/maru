@@ -1230,6 +1230,19 @@ mod quit_acl_tests {
         let sites = WebviewWindowBuilder::new(&app, "sites", Default::default())
             .build()
             .expect("Sites mock window builds without diagram permissions");
+        let sites_child = main
+            .as_ref()
+            .window()
+            .add_child(
+                tauri::WebviewBuilder::new(
+                    "sites-child",
+                    tauri::WebviewUrl::App("index.html".into()),
+                ),
+                tauri::Position::Logical(tauri::LogicalPosition::new(0.0, 0.0)),
+                tauri::Size::Logical(tauri::LogicalSize::new(200.0, 100.0)),
+            )
+            .expect("local Sites child webview attaches to the main window");
+        let sites_child_ipc = ChildIpc(&sites_child);
 
         let commands = [
             ("validate", serde_json::json!({"input":"{}"})),
@@ -1253,6 +1266,7 @@ mod quit_acl_tests {
         ];
         let mut main_handler_reached = Vec::new();
         let mut sites_denied = Vec::new();
+        let mut sites_child_denied = Vec::new();
 
         for (command, body) in commands {
             let cmd = format!("plugin:maru-diagram|{command}");
@@ -1278,7 +1292,7 @@ mod quit_acl_tests {
             }
             main_handler_reached.push(command);
 
-            let refused = get_ipc_response(&sites, invoke_json_request(&cmd, body))
+            let refused = get_ipc_response(&sites, invoke_json_request(&cmd, body.clone()))
                 .expect_err("Sites window must not inherit the main-only diagram capability");
             let message = refused.as_str().unwrap_or_default();
             assert!(
@@ -1290,6 +1304,21 @@ mod quit_acl_tests {
                 "ACL denial did not identify the Sites window: {refused}"
             );
             sites_denied.push(command);
+
+            let mut child_request = invoke_json_request(&cmd, body);
+            child_request.url = sites_child.url().expect("Sites child URL is local");
+            let child_refused = get_ipc_response(&sites_child_ipc, child_request)
+                .expect_err("Sites child webview inside main must not inherit diagram commands");
+            let child_message = child_refused.as_str().unwrap_or_default();
+            assert!(
+                child_message.contains("not allowed"),
+                "{command} reached the local Sites child webview: {child_refused}"
+            );
+            assert!(
+                child_message.contains("sites-child"),
+                "ACL denial did not identify the Sites child webview: {child_refused}"
+            );
+            sites_child_denied.push(command);
         }
 
         let evidence = serde_json::json!({
@@ -1297,8 +1326,10 @@ mod quit_acl_tests {
             "scope": "Tauri MockRuntime invocation with the app's compiled generate_context capabilities; not native WebView transport evidence",
             "mainWindowLabel": "main",
             "deniedWindowLabel": "sites",
+            "deniedChildWebviewLabel": "sites-child",
             "mainHandlerReached": main_handler_reached,
             "sitesDeniedByAcl": sites_denied,
+            "sitesChildDeniedByAcl": sites_child_denied,
         });
         println!("DIAGRAM_PLUGIN_ACL_EVIDENCE {evidence}");
         if let Ok(path) = std::env::var("MARU_PLUGIN_ACL_EVIDENCE") {

@@ -460,12 +460,12 @@ mod commands {
   let mut commands = vec!["validate"];
   if std::env::var_os("CARGO_FEATURE_PNG").is_some() { commands.push("render_png"); }
 }`);
-  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", windows: ["main"], permissions: ["maru-diagram:allow-validate", "maru-diagram:allow-render-png"] });
+  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", webviews: ["main"], permissions: ["maru-diagram:allow-validate", "maru-diagram:allow-render-png"] });
   f.write("src-tauri/capabilities/default.json", { identifier: "default", windows: ["main", "skill-editor"], permissions: [] });
   f.write("docs/performance/diagram-engine-e3/plugin-acl-mock-ipc.json", {
     schemaVersion: 1, scope: "synthetic compiled generate_context ACL scanner fixture",
-    mainWindowLabel: "main", deniedWindowLabel: "sites",
-    mainHandlerReached: ["validate", "render_png"], sitesDeniedByAcl: ["validate", "render_png"],
+    mainWindowLabel: "main", deniedWindowLabel: "sites", deniedChildWebviewLabel: "sites-child",
+    mainHandlerReached: ["validate", "render_png"], sitesDeniedByAcl: ["validate", "render_png"], sitesChildDeniedByAcl: ["validate", "render_png"],
   });
   const evidence = {
     schemaVersion: 1, scope: "synthetic MockRuntime scanner unit fixture",
@@ -525,14 +525,14 @@ test("current production plugin count follows enabled render-store features and 
     }
   }`);
   const permissions = names.map((name) => `maru-diagram:allow-${name.replaceAll("_", "-")}`);
-  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", windows: ["main"], permissions });
+  f.write("src-tauri/capabilities/diagram-render.json", { identifier: "diagram-render", webviews: ["main"], permissions });
   f.evidence.pluginCommandCount = names.length;
   f.evidence.pluginCommandsObserved = names;
   f.saveEvidence();
   f.write("docs/performance/diagram-engine-e3/plugin-acl-mock-ipc.json", {
     schemaVersion: 1, scope: "synthetic compiled generate_context ACL scanner fixture",
-    mainWindowLabel: "main", deniedWindowLabel: "sites",
-    mainHandlerReached: names, sitesDeniedByAcl: names,
+    mainWindowLabel: "main", deniedWindowLabel: "sites", deniedChildWebviewLabel: "sites-child",
+    mainHandlerReached: names, sitesDeniedByAcl: names, sitesChildDeniedByAcl: names,
   });
   const manifest = createCurrentRegistrationManifest(f.root, "b".repeat(40));
   assert.deepEqual(manifest.counts, { app: 1, plugin: 6, total: 7 });
@@ -552,6 +552,15 @@ test("plugin permissions cannot be granted outside the main-only capability", (t
   const f = pluginFixture(t);
   f.write("src-tauri/capabilities/default.json", { identifier: "default", windows: ["main", "Sites"], permissions: ["maru-diagram:allow-render-png"] });
   assert.throws(() => checkPluginEvidence(f.root), /permission escaped the main-only capability/);
+});
+
+test("plugin permissions reject a window-wide grant even when webviews are narrowed", (t) => {
+  const f = pluginFixture(t);
+  f.write("src-tauri/capabilities/diagram-render.json", {
+    identifier: "diagram-render", windows: ["main"], webviews: ["main"],
+    permissions: ["maru-diagram:allow-validate", "maru-diagram:allow-render-png"],
+  });
+  assert.throws(() => checkPluginEvidence(f.root), /main-only capability/);
 });
 
 test("plugin scanner refuses stale permission and observed command lists", (t) => {

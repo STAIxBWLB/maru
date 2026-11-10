@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "diagram-render",
   "description": "Native diagram rendering and verified render history for the main editor",
-  "windows": ["main"],
+  "webviews": ["main"],
   "permissions": [
     "maru-diagram:allow-validate",
     "maru-diagram:allow-render-png",
