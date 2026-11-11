@@ -2675,9 +2675,12 @@ It maps to the acceptance items as follows.
 - AC4 export: SVG and PNG are produced by the native engine path and both
   receipts report a verified byte readback.
 - AC7 labels: Korean, English and mixed Korean/English labels keep the engine's
-  line breaks, start where the engine put their first line and stay inside the
-  box that owns them. Korean IME composition is not covered here; the harness
-  cannot compose through the macOS input method, so that stays a human check.
+  line breaks, start where the engine's own label box puts their first line and
+  stay inside that box. The expected origin and the box both come from the
+  engine layout, never from the coordinates the canvas paints with, so a canvas
+  that moved a label but kept it inside its owner still fails. Korean IME
+  composition is not covered here; the harness cannot compose through the macOS
+  input method, so that stays a human check.
 - AC8 interaction: every route the engine ran inside a container stays visible,
   with no lane, boundary or member painted over it; pan, zoom and selection act
   on the engine scene; and a refused edit anchors the engine's diagnostic beside

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": "E4 T4 real-app engine canvas check (maru#552)",
-  "sourceCommit": "e4d767dba452afab6cb170f4e51a4fb2d58944fe",
+  "sourceCommit": "501596396f8481dd65e76c5ede6383eaa34bea37",
   "sourceScope": "the debug native-e2e build of this commit; the receipt, docs/diagram.md and the screenshots below land in the next commit and change no source",
   "executionScope": {
     "host": "local Apple silicon Mac, arm64",
@@ -17,10 +17,10 @@
     "command": "make test-e2e-native",
     "exitCode": 0,
     "specFiles": "18 passed, 18 total",
-    "suiteDuration": "00:07:46",
-    "specDuration": "7 passing (5.1s)",
+    "suiteDuration": "00:07:51",
+    "specDuration": "7 passing (4.9s)",
     "fixture": "temporary MARU_NATIVE_E2E_HOME and config dir seeded per run by e2e-native/wdio.conf.ts",
-    "runNote": "an earlier run of this same tree hit one flake outside this spec: e2e-native/specs/family-tools.spec.ts timed out waiting 30 s for the launched acon console to write its proof file. It passed alone on the same build in 53 s and it passed in the run recorded here, so that timeout is the launch step's, not this change's."
+    "runNote": "two flakes hit while this branch was being proved, neither in a spec this change touches. An earlier run of the previous commit timed out in e2e-native/specs/family-tools.spec.ts waiting 30 s for the launched acon console to write its proof file; it passed alone in 53 s and in the runs since. A focused run made straight after a rebuilt binary failed the refusal case with the canvas showing null instead of workflow/geometry-label-fit; it passed on the next run and in this suite. Both are recorded here rather than dropped, and neither reproduces on demand."
   },
   "checks": {
     "familyGeometry": {
@@ -33,7 +33,8 @@
         "the painted route path equals the engine's route path, compared on the visible stroke path and never on the transparent hit path",
         "every sampled point of a visible route that lands inside a container hit-tests back to that route, so no lane, boundary, stage, segment or activation is painted over a route the engine ran inside it",
         "each engine label carries the engine's wrapped lines, including the mixed Korean and English label",
-        "each placed engine label paints its first line within 2 px of the engine's own origin on both axes and stays inside the box that owns it, within 2 px"
+        "each placed engine label paints its first line within 2 px of the origin of the engine's own label box on both axes, and stays inside that same box within 2 px",
+        "the expected label origin and box are the engine layout's, read through fixedToPixels of label.bounds, so a painted label that moved but stayed inside its owner still fails"
       ],
       "families": [
         {
@@ -211,11 +212,18 @@
       "greenAfterFix": "this run: every placed engine label of the five families starts within 2 px of the engine's first-line origin and stays inside the box that owns it",
       "unitGuard": "src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx asserts a dominant-baseline on every canvas tspan and on every exported tspan",
       "chromium": "Chromium already inherited the text element's value, so declaring it per line leaves a Chromium render where it was"
+    },
+    "labelOrigin": {
+      "defect": "the label-position assertion was self-referential: the spec read the painted <text> x/y, added the owner's origin, and compared the painted bbox against that number, so a canvas that moved a label while keeping it inside its owner passed the check meant to catch it",
+      "fix": "the bridge publishes the engine's own label bounds (fixedToPixels of label.bounds x/y/w/h, the conversion the node boxes already use); the spec compares the painted first line against that origin in canvas coordinates and measures containment against the same engine label box. Nothing in the expectation comes from the DOM.",
+      "redBeforeFix": "a local 4 px shift of the painted label origin failed with: architecture: label container:boundary:0:label paints its first line at (186.0,56.0); the engine put the label box at (182,56)",
+      "greenAfterFix": "after reverting the shift: 7 passing in the focused run and 7 passing (4.9s) in the suite recorded here",
+      "testSurface": "e2e-native/specs/diagram-engine-e4.spec.ts and src/lib/nativeE2eBridge.ts; the spec keeps its own copy of the family type, so both declarations gained the box field"
     }
   },
   "screenshots": {
     "directory": "e2e-native/evidence/diagram-engine-e4/",
-    "capturedAt": "2026-11-11T06:59:16.358Z",
+    "capturedAt": "2026-11-11T07:38:15.969Z",
     "uiLanguages": {
       "korean": [
         "family-architecture.png",
