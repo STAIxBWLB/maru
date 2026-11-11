@@ -74,7 +74,14 @@ function EngineRouteLabel({ label, color, selected }: {
         style={{ fontKerning: "none", fontVariantLigatures: "none", textRendering: "geometricPrecision" }}
       >
         {label.lines.map((line, index) => (
-          <tspan key={index} x={label.x} dy={index === 0 ? 0 : label.fontSize * 1.5}>
+          // WebKit does not inherit `dominant-baseline` into tspans; without it
+          // here the first line sits one ascent above the engine's label box.
+          <tspan
+            key={index}
+            x={label.x}
+            dy={index === 0 ? 0 : label.fontSize * 1.5}
+            dominantBaseline="text-before-edge"
+          >
             {line}
           </tspan>
         ))}

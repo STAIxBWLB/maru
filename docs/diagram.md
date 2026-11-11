@@ -647,6 +647,15 @@ export path independently lays out its source request.
   `layoutDoc` reflow (`layout.ts`) is gone; the projection keeps only coarse
   source slots as the fallback shown before an engine scene arrives.
 
+An engine scene is painted in three bands: containers (lanes, boundaries,
+stages, segments, activations), then routes, then members. A container fill is
+opaque, so painting it with the members hides every route the engine ran inside
+it. The Maru visual SVG emits the same three bands. Engine labels carry the
+drawing baseline on each line, not only on the `<text>` element: WebKit does not
+inherit `dominant-baseline` into a `tspan`, so a label declared only on its
+parent starts one ascent high and straddles its box. Chromium inherits the
+value, so declaring it per line leaves Chromium output where it was.
+
 ### Editing and diagnostics on engine geometry
 
 The canvas, inline editor, fit view, find navigation and property panel read
@@ -671,10 +680,22 @@ current painted scene. A refusal retains the last good scene without changing
 the document or history. Marquee and additive selection, pan, pointer-centred
 zoom, snap, smart guides and connect ghosts use the same displayed boxes.
 
+Pointer capture is attempted, never required. `setPointerCapture` is wrapped, so
+a refusal cannot abort the gesture: WebKit raises `NotFoundError` for a pointer
+id it never activated, which is what a synthetic pointer sequence produces, and
+losing capture only costs pointer events delivered outside the surface.
+
 Canvas and Maru visual-export engine labels disable browser kerning and
 ligatures and request geometric precision, matching the engine's unshaped text
-metrics. Browser regression evidence covers these interactions; real-app
-Korean IME, WKWebView behavior and screenshots remain the T4 check.
+metrics. Browser regression evidence covers these interactions, and
+`e2e-native/specs/diagram-engine-e4.spec.ts` re-proves them in the real macOS
+app, WKWebView included: five engine families, the v7/v8 legacy documents, the
+apply/undo/redo/reopen path, native SVG and PNG receipts, pan/zoom/selection and
+an anchored refusal, in both UI languages. Screenshots and the run summary are
+recorded in `e2e-native/evidence/diagram-engine-e4/` and
+`docs/diagram-engine-e4.json`. Korean IME composition remains a pending human
+check: the WebDriver harness injects synthetic events and cannot compose
+characters through the macOS input method.
 
 ## Performance
 
@@ -2640,3 +2661,27 @@ and individual gate statuses. Stored render history continues to accept legacy A
 their engine identity. Production engine IPC is exposed through the
 `diagram-render` capability for the `main` webview; the default-off
 `native-e2e` fixture bridge is separate.
+
+The real-app T4 check covers the WKWebView half of this integration:
+`e2e-native/specs/diagram-engine-e4.spec.ts` runs inside the debug `native-e2e`
+build and its screenshots and run summary sit in
+`e2e-native/evidence/diagram-engine-e4/` and `docs/diagram-engine-e4.json`.
+It maps to the acceptance items as follows.
+
+- AC4 opening and persistence: each of the five engine families paints the
+  scene whose spec hash the canvas carries, v7 and v8 files still open through
+  the migration path, and a structural edit that passes the SDK gate survives
+  undo, redo, save and reopen with no field lost.
+- AC4 export: SVG and PNG are produced by the native engine path and both
+  receipts report a verified byte readback.
+- AC7 labels: Korean, English and mixed Korean/English labels keep the engine's
+  line breaks, start where the engine's own label box puts their first line and
+  stay inside that box. The expected origin and the box both come from the
+  engine layout, never from the coordinates the canvas paints with, so a canvas
+  that moved a label but kept it inside its owner still fails. Korean IME
+  composition is not covered here; the harness cannot compose through the macOS
+  input method, so that stays a human check.
+- AC8 interaction: every route the engine ran inside a container stays visible,
+  with no lane, boundary or member painted over it; pan, zoom and selection act
+  on the engine scene; and a refused edit anchors the engine's diagnostic beside
+  its element rather than in the canvas notice.
