@@ -310,9 +310,15 @@ export function mapCanvasDiagnostics(
     const category = canvasDiagnosticCategory(diagnostic);
     const anchor = anchorOf(diagnostic);
     if (!anchor) return { diagnostic, category, target: null };
-    const point = placeBadge(anchor.box, obstacles
+    const others = obstacles
       .filter((obstacle) => obstacle.member === null || obstacle.member !== anchor.owner)
-      .map((obstacle) => obstacle.rect), pageFrame(geometry?.page ?? null, [anchor.box, ...obstacles.map((obstacle) => obstacle.rect)]));
+      .map((obstacle) => obstacle.rect);
+    // A clear spot inside the page wins. When the page has none (a crowded
+    // refusal scene), a clear spot past the right or bottom edge still beats the
+    // notice: the canvas shows it, and the export never draws badges. Negative
+    // coordinates stay unreachable either way.
+    const frame = pageFrame(geometry?.page ?? null, [anchor.box, ...obstacles.map((obstacle) => obstacle.rect)]);
+    const point = placeBadge(anchor.box, others, frame) ?? (frame ? placeBadge(anchor.box, others, null) : null);
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return { diagnostic, category, target: null };
     obstacles.push({
       member: null,
