@@ -514,7 +514,7 @@ test("Maru SVG engine labels disable browser kerning and ligatures through CSS",
     try {
       return [...svg.querySelectorAll("text[data-engine-label]")].map((text) => {
         const css = getComputedStyle(text);
-        return { kerning: css.fontKerning, ligatures: css.fontVariantLigatures, rendering: css.textRendering };
+        return { kerning: css.fontKerning, ligatures: css.fontVariantLigatures, rendering: css.textRendering.toLowerCase() };
       });
     } finally {
       svg.remove();
