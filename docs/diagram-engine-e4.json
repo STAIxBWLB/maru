@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "stage": "E4 T4 real-app engine canvas check (maru#552)",
-  "sourceCommit": "6c5d356be046ba814e45a21700002962aca74193",
+  "sourceCommit": "e4d767dba452afab6cb170f4e51a4fb2d58944fe",
   "sourceScope": "the debug native-e2e build of this commit; the receipt, docs/diagram.md and the screenshots below land in the next commit and change no source",
   "executionScope": {
     "host": "local Apple silicon Mac, arm64",
@@ -17,9 +17,10 @@
     "command": "make test-e2e-native",
     "exitCode": 0,
     "specFiles": "18 passed, 18 total",
-    "suiteDuration": "00:07:59",
-    "specDuration": "7 passing (5.6s)",
-    "fixture": "temporary MARU_NATIVE_E2E_HOME and config dir seeded per run by e2e-native/wdio.conf.ts"
+    "suiteDuration": "00:07:46",
+    "specDuration": "7 passing (5.1s)",
+    "fixture": "temporary MARU_NATIVE_E2E_HOME and config dir seeded per run by e2e-native/wdio.conf.ts",
+    "runNote": "an earlier run of this same tree hit one flake outside this spec: e2e-native/specs/family-tools.spec.ts timed out waiting 30 s for the launched acon console to write its proof file. It passed alone on the same build in 53 s and it passed in the run recorded here, so that timeout is the launch step's, not this change's."
   },
   "checks": {
     "familyGeometry": {
@@ -29,8 +30,10 @@
         "data-engine-geometry-status settles on ready for the opened document",
         "data-engine-spec-sha256 equals the hash of the source spec the fixture laid out",
         "every engine member's box equals the engine's box for that member",
-        "the painted routes are the engine's own routes",
-        "each engine label carries the engine's wrapped lines, including the mixed Korean and English label"
+        "the painted route path equals the engine's route path, compared on the visible stroke path and never on the transparent hit path",
+        "every sampled point of a visible route that lands inside a container hit-tests back to that route, so no lane, boundary, stage, segment or activation is painted over a route the engine ran inside it",
+        "each engine label carries the engine's wrapped lines, including the mixed Korean and English label",
+        "each placed engine label paints its first line within 2 px of the engine's own origin on both axes and stays inside the box that owns it, within 2 px"
       ],
       "families": [
         {
@@ -39,6 +42,8 @@
           "routes": 2,
           "labels": 10,
           "specSha256": "feeacb11ee6823c0c8458984d82b16f4352a2d9914475f526a8f5816c6278d08",
+          "containerRouteSamples": 139,
+          "coveredRoutes": [],
           "screenshot": "e2e-native/evidence/diagram-engine-e4/family-architecture.png"
         },
         {
@@ -47,6 +52,8 @@
           "routes": 2,
           "labels": 10,
           "specSha256": "66ea9d3f9e016563b9b2fcfbf900fd102de0eb831510a3c20718faa5365ee551",
+          "containerRouteSamples": 166,
+          "coveredRoutes": [],
           "screenshot": "e2e-native/evidence/diagram-engine-e4/family-workflow.png"
         },
         {
@@ -55,6 +62,8 @@
           "routes": 4,
           "labels": 11,
           "specSha256": "52c71d525435d5b8dd6bb9ca5d2ba18c0eaa5b00614062e38fec228b6de70962",
+          "containerRouteSamples": 0,
+          "coveredRoutes": [],
           "screenshot": "e2e-native/evidence/diagram-engine-e4/family-sequence.png"
         },
         {
@@ -63,6 +72,8 @@
           "routes": 1,
           "labels": 9,
           "specSha256": "e963f923e60e1111c5b5ff6fd6e8c269df7a041aca0cd73e234759935a4be06c",
+          "containerRouteSamples": 46,
+          "coveredRoutes": [],
           "screenshot": "e2e-native/evidence/diagram-engine-e4/family-dataflow.png"
         },
         {
@@ -71,9 +82,12 @@
           "routes": 2,
           "labels": 12,
           "specSha256": "e00c646d2a771a441f8264566d81264625b6b20fd1a2be38fab547ed8ede6a64",
+          "containerRouteSamples": 170,
+          "coveredRoutes": [],
           "screenshot": "e2e-native/evidence/diagram-engine-e4/family-lifecycle.png"
         }
-      ]
+      ],
+      "containerSampleReading": "521 samples across the five families land inside a container and all of them hit-test back to their own route. Sequence shows 0 because its four routes run outside every container, so it has no sample that a container fill could hide."
     },
     "legacyDocuments": {
       "passed": true,
@@ -182,9 +196,26 @@
       "screenshot": "e2e-native/evidence/diagram-engine-e4/english-ui.png"
     }
   },
+  "reviewRound": {
+    "paintOrder": {
+      "defect": "the canvas painted container fills - lanes, boundaries, stages, segments, activations - after the routes, so an opaque lane rect covered any route the engine ran inside it; the Maru visual SVG emitted the same wrong order",
+      "fix": "src/components/diagram/canvas/CanvasSurface.tsx paints containers, then routes, then members, and src/lib/diagram/renderSvg.ts emits the same three bands so canvas and export agree",
+      "redBeforeFix": "on the pre-fix tree the new hit-test failed: architecture: route conn1 is covered at (169.6,110.0) by g data-engine-source-id=\"boundary:0\"",
+      "greenAfterFix": "this run: 139, 166, 0, 46 and 170 container route samples for architecture, workflow, sequence, dataflow and lifecycle, with no covered route in any family",
+      "unitGuard": "src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx asserts the canvas paint order lane < approve < draft/review and the export order lane < approve < member"
+    },
+    "labelBaseline": {
+      "defect": "dominant-baseline=\"text-before-edge\" was declared on the <text> element only; WebKit does not inherit it into child <tspan>s, so every engine label painted about one ascent high and straddled its box, while Chromium inherited the value and looked correct",
+      "fix": "NodeView EngineLabels, EdgeView EngineRouteLabel and renderSvg's engineLabelsSvg declare the baseline on each tspan, and the canvas and the export apply the same per-line rule",
+      "redBeforeFix": "with the paint order fixed and the baseline not, the new label assertion failed: architecture: label title paints its first line at (32.0,-11.8); the engine put it at (32.0,16.0)",
+      "greenAfterFix": "this run: every placed engine label of the five families starts within 2 px of the engine's first-line origin and stays inside the box that owns it",
+      "unitGuard": "src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx asserts a dominant-baseline on every canvas tspan and on every exported tspan",
+      "chromium": "Chromium already inherited the text element's value, so declaring it per line leaves a Chromium render where it was"
+    }
+  },
   "screenshots": {
     "directory": "e2e-native/evidence/diagram-engine-e4/",
-    "capturedAt": "2026-11-11T06:01:09.322Z",
+    "capturedAt": "2026-11-11T06:59:16.358Z",
     "uiLanguages": {
       "korean": [
         "family-architecture.png",
@@ -204,8 +235,10 @@
     "regenerate": "make test-e2e-native rewrites this directory from the run it makes; screenshots.json there is written by the spec's after() hook, so a failing case still leaves its captures"
   },
   "productDefect": {
+    "classification": "harness-surfaced robustness change, not a reproduced product defect",
     "found": "the canvas gesture handlers called SVGSVGElement.setPointerCapture without a guard",
-    "symptom": "in WKWebView the call raised NotFoundError, which aborted beginNodeDrag, pan and marquee before they did anything: pressing a member selected nothing and a shift-drag did not pan",
+    "whyItSurfaced": "the embedded driver dispatches synthetic PointerEvents, and WebKit raises NotFoundError for a pointer id it never activated; unguarded, that throw leaves the handler before it sets its own gesture state",
+    "notClaimed": "no press, pan or marquee was reproduced failing under real OS input on an unguarded build, so this is recorded as robustness the harness asked for rather than a user-visible defect",
     "fix": "src/components/diagram/canvas/CanvasSurface.tsx capturePointer() attempts capture and ignores a refusal, since losing capture only costs events delivered outside the surface",
     "regression": "src/components/diagram/canvas/CanvasSurface.pointerCapture.test.tsx"
   },
@@ -216,7 +249,10 @@
   },
   "limits": {
     "koreanIme": "not covered; WebDriver cannot compose through the macOS input method, so Korean IME composition stays a human check",
-    "syntheticPointer": "the embedded driver injects synthetic mouse events only (mousedown, never pointerdown) and this WKWebView reports hasFocus() false, so the terminal's first-mouse guard swallows document-level pointerdown; the spec dispatches PointerEvents at the app's handlers and asserts the canvas state they produce",
+    "syntheticPointer": "the embedded driver injects synthetic mouse events only (mousedown, never pointerdown) and this WKWebView reports hasFocus() false, so the terminal's first-mouse guard swallows document-level pointerdown; the spec dispatches PointerEvents at the app's handlers and asserts the canvas state they produce, and a synthetic pointer id is also what makes capture refusable",
     "scope": "a debug native-e2e build on one macOS host; no notarization, updater or release-binary claim, and Chromium Playwright evidence remains the separate frontend gate"
-  }
+  },
+  "followUps": [
+    "the anchored refusal badge in refusal-diagnostic.png overlaps the neighbouring member's label; a small offset would clear it, but the badge's anchor rule is itself asserted here, so it is left as a follow-up rather than widened in this change"
+  ]
 }

@@ -647,6 +647,15 @@ export path independently lays out its source request.
   `layoutDoc` reflow (`layout.ts`) is gone; the projection keeps only coarse
   source slots as the fallback shown before an engine scene arrives.
 
+An engine scene is painted in three bands: containers (lanes, boundaries,
+stages, segments, activations), then routes, then members. A container fill is
+opaque, so painting it with the members hides every route the engine ran inside
+it. The Maru visual SVG emits the same three bands. Engine labels carry the
+drawing baseline on each line, not only on the `<text>` element: WebKit does not
+inherit `dominant-baseline` into a `tspan`, so a label declared only on its
+parent starts one ascent high and straddles its box. Chromium inherits the
+value, so declaring it per line leaves Chromium output where it was.
+
 ### Editing and diagnostics on engine geometry
 
 The canvas, inline editor, fit view, find navigation and property panel read
@@ -671,12 +680,10 @@ current painted scene. A refusal retains the last good scene without changing
 the document or history. Marquee and additive selection, pan, pointer-centred
 zoom, snap, smart guides and connect ghosts use the same displayed boxes.
 
-Pointer capture is an optimization, not a precondition. WebKit raises
-`NotFoundError` when the id no longer names an active pointer (a gesture the
-platform cancelled or re-routed mid-press); letting that throw escape the
-handler costs the whole gesture, not only the events delivered outside the
-surface, so capture is attempted and a refusal ignored. Losing capture still
-selects, pans and marquees; only pointer events leaving the surface are missed.
+Pointer capture is attempted, never required. `setPointerCapture` is wrapped, so
+a refusal cannot abort the gesture: WebKit raises `NotFoundError` for a pointer
+id it never activated, which is what a synthetic pointer sequence produces, and
+losing capture only costs pointer events delivered outside the surface.
 
 Canvas and Maru visual-export engine labels disable browser kerning and
 ligatures and request geometric precision, matching the engine's unshaped text
@@ -2668,8 +2675,10 @@ It maps to the acceptance items as follows.
 - AC4 export: SVG and PNG are produced by the native engine path and both
   receipts report a verified byte readback.
 - AC7 labels: Korean, English and mixed Korean/English labels keep the engine's
-  line breaks. Korean IME composition is not covered here; the harness cannot
-  compose through the macOS input method, so that stays a human check.
-- AC8 interaction: pan, zoom and selection act on the engine scene, and a
-  refused edit anchors the engine's diagnostic beside its element rather than in
-  the canvas notice.
+  line breaks, start where the engine put their first line and stay inside the
+  box that owns them. Korean IME composition is not covered here; the harness
+  cannot compose through the macOS input method, so that stays a human check.
+- AC8 interaction: every route the engine ran inside a container stays visible,
+  with no lane, boundary or member painted over it; pan, zoom and selection act
+  on the engine scene; and a refused edit anchors the engine's diagnostic beside
+  its element rather than in the canvas notice.
