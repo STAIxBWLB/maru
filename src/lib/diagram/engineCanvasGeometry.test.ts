@@ -10,6 +10,7 @@ import type {
 import { archifySpecToDataset } from "./archifyCodec";
 import {
   canvasDisplayNode,
+  currentCanvasDiagnostics,
   canvasGeometryDatasetId,
   canvasGeometryOf,
   canvasLabelsFor,
@@ -25,8 +26,10 @@ import {
 } from "./engineCanvasGeometry";
 import { canonicalSemanticExportInput } from "./export";
 import { renderDocToSvg } from "./renderSvg";
-import { defaultCoalescer, undo, withSnapshot } from "./actions";
-import { detachSemanticDatasetAction } from "./semanticEdit";
+import { defaultCoalescer, redo, undo, withSnapshot } from "./actions";
+import { applyValidatedSemanticEdit } from "./semanticApply";
+import { pinnedEngineHost } from "./__fixtures__/engineHost";
+import { detachSemanticDatasetAction, setSpecField } from "./semanticEdit";
 import { createDiagramStore } from "./state";
 import { createInitialEphemeral } from "./types";
 import type { EngineDiagramType, SemanticSpecDataset } from "./reportTypes";
@@ -879,5 +882,63 @@ describe("a keyboard nudge writes what the canvas shows", () => {
     ]);
     // Another dataset's canvas pins nothing here.
     expect(canvasNudgePins(withFree, "ds-elsewhere", geometry, [member.id], 5, -4)).toEqual([]);
+  });
+});
+
+
+describe("semantic apply history and painted scene ownership", () => {
+  it.each([false, true])("restores apply -> undo -> redo with held layout (refusal=%s)", async (refused) => {
+    const { doc, dataset } = docFor("workflow");
+    const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
+    const initial = fakeEngine();
+    await syncCanvasGeometry(doc, dataset.id, initial.load);
+    const originalScene = canvasGeometryState(dataset.id).geometry;
+    const outcome = await applyValidatedSemanticEdit(store, dataset.id, setSpecField("nodes", 0, "label", "접수 Intake"), pinnedEngineHost);
+    expect(outcome.status).toBe("applied");
+    const applied = store.getState().doc;
+    expect(applied).not.toEqual(doc);
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    type Engine = Awaited<ReturnType<FakeEngine["load"]>>;
+    const releases: Array<(engine: Engine) => void> = [];
+    const held = () => new Promise<Engine>((resolve) => { releases.push(resolve); });
+    const superseded = syncCanvasGeometry(applied, dataset.id, held);
+    expect(canvasGeometryState(dataset.id).geometry).toBe(originalScene);
+    store.setState(undo());
+    expect(store.getState().doc).toEqual(doc);
+    await syncCanvasGeometry(store.getState().doc, dataset.id, held);
+    expect(canvasGeometryState(dataset.id).geometry).toBe(originalScene);
+    store.setState(redo());
+    expect(store.getState().doc).toEqual(applied);
+    const latest = syncCanvasGeometry(store.getState().doc, dataset.id, held);
+    expect(releases).toHaveLength(2);
+    const engine = await fakeEngine({ ok: !refused }).load();
+    releases[0]!(engine);
+    await superseded;
+    // The first apply's result cannot publish over the redo's pending request.
+    expect(canvasGeometryState(dataset.id).geometry).toBe(originalScene);
+    expect(currentCanvasDiagnostics(applied, canvasGeometryState(dataset.id))).toEqual([]);
+    releases[1]!(engine);
+    await latest;
+    const result = canvasGeometryState(dataset.id);
+    expect(store.getState().doc).toEqual(applied);
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    if (refused) {
+      expect(result.status).toBe("stale");
+      expect(result.geometry).toBe(originalScene);
+      expect(currentCanvasDiagnostics(applied, result)).toEqual([selectionDiagnostic()]);
+      // Undo hides the refused request's diagnostics immediately, before a layout.
+      store.setState(undo());
+      expect(currentCanvasDiagnostics(store.getState().doc, result)).toEqual([]);
+      await syncCanvasGeometry(store.getState().doc, dataset.id, initial.load);
+      expect(canvasGeometryState(dataset.id).status).toBe("ready");
+      expect(store.getState().doc).toEqual(doc);
+      store.setState(redo());
+      await syncCanvasGeometry(store.getState().doc, dataset.id, fakeEngine({ ok: false }).load);
+      expect(canvasGeometryState(dataset.id).status).toBe("stale");
+      expect(store.getState().doc).toEqual(applied);
+    } else {
+      expect(result.status).toBe("ready");
+      expect([...result.geometry!.labels.values()].flat().some((label) => label.lines.includes("접수 Intake"))).toBe(true);
+    }
   });
 });

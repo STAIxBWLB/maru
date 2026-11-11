@@ -9,6 +9,7 @@ import {
   type CanvasGeometry,
   type CanvasGeometryState,
 } from "../../../lib/diagram/engineCanvasGeometry";
+import { canvasPositionsState, subscribeCanvasPositions, canvasDisplayOffset } from "../../../lib/diagram/canvasDisplayPositions";
 import type { DiagramDoc, DiagramNode } from "../../../lib/diagram/types";
 
 /**
@@ -33,6 +34,7 @@ export function useCanvasGeometry(doc: DiagramDoc): CanvasGeometryState {
 }
 
 export interface CanvasDisplay {
+  state: CanvasGeometryState;
   datasetId: string | null;
   geometry: CanvasGeometry | null;
   /** The doc nodes as the canvas paints them: the engine's box where it owns one. */
@@ -47,12 +49,16 @@ export interface CanvasDisplay {
 export function useCanvasDisplay(doc: DiagramDoc): CanvasDisplay {
   const state = useCanvasGeometry(doc);
   const geometry = state.geometry;
+  const subscribe = useCallback((listener: () => void) => subscribeCanvasPositions(doc.id, listener), [doc.id]);
+  const snapshot = useCallback(() => canvasPositionsState(doc.id), [doc.id]);
+  const positions = useSyncExternalStore(subscribe, snapshot, snapshot);
+  const offset = useMemo(() => canvasDisplayOffset(doc, state, positions), [doc, state, positions]);
   const nodes = useMemo(
-    () => (geometry ? doc.nodes.map((node) => canvasDisplayNode(node, geometry)) : doc.nodes),
-    [doc.nodes, geometry],
+    () => (geometry || offset ? doc.nodes.map((node) => canvasDisplayNode(node, geometry, offset)) : doc.nodes),
+    [doc.nodes, geometry, offset],
   );
   return useMemo(
-    () => ({ datasetId: state.datasetId, geometry, nodes }),
-    [geometry, nodes, state.datasetId],
+    () => ({ state, datasetId: state.datasetId, geometry, nodes }),
+    [geometry, nodes, state],
   );
 }

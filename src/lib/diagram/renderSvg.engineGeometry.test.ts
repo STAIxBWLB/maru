@@ -107,6 +107,11 @@ describe("published engine geometry in Maru visual exports", () => {
     }
     expect(svg.querySelector('[data-engine-label="edge:relation-0:label"]')?.textContent).toBe("처리Process");
     expect(svg.querySelector('[data-engine-label="document:title"]')?.textContent).toBe("한글 Header");
+    for (const text of svg.querySelectorAll("text[data-engine-label]")) {
+      expect(text.getAttribute("font-kerning")).toBe("none");
+      expect(text.getAttribute("font-variant-ligatures")).toBe("none");
+      expect(text.getAttribute("text-rendering")).toBe("geometricPrecision");
+    }
     expect(rendered.viewBox).toEqual({ x: -40, y: -40, w: 5080, h: 3080 });
     expect(JSON.stringify(doc)).toBe(before);
   });

@@ -14,6 +14,7 @@
  * leaves the canvas on its projected source positions, so opening, editing,
  * history and saving never wait for the engine.
  */
+import { resetCanvasPositions } from "./canvasDisplayPositions";
 import type { Diagnostic, GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { fixedToPixels, isPinnableCanvasMember, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
@@ -469,6 +470,7 @@ function resetEntry(entry: Entry): void {
 
 /** Invalidate displayed scenes and in-flight work when opening/replacing a document. */
 export function resetCanvasGeometry(): void {
+  resetCanvasPositions();
   for (const entry of entries.values()) resetEntry(entry);
 }
 
@@ -487,8 +489,22 @@ export function matchingCanvasGeometry(doc: DiagramDoc): CanvasGeometry | null {
   }
 }
 
+/** Diagnostics belong to the attempted request, never to a retained old scene. */
+export function currentCanvasDiagnostics(doc: DiagramDoc, state: CanvasGeometryState): readonly Diagnostic[] {
+  const id = canvasGeometryDatasetId(doc);
+  const entry = id ? entries.get(id) : undefined;
+  const dataset = doc.datasets?.find((item) => item.id === id);
+  if (!entry || entry.documentId !== doc.id || entry.state !== state || dataset?.kind !== "semanticSpec") return [];
+  try {
+    return entry.cacheKey === canvasLayoutKey(JSON.stringify(dataset.spec), doc) ? state.diagnostics : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Drop every cached layout — tests start here so keys never leak across cases. */
 export function _resetCanvasGeometryForTests(): void {
+  resetCanvasPositions();
   entries.clear();
   engineLoader = defaultEngineLoader;
 }

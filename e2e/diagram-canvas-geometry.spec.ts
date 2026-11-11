@@ -438,3 +438,59 @@ test("ArrowRight on a derived dataflow stage changes neither doc nor history", a
   await expect(undo).toBeDisabled();
   expect(await readDoc()).toEqual(before);
 });
+
+// A held layout makes the optimistic display interval observable in Chromium.
+test("inline edit and find use the shared dropped position before layout publishes", async ({ page }) => {
+  await importSpec(page, "workflow", mixedSpec("workflow"));
+  await showWholePage(page);
+  await page.evaluate(async () => {
+    const load = (specifier: string) => import(specifier);
+    const geometry = await load("/src/lib/diagram/engineGeometry.ts");
+    const canvas = await load("/src/lib/diagram/engineCanvasGeometry.ts");
+    const engine = await geometry.loadGeometryEngine();
+    let release!: () => void;
+    const held = new Promise((resolve) => { release = () => resolve(engine); });
+    canvas._setCanvasEngineLoaderForTests(() => held);
+    (window as unknown as { releaseCanvasLayout: () => void }).releaseCanvasLayout = () => {
+      canvas._setCanvasEngineLoaderForTests(null);
+      release();
+    };
+  });
+  try {
+    const member = page.locator('[data-engine-source-id="draft"] .maru-diagram-node[data-node-id]');
+    const sourceBox = await member.locator("..").getAttribute("data-engine-box");
+    const rect = await member.boundingBox();
+    if (!rect) throw new Error("The workflow member is not visible");
+    await page.mouse.move(rect.x + 8, rect.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(rect.x + 108, rect.y + 48, { steps: 4 });
+    await page.mouse.up();
+    const moved = await member.boundingBox();
+    expect(moved!.x - rect.x).toBeGreaterThan(40);
+    // No new engine box has landed; the drop is shared optimistic geometry.
+    expect(await member.locator("..").getAttribute("data-engine-box")).toBe(sourceBox);
+    await page.keyboard.press("F2");
+    const editor = page.locator("textarea.maru-diagram-inline-editor");
+    await expect(editor).toBeVisible();
+    const editorRect = await editor.boundingBox();
+    const current = await member.boundingBox();
+    expect(Math.abs(editorRect!.x - current!.x)).toBeLessThan(2);
+    expect(Math.abs(editorRect!.y - current!.y)).toBeLessThan(2);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("ControlOrMeta+f");
+    const query = page.locator('.maru-diagram-find-bar input[type="search"]');
+    await query.fill("초안 Draft");
+    await query.press("Enter");
+    const centered = await member.boundingBox();
+    const surface = await page.locator(".maru-diagram-canvas").boundingBox();
+    expect(Math.abs(centered!.x + centered!.width / 2 - surface!.x - surface!.width / 2)).toBeLessThan(2);
+    expect(Math.abs(centered!.y + centered!.height / 2 - surface!.y - surface!.height / 2)).toBeLessThan(2);
+    await query.press("Escape");
+    await page.getByRole("button", { name: "맞춤", exact: true }).click();
+    const fitted = await member.boundingBox();
+    expect(fitted!.x).toBeGreaterThanOrEqual(surface!.x - 2);
+    expect(fitted!.x + fitted!.width).toBeLessThanOrEqual(surface!.x + surface!.width + 2);
+  } finally {
+    await page.evaluate(() => { (window as unknown as { releaseCanvasLayout: () => void }).releaseCanvasLayout(); });
+  }
+});

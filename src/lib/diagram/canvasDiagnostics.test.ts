@@ -1,0 +1,118 @@
+import { describe, expect, it } from "vitest";
+import type { Diagnostic } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
+import { archifySpecToDataset } from "./archifyCodec";
+import { canvasDiagnosticCategory, mapCanvasDiagnostics } from "./canvasDiagnostics";
+import type { CanvasGeometry, CanvasGeometryLabel } from "./engineCanvasGeometry";
+import type { EngineDiagramType } from "./reportTypes";
+import { descriptorFor, projectSemanticDocument, projectedRelationEdgeIds, resolveSemanticMember, specEntries } from "./semantic";
+
+function fixture(type: EngineDiagramType = "workflow") {
+  const { dataset } = archifySpecToDataset(type, structuredClone(SEMANTIC_FIXTURES[type]), { id: "diagnostic-ds" });
+  const doc = projectSemanticDocument(dataset).doc;
+  const labels = new Map<string, CanvasGeometryLabel[]>();
+  const geometry: CanvasGeometry = {
+    boxes: new Map(doc.nodes.map((node, index) => {
+      const kind = resolveSemanticMember(doc, { nodeId: node.id })?.kind === "container" ? "container" as const : "node" as const;
+      const box = { id: node.id, sourceId: node.id, role: kind, x: 100 + index * 200, y: 150, w: 180, h: 70 };
+      labels.set(node.id, [{ id: `${kind}:${node.id}:label`, targetId: node.id, role: "label", lines: ["한글 English"], x: box.x + 8, y: box.y + 9, w: 150, h: 20, fontSize: 13, weight: 400 }]);
+      return [node.id, box];
+    })),
+    labels,
+    routes: new Map(doc.edges.map((edge) => [edge.id, { id: edge.id, sourceId: edge.id, points: [{ x: 300, y: 250 }, { x: 400, y: 250 }, { x: 400, y: 350 }] }])),
+    pageLabels: [{ id: "title", targetId: "document", role: "label", lines: ["Document"], x: 20, y: 10, w: 200, h: 30, fontSize: 24, weight: 700 }],
+    page: { x: 0, y: 0, w: 900, h: 700 },
+    diagnostics: [],
+  };
+  return { dataset, doc, geometry };
+}
+
+function diagnostic(path: string, code = "workflow/geometry-label-fit"): Diagnostic {
+  return { code, path, rule: "geometry-v1/geometry-label-fit", message: "Measured text needs 12px more width", fix: "Shorten nodes[0].label or enlarge its source box" };
+}
+
+describe("canvas diagnostic anchors", () => {
+  it.each<EngineDiagramType>(["architecture", "workflow", "sequence", "dataflow", "lifecycle"])("maps %s source JSON-pointer indexes to its measured node label", (type) => {
+    const { doc, dataset, geometry } = fixture(type);
+    const descriptor = descriptorFor(dataset)!;
+    const sourceId = specEntries(dataset.spec, descriptor.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    const label = geometry.labels.get(id)![0]!;
+    const cause = diagnostic(`/${descriptor.entities}/0/label`);
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, geometry, [cause]);
+    expect(item!.diagnostic).toBe(cause);
+    expect(item!.target).toEqual({ kind: "label", id: label.id, x: label.x + label.w + 8, y: label.y });
+  });
+
+  it("uses displayed drag positions and source fallback for a first-run refusal", () => {
+    const { doc, dataset, geometry } = fixture();
+    const id = dataset.idMap.draft!;
+    const box = geometry.boxes.get(id)!;
+    const displayed = doc.nodes.map((node) => node.id === id ? { ...node, x: box.x + 60, y: box.y + 45, w: box.w, h: box.h } : node);
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/nodes/0/label")], displayed);
+    const label = geometry.labels.get(id)![0]!;
+    expect(item!.target).toMatchObject({ x: label.x + label.w + 8 + 60, y: label.y + 45 });
+    const [fallback] = mapCanvasDiagnostics(doc, dataset.id, null, [diagnostic("/nodes/0/label")], displayed);
+    expect(fallback!.target).toEqual({ kind: "node", id, x: box.x + 60 + box.w + 8, y: box.y + 45 });
+  });
+
+  it("anchors named and index-keyed containers by their projected membership", () => {
+    for (const type of ["workflow", "dataflow"] as const) {
+      const { doc, dataset, geometry } = fixture(type);
+      const field = descriptorFor(dataset)!.container!.field;
+      const [item] = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic(`/${field}/0`)]);
+      expect(item!.target?.kind).toBe("container");
+      const member = resolveSemanticMember(doc, { nodeId: item!.target!.id });
+      expect(member).toMatchObject({ kind: "container", field, index: 0 });
+    }
+  });
+
+  it("keeps node and relation labels separate when their canvas ids collide", () => {
+    const { dataset } = fixture();
+    const relations = specEntries(dataset.spec, "edges");
+    relations[0]!.id = "draft";
+    const doc = projectSemanticDocument(dataset).doc;
+    const shared = dataset.idMap.draft!;
+    expect(doc.edges[0]!.id).toBe(shared);
+    const label = (id: string, y: number): CanvasGeometryLabel => ({ id, targetId: shared, role: "label", lines: [id], x: 10, y, w: 30, h: 20, fontSize: 13, weight: 400 });
+    const geometry: CanvasGeometry = { boxes: new Map(), labels: new Map([[shared, [label("node:draft:label", 20), label("edge:draft:label", 80)]]]), routes: new Map(), pageLabels: [], page: null, diagnostics: [] };
+    const items = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/nodes/0/label"), diagnostic("/edges/0/label")]);
+    expect(items.map((item) => item.target?.id)).toEqual(["node:draft:label", "edge:draft:label"]);
+    expect(items.map((item) => item.target?.y)).toEqual([20, 80]);
+  });
+
+  it("uses projection relation indexes instead of guessing generated or colliding route ids", () => {
+    const { dataset } = fixture();
+    const relations = specEntries(dataset.spec, "edges");
+    delete relations[0]!.id;
+    relations[1]!.id = "edge:0";
+    const doc = projectSemanticDocument(dataset).doc;
+    const ids = projectedRelationEdgeIds(dataset);
+    const geometry: CanvasGeometry = { boxes: new Map(), labels: new Map(), routes: new Map([
+      [ids[0]!, { id: ids[0]!, sourceId: "edge:0:generated:generated", points: [{ x: 10, y: 20 }, { x: 50, y: 60 }] }],
+      [ids[1]!, { id: ids[1]!, sourceId: "edge:0", points: [{ x: 90, y: 100 }, { x: 130, y: 140 }] }],
+    ]), pageLabels: [], page: null, diagnostics: [] };
+    const items = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/edges/0/via/0"), diagnostic("/edges/1")]);
+    expect(items.map((item) => item.target?.id)).toEqual(ids);
+    expect(items.map((item) => item.target?.x)).toEqual([58, 138]);
+  });
+
+  it("anchors page title but leaves unresolvable or malformed pointers as canvas notices", () => {
+    const { doc, dataset, geometry } = fixture();
+    const paths = ["/meta/title", "/meta/viewBox", "/nodes/-1/label", "/nodes/00/label", "/nodes/99/label", "/nodes/0/~2", "", "/unknown/0"];
+    const items = mapCanvasDiagnostics(doc, dataset.id, geometry, paths.map((path) => diagnostic(path)));
+    expect(items[0]!.target).toEqual({ kind: "label", id: "title", x: 228, y: 10 });
+    expect(items.slice(1).every((item) => item.target === null)).toBe(true);
+  });
+
+  it("categorizes only recognized codes and retains unknown engine prose verbatim", () => {
+    expect(canvasDiagnosticCategory(diagnostic("/nodes/0/label"))).toBe("text");
+    expect(canvasDiagnosticCategory(diagnostic("/nodes/0", "workflow/geometry-node-overlap"))).toBe("overlap");
+    expect(canvasDiagnosticCategory(diagnostic("/edges/0", "workflow/route-blocked"))).toBe("routing");
+    const unknown = diagnostic("/meta/viewBox", "future/label-new-rule");
+    const { doc, dataset } = fixture();
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, null, [unknown]);
+    expect(item!.category).toBe("unknown");
+    expect(item!.diagnostic).toBe(unknown);
+  });
+});
