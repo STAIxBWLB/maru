@@ -105,6 +105,17 @@ describe("canvas diagnostic anchors", () => {
     expect(items.slice(1).every((item) => item.target === null)).toBe(true);
   });
 
+  it("ignores inherited idMap keys and maps raw source indexes before filtering", () => {
+    const { dataset } = fixture();
+    const nodes = specEntries(dataset.spec, "nodes");
+    nodes[0]!.id = "constructor";
+    dataset.spec.nodes = [null, ...nodes];
+    const doc = projectSemanticDocument(dataset).doc;
+    const mapped = mapCanvasDiagnostics(doc, dataset.id, null, [diagnostic("/nodes/1/label"), diagnostic("/nodes/0/label")]);
+    expect(mapped[0]!.target).toMatchObject({ kind: "node", id: "constructor" });
+    expect(mapped[1]!.target).toBeNull();
+  });
+
   it("categorizes only recognized codes and retains unknown engine prose verbatim", () => {
     expect(canvasDiagnosticCategory(diagnostic("/nodes/0/label"))).toBe("text");
     expect(canvasDiagnosticCategory(diagnostic("/nodes/0", "workflow/geometry-node-overlap"))).toBe("overlap");

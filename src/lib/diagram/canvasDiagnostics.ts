@@ -105,7 +105,7 @@ export function mapCanvasDiagnostics(
     const container = semanticContainers(descriptor).find((item) => item.field === field);
     const sourceId = typeof source.entry.id === "string" ? source.entry.id : null;
     const id = field === descriptor.entities && sourceId !== null
-      ? dataset.idMap[sourceId] ?? sourceId
+      ? Object.hasOwn(dataset.idMap, sourceId) ? dataset.idMap[sourceId]! : sourceId
       : container ? semanticContainerId(dataset.id, container.role, container.keyedBy === "id" ? sourceId ?? "" : String(source.index)) : null;
     if (!id) return null;
     const member = resolveSemanticMember(doc, { nodeId: id });
