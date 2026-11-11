@@ -71,8 +71,11 @@ pub const AUTO_FIT_BEYOND_MODEL: &[(&str, &[&str])] = &[
         &["grow:a:3712", "wrap:a"],
     ),
     (
+        // An oval state fits its text inside the ellipse's inscribed rectangle
+        // and never grows into the band below it, so this label reaches the
+        // readable floor instead of taking the band's spare height.
         "e2-boundary-lifecycle-v1-primary-width-below",
-        &["grow:a:3968", "wrap:a"],
+        &["shrink:a:label:640", "wrap:a"],
     ),
     (
         "e2-boundary-lifecycle-v1-detail-width-sublabel-below",
@@ -82,7 +85,11 @@ pub const AUTO_FIT_BEYOND_MODEL: &[(&str, &[&str])] = &[
         "e2-boundary-lifecycle-v1-detail-width-tag-below",
         &["grow:a:3968", "wrap:a"],
     ),
-    ("e2-boundary-lifecycle-v2-primary-width-below", &["wrap:a"]),
+    (
+        // Same reason as the v1 case above.
+        "e2-boundary-lifecycle-v2-primary-width-below",
+        &["shrink:a:label:640", "wrap:a"],
+    ),
     (
         "e2-boundary-lifecycle-v2-detail-width-sublabel-below",
         &["grow:a:4096", "wrap:a"],

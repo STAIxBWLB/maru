@@ -36,6 +36,7 @@ import {
   canvasLabelLines,
   canvasMoveBase,
   type CanvasGeometry,
+  type CanvasGeometryPrimitive,
   type CanvasLabelLines,
 } from "../../../lib/diagram/engineCanvasGeometry";
 import { isPinnableCanvasMember } from "../../../lib/diagram/engineGeometryCanvas";
@@ -74,6 +75,7 @@ import {
 } from "../DiagramStoreContext";
 import { EdgeMarkers } from "./EdgeMarkers";
 import { EdgeView, type EngineRoute } from "./EdgeView";
+import { EnginePrimitives } from "./EnginePrimitives";
 import { Marquee } from "./Marquee";
 import { EngineLabels, NodeView } from "./NodeView";
 import { SmartGuides } from "./SmartGuides";
@@ -177,6 +179,8 @@ export interface CanvasSurfaceProps {
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const SMART_GUIDE_THRESHOLD_PX = 6;
+/** Stable empty list, so a canvas without a scene does not re-render the layer. */
+const NO_PRIMITIVES: readonly CanvasGeometryPrimitive[] = [];
 
 function marqueeRect(g: MarqueeState): Rect {
   const x = Math.min(g.startCanvasX, g.currentCanvasX);
@@ -939,16 +943,16 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             />
           </g>
         ) : null}
-        {geometry && geometry.pageLabels.length > 0 ? (
-          // The engine's title and subtitle sit in the header band its page
-          // offset reserves; without them the band is blank.
-          <EngineLabels labels={geometry.pageLabels} color="#111827" />
-        ) : null}
         {/* Engine containers (lanes, boundaries, stages, segments) are frames:
             their fills would hide every route inside them if they were painted
             with the members, so they go under the edges. `renderSvg` keeps the
             same order. */}
         {visible.nodes.filter(isEngineContainer).map(renderNode)}
+        {/* The engine's underlay shapes — a sequence lifeline, a phase span, a
+            lifecycle band — paint after the frames and before the routes, in
+            the writer's own order, so a message reads against its participant's
+            timeline and no shape covers a route the engine ran. */}
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="underlay" />
         {visible.edges.map((edge) => (
           <EdgeView
             key={edge.id}
@@ -961,6 +965,16 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
           />
         ))}
         {visible.nodes.filter((n) => !isEngineContainer(n)).map(renderNode)}
+        {/* Overlays come after the members: a lifecycle final border sits on its
+            own state and would be hidden by the state's box. */}
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="overlay" />
+        {geometry && geometry.pageLabels.length > 0 ? (
+          // The engine's title and subtitle sit in the header band its page
+          // offset reserves. They are page chrome, so they paint after the
+          // scene: above a lane, boundary or stage frame that reaches up to
+          // them, exactly as `renderSvg` emits them.
+          <EngineLabels labels={geometry.pageLabels} color="#111827" />
+        ) : null}
         <SmartGuides guides={guides} />
         {connectGhost ? (
           <line

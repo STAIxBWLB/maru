@@ -2380,6 +2380,7 @@ mod tests {
                 containers: vec![],
                 routes,
                 labels: vec![],
+                primitives: vec![],
                 legend: crate::geometry::GeometryLegend {
                     content_bounds: None,
                     title_y: None,

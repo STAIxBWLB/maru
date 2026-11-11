@@ -371,6 +371,12 @@ pub(crate) fn place(spec: &LifecycleSpec, scene: &mut SceneBuilder) -> Result<()
         } else {
             Some(OUTCOME_TOP)
         };
+        // Maru draws a start, success or failure state as an oval, so the state's
+        // own text must be fitted inside the ellipse rather than across the whole
+        // box. This is the same rule the canvas projection uses to pick a shape.
+        if matches!(state.state_type.as_str(), "start" | "success" | "failure") {
+            scene.mark_ellipse(&state.id);
+        }
         let placed = scene.add_node(
             &state.id,
             &state.state_type,
@@ -512,11 +518,26 @@ mod tests {
         crate::layout::layout_json(&request.to_string())
     }
 
+    /// A lifecycle scene moves below its emitted header band, so every emitted
+    /// vertical position is the authored one plus the page's content offset.
+    /// These tests assert the authored rows and read the band from the retained
+    /// field rather than hard-coding how tall a title happens to measure.
+    fn band(report: &crate::geometry::GeometryReport) -> i32 {
+        report
+            .geometry
+            .as_ref()
+            .and_then(|geometry| geometry.page.content_offset)
+            .map(|offset| offset.y)
+            .unwrap_or(0)
+    }
+
     #[test]
     fn places_states_lanes_and_transition_geometry_deterministically() {
         let spec = r#"{"schema_version":2,"diagram_type":"lifecycle","meta":{"title":"Lifecycle","output":"lifecycle.html"},"lanes":[{"id":"main","label":"Main"}],"states":[{"id":"begin","type":"start","label":"Begin","sublabel":"Current","lane":"main","col":0,"step":"Entry"},{"id":"done","type":"success","label":"Done","lane":"main","col":1}],"transitions":[{"id":"complete","from":"begin","to":"done","label":"complete","note":"after review","route":"auto","fromSide":"right","toSide":"left","labelAt":[500,200]}]}"#;
         let report = layout(spec);
         assert!(report.ok, "{:?}", report.diagnostics);
+        let shift = band(&report);
+        assert!(shift > 0, "the emitted title band did not move the lane");
         let geometry = report.geometry.unwrap();
         assert_eq!(geometry.nodes.len(), 2);
         assert_eq!(geometry.routes.len(), 1);
@@ -530,12 +551,21 @@ mod tests {
             .iter()
             .find(|node| node.id == "done")
             .unwrap();
-        assert_eq!((begin.bounds.x, begin.bounds.y), (60 * 64, 56 * 64));
         assert_eq!(
-            (begin.bounds.width, begin.bounds.height),
-            (140 * 64, 64 * 64)
+            (begin.bounds.x, begin.bounds.y - shift),
+            (60 * 64, 56 * 64)
         );
-        assert_eq!((done.bounds.x, done.bounds.y), (264 * 64, 56 * 64));
+        assert_eq!(begin.bounds.width, 140 * 64);
+        // The default state is 64 px tall. This one carries a label, a sublabel
+        // and a step inside an oval's inscribed rectangle, which is narrower
+        // than its box, so auto-fit grows it downward by the few pixels those
+        // three lines need and never by more than the row below allows.
+        assert!(
+            begin.bounds.height >= 64 * 64 && begin.bounds.height < 72 * 64,
+            "the oval state grew to {} units",
+            begin.bounds.height
+        );
+        assert_eq!((done.bounds.x, done.bounds.y - shift), (264 * 64, 56 * 64));
         assert!(geometry
             .containers
             .iter()
@@ -560,15 +590,22 @@ mod tests {
         let spec = r#"{"schema_version":1,"diagram_type":"lifecycle","meta":{"title":"Lifecycle","output":"lifecycle.html"},"lanes":[{"id":"main","label":"Main"},{"id":"ordinary","label":"Ordinary"}],"states":[{"id":"phase","type":"start","label":"Phase","lane":"main","col":0},{"id":"event","type":"active","label":"Event","lane":"ordinary","col":0}],"transitions":[]}"#;
         let report = layout(spec);
         assert!(report.ok, "{:?}", report.diagnostics);
+        let shift = band(&report);
         let nodes = report.geometry.unwrap().nodes;
         let phase = nodes.iter().find(|node| node.id == "phase").unwrap();
         let event = nodes.iter().find(|node| node.id == "event").unwrap();
-        assert_eq!((phase.bounds.x, phase.bounds.y), (35 * 64, 126 * 64));
+        assert_eq!(
+            (phase.bounds.x, phase.bounds.y - shift),
+            (35 * 64, 126 * 64)
+        );
         assert_eq!(
             (phase.bounds.width, phase.bounds.height),
             (118 * 64, 62 * 64)
         );
-        assert_eq!((event.bounds.x, event.bounds.y), (339 * 64, 278 * 64));
+        assert_eq!(
+            (event.bounds.x, event.bounds.y - shift),
+            (339 * 64, 278 * 64)
+        );
         assert_eq!(
             (event.bounds.width, event.bounds.height),
             (126 * 64, 58 * 64)
@@ -597,6 +634,7 @@ mod tests {
         });
         let report = crate::layout::layout_json(&request.to_string());
         assert!(report.ok, "{:?}", report.diagnostics);
+        let shift = band(&report);
         let node = report
             .geometry
             .unwrap()
@@ -608,6 +646,6 @@ mod tests {
             node.position_source,
             crate::geometry::GeometryPositionSource::PlannedPin
         );
-        assert_eq!((node.bounds.x, node.bounds.y), (35 * 64, 100 * 64));
+        assert_eq!((node.bounds.x, node.bounds.y - shift), (35 * 64, 100 * 64));
     }
 }

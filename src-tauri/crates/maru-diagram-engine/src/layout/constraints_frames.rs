@@ -511,6 +511,7 @@ mod tests {
             containers,
             routes: Vec::new(),
             labels,
+            primitives: Vec::new(),
             legend: GeometryLegend {
                 content_bounds: None,
                 title_y: None,

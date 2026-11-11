@@ -15,7 +15,7 @@
  * history and saving never wait for the engine.
  */
 import { resetCanvasPositions } from "./canvasDisplayPositions";
-import type { Diagnostic, GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type { Diagnostic, GeometryPrimitive, GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { fixedToPixels, isPinnableCanvasMember, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
 import { ENGINE_DIAGRAM_TYPES, type SemanticSpecDataset } from "./reportTypes";
@@ -64,6 +64,57 @@ export interface CanvasGeometryRoute {
   points: readonly CanvasGeometryPoint[];
 }
 
+export type CanvasGeometryPrimitiveShape =
+  | { kind: "rect"; x: number; y: number; w: number; h: number; radius: number }
+  | { kind: "line"; from: CanvasGeometryPoint; to: CanvasGeometryPoint }
+  | { kind: "polyline"; points: readonly CanvasGeometryPoint[] }
+  | { kind: "circle"; center: CanvasGeometryPoint; radius: number }
+  | { kind: "polygon"; points: readonly CanvasGeometryPoint[] };
+
+/**
+ * A shape the engine's writer paints that is not a member, a container or a
+ * route: a lifeline, a phase span, a lifecycle initial marker, rail or band, a
+ * final border, or a legend swatch. They are the engine's own, in canvas pixels,
+ * so the canvas never re-derives one from node boxes.
+ */
+export interface CanvasGeometryPrimitive {
+  kind: string;
+  /** The member, container, route or legend key the primitive belongs to. */
+  owner: string;
+  layer: "underlay" | "overlay";
+  /** The engine's semantic colour role, which the canvas maps to its palette. */
+  paint: string;
+  stroke: number;
+  dash: readonly number[] | null;
+  arrow: boolean;
+  shape: CanvasGeometryPrimitiveShape;
+}
+
+/**
+ * How far the drawn box around a route label sits outside the engine's measured
+ * text box. The engine's box is the glyph ink the label was fitted to, so a box
+ * drawn at exactly those bounds has the text touching its own border; the canvas
+ * and the SVG export both draw it this much larger and leave the text where the
+ * engine put it.
+ */
+export const ENGINE_LABEL_BOX_PAD = 3;
+
+/**
+ * The engine's semantic paint role, mapped to this canvas's own palette. The
+ * report names the role rather than the colour for exactly this reason: the
+ * canvas paints members with the document's style, so the shared shapes take
+ * that same neutral member colour instead of importing the engine's theme.
+ */
+export const ENGINE_PRIMITIVE_PAINT: Readonly<Record<string, { fill: string; stroke: string }>> = {
+  line: { fill: "none", stroke: "#94a3b8" },
+  accentLine: { fill: "none", stroke: "#059669" },
+  securityLine: { fill: "none", stroke: "#e11d48" },
+  dashedLine: { fill: "none", stroke: "#7c3aed" },
+  node: { fill: "#ffffff", stroke: "#1f2937" },
+  outlineNode: { fill: "none", stroke: "#1f2937" },
+  accentFill: { fill: "#059669", stroke: "none" },
+};
+
 export interface CanvasGeometryPage {
   x: number;
   y: number;
@@ -78,6 +129,12 @@ export interface CanvasGeometry {
   labels: ReadonlyMap<string, readonly CanvasGeometryLabel[]>;
   /** Canvas edge id → engine route points. */
   routes: ReadonlyMap<string, CanvasGeometryRoute>;
+  /**
+   * The engine's own shapes that no member, container or route covers — a
+   * sequence lifeline, a workflow phase span, a lifecycle marker, rail, band or
+   * final border — in canvas pixels and in painter order, underlays first.
+   */
+  primitives: readonly CanvasGeometryPrimitive[];
   /** Document title and subtitle in page coordinates: no member owns them. */
   pageLabels: readonly CanvasGeometryLabel[];
   page: CanvasGeometryPage | null;
@@ -150,6 +207,63 @@ function labelRole(id: string): CanvasGeometryLabelRole {
   if (id.endsWith(":sublabel")) return "sublabel";
   if (id.endsWith(":tag")) return "tag";
   return "label";
+}
+
+/**
+ * The engine's published shapes, in canvas pixels, keeping the order the writer
+ * paints them in. Every coordinate goes through `fixedToPixels`; the stroke
+ * width and dash come as the writer's own pixel strings, so they are parsed and
+ * never divided.
+ *
+ * A legend swatch is published too, but this canvas draws no legend: it paints
+ * members with the document's own style, so a colour key would explain colours
+ * the canvas does not use. Those kinds are dropped here rather than left to the
+ * renderers, so the count a consumer sees is the count it must draw.
+ */
+function canvasPrimitivesOf(
+  primitives: readonly GeometryPrimitive[],
+): readonly CanvasGeometryPrimitive[] {
+  const points = (list: readonly { x: number; y: number }[], what: string): CanvasGeometryPoint[] =>
+    list.map((point, index) => ({
+      x: fixedToPixels(point.x, `${what} point ${index} x`),
+      y: fixedToPixels(point.y, `${what} point ${index} y`),
+    }));
+  const px = (value: string, what: string): number => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      throw new Error(`Cannot read engine canvas geometry: ${what} is "${value}", not a pixel length; rebuild the same SDK bindings and retry.`);
+    }
+    return number;
+  };
+  return primitives
+    .filter((primitive) => !primitive.kind.startsWith("legend-"))
+    .map((primitive) => {
+      const what = `the ${primitive.kind} primitive`;
+      const shape = primitive.shape;
+      return {
+        kind: primitive.kind,
+        owner: primitive.owner,
+        layer: primitive.layer,
+        paint: primitive.paint,
+        stroke: px(primitive.stroke, `${what} stroke width`),
+        dash: primitive.dash ? primitive.dash.trim().split(/\s+/).map((part) => px(part, `${what} dash`)) : null,
+        arrow: primitive.arrow,
+        shape: shape.kind === "rect"
+          ? {
+            kind: "rect",
+            x: fixedToPixels(shape.bounds.x, `${what} x`),
+            y: fixedToPixels(shape.bounds.y, `${what} y`),
+            w: fixedToPixels(shape.bounds.width, `${what} width`),
+            h: fixedToPixels(shape.bounds.height, `${what} height`),
+            radius: fixedToPixels(shape.radius, `${what} radius`),
+          }
+          : shape.kind === "line"
+            ? { kind: "line", from: points([shape.from], what)[0]!, to: points([shape.to], what)[0]! }
+            : shape.kind === "circle"
+              ? { kind: "circle", center: points([shape.center], what)[0]!, radius: fixedToPixels(shape.radius, `${what} radius`) }
+              : { kind: shape.kind, points: points(shape.points, what) },
+      };
+    });
 }
 
 /**
@@ -272,6 +386,7 @@ export function canvasGeometryOf(
     boxes,
     labels,
     routes,
+    primitives: canvasPrimitivesOf(scene.primitives ?? []),
     pageLabels,
     page: {
       x: fixedToPixels(scene.page.bounds.x, "the page x"),

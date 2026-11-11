@@ -448,6 +448,47 @@ describe("canvas geometry source agreement with the export path", () => {
     };
     expect(canvasGeometryOf(report, doc, dataset)).toBeNull();
   });
+
+  it("publishes the engine's own shapes in canvas pixels and keeps the writer's order", () => {
+    const { doc, dataset } = docFor("sequence");
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    scene.primitives = [
+      {
+        kind: "sequence-lifeline", owner: scene.nodes[0]!.id, layer: "underlay", paint: "line",
+        stroke: "0.8", dash: "3 7", arrow: false,
+        shape: { kind: "line", from: { x: 64 * 130 + 32, y: 64 * 112 }, to: { x: 64 * 130 + 32, y: 64 * 400 } },
+      },
+      {
+        kind: "lifecycle-final-border", owner: scene.nodes[0]!.id, layer: "overlay", paint: "outlineNode",
+        stroke: "1", arrow: false,
+        shape: { kind: "rect", bounds: { x: 64 * 43, y: 64 * 43, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+      },
+      {
+        kind: "legend-node-swatch", owner: "frontend", layer: "overlay", paint: "node",
+        stroke: "1", arrow: false,
+        shape: { kind: "rect", bounds: { x: 64 * 40, y: 64 * 700, width: 64 * 16, height: 64 * 10 }, radius: 0 },
+      },
+    ];
+    const geometry = canvasGeometryOf({ apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() }, doc, dataset)!;
+    // The canvas draws no legend, so it publishes none: a swatch would explain a
+    // colour palette this canvas does not paint with.
+    expect(geometry.primitives.map((primitive) => primitive.kind)).toEqual(["sequence-lifeline", "lifecycle-final-border"]);
+    const [lifeline, border] = geometry.primitives;
+    expect(lifeline!.layer).toBe("underlay");
+    expect(lifeline!.stroke).toBe(0.8);
+    expect(lifeline!.dash).toEqual([3, 7]);
+    expect(lifeline!.shape).toEqual({ kind: "line", from: { x: 130.5, y: 112 }, to: { x: 130.5, y: 400 } });
+    expect(border!.layer).toBe("overlay");
+    expect(border!.shape).toEqual({ kind: "rect", x: 43, y: 43, w: 174, h: 66, radius: 4 });
+  });
+
+  it("reads a scene published before primitives existed as having none", () => {
+    const { doc, dataset } = docFor("workflow");
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    delete scene.primitives;
+    const geometry = canvasGeometryOf({ apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() }, doc, dataset)!;
+    expect(geometry.primitives).toEqual([]);
+  });
 });
 
 describe("canvas geometry store", () => {
@@ -879,6 +920,7 @@ describe("a keyboard nudge writes what the canvas shows", () => {
       boxes: new Map([[member.id, { id: member.id, sourceId: "draft", role: "node", x: 200, y: 300, w: 180, h: 72 }]]),
       labels: new Map(),
       routes: new Map(),
+      primitives: [],
       pageLabels: [],
       page: null,
       diagnostics: [],

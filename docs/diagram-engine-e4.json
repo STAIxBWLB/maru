@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "stage": "E4 T4 real-app engine canvas check (maru#552)",
-  "sourceCommit": "501596396f8481dd65e76c5ede6383eaa34bea37",
-  "sourceScope": "the debug native-e2e build of this commit; the receipt, docs/diagram.md and the screenshots below land in the next commit and change no source",
+  "sourceCommit": "d134b0abcaa81fbc9b5d2500faf547fbee49a9c7",
+  "sourceScope": "the branch fix/552-canvas-parity branched from this commit; the canvas-parity fix recorded below and this receipt land in the PR, so the next commit that touches source carries them",
   "executionScope": {
     "host": "local Apple silicon Mac, arm64",
     "os": "macOS 27.0.1 (26A434)",
@@ -14,13 +14,13 @@
     "rust": "1.98.0",
     "wasmAssets": "engine:assets ran on 1.93.0 because this host's 1.98 rust-lld cannot link the wasm slices; the app itself is 1.98.0",
     "cargoBuildJobs": 2,
-    "command": "make test-e2e-native",
+    "command": "the four steps make test-e2e-native runs, with the toolchain split this host needs: PATH=1.93.0 pnpm engine:assets; PATH=1.98.0 VITE_NATIVE_E2E=1 vite build; touch src-tauri/build.rs and PATH=1.98.0 cargo build --features native-e2e; PATH=1.93.0 pnpm test:e2e:native over all 18 spec files",
     "exitCode": 0,
     "specFiles": "18 passed, 18 total",
-    "suiteDuration": "00:07:51",
-    "specDuration": "7 passing (4.9s)",
+    "suiteDuration": "00:08:02",
+    "specDuration": "12 passing (9.3s)",
     "fixture": "temporary MARU_NATIVE_E2E_HOME and config dir seeded per run by e2e-native/wdio.conf.ts",
-    "runNote": "two flakes hit while this branch was being proved, neither in a spec this change touches. An earlier run of the previous commit timed out in e2e-native/specs/family-tools.spec.ts waiting 30 s for the launched acon console to write its proof file; it passed alone in 53 s and in the runs since. A focused run made straight after a rebuilt binary failed the refusal case with the canvas showing null instead of workflow/geometry-label-fit; it passed on the next run and in this suite. Both are recorded here rather than dropped, and neither reproduces on demand."
+    "runNote": "no flake in this round. Each of the five canvas-parity checks was proved to bite first, one gap at a time, on the same binary build path: the fix was reverted for that gap alone, the suite was rerun and the case failed for that gap, then the fix was restored. Those red runs are recorded per gap under reviewRound."
   },
   "checks": {
     "familyGeometry": {
@@ -30,6 +30,7 @@
         "data-engine-geometry-status settles on ready for the opened document",
         "data-engine-spec-sha256 equals the hash of the source spec the fixture laid out",
         "every engine member's box equals the engine's box for that member",
+        "the shape actually drawn for a member is measured and equals the engine's box for it within 2 px, so the attribute the canvas writes is not the only evidence",
         "the painted route path equals the engine's route path, compared on the visible stroke path and never on the transparent hit path",
         "every sampled point of a visible route that lands inside a container hit-tests back to that route, so no lane, boundary, stage, segment or activation is painted over a route the engine ran inside it",
         "each engine label carries the engine's wrapped lines, including the mixed Korean and English label",
@@ -89,6 +90,77 @@
         }
       ],
       "containerSampleReading": "521 samples across the five families land inside a container and all of them hit-test back to their own route. Sequence shows 0 because its four routes run outside every container, so it has no sample that a container fill could hide."
+    },
+    "enginePrimitives": {
+      "passed": true,
+      "test": "draws the shapes the writer paints but no member covers",
+      "asserted": [
+        "every primitive the engine publishes for a canvas family — a sequence lifeline, a lifecycle initial marker, stem, head, band, rail or final border — is painted, by owner and in the layer the report names",
+        "each painted primitive's box equals the engine's own coordinates within 1.5 px, measured from the drawn element rather than from an attribute",
+        "a painted primitive takes no pointer, so a lifeline or band never swallows a pan, a marquee or a member drag",
+        "legend swatches are the one kind the canvas drops, because it has no legend for them to key, and it paints none of them",
+        "the check is not vacuous: at least one non-legend primitive was compared"
+      ],
+      "observed": {
+        "sequence": { "published": ["sequence-lifeline", "sequence-lifeline", "sequence-lifeline", "legend-route-swatch", "legend-route-swatch"], "painted": ["sequence-lifeline", "sequence-lifeline", "sequence-lifeline"] },
+        "lifecycle": { "published": ["lifecycle-final-border", "lifecycle-initial-dot", "lifecycle-initial-stem", "lifecycle-initial-head", "legend-initial-dot", "legend-initial-stem", "legend-initial-head", "legend-node-swatch", "legend-node-swatch", "legend-final-outer", "legend-final-inner"], "painted": ["lifecycle-final-border", "lifecycle-initial-dot", "lifecycle-initial-stem", "lifecycle-initial-head"] },
+        "architecture": { "published": ["legend-node-swatch", "legend-node-swatch", "legend-node-swatch"], "painted": [] },
+        "workflow": { "published": ["legend-node-swatch", "legend-node-swatch"], "painted": [] },
+        "dataflow": { "published": ["legend-node-swatch", "legend-route-swatch"], "painted": [] }
+      }
+    },
+    "sequenceLifelines": {
+      "passed": true,
+      "test": "draws a lifeline for every sequence participant",
+      "asserted": [
+        "the engine publishes exactly one sequence lifeline per participant, counted against the scene's own nodes",
+        "the canvas paints that many, each at the engine's own x, y and length within 1.5 px",
+        "each lifeline starts on its own participant's bottom edge at its centre, so the messages read against the right timeline"
+      ],
+      "observed": { "family": "sequence", "participants": 3, "painted": 3 },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-lifelines-sequence.png"
+    },
+    "pageTitle": {
+      "passed": true,
+      "test": "keeps every page title clear of the members and containers the scene paints",
+      "asserted": [
+        "every page label the engine emitted is painted, with the engine's own lines",
+        "every page label is painted after every member and container group in document order, so page chrome sits above the scene",
+        "no member or container outline shares more than 2 px² with a page label's drawn box",
+        "the check is not vacuous: page labels were compared for all five families, and the fixture's lifecycle family is present"
+      ],
+      "observed": {
+        "familiesChecked": 5,
+        "lifecyclePageLabels": [{ "id": "title", "box": [32, 16, 47.046875, 36] }]
+      },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-page-title.png"
+    },
+    "routeLabelBox": {
+      "passed": true,
+      "test": "draws each labelled relation's text inside the box drawn for it",
+      "asserted": [
+        "the box drawn around a route label is the engine's own label box grown by ENGINE_LABEL_BOX_PAD (3 px) on each side, within 2 px",
+        "the text stays at least 2 px inside that box on all four sides, so it is never stroked at its own bounds",
+        "the check is not vacuous: 9 route labels across the five families were compared"
+      ],
+      "observed": { "routeLabelsChecked": 9, "pad": 3, "screenshotFamily": "workflow" },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-route-label-box.png"
+    },
+    "ovalLabel": {
+      "passed": true,
+      "test": "keeps every oval state's label inside the curve it is drawn in",
+      "asserted": [
+        "the canvas draws a lifecycle start, success or failure state as an ellipse, measured from the drawn element",
+        "every corner of that state's painted label lies on or inside the drawn ellipse (reach ≤ 1.02 of its radius)",
+        "the check is not vacuous: at least one oval carried a label"
+      ],
+      "observed": {
+        "ovals": [
+          { "id": "queued", "centre": [130, 152], "radius": [70, 32] },
+          { "id": "done", "centre": [538, 152], "radius": [70, 32] }
+        ]
+      },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-oval-label.png"
     },
     "legacyDocuments": {
       "passed": true,
@@ -175,15 +247,18 @@
         "code": "workflow/geometry-label-fit",
         "targetKind": "node",
         "targetId": "draft",
-        "at": { "x": 232, "y": 72 }
+        "at": { "x": 64, "y": 20 },
+        "covers": 0
       },
       "asserted": [
         "the canvas settles on refused and keeps a 64-hex engine spec hash",
         "the badge carries the engine's own code and is anchored to the member the engine named",
         "no unanchored canvas notice appears alongside the anchored diagnostic",
         "the badge's aria-label carries the engine's code and JSON path",
-        "the badge transform equals the engine's anchor",
-        "the badge sits 0 to 24 px right of the member's box and within 2 px of its top edge"
+        "the badge's drawn transform equals the placement the same mapper produces from the same document and the same displayed members, so the expectation does not come from the DOM",
+        "the badge's drawn box is adjacent to its member (nearest edge within 24 px) but its side is not pinned: which side is free is the mapper's decision",
+        "the badge overlaps no other member's box and no other label, measured on drawn client rectangles, while it may cover its own anchor and sit inside a lane frame",
+        "the badge stays in the keyboard order (tabIndex 0) and is announced as a note (role=\"note\")"
       ],
       "screenshot": "e2e-native/evidence/diagram-engine-e4/refusal-diagnostic.png"
     },
@@ -219,11 +294,48 @@
       "redBeforeFix": "a local 4 px shift of the painted label origin failed with: architecture: label container:boundary:0:label paints its first line at (186.0,56.0); the engine put the label box at (182,56)",
       "greenAfterFix": "after reverting the shift: 7 passing in the focused run and 7 passing (4.9s) in the suite recorded here",
       "testSurface": "e2e-native/specs/diagram-engine-e4.spec.ts and src/lib/nativeE2eBridge.ts; the spec keeps its own copy of the family type, so both declarations gained the box field"
+    },
+    "enginePrimitives": {
+      "defect": "the canvas drew members, containers and routes but dropped every shape the writer paints that no member covers — a sequence's lifelines, a lifecycle initial marker, stem, head, band and final border — so a sequence's messages floated with no participant timeline under them",
+      "fix": "one derivation in src/primitives.rs, published as GeometryDocument.primitives in paint order by the layout and consumed by both writers: the canvas through src/components/diagram/canvas/EnginePrimitives.tsx in the underlay and overlay bands CanvasSurface already paints, and the export through enginePrimitivesSvg in src/lib/diagram/renderSvg.ts. Legend swatches stay out of the canvas adapter because it has no legend for them to key.",
+      "redBeforeFix": "with the two <EnginePrimitives> bands removed and everything else in place, the run failed twice: 'sequence: the engine published a sequence-lifeline for api and the canvas painted none; painted []' and 'sequence: the canvas painted 0 of the engine's 3 lifelines'",
+      "greenAfterFix": "this run: 3 of 3 lifelines painted for the three sequence participants, and 4 of 4 lifecycle shapes (final border, initial dot, stem, head), each at the engine's coordinates with pointer-events none",
+      "unitGuard": "src-tauri/crates/maru-diagram-engine/tests/published_primitives.rs holds the report and the SVG against each other, and src/lib/diagram/engineCanvasGeometry.test.ts plus src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx cover the adapter and the two bands"
+    },
+    "pageTitleBand": {
+      "defect": "the lifecycle page title was painted under the lane that frames the scene. Two causes: the engine's emitted header band shifted workflow and dataflow but not lifecycle, so its first row started inside the band, and the canvas painted page chrome before the containers.",
+      "fix": "layout header_shift includes lifecycle, so the drawing moves below the measured band in Korean or multi-line titles too, and both renderers paint page chrome last: CanvasSurface after the overlay band and renderSvg after the members.",
+      "redBeforeFix": "both halves were proved separately. With page chrome painted first again: 'architecture: page label title is painted before a member or container group, so the scene covers it'. With lifecycle dropped from header_shift and the paint order kept: 'lifecycle: page label title is covered by lane:main over 1496.6px²; the title band must stay clear of the scene'",
+      "greenAfterFix": "this run: page labels painted for all five families, each after every member and container group, with no shared area; the lifecycle title's box (32,16,47.046875,36) sits clear of lane:main",
+      "unitGuard": "src-tauri/crates/maru-diagram-engine/tests/lifecycle_band_title_svg.rs pins the shifted geometry and the emitted band, and the T4 label checks in CanvasSurface.engineGeometry.test.tsx keep the page label in the last band"
+    },
+    "routeLabelBox": {
+      "defect": "a route label's background box was stroked at the engine's measured text bounds, so the text touched its own border and read as cramped against a diagonal route",
+      "fix": "ENGINE_LABEL_BOX_PAD (3 px) grows the drawn box outward in EdgeView and in renderSvg's edge label, and the text origin is left exactly where the engine put it, so the label-origin assertion still holds",
+      "redBeforeFix": "with the pad set back to 0: 'architecture: route label edge:conn1:label draws its box at (161.1,34.0) 37.9x18.0 instead of the engine's label box (161.078125,34,37.859375,18) grown by 3px'",
+      "greenAfterFix": "this run: 9 route labels across the five families draw their box at the engine's label box grown by 3 px on each side, with the text at least 2 px inside on all four sides",
+      "unitGuard": "src/lib/diagram/renderSvg.engineGeometry.test.ts emits the padded box, and src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx asserts the canvas draws the same padded rect"
+    },
+    "ovalLabelPlacement": {
+      "decision": "engine label placement, not a canvas inset. The canvas draws the oval the document asks for and must not move text the engine measured, so a label that crosses the curve is a layout defect.",
+      "defect": "a lifecycle start, success or failure state is drawn as an oval, but its label was placed from the box's own text inset and wrapped to the box's whole width, so the text ran across the curve",
+      "fix": "layout marks those states as ellipses before placing them (SceneBuilder.mark_ellipse from the lifecycle placer) and fits their text inside the ellipse's inscribed rectangle (ELLIPSE_INSET = (1 − 1/√2)/2 per axis). A label that cannot fit that way demotes the node to its full box instead of turning an accepted document into a refusal, and no oval grows to make room.",
+      "redBeforeFix": "with ELLIPSE_INSET set back to 0 and everything else in place: 'lifecycle: label node:queued:label reaches 2.000 of oval queued's radius at (60.0,120.0), so it is painted across the curve'",
+      "greenAfterFix": "this run: both ovals (queued at centre (130,152) radius (70,32) and done at (538,152) radius (70,32)) carry their labels wholly inside the curve",
+      "unitGuard": "the lifecycle layout tests assert the inscribed-rectangle origin and the demotion ladder, and src-tauri/crates/maru-diagram-engine/tests/lifecycle_band_title_svg.rs keeps the emitted label boxes pinned"
+    },
+    "badgeCollision": {
+      "closesPreviousFollowUp": "the followUps entry of the previous receipt, which recorded the anchored badge overlapping the neighbouring member's label and blocking its pointer",
+      "defect": "the anchored refusal badge was drawn at a fixed offset from its anchor at a fixed 300x44 size, so on a packed workflow scene it covered the neighbouring member's label and took that member's click",
+      "fix": "the mapper owns the size (CANVAS_DIAGNOSTIC_BADGE) and the placement: right of the anchor first, then above, below, right-and-under, and opposite last, sliding a step at a time and scoring off-page as unreachable, so the badge lands on the first side that covers nothing. It may cover its own anchor and sit inside a lane frame, never another member or label; the renderer draws at exactly the placed box and keeps the badge in the keyboard order.",
+      "redBeforeFix": "with placeBadge reduced to the fixed right-side offset: 'the badge covers [{\"name\":\"merge\",\"shared\":1915}]; it may hide its own anchor but never another member or label'",
+      "greenAfterFix": "this run: the badge sits at (64,20), above its own member and clear of every other member and label, 0 members covered, still tabIndex 0 and role=\"note\"",
+      "unitGuard": "src/lib/diagram/canvasDiagnostics.test.ts asserts zero overlap with every drawn box except the badge's own member for all five diagnostic families, and src/components/diagram/canvas/CanvasDiagnostics.test.tsx asserts the drawn size and the keyboard order"
     }
   },
   "screenshots": {
     "directory": "e2e-native/evidence/diagram-engine-e4/",
-    "capturedAt": "2026-11-11T07:38:15.969Z",
+    "capturedAt": "2026-11-11T08:36:45.296Z",
     "uiLanguages": {
       "korean": [
         "family-architecture.png",
@@ -231,6 +343,10 @@
         "family-sequence.png",
         "family-dataflow.png",
         "family-lifecycle.png",
+        "gap-lifelines-sequence.png",
+        "gap-page-title.png",
+        "gap-route-label-box.png",
+        "gap-oval-label.png",
         "legacy-v7.png",
         "legacy-v8.png",
         "selection.png",
@@ -260,7 +376,5 @@
     "syntheticPointer": "the embedded driver injects synthetic mouse events only (mousedown, never pointerdown) and this WKWebView reports hasFocus() false, so the terminal's first-mouse guard swallows document-level pointerdown; the spec dispatches PointerEvents at the app's handlers and asserts the canvas state they produce, and a synthetic pointer id is also what makes capture refusable",
     "scope": "a debug native-e2e build on one macOS host; no notarization, updater or release-binary claim, and Chromium Playwright evidence remains the separate frontend gate"
   },
-  "followUps": [
-    "the anchored refusal badge in refusal-diagnostic.png overlaps the neighbouring member's label; a small offset would clear it, but the badge's anchor rule is itself asserted here, so it is left as a follow-up rather than widened in this change"
-  ]
+  "followUps": []
 }

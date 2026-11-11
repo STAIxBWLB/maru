@@ -252,11 +252,18 @@ pub(crate) fn expected(g: &GeometryDocument, options: &SvgOptions) -> Vec<Primit
             bands.entry(band).or_default().push(n);
         }
         if c.schema_version == 1 {
+            // Band baselines are anchored in the source drawing; the emitted
+            // drawing may sit below an emitted header band, and the retained
+            // `page.contentOffset` is the only place that says by how much.
+            let shift = g
+                .page
+                .content_offset
+                .map_or(0, |offset| i64::from(offset.y));
             for band in bands.keys() {
                 let y = match *band {
-                    "phase" => 112 * 64,
-                    "event" => 264 * 64,
-                    "outcome" => 436 * 64,
+                    "phase" => 112 * 64 + shift,
+                    "event" => 264 * 64 + shift,
+                    "outcome" => 436 * 64 + shift,
                     _ => continue,
                 };
                 let left = i64::from(g.page.bounds.x) + 72 * 64;

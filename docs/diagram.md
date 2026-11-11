@@ -581,8 +581,9 @@ for replace/restore.
 ## Canvas geometry
 
 A semantic canvas draws the engine scene rather than its own placement: node
-and container boxes, the label lines the engine wrapped, its route points, and
-the document title and subtitle in the header band the page offset reserves.
+and container boxes, the label lines the engine wrapped, its route points, the
+engine's own shapes that no member covers, and the document title and subtitle
+in the header band the page offset reserves.
 `src/lib/diagram/engineCanvasGeometry.ts` maps one dataset's geometry report onto
 canvas ids (a relation without an id is named by its ordinal: `<role>:<index>`
 in the report, `<datasetId>-e<index>` on the canvas, and `<role>:<index>:generated`
@@ -647,14 +648,34 @@ export path independently lays out its source request.
   `layoutDoc` reflow (`layout.ts`) is gone; the projection keeps only coarse
   source slots as the fallback shown before an engine scene arrives.
 
-An engine scene is painted in three bands: containers (lanes, boundaries,
-stages, segments, activations), then routes, then members. A container fill is
-opaque, so painting it with the members hides every route the engine ran inside
-it. The Maru visual SVG emits the same three bands. Engine labels carry the
-drawing baseline on each line, not only on the `<text>` element: WebKit does not
-inherit `dominant-baseline` into a `tspan`, so a label declared only on its
-parent starts one ascent high and straddles its box. Chromium inherits the
-value, so declaring it per line leaves Chromium output where it was.
+An engine scene is painted in the writer's own bands: containers (lanes,
+boundaries, stages, segments, activations), then the engine's underlay shapes,
+then routes, then members, then its overlay shapes, then page chrome. A
+container fill is opaque, so painting it with the members hides every route the
+engine ran inside it. The Maru visual SVG emits the same bands in the same
+order.
+
+The shapes either side of the routes are the ones no member covers — a sequence
+lifeline, a workflow phase span, a lifecycle initial marker, stem, head, rail,
+band or final border — published as `GeometryDocument.primitives` and derived
+once in the engine, so the canvas and the export cannot disagree about where
+they are. They take no pointer. Legend swatches are the one kind the canvas
+drops, because it has no legend for them to key. A lifecycle page moves below
+its emitted title band like workflow and dataflow already did, and page chrome
+paints last in both renderers, so a lane frame never covers the page title.
+
+A route label's background box is drawn `ENGINE_LABEL_BOX_PAD` (3 px) larger
+than the engine's text box, and the text stays exactly where the engine put it.
+A lifecycle start, success or failure state is drawn as an oval, so the engine
+fits its label inside the ellipse's inscribed rectangle and demotes the node to
+its full box rather than refusing a document that laid out before; the canvas
+never insets that text on its own.
+
+Engine labels carry the drawing baseline on each line, not only on the `<text>`
+element: WebKit does not inherit `dominant-baseline` into a `tspan`, so a label
+declared only on its parent starts one ascent high and straddles its box.
+Chromium inherits the value, so declaring it per line leaves Chromium output
+where it was.
 
 ### Editing and diagnostics on engine geometry
 
@@ -668,7 +689,12 @@ cancels active gestures, including copies that retain their document id.
 Engine diagnostics are read-only asynchronous feedback. A diagnostic naming a
 source member, relation or label appears beside its displayed box or route;
 JSON-pointer paths use the same semantic member and relation-id allocation as
-the canvas projection. Untargeted diagnostics stay in a canvas notice. Only
+the canvas projection. The badge's size and placement belong to the mapper, not
+the renderer: it takes the first side that covers no other member or label
+(right, then above, below, right-and-under, and opposite last, sliding a step at
+a time), may cover the member it explains and sit inside a frame, stays in the
+keyboard order as a note, and is drawn at exactly the box it was placed in.
+Untargeted diagnostics stay in a canvas notice. Only
 results for the current source and pins are shown, including current refusals
 while the last good scene remains visible. They never block opening, editing
 or saving. Korean and English explanations include a cause and next step;

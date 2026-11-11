@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import "../../../lib/i18n/testing";
 import { LocaleContext, t } from "../../../lib/i18n";
-import type { CanvasDiagnosticPlacement } from "../../../lib/diagram/canvasDiagnostics";
+import { CANVAS_DIAGNOSTIC_BADGE, type CanvasDiagnosticPlacement } from "../../../lib/diagram/canvasDiagnostics";
 import { CanvasDiagnostics } from "./CanvasDiagnostics";
 
 const item: CanvasDiagnosticPlacement = {
@@ -29,6 +29,14 @@ describe("localized read-only canvas diagnostics", () => {
     expect(svg).toContain('transform="translate(388,300)"');
     expect(svg).toContain("data-export-ignore");
     expect(svg).not.toContain("<source>");
+  });
+  it("draws the badge at the placed size and keeps it in the keyboard order", () => {
+    const svg = render("ko", [item]);
+    // The mapper places the badge at exactly the size it is drawn at; drawing a
+    // different box would re-introduce the collision the placement avoided.
+    expect(svg).toContain(`width="${CANVAS_DIAGNOSTIC_BADGE.width}" height="${CANVAS_DIAGNOSTIC_BADGE.height}"`);
+    expect(svg).toContain('tabindex="0"');
+    expect(svg).toContain('role="note"');
   });
   it("keeps untargeted diagnostics in the canvas notice only", () => {
     const unanchored = { ...item, target: null };

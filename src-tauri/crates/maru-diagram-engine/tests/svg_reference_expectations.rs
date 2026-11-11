@@ -118,8 +118,12 @@ fn lifecycle_rail_uses_authored_nonzero_endpoints_for_single_main_phase() {
         rail.from, rail.to,
         "one authored main phase still spans the source rail"
     );
-    assert_eq!((rail.from.x, rail.from.y), (154 * 64, 157 * 64));
-    assert_eq!((rail.to.x, rail.to.y), (132 * 64, 157 * 64));
+    // The rail is authored in source coordinates; a lifecycle page also carries
+    // its emitted header band in `page.contentOffset`, so the emitted endpoints
+    // are source + offset on both axes.
+    let shift = g.page.content_offset.map_or(0, |offset| offset.y);
+    assert_eq!((rail.from.x, rail.from.y - shift), (154 * 64, 157 * 64));
+    assert_eq!((rail.to.x, rail.to.y - shift), (132 * 64, 157 * 64));
     let svg = artifact(&spec, &g);
     let doc = roxmltree::Document::parse(&svg).unwrap();
     let primitive = element(&doc, "lifecycle-rail", "main");
@@ -137,12 +141,14 @@ fn lifecycle_rail_uses_authored_nonzero_endpoints_for_single_main_phase() {
     let corrupted = svg.replacen(primitive.attribute("points").unwrap(), "0,0 0,0", 1);
     assert!(!check_svg_artifact(&corrupted, &g, &options).is_empty());
     let page_width = g.page.bounds.width as f64 / 64.0;
+    // Band baselines are source anchors, so they print at source + header band.
+    let band_shift = shift as f64 / 64.0;
     for (band, y) in [("phase", 112.0), ("event", 264.0)] {
         let divider = element(&doc, "lifecycle-band", band);
         assert_eq!(px(divider, "x1"), 72.0);
         assert_eq!(px(divider, "x2"), page_width - 72.0);
-        assert_eq!(px(divider, "y1"), y);
-        assert_eq!(px(divider, "y2"), y);
+        assert_eq!(px(divider, "y1"), y + band_shift);
+        assert_eq!(px(divider, "y2"), y + band_shift);
     }
 }
 

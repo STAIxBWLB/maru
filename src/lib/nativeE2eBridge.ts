@@ -148,6 +148,21 @@ export interface NativeE2eDiagramE4Family {
    *  the label-position check reads where the engine put the label rather than
    *  asking the canvas where it painted it. */
   labels: Array<{ id: string; targetId: string; lines: string[]; box: [number, number, number, number] }>;
+  /** The document title and subtitle: page chrome with no member owner, so the
+   *  spec can prove nothing is painted over them. */
+  pageLabels: Array<{ id: string; lines: string[]; box: [number, number, number, number] }>;
+  /** The engine's own shapes — lifelines, phase spans, bands, markers — as an
+   *  axis-aligned box in canvas pixels, plus the endpoints when the shape is a
+   *  line. The canvas must draw each one, so the spec measures what it painted
+   *  against these rather than against an attribute the canvas itself wrote. */
+  primitives: Array<{
+    kind: string;
+    owner: string;
+    layer: string;
+    box: [number, number, number, number];
+    from?: [number, number];
+    to?: [number, number];
+  }>;
 }
 
 export interface NativeE2eDiagramE4Version {
@@ -179,6 +194,10 @@ export interface NativeE2eDiagramE4Refusal {
   targetId: string;
   targetX: number;
   targetY: number;
+  /** Members that are frames — lanes, boundaries, stages, segments. The badge
+   *  mapper treats one as no obstacle (a badge inside a frame covers nothing),
+   *  so the spec has to know which boxes it may overlap. */
+  frames: string[];
 }
 
 export interface NativeE2eDiagramE4Result {
@@ -626,7 +645,7 @@ function bridgeNamespace(): MaruNativeE2eBridge {
         const [
           { createInitialEphemeral },
           { archifySpecToDataset },
-          { projectSemanticDocument },
+          { projectSemanticDocument, resolveSemanticMember },
           { createDiagramStore },
           { applyValidatedSemanticEdit },
           { undo, redo },
@@ -698,6 +717,41 @@ function bridgeNamespace(): MaruNativeE2eBridge {
                 box: boxOf(label.bounds, what),
               }]
               : [])),
+            pageLabels: scene.labels.flatMap((label) => (typeof label.id === "string" && label.targetId === "document"
+              ? [{ id: label.id, lines: label.text.split("\n"), box: boxOf(label.bounds, what) }]
+              : [])),
+            primitives: (scene.primitives ?? []).map((primitive) => {
+              const shape = primitive.shape;
+              const pointsOf = shape.kind === "polyline" || shape.kind === "polygon" ? shape.points : [];
+              const xs = shape.kind === "rect"
+                ? [shape.bounds.x, shape.bounds.x + shape.bounds.width]
+                : shape.kind === "line"
+                  ? [shape.from.x, shape.to.x]
+                  : shape.kind === "circle"
+                    ? [shape.center.x - shape.radius, shape.center.x + shape.radius]
+                    : pointsOf.map((point) => point.x);
+              const ys = shape.kind === "rect"
+                ? [shape.bounds.y, shape.bounds.y + shape.bounds.height]
+                : shape.kind === "line"
+                  ? [shape.from.y, shape.to.y]
+                  : shape.kind === "circle"
+                    ? [shape.center.y - shape.radius, shape.center.y + shape.radius]
+                    : pointsOf.map((point) => point.y);
+              const box: [number, number, number, number] = [
+                px(Math.min(...xs), what), px(Math.min(...ys), what),
+                px(Math.max(...xs) - Math.min(...xs), what), px(Math.max(...ys) - Math.min(...ys), what),
+              ];
+              return {
+                kind: primitive.kind,
+                owner: primitive.owner,
+                layer: primitive.layer,
+                box,
+                ...(shape.kind === "line"
+                  ? { from: [px(shape.from.x, what), px(shape.from.y, what)] as [number, number],
+                    to: [px(shape.to.x, what), px(shape.to.y, what)] as [number, number] }
+                  : {}),
+              };
+            }),
           });
         }
 
@@ -816,7 +870,18 @@ function bridgeNamespace(): MaruNativeE2eBridge {
         if (refusedReport.ok) {
           throw new Error(`the engine laid out the refusal fixture; the diagnostic check needs a document it refuses: ${JSON.stringify(refusedReport.diagnostics)}`);
         }
-        const placements = mapCanvasDiagnostics(refusedDoc, refusedDataset.id, null, refusedReport.diagnostics);
+        // The badge is placed against everything already painted, so the
+        // fixture has to hand the mapper the same displayed members the canvas
+        // does: with the engine's own boxes absent (this document is refused)
+        // those are the document's own nodes, and a placement computed without
+        // them is one the app never makes.
+        const placements = mapCanvasDiagnostics(
+          refusedDoc,
+          refusedDataset.id,
+          null,
+          refusedReport.diagnostics,
+          refusedDoc.nodes,
+        );
         const anchored = placements.find((placement) => placement.target !== null);
         if (!anchored || !anchored.target) {
           throw new Error(`the engine's refusal carried no member anchor: ${JSON.stringify(refusedReport.diagnostics)}`);
@@ -832,6 +897,11 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           targetId: anchored.target.id,
           targetX: anchored.target.x,
           targetY: anchored.target.y,
+          // The mapper's own rule for what a badge may sit inside, reported
+          // rather than guessed from the painted boxes.
+          frames: refusedDoc.nodes
+            .filter((node) => resolveSemanticMember(refusedDoc, { nodeId: node.id })?.kind === "container")
+            .map((node) => node.id),
         };
 
         return {

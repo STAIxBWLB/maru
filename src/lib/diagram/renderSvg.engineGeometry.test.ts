@@ -70,7 +70,7 @@ function sceneFor(type: EngineDiagramType): { doc: DiagramDoc; geometry: CanvasG
     weight: 400,
   }]);
   return { doc, geometry: {
-    boxes, labels, routes,
+    boxes, labels, routes, primitives: [],
     pageLabels: [{ ...label, id: "document:title", targetId: "document", x: 40, y: 20, lines: ["한글 Header"] }],
     page: { x: 0, y: 0, w: 5000, h: 3000 },
     diagnostics: [],
@@ -134,6 +134,50 @@ describe("published engine geometry in Maru visual exports", () => {
     expect(node.querySelector('[data-engine-label="edge:relation-0:label"]')).toBeNull();
     expect(edge.querySelector('[data-engine-label="node:source-0:label"]')).toBeNull();
     expect(edge.querySelector('[data-engine-label="edge:relation-0:label"]')?.textContent).toBe("처리Process");
+  });
+
+  it("emits the engine's published shapes in the two bands the canvas paints", () => {
+    const { doc, geometry } = sceneFor("sequence");
+    const lifeline = {
+      kind: "sequence-lifeline",
+      owner: "source-0",
+      layer: "underlay" as const,
+      paint: "line",
+      stroke: 0.8,
+      dash: [3, 7],
+      arrow: false,
+      shape: { kind: "line" as const, from: { x: 200.5, y: 260.25 }, to: { x: 200.5, y: 640 } },
+    };
+    const finalBorder = {
+      kind: "lifecycle-final-border",
+      owner: "source-1",
+      layer: "overlay" as const,
+      paint: "outlineNode",
+      stroke: 1,
+      dash: null,
+      arrow: false,
+      shape: { kind: "rect" as const, x: 315, y: 175, w: 170, h: 80, radius: 4 },
+    };
+    vi.mocked(matchingCanvasGeometry).mockReturnValue({ ...geometry, primitives: [lifeline, finalBorder] });
+    const svg = renderDocToSvg(doc).svg;
+    const parsedSvg = parsed(svg);
+    const line = parsedSvg.querySelector('[data-engine-primitive="sequence-lifeline"]')!;
+    expect(line.tagName).toBe("line");
+    expect(line.getAttribute("x1")).toBe("200.5");
+    expect(line.getAttribute("y2")).toBe("640");
+    expect(line.getAttribute("stroke-width")).toBe("0.8");
+    expect(line.getAttribute("stroke-dasharray")).toBe("3 7");
+    const border = parsedSvg.querySelector('[data-engine-primitive="lifecycle-final-border"]')!;
+    expect(border.getAttribute("data-engine-primitive-owner")).toBe("source-1");
+    expect(border.getAttribute("width")).toBe("170");
+    // Paint order: frames, underlays, routes, members, overlays, page chrome.
+    const order = [...parsedSvg.querySelectorAll("[data-engine-source-id], [data-engine-primitive], [data-edge-id], [data-engine-label]")]
+      .map((element) => element.getAttribute("data-engine-primitive")
+        ?? element.getAttribute("data-engine-label")
+        ?? element.getAttribute("data-edge-id")
+        ?? element.getAttribute("data-engine-source-id"));
+    expect(order.indexOf("sequence-lifeline")).toBeLessThan(order.findIndex((id) => id?.startsWith("edge-") || id === doc.edges[0]!.id));
+    expect(order.indexOf("lifecycle-final-border")).toBeGreaterThan(order.lastIndexOf("source-1"));
   });
 
   it("keeps source placement when no matching ready scene is available", () => {

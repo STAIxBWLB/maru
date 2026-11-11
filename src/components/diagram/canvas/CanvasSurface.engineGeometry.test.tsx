@@ -277,6 +277,63 @@ describe("semantic canvas draws engine geometry", () => {
     expect(JSON.stringify(probe!.getState().doc)).toBe(saved);
   });
 
+  it("paints the engine's own shapes under the routes and over the members, taking no pointer", async () => {
+    _setCanvasEngineLoaderForTests(async () => ({
+      layout: (input: LayoutRequest) => {
+        requests.push(input);
+        const report = scene(input);
+        report.geometry!.primitives = [
+          {
+            kind: "sequence-lifeline", owner: "draft", layer: "underlay", paint: "line",
+            stroke: "0.8", dash: "3 7", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 290, y: 64 * 372 }, to: { x: 64 * 290, y: 64 * 600 } },
+          },
+          {
+            kind: "lifecycle-final-border", owner: "review", layer: "overlay", paint: "outlineNode",
+            stroke: "1", arrow: false,
+            shape: { kind: "rect", bounds: { x: 64 * 463, y: 64 * 303, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+          },
+        ];
+        return report;
+      },
+    }));
+    harness = renderCanvas(doc);
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+
+    const canvas = document.body.querySelector(".maru-diagram-canvas")!;
+    const lifeline = canvas.querySelector('[data-engine-primitive="sequence-lifeline"]')!;
+    expect(lifeline.tagName.toLowerCase()).toBe("line");
+    expect(lifeline.getAttribute("x1")).toBe("290");
+    expect(lifeline.getAttribute("y2")).toBe("600");
+    expect(lifeline.getAttribute("stroke-width")).toBe("0.8");
+    expect(lifeline.getAttribute("stroke-dasharray")).toBe("3 7");
+    expect(lifeline.getAttribute("data-engine-primitive-owner")).toBe("draft");
+    const border = canvas.querySelector('[data-engine-primitive="lifecycle-final-border"]')!;
+    expect(border.getAttribute("x")).toBe("463");
+    expect(border.getAttribute("data-engine-primitive-owner")).toBe("review");
+
+    // Scenery, not a target: a lifeline that swallowed the pointer would make
+    // every message on it unselectable.
+    for (const layer of canvas.querySelectorAll("[data-engine-primitive-layer]")) {
+      expect(layer.getAttribute("pointer-events")).toBe("none");
+    }
+
+    // The order the SVG writer uses: frames, underlays, routes, members,
+    // overlays, page chrome.
+    const order = [...canvas.querySelectorAll("[data-node-id], [data-edge-id], [data-engine-primitive], [data-engine-label]")]
+      .map((element) => element.getAttribute("data-engine-primitive")
+        ?? element.getAttribute("data-engine-label")
+        ?? element.getAttribute("data-node-id")
+        ?? element.getAttribute("data-edge-id"));
+    const draft = doc.datasets![0] as SemanticSpecDataset;
+    expect(order.indexOf("sequence-lifeline")).toBeGreaterThan(order.indexOf("ds-flow:lane:main"));
+    expect(order.indexOf("sequence-lifeline")).toBeLessThan(order.indexOf("approve"));
+    expect(order.indexOf("lifecycle-final-border")).toBeGreaterThan(order.indexOf(draft.idMap.review!));
+    expect(order.indexOf("lifecycle-final-border")).toBeLessThan(order.indexOf("title"));
+  });
+
   it("keeps the last scene and says so when the engine refuses", async () => {
     harness = renderCanvas(doc);
     await settle();
@@ -304,7 +361,11 @@ describe("semantic canvas draws engine geometry", () => {
     expect(notice.getAttribute("data-target-id")).toBe((doc.datasets![0] as SemanticSpecDataset).idMap.draft);
     expect(notice.getAttribute("aria-label")).toContain("The label does not fit");
     expect(notice.getAttribute("aria-label")).toContain("shorten it");
-    expect(notice.getAttribute("transform")).toBe("translate(388,300)");
+    // Beside the member is taken by the neighbour's box and above it by the
+    // lane caption, so the badge steps below the member instead of covering
+    // either of them.
+    expect(notice.getAttribute("transform")).toBe("translate(200,380)");
+    expect(notice.getAttribute("tabindex")).toBe("0");
     expect(document.querySelector("[data-canvas-diagnostic-notice]")).toBeNull();
     expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
     let release!: () => void;

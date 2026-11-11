@@ -6,6 +6,7 @@ import {
   type RoutedEdge,
 } from "../../../lib/diagram/edgeRouting";
 import {
+  ENGINE_LABEL_BOX_PAD,
   routePathOf,
   type CanvasGeometryLabel,
   type CanvasGeometryRoute,
@@ -54,10 +55,10 @@ function EngineRouteLabel({ label, color, selected }: {
       pointerEvents="none"
     >
       <rect
-        x={label.x}
-        y={label.y}
-        width={label.w}
-        height={label.h}
+        x={label.x - ENGINE_LABEL_BOX_PAD}
+        y={label.y - ENGINE_LABEL_BOX_PAD}
+        width={label.w + ENGINE_LABEL_BOX_PAD * 2}
+        height={label.h + ENGINE_LABEL_BOX_PAD * 2}
         rx={3}
         ry={3}
         fill="#ffffff"

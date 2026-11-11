@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { archifySpecToDataset } from "./archifyCodec";
-import { canvasDiagnosticCategory, mapCanvasDiagnostics } from "./canvasDiagnostics";
-import type { CanvasGeometry, CanvasGeometryLabel } from "./engineCanvasGeometry";
+import { CANVAS_DIAGNOSTIC_BADGE, canvasDiagnosticCategory, mapCanvasDiagnostics } from "./canvasDiagnostics";
+import { canvasLabelsFor, type CanvasGeometry, type CanvasGeometryLabel } from "./engineCanvasGeometry";
+import type { Rect } from "./geometry";
 import type { EngineDiagramType } from "./reportTypes";
 import { descriptorFor, projectSemanticDocument, projectedRelationEdgeIds, resolveSemanticMember, specEntries } from "./semantic";
 
@@ -20,6 +21,7 @@ function fixture(type: EngineDiagramType = "workflow") {
     })),
     labels,
     routes: new Map(doc.edges.map((edge) => [edge.id, { id: edge.id, sourceId: edge.id, points: [{ x: 300, y: 250 }, { x: 400, y: 250 }, { x: 400, y: 350 }] }])),
+    primitives: [],
     pageLabels: [{ id: "title", targetId: "document", role: "label", lines: ["Document"], x: 20, y: 10, w: 200, h: 30, fontSize: 24, weight: 700 }],
     page: { x: 0, y: 0, w: 900, h: 700 },
     diagnostics: [],
@@ -29,6 +31,32 @@ function fixture(type: EngineDiagramType = "workflow") {
 
 function diagnostic(path: string, code = "workflow/geometry-label-fit"): Diagnostic {
   return { code, path, rule: "geometry-v1/geometry-label-fit", message: "Measured text needs 12px more width", fix: "Shorten nodes[0].label or enlarge its source box" };
+}
+
+/** The drawn badge for one placement, at the size the mapper places at. */
+function badgeOf(target: { x: number; y: number }): Rect {
+  return { x: target.x, y: target.y, w: CANVAS_DIAGNOSTIC_BADGE.width, h: CANVAS_DIAGNOSTIC_BADGE.height };
+}
+
+/** Everything already painted that a badge may not sit on top of. The member
+ *  the badge explains is left out: the badge belongs to it and may sit over it. */
+function drawnBoxes(geometry: CanvasGeometry, except: string | null = null): Rect[] {
+  const boxes: Rect[] = [];
+  for (const [id, box] of geometry.boxes) {
+    if (box.role === "container" || id === except) continue;
+    boxes.push({ x: box.x, y: box.y, w: box.w, h: box.h });
+    for (const label of canvasLabelsFor(geometry, id, "node")) {
+      boxes.push({ x: label.x, y: label.y, w: label.w, h: label.h });
+    }
+  }
+  for (const label of geometry.pageLabels) boxes.push({ x: label.x, y: label.y, w: label.w, h: label.h });
+  return boxes;
+}
+
+function sharedArea(a: Rect, b: Rect): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
 }
 
 describe("canvas diagnostic anchors", () => {
@@ -41,6 +69,31 @@ describe("canvas diagnostic anchors", () => {
     const cause = diagnostic(`/${descriptor.entities}/0/label`);
     const [item] = mapCanvasDiagnostics(doc, dataset.id, geometry, [cause]);
     expect(item!.diagnostic).toBe(cause);
+    expect(item!.target).toMatchObject({ kind: "label", id: label.id });
+    // Every fixture packs its members a row apart, so the badge has to leave the
+    // side it prefers. What must hold is that it covers nothing already drawn:
+    // a badge over the neighbouring label hides that member's text and swallows
+    // its pointer input.
+    const badge = badgeOf(item!.target!);
+    for (const drawn of drawnBoxes(geometry, label.targetId)) {
+      expect(sharedArea(badge, drawn)).toBe(0);
+    }
+    expect(badge.x).toBeGreaterThanOrEqual(0);
+    expect(badge.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it("keeps the badge to the right of its label at the label's top when nothing is in the way", () => {
+    const { doc, dataset, geometry } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    const label = geometry.labels.get(id)![0]!;
+    const alone: CanvasGeometry = {
+      ...geometry,
+      boxes: new Map([...geometry.boxes].filter(([key]) => key === id)),
+      labels: new Map([[id, [label]]]),
+      pageLabels: [],
+    };
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, alone, [diagnostic("/nodes/0/label")]);
     expect(item!.target).toEqual({ kind: "label", id: label.id, x: label.x + label.w + 8, y: label.y });
   });
 
@@ -51,7 +104,9 @@ describe("canvas diagnostic anchors", () => {
     const displayed = doc.nodes.map((node) => node.id === id ? { ...node, x: box.x + 60, y: box.y + 45, w: box.w, h: box.h } : node);
     const [item] = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/nodes/0/label")], displayed);
     const label = geometry.labels.get(id)![0]!;
-    expect(item!.target).toMatchObject({ x: label.x + label.w + 8 + 60, y: label.y + 45 });
+    // The anchor and the boxes it dodges both come from the displayed
+    // positions, so the badge travels with the drag and stays beside it.
+    expect(item!.target).toEqual({ kind: "label", id: label.id, x: label.x + label.w + 8 + 60, y: label.y + 45 });
     const [fallback] = mapCanvasDiagnostics(doc, dataset.id, null, [diagnostic("/nodes/0/label")], displayed);
     expect(fallback!.target).toEqual({ kind: "node", id, x: box.x + 60 + box.w + 8, y: box.y + 45 });
   });
@@ -75,7 +130,7 @@ describe("canvas diagnostic anchors", () => {
     const shared = dataset.idMap.draft!;
     expect(doc.edges[0]!.id).toBe(shared);
     const label = (id: string, y: number): CanvasGeometryLabel => ({ id, targetId: shared, role: "label", lines: [id], x: 10, y, w: 30, h: 20, fontSize: 13, weight: 400 });
-    const geometry: CanvasGeometry = { boxes: new Map(), labels: new Map([[shared, [label("node:draft:label", 20), label("edge:draft:label", 80)]]]), routes: new Map(), pageLabels: [], page: null, diagnostics: [] };
+    const geometry: CanvasGeometry = { boxes: new Map(), labels: new Map([[shared, [label("node:draft:label", 20), label("edge:draft:label", 80)]]]), routes: new Map(), primitives: [], pageLabels: [], page: null, diagnostics: [] };
     const items = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/nodes/0/label"), diagnostic("/edges/0/label")]);
     expect(items.map((item) => item.target?.id)).toEqual(["node:draft:label", "edge:draft:label"]);
     expect(items.map((item) => item.target?.y)).toEqual([20, 80]);
@@ -91,7 +146,7 @@ describe("canvas diagnostic anchors", () => {
     const geometry: CanvasGeometry = { boxes: new Map(), labels: new Map(), routes: new Map([
       [ids[0]!, { id: ids[0]!, sourceId: "edge:0:generated:generated", points: [{ x: 10, y: 20 }, { x: 50, y: 60 }] }],
       [ids[1]!, { id: ids[1]!, sourceId: "edge:0", points: [{ x: 90, y: 100 }, { x: 130, y: 140 }] }],
-    ]), pageLabels: [], page: null, diagnostics: [] };
+    ]), primitives: [], pageLabels: [], page: null, diagnostics: [] };
     const items = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/edges/0/via/0"), diagnostic("/edges/1")]);
     expect(items.map((item) => item.target?.id)).toEqual(ids);
     expect(items.map((item) => item.target?.x)).toEqual([58, 138]);
