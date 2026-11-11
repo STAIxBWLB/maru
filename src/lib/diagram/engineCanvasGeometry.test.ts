@@ -734,7 +734,7 @@ describe("detach preserves completed displayed member boxes", () => {
       },
     }));
     const painted = matchingCanvasGeometry(doc)!.boxes;
-    const members = doc.nodes.filter((node) => node.meta?.memberId?.startsWith(`${dataset.id}:`));
+    const members = doc.nodes.filter((node) => typeof node.meta?.memberId === "string" && node.meta.memberId.startsWith(`${dataset.id}:`));
     expect(painted.size).toBe(members.length);
     expect(members.some((node) => {
       const box = painted.get(node.id)!;
