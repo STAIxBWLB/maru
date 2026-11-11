@@ -77,6 +77,19 @@ function shapeElement(
           {...color}
         />
       );
+    case "ellipse":
+      return (
+        <ellipse
+          key={key}
+          data-engine-primitive={kind}
+          data-engine-primitive-owner={owner}
+          cx={shape.center.x}
+          cy={shape.center.y}
+          rx={shape.rx}
+          ry={shape.ry}
+          {...color}
+        />
+      );
     case "polygon":
       return (
         <polygon
@@ -100,11 +113,21 @@ function shapeElement(
   }
 }
 
-function EnginePrimitivesBase({ primitives, layer }: {
+function EnginePrimitivesBase({ primitives, layer, members }: {
   primitives: readonly CanvasGeometryPrimitive[];
   layer: "underlay" | "overlay";
+  /**
+   * The ids of the members the canvas is drawing. A shape whose member is gone
+   * — hidden, or in a band the reader is not looking at — goes with it: a
+   * lifeline under no participant, or a final border around no state, is a line
+   * through the scene that explains nothing.
+   */
+  members: ReadonlySet<string>;
 }) {
-  const drawn = primitives.filter((primitive) => primitive.layer === layer);
+  const drawn = primitives.filter(
+    (primitive) => primitive.layer === layer
+      && (primitive.member === null || members.has(primitive.member)),
+  );
   if (drawn.length === 0) return null;
   return (
     <g data-engine-primitive-layer={layer} pointerEvents="none">

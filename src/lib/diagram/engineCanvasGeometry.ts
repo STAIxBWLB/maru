@@ -37,6 +37,14 @@ export interface CanvasGeometryBox {
   y: number;
   w: number;
   h: number;
+  /**
+   * The shape the engine drew this member as. `true` and `false` are an oval it
+   * kept and an oval its own label fit demoted to a rounded box; `null` is a
+   * member the family never draws as a curve. The canvas and the export draw
+   * this shape, so a demoted state's own text cannot cross a curve the engine
+   * removed.
+   */
+  ellipse: boolean | null;
 }
 
 export type CanvasGeometryLabelRole = "label" | "sublabel" | "tag";
@@ -69,6 +77,7 @@ export type CanvasGeometryPrimitiveShape =
   | { kind: "line"; from: CanvasGeometryPoint; to: CanvasGeometryPoint }
   | { kind: "polyline"; points: readonly CanvasGeometryPoint[] }
   | { kind: "circle"; center: CanvasGeometryPoint; radius: number }
+  | { kind: "ellipse"; center: CanvasGeometryPoint; rx: number; ry: number }
   | { kind: "polygon"; points: readonly CanvasGeometryPoint[] };
 
 /**
@@ -81,6 +90,12 @@ export interface CanvasGeometryPrimitive {
   kind: string;
   /** The member, container, route or legend key the primitive belongs to. */
   owner: string;
+  /**
+   * The canvas member this shape belongs to, or null for page chrome such as a
+   * lifecycle band or rail. A primitive whose member is hidden or unlistable
+   * goes with it instead of staying behind on its own.
+   */
+  member: string | null;
   layer: "underlay" | "overlay";
   /** The engine's semantic colour role, which the canvas maps to its palette. */
   paint: string;
@@ -222,6 +237,7 @@ function labelRole(id: string): CanvasGeometryLabelRole {
  */
 function canvasPrimitivesOf(
   primitives: readonly GeometryPrimitive[],
+  memberOf: (owner: string) => string | null,
 ): readonly CanvasGeometryPrimitive[] {
   const points = (list: readonly { x: number; y: number }[], what: string): CanvasGeometryPoint[] =>
     list.map((point, index) => ({
@@ -243,6 +259,7 @@ function canvasPrimitivesOf(
       return {
         kind: primitive.kind,
         owner: primitive.owner,
+        member: memberOf(primitive.owner),
         layer: primitive.layer,
         paint: primitive.paint,
         stroke: px(primitive.stroke, `${what} stroke width`),
@@ -261,7 +278,14 @@ function canvasPrimitivesOf(
             ? { kind: "line", from: points([shape.from], what)[0]!, to: points([shape.to], what)[0]! }
             : shape.kind === "circle"
               ? { kind: "circle", center: points([shape.center], what)[0]!, radius: fixedToPixels(shape.radius, `${what} radius`) }
-              : { kind: shape.kind, points: points(shape.points, what) },
+              : shape.kind === "ellipse"
+                ? {
+                  kind: "ellipse",
+                  center: points([shape.center], what)[0]!,
+                  rx: fixedToPixels(shape.rx, `${what} rx`),
+                  ry: fixedToPixels(shape.ry, `${what} ry`),
+                }
+                : { kind: shape.kind, points: points(shape.points, what) },
       };
     });
 }
@@ -323,7 +347,12 @@ export function canvasGeometryOf(
     return canvasId(targetId, "node");
   };
   const boxes = new Map<string, CanvasGeometryBox>();
-  const box = (role: "node" | "container", sourceId: string, bounds: { x: number; y: number; width: number; height: number }) => {
+  const box = (
+    role: "node" | "container",
+    sourceId: string,
+    bounds: { x: number; y: number; width: number; height: number },
+    ellipse: boolean | null = null,
+  ) => {
     const id = canvasId(sourceId, role);
     return {
       id,
@@ -333,10 +362,11 @@ export function canvasGeometryOf(
       y: fixedToPixels(bounds.y, `the ${role} ${sourceId} y`),
       w: fixedToPixels(bounds.width, `the ${role} ${sourceId} width`),
       h: fixedToPixels(bounds.height, `the ${role} ${sourceId} height`),
+      ellipse,
     };
   };
   for (const node of scene.nodes) {
-    const entry = box("node", node.id, node.bounds);
+    const entry = box("node", node.id, node.bounds, node.ellipse ?? null);
     boxes.set(entry.id, entry);
   }
   for (const container of scene.containers) {
@@ -382,11 +412,23 @@ export function canvasGeometryOf(
       })),
     });
   });
+  // A shape belongs to a member when the engine named one: a lifeline to its
+  // participant, a phase span to its phase, an initial marker or final border
+  // to its state. A band or rail is anchored to a band name and a legend swatch
+  // to a legend key, so those stay page chrome and never disappear with a
+  // member.
+  const nodeIds = new Set(scene.nodes.map((node) => node.id));
+  const containerIds = new Set(scene.containers.map((container) => container.id));
+  const primitiveMember = (owner: string): string | null => {
+    if (nodeIds.has(owner)) return canvasId(owner, "node");
+    if (containerIds.has(owner)) return canvasId(owner, "container");
+    return null;
+  };
   return {
     boxes,
     labels,
     routes,
-    primitives: canvasPrimitivesOf(scene.primitives ?? []),
+    primitives: canvasPrimitivesOf(scene.primitives ?? [], primitiveMember),
     pageLabels,
     page: {
       x: fixedToPixels(scene.page.bounds.x, "the page x"),
@@ -418,6 +460,12 @@ export interface CanvasDisplayOffset {
  * the node, plus the live drag offset while a gesture is moving it. A node the
  * engine did not emit keeps its own placement, so free-form, template, pattern
  * and mermaid canvases are unchanged.
+ *
+ * The engine also decides the outline: a lifecycle state is projected as an
+ * oval from its source type, and the engine demotes one to a box when its own
+ * label needed the whole width. The drawn shape is the engine's, because the
+ * label the engine placed is what the reader sees, and an oval over a
+ * full-width label cuts through its own text.
  */
 export function canvasDisplayNode(
   node: DiagramNode,
@@ -433,7 +481,10 @@ export function canvasDisplayNode(
   const y = position?.y ?? (box?.y ?? node.y) + dy;
   const w = box?.w ?? node.w;
   const h = box?.h ?? node.h;
-  return node.x === x && node.y === y && node.w === w && node.h === h ? node : { ...node, x, y, w, h };
+  const kind = box?.ellipse === false && node.kind === "oval" ? "simple" : node.kind;
+  return node.x === x && node.y === y && node.w === w && node.h === h && node.kind === kind
+    ? node
+    : { ...node, x, y, w, h, kind };
 }
 
 /**

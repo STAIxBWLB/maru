@@ -8,18 +8,24 @@
 //! published order within its layer, at the published coordinates, and the
 //! writer paints no primitive the report left out.
 #![cfg(all(feature = "geometry", feature = "render-svg"))]
-use maru_diagram_engine::geometry::{GeometryPrimitiveShape, GeometryDocument};
+use maru_diagram_engine::geometry::{GeometryDocument, GeometryPrimitiveShape};
 use maru_diagram_engine::layout::layout_json;
 use maru_diagram_engine::render::{render_svg, SvgOptions, SvgTheme};
 use roxmltree::{Document, Node};
 use serde_json::{json, Value};
 
 const FAMILIES: [(&str, &str); 5] = [
-    ("architecture", include_str!("../testdata/valid-architecture.json")),
+    (
+        "architecture",
+        include_str!("../testdata/valid-architecture.json"),
+    ),
     ("workflow", include_str!("../testdata/valid-workflow.json")),
     ("sequence", include_str!("../testdata/valid-sequence.json")),
     ("dataflow", include_str!("../testdata/valid-dataflow.json")),
-    ("lifecycle", include_str!("../testdata/valid-lifecycle.json")),
+    (
+        "lifecycle",
+        include_str!("../testdata/valid-lifecycle.json"),
+    ),
 ];
 
 fn layout(source: &str) -> GeometryDocument {
@@ -79,6 +85,13 @@ fn assert_shape(primitive: &maru_diagram_engine::geometry::GeometryPrimitive, no
             close(attr("cy"), px(center.y));
             close(attr("r"), px(*radius));
         }
+        GeometryPrimitiveShape::Ellipse { center, rx, ry } => {
+            assert_eq!(node.tag_name().name(), "ellipse");
+            close(attr("cx"), px(center.x));
+            close(attr("cy"), px(center.y));
+            close(attr("rx"), px(*rx));
+            close(attr("ry"), px(*ry));
+        }
         GeometryPrimitiveShape::Polyline { points } => {
             assert_eq!(node.tag_name().name(), "polyline");
             let actual = node.attribute("points").expect("polyline carries points");
@@ -136,7 +149,10 @@ fn every_published_primitive_is_painted_and_nothing_else_is() {
             assert_shape(primitive, node);
         }
         assert!(
-            geometry.primitives.iter().all(|primitive| !primitive.kind.is_empty()),
+            geometry
+                .primitives
+                .iter()
+                .all(|primitive| !primitive.kind.is_empty()),
             "{family}: a primitive lost its kind"
         );
     }
@@ -170,8 +186,17 @@ fn a_sequence_scene_publishes_one_lifeline_per_participant() {
         let bottom = i64::from(participant.bounds.y) + i64::from(participant.bounds.height);
         assert_eq!(i64::from(from.x), centre, "{} lifeline x", participant.id);
         assert_eq!(i64::from(from.y), bottom, "{} lifeline top", participant.id);
-        assert_eq!(i64::from(to.x), centre, "{} lifeline stays vertical", participant.id);
-        assert!(i64::from(to.y) > bottom, "{} lifeline descends", participant.id);
+        assert_eq!(
+            i64::from(to.x),
+            centre,
+            "{} lifeline stays vertical",
+            participant.id
+        );
+        assert!(
+            i64::from(to.y) > bottom,
+            "{} lifeline descends",
+            participant.id
+        );
     }
 }
 
@@ -208,4 +233,109 @@ fn primitives_are_published_in_emitted_coordinates() {
         i64::from(state.bounds.y) >= i64::from(shift),
         "the state itself moved below the band"
     );
+}
+
+fn lifecycle_scene(done: Value) -> String {
+    json!({
+        "schema_version": 2,
+        "diagram_type": "lifecycle",
+        "meta": {"title": "Shapes", "output": "shapes.html"},
+        "lanes": [{"id": "main", "label": "Main"}],
+        "states": [
+            {"id": "start", "type": "start", "label": "Start", "lane": "main", "col": 0},
+            {"id": "work", "type": "active", "label": "Work", "lane": "main", "col": 1},
+            done,
+        ],
+        "transitions": [
+            {"id": "begin", "from": "start", "to": "work", "label": "Begin"},
+            {"id": "finish", "from": "work", "to": "done", "label": "Finish"},
+        ],
+    })
+    .to_string()
+}
+
+/// The shape the engine drew each state as is published on the node, and the
+/// final border follows it. A state whose label fit inside the curve keeps the
+/// oval and an oval border around it; a state whose label needed the whole box
+/// is published as a box and gets the inset rectangle, so the canvas and the
+/// writer never draw a curve across text the engine placed as a box.
+#[test]
+fn a_lifecycle_state_publishes_the_shape_it_was_drawn_as() {
+    let kept = layout(&lifecycle_scene(json!({
+        "id": "done",
+        "type": "success",
+        "label": "Done",
+        "lane": "main",
+        "col": 2,
+    })));
+    let demoted = layout(&lifecycle_scene(json!({
+        "id": "done",
+        "type": "success",
+        "label": "A comprehensive validation checkpoint",
+        "lane": "main",
+        "col": 2,
+        "width": 180,
+        "height": 72,
+    })));
+    for (geometry, shape) in [(&kept, Some(true)), (&demoted, Some(false))] {
+        let node = geometry
+            .nodes
+            .iter()
+            .find(|node| node.id == "done")
+            .expect("done is placed");
+        assert_eq!(node.ellipse, shape, "published shape of the done state");
+        assert_eq!(node.final_state, Some(true), "done is the final state");
+        // A state the family never draws as a curve says nothing at all.
+        let active = geometry
+            .nodes
+            .iter()
+            .find(|node| node.id == "work")
+            .expect("work is placed");
+        assert_eq!(active.ellipse, None, "an active state has no oval decision");
+        assert_eq!(
+            geometry
+                .nodes
+                .iter()
+                .find(|node| node.id == "start")
+                .expect("start is placed")
+                .ellipse,
+            Some(true),
+            "a start state is an oval"
+        );
+        let inset = (3 * 64).min(node.bounds.width.min(node.bounds.height) / 4);
+        let border = geometry
+            .primitives
+            .iter()
+            .find(|primitive| primitive.kind == "lifecycle-final-border")
+            .expect("the final state has a border");
+        assert_eq!(border.owner, "done");
+        match (&border.shape, shape) {
+            (GeometryPrimitiveShape::Ellipse { center, rx, ry }, Some(true)) => {
+                assert_eq!(
+                    i64::from(center.x) * 2,
+                    i64::from(node.bounds.x) * 2 + i64::from(node.bounds.width),
+                    "the border is concentric with the oval"
+                );
+                assert_eq!(
+                    i64::from(center.y) * 2,
+                    i64::from(node.bounds.y) * 2 + i64::from(node.bounds.height)
+                );
+                assert_eq!(
+                    i64::from(*rx),
+                    i64::from(node.bounds.width) / 2 - i64::from(inset)
+                );
+                assert_eq!(
+                    i64::from(*ry),
+                    i64::from(node.bounds.height) / 2 - i64::from(inset)
+                );
+            }
+            (GeometryPrimitiveShape::Rect { bounds, .. }, Some(false)) => {
+                assert_eq!(bounds.x, node.bounds.x + inset);
+                assert_eq!(bounds.y, node.bounds.y + inset);
+                assert_eq!(bounds.width, node.bounds.width - 2 * inset);
+                assert_eq!(bounds.height, node.bounds.height - 2 * inset);
+            }
+            (shape, state) => panic!("{state:?} state published a {shape:?} border"),
+        }
+    }
 }

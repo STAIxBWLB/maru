@@ -51,12 +51,12 @@ pub mod render;
 #[cfg(feature = "geometry")]
 pub mod routing;
 pub mod rules;
-pub mod sequence;
 /// Semantic projection of an accepted source spec: the node kinds, lanes and
 /// variants the render primitives are derived from. It lives outside `render`
 /// so the layout build can publish those primitives too (`maru#552` E4).
 #[cfg(feature = "geometry")]
 pub mod semantics;
+pub mod sequence;
 #[cfg(all(feature = "geometry", any(test, feature = "geometry-corpus")))]
 pub mod work;
 pub mod workflow;

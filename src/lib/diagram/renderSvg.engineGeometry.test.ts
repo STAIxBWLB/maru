@@ -10,6 +10,7 @@ import {
   routePathOf,
   type CanvasGeometry,
   type CanvasGeometryLabel,
+  type CanvasGeometryPrimitive,
 } from "./engineCanvasGeometry";
 import { deserializeDoc, serializeDoc } from "./persistence";
 import type { EngineDiagramType } from "./reportTypes";
@@ -35,6 +36,7 @@ function sceneFor(type: EngineDiagramType): { doc: DiagramDoc; geometry: CanvasG
     y: 170.015625,
     w: 180.015625,
     h: 90.125,
+    ellipse: null,
   }]));
   const first = doc.nodes[0]!;
   const box = boxes.get(first.id)!;
@@ -141,6 +143,7 @@ describe("published engine geometry in Maru visual exports", () => {
     const lifeline = {
       kind: "sequence-lifeline",
       owner: "source-0",
+      member: doc.nodes[0]!.id,
       layer: "underlay" as const,
       paint: "line",
       stroke: 0.8,
@@ -151,6 +154,7 @@ describe("published engine geometry in Maru visual exports", () => {
     const finalBorder = {
       kind: "lifecycle-final-border",
       owner: "source-1",
+      member: doc.nodes[1]!.id,
       layer: "overlay" as const,
       paint: "outlineNode",
       stroke: 1,
@@ -178,6 +182,113 @@ describe("published engine geometry in Maru visual exports", () => {
         ?? element.getAttribute("data-engine-source-id"));
     expect(order.indexOf("sequence-lifeline")).toBeLessThan(order.findIndex((id) => id?.startsWith("edge-") || id === doc.edges[0]!.id));
     expect(order.indexOf("lifecycle-final-border")).toBeGreaterThan(order.lastIndexOf("source-1"));
+  });
+
+  it("drops an engine shape with the member the export stops drawing", () => {
+    const { doc, geometry } = sceneFor("sequence");
+    const participant = doc.nodes[0]!;
+    vi.mocked(matchingCanvasGeometry).mockReturnValue({
+      ...geometry,
+      primitives: [
+        {
+          kind: "sequence-lifeline",
+          owner: "source-0",
+          member: participant.id,
+          layer: "underlay" as const,
+          paint: "line",
+          stroke: 0.8,
+          dash: [3, 7],
+          arrow: false,
+          shape: { kind: "line" as const, from: { x: 200.5, y: 260.25 }, to: { x: 200.5, y: 640 } },
+        },
+        {
+          // Page chrome: a band names a band, so it outlives every member.
+          kind: "lifecycle-band",
+          owner: "outcome",
+          member: null,
+          layer: "underlay" as const,
+          paint: "line",
+          stroke: 1.1,
+          dash: null,
+          arrow: false,
+          shape: { kind: "line" as const, from: { x: 72, y: 436 }, to: { x: 800, y: 436 } },
+        },
+      ],
+    });
+    const drawn = parsed(renderDocToSvg(doc).svg);
+    expect(drawn.querySelector('[data-engine-primitive="sequence-lifeline"]')).not.toBeNull();
+
+    const hidden = parsed(renderDocToSvg({
+      ...doc,
+      nodes: doc.nodes.map((node) => node.id === participant.id ? { ...node, hidden: true } : node),
+    }).svg);
+    expect(hidden.querySelector(`[data-node-id="${participant.id}"]`)).toBeNull();
+    expect(hidden.querySelector('[data-engine-primitive="sequence-lifeline"]')).toBeNull();
+    expect(hidden.querySelector('[data-engine-primitive="lifecycle-band"]')).not.toBeNull();
+
+    const unlisted = parsed(renderDocToSvg({
+      ...doc,
+      layers: doc.layers.map((layer) => layer.id === doc.layers[0]!.id ? { ...layer, visible: false } : layer),
+      nodes: doc.nodes.map((node) => node.id === participant.id
+        ? { ...node, layerId: doc.layers[0]!.id }
+        : node),
+    }).svg);
+    expect(unlisted.querySelector(`[data-node-id="${participant.id}"]`)).toBeNull();
+    expect(unlisted.querySelector('[data-engine-primitive="sequence-lifeline"]')).toBeNull();
+  });
+
+  it("draws the state shape the engine kept and an oval border around it", () => {
+    const { doc, geometry } = sceneFor("lifecycle");
+    const state = doc.nodes.find((node) => node.kind === "oval");
+    expect(state).toBeDefined();
+    const box = geometry.boxes.get(state!.id)!;
+    const border = (shape: CanvasGeometryPrimitive["shape"]) => ({
+      kind: "lifecycle-final-border",
+      owner: "source-state",
+      member: state!.id,
+      layer: "overlay" as const,
+      paint: "outlineNode",
+      stroke: 1,
+      dash: null,
+      arrow: false,
+      shape,
+    });
+    const ovalBorder = border({
+      kind: "ellipse" as const,
+      center: { x: box.x + box.w / 2, y: box.y + box.h / 2 },
+      rx: box.w / 2 - 3,
+      ry: box.h / 2 - 3,
+    });
+    const boxOf = (ellipse: boolean | null) => new Map([[state!.id, { ...box, ellipse }]]);
+
+    // Kept: the state is the oval the projection asked for, and the border is
+    // the same curve one inset inside it.
+    vi.mocked(matchingCanvasGeometry).mockReturnValue({
+      ...geometry,
+      boxes: boxOf(true),
+      primitives: [ovalBorder],
+    });
+    const kept = parsed(renderDocToSvg(doc).svg);
+    expect(kept.querySelector(`[data-node-id="${state!.id}"] ellipse`)).not.toBeNull();
+    const ring = kept.querySelector('[data-engine-primitive="lifecycle-final-border"]')!;
+    expect(ring.tagName.toLowerCase()).toBe("ellipse");
+    // Coordinates are emitted to two decimals, the artifact's own resolution.
+    expect(Number(ring.getAttribute("rx"))).toBeCloseTo(box.w / 2 - 3, 2);
+    expect(Number(ring.getAttribute("ry"))).toBeCloseTo(box.h / 2 - 3, 2);
+
+    // Demoted: the engine placed this state's label across the whole box, so
+    // the export draws the box and a border that follows it.
+    vi.mocked(matchingCanvasGeometry).mockReturnValue({
+      ...geometry,
+      boxes: boxOf(false),
+      primitives: [border({ kind: "rect" as const, x: box.x + 3, y: box.y + 3, w: box.w - 6, h: box.h - 6, radius: 4 })],
+    });
+    const demoted = parsed(renderDocToSvg(doc).svg);
+    const group = demoted.querySelector(`[data-node-id="${state!.id}"]`)!;
+    expect(group.querySelector("ellipse")).toBeNull();
+    expect(group.querySelector("rect")).not.toBeNull();
+    const square = demoted.querySelector('[data-engine-primitive="lifecycle-final-border"]')!;
+    expect(square.tagName.toLowerCase()).toBe("rect");
   });
 
   it("keeps source placement when no matching ready scene is available", () => {

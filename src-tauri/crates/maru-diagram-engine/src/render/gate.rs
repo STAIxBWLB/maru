@@ -463,7 +463,7 @@ fn check_unique_ids(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
 fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
     const ALLOWED: &[&str] = &[
         "svg", "title", "desc", "rect", "g", "polyline", "text", "tspan", "path", "defs", "marker",
-        "polygon", "line", "circle",
+        "polygon", "line", "circle", "ellipse",
     ];
     const KINDS: &[&str] = &[
         "page",
@@ -625,6 +625,8 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                     "cx",
                     "cy",
                     "r",
+                    "rx",
+                    "ry",
                     "points",
                     "fill",
                     "stroke",

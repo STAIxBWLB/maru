@@ -155,6 +155,14 @@ pub struct GeometryNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub final_state: Option<bool>,
+    /// The shape the engine drew this member as. `true` is an ellipse whose
+    /// text was fitted inside the curve, `false` is one the fit demoted to a
+    /// rounded box, and absent means the family never draws this member as a
+    /// curve. The canvas and the writer draw what this says, so a demoted
+    /// state's own label cannot cross a curve the engine removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub ellipse: Option<bool>,
     /// Authored main-lane column, for both versions, independent of pinned positions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
@@ -322,11 +330,32 @@ pub enum GeometryPrimitivePaint {
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
 pub enum GeometryPrimitiveShape {
-    Rect { bounds: GeometryBox, radius: Coord },
-    Line { from: GeometryPoint, to: GeometryPoint },
-    Polyline { points: Vec<GeometryPoint> },
-    Circle { center: GeometryPoint, radius: Coord },
-    Polygon { points: Vec<GeometryPoint> },
+    Rect {
+        bounds: GeometryBox,
+        radius: Coord,
+    },
+    Line {
+        from: GeometryPoint,
+        to: GeometryPoint,
+    },
+    Polyline {
+        points: Vec<GeometryPoint>,
+    },
+    Circle {
+        center: GeometryPoint,
+        radius: Coord,
+    },
+    /// An ellipse with its own two radii: a lifecycle final border around a
+    /// state the engine kept as a curve has to follow that curve, and a circle
+    /// cannot.
+    Ellipse {
+        center: GeometryPoint,
+        rx: Coord,
+        ry: Coord,
+    },
+    Polygon {
+        points: Vec<GeometryPoint>,
+    },
 }
 
 /// A shape the writer paints that is not a member, a container or a route:
@@ -376,6 +405,11 @@ impl GeometryPrimitive {
                 Shape::Circle { center, radius } => GeometryPrimitiveShape::Circle {
                     center: *center,
                     radius: *radius,
+                },
+                Shape::Ellipse { center, rx, ry } => GeometryPrimitiveShape::Ellipse {
+                    center: *center,
+                    rx: *rx,
+                    ry: *ry,
                 },
                 Shape::Polygon { points } => GeometryPrimitiveShape::Polygon {
                     points: points.clone(),

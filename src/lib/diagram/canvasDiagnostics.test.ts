@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Diagnostic } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import { nativeE4RefusedSpec } from "./__fixtures__/nativeEngineE4";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { archifySpecToDataset } from "./archifyCodec";
-import { CANVAS_DIAGNOSTIC_BADGE, canvasDiagnosticCategory, mapCanvasDiagnostics } from "./canvasDiagnostics";
+import { CANVAS_CONTAINER_HEADER_BAND, CANVAS_DIAGNOSTIC_BADGE, canvasDiagnosticCategory, mapCanvasDiagnostics } from "./canvasDiagnostics";
 import { canvasLabelsFor, type CanvasGeometry, type CanvasGeometryLabel } from "./engineCanvasGeometry";
 import type { Rect } from "./geometry";
 import type { EngineDiagramType } from "./reportTypes";
@@ -15,7 +16,7 @@ function fixture(type: EngineDiagramType = "workflow") {
   const geometry: CanvasGeometry = {
     boxes: new Map(doc.nodes.map((node, index) => {
       const kind = resolveSemanticMember(doc, { nodeId: node.id })?.kind === "container" ? "container" as const : "node" as const;
-      const box = { id: node.id, sourceId: node.id, role: kind, x: 100 + index * 200, y: 150, w: 180, h: 70 };
+      const box = { id: node.id, sourceId: node.id, role: kind, x: 100 + index * 200, y: 150, w: 180, h: 70, ellipse: null };
       labels.set(node.id, [{ id: `${kind}:${node.id}:label`, targetId: node.id, role: "label", lines: ["한글 English"], x: box.x + 8, y: box.y + 9, w: 150, h: 20, fontSize: 13, weight: 400 }]);
       return [node.id, box];
     })),
@@ -181,6 +182,85 @@ describe("canvas diagnostic anchors", () => {
     const mapped = mapCanvasDiagnostics(doc, dataset.id, null, [diagnostic("/nodes/1/label"), diagnostic("/nodes/0/label")]);
     expect(mapped[0]!.target).toMatchObject({ kind: "node", id: "constructor" });
     expect(mapped[1]!.target).toBeNull();
+  });
+
+  it("stacks two diagnostics on one element instead of drawing them on top of each other", () => {
+    const { doc, dataset, geometry } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    const label = geometry.labels.get(id)![0]!;
+    const alone: CanvasGeometry = {
+      ...geometry,
+      boxes: new Map([...geometry.boxes].filter(([key]) => key === id)),
+      labels: new Map([[id, [label]]]),
+      pageLabels: [],
+    };
+    const cause = diagnostic("/nodes/0/label");
+    const items = mapCanvasDiagnostics(doc, dataset.id, alone, [cause, cause]);
+    expect(items.map((item) => item.target?.id)).toEqual([label.id, label.id]);
+    const [first, second] = items.map((item) => badgeOf(item.target!));
+    // The first badge keeps the side it prefers; the second knows the first is
+    // there and takes another one, so the two never cover each other.
+    expect(first).toMatchObject({ x: label.x + label.w + 8, y: label.y });
+    expect(sharedArea(first, second)).toBe(0);
+    expect(second.x === first.x && second.y === first.y).toBe(false);
+    // Both stay beside the element they explain: a badge that jumps across the
+    // scene reads as belonging to whatever it landed on.
+    for (const badge of [first, second]) {
+      expect(Math.abs(badge.x - label.x)).toBeLessThanOrEqual(CANVAS_DIAGNOSTIC_BADGE.width);
+      expect(Math.abs(badge.y - label.y)).toBeLessThanOrEqual(
+        CANVAS_DIAGNOSTIC_BADGE.height + CANVAS_DIAGNOSTIC_BADGE.gap,
+      );
+    }
+    for (const drawn of drawnBoxes(alone, id)) {
+      expect(sharedArea(first, drawn)).toBe(0);
+      expect(sharedArea(second, drawn)).toBe(0);
+    }
+  });
+
+  it("keeps the badge off a container's title band in the fallback view", () => {
+    const { doc, dataset } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    const lane = doc.nodes.find((node) => resolveSemanticMember(doc, { nodeId: node.id })?.kind === "container");
+    expect(lane).toBeDefined();
+    // The refused view has no engine geometry, so the canvas draws the
+    // container's own dark title band above its body and the member sits just
+    // under it.
+    const shown = doc.nodes.map((node) => node.id === id
+      ? { ...node, x: lane!.x + 40, y: lane!.y + CANVAS_CONTAINER_HEADER_BAND + 2 }
+      : node);
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, null, [diagnostic("/nodes/0/label")], shown);
+    const badge = badgeOf(item!.target!);
+    const band = { x: lane!.x, y: lane!.y, w: lane!.w, h: CANVAS_CONTAINER_HEADER_BAND };
+    expect(sharedArea(badge, band)).toBe(0);
+    // The lane body is still no obstacle: a badge inside the frame covers
+    // nothing, so only the opaque band pushes it away.
+    expect(badge.y).toBeGreaterThanOrEqual(lane!.y + CANVAS_CONTAINER_HEADER_BAND);
+  });
+
+  it("slides clear of the members and title bands on every side it prefers", () => {
+    // The native refusal fixture: a lane whose member sits just under its own
+    // title band, a second member to the right of it and a third in the lane
+    // below. No side of the anchor is free at the first step, so the badge has
+    // to keep sliding — and still cover nothing. A 300 px badge is wider than
+    // the gap between these members, which is why adjacency cannot be promised
+    // here and the first clear slot is what the mapper owns.
+    const { dataset } = archifySpecToDataset("workflow", nativeE4RefusedSpec(), { id: "native-e4-refused" });
+    const doc = projectSemanticDocument(dataset).doc;
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, null, [diagnostic("/nodes/0/label")], doc.nodes);
+    expect(item!.target).toMatchObject({ kind: "node", id: "draft" });
+    const badge = badgeOf(item!.target!);
+    const anchor = doc.nodes.find((node) => node.id === "draft")!;
+    const { gap, step } = CANVAS_DIAGNOSTIC_BADGE;
+    // Below the anchor, three steps down: the first slot in the mapper's order
+    // that covers no member and no title band.
+    expect(badge).toMatchObject({ x: anchor.x, y: anchor.y + anchor.h + gap + 3 * step });
+    for (const node of doc.nodes) {
+      const rect = { x: node.x, y: node.y, w: node.w, h: node.h };
+      const isFrame = resolveSemanticMember(doc, { nodeId: node.id })?.kind === "container";
+      expect(sharedArea(badge, isFrame ? { ...rect, h: CANVAS_CONTAINER_HEADER_BAND } : rect)).toBe(0);
+    }
   });
 
   it("categorizes only recognized codes and retains unknown engine prose verbatim", () => {

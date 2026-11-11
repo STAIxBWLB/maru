@@ -912,12 +912,37 @@ describe("which canvases draw engine geometry", () => {
     expect(canvasDisplayNode(free, geometry)).toBe(free);
     expect(canvasDisplayNode(free, null, { ids: new Set(["free-note"]), dx: 10, dy: 10 })).toMatchObject({ x: 910, y: 910 });
   });
+
+  it("draws the shape the engine kept, not the one the projection assumed", () => {
+    const { doc, dataset } = docFor("lifecycle");
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    const geometry = canvasGeometryOf(
+      { apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() },
+      doc,
+      dataset,
+    )!;
+    const oval = doc.nodes.find((node) => node.kind === "oval")!;
+    expect(oval).toBeDefined();
+    const box = geometry.boxes.get(oval.id)!;
+
+    // The projection draws a start, success or failure state as an oval. The
+    // engine keeps that only while its own label fits inside the curve; when the
+    // label needed the whole box the engine's text is placed as a box, and an
+    // oval over it would cut through its own label.
+    const kept = canvasDisplayNode(oval, { ...geometry, boxes: new Map([[oval.id, { ...box, ellipse: true }]]) });
+    expect(kept.kind).toBe("oval");
+    const untouched = canvasDisplayNode(oval, { ...geometry, boxes: new Map([[oval.id, { ...box, ellipse: null }]]) });
+    expect(untouched.kind).toBe("oval");
+    const demoted = canvasDisplayNode(oval, { ...geometry, boxes: new Map([[oval.id, { ...box, ellipse: false }]]) });
+    expect(demoted.kind).toBe("simple");
+    expect(demoted).toMatchObject({ id: oval.id, x: box.x, y: box.y, w: box.w, h: box.h });
+  });
 });
 
 describe("a keyboard nudge writes what the canvas shows", () => {
   function scene(member: DiagramNode): CanvasGeometry {
     return {
-      boxes: new Map([[member.id, { id: member.id, sourceId: "draft", role: "node", x: 200, y: 300, w: 180, h: 72 }]]),
+      boxes: new Map([[member.id, { id: member.id, sourceId: "draft", role: "node", x: 200, y: 300, w: 180, h: 72, ellipse: null }]]),
       labels: new Map(),
       routes: new Map(),
       primitives: [],

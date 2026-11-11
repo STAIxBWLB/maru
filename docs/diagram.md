@@ -664,12 +664,25 @@ drops, because it has no legend for them to key. A lifecycle page moves below
 its emitted title band like workflow and dataflow already did, and page chrome
 paints last in both renderers, so a lane frame never covers the page title.
 
+Each shape also carries the member it belongs to, so it shares that member's
+visibility: hiding a sequence participant, or exporting a document with its
+layer unlisted, takes the lifeline and the final border with the member instead
+of leaving a line under nothing. A band, rail or legend swatch belongs to the
+page and to no member, so it stays. Both renderers filter on the same rule, and
+the canvas applies the model's own visibility rather than the viewport subset —
+a lifeline whose participant sits above the viewport still crosses the scene.
+
 A route label's background box is drawn `ENGINE_LABEL_BOX_PAD` (3 px) larger
 than the engine's text box, and the text stays exactly where the engine put it.
 A lifecycle start, success or failure state is drawn as an oval, so the engine
 fits its label inside the ellipse's inscribed rectangle and demotes the node to
-its full box rather than refusing a document that laid out before; the canvas
-never insets that text on its own.
+its full box rather than refusing a document that laid out before. The engine
+publishes which shape it used (`GeometryNode.ellipse`: `true` kept, `false`
+demoted, absent never offered), and both renderers draw that shape — an oval
+only while the engine kept one, a rounded box otherwise — so a demoted state's
+own label never crosses a curve the engine removed, and the canvas never insets
+that text on its own. A final state's border follows the same decision: an
+ellipse concentric with the oval, or the inset rectangle around a box.
 
 Engine labels carry the drawing baseline on each line, not only on the `<text>`
 element: WebKit does not inherit `dominant-baseline` into a `tspan`, so a label
@@ -693,12 +706,20 @@ the canvas projection. The badge's size and placement belong to the mapper, not
 the renderer: it takes the first side that covers no other member or label
 (right, then above, below, right-and-under, and opposite last, sliding a step at
 a time), may cover the member it explains and sit inside a frame, stays in the
-keyboard order as a note, and is drawn at exactly the box it was placed in.
-Untargeted diagnostics stay in a canvas notice. Only
-results for the current source and pins are shown, including current refusals
-while the last good scene remains visible. They never block opening, editing
-or saving. Korean and English explanations include a cause and next step;
-original engine details remain available for exact diagnosis.
+keyboard order as a note, and is drawn at exactly the box it was placed in. Each
+badge joins the obstacles as it is placed, so two diagnostics on one element
+stack beside it instead of landing on each other. A container's body is still no
+obstacle — a badge inside a frame covers nothing — but its opaque title band is,
+because a badge over the band hides the lane or stage the scene is read by.
+Refused documents have no engine geometry, so there the band is the only box the
+container contributes. Covering nothing outranks staying close: when every side
+is blocked at the first step the badge keeps sliding to the first clear slot, so
+in a packed lane it can end up a few steps from its member rather than over a
+neighbouring member or a title band. Untargeted diagnostics stay in a canvas
+notice. Only results for the current source and pins are shown, including
+current refusals while the last good scene remains visible. They never block
+opening, editing or saving. Korean and English explanations include a cause and
+next step; original engine details remain available for exact diagnosis.
 
 Apply retains the SDK admission gate. Undo and redo restore authored documents;
 layout generation ownership prevents a superseded result from replacing the
@@ -2371,7 +2392,7 @@ remain reviewable.
 | Workflow phase span | Midline of retained phase bounds, x from frame left to right; 1.1px, variant dash/accent | E3 `render/primitives.rs`; Archify `workflow/workflow-compiler.mjs:4666-4672`; artifact gate `render/primitive_gate.rs` |
 | Sequence lifeline | Participant center x; starts at box bottom; 0.8px dash3,7; end is page bottom minus65, clamped to measured legend title minus22 and card top minus22, but not above last message/activation/segment | E3 `render/primitives.rs`; Archify `sequence/render-sequence.mjs:92-94,398-406`; artifact gate `render/primitive_gate.rs` |
 | Lifecycle initial marker | Dot radius4.5; 1.4px stem, from dot edge to 6px before tip; head extends 7px left and 3.5px above/below tip | E3 `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:850-865`; artifact gate `render/primitive_gate.rs` |
-| Lifecycle final border | Final-state box inset is min(3px, quarter of smaller dimension), radius4, stroke1; tiny boxes retain the clamped/possibly zero-size inset as an invalid-but-preserved geometry case | E3 `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:789-790`; artifact gate `render/primitive_gate.rs` |
+| Lifecycle final border | Final-state box inset is min(3px, quarter of smaller dimension), radius4, stroke1; tiny boxes retain the clamped/possibly zero-size inset as an invalid-but-preserved geometry case. An oval state gets the same inset as an ellipse concentric with it (rx = width/2 - inset, ry = height/2 - inset), so the border never squares off a curve it was drawn around | E3 `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:789-790`; artifact gate `render/primitive_gate.rs` |
 | Lifecycle v1 bands | Populated bands only; x=72 through page width minus72; y=112 phase, 264 event, 436 outcome; 0.8px dash3,8 | E3 `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:745-756`; artifact gate `render/primitive_gate.rs` |
 | Lifecycle v1 rail | Producer DTO endpoints: (154,157) to (`phaseXs[maxCol]+38`,157); arrow, 2.2px; may point left in column0 but endpoints must differ. V2 omits rail and bands | E3 producer `layout/lifecycle.rs`; E3 primitive `render/primitives.rs`; Archify `lifecycle/render-lifecycle.mjs:884-893`; artifact gate `render/primitive_gate.rs` |
 | Legend catalog and empty/hidden behavior | Family catalog order; hidden clears entries; final appended only for nonempty lifecycle legend with a final state; empty legend has no bounds/title/swatches | E2 `layout/mod.rs`; Archify sequence catalog `sequence/render-sequence.mjs:24-40`; lifecycle `render-lifecycle.mjs:297-311`; footprint empty case `shared/legend.mjs:75-76` |

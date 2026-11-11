@@ -73,6 +73,12 @@ pub(crate) enum Shape {
         center: GeometryPoint,
         radius: i32,
     },
+    /// Two radii, for a border that has to follow an oval state's own curve.
+    Ellipse {
+        center: GeometryPoint,
+        rx: i32,
+        ry: i32,
+    },
     Polygon {
         points: Vec<GeometryPoint>,
     },
@@ -333,19 +339,32 @@ pub(crate) fn derive(
             }
             if n.final_state == Some(true) {
                 let inset = (3 * 64).min(n.bounds.width.min(n.bounds.height) / 4).max(0);
-                let b = box_at(
-                    i64::from(n.bounds.x) + i64::from(inset),
-                    i64::from(n.bounds.y) + i64::from(inset),
-                    i64::from(n.bounds.width) - 2 * i64::from(inset),
-                    i64::from(n.bounds.height) - 2 * i64::from(inset),
-                )?;
-                out.push(primitive(
-                    "lifecycle-final-border",
-                    &n.id,
+                // The border sits inside the state's own outline. An oval state
+                // keeps a curve, so a rectangle around it would cut the corners
+                // it was meant to follow: the border is the same curve, one
+                // inset smaller.
+                let shape = if n.ellipse == Some(true) {
+                    Shape::Ellipse {
+                        center: middle(n.bounds)?,
+                        rx: n.bounds.width / 2 - inset,
+                        ry: n.bounds.height / 2 - inset,
+                    }
+                } else {
+                    let b = box_at(
+                        i64::from(n.bounds.x) + i64::from(inset),
+                        i64::from(n.bounds.y) + i64::from(inset),
+                        i64::from(n.bounds.width) - 2 * i64::from(inset),
+                        i64::from(n.bounds.height) - 2 * i64::from(inset),
+                    )?;
                     Shape::Rect {
                         bounds: b,
                         radius: 4 * 64,
-                    },
+                    }
+                };
+                out.push(primitive(
+                    "lifecycle-final-border",
+                    &n.id,
+                    shape,
                     Paint::OutlineNode,
                     "1",
                     Layer::Overlay,
@@ -376,10 +395,7 @@ pub(crate) fn derive(
                     "lifecycle-band",
                     band,
                     Shape::Line {
-                        from: at(
-                            i64::from(g.page.bounds.x) + 72 * 64,
-                            baseline * 64 + shift,
-                        )?,
+                        from: at(i64::from(g.page.bounds.x) + 72 * 64, baseline * 64 + shift)?,
                         to: at(
                             i64::from(g.page.bounds.x) + i64::from(g.page.bounds.width) - 72 * 64,
                             baseline * 64 + shift,

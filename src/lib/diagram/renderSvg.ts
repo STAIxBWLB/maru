@@ -468,8 +468,12 @@ function pointsAttrOf(points: readonly CanvasGeometryPoint[]): string {
 function enginePrimitivesSvg(
   geometry: CanvasGeometry | null,
   layer: "underlay" | "overlay",
+  members: ReadonlySet<string>,
 ): string {
-  const drawn = (geometry?.primitives ?? []).filter((primitive) => primitive.layer === layer);
+  const drawn = (geometry?.primitives ?? []).filter(
+    (primitive) => primitive.layer === layer
+      && (primitive.member === null || members.has(primitive.member)),
+  );
   if (drawn.length === 0) return "";
   const shapes = drawn.map((primitive: CanvasGeometryPrimitive) => {
     const paint = ENGINE_PRIMITIVE_PAINT[primitive.paint] ?? { fill: "none", stroke: "#1f2937" };
@@ -486,6 +490,8 @@ function enginePrimitivesSvg(
         return `<line${meta} x1="${num(shape.from.x)}" y1="${num(shape.from.y)}" x2="${num(shape.to.x)}" y2="${num(shape.to.y)}"${style}/>`;
       case "circle":
         return `<circle${meta} cx="${num(shape.center.x)}" cy="${num(shape.center.y)}" r="${num(shape.radius)}"${style}/>`;
+      case "ellipse":
+        return `<ellipse${meta} cx="${num(shape.center.x)}" cy="${num(shape.center.y)}" rx="${num(shape.rx)}" ry="${num(shape.ry)}"${style}/>`;
       case "polygon":
         return `<polygon${meta} points="${pointsAttrOf(shape.points)}"${style}/>`;
       default:
@@ -622,6 +628,10 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
     (node) => !node.hidden && !(node.layerId && hiddenLayers.has(node.layerId)),
   ).map((node) => canvasDisplayNode(node, geometry));
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  // The members this export actually draws: the engine's shapes belong to them,
+  // so a lifeline under a hidden participant or a border around a state on an
+  // unlisted layer goes with the member instead of staying in the artifact.
+  const drawnMembers = new Set(nodeById.keys());
   const edges = doc.edges.filter(
     (edge) => nodeById.has(edge.fromNode) && nodeById.has(edge.toNode),
   );
@@ -663,8 +673,8 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
     // The engine's underlays (lifelines, phase spans, bands) paint after the
     // frames and before the routes, in the writer's own order; the overlays
     // (a lifecycle final border) after the members. `CanvasSurface` keeps the
-    // same two bands.
-    enginePrimitivesSvg(geometry, "underlay") +
+    // same two bands, and both drop the shapes of a member the model hides.
+    enginePrimitivesSvg(geometry, "underlay", drawnMembers) +
     edges.map((edge) => edgeSvg(
       edge,
       nodeById.get(edge.fromNode)!,
@@ -673,7 +683,7 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
       geometry ? canvasLabelsFor(geometry, edge.id, "edge")[0] : undefined,
     )).join("") +
     memberNodes.map(nodeSvgFor).join("") +
-    enginePrimitivesSvg(geometry, "overlay") +
+    enginePrimitivesSvg(geometry, "overlay", drawnMembers) +
     // Page chrome paints last: a lane, boundary or stage frame that reaches up
     // into the header band must not hide the engine's title or subtitle.
     (geometry ? engineLabelsSvg(geometry.pageLabels, "#111827") : "");

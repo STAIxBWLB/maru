@@ -551,10 +551,7 @@ mod tests {
             .iter()
             .find(|node| node.id == "done")
             .unwrap();
-        assert_eq!(
-            (begin.bounds.x, begin.bounds.y - shift),
-            (60 * 64, 56 * 64)
-        );
+        assert_eq!((begin.bounds.x, begin.bounds.y - shift), (60 * 64, 56 * 64));
         assert_eq!(begin.bounds.width, 140 * 64);
         // The default state is 64 px tall. This one carries a label, a sublabel
         // and a step inside an oval's inscribed rectangle, which is narrower

@@ -273,6 +273,7 @@ fn write_primitive(
         Shape::Line { .. } => "line",
         Shape::Polyline { .. } => "polyline",
         Shape::Circle { .. } => "circle",
+        Shape::Ellipse { .. } => "ellipse",
         Shape::Polygon { .. } => "polygon",
     };
     write!(
@@ -309,6 +310,15 @@ fn write_primitive(
             fixed(center.x.into()),
             fixed(center.y.into()),
             fixed((*radius).into())
+        )
+        .unwrap(),
+        Shape::Ellipse { center, rx, ry } => write!(
+            s,
+            " cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"",
+            fixed(center.x.into()),
+            fixed(center.y.into()),
+            fixed((*rx).into()),
+            fixed((*ry).into())
         )
         .unwrap(),
         Shape::Polyline { points } | Shape::Polygon { points } => {

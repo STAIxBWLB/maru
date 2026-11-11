@@ -408,6 +408,11 @@ pub(crate) struct SceneBuilder {
     /// start, success and failure states as ovals; a label placed across the
     /// full width of that box crosses the curve.
     ellipses: BTreeSet<String>,
+    /// Every node the family asked for an ellipse, whether or not the label fit
+    /// kept one. A demoted node leaves `ellipses` so the shared ladder runs on
+    /// the whole box, and this set is what still tells the published geometry
+    /// that its shape was decided rather than never offered.
+    ellipse_candidates: BTreeSet<String>,
 }
 
 /// A node auto-fit grew before every other node was placed, kept so the scene
@@ -577,6 +582,7 @@ impl SceneBuilder {
             pins,
             grown: vec![],
             ellipses: BTreeSet::new(),
+            ellipse_candidates: BTreeSet::new(),
         }
     }
     pub(crate) fn pinned_position(&self, id: &str) -> Option<GeometryPoint> {
@@ -587,6 +593,7 @@ impl SceneBuilder {
     /// the whole box.
     pub(crate) fn mark_ellipse(&mut self, id: &str) {
         self.ellipses.insert(id.into());
+        self.ellipse_candidates.insert(id.into());
     }
     pub(crate) fn node_bounds(&self, id: &str) -> Option<GeometryBox> {
         self.routing_nodes.get(id).copied().or_else(|| {
@@ -744,6 +751,13 @@ impl SceneBuilder {
         }
         self.document.nodes.push(GeometryNode {
             final_state: None,
+            // The label fit above is what decides the shape: a node still in
+            // `ellipses` kept its curve, one only in `ellipse_candidates` was
+            // demoted, and a node in neither was never offered one.
+            ellipse: self
+                .ellipse_candidates
+                .contains(id)
+                .then(|| self.ellipses.contains(id)),
             phase_order: None,
             id: id.into(),
             bounds,
@@ -875,7 +889,10 @@ impl SceneBuilder {
         // An oval state fits its text inside the ellipse when it can. A label
         // that needs the whole box keeps the box placement rather than turning a
         // document that laid out before into a refusal, so a failed oval attempt
-        // demotes the node and the shared ladder below runs unchanged.
+        // demotes the node and the shared ladder below runs unchanged. The
+        // demotion leaves `ellipse_candidates`, so `add_node` publishes the box
+        // it actually drew and the renderers stop drawing a curve over text that
+        // crosses it.
         if self.ellipses.contains(id) {
             if let Some(fitted) = self.place_node_labels_ladder(
                 id,
@@ -1096,7 +1113,11 @@ impl SceneBuilder {
     /// origin is a placement rule, not a clip boundary, so a bearing may reach
     /// left of it. An elliptical node admits text only inside the inscribed
     /// rectangle, whose corners lie on the curve.
-    fn node_text_area(&self, id: &str, bounds: GeometryBox) -> Result<(i64, i64, i64, i64), Diagnostic> {
+    fn node_text_area(
+        &self,
+        id: &str,
+        bounds: GeometryBox,
+    ) -> Result<(i64, i64, i64, i64), Diagnostic> {
         let left = i64::from(bounds.x);
         let top = i64::from(bounds.y);
         let right = left + i64::from(bounds.width);
@@ -1106,7 +1127,12 @@ impl SceneBuilder {
         }
         let inset_x = i64::from(px(i64::from(bounds.width) as f64 / 64.0 * ELLIPSE_INSET)?);
         let inset_y = i64::from(px(i64::from(bounds.height) as f64 / 64.0 * ELLIPSE_INSET)?);
-        Ok((left + inset_x, top + inset_y, right - inset_x, bottom - inset_y))
+        Ok((
+            left + inset_x,
+            top + inset_y,
+            right - inset_x,
+            bottom - inset_y,
+        ))
     }
     #[allow(clippy::too_many_arguments)]
     fn place_node_labels_at(

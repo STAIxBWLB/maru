@@ -334,6 +334,60 @@ describe("semantic canvas draws engine geometry", () => {
     expect(order.indexOf("lifecycle-final-border")).toBeLessThan(order.indexOf("title"));
   });
 
+  it("drops an engine shape with the member the canvas stops drawing", async () => {
+    _setCanvasEngineLoaderForTests(async () => ({
+      layout: (input: LayoutRequest) => {
+        requests.push(input);
+        const report = scene(input);
+        report.geometry!.primitives = [
+          {
+            kind: "sequence-lifeline", owner: "draft", layer: "underlay", paint: "line",
+            stroke: "0.8", dash: "3 7", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 290, y: 64 * 372 }, to: { x: 64 * 290, y: 64 * 600 } },
+          },
+          {
+            kind: "sequence-lifeline", owner: "review", layer: "underlay", paint: "line",
+            stroke: "0.8", dash: "3 7", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 560, y: 64 * 372 }, to: { x: 64 * 560, y: 64 * 600 } },
+          },
+          {
+            kind: "lifecycle-final-border", owner: "review", layer: "overlay", paint: "outlineNode",
+            stroke: "1", arrow: false,
+            shape: { kind: "rect", bounds: { x: 64 * 463, y: 64 * 303, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+          },
+          {
+            // Page chrome: a band names a band, not a member, so hiding a
+            // participant must not take the lifecycle's own rail with it.
+            kind: "lifecycle-band", owner: "outcome", layer: "underlay", paint: "line",
+            stroke: "1.1", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 72, y: 64 * 436 }, to: { x: 64 * 800, y: 64 * 436 } },
+          },
+        ];
+        return report;
+      },
+    }));
+    const dataset = doc.datasets![0] as SemanticSpecDataset;
+    const reviewId = dataset.idMap.review!;
+    harness = renderCanvas({
+      ...doc,
+      nodes: doc.nodes.map((node) => node.id === reviewId ? { ...node, hidden: true } : node),
+    });
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+
+    const canvas = document.body.querySelector(".maru-diagram-canvas")!;
+    // The member is gone, so its lifeline and its final border are gone with it:
+    // a dashed line under no participant, and a ring around no state, only
+    // describe a scene the reader is not looking at.
+    expect(document.body.querySelector(`[data-node-id="${reviewId}"]`)).toBeNull();
+    const lifelines = [...canvas.querySelectorAll('[data-engine-primitive="sequence-lifeline"]')];
+    expect(lifelines.map((line) => line.getAttribute("data-engine-primitive-owner"))).toEqual(["draft"]);
+    expect(canvas.querySelector('[data-engine-primitive="lifecycle-final-border"]')).toBeNull();
+    // The band belongs to the page, not to the hidden member.
+    expect(canvas.querySelector('[data-engine-primitive="lifecycle-band"]')).not.toBeNull();
+  });
+
   it("keeps the last scene and says so when the engine refuses", async () => {
     harness = renderCanvas(doc);
     await settle();

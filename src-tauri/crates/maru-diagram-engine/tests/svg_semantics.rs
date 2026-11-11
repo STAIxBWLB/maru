@@ -210,12 +210,20 @@ fn lifecycle_v1_and_v2_emit_initial_final_and_final_legend_symbols() {
             .descendants()
             .find(|element| element.attribute("data-kind") == Some("lifecycle-final-border"))
             .expect("final state has a visible semantic border");
-        assert!((px(border, "x") * 64.0 - (sink.bounds.x + inset) as f64).abs() < 0.01);
-        assert!((px(border, "y") * 64.0 - (sink.bounds.y + inset) as f64).abs() < 0.01);
-        assert!((px(border, "width") * 64.0 - (sink.bounds.width - 2 * inset) as f64).abs() < 0.01);
+        // The sink state is a success, so the engine kept its oval and the
+        // border follows the curve one inset inside it instead of squaring it
+        // off around the text the oval admitted.
+        assert_eq!(border.tag_name().name(), "ellipse");
+        assert_eq!(sink.ellipse, Some(true));
         assert!(
-            (px(border, "height") * 64.0 - (sink.bounds.height - 2 * inset) as f64).abs() < 0.01
+            (px(border, "cx") * 64.0 - (sink.bounds.x + sink.bounds.width / 2) as f64).abs() < 0.01
         );
+        assert!(
+            (px(border, "cy") * 64.0 - (sink.bounds.y + sink.bounds.height / 2) as f64).abs()
+                < 0.01
+        );
+        assert!((px(border, "rx") * 64.0 - (sink.bounds.width / 2 - inset) as f64).abs() < 0.01);
+        assert!((px(border, "ry") * 64.0 - (sink.bounds.height / 2 - inset) as f64).abs() < 0.01);
     }
 }
 

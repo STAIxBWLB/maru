@@ -100,6 +100,14 @@ export type GeometryNode = {
  */
 finalState?: boolean | null,
 /**
+ * The shape the engine drew this member as. `true` is an ellipse whose
+ * text was fitted inside the curve, `false` is one the fit demoted to a
+ * rounded box, and absent means the family never draws this member as a
+ * curve. The canvas and the writer draw what this says, so a demoted
+ * state's own label cannot cross a curve the engine removed.
+ */
+ellipse?: boolean | null,
+/**
  * Authored main-lane column, for both versions, independent of pinned positions.
  */
 phaseOrder?: number | null, id: string, bounds: GeometryBox,
@@ -142,7 +150,7 @@ export type GeometryPrimitiveLayer = "underlay" | "overlay";
 
 export type GeometryPrimitivePaint = "line" | "accentLine" | "securityLine" | "dashedLine" | "node" | "outlineNode" | "accentFill";
 
-export type GeometryPrimitiveShape = { "kind": "rect", bounds: GeometryBox, radius: number, } | { "kind": "line", from: GeometryPoint, to: GeometryPoint, } | { "kind": "polyline", points: Array<GeometryPoint>, } | { "kind": "circle", center: GeometryPoint, radius: number, } | { "kind": "polygon", points: Array<GeometryPoint>, };
+export type GeometryPrimitiveShape = { "kind": "rect", bounds: GeometryBox, radius: number, } | { "kind": "line", from: GeometryPoint, to: GeometryPoint, } | { "kind": "polyline", points: Array<GeometryPoint>, } | { "kind": "circle", center: GeometryPoint, radius: number, } | { "kind": "ellipse", center: GeometryPoint, rx: number, ry: number, } | { "kind": "polygon", points: Array<GeometryPoint>, };
 
 export type GeometryPrimitive = { kind: string,
 /**

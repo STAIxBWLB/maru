@@ -5,10 +5,10 @@
 //! (`maru#552` E4). This module keeps the writer-side validation that needs the
 //! theme, and paints the primitives the shared rules produced.
 use super::{error, SvgOptions};
+use crate::geometry::GeometryDocument;
 pub(crate) use crate::primitives::{
     dash, frame_dash, node_caption, Layer, Paint, Primitive, Shape, KINDS,
 };
-use crate::geometry::GeometryDocument;
 use crate::semantics::SemanticContext;
 use crate::Diagnostic;
 
@@ -108,10 +108,7 @@ pub(crate) fn context<'a>(
     Ok(c)
 }
 
-pub(crate) fn derive(
-    g: &GeometryDocument,
-    o: &SvgOptions,
-) -> Result<Vec<Primitive>, Diagnostic> {
+pub(crate) fn derive(g: &GeometryDocument, o: &SvgOptions) -> Result<Vec<Primitive>, Diagnostic> {
     let c = context(g, o)?;
     crate::primitives::derive(g, c)
 }

@@ -194,6 +194,12 @@ export interface NativeE2eDiagramE4Refusal {
   targetId: string;
   targetX: number;
   targetY: number;
+  /** Edge-to-edge gap between the placed badge and its anchor, in scene pixels.
+   *  The mapper decides it, so the spec can prove the painted badge is the box
+   *  the mapper placed rather than a second number written by hand. */
+  targetDistance: number;
+  /** Height of the opaque title band a container paints, in scene pixels. */
+  headerBand: number;
   /** Members that are frames — lanes, boundaries, stages, segments. The badge
    *  mapper treats one as no obstacle (a badge inside a frame covers nothing),
    *  so the spec has to know which boxes it may overlap. */
@@ -654,7 +660,7 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           { buildEngineCanvasLayoutRequest, fixedToPixels },
           { serializeDoc, readDiagramDetailed },
           { diagramSaveDocument },
-          { mapCanvasDiagnostics },
+          { CANVAS_CONTAINER_HEADER_BAND, CANVAS_DIAGNOSTIC_BADGE, mapCanvasDiagnostics },
           { NATIVE_E4_DIAGRAM_TYPES, NATIVE_E4_LEGACY_DOCUMENTS, nativeE4Spec, nativeE4RefusedSpec, NATIVE_E4_MIXED_LABEL },
         ] = await Promise.all([
           import("./diagram/types"),
@@ -729,14 +735,18 @@ function bridgeNamespace(): MaruNativeE2eBridge {
                   ? [shape.from.x, shape.to.x]
                   : shape.kind === "circle"
                     ? [shape.center.x - shape.radius, shape.center.x + shape.radius]
-                    : pointsOf.map((point) => point.x);
+                    : shape.kind === "ellipse"
+                      ? [shape.center.x - shape.rx, shape.center.x + shape.rx]
+                      : pointsOf.map((point) => point.x);
               const ys = shape.kind === "rect"
                 ? [shape.bounds.y, shape.bounds.y + shape.bounds.height]
                 : shape.kind === "line"
                   ? [shape.from.y, shape.to.y]
                   : shape.kind === "circle"
                     ? [shape.center.y - shape.radius, shape.center.y + shape.radius]
-                    : pointsOf.map((point) => point.y);
+                    : shape.kind === "ellipse"
+                      ? [shape.center.y - shape.ry, shape.center.y + shape.ry]
+                      : pointsOf.map((point) => point.y);
               const box: [number, number, number, number] = [
                 px(Math.min(...xs), what), px(Math.min(...ys), what),
                 px(Math.max(...xs) - Math.min(...xs), what), px(Math.max(...ys) - Math.min(...ys), what),
@@ -886,6 +896,23 @@ function bridgeNamespace(): MaruNativeE2eBridge {
         if (!anchored || !anchored.target) {
           throw new Error(`the engine's refusal carried no member anchor: ${JSON.stringify(refusedReport.diagnostics)}`);
         }
+        // The gap the mapper placed the badge at, measured between its own box
+        // and the anchored member's displayed box. The spec compares the drawn
+        // badge against this instead of a distance written by hand, so a moved
+        // badge and a resized one are both caught.
+        const anchorNode = refusedDoc.nodes.find((node) => node.id === anchored.target!.id);
+        const badge = {
+          x: anchored.target.x,
+          y: anchored.target.y,
+          w: CANVAS_DIAGNOSTIC_BADGE.width,
+          h: CANVAS_DIAGNOSTIC_BADGE.height,
+        };
+        const targetDistance = anchorNode
+          ? Math.hypot(
+            Math.max(0, badge.x - (anchorNode.x + anchorNode.w), anchorNode.x - (badge.x + badge.w)),
+            Math.max(0, badge.y - (anchorNode.y + anchorNode.h), anchorNode.y - (badge.y + badge.h)),
+          )
+          : 0;
         const refusal: NativeE2eDiagramE4Refusal = {
           documentName: refusedName,
           documentTitle: refusedDoc.docTitle.length > 0 ? refusedDoc.docTitle : refusedName,
@@ -897,6 +924,8 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           targetId: anchored.target.id,
           targetX: anchored.target.x,
           targetY: anchored.target.y,
+          targetDistance,
+          headerBand: CANVAS_CONTAINER_HEADER_BAND,
           // The mapper's own rule for what a badge may sit inside, reported
           // rather than guessed from the painted boxes.
           frames: refusedDoc.nodes

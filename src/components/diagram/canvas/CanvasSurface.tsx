@@ -330,22 +330,36 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
   const pageSize = page && page !== "free" ? DIAGRAM_PAGE_SIZES[page] : null;
 
+  // A hidden member is not drawn at all. That is the model's own rule, so it
+  // applies before the cull and needs no measurement: the canvas would otherwise
+  // paint a hidden node until its first resize and then drop it.
+  const drawnNodes = useMemo(() => displayNodes.filter((node) => !node.hidden), [displayNodes]);
+
   // Culling: pick only the visible subset of nodes + edges. Selection is
   // forced-visible so an off-screen drag target doesn't disappear mid-gesture.
   // Skip when we haven't measured yet (avoid culling everything on first paint).
   const visible = useMemo(() => {
     if (svgSize.width === 0 || svgSize.height === 0) {
-      return { nodes: displayNodes, edges, full: true };
+      return { nodes: drawnNodes, edges, full: true };
     }
     const tl = screenToCanvas(0, 0, viewport);
     const br = screenToCanvas(svgSize.width, svgSize.height, viewport);
     return visibleSubset({
-      nodes: displayNodes,
+      nodes: drawnNodes,
       edges,
       viewport: { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y },
       forceVisible: selection.nodes,
     });
-  }, [displayNodes, edges, selection.nodes, svgSize.height, svgSize.width, viewport]);
+  }, [drawnNodes, edges, selection.nodes, svgSize.height, svgSize.width, viewport]);
+
+  // The engine's shapes follow the members they belong to. This is the model's
+  // own visibility and not the viewport subset: a lifeline whose participant
+  // sits above the viewport still crosses the part of the scene the reader is
+  // looking at, so culling it would tear the timeline in half.
+  const drawnMembers = useMemo(
+    () => new Set(drawnNodes.map((node) => node.id)),
+    [drawnNodes],
+  );
 
   const transform = `translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`;
 
@@ -952,7 +966,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             lifecycle band — paint after the frames and before the routes, in
             the writer's own order, so a message reads against its participant's
             timeline and no shape covers a route the engine ran. */}
-        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="underlay" />
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="underlay" members={drawnMembers} />
         {visible.edges.map((edge) => (
           <EdgeView
             key={edge.id}
@@ -967,7 +981,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         {visible.nodes.filter((n) => !isEngineContainer(n)).map(renderNode)}
         {/* Overlays come after the members: a lifecycle final border sits on its
             own state and would be hidden by the state's box. */}
-        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="overlay" />
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="overlay" members={drawnMembers} />
         {geometry && geometry.pageLabels.length > 0 ? (
           // The engine's title and subtitle sit in the header band its page
           // offset reserves. They are page chrome, so they paint after the

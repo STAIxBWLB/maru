@@ -26,6 +26,14 @@ export interface CanvasDiagnosticPlacement {
  */
 export const CANVAS_DIAGNOSTIC_BADGE = { width: 300, height: 44, gap: 8, step: 48 } as const;
 
+/**
+ * The opaque title band a container paints above its body, in canvas pixels.
+ * `NodeView` draws it and `renderSvg` emits the same strip; the badge mapper
+ * needs the number because a badge over the band hides the lane or stage the
+ * reader is looking at.
+ */
+export const CANVAS_CONTAINER_HEADER_BAND = 26;
+
 const CATEGORY_CODES: Record<Exclude<CanvasDiagnosticCategory, "unknown">, readonly string[]> = {
   text: ["geometry-label-fit", "geometry-boundary-title-fit", "geometry-segment-label-fit", "route-label-space"],
   overlap: ["geometry-node-overlap", "geometry-label-overlap"],
@@ -88,18 +96,20 @@ function overlapArea(a: Rect, b: Rect): number {
  *
  * Placement matters because a badge is 300 px wide and takes the pointer: on
  * top of the neighbouring label it hides the text and swallows that member's
- * click, which is what the anchored diagnostic exists to explain.
+ * click, which is what the anchored diagnostic exists to explain. `obstacles`
+ * includes the badges already placed in this pass, with no exemption for the
+ * anchor's own member: two diagnostics on one element stack beside it instead
+ * of landing on each other.
  */
-function placeBadge(anchor: Rect, slot: number, obstacles: readonly Rect[]): { x: number; y: number } {
+function placeBadge(anchor: Rect, obstacles: readonly Rect[]): { x: number; y: number } {
   const { width, height, gap, step } = CANVAS_DIAGNOSTIC_BADGE;
-  const offset = slot * step;
   const beside = [
-    { x: anchor.x + anchor.w + gap, y: anchor.y + offset, dy: 1 },
-    { x: anchor.x, y: anchor.y - gap - height - offset, dy: -1 },
-    { x: anchor.x, y: anchor.y + anchor.h + gap + offset, dy: 1 },
-    { x: anchor.x + anchor.w + gap, y: anchor.y + anchor.h + gap + offset, dy: 1 },
+    { x: anchor.x + anchor.w + gap, y: anchor.y, dy: 1 },
+    { x: anchor.x, y: anchor.y - gap - height, dy: -1 },
+    { x: anchor.x, y: anchor.y + anchor.h + gap, dy: 1 },
+    { x: anchor.x + anchor.w + gap, y: anchor.y + anchor.h + gap, dy: 1 },
   ];
-  const across = [{ x: anchor.x - gap - width, y: anchor.y + offset, dy: 1 }];
+  const across = [{ x: anchor.x - gap - width, y: anchor.y, dy: 1 }];
   let best: { x: number; y: number } = beside[0]!;
   let bestScore = Number.POSITIVE_INFINITY;
   for (const group of [beside, across]) {
@@ -176,8 +186,16 @@ export function mapCanvasDiagnostics(
   }
   for (const node of shown.values()) {
     if (labelled.has(node.id)) continue;
-    if (resolveSemanticMember(doc, { nodeId: node.id })?.kind === "container") continue;
-    obstacles.push({ member: node.id, rect: { x: node.x, y: node.y, w: node.w, h: node.h } });
+    const container = resolveSemanticMember(doc, { nodeId: node.id })?.kind === "container";
+    // A container's body is a translucent frame — a badge inside one covers
+    // nothing — but its title band is opaque, and a badge over it hides the lane
+    // or stage the reader is reading the scene by.
+    obstacles.push({
+      member: node.id,
+      rect: container
+        ? { x: node.x, y: node.y, w: node.w, h: Math.min(CANVAS_CONTAINER_HEADER_BAND, node.h) }
+        : { x: node.x, y: node.y, w: node.w, h: node.h },
+    });
   }
   const anchorOf = (diagnostic: Diagnostic): CanvasDiagnosticAnchor | null => {
     if (!dataset || !descriptor) return null;
@@ -243,20 +261,22 @@ export function mapCanvasDiagnostics(
       owner: id,
     };
   };
-  // Two diagnostics on one element stack downward from the same side, so the
-  // second is placed as though the first were already there.
-  const slots = new Map<string, number>();
+  // Every badge placed in this pass joins the obstacles, so a second diagnostic
+  // on the same element — or on a neighbouring one — slides clear of the first
+  // instead of landing on it. A badge is `member: null` because it belongs to no
+  // member: even a later badge for the same owner has to keep off it.
   return diagnostics.map((diagnostic) => {
     const category = canvasDiagnosticCategory(diagnostic);
     const anchor = anchorOf(diagnostic);
     if (!anchor) return { diagnostic, category, target: null };
-    const key = `${anchor.kind}:${anchor.id}`;
-    const slot = slots.get(key) ?? 0;
-    slots.set(key, slot + 1);
-    const point = placeBadge(anchor.box, slot, obstacles
+    const point = placeBadge(anchor.box, obstacles
       .filter((obstacle) => obstacle.member === null || obstacle.member !== anchor.owner)
       .map((obstacle) => obstacle.rect));
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return { diagnostic, category, target: null };
+    obstacles.push({
+      member: null,
+      rect: { x: point.x, y: point.y, w: CANVAS_DIAGNOSTIC_BADGE.width, h: CANVAS_DIAGNOSTIC_BADGE.height },
+    });
     return { diagnostic, category, target: { kind: anchor.kind, id: anchor.id, x: point.x, y: point.y } };
   });
 }

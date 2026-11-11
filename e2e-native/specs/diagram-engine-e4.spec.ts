@@ -68,6 +68,10 @@ interface NativeE2eDiagramE4Refusal {
   targetId: string;
   targetX: number;
   targetY: number;
+  /** Edge-to-edge gap the mapper placed the badge at, in scene pixels. */
+  targetDistance: number;
+  /** Height of the opaque title band a container paints, in scene pixels. */
+  headerBand: number;
   /** Members that are frames: a badge inside one covers nothing. */
   frames: string[];
 }
@@ -1178,6 +1182,9 @@ describe("native engine canvas (T4)", () => {
       const badgeRect = badge?.getBoundingClientRect() ?? null;
       const targetRect = target?.getBoundingClientRect() ?? null;
       const match = /translate\(([-\d.]+),\s*([-\d.]+)\)/.exec(badge?.getAttribute("transform") ?? "");
+      const view = /scale\(([-\d.]+)\)/.exec(
+        canvas.querySelector(":scope > g[transform]")?.getAttribute("transform") ?? "",
+      );
       return {
         status: canvas.getAttribute("data-engine-geometry-status"),
         specSha256: canvas.getAttribute("data-engine-spec-sha256"),
@@ -1186,10 +1193,11 @@ describe("native engine canvas (T4)", () => {
         targetId: badge?.getAttribute("data-target-id") ?? null,
         label: badge?.getAttribute("aria-label") ?? "",
         at: match ? { x: Number(match[1]), y: Number(match[2]) } : null,
+        zoom: view ? Number(view[1]) : 1,
         notice: document.querySelectorAll("[data-canvas-diagnostic-notice]").length,
         // How far the drawn badge's box sits from the member it names, edge to
-        // edge. Which side it took is the mapper's decision; that it is still
-        // beside the member is not.
+        // edge — in client pixels, so it has to be read against the scene
+        // scale.
         distance: badgeRect && targetRect
           ? Math.hypot(
             Math.max(0, badgeRect.left - targetRect.right, targetRect.left - badgeRect.right),
@@ -1213,8 +1221,16 @@ describe("native engine canvas (T4)", () => {
     assert.ok(state.at, "the diagnostic badge carries no placement transform");
     assert.equal(state.at.x, refusal.targetX, `the badge sits at x=${state.at.x}, the mapper placed it at x=${refusal.targetX}`);
     assert.equal(state.at.y, refusal.targetY, `the badge sits at y=${state.at.y}, the mapper placed it at y=${refusal.targetY}`);
-    assert.ok(state.distance !== null && state.distance <= 24,
-      `the badge is not beside the member it names (nearest edge ${state.distance}px away)`);
+    // Adjacency is not a constant here. A 300 px badge does not fit between the
+    // members of this lane, and the lane title bands are opaque, so the mapper
+    // slides the badge a step at a time until it covers nothing (the rule and
+    // the cramped case are pinned in canvasDiagnostics.test.ts). What the app
+    // must not do is drift from the mapper: the same translate, and a drawn box
+    // no farther from its anchor than the one the mapper measured. The coverage
+    // checks below are the real bound.
+    assert.ok(state.distance !== null, "the badge has no measured distance to its member");
+    assert.ok(state.distance <= refusal.targetDistance * state.zoom + 1,
+      `the badge is drawn ${state.distance}px from its member, farther than the mapper's ${refusal.targetDistance}px at ${state.zoom}x`);
     // Gap: at a fixed offset and its full size the badge covered the next
     // member's box and label, which also took that member's pointer input. A
     // badge may hide its own anchor and sit inside a frame — a lane encloses
@@ -1222,7 +1238,7 @@ describe("native engine canvas (T4)", () => {
     // or label. Nothing is converted here: the badge and the scene share one
     // transform, so a client rectangle overlap is the same overlap the user
     // sees.
-    const collision = await browser.execute((options: { targetId: string; frames: string[] }) => {
+    const collision = await browser.execute((options: { targetId: string; frames: string[]; headerBand: number }) => {
       const canvas = document.querySelector(".maru-diagram-canvas");
       const badge = canvas?.querySelector<SVGGElement>("[data-canvas-diagnostic]");
       if (!canvas || !badge) return null;
@@ -1232,6 +1248,10 @@ describe("native engine canvas (T4)", () => {
         return w > 0 && h > 0 ? w * h : 0;
       };
       const badgeRect = badge.getBoundingClientRect();
+      const view = /scale\(([-\d.]+)\)/.exec(
+        canvas.querySelector(":scope > g[transform]")?.getAttribute("transform") ?? "",
+      );
+      const zoom = view ? Number(view[1]) : 1;
       const obstacles = [
         ...canvas.querySelectorAll<SVGGraphicsElement>("[data-node-id]"),
         ...canvas.querySelectorAll<SVGGraphicsElement>("[data-engine-label]"),
@@ -1242,6 +1262,18 @@ describe("native engine canvas (T4)", () => {
         name: element.getAttribute("data-node-id") ?? element.getAttribute("data-engine-label") ?? "",
         shared: shared(badgeRect, element.getBoundingClientRect()),
       }));
+      // A frame's body is translucent, so a badge may sit inside one, but the
+      // title it paints across the top is opaque: a badge over that strip hides
+      // the lane or stage the reader is reading the scene by.
+      const bands = options.frames.flatMap((id) => {
+        const group = canvas.querySelector<SVGGraphicsElement>(`[data-node-id="${id}"]`);
+        if (!group) return [];
+        const rect = group.getBoundingClientRect();
+        return [{
+          name: id,
+          shared: shared(badgeRect, new DOMRect(rect.left, rect.top, rect.width, options.headerBand * zoom)),
+        }];
+      });
       return {
         tabIndex: badge.tabIndex,
         role: badge.getAttribute("role"),
@@ -1251,13 +1283,22 @@ describe("native engine canvas (T4)", () => {
             && !options.frames.includes(obstacle.name)
             && obstacle.shared > 4)
           .map((obstacle) => ({ name: obstacle.name, shared: Math.round(obstacle.shared) })),
+        banded: bands.filter((band) => band.shared > 4).map((band) => ({
+          name: band.name,
+          shared: Math.round(band.shared),
+        })),
       };
-    }, { targetId: refusal.targetId, frames: refusal.frames });
+    }, { targetId: refusal.targetId, frames: refusal.frames, headerBand: refusal.headerBand });
     assert.ok(collision, "the anchored diagnostic badge is not painted");
     assert.deepEqual(
       collision.covered,
       [],
       `the badge covers ${JSON.stringify(collision.covered)}; it may hide its own anchor but never another member or label`,
+    );
+    assert.deepEqual(
+      collision.banded,
+      [],
+      `the badge covers the title band of ${JSON.stringify(collision.banded)}`,
     );
     // A badge that cannot be reached without a pointer is still a notice: it
     // stays in the tab order and names itself to a screen reader.
@@ -1268,7 +1309,10 @@ describe("native engine canvas (T4)", () => {
       code: state.code,
       targetId: state.targetId,
       at: state.at,
+      distance: state.distance,
+      mapperDistance: refusal.targetDistance * state.zoom,
       covers: collision.covered.length,
+      bands: collision.banded.length,
     })}`);
   }).timeout(180_000);
 
