@@ -12,6 +12,7 @@
  */
 
 import type { StateTransformer } from "./actions";
+import { matchingCanvasGeometry } from "./engineCanvasGeometry";
 import { floorplanDescendants } from "./floorplan";
 import { buildProposalFromCandidate, prepareProposalApply, type ProposalMeta } from "./proposal";
 import {
@@ -901,7 +902,8 @@ export function moveMessage(index: number, direction: -1 | 1): SpecTransform {
 /** Detach dataset `datasetId` to freeform (one undo entry when wrapped in `withSnapshot`). */
 export function detachSemanticDatasetAction(datasetId: string): StateTransformer {
   return (state) => {
-    const { doc } = detachSemanticDataset(state.doc, datasetId);
+    const geometry = matchingCanvasGeometry(state.doc);
+    const { doc } = detachSemanticDataset(state.doc, datasetId, geometry?.boxes);
     return doc === state.doc ? state : { ...state, doc };
   };
 }

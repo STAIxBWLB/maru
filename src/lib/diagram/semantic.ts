@@ -1268,6 +1268,7 @@ export function semanticLosses(dataset: SemanticSpecDataset): ValidationDiagnost
 export function detachSemanticDataset(
   doc: DiagramDoc,
   datasetId: string,
+  displayedBoxes?: ReadonlyMap<string, Pick<DiagramNode, "x" | "y" | "w" | "h">>,
 ): { doc: DiagramDoc; losses: ValidationDiagnostic[] } {
   const dataset = semanticDatasetsOf(doc).find((entry) => entry.id === datasetId);
   if (!dataset) return { doc, losses: [] };
@@ -1276,7 +1277,12 @@ export function detachSemanticDataset(
     const meta = { ...node.meta };
     delete meta.memberId;
     delete meta.semanticContainer;
-    const next: DiagramNode = { ...node, meta };
+    const box = displayedBoxes?.get(node.id);
+    const next: DiagramNode = {
+      ...node,
+      ...(box ? { x: box.x, y: box.y, w: box.w, h: box.h } : {}),
+      meta,
+    };
     if (Object.keys(meta).length === 0) delete next.meta;
     return next;
   });

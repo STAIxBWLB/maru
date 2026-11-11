@@ -25,6 +25,10 @@ import {
 } from "./engineCanvasGeometry";
 import { canonicalSemanticExportInput } from "./export";
 import { renderDocToSvg } from "./renderSvg";
+import { defaultCoalescer, undo, withSnapshot } from "./actions";
+import { detachSemanticDatasetAction } from "./semanticEdit";
+import { createDiagramStore } from "./state";
+import { createInitialEphemeral } from "./types";
 import type { EngineDiagramType, SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDocument, resolveSemanticMember } from "./semantic";
 import { createEmptyDoc, type DiagramDoc, type DiagramNode } from "./types";
@@ -708,6 +712,61 @@ describe("visual export scene eligibility with the real store", () => {
     expect(canvasGeometryState(dataset.id)).toMatchObject({ status: "refused", geometry: null });
     expect(matchingCanvasGeometry(doc)).toBeNull();
     expect(matchingCanvasGeometry(copy)).toBeNull();
+  });
+});
+
+describe("detach preserves completed displayed member boxes", () => {
+  it.each(TYPES)("bakes %s boxes in one undoable detach transaction", async (type) => {
+    const { doc, dataset } = docFor(type);
+    const free: DiagramNode = { id: "unassociated", kind: "simple", x: -200, y: -300, w: 80, h: 40 };
+    doc.nodes.push(free);
+    const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
+    const before = JSON.stringify(doc);
+    await syncCanvasGeometry(doc, dataset.id, async () => ({
+      layout: (request: LayoutRequest): GeometryReport => {
+        const geometry = sceneFor(request);
+        geometry.containers = doc.nodes.filter((node) => node.meta?.semanticContainer).map((node, index) => ({
+          id: String(node.meta!.memberId).slice(dataset.id.length + 1),
+          kind: String(node.meta!.semanticContainer),
+          bounds: { x: 64 * (600 + index * 200), y: 64 * 90, width: 64 * 220, height: 64 * 240 },
+        }));
+        return { apiVersion: 1, ok: true, geometry, diagnostics: [], receipt: receipt() };
+      },
+    }));
+    const painted = matchingCanvasGeometry(doc)!.boxes;
+    const members = doc.nodes.filter((node) => node.meta?.memberId?.startsWith(`${dataset.id}:`));
+    expect(painted.size).toBe(members.length);
+    expect(members.some((node) => {
+      const box = painted.get(node.id)!;
+      return box.x !== node.x || box.y !== node.y || box.w !== node.w || box.h !== node.h;
+    })).toBe(true);
+    store.setState(withSnapshot(detachSemanticDatasetAction(dataset.id), defaultCoalescer()));
+    const detached = store.getState().doc;
+    for (const member of members) {
+      const box = painted.get(member.id)!;
+      expect(detached.nodes.find((node) => node.id === member.id)).toMatchObject({ x: box.x, y: box.y, w: box.w, h: box.h });
+    }
+    expect(detached.nodes.find((node) => node.id === free.id)).toBe(free);
+    expect(detached.datasets).toEqual([]);
+    expect(detached.nodes.some((node) => node.meta?.memberId || node.meta?.semanticContainer)).toBe(false);
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    store.setState(undo());
+    expect(JSON.stringify(store.getState().doc)).toBe(before);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("keeps stored boxes when only a retained stale scene is available", async () => {
+    const { doc, dataset } = docFor("workflow");
+    await syncCanvasGeometry(doc, dataset.id, fakeEngine().load);
+    const changed = structuredClone(doc);
+    ((changed.datasets![0] as SemanticSpecDataset).spec.nodes as Array<Record<string, unknown>>)[0]!.label = "Changed source";
+    await syncCanvasGeometry(changed, dataset.id, fakeEngine({ ok: false }).load);
+    expect(canvasGeometryState(dataset.id).status).toBe("stale");
+    expect(matchingCanvasGeometry(changed)).toBeNull();
+    const boxes = changed.nodes.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
+    const store = createDiagramStore({ doc: changed, ephemeral: createInitialEphemeral() });
+    store.setState(withSnapshot(detachSemanticDatasetAction(dataset.id), defaultCoalescer()));
+    expect(store.getState().doc.nodes.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }))).toEqual(boxes);
   });
 });
 

@@ -151,11 +151,14 @@ describe("detachSemanticDatasetAction", () => {
   it("detaches to freeform and is undoable", () => {
     const store = storeOf("dataflow");
     const before = JSON.stringify(store.getState().doc);
+    const boxes = store.getState().doc.nodes.map(({ x, y, w, h }) => ({ x, y, w, h }));
     store.setState(withSnapshot(detachSemanticDatasetAction("ds"), defaultCoalescer()));
     const { doc } = store.getState();
     expect(doc.datasets).toEqual([]);
     expect(doc.nodes).toHaveLength(4);
     expect(doc.nodes.some((n) => n.meta?.memberId !== undefined)).toBe(false);
+    expect(doc.nodes.map(({ x, y, w, h }) => ({ x, y, w, h }))).toEqual(boxes);
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
     store.setState(undo());
     expect(JSON.stringify(store.getState().doc)).toBe(before);
   });

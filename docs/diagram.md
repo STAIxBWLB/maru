@@ -605,6 +605,9 @@ export path independently lays out its source request.
 - Fixed-point coordinates become pixels once, at the render boundary (`value /
   64` in `fixedToPixels`). Nothing re-measures text, and Korean label lines are
   never sliced with backend offsets: the engine's own line breaks provide them.
+- Detach to freeform copies a completed matching scene's member x/y/w/h boxes
+  into the doc before dropping the semantic association, in the same undo step.
+  Without a matching ready scene, stored boxes retain their existing behavior.
 - Document replacement clears the published scene and invalidates in-flight
   layouts, including when a copied file keeps the same dataset id. Returning to
   an already cached revision also supersedes a different pending layout.
