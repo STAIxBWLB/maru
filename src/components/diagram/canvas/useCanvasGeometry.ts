@@ -35,6 +35,7 @@ export function useCanvasGeometry(doc: DiagramDoc): CanvasGeometryState {
 
 export interface CanvasDisplay {
   state: CanvasGeometryState;
+  session: number;
   datasetId: string | null;
   geometry: CanvasGeometry | null;
   /** The doc nodes as the canvas paints them: the engine's box where it owns one. */
@@ -58,7 +59,7 @@ export function useCanvasDisplay(doc: DiagramDoc): CanvasDisplay {
     [doc.nodes, geometry, offset],
   );
   return useMemo(
-    () => ({ state, datasetId: state.datasetId, geometry, nodes }),
-    [geometry, nodes, state],
+    () => ({ state, session: positions.generation, datasetId: state.datasetId, geometry, nodes }),
+    [geometry, nodes, positions.generation, state],
   );
 }

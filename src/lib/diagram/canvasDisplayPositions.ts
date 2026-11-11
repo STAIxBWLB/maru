@@ -4,10 +4,11 @@ import type { DiagramDoc, NodeId } from "./types";
 
 export type CanvasPositions = ReadonlyMap<NodeId, CanvasGeometryPoint>;
 interface PositionsState {
+  generation: number;
   live: CanvasPositions | null;
   committed: { scene: CanvasGeometryState; positions: CanvasPositions } | null;
 }
-const EMPTY: PositionsState = Object.freeze({ live: null, committed: null });
+const EMPTY: PositionsState = Object.freeze({ generation: 0, live: null, committed: null });
 const entries = new Map<string, { state: PositionsState; listeners: Set<() => void> }>();
 function entryFor(documentId: string) {
   let entry = entries.get(documentId);
@@ -53,7 +54,7 @@ export function commitCanvasPositions(
   const positions = committedPositions(current, scene, doc);
   for (const id of movedIds) positions.delete(id);
   if (scene.geometry) for (const { id, x, y } of placed) positions.set(id, { x, y });
-  publish(doc.id, { live: null, committed: positions.size ? { scene, positions } : null });
+  publish(doc.id, { generation: current.generation, live: null, committed: positions.size ? { scene, positions } : null });
 }
 export function canvasDisplayOffset(doc: DiagramDoc, scene: CanvasGeometryState, state = entryFor(doc.id).state): CanvasDisplayOffset | null {
   const positions = committedPositions(state, scene, doc);
@@ -62,5 +63,5 @@ export function canvasDisplayOffset(doc: DiagramDoc, scene: CanvasGeometryState,
 }
 /** Document replacement invalidates copied ids as well as published geometry. */
 export function resetCanvasPositions(): void {
-  for (const [id] of entries) publish(id, EMPTY);
+  for (const [id, entry] of entries) publish(id, { ...EMPTY, generation: entry.state.generation + 1 });
 }

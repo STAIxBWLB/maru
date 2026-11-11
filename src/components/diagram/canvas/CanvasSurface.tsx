@@ -38,6 +38,7 @@ import {
   type CanvasGeometry,
   type CanvasLabelLines,
 } from "../../../lib/diagram/engineCanvasGeometry";
+import type { DiagramDoc } from "../../../lib/diagram/types";
 import { isPinnableCanvasMember } from "../../../lib/diagram/engineGeometryCanvas";
 import {
   analyzeViewDrag,
@@ -77,7 +78,7 @@ import { Marquee } from "./Marquee";
 import { EngineLabels, NodeView } from "./NodeView";
 import { SmartGuides } from "./SmartGuides";
 import { useCanvasDisplay } from "./useCanvasGeometry";
-import { commitCanvasPositions, setLiveCanvasPositions } from "../../../lib/diagram/canvasDisplayPositions";
+import { canvasPositionsState, commitCanvasPositions, setLiveCanvasPositions } from "../../../lib/diagram/canvasDisplayPositions";
 
 const CanvasDiagnosticLayer = lazy(() => import("./CanvasDiagnostics").then((module) => ({ default: module.CanvasDiagnosticLayer })));
 
@@ -142,7 +143,10 @@ interface TableResizeState {
   coalescer: Coalescer;
 }
 
-type Gesture = DragState | PanState | MarqueeState | ConnectState | CellRangeState | TableResizeState | null;
+type Gesture = ((DragState | PanState | MarqueeState | ConnectState | CellRangeState | TableResizeState) & { documentId: string; generation: number }) | null;
+function gestureContext(doc: DiagramDoc) {
+  return { documentId: doc.id, generation: canvasPositionsState(doc.id).generation };
+}
 
 export interface CanvasSurfaceProps {
   onMemoOpen?: (nodeId: NodeId) => void;
@@ -213,7 +217,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   const snapSize = useDiagram((s) => s.ephemeral.ui.snapSize);
   const smartGuideOn = useDiagram((s) => s.ephemeral.ui.smartGuideOn);
   const tool = useDiagram((s) => s.ephemeral.tool);
-  const { state: canvasGeometry, nodes: displayNodes } = useCanvasDisplay(doc);
+  const { state: canvasGeometry, session: displaySession, nodes: displayNodes } = useCanvasDisplay(doc);
   const geometry: CanvasGeometry | null = canvasGeometry.geometry;
   const datasetId = canvasGeometry.datasetId;
 
@@ -229,6 +233,26 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   const [svgSize, setSvgSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => () => { setLiveCanvasPositions(doc.id, null); }, [doc.id]);
+  useEffect(() => {
+    gestureRef.current = null;
+    setMarquee(null);
+    setGuides([]);
+    setConnectGhost(null);
+  }, [doc.id, displaySession]);
+
+  const activeGesture = useCallback(() => {
+    const gesture = gestureRef.current;
+    const currentDoc = store.getState().doc;
+    if (gesture && (gesture.documentId !== currentDoc.id || gesture.generation !== canvasPositionsState(currentDoc.id).generation)) {
+      gestureRef.current = null;
+      setLiveCanvasPositions(gesture.documentId, null);
+      setMarquee(null);
+      setGuides([]);
+      setConnectGhost(null);
+      return null;
+    }
+    return gesture;
+  }, [store]);
 
   // Labels are relative to the engine box, so a drag that displaces the node
   // group carries them without re-deriving anything.
@@ -357,6 +381,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       }
       const drawnIds = canvasEngineDrawnIds(state.doc, datasetId, geometry);
       gestureRef.current = {
+        ...gestureContext(store.getState().doc),
         kind: "node",
         startCanvasX: canvas.x,
         startCanvasY: canvas.y,
@@ -389,6 +414,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         y: port === "s" ? node.y + node.h : port === "n" ? node.y : node.y + node.h / 2,
       };
       gestureRef.current = {
+        ...gestureContext(store.getState().doc),
         kind: "connect",
         fromNodeId: nodeId,
         fromPort: port,
@@ -426,7 +452,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       } else {
         store.setState(setTableSelection({ nodeId, anchor: addr, focus: addr }));
       }
-      gestureRef.current = { kind: "cell-range", nodeId };
+      gestureRef.current = { ...gestureContext(store.getState().doc), kind: "cell-range", nodeId };
     },
     [store],
   );
@@ -459,6 +485,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       const rect = svg.getBoundingClientRect();
       const canvas = screenToCanvas(event.clientX - rect.left, event.clientY - rect.top, viewport);
       gestureRef.current = {
+        ...gestureContext(store.getState().doc),
         kind: "table-resize",
         nodeId,
         datasetId: matrix.id,
@@ -509,6 +536,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
       if (event.shiftKey || tool === "pan") {
         gestureRef.current = {
+        ...gestureContext(store.getState().doc),
           kind: "pan",
           startScreenX: screenX,
           startScreenY: screenY,
@@ -520,6 +548,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
       const canvas = screenToCanvas(screenX, screenY, viewport);
       gestureRef.current = {
+        ...gestureContext(store.getState().doc),
         kind: "marquee",
         startCanvasX: canvas.x,
         startCanvasY: canvas.y,
@@ -548,7 +577,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         const point = screenToCanvas(screenX, screenY, viewport);
         onPointerCanvasMove(point);
       }
-      const gesture = gestureRef.current;
+      const gesture = activeGesture();
       if (!gesture) return;
 
       if (gesture.kind === "pan") {
@@ -675,7 +704,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         setGuides(smartGuideOut);
       }
     },
-    [displayNodes, doc.id, onPointerCanvasMove, snapOn, snapSize, smartGuideOn, store, updateViewport, viewport],
+    [activeGesture, displayNodes, doc.id, onPointerCanvasMove, snapOn, snapSize, smartGuideOn, store, updateViewport, viewport],
   );
 
   const onSurfacePointerUp = useCallback(
@@ -684,7 +713,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (svg && svg.hasPointerCapture(event.pointerId)) {
         svg.releasePointerCapture(event.pointerId);
       }
-      const gesture = gestureRef.current;
+      const gesture = activeGesture();
       if (!gesture) return;
       if (gesture.kind === "marquee") {
         const rect = marqueeRect(gesture);
@@ -764,7 +793,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       }
       gestureRef.current = null;
     },
-    [canvasGeometry, datasetId, displayNodes, doc, geometry, nodes, store],
+    [activeGesture, canvasGeometry, datasetId, displayNodes, doc, geometry, nodes, store],
   );
 
   const onWheel = useCallback(

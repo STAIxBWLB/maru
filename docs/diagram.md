@@ -653,7 +653,8 @@ The canvas, inline editor, fit view, find navigation and property panel read
 one shared displayed position, including live drags and dropped pins awaiting
 the next layout. These positions are ephemeral: they never add history entries.
 Escape cancels the live gesture, undo removes a dropped pin's overlay, and a
-new scene or document replacement invalidates it.
+new scene or document replacement invalidates it. Document replacement also
+cancels active gestures, including copies that retain their document id.
 
 Engine diagnostics are read-only asynchronous feedback. A diagnostic naming a
 source member, relation or label appears beside its displayed box or route;

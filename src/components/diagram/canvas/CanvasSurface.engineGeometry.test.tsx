@@ -5,12 +5,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GeometryReport, LayoutRequest } from "../../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
-import { undo } from "../../../lib/diagram/actions";
+import { replaceDoc, undo } from "../../../lib/diagram/actions";
 import {
   _resetCanvasGeometryForTests,
   _setCanvasEngineLoaderForTests,
   canvasGeometryState,
   syncCanvasGeometry,
+  resetCanvasGeometry,
 } from "../../../lib/diagram/engineCanvasGeometry";
 import { projectSemanticDocument } from "../../../lib/diagram/semantic";
 import type { SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
@@ -443,6 +444,36 @@ describe("semantic canvas pins a dropped member", () => {
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(surface.querySelector('line[stroke="#2563eb"]')).toBeNull();
     expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it.each([false, true])("document replacement cancels a live drag before pointer-up (copied id=%s)", async (sameId) => {
+    await startReadyCanvas();
+    const release = holdFollowingLayouts();
+    const draft = (doc.datasets![0] as SemanticSpecDataset).idMap.draft!;
+    try {
+      await dragMember(draft, 60, 45, false);
+      expect(displayed(draft)).toMatchObject({ x: 260, y: 345 });
+      const replacement = structuredClone(doc);
+      if (!sameId) replacement.id = "other-document";
+      replacement.docTitle = "Opened replacement";
+      replacement.nodes = replacement.nodes.map((node) => ({ ...node, x: node.x + 900 }));
+      await act(async () => {
+        resetCanvasGeometry();
+        probe!.setState(replaceDoc(replacement));
+      });
+      const before = JSON.stringify(probe!.getState().doc);
+      const source = replacement.nodes.find((node) => node.id === draft)!;
+      expect(displayed(draft)).toMatchObject({ x: source.x, y: source.y });
+      const surface = document.querySelector(".maru-diagram-canvas")!;
+      await act(async () => { surface.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 268, clientY: 353 })); });
+      expect(JSON.stringify(probe!.getState().doc)).toBe(before);
+      expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+      expect(document.querySelector('line[stroke="#ec4899"]')).toBeNull();
+    } finally {
+      release();
+      await settle();
+      await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    }
   });
 
   it("keeps each member's painted start through a second drag before the first layout lands", async () => {
