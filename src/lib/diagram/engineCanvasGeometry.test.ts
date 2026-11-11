@@ -636,6 +636,32 @@ describe("canvas geometry store", () => {
   });
 });
 
+describe("unserializable source diagnostics", () => {
+  it.each([false, true])("shows only the current failed attempt (retained scene=%s)", async (retained) => {
+    const { doc, dataset } = docFor("workflow");
+    const engine = fakeEngine();
+    if (retained) await syncCanvasGeometry(doc, dataset.id, engine.load);
+    const cyclicSpec = { ...dataset.spec };
+    cyclicSpec.cycle = cyclicSpec;
+    const broken: DiagramDoc = { ...doc, datasets: [{ ...dataset, spec: cyclicSpec }] };
+    await syncCanvasGeometry(broken, dataset.id, engine.load);
+    const failed = canvasGeometryState(dataset.id);
+    expect(failed.status).toBe(retained ? "stale" : "refused");
+    expect(currentCanvasDiagnostics(broken, failed)).toEqual(failed.diagnostics);
+    expect(failed.diagnostics).toMatchObject([{ code: "canvas.geometry.unavailable", path: "" }]);
+    expect(engine.requests).toHaveLength(retained ? 1 : 0);
+    const next = { ...broken, docTitle: "Another failed attempt" };
+    expect(currentCanvasDiagnostics(next, failed)).toEqual([]);
+    await syncCanvasGeometry(next, dataset.id, engine.load);
+    const latest = canvasGeometryState(dataset.id);
+    expect(currentCanvasDiagnostics(next, latest)).toEqual(latest.diagnostics);
+    expect(currentCanvasDiagnostics(broken, latest)).toEqual([]);
+    await syncCanvasGeometry(doc, dataset.id, engine.load);
+    expect(canvasGeometryState(dataset.id).status).toBe("ready");
+    expect(currentCanvasDiagnostics(next, canvasGeometryState(dataset.id))).toEqual([]);
+  });
+});
+
 describe("visual export scene eligibility with the real store", () => {
   function example() {
     const { doc, dataset } = docFor("workflow");

@@ -494,3 +494,32 @@ test("inline edit and find use the shared dropped position before layout publish
     await page.evaluate(() => { (window as unknown as { releaseCanvasLayout: () => void }).releaseCanvasLayout(); });
   }
 });
+
+test("Maru SVG engine labels disable browser kerning and ligatures through CSS", async ({ page }) => {
+  await importSpec(page, "workflow", mixedSpec("workflow"));
+  await page.getByRole("button", { name: "내보내기", exact: true }).click();
+  const dialog = page.locator(".dialog-content", { hasText: "내보내기" });
+  await dialog.getByTestId("ie-format-select").selectOption("maru-svg");
+  const downloaded = page.waitForEvent("download");
+  await dialog.getByTestId("ie-export-confirm").click();
+  const download = await downloaded;
+  const filePath = await download.path();
+  if (!filePath) throw new Error("The SVG export produced no readable download");
+  const svgSource = await readFile(filePath, "utf8");
+  const styles = await page.evaluate((source) => {
+    const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+    const svg = document.importNode(parsed.documentElement, true);
+    svg.setAttribute("style", "position:absolute;left:-100000px;top:0");
+    document.body.appendChild(svg);
+    try {
+      return [...svg.querySelectorAll("text[data-engine-label]")].map((text) => {
+        const css = getComputedStyle(text);
+        return { kerning: css.fontKerning, ligatures: css.fontVariantLigatures, rendering: css.textRendering };
+      });
+    } finally {
+      svg.remove();
+    }
+  }, svgSource);
+  expect(styles.length).toBeGreaterThan(0);
+  for (const style of styles) expect(style).toEqual({ kerning: "none", ligatures: "none", rendering: "geometricprecision" });
+});

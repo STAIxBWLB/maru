@@ -97,6 +97,18 @@ describe("canvas diagnostic anchors", () => {
     expect(items.map((item) => item.target?.x)).toEqual([58, 138]);
   });
 
+  it.each(["geometry-label-overlap", "geometry-label-viewbox", "route-label-space", "geometry-label-fit"])("anchors %s at an offset edge label for the engine's relation-only pointer", (suffix) => {
+    const { doc, dataset, geometry } = fixture();
+    const edge = doc.edges[0]!;
+    const label: CanvasGeometryLabel = { id: `edge:${edge.id}:label`, targetId: edge.id, role: "label", lines: ["Offset label"], x: 900, y: 650, w: 80, h: 20, fontSize: 13, weight: 400 };
+    const labelled = { ...geometry, labels: new Map([...geometry.labels, [edge.id, [label]]]) };
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, labelled, [diagnostic("/edges/0", `workflow/${suffix}`)]);
+    expect(item!.target).toEqual({ kind: "label", id: label.id, x: 988, y: 650 });
+    // A route-clearance failure with the same pointer still belongs to the route.
+    const [route] = mapCanvasDiagnostics(doc, dataset.id, labelled, [diagnostic("/edges/0", "workflow/geometry-route-clearance")]);
+    expect(route!.target).toEqual({ kind: "edge", id: edge.id, x: 408, y: 250 });
+  });
+
   it("anchors page title but leaves unresolvable or malformed pointers as canvas notices", () => {
     const { doc, dataset, geometry } = fixture();
     const paths = ["/meta/title", "/meta/viewBox", "/nodes/-1/label", "/nodes/00/label", "/nodes/99/label", "/nodes/0/~2", "", "/unknown/0"];

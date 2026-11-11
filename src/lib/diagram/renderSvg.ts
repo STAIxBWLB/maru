@@ -422,7 +422,7 @@ function engineLabelsSvg(labels: readonly CanvasLabelLines[], color: string): st
     `<text data-engine-label="${escapeHtml(label.id)}" x="${label.x}" y="${label.y}"` +
     ` fill="${color}" font-size="${label.fontSize}" font-weight="${label.weight}"` +
     ` font-family="Noto Sans CJK KR Diagram, Noto Sans CJK KR, sans-serif" dominant-baseline="text-before-edge"` +
-    ` font-kerning="none" font-variant-ligatures="none" text-rendering="geometricPrecision">` +
+    ` style="font-kerning:none;font-variant-ligatures:none" text-rendering="geometricPrecision">` +
     label.lines.map((line, index) =>
       `<tspan x="${label.x}" dy="${index === 0 ? 0 : label.fontSize * 1.5}">${escapeHtml(line)}</tspan>`,
     ).join("") + `</text>`,

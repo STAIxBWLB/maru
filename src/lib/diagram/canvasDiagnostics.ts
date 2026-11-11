@@ -36,6 +36,11 @@ export function canvasDiagnosticCategory(diagnostic: Diagnostic): CanvasDiagnost
   return "unknown";
 }
 
+/** The route checker points label failures at the relation, without /label. */
+function relationLabelDiagnostic(diagnostic: Diagnostic): boolean {
+  return /\/(?:geometry-label-overlap|geometry-label-viewbox|route-label-space|geometry-label-fit)$/.test(diagnostic.code);
+}
+
 function pointerParts(path: string): string[] | null {
   if (!path.startsWith("/")) return null;
   const parts = path.slice(1).split("/");
@@ -93,7 +98,8 @@ export function mapCanvasDiagnostics(
       const edge = doc.edges.find((item) => item.id === id);
       const member = edge ? resolveSemanticMember(doc, { edgeId: id }) : null;
       if (!edge || member?.dataset.id !== datasetId || member.field !== field || member.index !== source.index) return null;
-      const label = labelRole && geometry ? canvasLabelsFor(geometry, id, "edge").find((item) => item.role === labelRole) : null;
+      const role = labelRole ?? (relationLabelDiagnostic(diagnostic) ? "label" : null);
+      const label = role && geometry ? canvasLabelsFor(geometry, id, "edge").find((item) => item.role === role) : null;
       if (label) return labelTarget(label);
       const points = geometry?.routes.get(id)?.points;
       const point = points?.[Math.floor(points.length / 2)];

@@ -400,6 +400,8 @@ interface Entry {
   listeners: Set<() => void>;
   /** Source/pin key of the geometry currently displayed. */
   cacheKey: string | null;
+  /** Identity of the current attempt when source bytes could not be serialized. */
+  serializationFailureDoc: DiagramDoc | null;
   /** Source/pin key of the layout in flight, and the layout itself. */
   pendingKey: string | null;
   pending: Promise<void> | null;
@@ -431,6 +433,7 @@ function entryFor(datasetId: string): Entry {
       state: { datasetId, status: "idle", geometry: null, diagnostics: [], sourceSpecSha256: null },
       listeners: new Set(),
       cacheKey: null,
+      serializationFailureDoc: null,
       pendingKey: null,
       pending: null,
       offset: null,
@@ -462,6 +465,7 @@ function resetEntry(entry: Entry): void {
   entry.documentId = null;
   entry.generation += 1;
   entry.cacheKey = null;
+  entry.serializationFailureDoc = null;
   entry.pendingKey = null;
   entry.pending = null;
   entry.offset = null;
@@ -498,7 +502,8 @@ export function currentCanvasDiagnostics(doc: DiagramDoc, state: CanvasGeometryS
   try {
     return entry.cacheKey === canvasLayoutKey(JSON.stringify(dataset.spec), doc) ? state.diagnostics : [];
   } catch {
-    return [];
+    return entry.cacheKey === null && entry.serializationFailureDoc === doc
+      && (state.status === "refused" || state.status === "stale") ? state.diagnostics : [];
   }
 }
 
@@ -619,17 +624,20 @@ export function syncCanvasGeometry(
     entry.pendingKey = null;
     entry.pending = null;
     entry.cacheKey = null;
+    entry.serializationFailureDoc = null;
     if (entry.state.status !== "idle") publish(entry, { ...IDLE, datasetId });
     return Promise.resolve();
   }
   let specJson: string;
   try {
     specJson = JSON.stringify(dataset.spec);
+    entry.serializationFailureDoc = null;
   } catch (error) {
     entry.generation += 1;
     entry.pendingKey = null;
     entry.pending = null;
     entry.cacheKey = null;
+    entry.serializationFailureDoc = doc;
     publish(entry, {
       datasetId,
       status: entry.state.geometry ? "stale" : "refused",
