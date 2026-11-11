@@ -92,7 +92,10 @@ function overlapArea(a: Rect, b: Rect): number {
  * below, and right-and-under the box; each side slides a step away from the
  * anchor until it covers nothing. Opposite the anchor comes last, because a
  * badge that jumps across the member reads as belonging to what is on its other
- * side. When even that is crowded the least covered position wins.
+ * side. When every one of them is crowded the badge is not placed at all and
+ * joins the canvas notice instead: the least covered spot still covers a
+ * neighbour and takes the clicks meant for it, and a badge that explains one
+ * diagnostic by breaking another member is worse than a badge in the notice.
  *
  * Placement matters because a badge is 300 px wide and takes the pointer: on
  * top of the neighbouring label it hides the text and swallows that member's
@@ -101,7 +104,7 @@ function overlapArea(a: Rect, b: Rect): number {
  * anchor's own member: two diagnostics on one element stack beside it instead
  * of landing on each other.
  */
-function placeBadge(anchor: Rect, obstacles: readonly Rect[]): { x: number; y: number } {
+function placeBadge(anchor: Rect, obstacles: readonly Rect[]): { x: number; y: number } | null {
   const { width, height, gap, step } = CANVAS_DIAGNOSTIC_BADGE;
   const beside = [
     { x: anchor.x + anchor.w + gap, y: anchor.y, dy: 1 },
@@ -128,7 +131,9 @@ function placeBadge(anchor: Rect, obstacles: readonly Rect[]): { x: number; y: n
       }
     }
   }
-  return best;
+  // Nothing clear was found: a covered badge would hide the member it landed on
+  // and swallow that member's click, so the diagnostic goes to the notice.
+  return bestScore === 0 ? best : null;
 }
 
 /** The box a diagnostic's badge sits beside, before the badge's own placement. */
@@ -272,7 +277,7 @@ export function mapCanvasDiagnostics(
     const point = placeBadge(anchor.box, obstacles
       .filter((obstacle) => obstacle.member === null || obstacle.member !== anchor.owner)
       .map((obstacle) => obstacle.rect));
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return { diagnostic, category, target: null };
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return { diagnostic, category, target: null };
     obstacles.push({
       member: null,
       rect: { x: point.x, y: point.y, w: CANVAS_DIAGNOSTIC_BADGE.width, h: CANVAS_DIAGNOSTIC_BADGE.height },

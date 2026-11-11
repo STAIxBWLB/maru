@@ -36,6 +36,7 @@ import {
   canvasLabelLines,
   canvasMoveBase,
   type CanvasGeometry,
+  type CanvasGeometryPoint,
   type CanvasGeometryPrimitive,
   type CanvasLabelLines,
 } from "../../../lib/diagram/engineCanvasGeometry";
@@ -360,6 +361,23 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
     () => new Set(drawnNodes.map((node) => node.id)),
     [drawnNodes],
   );
+
+  // The engine's member-owned shapes follow the same displacement the member
+  // groups do: a member sits at its engine box plus its live drag offset, so a
+  // shape anchored to it needs that delta too, or a dragged state leaves its
+  // inner border behind and a dragged lifeline waits for the next layout.
+  const memberOffsets = useMemo(() => {
+    const offsets = new Map<NodeId, CanvasGeometryPoint>();
+    if (!geometry) return offsets;
+    for (const node of drawnNodes) {
+      const box = geometry.boxes.get(node.id);
+      if (!box) continue;
+      const dx = node.x - box.x;
+      const dy = node.y - box.y;
+      if (dx !== 0 || dy !== 0) offsets.set(node.id, { x: dx, y: dy });
+    }
+    return offsets;
+  }, [drawnNodes, geometry]);
 
   const transform = `translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`;
 
@@ -966,7 +984,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             lifecycle band — paint after the frames and before the routes, in
             the writer's own order, so a message reads against its participant's
             timeline and no shape covers a route the engine ran. */}
-        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="underlay" members={drawnMembers} />
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="underlay" members={drawnMembers} offsets={memberOffsets} />
         {visible.edges.map((edge) => (
           <EdgeView
             key={edge.id}
@@ -981,7 +999,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         {visible.nodes.filter((n) => !isEngineContainer(n)).map(renderNode)}
         {/* Overlays come after the members: a lifecycle final border sits on its
             own state and would be hidden by the state's box. */}
-        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="overlay" members={drawnMembers} />
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="overlay" members={drawnMembers} offsets={memberOffsets} />
         {geometry && geometry.pageLabels.length > 0 ? (
           // The engine's title and subtitle sit in the header band its page
           // offset reserves. They are page chrome, so they paint after the

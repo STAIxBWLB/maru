@@ -561,6 +561,51 @@ describe("semantic canvas pins a dropped member", () => {
     expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
   });
 
+  it("moves a state's own engine shapes with it while the drag is live", async () => {
+    // A lifecycle final border is the engine's shape, but it belongs to the
+    // state it rings. The member group is painted at its live position, so a
+    // border left at the settled box would be a ring the state has stepped out
+    // of until the next layout lands.
+    _setCanvasEngineLoaderForTests(async () => ({
+      layout: (input: LayoutRequest) => {
+        requests.push(input);
+        const report = scene(input);
+        report.geometry!.primitives = [
+          {
+            kind: "lifecycle-final-border", owner: "review", layer: "overlay", paint: "outlineNode",
+            stroke: "1", arrow: false,
+            shape: { kind: "rect", bounds: { x: 64 * 463, y: 64 * 303, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+          },
+        ];
+        return report;
+      },
+    }));
+    harness = renderCanvas(doc);
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+    act(() => {
+      probe!.setState((state) => ({
+        ...state,
+        ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: false, smartGuideOn: false } },
+      }));
+    });
+    const review = (doc.datasets![0] as SemanticSpecDataset).idMap.review!;
+    const border = () => document.body.querySelector('[data-engine-primitive="lifecycle-final-border"]')!;
+    expect([border().getAttribute("x"), border().getAttribute("y")]).toEqual(["463", "303"]);
+
+    await dragMember(review, 60, 45, false);
+    expect(nodeGroup(review).getAttribute("transform")).toBe("translate(520,345)");
+    // The same delta the member group took, applied to the engine's shape.
+    expect([border().getAttribute("x"), border().getAttribute("y")]).toEqual(["523", "348"]);
+    expect(border().getAttribute("width")).toBe("174");
+
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect([border().getAttribute("x"), border().getAttribute("y")]).toEqual(["463", "303"]);
+    expect(nodeGroup(review).getAttribute("transform")).toBe("translate(460,300)");
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
   it("starts the connect ghost at the painted engine port", async () => {
     await startReadyCanvas();
     const draft = (doc.datasets![0] as SemanticSpecDataset).idMap.draft!;

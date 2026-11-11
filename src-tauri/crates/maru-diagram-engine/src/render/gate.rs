@@ -390,7 +390,7 @@ fn check_container_paint(
 fn check_rect_paint(
     node: Node<'_, '_>,
     kind: &str,
-    radius: i64,
+    corner: Option<i64>,
     options: &super::SvgOptions,
     path: &str,
     errors: &mut Vec<Diagnostic>,
@@ -426,22 +426,26 @@ fn check_rect_paint(
         ));
         return;
     }
-    let (fill, stroke, width, radius) = match kind {
-        "page" => (tokens.background, "none", "0", 0),
-        "container-box" => (tokens.lane_fill, tokens.lane_stroke, "1", radius),
+    let (fill, stroke, width) = match kind {
+        "page" => (tokens.background, "none", "0"),
+        "container-box" => (tokens.lane_fill, tokens.lane_stroke, "1"),
         "node-box" => {
             let color = node_color.expect("checked above");
-            (color.fill, color.stroke, "1.5", radius)
+            (color.fill, color.stroke, "1.5")
         }
-        "node-mask" | "activation-mask" => (tokens.mask, "none", "0", radius),
-        "legend-box" => (tokens.lane_fill, tokens.lane_stroke, "1", radius),
-        "legend-entry-box" | "label-bounds" => ("none", "none", "0", radius),
+        "node-mask" | "activation-mask" => (tokens.mask, "none", "0"),
+        "legend-box" => (tokens.lane_fill, tokens.lane_stroke, "1"),
+        "legend-entry-box" | "label-bounds" => ("none", "none", "0"),
         _ => return,
     };
     for (name, expected) in [("fill", fill), ("stroke", stroke), ("stroke-width", width)] {
         require_attr(node, name, expected, path, errors);
     }
-    require_attr(node, "rx", &super::svg::fixed(radius), path, errors);
+    // A curve's two radii are its axes, not a corner, so an oval body carries no
+    // corner value to compare here.
+    if let Some(corner) = corner {
+        require_attr(node, "rx", &super::svg::fixed(corner), path, errors);
+    }
 }
 
 fn check_unique_ids(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
@@ -522,6 +526,22 @@ fn check_safe_tree(doc: &Document<'_>, errors: &mut Vec<Diagnostic>) {
                 "width",
                 "height",
                 "rx",
+                "stroke-dasharray",
+                "fill",
+                "stroke",
+                "stroke-width",
+            ],
+        ),
+        // A member the engine drew as a curve rather than a box. Its two radii
+        // are its axes, so it carries `cx`/`cy`/`rx`/`ry` and no corner.
+        (
+            "ellipse",
+            &[
+                "data-kind",
+                "cx",
+                "cy",
+                "rx",
+                "ry",
                 "stroke-dasharray",
                 "fill",
                 "stroke",
@@ -799,13 +819,51 @@ fn check_child_box(
     path: &str,
     errors: &mut Vec<Diagnostic>,
 ) {
+    check_child_shape(parent, kind, bounds, false, path, errors);
+}
+
+/// A member's own frame: a box, or the curve the engine kept for it. Either way
+/// the artifact must place it where the geometry put the bounds.
+fn check_member_shape(
+    node: Node<'_, '_>,
+    bounds: GeometryBox,
+    oval: bool,
+    path: &str,
+    errors: &mut Vec<Diagnostic>,
+) {
+    if !oval {
+        check_box(node, bounds, path, errors);
+        return;
+    }
+    require_tag(node, "ellipse", path, errors);
+    for (name, value) in [
+        ("cx", i64::from(bounds.x) + i64::from(bounds.width) / 2),
+        ("cy", i64::from(bounds.y) + i64::from(bounds.height) / 2),
+        ("rx", i64::from(bounds.width) / 2),
+        ("ry", i64::from(bounds.height) / 2),
+    ] {
+        check_number(node, name, value as f64 / 64.0, path, errors);
+    }
+}
+
+fn check_child_shape(
+    parent: Node<'_, '_>,
+    kind: &str,
+    bounds: GeometryBox,
+    oval: bool,
+    path: &str,
+    errors: &mut Vec<Diagnostic>,
+) {
+    let tag = if oval { "ellipse" } else { "rect" };
     let found = elements(parent).find(|child| child.attribute("data-kind") == Some(kind));
     match found {
-        Some(node) if node.tag_name().name() == "rect" => check_box(node, bounds, path, errors),
+        Some(node) if node.tag_name().name() == tag => {
+            check_member_shape(node, bounds, oval, path, errors);
+        }
         _ => errors.push(diagnostic(
             "bounds-frame",
             path,
-            format!("expected child rect {kind:?} is missing"),
+            format!("expected child {tag} {kind:?} is missing"),
             "emit the source geometry bounds as the element's selection frame",
         )),
     }
@@ -1257,7 +1315,7 @@ pub fn check_svg_artifact(
 
     if let Some(page) = first_kind(&doc, "page", "data-kind", &mut errors) {
         check_box(page, geometry.page.bounds, "/page", &mut errors);
-        check_rect_paint(page, "page", 0, options, "/page", &mut errors);
+        check_rect_paint(page, "page", Some(0), options, "/page", &mut errors);
     }
     for (index, node) in geometry.nodes.iter().enumerate() {
         let path = format!("/nodes/{index}");
@@ -1275,40 +1333,24 @@ pub fn check_svg_artifact(
                 &path,
                 &mut errors,
             );
-            check_child_box(group, "node-box", node.bounds, &path, &mut errors);
-            check_child_box(group, "node-mask", node.bounds, &path, &mut errors);
+            let oval = node.ellipse == Some(true);
+            check_child_shape(group, "node-box", node.bounds, oval, &path, &mut errors);
+            check_child_shape(group, "node-mask", node.bounds, oval, &path, &mut errors);
+            let corner = (!oval).then_some(if semantics.family == "lifecycle" {
+                7 * 64
+            } else {
+                6 * 64
+            });
             if let Some(mask) =
                 elements(group).find(|child| child.attribute("data-kind") == Some("node-mask"))
             {
-                check_rect_paint(
-                    mask,
-                    "node-mask",
-                    if semantics.family == "lifecycle" {
-                        7 * 64
-                    } else {
-                        6 * 64
-                    },
-                    options,
-                    &path,
-                    &mut errors,
-                );
+                check_rect_paint(mask, "node-mask", corner, options, &path, &mut errors);
             }
 
             if let Some(box_node) =
                 elements(group).find(|child| child.attribute("data-kind") == Some("node-box"))
             {
-                check_rect_paint(
-                    box_node,
-                    "node-box",
-                    if semantics.family == "lifecycle" {
-                        7 * 64
-                    } else {
-                        6 * 64
-                    },
-                    options,
-                    &path,
-                    &mut errors,
-                );
+                check_rect_paint(box_node, "node-box", corner, options, &path, &mut errors);
             }
         } else {
             errors.push(diagnostic(
@@ -1387,7 +1429,7 @@ pub fn check_svg_artifact(
                         check_rect_paint(
                             mask,
                             "activation-mask",
-                            3 * 64,
+                            Some(3 * 64),
                             options,
                             &path,
                             &mut errors,
@@ -1580,7 +1622,7 @@ pub fn check_svg_artifact(
                 check_rect_paint(
                     bounds,
                     "label-bounds",
-                    0,
+                    Some(0),
                     options,
                     &format!("/labels/{index}"),
                     &mut errors,
@@ -1669,7 +1711,14 @@ pub fn check_svg_artifact(
             if let Some(box_node) = elements(group)
                 .find(|child| child.attribute("data-kind") == Some("legend-entry-box"))
             {
-                check_rect_paint(box_node, "legend-entry-box", 0, options, &path, &mut errors);
+                check_rect_paint(
+                    box_node,
+                    "legend-entry-box",
+                    Some(0),
+                    options,
+                    &path,
+                    &mut errors,
+                );
             }
         } else {
             errors.push(diagnostic(

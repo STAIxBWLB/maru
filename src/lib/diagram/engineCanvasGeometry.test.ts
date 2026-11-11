@@ -482,6 +482,48 @@ describe("canvas geometry source agreement with the export path", () => {
     expect(border!.shape).toEqual({ kind: "rect", x: 43, y: 43, w: 174, h: 66, radius: 4 });
   });
 
+  it("keeps page chrome page-owned when a state carries the band's own name", () => {
+    // A lifecycle band is owned by a band name and the rail by the literal
+    // `main`, and both are legal state ids. Membership is decided by kind, so
+    // hiding a state named `phase` cannot take the page band with it.
+    const spec = structuredClone(SEMANTIC_FIXTURES.lifecycle) as Record<string, unknown>;
+    const states = spec.states as Array<Record<string, unknown>>;
+    states[0]!.id = "phase";
+    states[1]!.id = "main";
+    spec.transitions = [
+      { from: "phase", to: "main", label: "start" },
+      { from: "main", to: "done", label: "finish" },
+    ];
+    const { dataset } = archifySpecToDataset("lifecycle", spec, { id: "ds-bandname" });
+    const doc = projectSemanticDocument(dataset).doc;
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    expect(scene.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(["phase", "main"]));
+    scene.primitives = [
+      {
+        kind: "lifecycle-band", owner: "phase", layer: "underlay", paint: "line",
+        stroke: "1.1", arrow: false,
+        shape: { kind: "line", from: { x: 64 * 32, y: 64 * 90 }, to: { x: 64 * 800, y: 64 * 90 } },
+      },
+      {
+        kind: "lifecycle-rail", owner: "main", layer: "underlay", paint: "line",
+        stroke: "1.1", arrow: false,
+        shape: { kind: "line", from: { x: 64 * 700, y: 64 * 32 }, to: { x: 64 * 700, y: 64 * 500 } },
+      },
+      {
+        kind: "lifecycle-final-border", owner: "phase", layer: "overlay", paint: "outlineNode",
+        stroke: "1", arrow: false,
+        shape: { kind: "rect", bounds: { x: 64 * 43, y: 64 * 43, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+      },
+    ];
+    const geometry = canvasGeometryOf({ apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() }, doc, dataset)!;
+    expect(geometry.primitives.map((primitive) => [primitive.kind, primitive.member])).toEqual([
+      ["lifecycle-band", null],
+      ["lifecycle-rail", null],
+      // The state's own border is a member shape, so the same owner still maps.
+      ["lifecycle-final-border", dataset.idMap.phase],
+    ]);
+  });
+
   it("reads a scene published before primitives existed as having none", () => {
     const { doc, dataset } = docFor("workflow");
     const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });

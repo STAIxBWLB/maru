@@ -715,8 +715,10 @@ Refused documents have no engine geometry, so there the band is the only box the
 container contributes. Covering nothing outranks staying close: when every side
 is blocked at the first step the badge keeps sliding to the first clear slot, so
 in a packed lane it can end up a few steps from its member rather than over a
-neighbouring member or a title band. Untargeted diagnostics stay in a canvas
-notice. Only results for the current source and pins are shown, including
+neighbouring member or a title band. A scene packed enough to leave no clear
+slot at all puts the badge nowhere: the diagnostic joins the canvas notice,
+because the least covered spot would still hide a member and take the click
+meant for it. Untargeted diagnostics stay in a canvas notice too. Only results for the current source and pins are shown, including
 current refusals while the last good scene remains visible. They never block
 opening, editing or saving. Korean and English explanations include a cause and
 next step; original engine details remain available for exact diagnosis.

@@ -224,6 +224,44 @@ fn lifecycle_v1_and_v2_emit_initial_final_and_final_legend_symbols() {
         );
         assert!((px(border, "rx") * 64.0 - (sink.bounds.width / 2 - inset) as f64).abs() < 0.01);
         assert!((px(border, "ry") * 64.0 - (sink.bounds.height / 2 - inset) as f64).abs() < 0.01);
+        // The body is the same curve, so the two read as concentric ovals: a
+        // rectangular body under an elliptical border is a box drawn around an
+        // oval, which is not the shape the canvas and the Maru export paint.
+        for node in &geometry.nodes {
+            let group = document
+                .descendants()
+                .find(|element| {
+                    element.attribute("data-kind") == Some("node")
+                        && element.attribute("data-source-id") == Some(node.id.as_str())
+                })
+                .expect("every node has a group");
+            for kind in ["node-box", "node-mask"] {
+                let body = group
+                    .children()
+                    .find(|child| child.attribute("data-kind") == Some(kind))
+                    .expect("node group has a body and a mask");
+                let expected = if node.ellipse == Some(true) {
+                    "ellipse"
+                } else {
+                    "rect"
+                };
+                assert_eq!(
+                    body.tag_name().name(),
+                    expected,
+                    "state {} {kind} does not follow its published shape",
+                    node.id
+                );
+                if expected == "ellipse" {
+                    assert!(
+                        (px(body, "cx") * 64.0 - (node.bounds.x + node.bounds.width / 2) as f64)
+                            .abs()
+                            < 0.01
+                    );
+                    assert!((px(body, "rx") * 64.0 - (node.bounds.width / 2) as f64).abs() < 0.01);
+                    assert!((px(body, "ry") * 64.0 - (node.bounds.height / 2) as f64).abs() < 0.01);
+                }
+            }
+        }
     }
 }
 

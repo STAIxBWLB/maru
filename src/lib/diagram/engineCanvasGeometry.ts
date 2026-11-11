@@ -130,6 +130,24 @@ export const ENGINE_PRIMITIVE_PAINT: Readonly<Record<string, { fill: string; str
   accentFill: { fill: "#059669", stroke: "none" },
 };
 
+/**
+ * The primitive kinds the engine names a member for: a lifeline belongs to its
+ * participant, a phase span to its phase, an initial marker or final border to
+ * its state. Membership is decided by kind first, because the owners of the
+ * page-chrome kinds are band names (`phase`, `outcome`) and the rail's literal
+ * `main`, every one of which is a legal state id; matching an owner against the
+ * scene's ids regardless of kind would let hiding a state named `phase` take
+ * the page band with it. Kinds absent here stay page chrome, member null.
+ */
+export const ENGINE_MEMBER_PRIMITIVE_KINDS: ReadonlySet<string> = new Set([
+  "sequence-lifeline",
+  "workflow-phase-span",
+  "lifecycle-initial-dot",
+  "lifecycle-initial-stem",
+  "lifecycle-initial-head",
+  "lifecycle-final-border",
+]);
+
 export interface CanvasGeometryPage {
   x: number;
   y: number;
@@ -237,7 +255,7 @@ function labelRole(id: string): CanvasGeometryLabelRole {
  */
 function canvasPrimitivesOf(
   primitives: readonly GeometryPrimitive[],
-  memberOf: (owner: string) => string | null,
+  memberOf: (primitive: { kind: string; owner: string }) => string | null,
 ): readonly CanvasGeometryPrimitive[] {
   const points = (list: readonly { x: number; y: number }[], what: string): CanvasGeometryPoint[] =>
     list.map((point, index) => ({
@@ -259,7 +277,7 @@ function canvasPrimitivesOf(
       return {
         kind: primitive.kind,
         owner: primitive.owner,
-        member: memberOf(primitive.owner),
+        member: memberOf({ kind: primitive.kind, owner: primitive.owner }),
         layer: primitive.layer,
         paint: primitive.paint,
         stroke: px(primitive.stroke, `${what} stroke width`),
@@ -416,10 +434,13 @@ export function canvasGeometryOf(
   // participant, a phase span to its phase, an initial marker or final border
   // to its state. A band or rail is anchored to a band name and a legend swatch
   // to a legend key, so those stay page chrome and never disappear with a
-  // member.
+  // member. The kind decides first, because those page-chrome owners are legal
+  // member ids themselves.
   const nodeIds = new Set(scene.nodes.map((node) => node.id));
   const containerIds = new Set(scene.containers.map((container) => container.id));
-  const primitiveMember = (owner: string): string | null => {
+  const primitiveMember = (primitive: { kind: string; owner: string }): string | null => {
+    if (!ENGINE_MEMBER_PRIMITIVE_KINDS.has(primitive.kind)) return null;
+    const { owner } = primitive;
     if (nodeIds.has(owner)) return canvasId(owner, "node");
     if (containerIds.has(owner)) return canvasId(owner, "container");
     return null;

@@ -18,8 +18,8 @@ import {
  * takes the pointer: these are scenery under the members and the routes, and a
  * lifeline that swallowed a click would make the canvas unselectable.
  */
-function pointsAttr(points: readonly CanvasGeometryPoint[]): string {
-  return points.map((point) => `${point.x},${point.y}`).join(" ");
+function pointsAttr(points: readonly CanvasGeometryPoint[], dx: number, dy: number): string {
+  return points.map((point) => `${point.x + dx},${point.y + dy}`).join(" ");
 }
 
 function shapeElement(
@@ -27,6 +27,7 @@ function shapeElement(
   shape: CanvasGeometryPrimitiveShape,
   paint: { fill: string; stroke: string },
   primitive: CanvasGeometryPrimitive,
+  offset: CanvasGeometryPoint | null,
 ) {
   const color = {
     fill: paint.fill,
@@ -37,6 +38,10 @@ function shapeElement(
   };
   const kind = primitive.kind;
   const owner = primitive.owner;
+  // The same delta `canvasDisplayNode` puts on the member group, so a shape the
+  // engine anchored to a member travels with it while the gesture is live.
+  const dx = offset?.x ?? 0;
+  const dy = offset?.y ?? 0;
   switch (shape.kind) {
     case "rect":
       return (
@@ -44,8 +49,8 @@ function shapeElement(
           key={key}
           data-engine-primitive={kind}
           data-engine-primitive-owner={owner}
-          x={shape.x}
-          y={shape.y}
+          x={shape.x + dx}
+          y={shape.y + dy}
           width={shape.w}
           height={shape.h}
           rx={shape.radius}
@@ -58,10 +63,10 @@ function shapeElement(
           key={key}
           data-engine-primitive={kind}
           data-engine-primitive-owner={owner}
-          x1={shape.from.x}
-          y1={shape.from.y}
-          x2={shape.to.x}
-          y2={shape.to.y}
+          x1={shape.from.x + dx}
+          y1={shape.from.y + dy}
+          x2={shape.to.x + dx}
+          y2={shape.to.y + dy}
           {...color}
         />
       );
@@ -71,8 +76,8 @@ function shapeElement(
           key={key}
           data-engine-primitive={kind}
           data-engine-primitive-owner={owner}
-          cx={shape.center.x}
-          cy={shape.center.y}
+          cx={shape.center.x + dx}
+          cy={shape.center.y + dy}
           r={shape.radius}
           {...color}
         />
@@ -83,8 +88,8 @@ function shapeElement(
           key={key}
           data-engine-primitive={kind}
           data-engine-primitive-owner={owner}
-          cx={shape.center.x}
-          cy={shape.center.y}
+          cx={shape.center.x + dx}
+          cy={shape.center.y + dy}
           rx={shape.rx}
           ry={shape.ry}
           {...color}
@@ -96,7 +101,7 @@ function shapeElement(
           key={key}
           data-engine-primitive={kind}
           data-engine-primitive-owner={owner}
-          points={pointsAttr(shape.points)}
+          points={pointsAttr(shape.points, dx, dy)}
           {...color}
         />
       );
@@ -106,14 +111,14 @@ function shapeElement(
           key={key}
           data-engine-primitive={kind}
           data-engine-primitive-owner={owner}
-          points={pointsAttr(shape.points)}
+          points={pointsAttr(shape.points, dx, dy)}
           {...color}
         />
       );
   }
 }
 
-function EnginePrimitivesBase({ primitives, layer, members }: {
+function EnginePrimitivesBase({ primitives, layer, members, offsets }: {
   primitives: readonly CanvasGeometryPrimitive[];
   layer: "underlay" | "overlay";
   /**
@@ -123,6 +128,14 @@ function EnginePrimitivesBase({ primitives, layer, members }: {
    * through the scene that explains nothing.
    */
   members: ReadonlySet<string>;
+  /**
+   * How far each member sits from the engine's settled box while a gesture is
+   * live. Bodies and labels are painted from `displayNodes`, so a shape that
+   * ignored this would stay behind: a dragged lifecycle state would leave its
+   * inner border, its initial marker would detach, and a sequence participant's
+   * lifeline would wait for the next layout.
+   */
+  offsets: ReadonlyMap<string, CanvasGeometryPoint>;
 }) {
   const drawn = primitives.filter(
     (primitive) => primitive.layer === layer
@@ -136,6 +149,7 @@ function EnginePrimitivesBase({ primitives, layer, members }: {
         primitive.shape,
         ENGINE_PRIMITIVE_PAINT[primitive.paint] ?? { fill: "none", stroke: "#1f2937" },
         primitive,
+        primitive.member === null ? null : offsets.get(primitive.member) ?? null,
       ))}
     </g>
   );

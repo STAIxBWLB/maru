@@ -263,6 +263,32 @@ describe("canvas diagnostic anchors", () => {
     }
   });
 
+  it("leaves the badge to the canvas notice rather than cover a member", () => {
+    const { doc, dataset } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    // A second member wide enough to stand under every candidate slot. The least
+    // covered spot would still land on it, hide it and take its clicks, so the
+    // diagnostic belongs in the canvas notice instead of on another member.
+    const wall = {
+      ...doc.nodes.find((node) => node.id === id)!,
+      id: "wall",
+      x: -10_000,
+      y: -10_000,
+      w: 30_000,
+      h: 30_000,
+    };
+    const [item] = mapCanvasDiagnostics(
+      doc,
+      dataset.id,
+      null,
+      [diagnostic("/nodes/0/label")],
+      [...doc.nodes, wall],
+    );
+    expect(item!.target).toBeNull();
+    expect(item!.category).toBe("text");
+  });
+
   it("categorizes only recognized codes and retains unknown engine prose verbatim", () => {
     expect(canvasDiagnosticCategory(diagnostic("/nodes/0/label"))).toBe("text");
     expect(canvasDiagnosticCategory(diagnostic("/nodes/0", "workflow/geometry-node-overlap"))).toBe("overlap");
