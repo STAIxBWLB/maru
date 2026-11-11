@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   duplicateSelection,
   nudgeSelection,
+  withSnapshot,
+  defaultCoalescer,
   selectAllNodes,
   setNodeMeta,
   toggleFocusMode,
@@ -42,6 +44,34 @@ describe("phase 5 actions", () => {
     const before = store.getState();
     store.setState(nudgeSelection(5, 0));
     expect(store.getState()).toBe(before);
+  });
+
+  it("nudgeSelection pins the member the caller resolved and moves the rest", () => {
+    // An engine-drawn member carries a doc slot the layout overwrites, so the
+    // nudge pins the position the canvas showed instead of moving that slot.
+    const store = build([node("a", 40, 40), node("b", 100)], ["a", "b"]);
+    store.setState(nudgeSelection(5, -3, [{ id: "a", x: 205, y: 297 }]));
+    const [a, b] = store.getState().doc.nodes;
+    expect([a?.x, a?.y]).toEqual([205, 297]);
+    expect(a?.meta?.pinned).toBe(true);
+    expect([b?.x, b?.y]).toEqual([105, -3]);
+    expect(b?.meta?.pinned).toBeUndefined();
+  });
+
+  it("nudge leaves an engine-derived frame unchanged without a history entry", () => {
+    const store = build([node("stage", 40, 80)], ["stage"]);
+    const before = store.getState();
+    store.setState(withSnapshot(nudgeSelection(1, 0, [], ["stage"]), defaultCoalescer()));
+    expect(store.getState()).toBe(before);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("nudgeSelection keeps a locked member where it is", () => {
+    const store = build([{ ...node("a"), locked: true }], ["a"]);
+    store.setState(nudgeSelection(5, 0, [{ id: "a", x: 5, y: 0 }]));
+    const [a] = store.getState().doc.nodes;
+    expect([a?.x, a?.y]).toEqual([0, 0]);
+    expect(a?.meta?.pinned).toBeUndefined();
   });
 
   it("selectAllNodes selects every node in the doc", () => {

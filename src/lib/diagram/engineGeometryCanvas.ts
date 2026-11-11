@@ -1,10 +1,25 @@
-/** Test-only canvas adapter. Import lazily from the dev/native bridge only.
- * Canvas positions become engine pins only with an explicit pinned/locked flag;
- * automatic projected positions remain automatic engine layout inputs.
+/**
+ * Canvas adapter: one semantic dataset plus explicit canvas pins becomes an
+ * engine layout request (issue #552 E4 T3).
+ *
+ * The product canvas and the isolated test bridge both lay out through this
+ * module, so a canvas position becomes an authored engine pin by exactly one
+ * rule. Canvas positions become pins only with an explicit pinned/locked flag;
+ * automatic projected positions remain automatic engine layout inputs, and the
+ * adapter never writes to the doc.
  */
-import type { GeometryPin, LayoutRequest } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type { GeometryPin, GeometryReport, LayoutRequest } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type { GeometryEngine } from "./engineGeometry";
 import type { SemanticSpecDataset } from "./reportTypes";
 import type { DiagramDoc, DiagramNode } from "./types";
+
+/** One fixed-point coordinate as a canvas pixel; the render boundary divides by 64. */
+export function fixedToPixels(value: number, what: string): number {
+  if (!Number.isInteger(value) || value < -2147483648 || value > 2147483647) {
+    throw new Error(`Cannot read engine canvas geometry: ${what} is not signed-32-bit fixed-point; rebuild the same SDK bindings and retry.`);
+  }
+  return value / 64;
+}
 
 const ENTITY_FIELDS: Readonly<Record<string, string>> = {
   architecture: "components",
@@ -94,7 +109,7 @@ function target(dataset: SemanticSpecDataset, node: DiagramNode): Pick<GeometryP
   return { targetId: sourceId, targetKind: "node" };
 }
 
-/** Build the test engine request for one semantic dataset without editing the doc.
+/** Build the engine layout request for one semantic dataset without editing the doc.
  * The hash covers the exact serialized source passed to the SDK, not canvas state.
  * A canvas position is emitted space, so it becomes a pin only after the page's
  * `contentOffset` is subtracted: pins are authored source coordinates (maru#561).
@@ -112,7 +127,7 @@ export async function buildEngineCanvasLayoutRequest(
   }
   const dataset = datasets[0];
   if (!Object.hasOwn(ENTITY_FIELDS, dataset.diagramType)) {
-    fail(`diagram type ${dataset.diagramType} has no test engine layout adapter`, "select an architecture, workflow, sequence, dataflow, or lifecycle dataset");
+    fail(`diagram type ${dataset.diagramType} has no canvas layout adapter`, "select an architecture, workflow, sequence, dataflow, or lifecycle dataset");
   }
   let specJson: string;
   try { specJson = JSON.stringify(dataset.spec); }
@@ -144,6 +159,70 @@ export async function buildEngineCanvasLayoutRequest(
   try {
     const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(specJson));
     sourceSpecSha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  } catch { fail("SHA-256 is unavailable for the source spec", "open the test bridge in a secure desktop or browser context and retry"); }
+  } catch { fail("SHA-256 is unavailable for the source spec", "open the canvas in a secure desktop or browser context and retry"); }
   return { specJson, pinSet: { sourceSpecSha256, pins } };
+}
+
+export interface CanvasLayout {
+  request: LayoutRequest;
+  report: GeometryReport;
+}
+
+export interface CanvasLayoutOptions {
+  /** Page offset already measured for this exact source spec, which saves the probe pass. */
+  contentOffset?: Readonly<ContentOffset>;
+}
+
+/**
+ * Lay out one semantic dataset for display: the request the canvas draws from
+ * and the engine report answering it.
+ *
+ * A canvas shows emitted positions, while a pin is an authored source
+ * position. The page offset depends on the header text alone, so one pin-free
+ * layout measures it before the pinned layout converts every member
+ * (maru#561). A caller that already measured the offset for the same source
+ * spec passes it in and skips that pass; either way the conversion rule lives
+ * here, so the product canvas and the isolated test bridge stay on one rule.
+ */
+export async function layoutCanvasRequest(
+  engine: Pick<GeometryEngine, "layout">,
+  doc: DiagramDoc,
+  datasetId: string,
+  options: CanvasLayoutOptions = {},
+): Promise<CanvasLayout> {
+  const pinned = doc.nodes.some((node) => node.locked === true || node.meta?.pinned === true);
+  let contentOffset: Readonly<ContentOffset> = NO_CONTENT_OFFSET;
+  if (pinned) {
+    const known = options.contentOffset ? offsetOf(options.contentOffset) : null;
+    if (known) {
+      contentOffset = known;
+    } else {
+      const probe = engine.layout(await buildEngineCanvasLayoutRequest(doc, datasetId, { pins: false }));
+      const offset = probe.geometry?.page.contentOffset;
+      if (offset) contentOffset = offset;
+    }
+  }
+  const request = await buildEngineCanvasLayoutRequest(doc, datasetId, { contentOffset });
+  return { request, report: engine.layout(request) };
+}
+
+/**
+ * Whether an explicit canvas move of `node` becomes an engine pin in this
+ * dataset: authored entities and authored containers only. Derived frames
+ * (boundary, stage, segment, activation, card) are computed from their members
+ * and a foreign member of another dataset is left alone.
+ */
+export function isPinnableCanvasMember(doc: DiagramDoc, datasetId: string, node: DiagramNode): boolean {
+  if (node.locked === true) return false;
+  const dataset = (doc.datasets ?? []).find(
+    (item): item is SemanticSpecDataset => item.kind === "semanticSpec" && item.id === datasetId,
+  );
+  if (!dataset) return false;
+  try {
+    return target(dataset, node) !== null;
+  } catch {
+    // A stale identity is a repair problem the request builder reports with a
+    // fix; the drag itself must not throw.
+    return false;
+  }
 }

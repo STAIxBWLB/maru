@@ -212,8 +212,10 @@ apply is disabled.
 (lane bands top-down, `col` columns), dataflow entities in stage columns
 (ordered by `row`). Architecture projection honors explicit pos coordinates
 and authored row/col cells using the pinned grid's origin and spacing;
-index-based placement is a fallback only. Fresh-document auto-layout is used
-only when no architecture member has authored placement.
+index-based grid placement is the fallback for members without authored
+coordinates. There is no reflow pass: the canvas draws the engine's own scene
+(§ Canvas geometry), so a projection position only stands in until that scene
+arrives.
 Lanes, stages, boundaries, workflow phases/groups and sequence segments become
 `section` containers; activations use simple transparent outlines so their
 captions have no opaque header over message endpoints. Managed containers
@@ -575,6 +577,75 @@ converters are unchanged, and HWPX output does NOT embed the linked image.
 A 5-minute auto-snapshot ring (cap 20 per document) under
 `<workspace>/.maru/diagrams/history/<docId>/`, with Radix confirmation dialogs
 for replace/restore.
+
+## Canvas geometry
+
+A semantic canvas draws the engine scene rather than its own placement: node
+and container boxes, the label lines the engine wrapped, its route points, and
+the document title and subtitle in the header band the page offset reserves.
+`src/lib/diagram/engineCanvasGeometry.ts` maps one dataset's geometry report onto
+canvas ids (a relation without an id is named by its ordinal: `<role>:<index>`
+in the report, `<datasetId>-e<index>` on the canvas, and `<role>:<index>:generated`
+when an authored id already holds that name; `:generated` may repeat) and publishes it per
+dataset, and `useCanvasGeometry` reads it on the
+canvas side. Node/container and relation labels retain their engine namespaces,
+including when their raw ids coincide; a node named `document` remains a member,
+not a page header. The engine lays out exactly the bytes the export path sends, and the
+canvas carries their SHA-256 in `data-engine-spec-sha256`. When a completed ready
+scene belongs to the current document, has no layout in flight, and matches the
+current source and pins, the Maru visual exports (Maru SVG,
+plain SVG, PNG, PDF and clipboard) reuse its boxes, measured label lines and
+routes. Maru SVG still embeds the original editable source document as metadata.
+While no matching ready scene exists, visual exports keep their source-position
+fallback; retained stale canvas geometry is not a current export agreement
+claim. Font-independent outlines remain the native engine export profile; the
+Maru visual SVG keeps text labels in the canvas font family. The engine SVG/PNG
+export path independently lays out its source request.
+
+- Fixed-point coordinates become pixels once, at the render boundary (`value /
+  64` in `fixedToPixels`). Nothing re-measures text, and Korean label lines are
+  never sliced with backend offsets: the engine's own line breaks provide them.
+- Detach to freeform copies a completed matching scene's member x/y/w/h boxes
+  into the doc before dropping the semantic association, in the same undo step.
+  Without a matching ready scene, stored boxes retain their existing behavior.
+- Document replacement clears the published scene and invalidates in-flight
+  layouts, including when a copied file keeps the same dataset id. Returning to
+  an already cached revision also supersedes a different pending layout.
+- Escape cancels live drag positions without changing the document or losing
+  an earlier pending drop. Consecutive drags retain each member's painted start
+  position until a new scene arrives; a committed overlay also disappears when
+  its pin is undone, even if the cached scene does not publish again.
+- A drag authors a pin, not a placement. Engine-drawn members move on the canvas
+  during the gesture and the drop records one pin entry (`pinSemanticNodes`), in
+  one undo step. A pin is an authored source position, so the adapter subtracts
+  `page.contentOffset`; the measured offset is reused per source spec, which
+  keeps a drop to one layout instead of a probe plus a layout. A member with no
+  scene yet (first paint, first-run refusal) pins at the position the canvas
+  shows it on, and a derived frame (a boundary, stage, segment or activation
+  computed from its members) pins nothing: its drop returns to the engine's box
+  instead of leaving an offset no layout would replace.
+- Every path that acts on a member acts on what the canvas shows. An arrow-key
+  nudge pins pinnable engine members at their painted box (`canvasNudgePins`),
+  leaves derived engine frames unchanged, and moves only non-engine members in
+  the doc, as one edit. The property panel reports the
+  painted box: its position fields are read-only for an unpinned engine member
+  (a pinned one's typed position *is* the pin) and its size fields are always
+  the engine's. Pinned coordinate inputs read the authored doc position while
+  an async scene is pending, so typing a number keeps every digit. The inline editor, fit view and find navigation read the same
+  displayed nodes (`useCanvasDisplay`), so none of them aims at the coarse slot
+  the doc still stores under an engine member.
+- A refused or unavailable layout keeps the last good scene (or the projected
+  source positions on first paint) and shows the engine's diagnostic and its fix
+  on the canvas. The retained scene keeps the hash it was emitted for; the same
+  bytes are not requested again until the document changes.
+- The five engine families (architecture, workflow, sequence, dataflow,
+  lifecycle) draw the engine scene when the document holds exactly one semantic
+  dataset. Floorplan stays local-only, and a document with no semantic dataset
+  or several keeps plain canvas placement.
+- Free-form documents, templates, pattern views and Mermaid imports keep their
+  own placement and routing helpers, including `edgeRouting.ts`. The old
+  `layoutDoc` reflow (`layout.ts`) is gone; the projection keeps only coarse
+  source slots as the fallback shown before an engine scene arrives.
 
 ## Performance
 

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 import {
   defaultCoalescer,
@@ -14,9 +14,10 @@ import type {
   EdgeDash,
   EdgeRouteMode,
 } from "../../../lib/diagram/types";
-import { semanticDatasetsOf } from "../../../lib/diagram/semantic";
+import { semanticDatasetsOf, semanticMemberNodeIds } from "../../../lib/diagram/semantic";
 import { useTranslation } from "../../../lib/i18n";
 import { useDiagram, useDiagramStore } from "../DiagramStoreContext";
+import { useCanvasDisplay } from "../canvas/useCanvasGeometry";
 import { SemanticProps } from "./SemanticProps";
 
 function NumberField({
@@ -26,6 +27,7 @@ function NumberField({
   min,
   max,
   step = 1,
+  disabled = false,
 }: {
   labelKey: string;
   value: number;
@@ -33,6 +35,7 @@ function NumberField({
   min?: number;
   max?: number;
   step?: number;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -44,6 +47,7 @@ function NumberField({
         min={min}
         max={max}
         step={step}
+        disabled={disabled}
         onChange={(e) => {
           const next = parseFloat(e.target.value);
           if (Number.isFinite(next)) onCommit(next);
@@ -126,7 +130,17 @@ function SelectField<T extends string>({
   );
 }
 
-function NodeProps({ node }: { node: DiagramNode }) {
+function NodeProps({
+  node,
+  shown,
+  engineOwned,
+}: {
+  node: DiagramNode;
+  /** The node as the canvas paints it: an engine member's box, not its slot. */
+  shown: DiagramNode;
+  /** The engine draws this member, so the doc cannot place or size it. */
+  engineOwned: boolean;
+}) {
   const { t } = useTranslation();
   const store = useDiagramStore();
   const patch = useCallback(
@@ -148,6 +162,11 @@ function NodeProps({ node }: { node: DiagramNode }) {
   const status = typeof node.meta?.status === "string" ? (node.meta.status as string) : "";
   const progress = typeof node.meta?.progress === "number" ? (node.meta.progress as number) : -1;
   const memo = typeof node.meta?.memo === "string" ? (node.meta.memo as string) : "";
+  // An engine-drawn member's doc position is a slot the layout overwrites, so a
+  // typed coordinate changes stored data and history with nothing on screen.
+  // Once pinned, the doc position is the authored pin. A pending layout may
+  // still paint the old box, so editable inputs must keep reading the doc.
+  const positionStuck = engineOwned && node.locked !== true && node.meta?.pinned !== true;
 
   return (
     <div className="maru-diagram-prop-sections">
@@ -206,16 +225,44 @@ function NodeProps({ node }: { node: DiagramNode }) {
       <section>
         <h3>{t("diagram.panel.properties.position")}</h3>
         <div className="maru-diagram-prop-row">
-          <NumberField labelKey="diagram.properties.x" value={node.x} onCommit={(v) => patch({ x: v })} />
-          <NumberField labelKey="diagram.properties.y" value={node.y} onCommit={(v) => patch({ y: v })} />
+          <NumberField
+            labelKey="diagram.properties.x"
+            value={positionStuck ? shown.x : node.x}
+            onCommit={(v) => patch({ x: v })}
+            disabled={positionStuck}
+          />
+          <NumberField
+            labelKey="diagram.properties.y"
+            value={positionStuck ? shown.y : node.y}
+            onCommit={(v) => patch({ y: v })}
+            disabled={positionStuck}
+          />
         </div>
+        {positionStuck ? (
+          <p className="maru-diagram-prop-note">{t("diagram.properties.enginePosition")}</p>
+        ) : null}
       </section>
       <section>
         <h3>{t("diagram.panel.properties.size")}</h3>
         <div className="maru-diagram-prop-row">
-          <NumberField labelKey="diagram.properties.w" value={node.w} onCommit={(v) => patch({ w: Math.max(20, v) })} min={20} />
-          <NumberField labelKey="diagram.properties.h" value={node.h} onCommit={(v) => patch({ h: Math.max(20, v) })} min={20} />
+          <NumberField
+            labelKey="diagram.properties.w"
+            value={shown.w}
+            onCommit={(v) => patch({ w: Math.max(20, v) })}
+            min={20}
+            disabled={engineOwned}
+          />
+          <NumberField
+            labelKey="diagram.properties.h"
+            value={shown.h}
+            onCommit={(v) => patch({ h: Math.max(20, v) })}
+            min={20}
+            disabled={engineOwned}
+          />
         </div>
+        {engineOwned ? (
+          <p className="maru-diagram-prop-note">{t("diagram.properties.engineSize")}</p>
+        ) : null}
       </section>
       <section>
         <h3>{t("diagram.panel.properties.style")}</h3>
@@ -332,6 +379,13 @@ export function RightPanel() {
   const doc = useDiagram((s) => s.doc);
   const nodes = doc.nodes;
   const edges = doc.edges;
+  const display = useCanvasDisplay(doc);
+  // Members the projection owns are drawn by the engine; its box is both what
+  // the fields show and what the doc position cannot replace.
+  const engineMembers = useMemo(
+    () => new Set(display.datasetId ? semanticMemberNodeIds(doc, display.datasetId) : []),
+    [display.datasetId, doc],
+  );
 
   const nodeCount = selection.nodes.size;
   const edgeCount = selection.edges.size;
@@ -369,11 +423,14 @@ export function RightPanel() {
   if (nodeCount === 1) {
     const id = [...selection.nodes][0]!;
     const node = nodes.find((n) => n.id === id);
+    const shown = display.nodes.find((n) => n.id === id) ?? node;
     return (
       <aside className="maru-diagram-side-panel" aria-label={t("diagram.panel.properties")}>
         <h2>{t("diagram.panel.properties")}</h2>
         <SemanticProps key={id} nodeId={id} />
-        {node ? <NodeProps node={node} /> : null}
+        {node && shown ? (
+          <NodeProps node={node} shown={shown} engineOwned={engineMembers.has(id)} />
+        ) : null}
       </aside>
     );
   }

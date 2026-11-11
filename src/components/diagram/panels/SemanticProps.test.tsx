@@ -11,6 +11,10 @@ import type { GenerationHost } from "../../../lib/diagram/generation";
 import { undo } from "../../../lib/diagram/actions";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
 import { validateEngineCandidate } from "../../../lib/diagram/engine";
+import {
+  _resetCanvasGeometryForTests,
+  _setCanvasEngineLoaderForTests,
+} from "../../../lib/diagram/engineCanvasGeometry";
 import type { SemanticDiagramType, SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
 import { projectSemanticDocument } from "../../../lib/diagram/semantic";
 import type { DiagramStore } from "../../../lib/diagram/state";
@@ -109,6 +113,10 @@ describe("SemanticProps", () => {
     validateSdkCandidate.mockReset();
     validateSdkCandidate.mockResolvedValue({ ok: true, errors: [], warnings: [], diagnostics: [] });
     _resetDiagramSharedStoreForTests();
+    // The panel reads the canvas geometry for its position and size fields; a
+    // layout that never lands keeps these cases on the projected slots.
+    _resetCanvasGeometryForTests();
+    _setCanvasEngineLoaderForTests(() => new Promise(() => {}));
     vi.mocked(messageDialog).mockClear();
     vi.mocked(confirmDialog).mockReset();
     vi.mocked(confirmDialog).mockResolvedValue(true);
@@ -120,6 +128,8 @@ describe("SemanticProps", () => {
     root = null;
     document.body.innerHTML = "";
     _resetDiagramSharedStoreForTests();
+    _setCanvasEngineLoaderForTests(null);
+    _resetCanvasGeometryForTests();
   });
 
   it.each([

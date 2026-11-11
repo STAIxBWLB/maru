@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import { resetCanvasGeometry } from "../../lib/diagram/engineCanvasGeometry";
 import {
   addNode,
   defaultCoalescer,
@@ -48,6 +49,7 @@ import {
 } from "../../lib/diagram/tableEditing";
 import { nextTableKeyAction } from "../../lib/diagram/tableKeys";
 import { isDiagramKeystroke, matchesShortcut } from "../../lib/diagram/shortcuts";
+import { canvasEngineDrawnIds, canvasNudgePins } from "../../lib/diagram/engineCanvasGeometry";
 import { fitView } from "../../lib/diagram/geometry";
 import {
   clipboardWriteHtml,
@@ -129,6 +131,7 @@ import {
   useDiagramHostOverride,
 } from "./DiagramStoreContext";
 import { CanvasSurface } from "./canvas/CanvasSurface";
+import { useCanvasDisplay } from "./canvas/useCanvasGeometry";
 import { deleteSelection } from "./deleteSelection";
 import { InlineTextEditor, type InlineEditField } from "./canvas/InlineTextEditor";
 import { LeftPanel } from "./panels/LeftPanel";
@@ -289,6 +292,9 @@ function DiagramShell({
   const docTitle = doc.docTitle;
   const selection = useDiagram((s) => s.ephemeral.selection);
   const viewport = useDiagram((s) => s.ephemeral.viewport);
+  // The chrome that acts on canvas members (fit view, the inline editor, arrow
+  // nudges) must use the box the canvas paints, not the doc's projected slot.
+  const canvasDisplay = useCanvasDisplay(doc);
 
   // Read once on mount from the session singleton so switching activity-rail
   // tabs and coming back resumes the in-progress work without losing the
@@ -352,6 +358,7 @@ function DiagramShell({
    */
   const openDoc = useCallback(
     (next: Parameters<typeof replaceDoc>[0]) => {
+      resetCanvasGeometry();
       store.setState(replaceDoc(next));
       if ((next.datasets ?? []).some((dataset) => dataset.kind === "semanticSpec" && dataset.diagramType === "floorplan")) {
         const rect = viewportRef.current?.getBoundingClientRect();
@@ -610,6 +617,7 @@ function DiagramShell({
               ? sel.preset.name
               : t(getPattern(patternId)?.labelKey ?? ""),
         });
+        resetCanvasGeometry();
         store.setState(replaceDoc(next));
         setActiveName(null);
         setLastSavedBody(null);
@@ -670,6 +678,7 @@ function DiagramShell({
 
   const handleMappingConfirm = useCallback(
     (result: CrossConversionResult) => {
+      resetCanvasGeometry();
       store.setState(withSnapshot(replaceDoc(result.doc), coalescer));
       if (mappingPreview) recordRecentPattern(mappingPreview.targetPatternId);
       setMappingPreview(null);
@@ -1018,12 +1027,14 @@ function DiagramShell({
     const el = viewportRef.current;
     const rect = el?.getBoundingClientRect();
     const next = fitView({
-      nodes: store.getState().doc.nodes,
+      // The painted boxes, so a semantic canvas fits what is on screen rather
+      // than the coarse slots under it.
+      nodes: canvasDisplay.nodes,
       viewportW: rect?.width ?? 800,
       viewportH: rect?.height ?? 600,
     });
     store.setState(setViewport(next));
-  }, [store]);
+  }, [canvasDisplay.nodes, store]);
 
   const persistSave = useCallback(
     async (name: string) => {
@@ -1112,6 +1123,7 @@ function DiagramShell({
 
   const handleNew = useCallback(() => {
     const fresh = createEmptyDoc(createDiagramId());
+    resetCanvasGeometry();
     store.setState(replaceDoc(fresh));
     setActiveName(null);
     setLastSavedBody(null);
@@ -1228,6 +1240,25 @@ function DiagramShell({
       setInlineEdit(null);
     },
     [store],
+  );
+
+  // Arrow-key nudges move what the canvas shows. A member the engine draws is
+  // pinned at its painted box while the rest keep the doc move, so the nudge is
+  // visible and lands in the same one-entry undo step as a drag.
+  const nudge = useCallback(
+    (dx: number, dy: number) => {
+      const state = store.getState();
+      const pins = canvasNudgePins(
+        state.doc,
+        canvasDisplay.datasetId,
+        canvasDisplay.geometry,
+        state.ephemeral.selection.nodes,
+        dx,
+        dy,
+      );
+      store.setState(withSnapshot(nudgeSelection(dx, dy, pins, canvasEngineDrawnIds(state.doc, canvasDisplay.datasetId, canvasDisplay.geometry)), coalescer, { coalesce: true }));
+    },
+    [canvasDisplay.datasetId, canvasDisplay.geometry, coalescer, store],
   );
 
   // --- Table cell editing -------------------------------------------------
@@ -1421,22 +1452,22 @@ function DiagramShell({
         const step = event.shiftKey ? 10 : 1;
         if (event.key === "ArrowLeft") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(-step, 0), coalescer, { coalesce: true }));
+          nudge(-step, 0);
           return;
         }
         if (event.key === "ArrowRight") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(step, 0), coalescer, { coalesce: true }));
+          nudge(step, 0);
           return;
         }
         if (event.key === "ArrowUp") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(0, -step), coalescer, { coalesce: true }));
+          nudge(0, -step);
           return;
         }
         if (event.key === "ArrowDown") {
           event.preventDefault();
-          store.setState(withSnapshot(nudgeSelection(0, step), coalescer, { coalesce: true }));
+          nudge(0, step);
           return;
         }
       }
@@ -1453,7 +1484,7 @@ function DiagramShell({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [cellEdit, coalescer, findOpen, gestureCoalescers, handleOsClipboardPaste, handleSave, hasSelection, openCellEditor, openInlineEditor, store, t, validationHost]);
+  }, [cellEdit, coalescer, findOpen, gestureCoalescers, handleOsClipboardPaste, handleSave, hasSelection, nudge, openCellEditor, openInlineEditor, store, t, validationHost]);
 
   const statusLabel = saving
     ? t("diagram.status.saving")
@@ -1521,8 +1552,10 @@ function DiagramShell({
 
   const initialSaveName = (docTitle || "").trim() || `diagram-${new Date().toISOString().slice(0, 10)}`;
 
+  // The editor overlays the member as the canvas paints it, so F2 and a
+  // double-click open on the engine's box rather than under it.
   const inlineEditNode = inlineEdit
-    ? (doc.nodes.find((n) => n.id === inlineEdit.nodeId) ?? null)
+    ? (canvasDisplay.nodes.find((n) => n.id === inlineEdit.nodeId) ?? null)
     : null;
 
   // Cell editor positioning: node-local cell rect → screen space.
@@ -1838,6 +1871,7 @@ function DiagramShell({
         doc={store.getState().doc}
         workspace={workPath}
         onRestore={(next) => {
+          resetCanvasGeometry();
           store.setState(replaceDoc(next));
           setHistoryOpen(false);
           reportError(null);

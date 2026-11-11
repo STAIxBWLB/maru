@@ -155,6 +155,33 @@ function lockedNodePatchAllowed(patch: Partial<DiagramNode>): boolean {
 }
 
 /**
+ * Place explicitly pinned semantic members at the positions the canvas shows.
+ * A semantic canvas draws engine geometry, so a drag authors a *pin*: the
+ * stored x/y is the emitted canvas position (the adapter subtracts the page
+ * `contentOffset` when it builds the request) and `meta.pinned` keeps the
+ * engine from re-placing the member. One entry, one undo step.
+ */
+export function pinSemanticNodes(
+  positions: Iterable<{ id: NodeId; x: number; y: number }>,
+): StateTransformer {
+  const entries = [...positions];
+  return (state) => {
+    if (entries.length === 0) return state;
+    const placed = new Map(entries.map((entry) => [entry.id, entry]));
+    let changed = false;
+    const nodes = state.doc.nodes.map((node) => {
+      const entry = placed.get(node.id);
+      if (!entry || node.locked) return node;
+      if (node.x === entry.x && node.y === entry.y && node.meta?.pinned === true) return node;
+      changed = true;
+      return { ...node, x: entry.x, y: entry.y, meta: { ...node.meta, pinned: true } };
+    });
+    if (!changed) return state;
+    return { ...state, doc: { ...state.doc, nodes } };
+  };
+}
+
+/**
  * Patch one node. Text on a semantic member writes through to its spec
  * (`writeThroughText`); a refused write-through (an empty required label)
  * leaves the state unchanged, like an edit on a locked node.
@@ -267,18 +294,24 @@ export function toggleFocusMode(value?: boolean): StateTransformer {
   });
 }
 
-export function nudgeSelection(dx: number, dy: number): StateTransformer {
+/**
+ * Arrow-key nudge of the selection, in one edit. A member the engine draws has
+ * no useful doc position, so the caller passes the pin it authors for that
+ * member (see `canvasNudgePins`); other engine-drawn members stay put while
+ * non-engine members keep the plain doc move, and a locked one stays put either way.
+ */
+export function nudgeSelection(
+  dx: number,
+  dy: number,
+  pins: Iterable<{ id: NodeId; x: number; y: number }> = [],
+  engineDrawnIds: Iterable<NodeId> = [],
+): StateTransformer {
+  const entries = [...pins];
+  const pinned = new Set([...engineDrawnIds, ...entries.map((entry) => entry.id)]);
   return (state) => {
-    const ids = state.ephemeral.selection.nodes;
-    if (ids.size === 0 || (dx === 0 && dy === 0)) return state;
-    let changed = false;
-    const nodes = state.doc.nodes.map((n) =>
-      ids.has(n.id) && !n.locked
-        ? (changed = true, { ...n, x: n.x + dx, y: n.y + dy })
-        : n,
-    );
-    if (!changed) return state;
-    return { ...state, doc: { ...state.doc, nodes } };
+    const plain = [...state.ephemeral.selection.nodes].filter((id) => !pinned.has(id));
+    const placed = pinSemanticNodes(entries)(state);
+    return moveNodes(plain, dx, dy)(placed);
   };
 }
 

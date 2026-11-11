@@ -13,6 +13,7 @@ import {
   addEdge,
   defaultCoalescer,
   moveNodes,
+  pinSemanticNodes,
   setSelection,
   setViewport,
   withSnapshot,
@@ -26,6 +27,18 @@ import {
   snap,
   type Rect,
 } from "../../../lib/diagram/geometry";
+import {
+  canvasDisplayNode,
+  canvasEngineDrawnIds,
+  canvasLabelsFor,
+  canvasLabelLines,
+  canvasMoveBase,
+  type CanvasGeometry,
+  type CanvasGeometryState,
+  type CanvasLabelLines,
+  type CanvasDisplayOffset,
+} from "../../../lib/diagram/engineCanvasGeometry";
+import { isPinnableCanvasMember } from "../../../lib/diagram/engineGeometryCanvas";
 import {
   analyzeViewDrag,
   detachViewMembersSnippetAction,
@@ -59,10 +72,11 @@ import {
   useDiagramStore,
 } from "../DiagramStoreContext";
 import { EdgeMarkers } from "./EdgeMarkers";
-import { EdgeView } from "./EdgeView";
+import { EdgeView, type EngineRoute } from "./EdgeView";
 import { Marquee } from "./Marquee";
-import { NodeView } from "./NodeView";
+import { EngineLabels, NodeView } from "./NodeView";
 import { SmartGuides } from "./SmartGuides";
+import { useCanvasGeometry } from "./useCanvasGeometry";
 
 interface DragState {
   kind: "node";
@@ -71,11 +85,40 @@ interface DragState {
   lastDx: number;
   lastDy: number;
   ids: NodeId[];
+  /** Ids whose box the engine owns; the drag paints them, the drop pins them. */
+  engineIds: NodeId[];
   /** Original positions of dragged nodes, keyed by id. */
   origins: Map<NodeId, { x: number; y: number; w: number; h: number }>;
   /** Views whose ENTIRE membership is dragged — stay linked (bounds offset on drop). */
   linkedViewIds: string[];
   coalescer: Coalescer;
+}
+
+type CanvasPositions = ReadonlyMap<NodeId, { x: number; y: number }>;
+
+/** Dropped positions remain painted only while the same scene is published. */
+interface CanvasOffset {
+  scene: CanvasGeometryState;
+  positions: CanvasPositions;
+}
+
+function committedCanvasPositions(
+  offset: CanvasOffset | null,
+  scene: CanvasGeometryState,
+  nodes: readonly DiagramNode[],
+): Map<NodeId, { x: number; y: number }> {
+  const positions = new Map<NodeId, { x: number; y: number }>();
+  if (!offset || offset.scene !== scene) return positions;
+  const storedNodes = new Map(nodes.map((node) => [node.id, node]));
+  for (const [id, position] of offset.positions) {
+    const stored = storedNodes.get(id);
+    // Undo may return to a cached scene without a publish. Keep the overlay
+    // only while the doc still carries that exact authored pin.
+    if (stored?.meta?.pinned === true && stored.x === position.x && stored.y === position.y) {
+      positions.set(id, position);
+    }
+  }
+  return positions;
 }
 
 interface PanState {
@@ -182,6 +225,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   const svgRef = useRef<SVGSVGElement | null>(null);
   const gestureRef = useRef<Gesture>(null);
 
+  const doc = useDiagram((s) => s.doc);
   const nodes = useDiagram((s) => s.doc.nodes);
   const edges = useDiagram((s) => s.doc.edges);
   const datasets = useDiagram((s) => s.doc.datasets);
@@ -193,9 +237,14 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   const snapSize = useDiagram((s) => s.ephemeral.ui.snapSize);
   const smartGuideOn = useDiagram((s) => s.ephemeral.ui.smartGuideOn);
   const tool = useDiagram((s) => s.ephemeral.tool);
+  const canvasGeometry = useCanvasGeometry(doc);
+  const geometry: CanvasGeometry | null = canvasGeometry.geometry;
+  const datasetId = canvasGeometry.datasetId;
 
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [guides, setGuides] = useState<GuideLine[]>([]);
+  const [canvasOffset, setCanvasOffset] = useState<CanvasOffset | null>(null);
+  const [liveCanvasPositions, setLiveCanvasPositions] = useState<CanvasPositions | null>(null);
   const [connectGhost, setConnectGhost] = useState<{
     x1: number;
     y1: number;
@@ -204,6 +253,51 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   } | null>(null);
   const [hoverNodeId, setHoverNodeId] = useState<NodeId | null>(null);
   const [svgSize, setSvgSize] = useState({ width: 0, height: 0 });
+
+  // A committed drop offset lives until the canvas answers with its next
+  // geometry: any publish means the layout that carries the pins was tried, and
+  // a refusal must not leave a painting that no later layout will replace.
+  useEffect(() => {
+    setCanvasOffset((current) => current?.scene === canvasGeometry ? current : null);
+  }, [canvasGeometry]);
+
+  const offset: CanvasDisplayOffset | null = useMemo(() => {
+    const positions = committedCanvasPositions(canvasOffset, canvasGeometry, nodes);
+    for (const [id, position] of liveCanvasPositions ?? []) positions.set(id, position);
+    return positions.size > 0 ? { ids: new Set(positions.keys()), dx: 0, dy: 0, positions } : null;
+  }, [canvasGeometry, canvasOffset, liveCanvasPositions, nodes]);
+
+  // The boxes the canvas paints: engine scene geometry when the document has a
+  // semantic dataset, the doc's own placement otherwise (free-form, templates,
+  // patterns, Mermaid imports).
+  const displayNodes = useMemo(
+    () => (geometry || offset ? nodes.map((node) => canvasDisplayNode(node, geometry, offset)) : nodes),
+    [geometry, nodes, offset],
+  );
+
+  // Labels are relative to the engine box, so a drag that displaces the node
+  // group carries them without re-deriving anything.
+  const engineLabelsByNode = useMemo(() => {
+    const map = new Map<NodeId, readonly CanvasLabelLines[]>();
+    if (!geometry) return map;
+    for (const [id, box] of geometry.boxes) {
+      const labels = canvasLabelsFor(geometry, id, "node");
+      if (labels.length) map.set(id, labels.map((label) => canvasLabelLines(label, box)));
+    }
+    return map;
+  }, [geometry]);
+
+  const engineRoutesByEdge = useMemo(() => {
+    const map = new Map<string, EngineRoute>();
+    if (!geometry) return map;
+    for (const edge of edges) {
+      const route = geometry.routes.get(edge.id);
+      if (!route) continue;
+      const label = canvasLabelsFor(geometry, edge.id, "edge")[0] ?? null;
+      map.set(edge.id, { route, label });
+    }
+    return map;
+  }, [edges, geometry]);
 
   // Track our own size for culling. `ResizeObserver` avoids re-measuring on
   // every render and stays accurate when the user toggles side panels.
@@ -222,9 +316,9 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
   const nodeById = useMemo(() => {
     const map = new Map<NodeId, DiagramNode>();
-    for (const n of nodes) map.set(n.id, n);
+    for (const n of displayNodes) map.set(n.id, n);
     return map;
-  }, [nodes]);
+  }, [displayNodes]);
 
   // View-linked tables: node id → matrix dataset (via meta.memberId).
   const matrixByNodeId = useMemo(() => {
@@ -243,17 +337,17 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
   // Skip when we haven't measured yet (avoid culling everything on first paint).
   const visible = useMemo(() => {
     if (svgSize.width === 0 || svgSize.height === 0) {
-      return { nodes, edges, full: true };
+      return { nodes: displayNodes, edges, full: true };
     }
     const tl = screenToCanvas(0, 0, viewport);
     const br = screenToCanvas(svgSize.width, svgSize.height, viewport);
     return visibleSubset({
-      nodes,
+      nodes: displayNodes,
       edges,
       viewport: { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y },
       forceVisible: selection.nodes,
     });
-  }, [edges, nodes, selection.nodes, svgSize.height, svgSize.width, viewport]);
+  }, [displayNodes, edges, selection.nodes, svgSize.height, svgSize.width, viewport]);
 
   const transform = `translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`;
 
@@ -306,6 +400,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         const n = nodeById.get(id);
         if (n) origins.set(id, { x: n.x, y: n.y, w: n.w, h: n.h });
       }
+      const drawnIds = canvasEngineDrawnIds(state.doc, datasetId, geometry);
       gestureRef.current = {
         kind: "node",
         startCanvasX: canvas.x,
@@ -313,12 +408,16 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         lastDx: 0,
         lastDy: 0,
         ids,
+        // All semantic members, including derived frames before their first
+        // scene, stay engine-owned. Only pinnable members author a pin on drop;
+        // a plain doc move would be hidden when the engine box arrives.
+        engineIds: ids.filter((id) => drawnIds.has(id)),
         origins,
         linkedViewIds: analysis.full,
         coalescer: defaultCoalescer(),
       };
     },
-    [nodeById, store, t, viewport],
+    [datasetId, geometry, nodeById, store, t, viewport],
   );
 
   const beginConnect = useCallback(
@@ -578,7 +677,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
               w: origin.w,
               h: origin.h,
             };
-            const stationary: Rect[] = nodes
+            const stationary: Rect[] = displayNodes
               .filter((n) => !gesture.ids.includes(n.id))
               .map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
             const result = computeSmartGuides({
@@ -600,15 +699,28 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         }
         gesture.lastDx = proposedDx;
         gesture.lastDy = proposedDy;
-        store.setState(
-          withSnapshot(moveNodes(gesture.ids, stepDx, stepDy), gesture.coalescer, {
-            coalesce: true,
-          }),
-        );
+        // Engine-drawn nodes move on the canvas, not in the doc: the drop writes
+        // one pin per member. Everything else keeps the live doc move.
+        const plainIds = gesture.ids.filter((id) => !gesture.engineIds.includes(id));
+        if (plainIds.length > 0) {
+          store.setState(
+            withSnapshot(moveNodes(plainIds, stepDx, stepDy), gesture.coalescer, {
+              coalesce: true,
+            }),
+          );
+        }
+        if (gesture.engineIds.length > 0) {
+          const positions = new Map<NodeId, { x: number; y: number }>();
+          for (const id of gesture.engineIds) {
+            const origin = gesture.origins.get(id);
+            if (origin) positions.set(id, { x: origin.x + proposedDx, y: origin.y + proposedDy });
+          }
+          setLiveCanvasPositions(positions);
+        }
         setGuides(smartGuideOut);
       }
     },
-    [nodes, onPointerCanvasMove, snapOn, snapSize, smartGuideOn, store, updateViewport, viewport],
+    [displayNodes, onPointerCanvasMove, snapOn, snapSize, smartGuideOn, store, updateViewport, viewport],
   );
 
   const onSurfacePointerUp = useCallback(
@@ -622,7 +734,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (gesture.kind === "marquee") {
         const rect = marqueeRect(gesture);
         if (rect.w > 1 || rect.h > 1) {
-          const hits = nodesInsideRect(store.getState().doc.nodes, rect);
+          const hits = nodesInsideRect(displayNodes, rect);
           if (gesture.additive) {
             const existing = [...store.getState().ephemeral.selection.nodes];
             store.setState(setSelection([...new Set([...existing, ...hits])]));
@@ -648,6 +760,46 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             ),
           );
         }
+        // A drop on engine-drawn members authors their position: one pin per
+        // pinnable member, in emitted canvas coordinates, in one undo step.
+        const moved = gesture.lastDx !== 0 || gesture.lastDy !== 0;
+        const placed: Array<{ id: NodeId; x: number; y: number }> = [];
+        if (moved && datasetId) {
+          for (const id of gesture.engineIds) {
+            // The doc node is the base, never the painted one: a painted node
+            // already carries the live gesture offset, and the drop adds it
+            // again (maru#552). Without a scene yet (first paint, first-run
+            // refusal) the doc position also stands in for the box.
+            const node = nodes.find((candidate) => candidate.id === id);
+            if (!node || !isPinnableCanvasMember(doc, datasetId, node)) continue;
+            const base = canvasMoveBase(node, geometry);
+            placed.push({
+              id,
+              x: base.x + gesture.lastDx,
+              y: base.y + gesture.lastDy,
+            });
+          }
+        }
+        if (placed.length > 0) {
+          store.setState(withSnapshot(pinSemanticNodes(placed), gesture.coalescer, { coalesce: true }));
+        }
+        // The painting follows the pins until the layout answers them: with a
+        // scene the engine box hides the doc position, so the gesture offset
+        // holds the drop. Without one, or when nothing was pinnable, the offset
+        // must go, or the canvas keeps a displacement no layout will replace.
+        setLiveCanvasPositions(null);
+        if (moved && gesture.engineIds.length > 0) {
+          setCanvasOffset((current) => {
+            const positions = committedCanvasPositions(current, canvasGeometry, nodes);
+            // A separate drop may still await this same scene's replacement.
+            // Retain those members, but a non-pinnable drop keeps no ghost.
+            for (const id of gesture.engineIds) positions.delete(id);
+            if (geometry) {
+              for (const { id, x, y } of placed) positions.set(id, { x, y });
+            }
+            return positions.size > 0 ? { scene: canvasGeometry, positions } : null;
+          });
+        }
       }
       if (gesture.kind === "connect") {
         const target = findPortTarget(event);
@@ -666,7 +818,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       }
       gestureRef.current = null;
     },
-    [store],
+    [canvasGeometry, datasetId, displayNodes, doc, geometry, nodes, store],
   );
 
   const onWheel = useCallback(
@@ -696,6 +848,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (!isDiagramKeystroke(event.target)) return;
       if (event.key === "Escape") {
         gestureRef.current = null;
+        setLiveCanvasPositions(null);
         setMarquee(null);
         setGuides([]);
         setConnectGhost(null);
@@ -720,12 +873,27 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
     [onBlankDoubleClick],
   );
 
+  // The engine's own box per node, for the geometry proofs and for debugging.
+  const engineBoxAttr = (nodeId: NodeId): string | undefined => {
+    const box = geometry?.boxes.get(nodeId);
+    return box ? `${box.x} ${box.y} ${box.w} ${box.h}` : undefined;
+  };
+
+  const refused = canvasGeometry.status === "refused" || canvasGeometry.status === "stale";
+  const firstDiagnostic = canvasGeometry.diagnostics[0] ?? null;
+  const engineNotice = refused && firstDiagnostic
+    ? `${t("diagram.engineGeometry.refused")}: ${firstDiagnostic.message} ${firstDiagnostic.fix}`
+    : null;
+
   return (
     <svg
       ref={svgRef}
       className="maru-diagram-canvas"
       role="application"
       aria-label={t("diagram.aria.canvas")}
+      data-engine-dataset-id={datasetId ?? undefined}
+      data-engine-spec-sha256={canvasGeometry.sourceSpecSha256 ?? undefined}
+      data-engine-geometry-status={datasetId ? canvasGeometry.status : undefined}
       onPointerDown={onSurfacePointerDown}
       onPointerMove={onSurfacePointerMove}
       onPointerUp={onSurfacePointerUp}
@@ -750,6 +918,11 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             />
           </g>
         ) : null}
+        {geometry && geometry.pageLabels.length > 0 ? (
+          // The engine's title and subtitle sit in the header band its page
+          // offset reserves; without them the band is blank.
+          <EngineLabels labels={geometry.pageLabels} color="#111827" />
+        ) : null}
         {visible.edges.map((edge) => (
           <EdgeView
             key={edge.id}
@@ -757,12 +930,15 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             fromNode={nodeById.get(edge.fromNode)}
             toNode={nodeById.get(edge.toNode)}
             selected={selection.edges.has(edge.id)}
+            engineRoute={engineRoutesByEdge.get(edge.id) ?? null}
             onSelect={onEdgeSelect}
           />
         ))}
         {visible.nodes.map((n) => (
           <g
             key={n.id}
+            data-engine-source-id={geometry?.boxes.get(n.id)?.sourceId}
+            data-engine-box={engineBoxAttr(n.id)}
             onPointerEnter={() => onNodeEnter(n.id)}
             onPointerLeave={onNodeLeave}
             onDoubleClick={() => onNodeDoubleClick?.(n.id)}
@@ -772,6 +948,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
               selected={selection.nodes.has(n.id)}
               showPorts={hoverNodeId === n.id}
               pendingConnectActive={Boolean(connectGhost)}
+              engineLabels={engineLabelsByNode.get(n.id) ?? null}
               onPointerDown={beginNodeDrag}
               onPortPointerDown={beginConnect}
               onMemoOpen={onMemoOpen}
@@ -801,6 +978,24 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         ) : null}
         <Marquee rect={marquee} />
       </g>
+      {engineNotice ? (
+        <g data-export-ignore data-engine-geometry-notice pointerEvents="none">
+          <rect
+            x={12}
+            y={12}
+            width={Math.min(svgSize.width - 24, 520)}
+            height={34}
+            rx={6}
+            ry={6}
+            fill="#fef3c7"
+            stroke="#b45309"
+            strokeWidth={1}
+          />
+          <text x={22} y={34} fontSize={12} fill="#78350f">
+            {engineNotice}
+          </text>
+        </g>
+      ) : null}
     </svg>
   );
 }

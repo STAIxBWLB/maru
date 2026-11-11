@@ -3498,6 +3498,8 @@ export const en: Record<string, string> = {
   "diagram.properties.br": "Radius",
   "diagram.properties.bw": "Stroke width",
   "diagram.properties.textAlign": "Align",
+  "diagram.properties.enginePosition": "The engine places this member. Drag it on the canvas to pin it where you drop it.",
+  "diagram.properties.engineSize": "The engine sizes this box from its label.",
 
   "diagram.fw.light": "Light",
   "diagram.fw.regular": "Regular",
@@ -3873,6 +3875,7 @@ export const en: Record<string, string> = {
   "diagram.semantic.collection.semanticChecks.allowedTerminals": "Allowed terminals",
   "diagram.semantic.collection.semanticChecks.requiredEdges": "Required edges",
   "diagram.semantic.collection.semanticChecks.requiredPaths": "Required paths",
+  "diagram.engineGeometry.refused": "The engine cannot draw this layout, so the last one stays",
   "diagram.semantic.title": "Semantics",
   "diagram.semantic.type": "Type",
   "diagram.semantic.dataset": "Diagram",
