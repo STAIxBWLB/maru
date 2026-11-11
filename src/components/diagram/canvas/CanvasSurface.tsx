@@ -82,6 +82,21 @@ import { canvasPositionsState, commitCanvasPositions, setLiveCanvasPositions } f
 
 const CanvasDiagnosticLayer = lazy(() => import("./CanvasDiagnostics").then((module) => ({ default: module.CanvasDiagnosticLayer })));
 
+/**
+ * Pointer capture is an optimization, not a precondition: WebKit throws
+ * `NotFoundError` when the id no longer names an active pointer (a gesture the
+ * platform cancelled or re-routed mid-press), and a handler that lets that
+ * throw aborts the whole gesture — no selection, no pan, no marquee. Losing
+ * capture only costs events delivered outside the surface.
+ */
+function capturePointer(svg: SVGSVGElement, pointerId: number): void {
+  try {
+    svg.setPointerCapture(pointerId);
+  } catch {
+    /* the gesture continues without capture */
+  }
+}
+
 interface DragState {
   kind: "node";
   startCanvasX: number;
@@ -340,7 +355,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       event.stopPropagation();
       const svg = svgRef.current;
       if (!svg) return;
-      svg.setPointerCapture(event.pointerId);
+      capturePointer(svg, event.pointerId);
       const rect = svg.getBoundingClientRect();
       const canvas = screenToCanvas(event.clientX - rect.left, event.clientY - rect.top, viewport);
       const state = store.getState();
@@ -404,7 +419,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
     (event: PointerEvent<SVGCircleElement>, nodeId: NodeId, port: EdgePort) => {
       const svg = svgRef.current;
       if (!svg) return;
-      svg.setPointerCapture(event.pointerId);
+      capturePointer(svg, event.pointerId);
       const rect = svg.getBoundingClientRect();
       const canvas = screenToCanvas(event.clientX - rect.left, event.clientY - rect.top, viewport);
       const node = nodeById.get(nodeId);
@@ -445,7 +460,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       event.stopPropagation();
       const svg = svgRef.current;
       if (!svg) return;
-      svg.setPointerCapture(event.pointerId);
+      capturePointer(svg, event.pointerId);
       const existing = state.ephemeral.tableSelection;
       if (event.shiftKey && existing && existing.nodeId === nodeId) {
         store.setState(setTableSelection({ ...existing, focus: addr }));
@@ -481,7 +496,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (!matrix) return;
       const track = axis === "col" ? matrix.columns[index] : matrix.rows[index];
       if (!track) return;
-      svg.setPointerCapture(event.pointerId);
+      capturePointer(svg, event.pointerId);
       const rect = svg.getBoundingClientRect();
       const canvas = screenToCanvas(event.clientX - rect.left, event.clientY - rect.top, viewport);
       gestureRef.current = {
@@ -529,7 +544,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (event.button !== 0) return;
       const svg = svgRef.current;
       if (!svg) return;
-      svg.setPointerCapture(event.pointerId);
+      capturePointer(svg, event.pointerId);
       const rect = svg.getBoundingClientRect();
       const screenX = event.clientX - rect.left;
       const screenY = event.clientY - rect.top;

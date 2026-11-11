@@ -127,6 +127,113 @@ export interface MaruNativeE2eBridge {
   channelEvals(): ReadonlyArray<NativeE2eChannelEvalSample>;
   /** Fixed semantic export fixture, available only in native-e2e builds. */
   diagramStaticExportFixture(): Promise<NativeE2eDiagramStaticExportResult>;
+  /** T4 real-app check: seeds one document per engine family plus the legacy
+   *  v7/v8 bodies, then reports what a fresh engine layout expects, so the
+   *  spec can compare it with the boxes this WKWebView paints. */
+  diagramEngineE4Fixture(): Promise<NativeE2eDiagramE4Result>;
+}
+
+export interface NativeE2eDiagramE4Family {
+  type: string;
+  datasetId: string;
+  documentName: string;
+  documentTitle: string;
+  /** SHA-256 of the exact bytes handed to the engine, as the canvas publishes it. */
+  specSha256: string;
+  mixedLabel: string;
+  nodes: Array<{ id: string; box: [number, number, number, number] }>;
+  containers: Array<{ id: string; box: [number, number, number, number] }>;
+  routes: Array<{ id: string; path: string }>;
+  labels: Array<{ id: string; targetId: string; lines: string[] }>;
+}
+
+export interface NativeE2eDiagramE4Version {
+  v: number;
+  documentName: string;
+  /** The title the app's open list shows for this document. */
+  documentTitle: string;
+  /** `v` as it was on disk before the loader migrated it. */
+  sourceVersion: number | null;
+  migratedVersion: number;
+  nodeCount: number;
+  datasets: number;
+  /** Re-serializing what the loader returned equals what a second open returns. */
+  reopenEqual: boolean;
+}
+
+/** The real engine's refusal of one fixture document, with the anchor the
+ *  canvas maps it to, so the spec compares the painted badge against the
+ *  engine's own placement instead of a number written by hand. */
+export interface NativeE2eDiagramE4Refusal {
+  documentName: string;
+  documentTitle: string;
+  /** SHA-256 of the refused bytes, as the canvas publishes it. */
+  specSha256: string;
+  code: string;
+  path: string;
+  category: string;
+  targetKind: string;
+  targetId: string;
+  targetX: number;
+  targetY: number;
+}
+
+export interface NativeE2eDiagramE4Result {
+  families: NativeE2eDiagramE4Family[];
+  versions: NativeE2eDiagramE4Version[];
+  refusal: NativeE2eDiagramE4Refusal;
+  apply: {
+    refused: boolean;
+    refusalKeys: string[];
+    historyAfterRefusal: number;
+    applied: boolean;
+    historyAfterApply: number;
+    undoRestored: boolean;
+    redoRestored: boolean;
+    /** Every field the saved document carried survives the reopen; the loader
+     *  only fills defaults, which `addedFields` names. */
+    reopenedWithoutLoss: boolean;
+    addedFields: string[];
+  };
+}
+
+/**
+ * Collects the saved fields a reopen did not carry (`missing`) and the ones the
+ * loader added on its own (`added`), walking both documents in parallel. A
+ * shorter array counts as loss: a dropped member is exactly what a reopen must
+ * not do. Key order is not compared, because rebuilding a member fixes it.
+ */
+function survivingFields(saved: unknown, reopened: unknown, path: string, missing: string[], added: string[]): void {
+  if (Array.isArray(saved) || Array.isArray(reopened)) {
+    if (!Array.isArray(saved) || !Array.isArray(reopened)) {
+      missing.push(`${path} (${Array.isArray(saved) ? "array" : "value"} became ${Array.isArray(reopened) ? "array" : "value"})`);
+      return;
+    }
+    if (saved.length !== reopened.length) {
+      missing.push(`${path} length ${saved.length} → ${reopened.length}`);
+      return;
+    }
+    saved.forEach((item, index) => survivingFields(item, reopened[index], `${path}[${index}]`, missing, added));
+    return;
+  }
+  if (saved !== null && reopened !== null && typeof saved === "object" && typeof reopened === "object") {
+    const left = saved as Record<string, unknown>;
+    const right = reopened as Record<string, unknown>;
+    for (const key of Object.keys(left)) {
+      if (!Object.hasOwn(right, key)) {
+        missing.push(path === "" ? key : `${path}.${key}`);
+        continue;
+      }
+      survivingFields(left[key], right[key], path === "" ? key : `${path}.${key}`, missing, added);
+    }
+    for (const key of Object.keys(right)) {
+      if (!Object.hasOwn(left, key)) added.push(path === "" ? key : `${path}.${key}`);
+    }
+    return;
+  }
+  if (!Object.is(saved, reopened)) {
+    missing.push(`${path === "" ? "(root)" : path} ${JSON.stringify(saved)} → ${JSON.stringify(reopened)}`);
+  }
 }
 
 export interface NativeE2eProbeResult {
@@ -493,6 +600,247 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           svgTextMode,
           pngTextMode,
           applyProbe,
+        };
+      },
+      // T4: the canvas is the artifact under test, so this fixture reports what
+      // a fresh engine layout expects for a document saved through the real IPC
+      // path; the spec compares that with the boxes this WKWebView painted.
+      diagramEngineE4Fixture: async () => {
+        if (import.meta.env.VITE_NATIVE_E2E !== "1") {
+          throw new Error("The diagram canvas fixture is available only in native-e2e builds.");
+        }
+        const state = appStateRegistration?.read();
+        const workspace = state?.workspacePath?.replace(/\\/g, "/").replace(/\/+$/, "") ?? "";
+        const segments = workspace.split("/");
+        if (
+          !/^(?:[A-Za-z]:)?\//.test(workspace)
+          || segments.includes(".") || segments.includes("..")
+          || !/(?:^|\/)maru-native-e2e-[^/]+\/workspace$/.test(workspace)
+        ) {
+          throw new Error("The native canvas fixture requires the app's isolated maru-native-e2e workspace; restart the native fixture and retry.");
+        }
+
+        const [
+          { createInitialEphemeral },
+          { archifySpecToDataset },
+          { projectSemanticDocument },
+          { createDiagramStore },
+          { applyValidatedSemanticEdit },
+          { undo, redo },
+          { removeSemanticEntries, addSemanticEntry },
+          { validateEngineCandidate, layout: layoutRequest },
+          { buildEngineCanvasLayoutRequest, fixedToPixels },
+          { serializeDoc, readDiagramDetailed },
+          { diagramSaveDocument },
+          { mapCanvasDiagnostics },
+          { NATIVE_E4_DIAGRAM_TYPES, NATIVE_E4_LEGACY_DOCUMENTS, nativeE4Spec, nativeE4RefusedSpec, NATIVE_E4_MIXED_LABEL },
+        ] = await Promise.all([
+          import("./diagram/types"),
+          import("./diagram/archifyCodec"),
+          import("./diagram/semantic"),
+          import("./diagram/state"),
+          import("./diagram/semanticApply"),
+          import("./diagram/actions"),
+          import("./diagram/semanticEdit"),
+          import("./diagram/engine"),
+          import("./diagram/engineGeometryCanvas"),
+          import("./diagram/persistence"),
+          import("./diagram"),
+          import("./diagram/canvasDiagnostics"),
+          import("./diagram/__fixtures__/nativeEngineE4"),
+        ]);
+
+        const px = (value: number, what: string) => fixedToPixels(value, what);
+        const boxOf = (bounds: { x: number; y: number; width: number; height: number }, what: string) =>
+          [px(bounds.x, what), px(bounds.y, what), px(bounds.width, what), px(bounds.height, what)] as
+            [number, number, number, number];
+
+        const families: NativeE2eDiagramE4Family[] = [];
+        for (const type of NATIVE_E4_DIAGRAM_TYPES) {
+          const { dataset } = archifySpecToDataset(type, nativeE4Spec(type), { id: `native-e4-${type}` });
+          const documentName = `t4-${type}`;
+          await diagramSaveDocument(workspace, documentName, serializeDoc(projectSemanticDocument(dataset).doc));
+          // Read it back through the app's own loader: the canvas lays out the
+          // document a reopened file holds, not the projection in memory.
+          const { doc } = await readDiagramDetailed(workspace, documentName);
+          // A saved fixture carries no pins, so this is byte-for-byte the
+          // request the canvas builds and the engine's own answer to it.
+          const request = await buildEngineCanvasLayoutRequest(doc, dataset.id);
+          const report = await layoutRequest(request);
+          const scene = report.ok ? report.geometry : null;
+          if (!scene) {
+            throw new Error(`the engine refused the ${type} fixture: ${JSON.stringify(report.diagnostics)}; repair the fixture before comparing.`);
+          }
+          const what = `${type} geometry`;
+          families.push({
+            type,
+            datasetId: dataset.id,
+            documentName,
+            documentTitle: doc.docTitle.length > 0 ? doc.docTitle : documentName,
+            specSha256: request.pinSet?.sourceSpecSha256 ?? "",
+            mixedLabel: NATIVE_E4_MIXED_LABEL[type],
+            nodes: scene.nodes.map((node) => ({ id: node.id, box: boxOf(node.bounds, what) })),
+            containers: scene.containers.map((container) => ({ id: container.id, box: boxOf(container.bounds, what) })),
+            routes: scene.routes.flatMap((route) => (route.id ? [{
+              id: route.id,
+              path: route.points
+                .map((point, index) => `${index === 0 ? "M" : "L"} ${px(point.x, what)} ${px(point.y, what)}`)
+                .join(" "),
+            }] : [])),
+            labels: scene.labels.flatMap((label) => (typeof label.id === "string"
+              ? [{ id: label.id, targetId: label.targetId, lines: label.text.split("\n") }]
+              : [])),
+          });
+        }
+
+        const versions: NativeE2eDiagramE4Version[] = [];
+        for (const key of ["v7", "v8"] as const) {
+          const body = NATIVE_E4_LEGACY_DOCUMENTS[key];
+          const documentName = `t4-legacy-${key}`;
+          await diagramSaveDocument(workspace, documentName, JSON.stringify(body));
+          const first = await readDiagramDetailed(workspace, documentName);
+          const second = await readDiagramDetailed(workspace, documentName);
+          // The v7 upgrade mints a dataset id per load and writes it into the
+          // node's own meta, so a reopen must preserve what the user authored:
+          // the node geometry and labels plus the edge endpoints.
+          const authored = (doc: typeof first.doc) => JSON.stringify({
+            nodes: doc.nodes.map((node) => ({
+              id: node.id, kind: node.kind, x: node.x, y: node.y, w: node.w, h: node.h, title: node.title ?? null,
+            })),
+            edges: doc.edges.map((edge) => ({ from: edge.fromNode, to: edge.toNode })),
+          });
+          const reopenEqual = key === "v7"
+            ? authored(first.doc) === authored(second.doc)
+              && (first.doc.datasets?.length ?? 0) === (second.doc.datasets?.length ?? 0)
+            : serializeDoc(first.doc) === serializeDoc(second.doc);
+          versions.push({
+            v: body.v,
+            documentName,
+            documentTitle: first.doc.docTitle.length > 0 ? first.doc.docTitle : documentName,
+            sourceVersion: first.sourceVersion,
+            migratedVersion: first.doc.v,
+            nodeCount: first.doc.nodes.length,
+            datasets: first.doc.datasets?.length ?? 0,
+            reopenEqual,
+          });
+        }
+        const savedWorkflow = await readDiagramDetailed(workspace, "t4-workflow");
+        versions.push({
+          v: 9,
+          documentName: "t4-workflow",
+          documentTitle: savedWorkflow.doc.docTitle.length > 0 ? savedWorkflow.doc.docTitle : "t4-workflow",
+          sourceVersion: savedWorkflow.sourceVersion,
+          migratedVersion: savedWorkflow.doc.v,
+          nodeCount: savedWorkflow.doc.nodes.length,
+          datasets: savedWorkflow.doc.datasets?.length ?? 0,
+          reopenEqual: serializeDoc(savedWorkflow.doc) === serializeDoc((await readDiagramDetailed(workspace, "t4-workflow")).doc),
+        });
+
+        // AC4: a structural edit that the engine refuses leaves no trace, the
+        // accepted one costs one history step, undo and redo move between the
+        // two documents, and the saved result reopens unchanged. The refusal
+        // needs the authored semanticChecks; the accepted edit runs on the same
+        // spec without them, so the guard cannot mask its own outcome.
+        const guardedSpec = {
+          ...nativeE4Spec("workflow"),
+          semanticChecks: { allowedRoots: ["draft"], allowedTerminals: ["merge"] },
+        };
+        const host = { validateCandidate: (type: string, spec: Record<string, unknown>) => validateEngineCandidate(type, spec) };
+        const { dataset: guardedDataset } = archifySpecToDataset("workflow", guardedSpec, { id: "native-e4-refusal" });
+        const refusedStore = createDiagramStore({
+          doc: projectSemanticDocument(guardedDataset).doc,
+          ephemeral: createInitialEphemeral(),
+        });
+        const beforeRefusal = refusedStore.getState().doc;
+        const refused = await applyValidatedSemanticEdit(
+          refusedStore,
+          guardedDataset.id,
+          removeSemanticEntries("workflow", guardedDataset.spec, [{ field: "nodes", index: 0 }]).transform,
+          host,
+        );
+        const historyAfterRefusal = refusedStore.getState().ephemeral.history.past.length;
+        const unchangedAfterRefusal = refusedStore.getState().doc === beforeRefusal;
+
+        // A distinct title keeps this probe's document out of the family
+        // document's row in the app's open list, which matches on docTitle.
+        const applySpec = nativeE4Spec("workflow");
+        applySpec.meta = { ...(applySpec.meta as Record<string, unknown>), title: "T4 apply 점검 Check" };
+        const { dataset: applyDataset } = archifySpecToDataset("workflow", applySpec, { id: "native-e4-apply" });
+        const store = createDiagramStore({
+          doc: projectSemanticDocument(applyDataset).doc,
+          ephemeral: createInitialEphemeral(),
+        });
+        const beforeApply = store.getState().doc;
+        const applied = await applyValidatedSemanticEdit(
+          store,
+          applyDataset.id,
+          addSemanticEntry("workflow", "nodes", { lane: "reviewer", col: 3, type: "backend", label: "T4 점검 Check" }),
+          host,
+        );
+        const historyAfterApply = store.getState().ephemeral.history.past.length;
+        const afterApply = store.getState().doc;
+        if (applied.status === "applied") store.setState(undo());
+        const undoRestored = JSON.stringify(store.getState().doc) === JSON.stringify(beforeApply);
+        if (applied.status === "applied") store.setState(redo());
+        const redoRestored = JSON.stringify(store.getState().doc) === JSON.stringify(afterApply);
+        const appliedName = "t4-workflow-apply";
+        await diagramSaveDocument(workspace, appliedName, serializeDoc(store.getState().doc));
+        const reopened = await readDiagramDetailed(workspace, appliedName);
+        // The loader rebuilds every member through its own defaults, so a JSON
+        // string comparison would fail on key order and on filled-in defaults
+        // rather than on lost content. What must hold is that every saved field
+        // survives and that a second load adds nothing further.
+        const missing: string[] = [];
+        const added: string[] = [];
+        survivingFields(store.getState().doc, reopened.doc, "", missing, added);
+        const secondLoad = await readDiagramDetailed(workspace, appliedName);
+        const reloadAdded: string[] = [];
+        survivingFields(reopened.doc, secondLoad.doc, "", [], reloadAdded);
+
+        // AC8: the real engine refuses one fixture document, so the canvas has
+        // to keep the member's place and anchor the diagnostic beside it.
+        const refusedName = "t4-refused";
+        const { dataset: refusedDataset } = archifySpecToDataset("workflow", nativeE4RefusedSpec(), { id: "native-e4-refused" });
+        await diagramSaveDocument(workspace, refusedName, serializeDoc(projectSemanticDocument(refusedDataset).doc));
+        const refusedDoc = (await readDiagramDetailed(workspace, refusedName)).doc;
+        const refusedRequest = await buildEngineCanvasLayoutRequest(refusedDoc, refusedDataset.id);
+        const refusedReport = await layoutRequest(refusedRequest);
+        if (refusedReport.ok) {
+          throw new Error(`the engine laid out the refusal fixture; the diagnostic check needs a document it refuses: ${JSON.stringify(refusedReport.diagnostics)}`);
+        }
+        const placements = mapCanvasDiagnostics(refusedDoc, refusedDataset.id, null, refusedReport.diagnostics);
+        const anchored = placements.find((placement) => placement.target !== null);
+        if (!anchored || !anchored.target) {
+          throw new Error(`the engine's refusal carried no member anchor: ${JSON.stringify(refusedReport.diagnostics)}`);
+        }
+        const refusal: NativeE2eDiagramE4Refusal = {
+          documentName: refusedName,
+          documentTitle: refusedDoc.docTitle.length > 0 ? refusedDoc.docTitle : refusedName,
+          specSha256: refusedRequest.pinSet?.sourceSpecSha256 ?? "",
+          code: anchored.diagnostic.code,
+          path: anchored.diagnostic.path,
+          category: anchored.category,
+          targetKind: anchored.target.kind,
+          targetId: anchored.target.id,
+          targetX: anchored.target.x,
+          targetY: anchored.target.y,
+        };
+
+        return {
+          families,
+          versions,
+          refusal,
+          apply: {
+            refused: refused.status === "invalid",
+            refusalKeys: refused.status === "invalid" ? refused.diagnostics.map((item) => item.key) : [],
+            historyAfterRefusal: unchangedAfterRefusal ? historyAfterRefusal : -1,
+            applied: applied.status === "applied",
+            historyAfterApply,
+            undoRestored,
+            redoRestored,
+            reopenedWithoutLoss: missing.length === 0 && reloadAdded.length === 0,
+            addedFields: [...new Set(added.map((field) => field.replace(/\[\d+\]/g, "[]")))].sort(),
+          } satisfies NativeE2eDiagramE4Result["apply"],
         };
       },
     };
