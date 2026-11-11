@@ -671,6 +671,11 @@ of leaving a line under nothing. A band, rail or legend swatch belongs to the
 page and to no member, so it stays. Both renderers filter on the same rule, and
 the canvas applies the model's own visibility rather than the viewport subset —
 a lifeline whose participant sits above the viewport still crosses the scene.
+The model's visibility is one predicate, `modelDrawsNode` in
+`src/lib/diagram/nodeVisibility.ts`: a node is drawn unless it is hidden or sits
+on a layer marked invisible. The canvas and `renderSvg` both apply it to member
+bodies, to their engine shapes and to the obstacles a diagnostic badge avoids,
+and a badge stays inside the page frame on every edge.
 
 A route label's background box is drawn `ENGINE_LABEL_BOX_PAD` (3 px) larger
 than the engine's text box, and the text stays exactly where the engine put it.

@@ -41,6 +41,7 @@ import {
   type CanvasLabelLines,
 } from "../../../lib/diagram/engineCanvasGeometry";
 import { isPinnableCanvasMember } from "../../../lib/diagram/engineGeometryCanvas";
+import { modelDrawsNode } from "../../../lib/diagram/nodeVisibility";
 import {
   analyzeViewDrag,
   detachViewMembersSnippetAction,
@@ -331,10 +332,11 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
   const pageSize = page && page !== "free" ? DIAGRAM_PAGE_SIZES[page] : null;
 
-  // A hidden member is not drawn at all. That is the model's own rule, so it
-  // applies before the cull and needs no measurement: the canvas would otherwise
-  // paint a hidden node until its first resize and then drop it.
-  const drawnNodes = useMemo(() => displayNodes.filter((node) => !node.hidden), [displayNodes]);
+  // A hidden member, or one on an invisible layer, is not drawn at all. That is
+  // the model's own rule, shared with `renderSvg`, so it applies before the cull
+  // and needs no measurement: the canvas would otherwise paint a hidden node
+  // until its first resize and then drop it.
+  const drawnNodes = useMemo(() => displayNodes.filter(modelDrawsNode(doc)), [displayNodes, doc]);
 
   // Culling: pick only the visible subset of nodes + edges. Selection is
   // forced-visible so an off-screen drag target doesn't disappear mid-gesture.
@@ -1024,13 +1026,13 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         <Marquee rect={marquee} />
         {datasetId && diagnostics.length > 0 ? (
           <Suspense fallback={null}>
-            <CanvasDiagnosticLayer doc={doc} datasetId={datasetId} geometry={geometry} diagnostics={diagnostics} displayedNodes={displayNodes} scope="elements" />
+            <CanvasDiagnosticLayer doc={doc} datasetId={datasetId} geometry={geometry} diagnostics={diagnostics} displayedNodes={drawnNodes} scope="elements" />
           </Suspense>
         ) : null}
       </g>
       {datasetId && diagnostics.length > 0 ? (
         <Suspense fallback={null}>
-          <CanvasDiagnosticLayer doc={doc} datasetId={datasetId} geometry={geometry} diagnostics={diagnostics} displayedNodes={displayNodes} scope="canvas" />
+          <CanvasDiagnosticLayer doc={doc} datasetId={datasetId} geometry={geometry} diagnostics={diagnostics} displayedNodes={drawnNodes} scope="canvas" />
         </Suspense>
       ) : null}
     </svg>
