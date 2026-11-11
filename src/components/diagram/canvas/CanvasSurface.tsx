@@ -38,7 +38,6 @@ import {
   type CanvasGeometry,
   type CanvasLabelLines,
 } from "../../../lib/diagram/engineCanvasGeometry";
-import type { DiagramDoc } from "../../../lib/diagram/types";
 import { isPinnableCanvasMember } from "../../../lib/diagram/engineGeometryCanvas";
 import {
   analyzeViewDrag,
@@ -61,6 +60,7 @@ import {
 } from "../../../lib/diagram/smartGuides";
 import {
   DIAGRAM_PAGE_SIZES,
+  type DiagramDoc,
   type DiagramNode,
   type EdgePort,
   type NodeId,
@@ -430,7 +430,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         y2: canvas.y,
       });
     },
-    [nodeById, viewport],
+    [nodeById, store, viewport],
   );
 
   // Cell click: only takes over when the table node is already selected
@@ -536,7 +536,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
       if (event.shiftKey || tool === "pan") {
         gestureRef.current = {
-        ...gestureContext(store.getState().doc),
+          ...gestureContext(store.getState().doc),
           kind: "pan",
           startScreenX: screenX,
           startScreenY: screenY,
