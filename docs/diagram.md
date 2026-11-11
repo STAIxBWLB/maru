@@ -647,6 +647,35 @@ export path independently lays out its source request.
   `layoutDoc` reflow (`layout.ts`) is gone; the projection keeps only coarse
   source slots as the fallback shown before an engine scene arrives.
 
+### Editing and diagnostics on engine geometry
+
+The canvas, inline editor, fit view, find navigation and property panel read
+one shared displayed position, including live drags and dropped pins awaiting
+the next layout. These positions are ephemeral: they never add history entries.
+Escape cancels the live gesture, undo removes a dropped pin's overlay, and a
+new scene or document replacement invalidates it. Document replacement also
+cancels active gestures, including copies that retain their document id.
+
+Engine diagnostics are read-only asynchronous feedback. A diagnostic naming a
+source member, relation or label appears beside its displayed box or route;
+JSON-pointer paths use the same semantic member and relation-id allocation as
+the canvas projection. Untargeted diagnostics stay in a canvas notice. Only
+results for the current source and pins are shown, including current refusals
+while the last good scene remains visible. They never block opening, editing
+or saving. Korean and English explanations include a cause and next step;
+original engine details remain available for exact diagnosis.
+
+Apply retains the SDK admission gate. Undo and redo restore authored documents;
+layout generation ownership prevents a superseded result from replacing the
+current painted scene. A refusal retains the last good scene without changing
+the document or history. Marquee and additive selection, pan, pointer-centred
+zoom, snap, smart guides and connect ghosts use the same displayed boxes.
+
+Canvas and Maru visual-export engine labels disable browser kerning and
+ligatures and request geometric precision, matching the engine's unshaped text
+metrics. Browser regression evidence covers these interactions; real-app
+Korean IME, WKWebView behavior and screenshots remain the T4 check.
+
 ## Performance
 
 Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache

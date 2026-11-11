@@ -294,6 +294,7 @@ export function EngineLabels({ labels, color }: { labels: readonly CanvasLabelLi
           fontSize={label.fontSize}
           fontWeight={label.weight}
           dominantBaseline="text-before-edge"
+          style={{ fontKerning: "none", fontVariantLigatures: "none", textRendering: "geometricPrecision" }}
         >
           {label.lines.map((line, index) => (
             <tspan key={index} x={label.x} dy={index === 0 ? 0 : label.fontSize * 1.5}>

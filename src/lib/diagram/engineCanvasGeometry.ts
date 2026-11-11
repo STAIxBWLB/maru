@@ -14,6 +14,7 @@
  * leaves the canvas on its projected source positions, so opening, editing,
  * history and saving never wait for the engine.
  */
+import { resetCanvasPositions } from "./canvasDisplayPositions";
 import type { Diagnostic, GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { fixedToPixels, isPinnableCanvasMember, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
@@ -399,6 +400,8 @@ interface Entry {
   listeners: Set<() => void>;
   /** Source/pin key of the geometry currently displayed. */
   cacheKey: string | null;
+  /** Identity of the current attempt when source bytes could not be serialized. */
+  serializationFailureDoc: DiagramDoc | null;
   /** Source/pin key of the layout in flight, and the layout itself. */
   pendingKey: string | null;
   pending: Promise<void> | null;
@@ -430,6 +433,7 @@ function entryFor(datasetId: string): Entry {
       state: { datasetId, status: "idle", geometry: null, diagnostics: [], sourceSpecSha256: null },
       listeners: new Set(),
       cacheKey: null,
+      serializationFailureDoc: null,
       pendingKey: null,
       pending: null,
       offset: null,
@@ -461,6 +465,7 @@ function resetEntry(entry: Entry): void {
   entry.documentId = null;
   entry.generation += 1;
   entry.cacheKey = null;
+  entry.serializationFailureDoc = null;
   entry.pendingKey = null;
   entry.pending = null;
   entry.offset = null;
@@ -469,6 +474,7 @@ function resetEntry(entry: Entry): void {
 
 /** Invalidate displayed scenes and in-flight work when opening/replacing a document. */
 export function resetCanvasGeometry(): void {
+  resetCanvasPositions();
   for (const entry of entries.values()) resetEntry(entry);
 }
 
@@ -487,8 +493,23 @@ export function matchingCanvasGeometry(doc: DiagramDoc): CanvasGeometry | null {
   }
 }
 
+/** Diagnostics belong to the attempted request, never to a retained old scene. */
+export function currentCanvasDiagnostics(doc: DiagramDoc, state: CanvasGeometryState): readonly Diagnostic[] {
+  const id = canvasGeometryDatasetId(doc);
+  const entry = id ? entries.get(id) : undefined;
+  const dataset = doc.datasets?.find((item) => item.id === id);
+  if (!entry || entry.documentId !== doc.id || entry.state !== state || dataset?.kind !== "semanticSpec") return [];
+  try {
+    return entry.cacheKey === canvasLayoutKey(JSON.stringify(dataset.spec), doc) ? state.diagnostics : [];
+  } catch {
+    return entry.cacheKey === null && entry.serializationFailureDoc === doc
+      && (state.status === "refused" || state.status === "stale") ? state.diagnostics : [];
+  }
+}
+
 /** Drop every cached layout — tests start here so keys never leak across cases. */
 export function _resetCanvasGeometryForTests(): void {
+  resetCanvasPositions();
   entries.clear();
   engineLoader = defaultEngineLoader;
 }
@@ -603,17 +624,20 @@ export function syncCanvasGeometry(
     entry.pendingKey = null;
     entry.pending = null;
     entry.cacheKey = null;
+    entry.serializationFailureDoc = null;
     if (entry.state.status !== "idle") publish(entry, { ...IDLE, datasetId });
     return Promise.resolve();
   }
   let specJson: string;
   try {
     specJson = JSON.stringify(dataset.spec);
+    entry.serializationFailureDoc = null;
   } catch (error) {
     entry.generation += 1;
     entry.pendingKey = null;
     entry.pending = null;
     entry.cacheKey = null;
+    entry.serializationFailureDoc = doc;
     publish(entry, {
       datasetId,
       status: entry.state.geometry ? "stale" : "refused",

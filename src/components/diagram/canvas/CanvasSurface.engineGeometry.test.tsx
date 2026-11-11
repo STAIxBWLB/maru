@@ -5,12 +5,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GeometryReport, LayoutRequest } from "../../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
-import { undo } from "../../../lib/diagram/actions";
+import { replaceDoc, undo } from "../../../lib/diagram/actions";
 import {
   _resetCanvasGeometryForTests,
   _setCanvasEngineLoaderForTests,
   canvasGeometryState,
   syncCanvasGeometry,
+  resetCanvasGeometry,
 } from "../../../lib/diagram/engineCanvasGeometry";
 import { projectSemanticDocument } from "../../../lib/diagram/semantic";
 import type { SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
@@ -21,7 +22,9 @@ import {
   DiagramStoreProvider,
   _resetDiagramSharedStoreForTests,
   useDiagramStore,
+  useDiagram,
 } from "../DiagramStoreContext";
+import { useCanvasDisplay } from "./useCanvasGeometry";
 import { CanvasSurface } from "./CanvasSurface";
 import { renderDocToSvg } from "../../../lib/diagram/renderSvg";
 import type { DiagramStore } from "../../../lib/diagram/state";
@@ -134,7 +137,9 @@ function scene(request: LayoutRequest): GeometryReport {
 let probe: DiagramStore | null = null;
 function StoreProbe() {
   probe = useDiagramStore();
-  return null;
+  const doc = useDiagram((state) => state.doc);
+  const { nodes } = useCanvasDisplay(doc);
+  return <output data-display-probe>{JSON.stringify(nodes.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })))}</output>;
 }
 
 let keySeq = 0;
@@ -175,6 +180,11 @@ function nodeGroup(nodeId: string): SVGGElement {
   const group = document.body.querySelector<SVGGElement>(`[data-node-id="${nodeId}"]`);
   if (!group) throw new Error(`node ${nodeId} was not rendered`);
   return group;
+}
+
+function displayed(id: string): { id: string; x: number; y: number; w: number; h: number } {
+  const nodes = JSON.parse(document.querySelector("[data-display-probe]")!.textContent!) as Array<{ id: string; x: number; y: number; w: number; h: number }>;
+  return nodes.find((node) => node.id === id)!;
 }
 
 describe("semantic canvas draws engine geometry", () => {
@@ -272,8 +282,27 @@ describe("semantic canvas draws engine geometry", () => {
     await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("stale"));
     await settle();
 
-    const notice = document.body.querySelector("[data-engine-geometry-notice]")!;
-    expect(notice.textContent).toContain("The label does not fit");
+    await vi.waitFor(() => expect(document.querySelector('[data-canvas-diagnostic="workflow.labelOverflow"]')).not.toBeNull());
+    const notice = document.querySelector('[data-canvas-diagnostic="workflow.labelOverflow"]')!;
+    expect(notice.getAttribute("data-target-id")).toBe((doc.datasets![0] as SemanticSpecDataset).idMap.draft);
+    expect(notice.getAttribute("aria-label")).toContain("The label does not fit");
+    expect(notice.getAttribute("aria-label")).toContain("shorten it");
+    expect(notice.getAttribute("transform")).toBe("translate(388,300)");
+    expect(document.querySelector("[data-canvas-diagnostic-notice]")).toBeNull();
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+    let release!: () => void;
+    const engine = { layout: scene };
+    const held = new Promise<typeof engine>((resolve) => { release = () => resolve(engine); });
+    _setCanvasEngineLoaderForTests(() => held);
+    try {
+      act(() => { probe!.setState((state) => ({ ...state, doc: { ...state.doc, datasets: [{ ...(state.doc.datasets![0] as SemanticSpecDataset), spec: { ...spec, meta: { ...spec.meta, title: "새 요청" } } }] } })); });
+      // Old-result diagnostics vanish while the next request is still held.
+      expect(document.querySelector("[data-canvas-diagnostic]")).toBeNull();
+    } finally {
+      release();
+      await settle();
+      await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    }
     // The refusal leaves the previous scene on screen.
     const draft = doc.datasets![0] as SemanticSpecDataset;
     expect(nodeGroup(draft.idMap.draft!).getAttribute("transform")).toBe("translate(200,300)");
@@ -352,6 +381,101 @@ describe("semantic canvas pins a dropped member", () => {
     await settle();
   }
 
+  it("marquee and additive multi-select hit engine boxes, and pan/zoom keep their canvas position", async () => {
+    await startReadyCanvas();
+    const dataset = doc.datasets![0] as SemanticSpecDataset;
+    const draft = dataset.idMap.draft!;
+    const review = dataset.idMap.review!;
+    const surface = document.querySelector(".maru-diagram-canvas")!;
+    async function pointer(type: string, x: number, y: number, modifiers = {}) {
+      await act(async () => { surface.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y, ...modifiers })); });
+    }
+    await pointer("pointerdown", 198, 298);
+    await pointer("pointermove", 382, 374);
+    await pointer("pointerup", 382, 374);
+    expect(new Set(probe!.getState().ephemeral.selection.nodes)).toEqual(new Set(["ds-flow:lane:main", draft]));
+    await pointer("pointerdown", 458, 298, { ctrlKey: true });
+    await pointer("pointermove", 642, 374);
+    await pointer("pointerup", 642, 374);
+    expect(new Set(probe!.getState().ephemeral.selection.nodes)).toEqual(new Set(["ds-flow:lane:main", draft, review]));
+    const saved = JSON.stringify(probe!.getState().doc);
+    await pointer("pointerdown", 10, 10, { shiftKey: true });
+    await pointer("pointermove", 50, 40);
+    await pointer("pointerup", 50, 40);
+    expect(probe!.getState().ephemeral.viewport).toMatchObject({ px: 40, py: 30, zoom: 1 });
+    await act(async () => { surface.dispatchEvent(new WheelEvent("wheel", { bubbles: true, ctrlKey: true, clientX: 240, clientY: 330, deltaY: -100 })); });
+    const viewport = probe!.getState().ephemeral.viewport;
+    expect(viewport.zoom).toBeGreaterThan(1);
+    // Zoom keeps the engine point under the pointer, not the stored coarse slot.
+    expect((240 - viewport.px) / viewport.zoom).toBeCloseTo(200);
+    expect((330 - viewport.py) / viewport.zoom).toBeCloseTo(300);
+    expect(displayed(draft)).toMatchObject({ x: 200, y: 300 });
+    expect(JSON.stringify(probe!.getState().doc)).toBe(saved);
+  });
+
+  it("snaps and smart guides operate on the painted engine origins", async () => {
+    await startReadyCanvas();
+    const dataset = doc.datasets![0] as SemanticSpecDataset;
+    const draft = dataset.idMap.draft!;
+    act(() => { probe!.setState((state) => ({ ...state, ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: true, snapSize: 20 } } })); });
+    await dragMember(draft, 29, 11, false);
+    expect(displayed(draft)).toMatchObject({ x: 220, y: 320 });
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    act(() => { probe!.setState((state) => ({ ...state, ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: false, smartGuideOn: true } } })); });
+    await dragMember(draft, 258, 0, false);
+    expect(displayed(draft)).toMatchObject({ x: 460, y: 300 });
+    expect(document.querySelectorAll('line[stroke="#ec4899"]').length).toBeGreaterThan(0);
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("starts the connect ghost at the painted engine port", async () => {
+    await startReadyCanvas();
+    const draft = (doc.datasets![0] as SemanticSpecDataset).idMap.draft!;
+    // Selected members expose their ports without relying on jsdom hover layout.
+    act(() => { probe!.setState((state) => ({ ...state, ephemeral: { ...state.ephemeral, selection: { nodes: new Set([draft]), edges: new Set() } } })); });
+    const port = nodeGroup(draft).querySelector('[data-port="e"]')!;
+    expect(port).not.toBeNull();
+    await act(async () => { port.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 380, clientY: 336 })); });
+    const surface = document.querySelector(".maru-diagram-canvas")!;
+    await act(async () => { surface.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 430, clientY: 350 })); });
+    const ghost = surface.querySelector('line[stroke="#2563eb"]')!;
+    expect([ghost.getAttribute("x1"), ghost.getAttribute("y1"), ghost.getAttribute("x2"), ghost.getAttribute("y2")]).toEqual(["380", "336", "430", "350"]);
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(surface.querySelector('line[stroke="#2563eb"]')).toBeNull();
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it.each([false, true])("document replacement cancels a live drag before pointer-up (copied id=%s)", async (sameId) => {
+    await startReadyCanvas();
+    const release = holdFollowingLayouts();
+    const draft = (doc.datasets![0] as SemanticSpecDataset).idMap.draft!;
+    try {
+      await dragMember(draft, 60, 45, false);
+      expect(displayed(draft)).toMatchObject({ x: 260, y: 345 });
+      const replacement = structuredClone(doc);
+      if (!sameId) replacement.id = "other-document";
+      replacement.docTitle = "Opened replacement";
+      replacement.nodes = replacement.nodes.map((node) => ({ ...node, x: node.x + 900 }));
+      await act(async () => {
+        resetCanvasGeometry();
+        probe!.setState(replaceDoc(replacement));
+      });
+      const before = JSON.stringify(probe!.getState().doc);
+      const source = replacement.nodes.find((node) => node.id === draft)!;
+      expect(displayed(draft)).toMatchObject({ x: source.x, y: source.y });
+      const surface = document.querySelector(".maru-diagram-canvas")!;
+      await act(async () => { surface.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: 268, clientY: 353 })); });
+      expect(JSON.stringify(probe!.getState().doc)).toBe(before);
+      expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+      expect(document.querySelector('line[stroke="#ec4899"]')).toBeNull();
+    } finally {
+      release();
+      await settle();
+      await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    }
+  });
+
   it("keeps each member's painted start through a second drag before the first layout lands", async () => {
     await startReadyCanvas();
     const release = holdFollowingLayouts();
@@ -361,6 +485,7 @@ describe("semantic canvas pins a dropped member", () => {
     try {
       await dragMember(draft, 60, 45);
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(260,345)");
+      expect(displayed(draft)).toMatchObject({ x: 260, y: 345 });
       // The second selection mixes a member with a pending prior drop and one
       // still at its original box. They must not share the first member's delta.
       act(() => {
@@ -407,16 +532,19 @@ describe("semantic canvas pins a dropped member", () => {
       await dragMember(draft, 60, 45);
       await dragMember(review, 20, 15);
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(260,345)");
+      expect(displayed(draft)).toMatchObject({ x: 260, y: 345 });
       expect(nodeGroup(review).getAttribute("transform")).toBe("translate(480,315)");
       const before = JSON.stringify(probe!.getState().doc);
       const historyCount = probe!.getState().ephemeral.history.past.length;
       await dragMember(draft, 10, 5, false);
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(270,350)");
+      expect(displayed(draft)).toMatchObject({ x: 270, y: 350 });
       expect(nodeGroup(review).getAttribute("transform")).toBe("translate(480,315)");
       await act(async () => {
         document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       });
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(260,345)");
+      expect(displayed(draft)).toMatchObject({ x: 260, y: 345 });
       expect(nodeGroup(review).getAttribute("transform")).toBe("translate(480,315)");
       expect(JSON.stringify(probe!.getState().doc)).toBe(before);
       expect(probe!.getState().ephemeral.history.past).toHaveLength(historyCount);
@@ -424,6 +552,7 @@ describe("semantic canvas pins a dropped member", () => {
       await settle();
       await vi.waitFor(() => expect(canvasGeometryState("ds-flow").geometry?.boxes.get(draft)?.x).toBe(260));
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(260,345)");
+      expect(displayed(draft)).toMatchObject({ x: 260, y: 345 });
       expect(nodeGroup(review).getAttribute("transform")).toBe("translate(480,315)");
     } finally {
       release();
@@ -443,6 +572,7 @@ describe("semantic canvas pins a dropped member", () => {
       await dragMember(draft, 60, 45);
       pending = syncCanvasGeometry(probe!.getState().doc, dataset.id);
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(260,345)");
+      expect(displayed(draft)).toMatchObject({ x: 260, y: 345 });
       expect(probe!.getState().ephemeral.history.past).toHaveLength(1);
       act(() => { probe!.setState(undo()); });
       await settle();
@@ -452,12 +582,14 @@ describe("semantic canvas pins a dropped member", () => {
       // K0 is already ready, so neither a new layout nor a geometry publish is
       // needed to replace the obsolete optimistic position from K1's drop.
       expect(canvasGeometryState("ds-flow")).toBe(published);
+      expect(displayed(draft)).toMatchObject({ x: 200, y: 300 });
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(200,300)");
       await act(async () => {
         release();
         await pending;
       });
       expect(canvasGeometryState("ds-flow")).toBe(published);
+      expect(displayed(draft)).toMatchObject({ x: 200, y: 300 });
       expect(nodeGroup(draft).getAttribute("transform")).toBe("translate(200,300)");
       expect(JSON.stringify(probe!.getState().doc)).toBe(before);
     } finally {
