@@ -675,7 +675,9 @@ The model's visibility is one predicate, `modelDrawsNode` in
 `src/lib/diagram/nodeVisibility.ts`: a node is drawn unless it is hidden or sits
 on a layer marked invisible. The canvas and `renderSvg` both apply it to member
 bodies, to their engine shapes and to the obstacles a diagnostic badge avoids,
-and a badge stays inside the page frame on every edge.
+and a badge prefers a clear spot inside the page frame on every edge. When the
+frame has none, a clear spot past its right or bottom edge comes before the
+canvas notice; a badge never sits at a negative coordinate.
 
 A route label's background box is drawn `ENGINE_LABEL_BOX_PAD` (3 px) larger
 than the engine's text box, and the text stays exactly where the engine put it.
