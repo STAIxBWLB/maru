@@ -144,7 +144,10 @@ export interface NativeE2eDiagramE4Family {
   nodes: Array<{ id: string; box: [number, number, number, number] }>;
   containers: Array<{ id: string; box: [number, number, number, number] }>;
   routes: Array<{ id: string; path: string }>;
-  labels: Array<{ id: string; targetId: string; lines: string[] }>;
+  /** Engine label bounds, in the same canvas coordinates as the node boxes, so
+   *  the label-position check reads where the engine put the label rather than
+   *  asking the canvas where it painted it. */
+  labels: Array<{ id: string; targetId: string; lines: string[]; box: [number, number, number, number] }>;
 }
 
 export interface NativeE2eDiagramE4Version {
@@ -688,7 +691,12 @@ function bridgeNamespace(): MaruNativeE2eBridge {
                 .join(" "),
             }] : [])),
             labels: scene.labels.flatMap((label) => (typeof label.id === "string"
-              ? [{ id: label.id, targetId: label.targetId, lines: label.text.split("\n") }]
+              ? [{
+                id: label.id,
+                targetId: label.targetId,
+                lines: label.text.split("\n"),
+                box: boxOf(label.bounds, what),
+              }]
               : [])),
           });
         }

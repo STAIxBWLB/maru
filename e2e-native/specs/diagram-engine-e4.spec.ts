@@ -34,7 +34,7 @@ interface NativeE2eDiagramE4Family {
   nodes: Array<{ id: string; box: [number, number, number, number] }>;
   containers: Array<{ id: string; box: [number, number, number, number] }>;
   routes: Array<{ id: string; path: string }>;
-  labels: Array<{ id: string; targetId: string; lines: string[] }>;
+  labels: Array<{ id: string; targetId: string; lines: string[]; box: [number, number, number, number] }>;
 }
 
 interface NativeE2eDiagramE4Version {
@@ -274,10 +274,6 @@ interface PaintReport {
     height: number;
     /** Painted top-left, in canvas coordinates. */
     painted: { x: number; y: number };
-    /** Where the engine put the first line's top, in canvas coordinates. */
-    expected: { x: number; y: number } | null;
-    /** The box the label must stay inside: its label box or its member's box. */
-    target: { x: number; y: number; w: number; h: number } | null;
   }>;
   surface: { width: number; height: number };
 }
@@ -341,10 +337,6 @@ async function painted(
       }
       return tags.join(" ");
     };
-    const numberAttr = (element: Element, name: string) => {
-      const value = Number(element.getAttribute(name) ?? NaN);
-      return Number.isFinite(value) ? value : null;
-    };
     return {
       specSha256: surface.getAttribute("data-engine-spec-sha256"),
       status: surface.getAttribute("data-engine-geometry-status"),
@@ -393,29 +385,16 @@ async function painted(
       }),
       labels: [...surface.querySelectorAll<SVGGraphicsElement>("[data-engine-label]")].map((element) => {
         const box = element.getBBox();
-        const own = element.getAttribute("data-engine-label-box");
-        const host = element.closest("[data-engine-box]");
-        const memberBox = host ? (host.getAttribute("data-engine-box") ?? "").split(" ").map(Number) : null;
-        const labelBox = own ? own.split(" ").map(Number) : null;
-        const text = element.tagName === "text" ? element : element.querySelector("text");
-        const x = text ? numberAttr(text, "x") : null;
-        const y = text ? numberAttr(text, "y") : null;
-        // A node label is drawn in its member's local coordinates; an edge
-        // label carries its own engine box in canvas coordinates.
-        const originX = labelBox ? 0 : memberBox ? memberBox[0]! : 0;
-        const originY = labelBox ? 0 : memberBox ? memberBox[1]! : 0;
-        const target = labelBox ?? memberBox;
+        const painted = paintedBox(element);
+        // Only what the canvas painted is read here. Where the label belongs
+        // comes from the engine's own label bounds, so an adapter that moved a
+        // label but kept it inside its owner cannot satisfy the comparison.
         return {
           id: element.getAttribute("data-engine-label") ?? "",
           lines: [...element.querySelectorAll("tspan")].map((line) => line.textContent ?? ""),
           width: box.width,
           height: box.height,
-          painted: (() => {
-            const painted = paintedBox(element);
-            return { x: painted.x, y: painted.y };
-          })(),
-          expected: x !== null && y !== null ? { x: originX + x, y: originY + y } : null,
-          target: target ? { x: target[0]!, y: target[1]!, w: target[2]!, h: target[3]! } : null,
+          painted: { x: painted.x, y: painted.y },
         };
       }),
       surface: { width: rect.width, height: rect.height },
@@ -479,31 +458,29 @@ function assertFamilyPainted(paint: PaintReport, family: NativeE2eDiagramE4Famil
     }
   }
   for (const actual of paint.labels) {
-    assert.ok(
-      family.labels.some((label) => label.id === actual.id),
-      `${family.type}: label ${actual.id} is painted but is not in the engine scene`,
-    );
+    const engine = family.labels.find((label) => label.id === actual.id);
+    assert.ok(engine, `${family.type}: label ${actual.id} is painted but is not in the engine scene`);
+    if (!placed.has(engine.targetId)) continue;
     // The engine's line breaks are only correct if the first line starts where
-    // the engine put it, and no line leaves the box that owns it. Both fail
-    // when a text baseline other than the top edge is used.
-    if (actual.expected) {
-      assert.ok(
-        Math.abs(actual.painted.x - actual.expected.x) <= 2
-        && Math.abs(actual.painted.y - actual.expected.y) <= 2,
-        `${family.type}: label ${actual.id} paints its first line at (${actual.painted.x.toFixed(1)},${actual.painted.y.toFixed(1)}); the engine put it at (${actual.expected.x.toFixed(1)},${actual.expected.y.toFixed(1)})`,
-      );
-    }
-    if (actual.target) {
-      const right = actual.painted.x + actual.width;
-      const bottom = actual.painted.y + actual.height;
-      assert.ok(
-        actual.painted.x >= actual.target.x - 2
-        && actual.painted.y >= actual.target.y - 2
-        && right <= actual.target.x + actual.target.w + 2
-        && bottom <= actual.target.y + actual.target.h + 2,
-        `${family.type}: label ${actual.id} spans (${actual.painted.x.toFixed(1)},${actual.painted.y.toFixed(1)})-(${right.toFixed(1)},${bottom.toFixed(1)}) outside its box (${actual.target.x},${actual.target.y})-(${actual.target.x + actual.target.w},${actual.target.y + actual.target.h})`,
-      );
-    }
+    // the engine put the box, and no line leaves that box. Both fail when a
+    // text baseline other than the top edge is used, and an adapter that moved
+    // a label while keeping it inside its owner fails the origin comparison
+    // because the expected point comes from the engine's bounds, not from the
+    // coordinates the canvas itself paints with.
+    assert.ok(
+      Math.abs(actual.painted.x - engine.box[0]) <= 2
+      && Math.abs(actual.painted.y - engine.box[1]) <= 2,
+      `${family.type}: label ${actual.id} paints its first line at (${actual.painted.x.toFixed(1)},${actual.painted.y.toFixed(1)}); the engine put the label box at (${engine.box[0]},${engine.box[1]})`,
+    );
+    const right = actual.painted.x + actual.width;
+    const bottom = actual.painted.y + actual.height;
+    assert.ok(
+      actual.painted.x >= engine.box[0] - 2
+      && actual.painted.y >= engine.box[1] - 2
+      && right <= engine.box[0] + engine.box[2] + 2
+      && bottom <= engine.box[1] + engine.box[3] + 2,
+      `${family.type}: label ${actual.id} spans (${actual.painted.x.toFixed(1)},${actual.painted.y.toFixed(1)})-(${right.toFixed(1)},${bottom.toFixed(1)}) outside its engine label box (${engine.box.join(",")})`,
+    );
   }
 }
 
