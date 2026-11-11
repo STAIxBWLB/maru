@@ -83,11 +83,11 @@ import { canvasPositionsState, commitCanvasPositions, setLiveCanvasPositions } f
 const CanvasDiagnosticLayer = lazy(() => import("./CanvasDiagnostics").then((module) => ({ default: module.CanvasDiagnosticLayer })));
 
 /**
- * Pointer capture is an optimization, not a precondition: WebKit throws
- * `NotFoundError` when the id no longer names an active pointer (a gesture the
- * platform cancelled or re-routed mid-press), and a handler that lets that
- * throw aborts the whole gesture — no selection, no pan, no marquee. Losing
- * capture only costs events delivered outside the surface.
+ * Pointer capture is an optimization, not a precondition. WebKit raises
+ * `NotFoundError` for a pointer id it has not activated, which is the shape the
+ * native e2e harness produces when it dispatches synthetic PointerEvents, and a
+ * handler that lets that throw escape loses the selection, pan or marquee with
+ * it. Losing capture only costs events delivered outside the surface.
  */
 function capturePointer(svg: SVGSVGElement, pointerId: number): void {
   try {
@@ -869,6 +869,41 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
     return box ? `${box.x} ${box.y} ${box.w} ${box.h}` : undefined;
   };
 
+  // A container is a frame the engine paints around other members: a lane, a
+  // boundary, a stage, a segment or an activation. Its own fill must not cover
+  // the routes the engine ran inside it.
+  const isEngineContainer = (node: DiagramNode): boolean =>
+    geometry?.boxes.get(node.id)?.role === "container";
+
+  const renderNode = (n: DiagramNode) => (
+    <g
+      key={n.id}
+      data-engine-source-id={geometry?.boxes.get(n.id)?.sourceId}
+      data-engine-box={engineBoxAttr(n.id)}
+      onPointerEnter={() => onNodeEnter(n.id)}
+      onPointerLeave={onNodeLeave}
+      onDoubleClick={() => onNodeDoubleClick?.(n.id)}
+    >
+      <NodeView
+        node={n}
+        selected={selection.nodes.has(n.id)}
+        showPorts={hoverNodeId === n.id}
+        pendingConnectActive={Boolean(connectGhost)}
+        engineLabels={engineLabelsByNode.get(n.id) ?? null}
+        onPointerDown={beginNodeDrag}
+        onPortPointerDown={beginConnect}
+        onMemoOpen={onMemoOpen}
+        tableMatrix={matrixByNodeId.get(n.id) ?? null}
+        tableSelection={
+          tableSelection && tableSelection.nodeId === n.id ? tableSelection : null
+        }
+        onCellPointerDown={beginCellSelect}
+        onCellDoubleClick={onCellDoubleClick}
+        onTableResizeHandlePointerDown={beginTableResize}
+      />
+    </g>
+  );
+
   const diagnostics = currentCanvasDiagnostics(doc, canvasGeometry);
 
   return (
@@ -909,6 +944,11 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
           // offset reserves; without them the band is blank.
           <EngineLabels labels={geometry.pageLabels} color="#111827" />
         ) : null}
+        {/* Engine containers (lanes, boundaries, stages, segments) are frames:
+            their fills would hide every route inside them if they were painted
+            with the members, so they go under the edges. `renderSvg` keeps the
+            same order. */}
+        {visible.nodes.filter(isEngineContainer).map(renderNode)}
         {visible.edges.map((edge) => (
           <EdgeView
             key={edge.id}
@@ -920,34 +960,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             onSelect={onEdgeSelect}
           />
         ))}
-        {visible.nodes.map((n) => (
-          <g
-            key={n.id}
-            data-engine-source-id={geometry?.boxes.get(n.id)?.sourceId}
-            data-engine-box={engineBoxAttr(n.id)}
-            onPointerEnter={() => onNodeEnter(n.id)}
-            onPointerLeave={onNodeLeave}
-            onDoubleClick={() => onNodeDoubleClick?.(n.id)}
-          >
-            <NodeView
-              node={n}
-              selected={selection.nodes.has(n.id)}
-              showPorts={hoverNodeId === n.id}
-              pendingConnectActive={Boolean(connectGhost)}
-              engineLabels={engineLabelsByNode.get(n.id) ?? null}
-              onPointerDown={beginNodeDrag}
-              onPortPointerDown={beginConnect}
-              onMemoOpen={onMemoOpen}
-              tableMatrix={matrixByNodeId.get(n.id) ?? null}
-              tableSelection={
-                tableSelection && tableSelection.nodeId === n.id ? tableSelection : null
-              }
-              onCellPointerDown={beginCellSelect}
-              onCellDoubleClick={onCellDoubleClick}
-              onTableResizeHandlePointerDown={beginTableResize}
-            />
-          </g>
-        ))}
+        {visible.nodes.filter((n) => !isEngineContainer(n)).map(renderNode)}
         <SmartGuides guides={guides} />
         {connectGhost ? (
           <line

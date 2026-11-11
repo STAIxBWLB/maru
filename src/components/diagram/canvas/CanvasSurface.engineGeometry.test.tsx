@@ -249,6 +249,23 @@ describe("semantic canvas draws engine geometry", () => {
     expect(title?.textContent).toBe("주문 흐름");
     expect(title?.getAttribute("x")).toBe("32");
     expect(title?.getAttribute("y")).toBe("16");
+
+    // A container's opaque fill would hide a route run inside it, so containers
+    // paint below the edges and members above them. renderSvg keeps the order.
+    const order = [...canvas.querySelectorAll("[data-node-id], [data-edge-id]")]
+      .map((element) => element.getAttribute("data-node-id") ?? element.getAttribute("data-edge-id"));
+    expect(order.indexOf("ds-flow:lane:main")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("ds-flow:lane:main")).toBeLessThan(order.indexOf("approve"));
+    expect(order.indexOf("approve")).toBeLessThan(order.indexOf(draftId));
+    expect(order.indexOf("approve")).toBeLessThan(order.indexOf(draft.idMap.review!));
+
+    // WebKit does not inherit dominant-baseline into tspans, so every line
+    // carries its own or the first one lifts by an ascent.
+    const lines = [...canvas.querySelectorAll("[data-engine-label] tspan")];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line.getAttribute("dominant-baseline")).toBe("text-before-edge");
+    }
   });
 
   it("lays out once and leaves the doc untouched", async () => {
@@ -638,6 +655,22 @@ describe("semantic canvas pins a dropped member", () => {
     const label = document.body.querySelector("[data-engine-label]")!;
     expect(exported.querySelector(`[data-engine-label="${label.getAttribute("data-engine-label")}"]`)?.textContent)
       .toBe(label.textContent);
+
+    // The Maru SVG is opened in Safari and Preview, where a tspan that inherits
+    // nothing lifts its line by an ascent, so the export declares it per line.
+    const exportedLines = [...exported.querySelectorAll("[data-engine-label] tspan")];
+    expect(exportedLines.length).toBeGreaterThan(0);
+    for (const line of exportedLines) {
+      expect(line.getAttribute("dominant-baseline")).toBe("text-before-edge");
+    }
+
+    // Same paint order as the canvas: container, then route, then members.
+    const exportedOrder = [...exported.documentElement.children]
+      .filter((element) => element.tagName.toLowerCase() !== "defs")
+      .map((element) => element.getAttribute("data-node-id") ?? element.getAttribute("data-edge-id"));
+    expect(exportedOrder.indexOf("ds-flow:lane:main")).toBeGreaterThanOrEqual(0);
+    expect(exportedOrder.indexOf("ds-flow:lane:main")).toBeLessThan(exportedOrder.indexOf("approve"));
+    expect(exportedOrder.indexOf("approve")).toBeLessThan(exportedOrder.indexOf(id));
     expect(JSON.stringify(probe!.getState().doc)).toBe(before);
   });
 

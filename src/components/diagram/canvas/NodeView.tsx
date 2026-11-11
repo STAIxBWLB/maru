@@ -297,7 +297,15 @@ export function EngineLabels({ labels, color }: { labels: readonly CanvasLabelLi
           style={{ fontKerning: "none", fontVariantLigatures: "none", textRendering: "geometricPrecision" }}
         >
           {label.lines.map((line, index) => (
-            <tspan key={index} x={label.x} dy={index === 0 ? 0 : label.fontSize * 1.5}>
+            // WebKit does not inherit `dominant-baseline` from <text> into its
+            // tspans, so declaring it only on the parent anchors the first line
+            // at its alphabetic baseline and lifts every line by one ascent.
+            <tspan
+              key={index}
+              x={label.x}
+              dy={index === 0 ? 0 : label.fontSize * 1.5}
+              dominantBaseline="text-before-edge"
+            >
               {line}
             </tspan>
           ))}

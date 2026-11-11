@@ -416,7 +416,9 @@ function metaDecorationsSvg(node: DiagramNode): string {
   return out;
 }
 
-/** Match EngineLabels on the canvas without measuring or wrapping its lines. */
+/** Match EngineLabels on the canvas without measuring or wrapping its lines.
+ *  `dominant-baseline` is repeated on every tspan: WebKit does not inherit it
+ *  from <text>, and the SVG is opened in Safari and Preview. */
 function engineLabelsSvg(labels: readonly CanvasLabelLines[], color: string): string {
   return labels.map((label) =>
     `<text data-engine-label="${escapeHtml(label.id)}" x="${label.x}" y="${label.y}"` +
@@ -424,7 +426,7 @@ function engineLabelsSvg(labels: readonly CanvasLabelLines[], color: string): st
     ` font-family="Noto Sans CJK KR Diagram, Noto Sans CJK KR, sans-serif" dominant-baseline="text-before-edge"` +
     ` style="font-kerning:none;font-variant-ligatures:none" text-rendering="geometricPrecision">` +
     label.lines.map((line, index) =>
-      `<tspan x="${label.x}" dy="${index === 0 ? 0 : label.fontSize * 1.5}">${escapeHtml(line)}</tspan>`,
+      `<tspan x="${label.x}" dy="${index === 0 ? 0 : label.fontSize * 1.5}" dominant-baseline="text-before-edge">${escapeHtml(line)}</tspan>`,
     ).join("") + `</text>`,
   ).join("");
 }
@@ -599,8 +601,21 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
     if (ds && ds.kind === "matrix") matrixByNodeId.set(node.id, ds as MatrixDataset);
   }
 
+  // Engine containers are frames: painted with the members their fills would
+  // hide every route inside them, so they go under the edges, exactly as
+  // CanvasSurface orders them.
+  const isContainer = (node: DiagramNode) => geometry?.boxes.get(node.id)?.role === "container";
+  const containerNodes = nodes.filter(isContainer);
+  const memberNodes = nodes.filter((node) => !isContainer(node));
+  const nodeSvgFor = (node: DiagramNode) => {
+    const box = geometry?.boxes.get(node.id);
+    const labels = box && geometry ? canvasLabelsFor(geometry, node.id, "node").map((label) => canvasLabelLines(label, box)) : undefined;
+    return nodeSvg(node, matrixByNodeId.get(node.id) ?? null, labels);
+  };
+
   const content =
     (geometry ? engineLabelsSvg(geometry.pageLabels, "#111827") : "") +
+    containerNodes.map(nodeSvgFor).join("") +
     edges.map((edge) => edgeSvg(
       edge,
       nodeById.get(edge.fromNode)!,
@@ -608,11 +623,7 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
       geometry?.routes.get(edge.id),
       geometry ? canvasLabelsFor(geometry, edge.id, "edge")[0] : undefined,
     )).join("") +
-    nodes.map((node) => {
-      const box = geometry?.boxes.get(node.id);
-      const labels = box && geometry ? canvasLabelsFor(geometry, node.id, "node").map((label) => canvasLabelLines(label, box)) : undefined;
-      return nodeSvg(node, matrixByNodeId.get(node.id) ?? null, labels);
-    }).join("");
+    memberNodes.map(nodeSvgFor).join("");
 
   const svg =
     `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink"` +

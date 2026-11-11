@@ -259,16 +259,41 @@ interface PaintReport {
   specSha256: string | null;
   status: string | null;
   nodes: Array<{ id: string; box: number[]; transform: string | null }>;
-  routes: Array<{ id: string; path: string | null }>;
-  labels: Array<{ id: string; lines: string[]; width: number; height: number }>;
+  routes: Array<{
+    id: string;
+    path: string | null;
+    /** Sample points inside a container, where a lane fill can cover the route. */
+    pointsInContainers: number;
+    /** The first sample the route does not own, named by whatever paints there. */
+    covered: { at: { x: number; y: number }; by: string } | null;
+  }>;
+  labels: Array<{
+    id: string;
+    lines: string[];
+    width: number;
+    height: number;
+    /** Painted top-left, in canvas coordinates. */
+    painted: { x: number; y: number };
+    /** Where the engine put the first line's top, in canvas coordinates. */
+    expected: { x: number; y: number } | null;
+    /** The box the label must stay inside: its label box or its member's box. */
+    target: { x: number; y: number; w: number; h: number } | null;
+  }>;
   surface: { width: number; height: number };
 }
 
 /** Read what this WKWebView painted, without trusting any app-side helper. The
  *  engine's status is awaited first: switching documents publishes `pending`
  *  before the loaded document's own layout lands, and the previous scene's
- *  attributes are still on the element while that happens. */
-async function painted(): Promise<PaintReport> {
+ *  attributes are still on the element while that happens.
+ *
+ *  The member and container boxes let a route sample say whether it is inside a
+ *  lane: a point inside a member is where the route legitimately ends, so only a
+ *  point outside every member can prove what paints above the route. */
+async function painted(
+  memberBoxes: readonly number[][] = [],
+  containerBoxes: readonly number[][] = [],
+): Promise<PaintReport> {
   await browser.waitUntil(async () => browser.execute(() => {
     const surface = document.querySelector(".maru-diagram-canvas");
     if (!surface) return false;
@@ -276,10 +301,50 @@ async function painted(): Promise<PaintReport> {
     return status === "ready" || status === "refused"
       || (status === null && surface.querySelectorAll("[data-node-id]").length > 0);
   }), { timeout: 60_000, interval: 200, timeoutMsg: "the canvas never settled on a geometry result" });
-  return browser.execute(() => {
+  return browser.execute((boxes: { members: number[][]; containers: number[][] }) => {
     const surface = document.querySelector<SVGSVGElement>(".maru-diagram-canvas");
     if (!surface) throw new Error("the diagram canvas is not mounted");
     const rect = surface.getBoundingClientRect();
+    const scene = surface.querySelector<SVGGElement>(":scope > g[transform]");
+    const view = /translate\(([-\d.]+),\s*([-\d.]+)\)\s*scale\(([-\d.]+)\)/.exec(
+      scene?.getAttribute("transform") ?? "",
+    );
+    if (!view) throw new Error("the canvas scene carries no viewport transform");
+    const tx = Number(view[1]);
+    const ty = Number(view[2]);
+    const zoom = Number(view[3]);
+    // Client pixels -> canvas pixels, the inverse of the scene transform.
+    const toCanvas = (x: number, y: number) => ({
+      x: (x - rect.left - tx) / zoom,
+      y: (y - rect.top - ty) / zoom,
+    });
+    const paintedBox = (element: Element) => {
+      const box = element.getBoundingClientRect();
+      const topLeft = toCanvas(box.left, box.top);
+      const bottomRight = toCanvas(box.right, box.bottom);
+      return {
+        x: topLeft.x,
+        y: topLeft.y,
+        w: bottomRight.x - topLeft.x,
+        h: bottomRight.y - topLeft.y,
+      };
+    };
+    const inside = (box: readonly number[], x: number, y: number, inset = 0) =>
+      x > box[0]! + inset && x < box[0]! + box[2]! - inset
+      && y > box[1]! + inset && y < box[1]! + box[3]! - inset;
+    const describe = (element: Element | null) => {
+      if (!element) return "nothing";
+      const tags = [element.tagName.toLowerCase()];
+      for (const name of ["class", "data-node-id", "data-engine-source-id", "data-edge-id", "data-engine-label"]) {
+        const value = element.getAttribute(name);
+        if (value) tags.push(`${name}="${value}"`);
+      }
+      return tags.join(" ");
+    };
+    const numberAttr = (element: Element, name: string) => {
+      const value = Number(element.getAttribute(name) ?? NaN);
+      return Number.isFinite(value) ? value : null;
+    };
     return {
       specSha256: surface.getAttribute("data-engine-spec-sha256"),
       status: surface.getAttribute("data-engine-geometry-status"),
@@ -288,22 +353,74 @@ async function painted(): Promise<PaintReport> {
         box: (group.getAttribute("data-engine-box") ?? "").split(" ").map(Number),
         transform: group.querySelector("[data-node-id]")?.getAttribute("transform") ?? group.getAttribute("transform"),
       })),
-      routes: [...surface.querySelectorAll("[data-engine-route]")].map((edge) => ({
-        id: edge.getAttribute("data-engine-route") ?? "",
-        path: edge.querySelector("path")?.getAttribute("d") ?? null,
-      })),
-      labels: [...surface.querySelectorAll("[data-engine-label]")].map((element) => {
-        const box = (element as SVGGraphicsElement).getBBox();
+      routes: [...surface.querySelectorAll<SVGGElement>("[data-engine-route]")].map((group) => {
+        const paths = [...group.querySelectorAll<SVGPathElement>("path")];
+        // The interactive hit path is transparent and owns the pointer; the
+        // stroke path below it is what the user sees. Compare and hit-test the
+        // stroke path, never the hit area.
+        const visible = paths.find((path) => getComputedStyle(path).pointerEvents === "none") ?? paths[paths.length - 1];
+        let pointsInContainers = 0;
+        let covered: { at: { x: number; y: number }; by: string } | null = null;
+        if (visible) {
+          const length = visible.getTotalLength();
+          for (let step = 1; step < 96 && !covered; step += 1) {
+            const point = visible.getPointAtLength((length * step) / 96);
+            // A member's own body and stroke own the pixels at its border, and
+            // an arrow marker sits there too, so only a sample clear of every
+            // member box says anything about paint order.
+            if (boxes.members.some((box) => inside(box, point.x, point.y, -4))) continue;
+            const inContainer = boxes.containers.some((box) => inside(box, point.x, point.y));
+            if (inContainer) pointsInContainers += 1;
+            const client = { x: rect.left + tx + point.x * zoom, y: rect.top + ty + point.y * zoom };
+            if (client.x < 0 || client.y < 0 || client.x > window.innerWidth || client.y > window.innerHeight) continue;
+            const top = document.elementFromPoint(client.x, client.y);
+            if (!top) continue;
+            // Only a member or container group painted above the route hides
+            // it. Another edge's wider transparent hit area is pointer chrome,
+            // and crossing strokes are what the engine routed.
+            const cover = top.closest("[data-engine-source-id]");
+            if (cover) {
+              covered = { at: { x: point.x, y: point.y }, by: describe(cover) };
+            }
+          }
+        }
+        return {
+          id: group.getAttribute("data-engine-route") ?? "",
+          path: visible?.getAttribute("d") ?? null,
+          pointsInContainers,
+          covered,
+        };
+      }),
+      labels: [...surface.querySelectorAll<SVGGraphicsElement>("[data-engine-label]")].map((element) => {
+        const box = element.getBBox();
+        const own = element.getAttribute("data-engine-label-box");
+        const host = element.closest("[data-engine-box]");
+        const memberBox = host ? (host.getAttribute("data-engine-box") ?? "").split(" ").map(Number) : null;
+        const labelBox = own ? own.split(" ").map(Number) : null;
+        const text = element.tagName === "text" ? element : element.querySelector("text");
+        const x = text ? numberAttr(text, "x") : null;
+        const y = text ? numberAttr(text, "y") : null;
+        // A node label is drawn in its member's local coordinates; an edge
+        // label carries its own engine box in canvas coordinates.
+        const originX = labelBox ? 0 : memberBox ? memberBox[0]! : 0;
+        const originY = labelBox ? 0 : memberBox ? memberBox[1]! : 0;
+        const target = labelBox ?? memberBox;
         return {
           id: element.getAttribute("data-engine-label") ?? "",
           lines: [...element.querySelectorAll("tspan")].map((line) => line.textContent ?? ""),
           width: box.width,
           height: box.height,
+          painted: (() => {
+            const painted = paintedBox(element);
+            return { x: painted.x, y: painted.y };
+          })(),
+          expected: x !== null && y !== null ? { x: originX + x, y: originY + y } : null,
+          target: target ? { x: target[0]!, y: target[1]!, w: target[2]!, h: target[3]! } : null,
         };
       }),
       surface: { width: rect.width, height: rect.height },
     };
-  });
+  }, { members: memberBoxes as number[][], containers: containerBoxes as number[][] });
 }
 
 function assertFamilyPainted(paint: PaintReport, family: NativeE2eDiagramE4Family): void {
@@ -326,6 +443,13 @@ function assertFamilyPainted(paint: PaintReport, family: NativeE2eDiagramE4Famil
     const actual = paint.routes.find((route) => route.id === expected.id);
     assert.ok(actual, `${family.type}: route ${expected.id} is not painted`);
     assert.equal(actual.path, expected.path, `${family.type}: route ${expected.id} path differs from the engine`);
+    // The engine routed this relation, so it must be visible everywhere it
+    // runs: a lane fill or a member box painted over it is the defect below.
+    assert.equal(
+      actual.covered,
+      null,
+      `${family.type}: route ${expected.id} is covered at (${actual.covered?.at.x.toFixed(1)},${actual.covered?.at.y.toFixed(1)}) by ${actual.covered?.by}`,
+    );
   }
   const mixed = family.labels.find((label) => label.lines.join(" ").includes(family.mixedLabel));
   assert.ok(mixed, `${family.type}: no engine label carries the mixed label ${family.mixedLabel}`);
@@ -359,6 +483,27 @@ function assertFamilyPainted(paint: PaintReport, family: NativeE2eDiagramE4Famil
       family.labels.some((label) => label.id === actual.id),
       `${family.type}: label ${actual.id} is painted but is not in the engine scene`,
     );
+    // The engine's line breaks are only correct if the first line starts where
+    // the engine put it, and no line leaves the box that owns it. Both fail
+    // when a text baseline other than the top edge is used.
+    if (actual.expected) {
+      assert.ok(
+        Math.abs(actual.painted.x - actual.expected.x) <= 2
+        && Math.abs(actual.painted.y - actual.expected.y) <= 2,
+        `${family.type}: label ${actual.id} paints its first line at (${actual.painted.x.toFixed(1)},${actual.painted.y.toFixed(1)}); the engine put it at (${actual.expected.x.toFixed(1)},${actual.expected.y.toFixed(1)})`,
+      );
+    }
+    if (actual.target) {
+      const right = actual.painted.x + actual.width;
+      const bottom = actual.painted.y + actual.height;
+      assert.ok(
+        actual.painted.x >= actual.target.x - 2
+        && actual.painted.y >= actual.target.y - 2
+        && right <= actual.target.x + actual.target.w + 2
+        && bottom <= actual.target.y + actual.target.h + 2,
+        `${family.type}: label ${actual.id} spans (${actual.painted.x.toFixed(1)},${actual.painted.y.toFixed(1)})-(${right.toFixed(1)},${bottom.toFixed(1)}) outside its box (${actual.target.x},${actual.target.y})-(${actual.target.x + actual.target.w},${actual.target.y + actual.target.h})`,
+      );
+    }
   }
 }
 
@@ -374,10 +519,16 @@ describe("native engine canvas (T4)", () => {
 
   it("draws every engine family's boxes, routes and label breaks in WKWebView", async () => {
     assert.equal(fixture.families.length, 5, `expected five engine families, got ${fixture.families.length}`);
+    let containerRoutePoints = 0;
     for (const family of fixture.families) {
       await openDocument(family.documentTitle, { specSha256: family.specSha256 });
-      const paint = await painted();
+      const paint = await painted(
+        family.nodes.map((node) => node.box),
+        family.containers.map((container) => container.box),
+      );
       assertFamilyPainted(paint, family);
+      const samples = paint.routes.reduce((total, route) => total + route.pointsInContainers, 0);
+      containerRoutePoints += samples;
       shots.push(await screenshot(`family-${family.type}`));
       console.log(`NATIVE_E4_FAMILY ${JSON.stringify({
         type: family.type,
@@ -385,8 +536,16 @@ describe("native engine canvas (T4)", () => {
         routes: family.routes.length,
         labels: family.labels.length,
         specSha256: family.specSha256,
+        containerRouteSamples: samples,
+        coveredRoutes: paint.routes.filter((route) => route.covered).map((route) => route.id),
       })}`);
     }
+    // Without a route sample inside a lane, the paint-order check proves
+    // nothing: the defect it exists for is a lane fill painted over a route.
+    assert.ok(
+      containerRoutePoints > 0,
+      "no engine route was sampled inside a container, so the paint-order check was vacuous",
+    );
   }).timeout(300_000);
 
   it("reopens v7, v8 and v9 documents without losing content", async () => {
@@ -704,7 +863,13 @@ describe("native engine canvas (T4)", () => {
     }), { timeout: 15_000, interval: 250, timeoutMsg: "the UI did not switch to English" });
     const family = fixture.families[0]!;
     await openDocument(family.documentTitle, { specSha256: family.specSha256 });
-    assertFamilyPainted(await painted(), family);
+    assertFamilyPainted(
+      await painted(
+        family.nodes.map((node) => node.box),
+        family.containers.map((container) => container.box),
+      ),
+      family,
+    );
     shots.push(await screenshot("english-ui"));
   }).timeout(180_000);
 
