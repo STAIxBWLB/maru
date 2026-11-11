@@ -671,10 +671,24 @@ current painted scene. A refusal retains the last good scene without changing
 the document or history. Marquee and additive selection, pan, pointer-centred
 zoom, snap, smart guides and connect ghosts use the same displayed boxes.
 
+Pointer capture is an optimization, not a precondition. WebKit raises
+`NotFoundError` when the id no longer names an active pointer (a gesture the
+platform cancelled or re-routed mid-press); letting that throw escape the
+handler costs the whole gesture, not only the events delivered outside the
+surface, so capture is attempted and a refusal ignored. Losing capture still
+selects, pans and marquees; only pointer events leaving the surface are missed.
+
 Canvas and Maru visual-export engine labels disable browser kerning and
 ligatures and request geometric precision, matching the engine's unshaped text
-metrics. Browser regression evidence covers these interactions; real-app
-Korean IME, WKWebView behavior and screenshots remain the T4 check.
+metrics. Browser regression evidence covers these interactions, and
+`e2e-native/specs/diagram-engine-e4.spec.ts` re-proves them in the real macOS
+app, WKWebView included: five engine families, the v7/v8 legacy documents, the
+apply/undo/redo/reopen path, native SVG and PNG receipts, pan/zoom/selection and
+an anchored refusal, in both UI languages. Screenshots and the run summary are
+recorded in `e2e-native/evidence/diagram-engine-e4/` and
+`docs/diagram-engine-e4.json`. Korean IME composition remains a pending human
+check: the WebDriver harness injects synthetic events and cannot compose
+characters through the macOS input method.
 
 ## Performance
 
@@ -2640,3 +2654,22 @@ and individual gate statuses. Stored render history continues to accept legacy A
 their engine identity. Production engine IPC is exposed through the
 `diagram-render` capability for the `main` webview; the default-off
 `native-e2e` fixture bridge is separate.
+
+The real-app T4 check covers the WKWebView half of this integration:
+`e2e-native/specs/diagram-engine-e4.spec.ts` runs inside the debug `native-e2e`
+build and its screenshots and run summary sit in
+`e2e-native/evidence/diagram-engine-e4/` and `docs/diagram-engine-e4.json`.
+It maps to the acceptance items as follows.
+
+- AC4 opening and persistence: each of the five engine families paints the
+  scene whose spec hash the canvas carries, v7 and v8 files still open through
+  the migration path, and a structural edit that passes the SDK gate survives
+  undo, redo, save and reopen with no field lost.
+- AC4 export: SVG and PNG are produced by the native engine path and both
+  receipts report a verified byte readback.
+- AC7 labels: Korean, English and mixed Korean/English labels keep the engine's
+  line breaks. Korean IME composition is not covered here; the harness cannot
+  compose through the macOS input method, so that stays a human check.
+- AC8 interaction: pan, zoom and selection act on the engine scene, and a
+  refused edit anchors the engine's diagnostic beside its element rather than in
+  the canvas notice.

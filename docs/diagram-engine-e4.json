@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "stage": "E4 T4 real-app engine canvas check (maru#552)",
+  "sourceCommit": "6c5d356be046ba814e45a21700002962aca74193",
+  "sourceScope": "the debug native-e2e build of this commit; the receipt, docs/diagram.md and the screenshots below land in the next commit and change no source",
+  "executionScope": {
+    "host": "local Apple silicon Mac, arm64",
+    "os": "macOS 27.0.1 (26A434)",
+    "appVersion": "1.1.26",
+    "app": "src-tauri/target/debug/maru built with the native-e2e feature; unsigned and not notarized",
+    "webview": "WKWebView, WebKit 605.1.15",
+    "driver": "WDIO 9.31.4 with the @wdio/tauri-service 1.3.0 embedded provider, no external driver",
+    "node": "24.18.1",
+    "rust": "1.98.0",
+    "wasmAssets": "engine:assets ran on 1.93.0 because this host's 1.98 rust-lld cannot link the wasm slices; the app itself is 1.98.0",
+    "cargoBuildJobs": 2,
+    "command": "make test-e2e-native",
+    "exitCode": 0,
+    "specFiles": "18 passed, 18 total",
+    "suiteDuration": "00:07:59",
+    "specDuration": "7 passing (5.6s)",
+    "fixture": "temporary MARU_NATIVE_E2E_HOME and config dir seeded per run by e2e-native/wdio.conf.ts"
+  },
+  "checks": {
+    "familyGeometry": {
+      "passed": true,
+      "test": "draws every engine family's boxes, routes and label breaks in WKWebView",
+      "asserted": [
+        "data-engine-geometry-status settles on ready for the opened document",
+        "data-engine-spec-sha256 equals the hash of the source spec the fixture laid out",
+        "every engine member's box equals the engine's box for that member",
+        "the painted routes are the engine's own routes",
+        "each engine label carries the engine's wrapped lines, including the mixed Korean and English label"
+      ],
+      "families": [
+        {
+          "type": "architecture",
+          "nodes": 3,
+          "routes": 2,
+          "labels": 10,
+          "specSha256": "feeacb11ee6823c0c8458984d82b16f4352a2d9914475f526a8f5816c6278d08",
+          "screenshot": "e2e-native/evidence/diagram-engine-e4/family-architecture.png"
+        },
+        {
+          "type": "workflow",
+          "nodes": 3,
+          "routes": 2,
+          "labels": 10,
+          "specSha256": "66ea9d3f9e016563b9b2fcfbf900fd102de0eb831510a3c20718faa5365ee551",
+          "screenshot": "e2e-native/evidence/diagram-engine-e4/family-workflow.png"
+        },
+        {
+          "type": "sequence",
+          "nodes": 3,
+          "routes": 4,
+          "labels": 11,
+          "specSha256": "52c71d525435d5b8dd6bb9ca5d2ba18c0eaa5b00614062e38fec228b6de70962",
+          "screenshot": "e2e-native/evidence/diagram-engine-e4/family-sequence.png"
+        },
+        {
+          "type": "dataflow",
+          "nodes": 2,
+          "routes": 1,
+          "labels": 9,
+          "specSha256": "e963f923e60e1111c5b5ff6fd6e8c269df7a041aca0cd73e234759935a4be06c",
+          "screenshot": "e2e-native/evidence/diagram-engine-e4/family-dataflow.png"
+        },
+        {
+          "type": "lifecycle",
+          "nodes": 3,
+          "routes": 2,
+          "labels": 12,
+          "specSha256": "e00c646d2a771a441f8264566d81264625b6b20fd1a2be38fab547ed8ede6a64",
+          "screenshot": "e2e-native/evidence/diagram-engine-e4/family-lifecycle.png"
+        }
+      ]
+    },
+    "legacyDocuments": {
+      "passed": true,
+      "test": "reopens v7, v8 and v9 documents without losing content",
+      "asserted": [
+        "each file reports sourceVersion 7, 8 or 9 and migrates to 9",
+        "two opens of the same file are equal",
+        "the v7 table upgrade mints exactly one dataset, v8 gains none and the v9 semantic document keeps its one",
+        "a legacy document paints as many members as the fixture reports nodes and none of them engine-sourced, so it still draws its own placement",
+        "every painted member has area and the members paint text"
+      ],
+      "screenshots": [
+        "e2e-native/evidence/diagram-engine-e4/legacy-v7.png",
+        "e2e-native/evidence/diagram-engine-e4/legacy-v8.png"
+      ]
+    },
+    "applyUndoRedoReopen": {
+      "passed": true,
+      "test": "applies a structural edit, undoes, redoes and reopens it",
+      "observed": {
+        "refused": true,
+        "refusalKeys": ["diagram.semantic.engineRejected"],
+        "historyAfterRefusal": 0,
+        "applied": true,
+        "historyAfterApply": 1,
+        "undoRestored": true,
+        "redoRestored": true,
+        "reopenedWithoutLoss": true,
+        "addedFields": [
+          "edges[].arrowSize",
+          "edges[].arrowStart",
+          "edges[].color",
+          "edges[].dash",
+          "edges[].label",
+          "edges[].midOff",
+          "edges[].routeMode",
+          "edges[].width",
+          "meta",
+          "nodes[].body",
+          "nodes[].bullets",
+          "nodes[].hidden",
+          "nodes[].layerId",
+          "nodes[].locked",
+          "nodes[].style",
+          "page",
+          "views"
+        ]
+      },
+      "reopenRule": "no saved field is lost, and a second load adds nothing the first load did not already fill; loader defaults above are what the migration writes, not content the engine dropped"
+    },
+    "nativeExportReceipts": {
+      "passed": true,
+      "test": "exports SVG and PNG on the native engine path with verified receipts",
+      "observed": {
+        "svgOutputSha256": "f0e96abed01d63837962759e670bdddc9a3b7c9b096fdca0d2c28692a4498548",
+        "pngOutputSha256": "624da0443ffd456ad082b9bbdb8a4b77956a1b1e6c655523a6c4b3fabfe2d7bc"
+      },
+      "asserted": [
+        "both receipts carry a 64-hex output hash",
+        "both receipts report readback status passed, a byte comparison by the native host",
+        "both written files are non-empty"
+      ]
+    },
+    "interaction": {
+      "passed": true,
+      "test": "pans, zooms and selects on the engine scene",
+      "observed": {
+        "selected": "draft",
+        "pan": { "dx": 60, "dy": 40 },
+        "zoom": { "before": 1, "after": 0.8 },
+        "zoomLabel": "80%"
+      },
+      "screenshots": [
+        "e2e-native/evidence/diagram-engine-e4/selection.png",
+        "e2e-native/evidence/diagram-engine-e4/pan.png",
+        "e2e-native/evidence/diagram-engine-e4/zoom.png"
+      ]
+    },
+    "refusalDiagnostic": {
+      "passed": true,
+      "test": "anchors the engine's refusal diagnostic beside its element",
+      "observed": {
+        "status": "refused",
+        "code": "workflow/geometry-label-fit",
+        "targetKind": "node",
+        "targetId": "draft",
+        "at": { "x": 232, "y": 72 }
+      },
+      "asserted": [
+        "the canvas settles on refused and keeps a 64-hex engine spec hash",
+        "the badge carries the engine's own code and is anchored to the member the engine named",
+        "no unanchored canvas notice appears alongside the anchored diagnostic",
+        "the badge's aria-label carries the engine's code and JSON path",
+        "the badge transform equals the engine's anchor",
+        "the badge sits 0 to 24 px right of the member's box and within 2 px of its top edge"
+      ],
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/refusal-diagnostic.png"
+    },
+    "englishUi": {
+      "passed": true,
+      "test": "draws the same scene in the English UI",
+      "observed": {
+        "family": "architecture",
+        "specSha256": "feeacb11ee6823c0c8458984d82b16f4352a2d9914475f526a8f5816c6278d08"
+      },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/english-ui.png"
+    }
+  },
+  "screenshots": {
+    "directory": "e2e-native/evidence/diagram-engine-e4/",
+    "capturedAt": "2026-11-11T06:01:09.322Z",
+    "uiLanguages": {
+      "korean": [
+        "family-architecture.png",
+        "family-workflow.png",
+        "family-sequence.png",
+        "family-dataflow.png",
+        "family-lifecycle.png",
+        "legacy-v7.png",
+        "legacy-v8.png",
+        "selection.png",
+        "pan.png",
+        "zoom.png",
+        "refusal-diagnostic.png"
+      ],
+      "english": ["english-ui.png"]
+    },
+    "regenerate": "make test-e2e-native rewrites this directory from the run it makes; screenshots.json there is written by the spec's after() hook, so a failing case still leaves its captures"
+  },
+  "productDefect": {
+    "found": "the canvas gesture handlers called SVGSVGElement.setPointerCapture without a guard",
+    "symptom": "in WKWebView the call raised NotFoundError, which aborted beginNodeDrag, pan and marquee before they did anything: pressing a member selected nothing and a shift-drag did not pan",
+    "fix": "src/components/diagram/canvas/CanvasSurface.tsx capturePointer() attempts capture and ignores a refusal, since losing capture only costs events delivered outside the surface",
+    "regression": "src/components/diagram/canvas/CanvasSurface.pointerCapture.test.tsx"
+  },
+  "relatedGate": {
+    "command": "make verify",
+    "localResult": "typecheck, lint, release-version, icons, i18n, select-chrome, DOM sanitizer, iframes, type tokens, archify pin, the TS suite, the diagram plugin suite, cargo fmt --check, clippy -D warnings, the frontend build with its bundle-budget, native-e2e-isolation, CSP and mode-css guards, and the 392-command isolation gate all passed locally; cargo test --lib ended 2235 passed, 2 failed in skill_host::store::tests::phase08_03_network_lock (untouched by this change and reproducible on this host: a temporary skills directory refuses a registry write with os error 13)",
+    "hostedCi": "not polled from here; the PR carries it"
+  },
+  "limits": {
+    "koreanIme": "not covered; WebDriver cannot compose through the macOS input method, so Korean IME composition stays a human check",
+    "syntheticPointer": "the embedded driver injects synthetic mouse events only (mousedown, never pointerdown) and this WKWebView reports hasFocus() false, so the terminal's first-mouse guard swallows document-level pointerdown; the spec dispatches PointerEvents at the app's handlers and asserts the canvas state they produce",
+    "scope": "a debug native-e2e build on one macOS host; no notarization, updater or release-binary claim, and Chromium Playwright evidence remains the separate frontend gate"
+  }
+}
