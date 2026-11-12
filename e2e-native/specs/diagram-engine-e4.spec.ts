@@ -336,6 +336,31 @@ async function painted(
     return status === "ready" || status === "refused"
       || (status === null && surface.querySelectorAll("[data-node-id]").length > 0);
   }), { timeout: 60_000, interval: 200, timeoutMsg: "the canvas never settled on a geometry result" });
+  // One React commit writes the status, the box attribute and the body's own
+  // width/height together (CanvasSurface renderNode and NodeBody both read the
+  // same display node), but the spec reads layout through separate WebDriver
+  // round trips, and twice a body measured at its authored 160x64 under a
+  // ready status whose box attribute and transform already matched the engine.
+  // So the measurement below waits until each body's painted size has
+  // caught up with its engine box. This waits for paint, not for the app: when
+  // the body stays wrong, the timeout does not throw and the drawn-box
+  // assertion in assertFamilyPainted still reports it with both boxes.
+  await browser.waitUntil(async () => browser.execute(() => {
+    const surface = document.querySelector(".maru-diagram-canvas");
+    if (!surface || surface.getAttribute("data-engine-geometry-status") !== "ready") return true;
+    const zoom = Number(/scale\(([-\d.]+)\)/.exec(
+      surface.querySelector(":scope > g[transform]")?.getAttribute("transform") ?? "",
+    )?.[1] ?? "1") || 1;
+    return [...surface.querySelectorAll("[data-engine-source-id][data-engine-box]")].every((group) => {
+      const box = (group.getAttribute("data-engine-box") ?? "").split(" ").map(Number);
+      const shape = [...group.querySelectorAll("rect, ellipse, path, circle, polygon, line")].find((candidate) =>
+        !candidate.closest("[data-export-ignore]")
+        && !candidate.closest(".maru-diagram-port, .maru-diagram-memo-badge"));
+      if (!shape || box.length !== 4) return true;
+      const painted = shape.getBoundingClientRect();
+      return Math.abs(painted.width / zoom - box[2]!) <= 2 && Math.abs(painted.height / zoom - box[3]!) <= 2;
+    });
+  }), { timeout: 5_000, interval: 50 }).catch(() => undefined);
   return browser.execute((boxes: { members: number[][]; containers: number[][] }) => {
     const surface = document.querySelector<SVGSVGElement>(".maru-diagram-canvas");
     if (!surface) throw new Error("the diagram canvas is not mounted");
