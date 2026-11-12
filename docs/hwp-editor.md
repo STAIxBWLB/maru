@@ -19,7 +19,7 @@ CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 
 | Command | CLI invocation | Returns |
 |---|---|---|
-| `hwped_read` | `hwp cat <in> --format markdown --with-segments` | CatEnvelope JSON |
+| `hwped_read` | `hwp cat <in> --format markdown --with-segments`, then `hwp info <in> --json --body-stats` | CatEnvelope JSON, plus `bodyTables?` |
 | `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report [--layout-json <file>]` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }], notes?: [{ code, message }] }` |
 | `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial]` | `{ name, dataBase64 }` |
 | `hwped_compose` | `hwp compose <spec.json> -o <out> --report` | `{ name, dataBase64, report? }` |
@@ -29,6 +29,15 @@ CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 Documents cross the bridge as `HwpedDocumentRef`: a workspace `path`
 (relative paths are resolved against `workspaceRoot` with an escape guard)
 when the bytes are already on disk, `dataBase64` otherwise.
+
+`hwped_read` also reports `bodyTables`, the engine's own table count from
+`hwp info --json --body-stats` on the same staged file. It counts tables the
+segment envelope publishes no segment for — a table inside a note, header,
+footer or hidden comment — which is the disagreement hwp-editor's table-index
+guard refuses index-addressed table ops over (`CatEnvelope.bodyTables`). The
+extra call never fails the read: it is not made below hwp-cli 0.19.2, and a
+failed body walk or a missing `body.tables` returns the envelope without the
+field, leaving the guard off exactly as before.
 
 `hwped_edit` takes exactly one of `ops` and `opsArgv`. The JSON `ops` channel
 accepts a flat `edit-ops-v1` array, writes it to an isolated per-call `ops.json`,

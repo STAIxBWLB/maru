@@ -26,6 +26,12 @@ export interface HwpedCatEnvelope {
     section: number;
     para: number;
   }[];
+  /** The engine's own table count (`hwp info --json --body-stats`,
+   *  `body.tables`), which counts tables no segment above publishes — a table
+   *  inside a note, header, footer or hidden comment. Absent when hwp-cli is
+   *  older than 0.19.2 or the body walk fails, and an absent count leaves the
+   *  editor's table-index guard off. */
+  bodyTables?: number;
 }
 
 export interface HwpedRenderOptions {
