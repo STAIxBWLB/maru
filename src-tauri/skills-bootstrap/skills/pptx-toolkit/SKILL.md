@@ -64,7 +64,7 @@ $PPTX to-md <file.pptx> -o out.md
 
 ## 제약
 
-- `.ppt` (PowerPoint 97-2003)는 python-pptx가 지원하지 않음. pandoc 또는 LibreOffice 변환 필요.
+- `.ppt` (PowerPoint 97-2003)는 python-pptx가 지원하지 않음. 미지원으로 보고하고 사용자에게 `.pptx`로 다시 저장해 달라고 요청.
 - 이미지·차트·다이어그램은 MVP에서 개수만 표시.
 - 애니메이션·전환은 무시.
 - 텍스트 박스가 아닌 도형(Shape)의 텍스트는 `shape.text_frame`에서 추출.
@@ -72,6 +72,6 @@ $PPTX to-md <file.pptx> -o out.md
 ## 응답 원칙
 
 1. 한국어 소통
-2. `.ppt` 감지 시 변환 안내 (pandoc / soffice)
+2. `.ppt` 감지 시 미지원 보고 + `.pptx` 재저장 요청
 3. 100+ 슬라이드 파일은 자동으로 outline 먼저 제시, 세부는 --slide로
 4. notes가 없는 슬라이드는 "_(no notes)_"로 표시

@@ -6,6 +6,8 @@ description: Find and create wiki link connections between vault notes
 
 # /vault-connect [note]
 
+> Before the first vmem call, read `lib/vault_adapter.md` §Runtime Discovery and bind the vmem vault id for the workspace `vault.path`; pass it as `vault` on every vmem tool call and as the `<vault>` argument of every `vmem` CLI command.
+
 Find relationships between a note and existing vault notes, create wiki links.
 
 ## Input
@@ -14,50 +16,50 @@ Find relationships between a note and existing vault notes, create wiki links.
 
 ## Process
 
-0. **Graph Report + Smart Connections 사전 조회** (있으면):
-   a. `vault/reports/graph-report-YYMMDD.md`가 7일 이내 존재 시 읽기 → 대상 노트의 community 소속 확인, surprising connections 중 미연결 항목 우선 연결 후보로 설정
-   b. Obsidian Smart Connections 플러그인이 활성 상태면 대상 노트의 semantic neighbors 상위 5개를 추가 연결 후보로 포함 (키워드 매칭으로 놓치는 cross-domain 연결 보완)
-   c. 위 후보를 Step 2의 검색 결과와 병합 (중복 제거)
-1. Read the target note completely
+0. **Candidate pre-fetch through vmem** (never a graph-report or `vault-graph.json` read):
+   a. `vmem_brief(intent: "<target note title> <description>", bytes: 2048)` returns screened pointer lines `notes/<path> | title | type | description` — no note bodies — with one-hop rows marked `[neighbor]`, so this is the cheap first pass.
+   b. `vmem_graph_neighbors(path: "<stem>", hops: 1)` returns the note's community and its one-hop neighbours (each node carries `community` and `degree`, so rank by degree); widen with `hops: 2` or narrow with `relation` (`wiki_link` or one typed relation). expect: vmem refuses `hops` outside 1–2, a `limit` outside 1–500, an unknown `relation` and an unknown note.
+   c. Obsidian Smart Connections 플러그인이 활성 상태면 대상 노트의 semantic neighbors 상위 5개를 추가 연결 후보로 포함 (키워드 매칭으로 놓치는 cross-domain 연결 보완)
+   d. 위 후보를 Step 2의 검색 결과와 병합 (중복 제거)
+1. Read the target note completely (`vmem_read`; `vmem_links` shows its current in/out links)
 2. Search vault/notes/ for related notes by:
-   - **entities_hint first pass** (if provided): for each entity name, search `glossary.md`, `people.md`, and vault/notes/ titles for exact or fuzzy matches. These are highest-priority link candidates since they're pre-identified by summaries or source metadata.
-   - **Backref seeds** (if present in target frontmatter): `relatedMeetings`, `relatedTasks`, `source_doc` / `meetingSourcePath` (context-enrichment §4) are pre-identified origins — treat their resolved `[[targets]]` as high-priority bidirectional link candidates.
+   - **entities_hint first pass** (if provided): for each entity name, run `vmem_brief(intent: "<entity>", bytes: 1024)` and confirm a hit with `vmem_search`; its pointers already cover `glossary`, `people` and note titles, so no manual grep of those notes. These are highest-priority link candidates since they're pre-identified by summaries or source metadata.
+   - **Backref seeds** (if present in target frontmatter): `relatedMeetings`, `relatedTasks`, `source_doc` / `meetingSourcePath` are pre-identified origins — treat their resolved `[[targets]]` as high-priority bidirectional link candidates.
    - Title keyword matching
    - Description similarity
    - Shared topics/MOCs
    - Same domain or cross-domain relevance
-   - Project affinity via registry: if source is from work/, read `<workspace-root>/project-registry.yaml` to identify project, then prioritize sibling notes sharing the same `vault_note` topic as connection candidates
-
-> **Registry fallback**: when project registry scoring < 3 → content-based similarity → prompt user. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
+   - Project affinity via registry: if source is from work/, classify it per `lib/vault_adapter.md` §Project Registry Pattern (scoring and fallback), then prioritize sibling notes sharing the same `vault_note` topic as connection candidates
 3. For each discovered relationship:
    - Determine relationship type (supports, contradicts, extends, applies-to, context-for)
-   - Add wiki link to both notes (bidirectional)
-   - Include relationship context after the link
-4. Update relevant MOCs if new connections span topics
-5. **Append CONNECT event to vault/log** (ingest chain audit trail)
+   - **Existing short path**: when the proposed link joins two notes that already sit close together, read `vmem_graph_path(from: "<x>", to: "<y>", maxHops: 3)` and show the hops beside the proposal (`x -[supports]-> m -[context-for]-> y`, 2 hops), in the same step and with no extra approval gate. `found: false` means no short route to show (raise `maxHops` to 6, or set `viaHubs` for a route through a MOC).
+   - `vmem_link(from, to, relation, context, log: {type: "CONNECT", project, source: "notes/<x>.md", dest: "notes/<y>.md", note: "linked [[y]] (<relation>)"})` adds the typed link to both notes (bidirectional by default) and skips a side that already links the target
+   - expect: vmem refuses a relation outside `supports | contradicts | extends | applies-to | context-for` and an unknown or ambiguous note; an already-linked pair returns `unchanged: true`
+4. Update relevant MOCs if new connections span topics (`vmem_append` into the MOC's list section)
+5. **CONNECT events in vault/log** come from each `vmem_link` call (ingest chain audit trail)
 6. Report connections made and any cross-domain patterns discovered
 
 ## Log Append (Step 5 — REQUIRED)
 
-Every /vault-connect invocation that creates ≥1 wiki link must produce one `log` line. `vault/log` is a plain logfile (no extension): append via direct fs write (`>>`), the sole exception to MCP-only vault writes.
+Every wiki link /vault-connect creates produces one `log` line, written by `vmem_link` itself; set its content with the `log` argument. `vmem_link` links one `from` to one `to`, so one call writes one line naming that one target: a note that gains three links takes three calls and three lines. Never append to the log file directly.
 
-**Format** (see `<workspace-root>/_meta/rules/ingest-chain.md` §"vault/log 포맷"):
+**Format** (`lib/vault_adapter.md` §Log Append):
 
 ```
-YYYY-MM-DD HH:MM  CONNECT  <project>  <vault/notes/x.md>  — linked `[[a]]`, `[[b]]`, `[[c]]`
+YYYY-MM-DD HH:MM  CONNECT  <project>  <vault/notes/x.md>  — linked `[[a]]`
 ```
 
 - `<project>`: project id from the target note's source registry classification, or `-` if unclassified
-- `<vault/notes/x.md>`: target note being connected
-- "linked target list": list of newly created wiki-link targets (cap at 5; if more, use overflow style with "+N more" suffix)
+- `<vault/notes/x.md>`: the `from` note this call linked from (vmem uses it as the line's source even when the link is bidirectional)
+- `[[a]]`: the one target this call linked
 
-**No connections made**: do not append (zero-link runs are silent). Report zero-connection runs in chat output instead.
+**No connections made**: no line is written (an `unchanged: true` link writes nothing). Report zero-connection runs in chat output instead.
 
-**Bidirectional links**: one log line for the target note (forward direction). Backlink updates to other notes do not create additional log lines — they are implied.
+**Bidirectional links**: one `vmem_link` call updates both notes and writes one line.
 
-**Failure**: if any wiki-link write fails, log the successful portion and warn user.
+**Failure**: `lib/vault_adapter.md` §Log failure handling, per link; keep the links that succeeded.
 
-**Vault access**: MCP Obsidian only.
+**Vault access**: vmem MCP only.
 
 ## Quality Gates
 

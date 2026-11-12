@@ -1,7 +1,7 @@
 ---
 name: notebooklm-deck
 description: |
-  NotebookLM Slide Deck / Visual Overview용 디자인 시스템 프롬프트를 쉽게 선택·조립·복사할 수 있게 돕는 스킬. <skills-bundle>/docs/slide-decks/에 보관된 14종 스타일 카탈로그(Anti-Gravity, Refined Minimal Portfolio, Blood Orange Agency, Comic Story, Neo-Retro Dev, Yellow Fashion Mag, Red Accent Editorial, Royal Watercolor, Premium Mockup, Sports Energy, Sculpture Pop, Constructivism Tech, Vitamin Pop, Flat Illustration)에서 발표 맥락에 맞는 스타일을 추천하고, Master Prompt + Topic/Source + 스타일별 추가 파라미터(Palette, Protagonist 등)를 한 블록으로 조립하여 사용자가 NotebookLM Studio에 통째로 붙여넣을 수 있게 한다.
+  NotebookLM Slide Deck / Visual Overview용 디자인 시스템 프롬프트가 필요할 때: 스타일 카탈로그에서 발표 맥락에 맞는 스타일을 추천하고, Master Prompt + Topic/Source + 스타일별 추가 파라미터(Palette, Protagonist 등)를 NotebookLM Studio에 통째로 붙여넣을 한 블록으로 조립한다.
   트리거: notebooklm, NotebookLM 슬라이드, 슬라이드 덱 프롬프트, 발표 스타일, slide deck style, slide style, presentation prompt, visual overview, /notebooklm-deck, 슬라이드 스타일 추천, 발표 디자인 시스템, deck prompt, 슬라이드 디자인 프롬프트, 마스터 프롬프트, NotebookLM 프롬프트, deck style picker
 ---
 
@@ -137,4 +137,4 @@ Topic / Source: {사용자가 입력한 주제}
 - `meeting-notes` — 회의록 → NotebookLM 소스로 사용 시 사전 정리
 - `gaejosik` — 한국어 공식 보고서 톤이 필요한 경우 본문 톤 보정
 - `pptx-toolkit` — 결과 슬라이드를 .pptx로 받았을 때 후처리
-- `hwp` — 발표 결과를 한국 공문서 양식으로 변환 시 (released binary minimum `v1.2.0`)
+- `hwp` — 발표 결과를 한국 공문서 양식으로 변환 시 (released agent-hwp minimum `v1.2.0`)

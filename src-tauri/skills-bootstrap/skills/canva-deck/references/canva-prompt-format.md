@@ -154,3 +154,11 @@ Flat Illustration:
 - **템플릿 Lock**: Magic Design 결과 중 마음에 드는 시안을 골라 "Edit this template"로 시작하면 톤 일관성 유지하기 좋음
 - **Animations**: 14종 스타일에 추가 모션 적용 시 → Page → Animate → "Subtle"·"Pan"·"Rise" 권장. "Block" / "Dramatic"은 격식 발표에 부적합
 - **Export**: PDF (격식) / PPTX (회사 발표) / MP4 (소셜) — regional innovation·international cooperation 보고는 PDF 권장
+
+## 처음 사용자 안내
+
+사용자가 처음이라면 다음 경로를 안내:
+
+- **Magic Design for Presentations**: Canva 홈 → "Create" → "Presentation" → 상단 "Magic Design" 또는 "AI 프레젠테이션" 클릭 → 프롬프트 입력 박스에 `Canva Prompt` 블록 붙여넣기
+- **Docs to Decks**: 긴 마크다운/텍스트가 있을 때 → Canva Docs에 붙여넣고 "Convert to Deck" 사용 → 슬라이드 톤 커스터마이즈
+- **Brand Hub**: 반복 사용하는 스타일은 Brand Hub에 색·폰트·로고 등록 → 모든 신규 덱에 자동 적용

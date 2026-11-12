@@ -7,12 +7,12 @@ sync with it.
 ## Runtime And Shared Helpers
 
 - `envs/default/` — shared Python/Node runtime scaffold for document, graph, and workspace skills.
-- `lib/build-graph.py` — shared graph builder used by `vault-graph` and `skill-mine`.
 - `lib/vault_adapter.md` — shared vault access policy for Obsidian MCP workflows.
 
-## Skills (39)
+## Skills
 
 - Document toolkits: `pptx-toolkit`, `xlsx-toolkit`, `md2docx`
+- Academic decks (editable .pptx): `academic-pptx`
 - Korean writing: `gaejosik`, `yunmun`
 - Social channels: `linkedin-manager`
 - Slide deck prompts: `canva-deck`, `notebooklm-deck`, `gpt-images-deck`
@@ -20,7 +20,7 @@ sync with it.
 - IO and inbox/outbox: `io-mso`, `io-gws`, `io-telegram`, `io-kakao`, `inbox-intake`, `inbox-process`, `meeting-notes`, `meeting-source-review`, `share-outbox`
 - Task and git: `task-management`, `git-sync`, `ship`
 - Ideation and drafts: `ideation-drafts`, `draft-writer`
-- Vault workflows: `vault-extract`, `vault-connect`, `vault-sync`, `vault-learn`, `vault-lint`, `vault-graph`, `vault-pipeline`, `vault-refactor`, `vault-rename`, `vault-update`, `vault-next`, `vault-remember`, `vault-rethink`, `vault-stats`
+- Vault workflows: `vault-extract`, `vault-connect`, `vault-sync`, `vault-learn`, `vault-lint`, `vault-graph`, `vault-refactor`, `vault-update`, `vault-remember`, `vault-rethink`, `vault-stats`, `vmem-status`
 - Skill analysis: `skill-mine`
 
 ## Install

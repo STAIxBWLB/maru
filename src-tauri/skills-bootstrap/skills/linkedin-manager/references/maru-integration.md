@@ -48,8 +48,14 @@ Display when present: `title`, `status`, `language`, `pillar`, `format`,
 
 ## Background and Review Runs
 
-In a proposals-only run the skill writes nothing. It returns exactly one
-proposal object:
+In a proposals-only run the skill writes nothing and runs no follow-up skills.
+Emit progress lines with exactly one marker at the start of the line:
+`[phase:source]` after config and input records are read, `[phase:normalize]`
+while resolving paths, dates, language and pillar, `[phase:draft]` while
+composing record content, `[phase:proposal]` when preparing the JSON object,
+`[phase:review]` when listing what the user must confirm; errors use `ERROR:`
+or `[phase:error]`. Return exactly one proposal object with the markdown file
+writes:
 
 ```json
 {

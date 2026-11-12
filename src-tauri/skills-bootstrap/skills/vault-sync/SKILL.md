@@ -1,16 +1,19 @@
 ---
 name: vault-sync
 trigger: /vault-sync
-description: Scan work/ for changes and propose vault extractions with confirmation
+description: Scan work/ for changes, or take an explicit list of work sources, and propose vault extractions with confirmation
 ---
 
-# /vault-sync [scope]
+# /vault-sync [scope] [path...]
+
+> Before the first vmem call, read `lib/vault_adapter.md` §Runtime Discovery and bind the vmem vault id for the workspace `vault.path`; pass it as `vault` on every vmem tool call and as the `<vault>` argument of every `vmem` CLI command.
 
 Scan work/ for new or changed content and propose vault extractions. Nothing is created without explicit user confirmation.
 
 ## Input
-- scope (optional): "full" (all work/), "meetings" (meetings only), "projects" (projects only), "diff" (git diff only)
+- scope (optional): "full" (all work/), "meetings" (meetings only), "projects" (projects only), "diff" (git diff only), "targets" (the work files or directories that follow, no scan)
 - Default: "full"
+- Single work source: call `/vault-extract` directly. A work `inbox/` item is processed by `inbox-process` first and its summary is the target (the vault has no inbox).
 
 Raw recordings and unreviewed transcripts are not scanned by `/vault-sync`. Only refined meeting notes under `work/meetings/YYYY/YYYY-MM/` are considered vault-worthy sources. Any transcript provider output must be processed through `meeting-notes` first.
 
@@ -28,7 +31,7 @@ ls <workspace-root>/meetings/YYYY/YYYY-MM/
 - Cross-reference vault notes source fields to find unprocessed meetings
 - Grep vault `notes/` for `source:.*work/meetings/YYYY/YYYY-MM` to identify already-extracted
 
-#### 1B: Git Diff — Work Root + Submodules (NEW)
+#### 1B: Git Diff (Work Root + Submodules)
 ```bash
 # Work root: changes since last sync timestamp
 cd <workspace-root>
@@ -40,8 +43,9 @@ SINCE_DATE=$(echo $LAST_SYNC | sed 's/\(....\)\(..\)\(..\)\(..\)\(..\)/\1-\2-\3 
 git log --oneline --since="$SINCE_DATE" --name-only -- . \
   ':!.claude' ':!.obsidian' ':!meetings' ':!tasks' \
   | grep -v '^\w\{7\} ' | grep -v '^$' | grep -v '\.json$' \
-  | grep -v '_meta/' | grep -v 'uv.lock' | grep -v 'pyproject.toml' \
+  | grep -v 'uv.lock' | grep -v 'pyproject.toml' \
   | sort -u
+# The workspace system directory is dropped by the Step 1.5 filter rules
 
 # Submodule changes: detect which submodules have new commits
 git submodule status --recursive | grep '^+' | awk '{print $2}'
@@ -56,41 +60,33 @@ git submodule status --recursive | grep '^+' | awk '{print $2}'
     | grep -v '^\w\{7\} ' | grep -v '^$' | sort -u
   ```
 
-**Work repo submodules**: 목록은 `.gitmodules`가 정본(런타임 뷰 `_meta/config/submodules.yaml`) — 여기에 표 사본을 두지 않는다(드리프트 방지). `vault`는 스캔 대상이 아니라 목적지이고, `dev`·`sites/*`(코드 저장소)는 명시 요청 시에만 스캔한다. 그 외 work 트리는 일반 디렉토리이므로 루트 git diff 스캔이 덮는다.
+**Work repo submodules**: 목록은 `.gitmodules`가 정본. `vault`는 스캔 대상이 아니라 목적지이고, 코드 저장소 서브모듈은 명시 요청 시에만 스캔한다. 그 외 work 트리는 일반 디렉토리이므로 루트 git diff 스캔이 덮는다.
 
 ### Step 1.5: Filter & Classify
 
 **Filter rules** (reduce noise):
-- Skip: `_meta/`, `.json`, `uv.lock`, `pyproject.toml`, `*.css`, `*.js`, `*.html`
-- Skip: draft versions if final exists (e.g., `drafts/260331-v2-*` if `final/260402-v4-*` exists)
-- Skip: personal/, dev/ submodules unless explicitly requested
+- Skip: the workspace system directory, `.json`, `uv.lock`, `pyproject.toml`, `*.css`, `*.js`, `*.html`
+- Skip: draft versions if final exists (e.g., `drafts/YYMMDD-v2-*` if `final/YYMMDD-v4-*` exists)
+- Skip: personal and code-repository submodules unless explicitly requested
 - Include: `README.md`, `*-plan-*.md`, `*-report-*.md`, `*-summary-*.md`, `*-strategy-*.md`
-- Include: any `.md` in `admin/`, `external/`, `projects/collabs/`, `projects/govt/`
+- Include: any `.md` under the workspace's configured document roots
 
-**Classify via project registry**:
-1. Read `<workspace-root>/project-registry.yaml` (status: active only)
-2. Extract signals from the candidate file (keywords, people, organizations, acronyms)
-3. Score: people +3, acronyms +2, keywords +2, orgs +1, tags +1
-4. top score >= 3 → attach project name + `vault_note` to proposal
-5. Ambiguous → mark as "project: TBD (user confirm)"
+**Classify** per `lib/vault_adapter.md` §Project Registry Pattern (scoring and fallback). A match attaches the project name and `vault_note` to the proposal; ambiguity marks it "project: TBD (user confirm)".
 
-> **Entity resolution**: people/orgs/projects 해소는 `<workspace-root>/_meta/rules/context-enrichment.md` §2 절차 사용 (fast cache → registry → vault MOC, 충돌 시 vault 우선).
->
-> **Registry fallback**: score < 3 → content-based domain analysis → if still ambiguous, prompt user via disambiguation field. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
+> **Entity resolution**: people/orgs/projects 해소는 워크스페이스 context-enrichment 규칙(`ssot.rules`)의 절차 사용 (fast cache → registry → vault MOC, 충돌 시 vault 우선).
 
-**Deduplication** (multi-signal, 2026-04-16 revision):
+**Deduplication** (multi-signal):
 
+0. **`vmem_brief` first**: `vmem_brief(intent: "<source title> <key topics>", paths: ["<source work file>"], bytes: 1024)` ranks screened pointer lines by the intent words plus the source file's basename words (`paths` is a word hint, not a citation filter). Run it once per source before the checks below, then confirm a pointer with `vmem_search`; the checks below decide the verdict
 1. **source field exact match**: `source: work/meetings/...` 경로 직접 일치
 2. **Title similarity ≥70%**: fuzzy compare against vault note titles
-3. **Recent update-section detection** (NEW): 대상 회의 날짜 헤더(`## Update (YYYY-MM-DD)` 또는 `## YYYY-MM-DD ...`)가 vault 노트에 이미 존재하면 "이미 반영됨"으로 판정
+3. **Recent update-section detection**: 대상 회의 날짜 헤더(`## Update (YYYY-MM-DD)` 또는 `## YYYY-MM-DD ...`)가 vault 노트에 이미 존재하면 "이미 반영됨"으로 판정
 4. **Entity overlap** (보조): 회의 제목의 주요 인물·기관 키워드가 vault 노트 본문에 ≥3회 등장 시 후보
 
 **판정 로직**:
 - 1, 2, 3 중 **임의 하나 hit** → "already reflected — skip" 제안
 - 1 miss + 2 hit (≥70%) → "update" 제안 (source field 갱신 포함)
 - 모두 miss → "create" 제안
-
-**근거 (2026-04-16 학습)**: /vault-sync가 04-14 회의 3건을 재추출 제안했으나 실제로는 vault 노트에 이미 반영됨. source field만 원본 경로를 가리키지 않아 dedup이 놓쳤음. update-section detection을 추가하여 content-level dedup 보완.
 
 ### Step 2: Propose
 
@@ -102,25 +98,25 @@ Scanned: meetings 9건, git-diff 5건, submodules 1건
 
 ─── MEETINGS (HIGH) ───
 
-[1] MEETING: 04-08 협력회의 - Diquest AI플랫폼
-    -> Proposed: update [[diquest-ai-education-platform-mou]]
+[1] MEETING: MM-DD partner meeting - example platform
+    -> Proposed: update [[example-partner-platform-mou]]
     -> Domain: projects
 
 ─── GIT DIFF (MEDIUM-HIGH) ───
 
-[2] DIFF: admin/innovation/260405-org-restructuring.md (new file)
-    -> Proposed: update [[chu-ai-headquarters-establishment-vp-level]]
+[2] DIFF: admin/example-unit/YYMMDD-org-restructuring.md (new file)
+    -> Proposed: update [[example-org-restructuring-decision]]
     -> Domain: operations
 
-[3] DIFF: projects/hope/planning/260403-plan-masterplan.md (new file)
-    -> Proposed: update [[hope-tuition-free-global-online-degree-idea]]
+[3] DIFF: projects/example-project/planning/YYMMDD-plan-masterplan.md (new file)
+    -> Proposed: update [[example-project-masterplan-idea]]
     -> Domain: projects
 
 ─── SUBMODULE CHANGES ───
 
-[4] SUBMODULE: sites/halla-ai (+1 commit, requested)
+[4] SUBMODULE: sites/example-site (+1 commit, requested)
     -> Changed: src/pages/
-    -> Proposed: update [[halla-ai-department-home]]
+    -> Proposed: update [[example-site-home]]
     -> Domain: teaching
 
 Accept: [a]ll, [1-4] select, [s]kip, [q]uit
@@ -128,26 +124,16 @@ Accept: [a]ll, [1-4] select, [s]kip, [q]uit
 
 ### Step 3: Confirm
 - User selects which proposals to execute
+- Follow `/vault-extract` §Extraction Fidelity and Concurrent Writers on every extraction; its one-writer rule's condition, stated in that rule, decides when it applies
 - For each confirmed proposal:
   1. Read the source document fully
   2. **create** proposals: extract insights per `/vault-extract` methodology → create vault note(s) → update relevant MOCs
-  3. **update** proposals: hand off to the `/vault-update` procedure (MCP `patch_note`/`write_note` with the original insight preserved, `## Update YYYY-MM-DD` section, `/vault-lint note=` afterwards) — this skill does not carry its own update path
+  3. **update** proposals: hand off to the `/vault-update` procedure (MCP `vmem_patch`/`vmem_append`/`vmem_set_frontmatter` with the original insight preserved, `## Update YYYY-MM-DD` section, `/vault-lint note=` afterwards when the CLI is available) — this skill does not carry its own update path
   4. Show created/updated note for review
 
-### Step 3.5: R4 Sibling Merge — Method Evidence 자동 갱신 (M10, 2026-04-24 도입)
+### Step 3.5: R4 Sibling Merge (Method Evidence 자동 갱신)
 
-이번 세션에서 **R4 sibling merge**가 1건 이상 실행된 경우 (≥2 meetings → 1 노트 merge), `sibling-meeting-merge-n-to-one-consolidation-method` 노트의 evidence 테이블을 자동 갱신한다.
-
-**절차**:
-1. 이번 /vault-sync 라운드에서 수행한 R4 merge 노트 목록 수집 (target note + merged sessions count)
-2. `mcp__obsidian__read_note('notes/sibling-meeting-merge-n-to-one-consolidation-method.md')` 호출
-3. `## 실증 사례 (3건, YYYY-MM-DD 기준)` 테이블에서 해당 merged 노트 행 찾기
-4. **누적 N 증가**: `N = 기존 N + 이번 라운드 병합 수`
-5. **날짜 분포 append**: `기존 분포 + MM-DD(N추가)` 형태로 append
-6. `mcp__obsidian__patch_note`로 테이블 갱신
-7. 신규 merged 노트(케이스 추가)인 경우 **새 행** 추가
-
-**근거**: 2026-04-24 Rethink O2 — 4라운드 누적 method evidence drift (기록 N=5, 실제 N=13) 해소
+이번 라운드에서 **R4 sibling merge**(≥2 meetings → 1 노트 merge)가 1건 이상 실행됐으면, Step 4 전에 `references/r4-method-evidence.md`를 읽고 method 노트의 evidence 테이블을 갱신한다.
 
 **Skip 조건**:
 - R4 merge 0건인 세션 → Step 3.5 skip
@@ -155,11 +141,11 @@ Accept: [a]ll, [1-4] select, [s]kip, [q]uit
 
 ### Step 4: Record
 - Update last-sync timestamp in `ops/sessions/last-sync-timestamp` (plain file, fs write)
-- Log sync results in `ops/sessions/YYYYMMDD-sync.md` via `mcp__obsidian__write_note` (vault markdown)
+- Log sync results in `ops/sessions/YYYYMMDD-sync.md` with `vmem_report(path: "ops/sessions/YYYYMMDD-sync.md", body)` (expect: vmem refuses secret-looking text and an unsafe path)
 - Promote vault-relevant `TASK` events from the work-local `.maru/tasks-log.md`
-  to `vault/log` (ingest-chain TYPE `TASK`; task-management does not write the
-  vault directly — context-enrichment §6)
-- **Graph freshness (DR-019 §6)**: run vault-lint L11 (graph staleness). If `vault-graph.json`
+  to `vault/log` with `vmem_log_append(type: "TASK", ...)` (task-management does not write the
+  vault directly)
+- **Graph freshness**: run vault-lint L11 (graph staleness). If `vault-graph.json`
   is > 7 days stale, propose `/vault-graph build`. Suggest only — do not auto-build.
 
 ## Scope Details
@@ -180,6 +166,15 @@ Accept: [a]ll, [1-4] select, [s]kip, [q]uit
 - Work root + all submodules
 - Useful for catching project doc changes between meeting-heavy days
 
+### /vault-sync targets <path>...
+- Skip Step 1. Enumerate eligible sources under the given work paths (`.md` with frontmatter, or summary output); at most 20 per run (collector's-fallacy guard: split larger batches)
+- Step 1.5 classification and deduplication run once for the whole batch, and the classification is passed to each extraction (no registry reload per item)
+- The named targets are the user's choice of sources: Step 2 shows the proposal list once and one accept covers the batch (per-item select still works)
+- Step 3 runs the `/vault-extract` method per accepted create proposal and hands accepted update proposals to `/vault-update` as in other scopes, then `/vault-connect` on the notes it created. Check quality once after the batch with one `vmem_lint` call (or the CLI `vmem lint <vault> --note <path>` per note when the CLI is available)
+- Stop on a refusal or a persisted partial write (see `lib/vault_adapter.md` §Write results); continue past warnings
+- Output adds: sources skipped by vault-extract preconditions, per-note lint error/warning counts
+- Step 4 writes the session record but does not move `ops/sessions/last-sync-timestamp`: a targets run covers only the named sources, not every change since the last sync
+
 ### /vault-sync full
 - All of the above in priority order: meetings → git diff → submodules
 - Limit: max 10 proposals per run (avoid overwhelm)
@@ -188,7 +183,7 @@ Accept: [a]ll, [1-4] select, [s]kip, [q]uit
 ## Quality Gates
 - Same as /vault-extract quality gates
 - Additional: deduplication check before creation
-- Confirmation required for every note creation
+- Confirmation required for every note creation (in `targets`, the one batch accept is that confirmation)
 
 ## Output
 - Summary of scan results (per source: meetings, diff, submodules)

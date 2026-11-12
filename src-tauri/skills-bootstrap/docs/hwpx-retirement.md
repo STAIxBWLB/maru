@@ -2,10 +2,10 @@
 
 The bundled `skills/hwpx` source tree was retired in favor of the single
 official-document `hwp` skill exported by the released
-[STAIxBWLB/hwp-cli v0.12.1](https://github.com/STAIxBWLB/hwp-cli/releases/tag/v0.12.1)
+[STAIxBWLB/agent-hwp v0.12.1](https://github.com/STAIxBWLB/agent-hwp/releases/tag/v0.12.1)
 binary (commit `fa2d86776af7226b34a5a6f43081e8f3adef56c8`). The minimum supported
 release is now
-[`v1.2.0`](https://github.com/STAIxBWLB/hwp-cli/releases/tag/v1.2.0), commit
+[`v1.2.0`](https://github.com/STAIxBWLB/agent-hwp/releases/tag/v1.2.0), commit
 `05bf9ad005ffb5c18769df5fb0b5bf78afaec82b`. It keeps the untrusted-input fixes carried
 through v1.0.0 (v0.20.2's HWPX nesting-depth bound and polynomial nested-table layout,
 and v1.0.0's quick-xml 0.41 for RUSTSEC-2026-0194) and adds what Maru now relies on:
@@ -15,10 +15,11 @@ and v1.0.0's quick-xml 0.41 for RUSTSEC-2026-0194) and adds what Maru now relies
 fill that matched nothing.
 
 Use a versioned release asset and an absolute binary path. A checkout build or
-an unversioned PATH binary is not replacement evidence.
+an unversioned PATH binary is not replacement evidence. The binary is `ahwp`
+from v1.6.0 and `hwp` on earlier releases; 2.0.0 ships only `ahwp`.
 
 ```sh
-HWP_BIN=/absolute/path/to/hwp-v1.2.0/hwp
+HWP_BIN=/absolute/path/to/ahwp-v1.6.0/ahwp   # before v1.6.0: .../hwp-v1.2.0/hwp
 "$HWP_BIN" --version
 "$HWP_BIN" skill export --install claude-code
 "$HWP_BIN" skill export --install codex
@@ -26,7 +27,7 @@ HWP_BIN=/absolute/path/to/hwp-v1.2.0/hwp
 
 The export installs a directory-shaped `hwp` skill tree. The native command
 crosswalk, parity boundaries, and validation commands are maintained in the
-versioned [editing recipes](https://github.com/STAIxBWLB/hwp-cli/blob/v1.2.0/skills/hwp/references/editing-recipes.md).
+versioned [editing recipes](https://github.com/STAIxBWLB/agent-hwp/blob/v1.2.0/skills/hwp/references/editing-recipes.md).
 For Korean official-document guidance, use the exported
 `hwp/references/korean-official-format.md` file. `gaejosik` references that
 same released source.
@@ -57,7 +58,7 @@ supersedes eligible OTA content without manually editing release assets.
 
 ## Rollback
 
-If a post-retirement regression is found, keep the additive `hwp-cli` v0.12.1
+If a post-retirement regression is found, keep the additive agent-hwp v0.12.1
 release. Revert the skills retirement PR on `main` and let the normal release
 workflow publish a new signed OTA revision. Do not edit or delete immutable
 `skills-channel` assets in place.

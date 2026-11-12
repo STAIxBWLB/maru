@@ -20,7 +20,7 @@ HWP·PDF 파일 처리를 위한 skills repo-local runtime scaffold. Claude Code
 make process-hwp   # input/hwp/ HWP 파일 일괄 텍스트 추출
 make process-pdf   # input/pdf/ PDF 파일 일괄 처리
 make process-all   # input/ 전체 HWP·PDF 처리
-make ocr           # 스캔 PDF OCR 처리
+make ocr           # 스캔 PDF OCR 폴백 (아래 PDF 처리 전략 참조)
 make verify        # 시스템 의존성 확인
 ```
 
@@ -44,14 +44,14 @@ make verify        # 시스템 의존성 확인
 
 ## HWP 처리 전략
 
-- 1순위 엔진: **hwp-cli** (Rust 단일 바이너리 `hwp`, 외부 의존성 0). `.hwp`/`.hwpx` 모두 `hwp cat --format plain`으로 추출. stdout만 사용(경고는 stderr). 탐색: `$HWP_CLI` → `~/.cargo/bin/hwp` → `dev/hwp-cli/target/release/hwp` → 검증된 PATH `hwp`.
+- 1순위 엔진: **agent-hwp** (Rust 단일 바이너리 `ahwp`, `v1.6.0` 이전 릴리스에서는 `hwp`, 외부 의존성 0). `.hwp`/`.hwpx` 모두 `ahwp cat --format plain`으로 추출. stdout만 사용(경고는 stderr). 직접 호출할 때는 `$HWP_CLI`, 없으면 PATH의 `ahwp`, 그다음 `hwp` 릴리스 바이너리를 쓴다(검증: `cat --help` 종료 코드 0).
 - HWP v5 (.hwp) 폴백: `libhwp` → `pyhwp hwp5txt` → `olefile` 직접 파싱
 - HWPX (.hwpx) 폴백: `zipfile` + `BeautifulSoup` (외부 의존성 최소화)
-- 표 추출: libhwp의 `find_all('table')` 또는 HWPX XML 직접 파싱 (hwp-cli는 `--format markdown`이 표를 GFM 표로 변환)
+- 표 추출: libhwp의 `find_all('table')` 또는 HWPX XML 직접 파싱 (agent-hwp는 `--format markdown`이 표를 GFM 표로 변환)
 
 ## PDF 처리 전략
 
 - 텍스트 추출: `pymupdf` (속도 우선) → `pdfminer.six` (정확도 필요 시)
 - 표 추출: `pdfplumber` (일반) 또는 `camelot` (복잡한 표)
 - 이미지 추출: `pymupdf`의 `page.get_images()`
-- 스캔 PDF: `pdf2image` → `pytesseract` (lang='kor+eng')
+- 스캔 PDF: 워크스페이스 설정·지침이 OCR 경로를 지정하면 그것을 따른다. 지정이 없을 때만 `make ocr`(`pdf2image` → `pytesseract`, lang='kor+eng')

@@ -70,11 +70,7 @@ pres.slide_masters          # 전체 마스터
 
 ## 제약
 
-- **`.ppt` (97-2003) 미지원** — `Presentation("foo.ppt")`는 에러. 변환 필요:
-  ```bash
-  soffice --headless --convert-to pptx foo.ppt
-  pandoc -f pptx foo.pptx -o foo.md  # lossy
-  ```
+- **`.ppt` (97-2003) 미지원** — `Presentation("foo.ppt")`는 에러. 사용자에게 `.pptx`로 다시 저장해 달라고 요청.
 - **애니메이션·전환은 파싱되지 않음** (런타임 효과라 무시)
 - **SmartArt/Chart 내부 텍스트**는 shape.has_text_frame이 False. 추출 복잡.
 - **글꼴·색상·배경**은 MVP에서 무시.

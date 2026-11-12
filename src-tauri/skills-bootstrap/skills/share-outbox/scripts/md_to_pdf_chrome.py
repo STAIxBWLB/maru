@@ -3,7 +3,7 @@
 
 Outgoing-PDF path for share-outbox: renders Markdown to HTML with a print
 stylesheet, then prints it with Chrome headless. Browser print paginates
-tables row-by-row with repeating header rows, unlike the hwp-cli PDF
+tables row-by-row with repeating header rows, unlike the agent-hwp PDF
 renderer, which silently drops every table row after a page boundary.
 
 Runs on the bundled env's markdown-it-py (no python-markdown dependency).
@@ -111,7 +111,7 @@ def main() -> int:
         else:
             print(
                 "error: Chrome/Chromium not found. Pass --chrome or set CHROME_BIN.\n"
-                "fallback: convert to docx/hwpx first and print with LibreOffice "
+                "no other PDF route is supported; ask the user how to proceed "
                 "(see references/pdf-print-path.md)",
                 file=sys.stderr,
             )

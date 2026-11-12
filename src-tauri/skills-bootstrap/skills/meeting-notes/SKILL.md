@@ -53,43 +53,18 @@ skill is provider-neutral and does not require inbox staging.
    uncertainties; never invent a canonical name or a wiki-link. Without the
    hook, fall back to normalizing against the local guides only.
 5. **Content verification & supplementation (`[phase:verify]`).** When
-   `meeting_notes.hooks.verification` is set (e.g. `internal-external`),
-   verify and supplement before drafting; without the hook, skip this step.
-   - Extract high-risk claims from the normalized material: person
-     names/titles/affiliations, org and program names, decisions and their
-     owners, dates, amounts, quoted commitments, and any "someone said X is
-     happening" attributions.
-   - Internal verification: cross-check each claim against the step-4 context
-     bundle plus targeted lookups — vault notes
-     (`mcp__obsidian__search_notes`), past meeting notes under the meeting
-     root, open tasks, and the project registry. Flag transcription-error
-     suspects (a surface form phonetically/visually close to a known
-     canonical entity, e.g. a garbled company name matching a glossary
-     entry) and contradiction suspects (claims conflicting with recorded
-     decisions or known project state).
-   - External verification (last resort): for claims about external parties
-     that internal sources cannot settle (a person's current title, an
-     org's program, a public event), use web search under the
-     context-enrichment §2-7 contract verbatim — results are
-     `web_unverified`, carry a source URL, and are promoted only by explicit
-     user confirmation. No web lookup for bare person names.
-   - Supplementation: add context the transcript cannot carry — the formal
-     meeting name from the calendar event, full org names from the
-     glossary, prior decisions a statement refers to — each tagged with its
-     source.
-   - Every proposed change is emitted as a structured correction in the
-     review block (see `corrections` below), never as an in-place rewrite.
+   `meeting_notes.hooks.verification` is set (e.g. `internal-external`), read
+   `references/verification.md` before drafting and verify and supplement as it
+   says; without the hook, skip this step.
 6. Draft the note using `templates/meeting-note.md`. Fill the frontmatter
-   `title` with a human-readable meeting title so the display name does not
-   depend on the filename alone — Maru resolves the shown label as
-   `title -> name -> filename` and also reads `date`, `type`, `topic`, `tags`,
-   and `attendees` from frontmatter. Keep the configured filename policy. When
-   enrichment resolved them, also set the additive cross-link fields per the
-   context-enrichment §4 contract: `project: [[vault_note]]`, `attendees` as
+   `title` with a human-readable meeting title; Maru reads `title`, `date`,
+   `type`, `topic`, `tags`, and `attendees` from frontmatter. Keep the
+   configured filename policy. When enrichment resolved them, also set the
+   additive cross-link fields per the context-enrichment §4 contract: `project: [[vault_note]]`, `attendees` as
    resolved `[[person]]` links, `relatedMeetings`, `relatedTasks`, and
    `source_doc`. Emit a wiki-link only for entities §2 actually resolved (never
    a guessed link). Structure action items as `{assignee, task, due}` rather
-   than bare checkboxes so they can seed pre-filled task candidates.
+   than bare checkboxes.
 7. Propose filing it under the configured meeting root, usually
    `YYYY/YYYY-MM/`; Maru applies the write only after user approval. The
    meeting root holds the **canonical** note. When a partner/project also needs a
@@ -105,87 +80,18 @@ skill is provider-neutral and does not require inbox staging.
 
 ## Maru Run Contract
 
-When Maru runs this skill in background/review mode:
+When Maru runs this skill in background/review mode, read
+`references/maru-review.md` before starting; it defines the phase markers and
+the `maru_meeting_review_v1` shape.
 
-1. Emit concise human-readable progress logs while working. Prefix major
-   progress logs with stable phase markers so Maru can render stepwise
-   status:
-   - `[phase:source]` after source text/files are identified.
-   - `[phase:normalize]` while applying guides, glossary, people, and naming
-     conventions.
-   - `[phase:verify]` while checking high-risk facts against internal
-     sources and web research, and assembling corrections.
-   - `[phase:draft]` while drafting the meeting note.
-   - `[phase:proposal]` when preparing the `maru_skill_proposal_v1` block.
-   - `[phase:review]` when preparing the `maru_meeting_review_v1` block.
-   - Always include exactly one phase marker per line and keep that marker
-     at the start of the line (after the timestamp) so the run-card parser
-     and Activity panel can colour-code each phase reliably.
-   - For errors, prepend `ERROR:` to the message or use `[phase:error]` so
-     the UI can surface them in red.
+1. Emit concise human-readable progress logs with those phase markers.
 2. Do not directly write files, update the vault, or run follow-up skills.
 3. Return one `maru_skill_proposal_v1` JSON object with the meeting note file
    write proposal.
-4. Return one `maru_meeting_review_v1` JSON object for user confirmation:
-
-```json
-{
-  "schemaVersion": "maru_meeting_review_v1",
-  "summary": "short review summary",
-  "terms": [
-    { "label": "source term", "normalized": "workspace term", "note": "why", "required": true }
-  ],
-  "people": [
-    { "label": "source person", "normalized": "canonical person", "note": "role", "required": true }
-  ],
-  "properNouns": [
-    { "label": "source name", "normalized": "canonical name", "note": "context", "required": true }
-  ],
-  "uncertainties": [
-    { "label": "uncertain item", "normalized": "best guess", "note": "needs user check", "required": true }
-  ],
-  "corrections": [
-    {
-      "before": "exact passage from source/draft",
-      "after": "proposed replacement",
-      "category": "transcription|fact|attribution|date|amount|decision|action|omission|supplement",
-      "evidence": "internal note path / calendar event / source URL",
-      "confidence": "resolved | card_reference | web_unverified | fuzzy",
-      "required": true
-    }
-  ],
-  "enrichment": {
-    "project": "[[vault-note]]",
-    "relatedMeetings": ["[[meeting-note]]"],
-    "relatedTasks": ["[[task-note]]"],
-    "calendarLink": { "calendarId": "id-or-null", "calendarEventId": "id-or-null" },
-    "resolvedPeople": [
-      { "surface": "source person", "canonical": "canonical name", "wikiLink": "[[person]]", "confidence": "resolved" }
-    ]
-  },
-  "followups": [
-    {
-      "skill": "task-management",
-      "title": "Create task from action item",
-      "prompt": "proposal-only follow-up prompt",
-      "reason": "why this is useful",
-      "assignee": "person or null",
-      "due": "YYYY-MM-DD or null",
-      "meetingSourcePath": "meetings/YYYY/YYYY-MM/<file>.md",
-      "selected": false
-    }
-  ]
-}
-```
+4. Return one `maru_meeting_review_v1` JSON object for user confirmation.
 
 Allowed follow-up skills are `vault-extract`, `vault-connect`, and
-`task-management`. Follow-ups must be proposals for the user to review. The
-`enrichment` object, the `corrections` array, and the
-`assignee`/`due`/`meetingSourcePath` follow-up
-fields are additive and optional — populate them only from resolved enrichment
-(context-enrichment §3/§4) and verified corrections (workflow step 5), and
-omit or null them otherwise. Parsers ignore
-unknown fields, so existing `maru_meeting_review_v1` consumers are unaffected.
+`task-management`. Follow-ups must be proposals for the user to review.
 
 ## Rules
 
@@ -215,6 +121,8 @@ unknown fields, so existing `maru_meeting_review_v1` consumers are unaffected.
 ## References
 
 - `references/workspace-config.md` - runtime config keys
+- `references/verification.md` - workflow step 5 verification procedure
+- `references/maru-review.md` - review-mode phase markers and review object
 - `templates/meeting-note.md` - neutral meeting note template
 - `_meta/rules/naming-and-placement.md` §C - destination subfolder for project/partner
   copies of the meeting note (`*-meetings/`); the canonical note stays in the
