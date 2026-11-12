@@ -714,7 +714,10 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
               w: origin.w,
               h: origin.h,
             };
-            const stationary: Rect[] = displayNodes
+            // Only what the canvas paints can pull the drag onto a guide: a
+            // hidden member, or one on an invisible layer, is not on screen, so
+            // aligning to it would move the member to a line nobody can see.
+            const stationary: Rect[] = drawnNodes
               .filter((n) => !gesture.ids.includes(n.id))
               .map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
             const result = computeSmartGuides({
@@ -757,7 +760,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
         setGuides(smartGuideOut);
       }
     },
-    [activeGesture, displayNodes, doc.id, onPointerCanvasMove, snapOn, snapSize, smartGuideOn, store, updateViewport, viewport],
+    [activeGesture, drawnNodes, doc.id, onPointerCanvasMove, snapOn, snapSize, smartGuideOn, store, updateViewport, viewport],
   );
 
   const onSurfacePointerUp = useCallback(
@@ -771,7 +774,9 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       if (gesture.kind === "marquee") {
         const rect = marqueeRect(gesture);
         if (rect.w > 1 || rect.h > 1) {
-          const hits = nodesInsideRect(displayNodes, rect);
+          // A marquee selects what the reader can see: an undrawn member is not
+          // a hit, so a sweep across empty canvas never picks one up.
+          const hits = nodesInsideRect(drawnNodes, rect);
           if (gesture.additive) {
             const existing = [...store.getState().ephemeral.selection.nodes];
             store.setState(setSelection([...new Set([...existing, ...hits])]));
@@ -846,7 +851,7 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
       }
       gestureRef.current = null;
     },
-    [activeGesture, canvasGeometry, datasetId, displayNodes, doc, geometry, nodes, store],
+    [activeGesture, canvasGeometry, datasetId, doc, drawnNodes, geometry, nodes, store],
   );
 
   const onWheel = useCallback(

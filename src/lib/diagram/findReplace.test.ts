@@ -41,6 +41,25 @@ describe("findReplace", () => {
     expect(findInDoc(doc, "WORLD", { caseSensitive: true })).toHaveLength(0);
   });
 
+  it("findInDoc skips members the canvas does not draw", () => {
+    const doc = buildDoc();
+    doc.layers.push({ id: "veiled", name: "Veiled", visible: true, locked: false, order: 1 });
+    doc.nodes.push(
+      { id: "hidden", kind: "simple", x: 0, y: 0, w: 100, h: 50, title: "world hidden" },
+      { id: "layered", kind: "simple", x: 0, y: 0, w: 100, h: 50, title: "world layered", layerId: "veiled" },
+    );
+    // Control: with nothing hidden and the layer shown, find reaches both, so
+    // the count below is not a property of the query alone.
+    expect(findInDoc(doc, "world")).toHaveLength(5);
+    doc.nodes[2]!.hidden = true;
+    doc.layers[1]!.visible = false;
+    const out = findInDoc(doc, "world");
+    expect(out).toHaveLength(3);
+    expect(out.some((m) => m.id === "hidden" || m.id === "layered")).toBe(false);
+    // An edge label is not hidden by an invisible endpoint.
+    expect(out.some((m) => m.kind === "edge")).toBe(true);
+  });
+
   it("replaceAllInDoc updates titles, bodies, edge labels via the store", () => {
     const doc = buildDoc();
     const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
