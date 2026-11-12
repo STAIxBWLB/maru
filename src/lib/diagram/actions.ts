@@ -27,6 +27,7 @@ import {
   type Coalescer,
 } from "./history";
 import { mkNode, type MkNodeOpts } from "./nodeKinds";
+import { modelDrawsNode } from "./nodeVisibility";
 import { writeThroughText } from "./semantic";
 import { relinkClonedNodes } from "./tableActions";
 import type {
@@ -321,7 +322,10 @@ export function selectAllNodes(): StateTransformer {
     ephemeral: {
       ...state.ephemeral,
       selection: {
-        nodes: new Set(state.doc.nodes.map((n) => n.id)),
+        // Select all takes what is on screen: a hidden member, or one on an
+        // invisible layer, is not drawn, so it must not answer the next Delete
+        // or nudge from off the canvas.
+        nodes: new Set(state.doc.nodes.filter(modelDrawsNode(state.doc)).map((n) => n.id)),
         edges: new Set(),
       },
     },

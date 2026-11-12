@@ -80,6 +80,23 @@ describe("phase 5 actions", () => {
     expect([...store.getState().ephemeral.selection.nodes].sort()).toEqual(["a", "b"]);
   });
 
+  it("selectAllNodes leaves out the members the canvas does not draw", () => {
+    const selectIn = (layerVisible: boolean, hidden: boolean): string[] => {
+      const store = build([node("a"), { ...node("hidden"), hidden }, { ...node("layered"), layerId: "veiled" }]);
+      store.setState((s) => ({
+        ...s,
+        doc: { ...s.doc, layers: [...s.doc.layers, { id: "veiled", name: "Veiled", visible: layerVisible, locked: false, order: 1 }] },
+      }));
+      store.setState(selectAllNodes());
+      return [...store.getState().ephemeral.selection.nodes].sort();
+    };
+    // Control: drawn, both are selected, so their absence below is the
+    // visibility rule rather than the fixture.
+    expect(selectIn(true, false)).toEqual(["a", "hidden", "layered"]);
+    // The next Delete or nudge must not reach a member the reader cannot see.
+    expect(selectIn(false, true)).toEqual(["a"]);
+  });
+
   it("duplicateSelection clones nodes + edges and reselects clones", () => {
     const store = build([node("a"), node("b", 100)], ["a", "b"]);
     store.setState((s) => ({

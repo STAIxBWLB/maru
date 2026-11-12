@@ -1072,3 +1072,147 @@ describe("semantic canvas leaves derived frames where the engine puts them", () 
     expect(nodeGroup(stageId).getAttribute("transform")).toBe("translate(160,250)");
   });
 });
+
+describe("semantic canvas leaves an undrawn member out of interaction", () => {
+  const GHOST_LAYER = "veiled";
+  let harness: { container: HTMLDivElement; root: Root } | null = null;
+  let doc: DiagramDoc;
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    requests.length = 0;
+    _resetCanvasGeometryForTests();
+    _setCanvasEngineLoaderForTests(async () => ({
+      layout: (input: LayoutRequest) => {
+        requests.push(input);
+        return scene(input);
+      },
+    }));
+    doc = semanticDoc().doc;
+  });
+
+  afterEach(() => {
+    unmount();
+    _setCanvasEngineLoaderForTests(null);
+    _resetCanvasGeometryForTests();
+  });
+
+  /** The document plus a layer the reader may have made invisible. */
+  function withLayer(visible: boolean): DiagramDoc {
+    return {
+      ...doc,
+      layers: [...doc.layers, { id: GHOST_LAYER, name: "Veiled", visible, locked: false, order: 1 }],
+    };
+  }
+
+  async function mount(next: DiagramDoc): Promise<void> {
+    harness = renderCanvas(next);
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+    act(() => {
+      probe!.setState((state) => ({
+        ...state,
+        ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: false, smartGuideOn: true } },
+      }));
+    });
+  }
+
+  function unmount(): void {
+    if (!harness) return;
+    act(() => harness!.root.unmount());
+    harness.container.remove();
+    harness = null;
+  }
+
+  function ghostDoc(opts: { hiddenGhostHidden: boolean; layerVisible: boolean }): DiagramDoc {
+    return {
+      ...withLayer(opts.layerVisible),
+      nodes: [
+        ...doc.nodes,
+        { id: "ghost-hidden", kind: "simple", x: 100, y: 500, w: 60, h: 40, hidden: opts.hiddenGhostHidden },
+        { id: "ghost-layer", kind: "simple", x: 100, y: 560, w: 60, h: 40, layerId: GHOST_LAYER },
+      ],
+    };
+  }
+
+  async function sweepAndSelect(): Promise<Set<string>> {
+    const surface = document.querySelector(".maru-diagram-canvas")!;
+    const at = async (type: string, x: number, y: number) => act(async () => {
+      surface.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y }));
+    });
+    await at("pointerdown", 90, 290);
+    await at("pointermove", 400, 620);
+    await at("pointerup", 400, 620);
+    await settle();
+    return new Set(probe!.getState().ephemeral.selection.nodes);
+  }
+
+  it("marquee selects only the members the canvas draws", async () => {
+    // Control: with both ghosts drawn, the same sweep hits both. Without this
+    // the empty result below would prove nothing about the sweep.
+    await mount(ghostDoc({ hiddenGhostHidden: false, layerVisible: true }));
+    const drawn = await sweepAndSelect();
+    expect(drawn.has("ghost-hidden")).toBe(true);
+    expect(drawn.has("ghost-layer")).toBe(true);
+    unmount();
+
+    await mount(ghostDoc({ hiddenGhostHidden: true, layerVisible: false }));
+    const undrawn = await sweepAndSelect();
+    expect(undrawn.has("ghost-hidden")).toBe(false);
+    expect(undrawn.has("ghost-layer")).toBe(false);
+    // The sweep still takes what is on screen.
+    expect(undrawn.has((doc.datasets![0] as SemanticSpecDataset).idMap.draft!)).toBe(true);
+  });
+
+  it("a hidden member is no smart-guide target", async () => {
+    const draft = (doc.datasets![0] as SemanticSpecDataset).idMap.draft!;
+    const dx = 10;
+    await mount(doc);
+    const start = displayed(draft);
+    unmount();
+
+    /** A plain member whose left edge sits three pixels past where the drag lands. */
+    const neighbour = (extra: { hidden?: boolean; layerId?: string } = {}) => ({
+      id: "ghost-guided",
+      kind: "simple" as const,
+      x: start.x + start.w + dx + 3,
+      y: start.y + 10,
+      w: 40,
+      h: 20,
+      ...extra,
+    });
+
+    async function dropWith(ghost: ReturnType<typeof neighbour>, layerVisible = true): Promise<number> {
+      await mount({ ...withLayer(layerVisible), nodes: [...doc.nodes, ghost] });
+      const surface = document.querySelector(".maru-diagram-canvas")!;
+      const position = nodeGroup(draft).getAttribute("transform")!.match(/translate\(([^,]+),([^)]*)\)/)!;
+      const x = Number(position[1]) + 8;
+      const y = Number(position[2]) + 8;
+      await act(async () => {
+        nodeGroup(draft).dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: x, clientY: y }));
+      });
+      await act(async () => {
+        surface.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: x + dx, clientY: y }));
+      });
+      await act(async () => {
+        surface.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientX: x + dx, clientY: y }));
+      });
+      await settle();
+      const landed = displayed(draft).x;
+      unmount();
+      return landed;
+    }
+
+    const guided = await dropWith(neighbour());
+    const hidden = await dropWith(neighbour({ hidden: true }));
+    const layered = await dropWith(neighbour({ layerId: GHOST_LAYER }), false);
+
+    // The control proves the fixture reaches the guide at all: a drawn
+    // neighbour pulls the member the three pixels onto its edge. The two
+    // invisible neighbours must leave the drag exactly where the pointer put it.
+    expect(guided).toBe(start.x + dx + 3);
+    expect(hidden).toBe(start.x + dx);
+    expect(layered).toBe(start.x + dx);
+  });
+});

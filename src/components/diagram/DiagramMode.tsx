@@ -51,6 +51,7 @@ import { nextTableKeyAction } from "../../lib/diagram/tableKeys";
 import { isDiagramKeystroke, matchesShortcut } from "../../lib/diagram/shortcuts";
 import { canvasEngineDrawnIds, canvasNudgePins } from "../../lib/diagram/engineCanvasGeometry";
 import { fitView } from "../../lib/diagram/geometry";
+import { modelDrawsNode } from "../../lib/diagram/nodeVisibility";
 import {
   clipboardWriteHtml,
   clipboardWriteImagePng,
@@ -362,7 +363,9 @@ function DiagramShell({
       store.setState(replaceDoc(next));
       if ((next.datasets ?? []).some((dataset) => dataset.kind === "semanticSpec" && dataset.diagramType === "floorplan")) {
         const rect = viewportRef.current?.getBoundingClientRect();
-        store.setState(setViewport(fitView({ nodes: next.nodes, viewportW: rect?.width ?? 800, viewportH: rect?.height ?? 600 })));
+        // A hidden member is not painted, so it must not widen the box the view
+        // fits to: the map would open on empty margin it drew nothing into.
+        store.setState(setViewport(fitView({ nodes: next.nodes.filter(modelDrawsNode(next)), viewportW: rect?.width ?? 800, viewportH: rect?.height ?? 600 })));
       }
     },
     [store],
@@ -1028,13 +1031,14 @@ function DiagramShell({
     const rect = el?.getBoundingClientRect();
     const next = fitView({
       // The painted boxes, so a semantic canvas fits what is on screen rather
-      // than the coarse slots under it.
-      nodes: canvasDisplay.nodes,
+      // than the coarse slots under it. A member the canvas does not draw has
+      // no box on screen, so it is no part of what the view fits.
+      nodes: canvasDisplay.nodes.filter(modelDrawsNode(doc)),
       viewportW: rect?.width ?? 800,
       viewportH: rect?.height ?? 600,
     });
     store.setState(setViewport(next));
-  }, [canvasDisplay.nodes, store]);
+  }, [canvasDisplay.nodes, doc, store]);
 
   const persistSave = useCallback(
     async (name: string) => {
