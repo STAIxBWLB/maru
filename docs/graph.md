@@ -35,8 +35,8 @@ The graph is assembled from two sources by `src/lib/graph/model.ts`:
 
 If the overlay file is missing or malformed, the model degrades to the live
 layer alone — the graph still renders, just without community coloring. The
-overlay is produced out-of-band by the `vault-graph` skill
-(`skills/lib/build-graph.py`), not by the app.
+overlay is produced out-of-band by `vmem graph build <vault>` (with
+`--workspace` for the workspace graph), not by the app.
 
 ## Rendering (V4, hardened in V5/V6)
 
@@ -229,7 +229,7 @@ from the fallback and observes the same node/edge visibility masks.
 The right pane's **Insights** tab (`GraphInsightsPanel` +
 `src/lib/graph/insights.ts`) turns the read-only graph into an ideation surface.
 All analyses run client-side over the in-memory model (no dependency on the
-weekly `build-graph.py` report):
+weekly `vmem graph build` report):
 
 - **Hidden link candidates** — non-adjacent note pairs sharing ≥2 neighbors
   (common-neighbor link prediction); the "derive new relationships" core.

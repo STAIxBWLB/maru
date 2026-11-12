@@ -1,10 +1,9 @@
 // Graph insight engine — the "ideation" layer over the read-only graph.
 //
 // All analyses run in a worker over the in-memory GraphModel, so nothing here
-// depends on the weekly
-// build-graph.py report; these are the same ideas (god nodes, surprising
-// cross-community links, community bridges) recomputed live, plus link
-// prediction (hidden links) and path finding for exploration.
+// depends on the weekly `vmem graph build` report; these are the same ideas
+// (god nodes, surprising cross-community links, community bridges) recomputed
+// live, plus link prediction (hidden links) and path finding for exploration.
 
 import { buildAdjacency, type GraphModel, type GraphNode } from "./model";
 
@@ -103,8 +102,8 @@ export interface SurprisingConnection {
 }
 
 /** Existing edges that cross community boundaries, ranked by combined degree
- *  (build-graph.py `find_surprising_connections`). Requires the community
- *  overlay; returns [] on the degraded live graph. */
+ *  (the producer's "Surprising Connections (Cross-Community)" report section).
+ *  Requires the community overlay; returns [] on the degraded live graph. */
 export function findSurprisingConnections(
   model: GraphModel,
   limit = 12,
