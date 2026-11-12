@@ -9,6 +9,10 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## Unreleased
+
+- Skills sync no longer links a tool directory through a root that is Maru's skills folder itself. A target whose root resolves to it, such as `~/.qwen/skills` pointing at `~/.maru/skills`, is reported in the sync plan and left alone, so its entries stay the canonical ones, and a link write that would point at its own source is refused before it happens (#587).
+
 ## v1.1.27 - Measured Lines (2026-11-12)
 
 - Diagram has its own layout engine. It validates, lays out and routes all five semantic types (architecture, workflow, sequence, data flow, lifecycle), and the canvas draws the engine's geometry: node boxes, routes, label breaks and diagnostics anchored at the element they describe (#548, #556, #557, #558, #559, #577, #578, #580).

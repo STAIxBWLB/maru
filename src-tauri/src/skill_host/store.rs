@@ -2481,6 +2481,10 @@ pub fn skills_sync_selected_tools(
         }
         preflight_tool_sync(&registry, &desired, &tools, retarget)?;
     }
+    // A target whose root is the canonical tree needs no install of its own:
+    // its entries are the canonical ones, so only the other targets' links are
+    // written or counted.
+    let aliased = aliased_sync_targets(&registry, &tools, retarget)?;
     let profiles = tool_sync_profiles(&registry, &desired, &tools, retarget)?;
     let mut actions = plan_tool_sync(&registry, &desired, &tools, retarget, selection.is_none())?;
     if apply {
@@ -2532,6 +2536,9 @@ pub fn skills_sync_selected_tools(
             let maru_entry = host_fs::skills_root()?.join(&skill.name);
             create_maru_entry_symlink(&maru_entry, &skill_path, &skill.name)?;
             for target in &tools {
+                if aliased.contains(target) {
+                    continue;
+                }
                 let tool_target =
                     effective_install_target(&registry, target, &skill.name, retarget)?;
                 if retarget {
@@ -2601,7 +2608,7 @@ pub fn skills_sync_selected_tools(
         tools: tools.clone(),
         profiles,
         desired_skills: desired.len(),
-        desired_installs: desired.len() * tools.len(),
+        desired_installs: desired.len() * tools.len().saturating_sub(aliased.len()),
         actions,
     })
 }
@@ -2737,6 +2744,10 @@ fn preflight_tool_sync(
             ));
         }
     }
+    // A target rooted at the canonical tree is satisfied by the canonical
+    // entry, so sync writes no link under it and its per-skill link checks
+    // cannot refuse the run.
+    let aliased = aliased_sync_targets(registry, tools, retarget)?;
     for skill in desired {
         let skill_path = PathBuf::from(&skill.abs_path);
         let maru_entry = host_fs::skills_root()?.join(&skill.name);
@@ -2749,7 +2760,7 @@ fn preflight_tool_sync(
                 host_fs::display_path(&maru_entry)
             ));
         }
-        for target in tools {
+        for target in tools.iter().filter(|target| !aliased.contains(*target)) {
             let tool_target = effective_install_target(registry, target, &skill.name, retarget)?;
             if path_occupied(&tool_target)
                 && !symlink_target_path_equals(&tool_target, &maru_entry)
@@ -2906,6 +2917,7 @@ fn plan_tool_sync(
     remove_stale: bool,
 ) -> Result<Vec<SkillToolSyncAction>, String> {
     let mut actions = Vec::new();
+    let aliased = aliased_sync_targets(registry, tools, retarget)?;
     let desired_keys: BTreeSet<(String, String)> = desired
         .iter()
         .flat_map(|skill| {
@@ -2929,6 +2941,20 @@ fn plan_tool_sync(
         }
         for target in tools {
             let tool_target = effective_install_target(registry, target, &skill.name, retarget)?;
+            if aliased.contains(target) {
+                // The target root is the canonical tree, so this destination is
+                // the canonical entry itself: report it and plan no link, and
+                // record no install Maru did not make.
+                actions.push(SkillToolSyncAction {
+                    action: "skip-aliased-target".to_string(),
+                    skill_name: skill.name.clone(),
+                    target: Some(target.clone()),
+                    source: Some(host_fs::display_path(&maru_entry)),
+                    path: host_fs::display_path(&tool_target),
+                    reason: "target install root resolves to the Maru skills root; the canonical entry is that target's entry".to_string(),
+                });
+                continue;
+            }
             if !symlink_target_path_equals(&tool_target, &maru_entry) {
                 actions.push(SkillToolSyncAction {
                     action: "link-tool".to_string(),
@@ -3811,11 +3837,28 @@ fn install_copy(
     write_install_marker(tool_target, skill_id, installed_as, skill_path)
 }
 
+/// A link write whose destination is the source itself would replace the
+/// canonical entry with a link to its own path, so it is refused before
+/// mutation. Both writers share this guard: the comparison resolves each
+/// path's parent, because a target root can alias the canonical tree while
+/// neither path names the other.
+fn refuse_self_link(link: &Path, source: &Path) -> Result<(), String> {
+    if physical_location(link) == physical_location(source) {
+        return Err(format!(
+            "install_target_self_link: {} and {} are the same file; refusing to link an entry to itself. One root is probably a symlink into the other, such as a tool's skills folder pointing at the Maru skills folder; check that root with `readlink`, then remove the alias or re-run the sync without that target",
+            host_fs::display_path(link),
+            host_fs::display_path(source)
+        ));
+    }
+    Ok(())
+}
+
 fn create_maru_entry_symlink(
     maru_entry: &Path,
     skill_path: &Path,
     installed_as: &str,
 ) -> Result<(), String> {
+    refuse_self_link(maru_entry, skill_path)?;
     if !maru_entry.exists() && fs::symlink_metadata(maru_entry).is_err() {
         return host_fs::create_symlink_no_clobber(maru_entry, skill_path);
     }
@@ -3840,6 +3883,7 @@ fn create_install_target_symlink(
     skill_path: &Path,
     installed_as: &str,
 ) -> Result<(), String> {
+    refuse_self_link(tool_target, maru_entry)?;
     if !tool_target.exists() && fs::symlink_metadata(tool_target).is_err() {
         return host_fs::create_symlink_no_clobber(tool_target, maru_entry);
     }
@@ -7984,6 +8028,53 @@ fn recorded_install_roots(registry: &SkillsRegistry, target: &str) -> BTreeSet<P
                 .map(|parent| parent.to_path_buf())
         })
         .collect()
+}
+
+/// The path a write physically lands on: its parent resolved through every
+/// alias with its own last component kept. Two destinations alias each other
+/// exactly when these are equal, which a plain canonicalize cannot answer —
+/// it follows the last component too, so a link and its target compare equal.
+fn physical_location(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => canonicalize_or_self(parent).join(name),
+        _ => canonicalize_or_self(path),
+    }
+}
+
+/// A target root that resolves to the Maru skills root, or into it, is the
+/// canonical tree itself: a link written there replaces a canonical entry with
+/// a link to itself.
+fn aliases_skills_root(root: &Path) -> Result<bool, String> {
+    let canonical = canonicalize_or_self(root);
+    let skills = canonicalize_or_self(&host_fs::skills_root()?);
+    Ok(canonical == skills || canonical.starts_with(&skills))
+}
+
+/// Targets whose effective install root is the canonical tree. Their entries
+/// are the canonical entries, so sync writes no link for them.
+fn aliased_sync_targets(
+    registry: &SkillsRegistry,
+    tools: &[String],
+    retarget: bool,
+) -> Result<BTreeSet<String>, String> {
+    let mut aliased = BTreeSet::new();
+    for target in tools {
+        let mut roots = if retarget {
+            BTreeSet::new()
+        } else {
+            recorded_install_roots(registry, target)
+        };
+        if roots.is_empty() {
+            roots.insert(install_root(target)?);
+        }
+        for root in roots {
+            if aliases_skills_root(&root)? {
+                aliased.insert(target.clone());
+                break;
+            }
+        }
+    }
+    Ok(aliased)
 }
 
 /// Where the install for `(target, installed_as)` lives. An existing record
@@ -14049,6 +14140,176 @@ exit 0
             Some(unrelated_skill.as_path())
         );
         assert_eq!(fs::read(registry_path().unwrap()).unwrap(), registry_before);
+    }
+
+    /// Points a tool's skills root at the canonical tree, the layout that turned
+    /// every canonical entry into a link to itself.
+    fn alias_target_root_onto_skills_root(home: &TestHome, tool_dir: &str) -> PathBuf {
+        let skills_root = host_fs::skills_root().unwrap();
+        fs::create_dir_all(&skills_root).unwrap();
+        let tool_root = home._dir.path().join(tool_dir);
+        fs::create_dir_all(&tool_root).unwrap();
+        let alias = tool_root.join("skills");
+        host_fs::create_symlink_no_clobber(&alias, &skills_root).unwrap();
+        alias
+    }
+
+    fn synced_skill() -> SkillRecord {
+        skills_sync_tools(None, vec!["claude".into()], true, false).unwrap();
+        let registry = load_registry().unwrap();
+        registry
+            .skills
+            .iter()
+            .find(|skill| {
+                registry
+                    .installs
+                    .iter()
+                    .any(|install| install.skill_id == skill.id)
+            })
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn aliased_target_sync_keeps_the_canonical_entry() {
+        let home = test_home();
+        let skill = synced_skill();
+        let alias = alias_target_root_onto_skills_root(&home, ".qwen");
+        let skills_root = host_fs::skills_root().unwrap();
+        let entry = skills_root.join(&skill.name);
+        let skill_path = PathBuf::from(&skill.abs_path);
+
+        skills_sync_selected_tools(
+            None,
+            vec!["qwen".into()],
+            Some(vec![skill.id.clone()]),
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert!(
+            symlink_target_path_equals(&entry, &skill_path),
+            "the canonical entry still points at the skill: {:?}",
+            host_fs::read_link_target(&entry)
+        );
+        assert_ne!(
+            host_fs::read_link_target(&entry).as_deref(),
+            Some(entry.as_path()),
+            "the canonical entry was not replaced with a self-link"
+        );
+        // The aliased target reads that same entry, which is why no link of its
+        // own is written or recorded.
+        assert_eq!(
+            host_fs::read_link_target(&alias.join(&skill.name)).as_deref(),
+            host_fs::read_link_target(&entry).as_deref()
+        );
+        let registry = load_registry().unwrap();
+        assert!(
+            !registry
+                .installs
+                .iter()
+                .any(|install| install.target == "qwen" && install.installed_as == skill.name),
+            "no qwen install record is created for a canonical-tree target"
+        );
+    }
+
+    #[test]
+    fn aliased_target_check_plans_no_tool_link() {
+        let home = test_home();
+        let skill = synced_skill();
+        let alias = alias_target_root_onto_skills_root(&home, ".qwen");
+        let checked = skills_sync_selected_tools(
+            None,
+            vec!["qwen".into()],
+            Some(vec![skill.id.clone()]),
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(
+            checked
+                .actions
+                .iter()
+                .all(|action| action.action != "link-tool"),
+            "{:?}",
+            checked.actions
+        );
+        assert!(
+            checked
+                .actions
+                .iter()
+                .all(|action| action.action != "record-install"),
+            "{:?}",
+            checked.actions
+        );
+        assert!(
+            checked.actions.iter().any(|action| {
+                action.action == "skip-aliased-target"
+                    && action.target.as_deref() == Some("qwen")
+                    && action.path == host_fs::display_path(&alias.join(&skill.name))
+            }),
+            "{:?}",
+            checked.actions
+        );
+    }
+
+    #[test]
+    fn aliased_target_sync_leaves_the_canonical_entry_for_other_targets() {
+        let home = test_home();
+        let skill = synced_skill();
+        let _alias = alias_target_root_onto_skills_root(&home, ".qwen");
+        skills_sync_selected_tools(
+            None,
+            vec!["qwen".into()],
+            Some(vec![skill.id.clone()]),
+            true,
+            false,
+        )
+        .unwrap();
+        let checked = skills_sync_selected_tools(
+            None,
+            vec!["claude".into()],
+            Some(vec![skill.id.clone()]),
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(
+            checked
+                .actions
+                .iter()
+                .all(|action| action.action != "link-canonical"),
+            "another target finds the canonical entry intact: {:?}",
+            checked.actions
+        );
+    }
+
+    #[test]
+    fn link_write_refuses_a_destination_that_resolves_to_its_source() {
+        let home = test_home();
+        let alias = alias_target_root_onto_skills_root(&home, ".qwen");
+        let skills_root = host_fs::skills_root().unwrap();
+        let entry = skills_root.join("self-linked");
+        let aliased_entry = alias.join("self-linked");
+
+        let error = create_install_target_symlink(&aliased_entry, &entry, &entry, "self-linked")
+            .unwrap_err();
+        assert!(error.contains("install_target_self_link"), "{error}");
+        assert!(error.contains("readlink"), "{error}");
+        assert!(!path_occupied(&entry));
+
+        let error = create_maru_entry_symlink(&entry, &entry, "self-linked").unwrap_err();
+        assert!(error.contains("install_target_self_link"), "{error}");
+        assert!(error.contains("readlink"), "{error}");
+        assert!(!path_occupied(&entry));
+
+        // A source outside the alias is written normally: the guard compares
+        // physical locations, not spellings.
+        let skill_path = home._dir.path().join("elsewhere").join("self-linked");
+        fs::create_dir_all(&skill_path).unwrap();
+        create_maru_entry_symlink(&entry, &skill_path, "self-linked").unwrap();
+        assert!(symlink_target_path_equals(&entry, &skill_path));
     }
 
     #[test]
