@@ -9,7 +9,7 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
-## Unreleased
+## v1.1.28 - Single Links (2026-11-12)
 
 - Skills sync no longer links a tool directory through a root that is Maru's skills folder itself. A target whose root resolves to it, such as `~/.qwen/skills` pointing at `~/.maru/skills`, is reported in the sync plan and left alone, so its entries stay the canonical ones, and a link write that would point at its own source is refused before it happens (#587).
 
