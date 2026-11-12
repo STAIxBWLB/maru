@@ -2516,7 +2516,7 @@
     },
     {
       "path": "src-tauri/src/hwped.rs",
-      "sha256": "efda3519970f74fba345b4d5b127abba9f2f82acc779797a2470432af6cb59da"
+      "sha256": "bbe882e3b9c1905f44c3078376be522d5cee0b25b45796ca4ea5f649bc2cf7ed"
     },
     {
       "path": "src-tauri/src/inbox.rs",
@@ -2735,5 +2735,5 @@
       "sha256": "2025ae2c4af528e26d8928f2beff151a1ea41a8990ef49a51ff1b886116d628f"
     }
   ],
-  "sourceCommit": "2e90c98aff89b1652fcb9c7fc26ef15aa58ba3d3"
+  "sourceCommit": "65c772f64ffb8f56211209b9d15ac86c4d0616bc"
 }

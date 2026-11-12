@@ -1106,15 +1106,11 @@ fn legacy_asset_size_suffix<'a>(flag: &str, value: &'a str) -> Option<(&'a str, 
     is_size.then_some((path, &value[path.len()..]))
 }
 
-fn resolve_legacy_asset(
-    flag: &str,
-    value: &str,
-    workspace_root: Option<&str>,
-) -> Result<String, String> {
-    let (anchor, raw) = value.split_once("=>").ok_or_else(|| {
-        format!("hwped_bad_request: {flag} requires anchor=>path with an optional @size; resend the opsToArgv value")
-    })?;
-    let (path, suffix) = legacy_asset_size_suffix(flag, raw).unwrap_or((raw, ""));
+/// Containment every asset path gets, whichever channel carries it: the
+/// workspace is required, the path resolves inside it, the canonical file —
+/// symlink targets included — stays inside, and it is a regular file. The
+/// resolved absolute path is the only form either channel passes on.
+fn resolve_workspace_asset(path: &str, workspace_root: Option<&str>) -> Result<String, String> {
     let root = workspace_root.filter(|root| !root.trim().is_empty()).ok_or_else(|| {
         "hwped_bad_request: image operations require workspaceRoot for path containment; provide the workspace containing the image file".to_string()
     })?;
@@ -1133,10 +1129,22 @@ fn resolve_legacy_asset(
     if !resolved.is_file() {
         return Err("hwped_bad_request: image asset is not a regular file; choose an existing image file in the workspace".to_string());
     }
-    let absolute = resolved.to_str().ok_or_else(|| {
+    resolved.to_str().map(str::to_string).ok_or_else(|| {
         "hwped_bad_request: resolved image path is not UTF-8; rename the asset with a Unicode filename and retry".to_string()
+    })
+}
+
+fn resolve_legacy_asset(
+    flag: &str,
+    value: &str,
+    workspace_root: Option<&str>,
+) -> Result<String, String> {
+    let (anchor, raw) = value.split_once("=>").ok_or_else(|| {
+        format!("hwped_bad_request: {flag} requires anchor=>path with an optional @size; resend the opsToArgv value")
     })?;
-    if suffix.is_empty() && legacy_asset_size_suffix(flag, absolute).is_some() {
+    let (path, suffix) = legacy_asset_size_suffix(flag, raw).unwrap_or((raw, ""));
+    let absolute = resolve_workspace_asset(path, workspace_root)?;
+    if suffix.is_empty() && legacy_asset_size_suffix(flag, &absolute).is_some() {
         return Err("hwped_bad_request: resolved image filename has a size-like @suffix; rename the file or supply explicit image dimensions so the CLI selects the same file".to_string());
     }
     Ok(format!("{anchor}=>{absolute}{suffix}"))
@@ -1158,6 +1166,45 @@ fn prepare_legacy_edit_args(
 #[cfg(test)]
 mod argv_tests;
 
+/// The JSON channel carries asset paths as bare `path` fields, with the anchor
+/// and dimensions as their own keys, so there is no `=>` or `@size` to keep:
+/// every `insert_image` and `seal` op is contained exactly as the legacy
+/// channel contains its `=>path` half, and its `path` becomes that absolute
+/// file before the ops file is staged. An op whose `path` is not a string is
+/// refused here; a missing one is left to the engine's own schema.
+fn contain_json_edit_assets(ops: Value, workspace_root: Option<&str>) -> Result<Value, String> {
+    let Value::Array(items) = ops else {
+        return Ok(ops);
+    };
+    let mut contained = Vec::with_capacity(items.len());
+    for mut op in items {
+        let is_asset = matches!(
+            op.get("op").and_then(Value::as_str),
+            Some("insert_image") | Some("seal")
+        );
+        if is_asset {
+            if let Some(path) = op.get("path") {
+                let path = path.as_str().ok_or_else(|| {
+                    format!(
+                        "hwped_bad_request: {} path must be a string; send the asset path as a JSON string",
+                        op.get("op").and_then(Value::as_str).unwrap_or("asset")
+                    )
+                })?;
+                let absolute = resolve_workspace_asset(path, workspace_root)?;
+                if let Some(fields) = op.as_object_mut() {
+                    fields.insert("path".to_string(), Value::from(absolute));
+                }
+            }
+        }
+        contained.push(op);
+    }
+    Ok(Value::Array(contained))
+}
+
+#[cfg(test)]
+#[path = "hwped/json_ops_tests.rs"]
+mod json_ops_tests;
+
 fn edit_now(
     document: HwpedDocumentRef,
     ops_argv: Option<Value>,
@@ -1173,7 +1220,9 @@ fn edit_now(
             })?;
             EditOperations::Argv(prepare_legacy_edit_args(argv, workspace_root.as_deref())?)
         }
-        (None, Some(ops)) if ops.is_array() => EditOperations::Json(ops),
+        (None, Some(ops)) if ops.is_array() => {
+            EditOperations::Json(contain_json_edit_assets(ops, workspace_root.as_deref())?)
+        }
         (None, Some(_)) => {
             return Err("hwped_bad_request: ops must be a JSON array; send an edit-ops-v1 array or use opsArgv instead".to_string().into());
         }
@@ -2559,6 +2608,76 @@ esac
             .unwrap();
         assert_eq!(capabilities["version"], "0.19.99");
         assert!(capabilities.get("editOps").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn json_edit_channel_stages_the_contained_asset_path() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.hwpx"), b"original document").unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("assets/chart.png"), b"fixture asset bytes").unwrap();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set("MARU_HWP_BIN", &fake_hwp(&bin_dir));
+        let absolute = std::fs::canonicalize(root.join("assets/chart.png")).unwrap();
+
+        let edited = run(edit_request(
+            doc_with_path("docs/a.hwpx"),
+            None,
+            Some(serde_json::json!([
+                {"op": "insert_image", "anchor": "삽화", "path": "assets/chart.png", "width_mm": 80, "height_mm": 60},
+                {"op": "seal", "anchor": "서명", "path": "assets/chart.png"}
+            ])),
+            Some(false),
+            None,
+            Some(text(&root)),
+        ))
+        .unwrap();
+
+        let bytes = BASE64.decode(edited.data_base64).unwrap();
+        let captured = String::from_utf8(bytes).unwrap();
+        let staged: Value = serde_json::from_str(captured.splitn(4, '\n').nth(3).unwrap()).unwrap();
+        // Both asset ops reach the engine with the resolved absolute file, and
+        // their own keys are untouched.
+        assert_eq!(staged[0]["path"], text(&absolute), "{staged}");
+        assert_eq!(staged[0]["anchor"], "삽화");
+        assert_eq!(staged[0]["width_mm"], 80);
+        assert_eq!(staged[1]["path"], text(&absolute), "{staged}");
+        assert_eq!(staged[1]["anchor"], "서명");
+
+        // A refusal happens before the engine runs at all: no edit invocation,
+        // no output and no document change.
+        let outside = home.root.path().join("outside.png");
+        std::fs::write(&outside, b"outside asset").unwrap();
+        let refused = run(edit_request(
+            doc_with_path("docs/a.hwpx"),
+            None,
+            Some(serde_json::json!([
+                {"op": "insert_image", "anchor": "삽화", "path": text(&outside)}
+            ])),
+            None,
+            None,
+            Some(text(&root)),
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(refused.contains("outside workspaceRoot"), "{refused}");
+        let invocations = std::fs::read_to_string(bin_dir.join("invocations")).unwrap();
+        assert!(
+            invocations
+                .lines()
+                .filter(|line| line.starts_with("edit "))
+                .count()
+                == 1,
+            "only the accepted call reaches the engine: {invocations}"
+        );
+        assert_eq!(
+            std::fs::read(root.join("docs/a.hwpx")).unwrap(),
+            b"original document"
+        );
     }
 
     #[cfg(unix)]
