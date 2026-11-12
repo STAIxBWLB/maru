@@ -1880,6 +1880,24 @@ mod phase08_21 {
     }
 
     #[cfg(unix)]
+    #[test]
+    #[ignore = "requires MARU_HWPED_REAL_AHWP_DIR: a directory holding a released agent-hwp 1.x installed only as `ahwp`"]
+    fn released_engine_installed_only_as_ahwp_is_found_and_runs() {
+        // Done-when for maru#592: the latest 1.x works with no `hwp` name and
+        // no MARU_HWP_BIN override, through the same lookup the bridge uses.
+        let dir = std::env::var_os("MARU_HWPED_REAL_AHWP_DIR")
+            .map(PathBuf::from)
+            .expect("set MARU_HWPED_REAL_AHWP_DIR");
+        assert!(dir.join("ahwp").is_file() && !dir.join("hwp").exists());
+        let _env = LookupEnv::path_only(&dir);
+        let bin = hwp_bin().unwrap();
+        assert_eq!(bin, dir.join("ahwp"));
+        let version = run_hwp_ok(&bin, &[OsString::from("--version")]).unwrap();
+        let (major, _, _) = parse_version(&version).unwrap();
+        assert_eq!(major, 1, "{}", String::from_utf8_lossy(&version));
+    }
+
+    #[cfg(unix)]
     fn fake_hwp_version(dir: &Path, version: &str) -> PathBuf {
         let binary = dir.join("hwp");
         let script = r#"#!/bin/sh
