@@ -1727,7 +1727,9 @@ that own it:
   instead of re-normalizing and re-sorting every obstacle per route;
 - each axis answers a clearance query from an inclusive interval bucket, so a
   retained bucket is always a superset that the existing exact predicate filters,
-  and a scene whose retained product exceeds 65,536 records still scans lazily;
+  and a scene whose retained product exceeds 65,536 records still scans lazily,
+  because the retained-record count comes off one difference-array prefix sum and
+  the bail-out never counts the product it refuses to retain;
 - route diagnostics stand on a uniform bucket grid over the route's own bounds
   grown by the clearance limit, in build order, so first-match diagnostics do not
   change; a grid wider than 262,144 cells keeps the exact full scan;
@@ -1767,6 +1769,19 @@ scene hashing and 11.1% in font metric measurement, while the three named hot
 spots now measure 5.3% (route diagnostics), 0.3% (axis population) and 8.3%
 (scene finish). Scene finish is the only one whose share rose: its absolute time
 fell, but the rest of the pass fell faster.
+
+A scene whose edges carry relationship labels does not get this reuse: a route
+that sees a label suffix cannot use the scene's cached obstacle set, so it routes
+through the free functions and builds a fresh `RoutePlanner` and a fresh cache
+for that route alone. On a 1,000-node chain with a one-character label on every
+edge, the native release layout measures 170.6 ms at `27ea454d` and 445.2 ms at
+this head (median of five warm layouts each), and 1,997 of the 1,998 route
+computations take that path; the same chain without labels measures 77.4 ms to
+51.1 ms. The hosted AC6 fixture carries no relationship labels, so the rows above
+do not cover this case. Routing such a leg against the cached base set plus the
+suffix obstacles, rather than through a fresh planner, is the next step for
+label-heavy scenes.
+
 Scene hashes, SVG hashes, PNG manifests and every corpus case are byte-identical
 to the base engine; the only receipt change is the constraint-evaluation work
 counter, `benchmarkWork.stats.constraintEvaluations` 3,332,334 to 2,013,086,

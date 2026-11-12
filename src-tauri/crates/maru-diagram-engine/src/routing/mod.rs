@@ -248,10 +248,17 @@ struct Visit {
 /// Cartesian grid.
 ///
 /// One cache serves every leg of a scene, so a bucket is a property of the
-/// scene's axis rather than of a leg's grid: a query between two axis
-/// coordinates reads the bucket of the coordinate at or just below it, and the
-/// caller's exact predicate rejects the obstacles that only touch that
-/// boundary. Every coordinate therefore has a bucket.
+/// scene's axis rather than of a leg's grid: a bucket holds an obstacle when
+/// that obstacle's closed interval [`crossing`] covers the coordinate, and a
+/// query reads the bucket of the first coordinate strictly above it, or the
+/// last bucket when no coordinate is above.
+///
+/// That bucket is a superset because an obstacle can only cover the query
+/// strictly when its far edge is an axis coordinate above the query, and the
+/// first coordinate above the query is then at or below that edge and still
+/// above the obstacle's near edge. The caller's exact predicate rejects the
+/// obstacles that only touch a boundary, so every coordinate has a bucket and
+/// no covering obstacle is missed.
 struct AxisCandidates {
     /// The sorted, deduplicated axis the buckets are indexed by.
     axis: Vec<Coord>,
@@ -319,9 +326,12 @@ impl AxisCandidates {
         masked: &[usize],
         horizontal: bool,
     ) -> Result<Self, Diagnostic> {
-        let mut spans = Vec::new();
-        spans.try_reserve(axis.len() + 1).map_err(|_| budget())?;
-        spans.resize(axis.len() + 1, 0_u32);
+        // A difference array, so one obstacle costs two deltas instead of one
+        // increment per axis slot it covers: a wide overlapping set would
+        // otherwise hold obstacles times axis before the cap below is read.
+        let mut deltas = Vec::new();
+        deltas.try_reserve(axis.len() + 1).map_err(|_| budget())?;
+        deltas.resize(axis.len() + 1, 0_i64);
         for (index, rect) in obstacles.iter().enumerate() {
             if masked.contains(&index) {
                 continue;
@@ -329,19 +339,31 @@ impl AxisCandidates {
             let (start, end) = crossing(rect, horizontal);
             let first = axis.partition_point(|coordinate| *coordinate < start);
             let last = axis.partition_point(|coordinate| *coordinate <= end);
-            for slot in &mut spans[first + 1..last + 1] {
-                *slot = slot.saturating_add(1);
+            if first >= last {
+                continue;
             }
+            deltas[first] += 1;
+            deltas[last] -= 1;
         }
+        let mut spans = Vec::new();
+        spans.try_reserve(axis.len() + 1).map_err(|_| budget())?;
+        spans.resize(axis.len() + 1, 0_u32);
+        let mut covered: i64 = 0;
+        let mut total: i64 = 0;
         for index in 0..axis.len() {
-            spans[index + 1] = spans[index].saturating_add(spans[index + 1]);
+            covered += deltas[index];
+            total += covered;
+            if total > MAX_OBSTACLES as i64 {
+                // Wide overlapping obstacles reach the retained-record cap. The
+                // running total only grows, so stopping here reaches the same
+                // verdict as the old end-of-pass check, without ever counting
+                // the slots the retained form would consume: scan per lookup
+                // instead.
+                return Self::scanning(axis);
+            }
+            spans[index + 1] = total as u32;
         }
-        let total = usize::try_from(spans[axis.len()]).map_err(|_| budget())?;
-        if total > MAX_OBSTACLES {
-            // Wide overlapping obstacles may reach every grid coordinate. Scan
-            // per lookup rather than retaining that product.
-            return Self::scanning(axis);
-        }
+        let total = usize::try_from(total).map_err(|_| budget())?;
         let mut cursor = Vec::new();
         cursor.try_reserve(axis.len()).map_err(|_| budget())?;
         cursor.extend_from_slice(&spans[..axis.len()]);
@@ -377,8 +399,12 @@ impl AxisCandidates {
         horizontal: bool,
     ) -> Candidates<'a> {
         if self.retained && !self.axis.is_empty() {
-            // The axis is sorted, so this is the coordinate at or just below
-            // the query. Its bucket holds every obstacle that can reach it.
+            // `partition_point` counts the coordinates at or below the query,
+            // so this is the first coordinate strictly above it, clamped to the
+            // last bucket when no coordinate is above. That bucket still holds
+            // every obstacle whose closed interval can cover the query: such an
+            // obstacle's far edge is an axis coordinate above the query, and it
+            // is not below the first one.
             let position = self
                 .axis
                 .partition_point(|held| *held <= coordinate)
@@ -794,12 +820,14 @@ fn route_with_budget(
 }
 
 /// One obstacle set's routing inputs: the normalized obstacles, plus — built on
-/// the first leg that actually needs the implicit grid — the obstacle axis and
-/// a clearance cache per mask set.
+/// the scene's first clearance query — the obstacle axis and a clearance cache
+/// per mask set.
 ///
-/// A leg with a clear straight or one-bend path never builds the grid, so a
-/// scene where most connections are visible pays nothing for it. When a leg
-/// does search, the axis is sorted once for the whole obstacle set and a cache
+/// The grid is not conditional on a leg searching. `route` tests both anchors
+/// and `search_leg` reads the cache before its straight and one-bend checks, so
+/// the first route of a scene builds it whatever its path turns out to be; a
+/// clear straight or one-bend leg saves only the per-leg axis and the A*
+/// search. The axis is sorted once for the whole obstacle set and a cache
 /// bucket answers about a coordinate rather than about a leg: the search still
 /// sees the same coordinate set and the same candidates as a per-leg build.
 pub(crate) struct RoutePlanner {
@@ -854,7 +882,7 @@ impl RoutePlanner {
     pub(crate) fn new(obstacles: &[GeometryBox]) -> Result<Self, Diagnostic> {
         Ok(Self {
             obstacles: normalize(obstacles)?,
-            source_to_normalized: normalized_obstacle_indexes(obstacles),
+            source_to_normalized: normalized_obstacle_indexes(obstacles)?,
             prepared: RefCell::new(None),
         })
     }
@@ -1002,22 +1030,21 @@ fn obstacle_axis(obstacles: &[Rect], horizontal: bool) -> Result<Vec<Coord>, Dia
     Ok(axis)
 }
 
-fn normalized_obstacle_indexes(source: &[GeometryBox]) -> Vec<Option<usize>> {
+fn normalized_obstacle_indexes(source: &[GeometryBox]) -> Result<Vec<Option<usize>>, Diagnostic> {
     // normalize omits zero-area boxes, retaining the source order of every
     // painted obstacle. The caller-provided indexes refer to that source list.
+    let mut indexes = Vec::new();
+    indexes.try_reserve(source.len()).map_err(|_| budget())?;
     let mut next = 0;
-    source
-        .iter()
-        .map(|bounds| {
-            if bounds.width == 0 || bounds.height == 0 {
-                None
-            } else {
-                let index = next;
-                next += 1;
-                Some(index)
-            }
-        })
-        .collect()
+    for bounds in source {
+        if bounds.width == 0 || bounds.height == 0 {
+            indexes.push(None);
+        } else {
+            indexes.push(Some(next));
+            next += 1;
+        }
+    }
+    Ok(indexes)
 }
 
 fn endpoint_mask_indexes(
@@ -1150,6 +1177,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn wide_overlap_build_reaches_scanning_fallback_in_bounded_work() {
+        // The counting pass's worst case: the largest obstacle set the cap
+        // admits, each obstacle covering every axis slot. Counting one
+        // increment per obstacle per slot would be 65,536 x 32,768, so only a
+        // pass that reads the cap off its running total reaches the fallback.
+        let axis: Vec<_> = (0..32_768).collect();
+        let obstacles = normalize(&vec![rect(0, 0, 32_768, 32_768); MAX_OBSTACLES]).unwrap();
+        let started = std::time::Instant::now();
+        let candidates = AxisCandidates::build(&axis, &obstacles, &[], true).unwrap();
+        let elapsed = started.elapsed();
+        assert!(!candidates.retained, "wide overlap must scan per lookup");
+        assert_eq!(
+            candidates.candidates(16_384, &obstacles, &[], true).count(),
+            obstacles.len(),
+            "the fallback still sees every obstacle"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "the counting pass read the cap after {elapsed:?}"
+        );
     }
 
     #[test]
