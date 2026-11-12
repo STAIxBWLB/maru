@@ -32,7 +32,7 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
-use crate::cli_path::{augmented_path, is_executable, resolve_program};
+use crate::cli_path::{augmented_path, is_executable, resolve_hwp_engine};
 use crate::command_output::{
     run_command_with_timeout_and_limits, CommandTermination, OutputLimits,
 };
@@ -176,19 +176,20 @@ pub struct HwpedCapabilities {
     pub formats: Vec<String>,
 }
 
-/// Binary resolution: MARU_HWP_BIN override -> `hwp` on the (augmented) PATH.
+/// Binary resolution: MARU_HWP_BIN override -> the engine on the (augmented)
+/// PATH, `ahwp` first and the 1.x `hwp` compatibility name as the fallback.
 fn find_hwp_tool() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("MARU_HWP_BIN").map(PathBuf::from) {
         if is_executable(&path) {
             return Some(path);
         }
     }
-    resolve_program("hwp")
+    resolve_hwp_engine()
 }
 
 fn hwp_bin() -> Result<PathBuf, String> {
     find_hwp_tool().ok_or_else(|| {
-        "cli_missing: hwp binary not found. Install hwp-cli >= 0.8.7 or set MARU_HWP_BIN"
+        "cli_missing: ahwp binary not found. Install agent-hwp (https://github.com/STAIxBWLB/agent-hwp) >= 0.8.7 or set MARU_HWP_BIN"
             .to_string()
     })
 }
@@ -351,11 +352,11 @@ fn ensure_version(bin: &Path) -> Result<String, String> {
         )
     })?;
     let version = parse_version(&stdout).ok_or_else(|| {
-        "hwp_version: cannot parse hwp --version output; install a supported hwp-cli release and retry".to_string()
+        "hwp_version: cannot parse the engine's --version output; install a supported agent-hwp release and retry".to_string()
     })?;
     if !version_at_least(version, MIN_VERSION) {
         return Err(format!(
-            "hwp_version: hwp {}.{}.{} is too old; >= 0.8.7 required; update hwp-cli or set MARU_HWP_BIN to a supported binary and retry",
+            "hwp_version: hwp {}.{}.{} is too old; >= 0.8.7 required; update agent-hwp or set MARU_HWP_BIN to a supported binary and retry",
             version.0, version.1, version.2,
         ));
     }
@@ -421,7 +422,7 @@ fn require_feature_version(version: &str, feature: &str) -> Result<(), HwpedBrid
     }
     Err(HwpedBridgeError::FeatureVersion(crate::ipc_error::IpcError {
         code: crate::ipc_error::HWPED_FEATURE_REQUIRES_VERSION.to_string(),
-        message: format!("{feature} requires hwp-cli >= 0.20.0; detected {version}. Upgrade hwp-cli to 0.20.0 or later, or set MARU_HWP_BIN before restarting Maru, then retry."),
+        message: format!("{feature} requires agent-hwp >= 0.20.0; detected {version}. Upgrade agent-hwp to 0.20.0 or later, or set MARU_HWP_BIN before restarting Maru, then retry."),
     }))
 }
 
@@ -1817,6 +1818,67 @@ mod phase08_21 {
         fake_hwp_version(dir, "0.20.0")
     }
 
+    /// Restores PATH and MARU_HWP_BIN after a lookup test, under the shared
+    /// env lock every MARU_HWP_BIN test already takes.
+    struct LookupEnv {
+        _lock: MutexGuard<'static, ()>,
+        path: Option<std::ffi::OsString>,
+        override_bin: Option<std::ffi::OsString>,
+    }
+    impl LookupEnv {
+        fn path_only(dir: &Path) -> Self {
+            let lock = super::PHASE08_21_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let saved = Self {
+                _lock: lock,
+                path: std::env::var_os("PATH"),
+                override_bin: std::env::var_os("MARU_HWP_BIN"),
+            };
+            std::env::remove_var("MARU_HWP_BIN");
+            std::env::set_var("PATH", dir);
+            saved
+        }
+    }
+    impl Drop for LookupEnv {
+        fn drop(&mut self) {
+            match self.path.take() {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            match self.override_bin.take() {
+                Some(bin) => std::env::set_var("MARU_HWP_BIN", bin),
+                None => std::env::remove_var("MARU_HWP_BIN"),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn engine_lookup_finds_ahwp_alone_and_prefers_it_over_hwp() {
+        // agent-hwp 2.0.0 ships only `ahwp`; 1.x ships both names.
+        let dir = tempfile::tempdir().unwrap();
+        let ahwp = dir.path().join("ahwp");
+        std::fs::rename(fake_hwp(dir.path()), &ahwp).unwrap();
+        {
+            let _env = LookupEnv::path_only(dir.path());
+            assert_eq!(find_hwp_tool(), Some(ahwp.clone()));
+            assert_eq!(hwp_bin().unwrap(), ahwp);
+        }
+        let legacy = fake_hwp(dir.path());
+        {
+            let _env = LookupEnv::path_only(dir.path());
+            assert_eq!(
+                find_hwp_tool(),
+                Some(ahwp.clone()),
+                "ahwp wins over {}",
+                legacy.display()
+            );
+        }
+        // The `hwp`-only fallback is covered by cli_path's injected resolver:
+        // here the augmented PATH would also reach a host-installed ahwp.
+    }
+
     #[cfg(unix)]
     fn fake_hwp_version(dir: &Path, version: &str) -> PathBuf {
         let binary = dir.join("hwp");
@@ -1971,7 +2033,7 @@ esac
         assert!(error.message.contains(detected), "{}", error.message);
         assert!(error.message.contains("0.20.0"), "{}", error.message);
         assert!(
-            error.message.contains("Upgrade hwp-cli"),
+            error.message.contains("Upgrade agent-hwp"),
             "{}",
             error.message
         );
@@ -2582,7 +2644,7 @@ esac
         assert!(edit_error["message"]
             .as_str()
             .unwrap()
-            .contains("Upgrade hwp-cli"));
+            .contains("Upgrade agent-hwp"));
 
         let layout_error = invoke(
             "hwped_render",

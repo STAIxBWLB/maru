@@ -1,8 +1,11 @@
 # hwp-editor integration (hwped_*)
 
 Maru hosts the [hwp-editor](https://github.com/STAIxBWLB/hwp-editor) engine
-bridge: six Tauri commands (`src-tauri/src/hwped.rs`) that spawn the `hwp`
-binary (hwp-cli >= 0.8.7) behind the editor's `HwpEngine` contract. This is a
+bridge: six Tauri commands (`src-tauri/src/hwped.rs`) that spawn the HWP engine
+([agent-hwp](https://github.com/STAIxBWLB/agent-hwp) >= 0.8.7, formerly hwp-cli)
+behind the editor's `HwpEngine` contract. Maru looks for the engine's own name
+`ahwp` first and falls back to `hwp`, the compatibility name every 1.x release
+still ships; `MARU_HWP_BIN` overrides both. This is a
 backend milestone; the published-engine UI migration follows the release
 gate described below.
 

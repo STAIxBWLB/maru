@@ -316,10 +316,11 @@ fn convert_hwpx(source: &Path, output: &Path) -> ConverterRun {
         Ok(hwp) => hwp,
         Err(reason) => {
             return ConverterRun {
-                command: "hwp".to_string(),
+                // The engine's own name; `hwp` is only its 1.x fallback.
+                command: "ahwp".to_string(),
                 result: Err(io::Error::new(io::ErrorKind::NotFound, reason)),
                 warning: None,
-            }
+            };
         }
     };
     run(
@@ -835,7 +836,7 @@ exit 2
         let response = run(ipc::export_dispatch(plan_request(&root))).unwrap();
         let result = &response.results[0];
         assert!(!result.success);
-        assert_eq!(result.command, "hwp");
+        assert_eq!(result.command, "ahwp");
         assert!(
             result
                 .reason

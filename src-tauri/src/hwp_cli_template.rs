@@ -14,7 +14,7 @@ use crate::artifact_checks::ArtifactCheck;
 use crate::atomic_file::{
     with_path_transactions, write_atomic, PathTransactionLease, PathTransactionRequest,
 };
-use crate::cli_path::{augmented_path, is_executable, resolve_program};
+use crate::cli_path::{augmented_path, hwp_engine_candidates, is_executable, HWP_ENGINE_NAMES};
 use crate::command_output::{
     run_command_with_timeout_and_limits, CommandTermination, OutputLimits,
 };
@@ -236,14 +236,22 @@ fn canonical_template(source: &str, key: &str) -> Result<(&'static str, &'static
         .ok_or_else(|| format!("template_alias_invalid: unsupported hwp_cli_skill alias: {alias}"))
 }
 
+/// Every place a released engine may live, each in `ahwp`-then-`hwp` order:
+/// the (augmented) PATH, then a binary bundled in the `hwp` skill directory.
+/// The skill keeps its `hwp` name; only the engine binary was renamed.
 fn hwp_candidates() -> Vec<PathBuf> {
-    let mut candidates = resolve_program("hwp").into_iter().collect::<Vec<_>>();
+    let mut candidates = hwp_engine_candidates();
+    let mut skill_dirs = Vec::new();
     if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".maru/skills/hwp/hwp"));
-        candidates.push(home.join(".maru/skills/_builtin/skills/hwp/hwp"));
+        skill_dirs.push(home.join(".maru/skills/hwp"));
+        skill_dirs.push(home.join(".maru/skills/_builtin/skills/hwp"));
     }
-    candidates
-        .push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("skills-bootstrap/skills/hwp/hwp"));
+    skill_dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("skills-bootstrap/skills/hwp"));
+    for dir in skill_dirs {
+        for name in HWP_ENGINE_NAMES {
+            candidates.push(dir.join(name));
+        }
+    }
     candidates
 }
 
@@ -260,7 +268,7 @@ fn select_compatible_hwp(candidates: impl IntoIterator<Item = PathBuf>) -> Resul
     }
     Err(version_errors.into_iter().next().unwrap_or_else(|| {
         let (major, minor, patch) = MIN_HWP_VERSION;
-        format!("cli_missing: released hwp >= {major}.{minor}.{patch} binary not found; install/export the unified hwp skill or set MARU_HWP_BIN")
+        format!("cli_missing: released ahwp >= {major}.{minor}.{patch} binary not found; install agent-hwp (https://github.com/STAIxBWLB/agent-hwp), export the unified hwp skill, or set MARU_HWP_BIN")
     }))
 }
 
@@ -1088,6 +1096,42 @@ esac
             r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
         );
         assert!(ensure_released_version(&released_binary).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_engine_installed_only_as_ahwp_is_selected() {
+        // agent-hwp 2.0.0 drops the `hwp` compatibility name, so a released
+        // engine reached only as `ahwp` must be enough on its own.
+        let tmp = tempfile::tempdir().unwrap();
+        let released = fake_hwp(
+            tmp.path(),
+            "1.3.0",
+            false,
+            r#"{"output":"filled.hwpx","mode":"placeholders","replaced":1,"counts":{"기관명":1},"warnings":[]}"#,
+        );
+        let ahwp = tmp.path().join("ahwp");
+        fs::rename(&released, &ahwp).unwrap();
+        assert!(!released.exists(), "no `hwp` name is left installed");
+        let missing_hwp = tmp.path().join("hwp");
+        assert_eq!(
+            select_compatible_hwp(vec![ahwp.clone(), missing_hwp]).unwrap(),
+            ahwp
+        );
+    }
+
+    #[test]
+    fn engine_candidates_try_ahwp_before_hwp_in_every_skill_dir() {
+        let candidates = hwp_candidates();
+        let skill_tail: Vec<_> = candidates
+            .iter()
+            .filter(|path| path.parent().is_some_and(|dir| dir.ends_with("hwp")))
+            .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+            .collect();
+        assert!(!skill_tail.is_empty());
+        for pair in skill_tail.chunks(2) {
+            assert_eq!(pair, ["ahwp", "hwp"], "{candidates:?}");
+        }
     }
 
     #[cfg(unix)]

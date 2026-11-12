@@ -85,6 +85,34 @@ pub fn resolve_program(program: &str) -> Option<PathBuf> {
         .ok()
 }
 
+/// Command names of the HWP engine (STAIxBWLB/agent-hwp), in lookup order.
+/// `ahwp` is the engine's own name. `hwp` is the compatibility name every 1.x
+/// release still ships and 2.0.0 removes, so it is only a fallback.
+pub const HWP_ENGINE_NAMES: [&str; 2] = ["ahwp", "hwp"];
+
+/// Every installed HWP engine on the (augmented) PATH, `ahwp` before `hwp`,
+/// without duplicates. Callers that check versions walk the whole list.
+pub fn hwp_engine_candidates() -> Vec<PathBuf> {
+    engine_candidates_with(resolve_program)
+}
+
+/// The HWP engine to spawn: `ahwp`, else the 1.x `hwp` compatibility name.
+pub fn resolve_hwp_engine() -> Option<PathBuf> {
+    hwp_engine_candidates().into_iter().next()
+}
+
+fn engine_candidates_with(resolve: impl Fn(&str) -> Option<PathBuf>) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    for name in HWP_ENGINE_NAMES {
+        if let Some(path) = resolve(name) {
+            if !found.contains(&path) {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
 pub fn which_in_path(program: &str, path_env: Option<&OsStr>) -> Result<PathBuf, std::io::Error> {
     let Some(path_env) = path_env else {
         return Err(std::io::Error::new(
@@ -188,6 +216,57 @@ pub fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A resolver over a fixed set of installed names, as if on PATH.
+    fn installed(
+        names: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<PathBuf> {
+        move |name| {
+            names
+                .iter()
+                .find(|(installed, _)| *installed == name)
+                .map(|(_, path)| PathBuf::from(path))
+        }
+    }
+
+    #[test]
+    fn hwp_engine_prefers_ahwp_and_falls_back_to_the_1x_hwp_name() {
+        // 2.0.0 and later: only `ahwp` exists.
+        assert_eq!(
+            engine_candidates_with(installed(&[("ahwp", "/bin/ahwp")])),
+            vec![PathBuf::from("/bin/ahwp")]
+        );
+        // A 1.x install ships both names: `ahwp` comes first.
+        assert_eq!(
+            engine_candidates_with(installed(&[("hwp", "/bin/hwp"), ("ahwp", "/bin/ahwp")])),
+            vec![PathBuf::from("/bin/ahwp"), PathBuf::from("/bin/hwp")]
+        );
+        // A release before the rename: only `hwp`.
+        assert_eq!(
+            engine_candidates_with(installed(&[("hwp", "/bin/hwp")])),
+            vec![PathBuf::from("/bin/hwp")]
+        );
+        // One file reached by both names is offered once.
+        assert_eq!(
+            engine_candidates_with(installed(&[
+                ("hwp", "/bin/engine"),
+                ("ahwp", "/bin/engine")
+            ])),
+            vec![PathBuf::from("/bin/engine")]
+        );
+        assert!(engine_candidates_with(installed(&[])).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hwp_engine_resolves_an_ahwp_only_install_on_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("ahwp");
+        crate::test_support::write_executable_fixture(&bin, "#!/bin/sh\nexit 0\n", 0o755).unwrap();
+        let path_env = std::env::join_paths([dir.path()]).unwrap();
+        let resolve = |name: &str| which_in_path(name, Some(&path_env)).ok();
+        assert_eq!(engine_candidates_with(resolve), vec![bin]);
+    }
 
     #[cfg(unix)]
     #[test]
