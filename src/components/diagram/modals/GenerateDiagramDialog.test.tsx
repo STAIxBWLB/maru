@@ -145,6 +145,17 @@ async function setTextarea(el: HTMLTextAreaElement, value: string) {
   });
 }
 
+/** Wait until the handler has asked for confirmation and its answer has been
+ *  delivered, so a negative assertion after a cancel cannot pass before the
+ *  handler acted on it. */
+async function settleConfirm() {
+  await vi.waitFor(() => expect(confirmDialog).toHaveBeenCalled());
+  const results = vi.mocked(confirmDialog).mock.results;
+  await act(async () => {
+    await results[results.length - 1]!.value;
+  });
+}
+
 async function runGeneration() {
   await setTextarea(query<HTMLTextAreaElement>('[data-testid="gen-requirements"]')!, "요구 사항");
   await click(query('[data-testid="gen-run"]')!);
@@ -330,6 +341,8 @@ describe("GenerateDiagramDialog", () => {
     await runGeneration();
     await vi.waitFor(() => expect(query('[data-testid="gen-apply-new"]')).not.toBeNull());
     await click(query('[data-testid="gen-apply-new"]')!);
+    // The negatives below hold only after the handler saw the cancelled confirm.
+    await settleConfirm();
     expect(confirmDialog).toHaveBeenCalledTimes(1);
     expect(harness.onImportDoc).not.toHaveBeenCalled();
     expect(harness.onClose).not.toHaveBeenCalled();
@@ -344,6 +357,8 @@ describe("GenerateDiagramDialog", () => {
     await setTextarea(query<HTMLTextAreaElement>('[data-testid="gen-mermaid"]')!, "flowchart TD\n A[Start] --> B[End]");
     await click(query('[data-testid="gen-from-mermaid"]')!);
     await click(query('[data-testid="gen-mermaid-apply"]')!);
+    await settleConfirm();
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
     expect(harness.onImportDoc).not.toHaveBeenCalled();
     expect(harness.onClose).not.toHaveBeenCalled();
     expect(probe!.getState().doc).toBe(original);
@@ -356,6 +371,10 @@ describe("GenerateDiagramDialog", () => {
     await vi.waitFor(() => expect(query('[data-testid="gen-apply-scoped"]')).not.toBeNull());
     withSnapshotSpy.mockClear();
     await click(query('[data-testid="gen-apply-scoped"]')!);
+    // handleApplyScoped awaits diagramRevision before it commits, so the click's
+    // act() can return first. onClose is its last step: wait for it, then the
+    // commit count is final and the handler cannot leak into the next test.
+    await vi.waitFor(() => expect(harness!.onClose).toHaveBeenCalled());
     expect(withSnapshotSpy).toHaveBeenCalledTimes(1);
     const applied = probe!.getState().doc;
     expect(applied.nodes.find((n) => n.id === "web")?.title).toBe("Web");
@@ -376,6 +395,9 @@ describe("GenerateDiagramDialog", () => {
       }));
     });
     await click(query('[data-testid="gen-apply-scoped"]')!);
+    // The stale message is set after the awaited revision, on the path that
+    // returns before withSnapshot, so the negative checks below run only once
+    // the handler has decided and cannot pass early.
     await vi.waitFor(() => expect(query('[data-testid="gen-stale"]')).not.toBeNull());
     expect(query('[data-testid="gen-stale"]')!.textContent).toBe(
       translate("ko", "diagram.generate.stale"),
@@ -471,6 +493,9 @@ describe("GenerateDiagramDialog", () => {
       expect(prompt).toContain("<untrusted_current_spec>");
       withSnapshotSpy.mockClear();
       await click(query('[data-testid="gen-apply-scoped"]')!);
+      // Same as above: onClose is the handler's last step after the awaited
+      // revision, so the commit count is read only once the handler finished.
+      await vi.waitFor(() => expect(harness!.onClose).toHaveBeenCalled());
       expect(withSnapshotSpy).toHaveBeenCalledTimes(1);
       const applied = probe!.getState().doc;
       expect((applied.datasets ?? []).filter(isSemanticSpecDataset).map((d) => d.id)).toEqual(["ds-run"]);
