@@ -350,6 +350,24 @@ describe("canvas diagnostic anchors", () => {
     expect(hidden!.target).toMatchObject(preferred);
   });
 
+  it("sends a diagnostic on an undrawn member to the canvas notice", () => {
+    const { doc, dataset, geometry } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    // The member the diagnostic names is the one the canvas does not draw, so
+    // there is no box on screen to point at: a badge beside an invisible member
+    // explains nothing a reader can see.
+    const drawn = doc.nodes.filter((node) => node.id !== id);
+    for (const path of ["/nodes/0", "/nodes/0/label"]) {
+      const [item] = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic(path)], drawn);
+      expect(item!.target).toBeNull();
+    }
+    // Without the drawn set the mapper does not know the member is absent, so
+    // it keeps anchoring: only the caller who says what it paints can drop it.
+    const [anchored] = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/nodes/0")]);
+    expect(anchored!.target).not.toBeNull();
+  });
+
   it("categorizes only recognized codes and retains unknown engine prose verbatim", () => {
     expect(canvasDiagnosticCategory(diagnostic("/nodes/0/label"))).toBe("text");
     expect(canvasDiagnosticCategory(diagnostic("/nodes/0", "workflow/geometry-node-overlap"))).toBe("overlap");

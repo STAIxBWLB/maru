@@ -290,6 +290,10 @@ export function mapCanvasDiagnostics(
     if (!id) return null;
     const member = resolveSemanticMember(doc, { nodeId: id });
     if (!member || member.dataset.id !== datasetId || member.field !== field || member.index !== source.index) return null;
+    // A member the canvas does not draw has nothing on screen to explain: its
+    // badge would sit beside an invisible box and its label beside an invisible
+    // line. It joins the canvas notice with the diagnostics that anchor nowhere.
+    if (undrawn(id)) return null;
     const box = geometry?.boxes.get(id);
     const node = shown.get(id) ?? box ?? sourceNodes.get(id);
     if (!node) return null;
