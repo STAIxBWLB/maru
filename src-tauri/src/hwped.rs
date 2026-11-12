@@ -5,6 +5,7 @@
 //! uses (hwp-editor `packages/server/src/cli-engine.ts`):
 //!
 //!   hwped_read         hwp cat <in> --format markdown --with-segments
+//!                      + hwp info <in> --json --body-stats (optional bodyTables, >= 0.19.2)
 //!   hwped_render       hwp render <in> -o page.<fmt> --format <fmt> --pages <p> --dpi <d> --report <r> --layout-json <l>
 //!   hwped_edit         hwp edit <in> -o <out> (--ops <json> | <opsArgv...>) [--verify] [--allow-partial]
 //!   hwped_compose      hwp compose <spec.json> -o <out> --report
@@ -44,6 +45,9 @@ const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
 const STDERR_LIMIT: usize = 1024 * 1024;
 const MIN_VERSION: (u64, u64, u64) = (0, 8, 7);
 const FEATURE_MIN_VERSION: (u64, u64, u64) = (0, 20, 0);
+/// `hwp info --body-stats` landed in hwp-cli 0.19.2 (its CHANGELOG, "Table
+/// placement switch"). Below it the read still answers, without `bodyTables`.
+const BODY_STATS_MIN_VERSION: (u64, u64, u64) = (0, 19, 2);
 
 /// Document reference crossing the bridge (JS `TauriDocumentRef`).
 #[derive(Debug, Clone, Deserialize)]
@@ -490,21 +494,56 @@ fn stage_document(
 
 fn read_now(document: HwpedDocumentRef, workspace_root: Option<String>) -> Result<Value, String> {
     let bin = hwp_bin()?;
-    ensure_version(&bin)?;
+    let version = ensure_version(&bin)?;
     let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     let stdout = run_hwp_ok(
         &bin,
         &[
             OsString::from("cat"),
-            input.into_os_string(),
+            input.as_os_str().to_os_string(),
             OsString::from("--format"),
             OsString::from("markdown"),
             OsString::from("--with-segments"),
         ],
     )?;
-    serde_json::from_slice(&stdout)
-        .map_err(|err| format!("hwp_parse_failed: cat envelope is not JSON: {err}"))
+    let mut envelope: Value = serde_json::from_slice(&stdout)
+        .map_err(|err| format!("hwp_parse_failed: cat envelope is not JSON: {err}"))?;
+    if let Some(tables) = body_table_count(&bin, &version, &input) {
+        if let Some(object) = envelope.as_object_mut() {
+            object.insert("bodyTables".to_string(), Value::from(tables));
+        }
+    }
+    Ok(envelope)
+}
+
+/// The engine's own table count for the staged document (`hwp info --json
+/// --body-stats`, field `body.tables`). It counts tables the segment envelope
+/// publishes no segment for, which is the disagreement the editor's table-index
+/// guard watches. Nothing here may fail the read: a body walk can fail on a
+/// document plain `info` still answers, and a missing count only leaves the
+/// guard off, as it was before this field existed.
+fn body_table_count(bin: &Path, version: &str, input: &Path) -> Option<u64> {
+    let supported = parse_version(version.as_bytes())
+        .is_some_and(|version| version_at_least(version, BODY_STATS_MIN_VERSION));
+    if !supported {
+        return None;
+    }
+    let run = run_hwp(
+        bin,
+        &[
+            OsString::from("info"),
+            input.as_os_str().to_os_string(),
+            OsString::from("--json"),
+            OsString::from("--body-stats"),
+        ],
+    )
+    .ok()?;
+    if run.code != 0 {
+        return None;
+    }
+    let info: Value = serde_json::from_slice(&run.stdout).ok()?;
+    info.get("body")?.get("tables")?.as_u64()
 }
 
 fn png_size(data: &[u8]) -> Option<(u32, u32)> {
@@ -1785,6 +1824,92 @@ esac
         let script = script.replace("__VERSION__", version);
         crate::test_support::write_executable_fixture(&binary, &script, 0o755).unwrap();
         binary
+    }
+
+    /// Fake hwp-cli whose `cat` publishes one `table` segment while its `info`
+    /// branch answers verbatim — the two counts are meant to disagree, which is
+    /// the condition the editor's table-index guard watches.
+    #[cfg(unix)]
+    fn fake_hwp_body_stats(dir: &Path, version: &str, info: &str) -> PathBuf {
+        let binary = dir.join("hwp");
+        let script = r#"#!/bin/sh
+printf '%s\n' "$*" >> "$(dirname "$0")/invocations"
+case "$1" in
+  --version) echo "hwp __VERSION__" ;;
+  cat) echo '{"title":"문서","segments":[{"kind":"table","start":0,"end":4,"section":0,"para":0},{"kind":"paragraph","start":4,"end":9,"section":0,"para":1}]}' ;;
+  info) __INFO__ ;;
+  *) exit 2 ;;
+esac
+"#;
+        let script = script
+            .replace("__VERSION__", version)
+            .replace("__INFO__", info);
+        crate::test_support::write_executable_fixture(&binary, &script, 0o755).unwrap();
+        binary
+    }
+
+    /// Read `docs/a.hwpx` through a body-stats fixture, returning the envelope
+    /// and the fixture's invocation log.
+    #[cfg(unix)]
+    fn read_with_body_stats(version: &str, info: &str) -> (Value, String) {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.hwpx"), b"document").unwrap();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let binary = fake_hwp_body_stats(&bin_dir, version, info);
+        let _env = EnvGuard::set("MARU_HWP_BIN", &binary);
+        let read = run(hwped_read(doc_with_path("docs/a.hwpx"), Some(text(&root)))).unwrap();
+        let invocations = std::fs::read_to_string(bin_dir.join("invocations")).unwrap();
+        (read, invocations)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_reports_the_engine_table_count_apart_from_published_segments() {
+        let (read, invocations) = read_with_body_stats(
+            "0.19.2",
+            r#"echo '{"body":{"tables":2,"tables_inline":1,"tables_floating":1}}'"#,
+        );
+        let published = read["segments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|segment| segment["kind"] == "table")
+            .count();
+        assert_eq!(published, 1, "{read}");
+        assert!(
+            invocations.contains("--body-stats"),
+            "the count comes from the engine, not the segments: {invocations}"
+        );
+        assert_eq!(read["bodyTables"], 2);
+        assert!(read["bodyTables"].as_u64().unwrap() > published as u64);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_keeps_the_envelope_when_the_body_stats_call_fails() {
+        let (read, _) = read_with_body_stats("0.20.0", "echo 'no body' >&2; exit 3");
+        assert_eq!(read["title"], "문서");
+        assert!(read.get("bodyTables").is_none(), "{read}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_keeps_the_envelope_when_the_stats_carry_no_table_count() {
+        let (read, _) = read_with_body_stats("0.20.0", r#"echo '{"format":"hwpx"}'"#);
+        assert_eq!(read["title"], "문서");
+        assert!(read.get("bodyTables").is_none(), "{read}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_skips_body_stats_below_the_hwp_cli_floor() {
+        let (read, invocations) = read_with_body_stats("0.19.1", r#"echo '{"body":{"tables":2}}'"#);
+        assert_eq!(read["title"], "문서");
+        assert!(read.get("bodyTables").is_none(), "{read}");
+        assert!(!invocations.contains("--body-stats"), "{invocations}");
     }
 
     fn assert_feature_version_error(error: HwpedBridgeError, feature: &str, detected: &str) {
