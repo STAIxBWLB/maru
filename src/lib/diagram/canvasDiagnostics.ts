@@ -104,7 +104,7 @@ function overlapArea(a: Rect, b: Rect): number {
  * anchor's own member: two diagnostics on one element stack beside it instead
  * of landing on each other.
  */
-function placeBadge(anchor: Rect, obstacles: readonly Rect[]): { x: number; y: number } | null {
+function placeBadge(anchor: Rect, obstacles: readonly Rect[], page: Rect | null): { x: number; y: number } | null {
   const { width, height, gap, step } = CANVAS_DIAGNOSTIC_BADGE;
   const beside = [
     { x: anchor.x + anchor.w + gap, y: anchor.y, dy: 1 },
@@ -122,7 +122,15 @@ function placeBadge(anchor: Rect, obstacles: readonly Rect[]): { x: number; y: n
         const box = { ...candidate, w: width, h: height };
         const overlap = obstacles.reduce((total, obstacle) => total + overlapArea(box, obstacle), 0);
         // Off the page is covered too: a badge nobody can see explains nothing.
-        const score = overlap + (candidate.x < 0 || candidate.y < 0 ? Number.MAX_SAFE_INTEGER : 0);
+        // Every edge counts, so a member at the right or bottom edge does not
+        // push its badge past the page frame or out of an export.
+        const offPage = candidate.x < 0 || candidate.y < 0 || (page !== null && (
+          candidate.x < page.x
+          || candidate.y < page.y
+          || candidate.x + width > page.x + page.w
+          || candidate.y + height > page.y + page.h
+        ));
+        const score = overlap + (offPage ? Number.MAX_SAFE_INTEGER : 0);
         if (score === 0) return candidate;
         if (score < bestScore) {
           bestScore = score;
@@ -134,6 +142,27 @@ function placeBadge(anchor: Rect, obstacles: readonly Rect[]): { x: number; y: n
   // Nothing clear was found: a covered badge would hide the member it landed on
   // and swallow that member's click, so the diagnostic goes to the notice.
   return bestScore === 0 ? best : null;
+}
+
+/**
+ * The frame a badge must stay inside: the engine's page, grown to cover anything
+ * already drawn outside it, so a badge never leaves the area the reader (or an
+ * export, whose view box covers the same content) can see. No page, no frame:
+ * only the negative-origin rule applies, as before.
+ */
+function pageFrame(page: Rect | null, drawn: readonly Rect[]): Rect | null {
+  if (!page) return null;
+  let x0 = page.x;
+  let y0 = page.y;
+  let x1 = page.x + page.w;
+  let y1 = page.y + page.h;
+  for (const rect of drawn) {
+    x0 = Math.min(x0, rect.x);
+    y0 = Math.min(y0, rect.y);
+    x1 = Math.max(x1, rect.x + rect.w);
+    y1 = Math.max(y1, rect.y + rect.h);
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /** The box a diagnostic's badge sits beside, before the badge's own placement. */
@@ -169,9 +198,16 @@ export function mapCanvasDiagnostics(
   // one covers nothing.
   const obstacles: Array<{ member: string | null; rect: Rect }> = [];
   const labelled = new Set<string>();
+  // A member the canvas does not draw (hidden, or on an invisible layer) covers
+  // nothing, so it is no obstacle. Only known when the caller says what it draws.
+  const undrawn = (id: string) => displayedNodes !== undefined && sourceNodes.has(id) && !shown.has(id);
   if (geometry) {
     for (const [id, box] of geometry.boxes) {
       if (box.role === "container") continue;
+      if (undrawn(id)) {
+        labelled.add(id);
+        continue;
+      }
       labelled.add(id);
       const node = shown.get(id);
       const dx = node ? node.x - box.x : 0;
@@ -254,6 +290,10 @@ export function mapCanvasDiagnostics(
     if (!id) return null;
     const member = resolveSemanticMember(doc, { nodeId: id });
     if (!member || member.dataset.id !== datasetId || member.field !== field || member.index !== source.index) return null;
+    // A member the canvas does not draw has nothing on screen to explain: its
+    // badge would sit beside an invisible box and its label beside an invisible
+    // line. It joins the canvas notice with the diagnostics that anchor nowhere.
+    if (undrawn(id)) return null;
     const box = geometry?.boxes.get(id);
     const node = shown.get(id) ?? box ?? sourceNodes.get(id);
     if (!node) return null;
@@ -274,9 +314,15 @@ export function mapCanvasDiagnostics(
     const category = canvasDiagnosticCategory(diagnostic);
     const anchor = anchorOf(diagnostic);
     if (!anchor) return { diagnostic, category, target: null };
-    const point = placeBadge(anchor.box, obstacles
+    const others = obstacles
       .filter((obstacle) => obstacle.member === null || obstacle.member !== anchor.owner)
-      .map((obstacle) => obstacle.rect));
+      .map((obstacle) => obstacle.rect);
+    // A clear spot inside the page wins. When the page has none (a crowded
+    // refusal scene), a clear spot past the right or bottom edge still beats the
+    // notice: the canvas shows it, and the export never draws badges. Negative
+    // coordinates stay unreachable either way.
+    const frame = pageFrame(geometry?.page ?? null, [anchor.box, ...obstacles.map((obstacle) => obstacle.rect)]);
+    const point = placeBadge(anchor.box, others, frame) ?? (frame ? placeBadge(anchor.box, others, null) : null);
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return { diagnostic, category, target: null };
     obstacles.push({
       member: null,

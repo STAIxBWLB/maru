@@ -40,6 +40,7 @@ import {
 } from "./engineCanvasGeometry";
 import { bbox } from "./geometry";
 import type { MatrixDataset } from "./reportTypes";
+import { modelDrawsNode } from "./nodeVisibility";
 import { escapeHtml, sanitizeCssColor } from "./richText";
 import {
   TABLE_GRID_BORDER,
@@ -623,10 +624,7 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
   const padding = opts.padding ?? 40;
   const geometry = matchingCanvasGeometry(doc);
 
-  const hiddenLayers = new Set(doc.layers.filter((layer) => !layer.visible).map((l) => l.id));
-  const nodes = doc.nodes.filter(
-    (node) => !node.hidden && !(node.layerId && hiddenLayers.has(node.layerId)),
-  ).map((node) => canvasDisplayNode(node, geometry));
+  const nodes = doc.nodes.filter(modelDrawsNode(doc)).map((node) => canvasDisplayNode(node, geometry));
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   // The members this export actually draws: the engine's shapes belong to them,
   // so a lifeline under a hidden participant or a border around a state on an

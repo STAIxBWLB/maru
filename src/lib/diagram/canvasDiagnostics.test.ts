@@ -24,7 +24,8 @@ function fixture(type: EngineDiagramType = "workflow") {
     routes: new Map(doc.edges.map((edge) => [edge.id, { id: edge.id, sourceId: edge.id, points: [{ x: 300, y: 250 }, { x: 400, y: 250 }, { x: 400, y: 350 }] }])),
     primitives: [],
     pageLabels: [{ id: "title", targetId: "document", role: "label", lines: ["Document"], x: 20, y: 10, w: 200, h: 30, fontSize: 24, weight: 700 }],
-    page: { x: 0, y: 0, w: 900, h: 700 },
+    // An engine page always contains its members, with room for a badge.
+    page: { x: 0, y: 0, w: 100 + doc.nodes.length * 200 + 400, h: 700 },
     diagnostics: [],
   };
   return { dataset, doc, geometry };
@@ -287,6 +288,84 @@ describe("canvas diagnostic anchors", () => {
     );
     expect(item!.target).toBeNull();
     expect(item!.category).toBe("text");
+  });
+
+  /** One member alone on a page, so only the page edges constrain its badge. */
+  function aloneAt(box: { x: number; y: number; h?: number }) {
+    const { doc, dataset, geometry } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    const engineBox = { ...geometry.boxes.get(id)!, ...box };
+    const alone: CanvasGeometry = {
+      ...geometry,
+      boxes: new Map([[id, engineBox]]),
+      labels: new Map(),
+      pageLabels: [],
+      page: { x: 0, y: 0, w: 900, h: 700 },
+    };
+    const [item] = mapCanvasDiagnostics(doc, dataset.id, alone, [diagnostic("/nodes/0")]);
+    return { badge: item!.target ? badgeOf(item!.target) : null, page: alone.page! };
+  }
+
+  function insidePage(badge: Rect, page: Rect) {
+    expect(badge.x).toBeGreaterThanOrEqual(page.x);
+    expect(badge.y).toBeGreaterThanOrEqual(page.y);
+    expect(badge.x + badge.w).toBeLessThanOrEqual(page.x + page.w);
+    expect(badge.y + badge.h).toBeLessThanOrEqual(page.y + page.h);
+  }
+
+  it("keeps the badge inside the page for a member at the right edge", () => {
+    const { badge, page } = aloneAt({ x: 900 - 180, y: 300 });
+    expect(badge).not.toBeNull();
+    insidePage(badge!, page);
+  });
+
+  it("keeps the badge inside the page for a member at the bottom edge", () => {
+    // Short enough that the right-hand badge would run past the bottom.
+    const { badge, page } = aloneAt({ x: 300, y: 700 - 30, h: 30 });
+    expect(badge).not.toBeNull();
+    insidePage(badge!, page);
+  });
+
+  it("does not treat a member the canvas does not draw as an obstacle", () => {
+    const { doc, dataset, geometry } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    const own = geometry.boxes.get(id)!;
+    const other = [...geometry.boxes.values()].find((box) => box.id !== id && box.role === "node")!;
+    // The other member sits exactly where the badge prefers to go.
+    const blocker = { ...geometry.boxes.get(other.id)!, x: own.x + own.w + 8, y: own.y, w: 300, h: 44 };
+    const scene: CanvasGeometry = {
+      ...geometry,
+      boxes: new Map([[id, own], [other.id, blocker]]),
+      labels: new Map(),
+      pageLabels: [],
+    };
+    const preferred = { x: own.x + own.w + 8, y: own.y };
+    const drawnBoth = doc.nodes.filter((node) => node.id === id || node.id === other.id)
+      .map((node) => ({ ...node, ...(node.id === id ? own : blocker) }));
+    const [blocked] = mapCanvasDiagnostics(doc, dataset.id, scene, [diagnostic("/nodes/0")], drawnBoth);
+    expect(blocked!.target).not.toMatchObject(preferred);
+    const [hidden] = mapCanvasDiagnostics(doc, dataset.id, scene, [diagnostic("/nodes/0")], drawnBoth.filter((node) => node.id === id));
+    expect(hidden!.target).toMatchObject(preferred);
+  });
+
+  it("sends a diagnostic on an undrawn member to the canvas notice", () => {
+    const { doc, dataset, geometry } = fixture();
+    const sourceId = specEntries(dataset.spec, descriptorFor(dataset)!.entities)[0]!.id as string;
+    const id = dataset.idMap[sourceId] ?? sourceId;
+    // The member the diagnostic names is the one the canvas does not draw, so
+    // there is no box on screen to point at: a badge beside an invisible member
+    // explains nothing a reader can see.
+    const drawn = doc.nodes.filter((node) => node.id !== id);
+    for (const path of ["/nodes/0", "/nodes/0/label"]) {
+      const [item] = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic(path)], drawn);
+      expect(item!.target).toBeNull();
+    }
+    // Without the drawn set the mapper does not know the member is absent, so
+    // it keeps anchoring: only the caller who says what it paints can drop it.
+    const [anchored] = mapCanvasDiagnostics(doc, dataset.id, geometry, [diagnostic("/nodes/0")]);
+    expect(anchored!.target).not.toBeNull();
   });
 
   it("categorizes only recognized codes and retains unknown engine prose verbatim", () => {

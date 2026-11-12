@@ -1172,6 +1172,15 @@ describe("native engine canvas (T4)", () => {
     // The refusing document is the only one whose layout the engine refuses,
     // so the canvas settles on `refused` rather than a stale scene.
     await openDocument(refusal.documentTitle, { specSha256: refusal.specSha256 });
+    // The diagnostic layer is a lazy chunk behind Suspense, so `refused` can be
+    // on the canvas a frame before the badge is. Wait for either the badge or
+    // the notice; the assertions below still decide which one is right.
+    await browser.waitUntil(async () => browser.execute(() =>
+      Boolean(document.querySelector(".maru-diagram-canvas [data-canvas-diagnostic], [data-canvas-diagnostic-notice]"))), {
+      timeout: 10_000,
+      interval: 100,
+      timeoutMsg: "the refused canvas drew neither a diagnostic badge nor the canvas notice within 10 s",
+    });
     const state = await browser.execute(() => {
       const canvas = document.querySelector(".maru-diagram-canvas");
       if (!canvas) return null;
