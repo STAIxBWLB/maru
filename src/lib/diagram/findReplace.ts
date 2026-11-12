@@ -2,7 +2,9 @@
  * Find / replace — searches drawn members' titles + bodies + edge labels.
  *
  * Pure logic returns a list of matches the UI walks through. Replacement
- * applies via store transformers so undo/redo behaves like a normal edit.
+ * applies via store transformers so undo/redo behaves like a normal edit, and
+ * rewrites exactly the members Find lists: a member the canvas does not draw
+ * keeps its text.
  */
 
 import { updateEdge, updateNode } from "./actions";
@@ -137,7 +139,11 @@ export function replaceAllInDoc(
   return (state) => {
     let next = state;
     let touched = false;
+    // The members Find lists, so the count the bar shows is exactly what
+    // Replace All rewrites: text in an undrawn member is never shown as a match.
+    const drawn = new Set(state.doc.nodes.filter(modelDrawsNode(state.doc)).map((node) => node.id));
     for (const node of state.doc.nodes) {
+      if (!drawn.has(node.id)) continue;
       const patch: Partial<typeof node> = {};
       if (node.title) {
         const out = replaceAtAll(node.title, search, replacement, caseSensitive);

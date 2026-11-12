@@ -60,6 +60,32 @@ describe("findReplace", () => {
     expect(out.some((m) => m.kind === "edge")).toBe(true);
   });
 
+  it("replaceAllInDoc rewrites exactly the members Find lists", () => {
+    const replaceIn = (layerVisible: boolean, hidden: boolean) => {
+      const doc = buildDoc();
+      doc.layers.push({ id: "veiled", name: "Veiled", visible: layerVisible, locked: false, order: 1 });
+      doc.nodes.push(
+        { id: "hidden", kind: "simple", x: 0, y: 0, w: 100, h: 50, title: "world hidden", hidden },
+        { id: "layered", kind: "simple", x: 0, y: 0, w: 100, h: 50, title: "world layered", layerId: "veiled" },
+      );
+      const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
+      store.setState(replaceAllInDoc("world", "planet"));
+      const next = store.getState().doc;
+      return { titles: next.nodes.map((node) => node.title ?? null), label: next.edges[0]?.label };
+    };
+    // Control: drawn, every member is rewritten, so the text kept below is the
+    // visibility rule rather than the query.
+    expect(replaceIn(true, false)).toEqual({
+      titles: ["Hello planet", "Other", "planet hidden", "planet layered"],
+      label: "planet bridge",
+    });
+    // The count the bar shows is what Replace All changes.
+    expect(replaceIn(false, true)).toEqual({
+      titles: ["Hello planet", "Other", "world hidden", "world layered"],
+      label: "planet bridge",
+    });
+  });
+
   it("replaceAllInDoc updates titles, bodies, edge labels via the store", () => {
     const doc = buildDoc();
     const store = createDiagramStore({ doc, ephemeral: createInitialEphemeral() });
