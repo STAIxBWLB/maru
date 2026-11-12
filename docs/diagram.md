@@ -1713,6 +1713,57 @@ samples are route diagnostics (8.1%), axis population (7.9%), and scene finish
 (6.3% of 492 samples). Hosted before/after numbers and cross-platform CI remain
 the acceptance evidence; a successful functional suite alone does not prove AC6.
 
+#### E4 T3 per-scene clearance cache (#552)
+
+The #576 merge head `3212ff93` recorded hosted 50/200/1,000-node layout p95
+7.0 / 31.7 / 279.3 ms in [CI run 42834613105](https://github.com/STAIxBWLB/maru/actions/runs/42834613105),
+down from the 482.8 ms baseline. The owner accepted that as the interim gate for
+T3; the sub-200 ms AC6 target is unchanged. This follow-up re-measured the three
+hot spots #576 named at the new head and moved the remaining work onto the scenes
+that own it:
+
+- one `RoutePlanner` per clearance for the whole scene, whose sorted obstacle
+  axis and clearance cache are built on first use and reused by every leg,
+  instead of re-normalizing and re-sorting every obstacle per route;
+- each axis answers a clearance query from an inclusive interval bucket, so a
+  retained bucket is always a superset that the existing exact predicate filters,
+  and a scene whose retained product exceeds 65,536 records still scans lazily;
+- route diagnostics stand on a uniform bucket grid over the route's own bounds
+  grown by the clearance limit, in build order, so first-match diagnostics do not
+  change; a grid wider than 262,144 cells keeps the exact full scan;
+- the route's obstacle set is shared through the clearance cache, and only a
+  route with a placed relationship label copies the base set plus that label
+  suffix; incoming target-face peers and pending node labels read prebuilt
+  indexes instead of re-filtering the whole graph.
+
+| Hosted Chromium/WASM p95, ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| `3212ff93` (#576), run 42834613105 | 7.0 | 31.7 | 279.3 |
+
+The hosted figure for this head comes from the `Measure browser apply gate` step
+of the merge candidate's own e2e job. A paired reproduction of that step on one
+machine, three runs per engine and 20 warm samples each, measures:
+
+| Local production WASM, median / p95 ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| Base engine `27ea454d` | 3.0 / 3.1-3.2 | 13.4-13.6 / 13.8-14.1 | 126.1-127.5 / 130.3-133.6 |
+| This head | 2.8-2.9 / 2.9-3.0 | 12.1-12.3 / 12.5-12.6 | 83.6-84.1 / 85.7-86.5 |
+
+The 1,000-node first layout falls from 182.9-184.9 ms to 134.1-135.5 ms and the
+harness reports `targetMet:true` for the 200 ms E4 requirement; the same
+`bench-1000.json` fixture still routes all 999 edges. A 5 s native release
+profile at this head (3,403 self samples) still spends 10.8% in the two clearance
+lookups, 8.3% in scene finish, 6.7% in scene hashing and 11.1% in font metric
+measurement, while the three named hot spots now measure 5.3% (route
+diagnostics), 0.3% (axis population) and 8.3% (scene finish). Scene finish is the
+only one whose share rose: its absolute time fell, but the rest of the pass fell
+faster.
+Scene hashes, SVG hashes, PNG manifests and every corpus case are byte-identical
+to the base engine; the only receipt change is the constraint-evaluation work
+counter, `benchmarkWork.stats.constraintEvaluations` 3,332,334 to 2,013,086,
+because the diagnostics pass now visits fewer candidates. Counter definitions
+and the checked-in ceilings are unchanged.
+
 The per-PR regression gate is deterministic logical work on the unchanged
 `bench-1000.json` fixture: live A* expansions, route evaluations and constraint
 predicate/pair evaluations. Each counter and their total have a checked-in

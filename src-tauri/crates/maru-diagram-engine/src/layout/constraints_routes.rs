@@ -23,7 +23,7 @@ pub(crate) fn is_route_quality_notice(diagnostic: &Diagnostic) -> bool {
 
 const U: i64 = 64;
 type Point = (i64, i64);
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Rect {
     x: i64,
     y: i64,
@@ -37,6 +37,179 @@ impl Rect {
     fn bottom(self) -> i64 {
         self.y + self.h
     }
+}
+
+/// A uniform bucket grid over the id-keyed rectangles of one domain, so a
+/// route visits only the nodes its own bounds can reach instead of every node
+/// in the scene.
+///
+/// A rectangle joins every bucket it overlaps, so a lookup never misses a
+/// witness; and because rectangles join in the caller's order, a lookup
+/// returns its witnesses in that same order. A route therefore still reports
+/// the same first node it reported when this pass compared against all of them.
+struct RectBuckets<'a> {
+    items: Vec<(&'a str, Rect)>,
+    buckets: Vec<Vec<u32>>,
+    origin_x: i64,
+    origin_y: i64,
+    columns: usize,
+    rows: usize,
+}
+
+/// The edge of one bucket, in fixed-point units.
+const BUCKET_SPAN: i64 = 512 * 64;
+/// The most buckets a grid may allocate; a wider scene keeps one bucket and
+/// each lookup degrades to the full scan it replaces.
+const BUCKET_LIMIT: usize = 1 << 18;
+
+impl<'a> RectBuckets<'a> {
+    fn build(items: impl IntoIterator<Item = (&'a str, Rect)>) -> Self {
+        let items: Vec<_> = items.into_iter().collect();
+        let mut grid = Self {
+            items,
+            buckets: Vec::new(),
+            origin_x: 0,
+            origin_y: 0,
+            columns: 1,
+            rows: 1,
+        };
+        let Some(first) = grid.items.first() else {
+            return grid;
+        };
+        let mut min_x = first.1.x;
+        let mut min_y = first.1.y;
+        let mut max_x = first.1.right();
+        let mut max_y = first.1.bottom();
+        for (_, bounds) in &grid.items {
+            min_x = min_x.min(bounds.x);
+            min_y = min_y.min(bounds.y);
+            max_x = max_x.max(bounds.right());
+            max_y = max_y.max(bounds.bottom());
+        }
+        let columns = (max_x - min_x) / BUCKET_SPAN + 1;
+        let rows = (max_y - min_y) / BUCKET_SPAN + 1;
+        let cells = usize::try_from(columns.saturating_mul(rows)).unwrap_or(usize::MAX);
+        if cells > BUCKET_LIMIT {
+            return grid;
+        }
+        grid.origin_x = min_x;
+        grid.origin_y = min_y;
+        grid.columns = usize::try_from(columns).unwrap_or(1);
+        grid.rows = usize::try_from(rows).unwrap_or(1);
+        // The table is the only allocation here whose size the scene does not
+        // bound, so it reserves fallibly: without the memory, the grid stays
+        // empty and every lookup keeps the exact full scan.
+        let mut buckets: Vec<Vec<u32>> = Vec::new();
+        if buckets.try_reserve(cells).is_err() {
+            return grid;
+        }
+        buckets.resize(cells, Vec::new());
+        for (index, (_, bounds)) in grid.items.iter().enumerate() {
+            let Ok(index) = u32::try_from(index) else {
+                continue;
+            };
+            let columns = grid.column_range(bounds.x, bounds.right());
+            for row in grid.row_range(bounds.y, bounds.bottom()) {
+                for column in columns.clone() {
+                    let bucket = &mut buckets[row * grid.columns + column];
+                    if bucket.try_reserve(1).is_err() {
+                        return grid;
+                    }
+                    bucket.push(index);
+                }
+            }
+        }
+        grid.buckets = buckets;
+        grid
+    }
+
+    fn column_range(&self, left: i64, right: i64) -> std::ops::RangeInclusive<usize> {
+        let first = self.column(left);
+        first..=self.column(right).max(first)
+    }
+
+    fn row_range(&self, top: i64, bottom: i64) -> std::ops::RangeInclusive<usize> {
+        let first = self.row(top);
+        first..=self.row(bottom).max(first)
+    }
+
+    fn column(&self, x: i64) -> usize {
+        let offset = (x - self.origin_x).max(0) / BUCKET_SPAN;
+        usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(self.columns - 1)
+    }
+
+    fn row(&self, y: i64) -> usize {
+        let offset = (y - self.origin_y).max(0) / BUCKET_SPAN;
+        usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(self.rows - 1)
+    }
+
+    /// The rectangles whose bounds reach `bounds`, in build order.
+    fn within<'s>(&self, bounds: Rect, scratch: &'s mut Vec<u32>) -> &'s [u32] {
+        scratch.clear();
+        if self.buckets.is_empty() {
+            for (index, (_, rect)) in self.items.iter().enumerate() {
+                if let Ok(index) = u32::try_from(index) {
+                    if reaches(*rect, bounds) {
+                        scratch.push(index);
+                    }
+                }
+            }
+            return scratch;
+        }
+        for row in self.row_range(bounds.y, bounds.bottom()) {
+            for column in self.column_range(bounds.x, bounds.right()) {
+                scratch.extend_from_slice(&self.buckets[row * self.columns + column]);
+            }
+        }
+        scratch.sort_unstable();
+        scratch.dedup();
+        scratch.retain(|index| {
+            self.items
+                .get(*index as usize)
+                .is_some_and(|(_, rect)| reaches(*rect, bounds))
+        });
+        scratch
+    }
+
+    fn get(&self, index: u32) -> Option<(&'a str, Rect)> {
+        self.items.get(index as usize).copied()
+    }
+}
+
+/// Whether two bounds touch at all. A clearance witness within `limit` of a
+/// path always reaches the path's bounds grown by `limit`, so this is the only
+/// test a bucket lookup needs.
+fn reaches(rect: Rect, bounds: Rect) -> bool {
+    rect.x <= bounds.right()
+        && bounds.x <= rect.right()
+        && rect.y <= bounds.bottom()
+        && bounds.y <= rect.bottom()
+}
+
+/// The bounds a route's own points occupy, grown by `limit`, so a lookup over
+/// it holds every node that could report a clearance witness.
+fn path_extent(points: &[Point], limit: i64) -> Option<Rect> {
+    let (first, rest) = points.split_first()?;
+    let mut left = first.0;
+    let mut top = first.1;
+    let mut right = first.0;
+    let mut bottom = first.1;
+    for point in rest {
+        left = left.min(point.0);
+        top = top.min(point.1);
+        right = right.max(point.0);
+        bottom = bottom.max(point.1);
+    }
+    Some(Rect {
+        x: left - limit,
+        y: top - limit,
+        w: right - left + 2 * limit,
+        h: bottom - top + 2 * limit,
+    })
 }
 #[derive(Clone, Copy)]
 struct Family {
@@ -1134,13 +1307,24 @@ fn node_and_label_safety(
         .iter()
         .map(|n| (n.id.as_str(), rect(n.bounds)))
         .collect();
+    let scene_buckets = RectBuckets::build(actual.iter().map(|(id, bounds)| (*id, *bounds)));
+    let source_buckets =
+        RectBuckets::build(boxes.iter().map(|(id, bounds)| (id.as_str(), *bounds)));
+    let mut scratch = Vec::new();
     for r in routes {
         endpoints(f, r, &actual, out);
-        for (id, b) in &actual {
-            if *id == r.from || *id == r.to {
+        let scene_extent = path_extent(&r.scene, 2 * U);
+        let scene_near = scene_extent
+            .map(|extent| scene_buckets.within(extent, &mut scratch))
+            .unwrap_or_default();
+        for &index in scene_near {
+            let Some((id, bounds)) = scene_buckets.get(index) else {
+                continue;
+            };
+            if id == r.from || id == r.to {
                 continue;
             }
-            if let Some(owned) = near_ownership(r, &r.scene, Domain::Scene, *b, 2 * U, true) {
+            if let Some(owned) = near_ownership(r, &r.scene, Domain::Scene, bounds, 2 * U, true) {
                 emit(
                     out,
                     f,
@@ -1157,11 +1341,20 @@ fn node_and_label_safety(
                 );
             }
         }
-        for (id, b) in boxes {
-            if id.as_str() == r.from || id.as_str() == r.to {
+        let authored_extent = path_extent(&r.authored, 2 * U);
+        let authored_near = authored_extent
+            .map(|extent| source_buckets.within(extent, &mut scratch))
+            .unwrap_or_default();
+        for &index in authored_near {
+            let Some((id, bounds)) = source_buckets.get(index) else {
+                continue;
+            };
+            if id == r.from || id == r.to {
                 continue;
             }
-            if let Some(owned) = near_ownership(r, &r.authored, Domain::Authored, *b, 2 * U, true) {
+            if let Some(owned) =
+                near_ownership(r, &r.authored, Domain::Authored, bounds, 2 * U, true)
+            {
                 emit(
                     out,
                     f,
@@ -2066,6 +2259,172 @@ mod tests {
         crate::layout::layout_json(&json!({"specJson":spec.to_string()}).to_string())
             .geometry
             .expect("layout retains a diagnostic scene")
+    }
+
+    #[test]
+    fn rect_buckets_returns_every_reaching_rectangle_in_scene_order() {
+        let span = BUCKET_SPAN;
+        let rects = [
+            (
+                "node-b",
+                Rect {
+                    x: 10,
+                    y: 10,
+                    w: 100,
+                    h: 40,
+                },
+            ),
+            (
+                "node-a",
+                Rect {
+                    x: 120,
+                    y: 300,
+                    w: 60,
+                    h: 4000,
+                },
+            ),
+            (
+                "node-d",
+                Rect {
+                    x: 0,
+                    y: 0,
+                    w: span * 3,
+                    h: span * 2,
+                },
+            ),
+            (
+                "node-c",
+                Rect {
+                    x: 900,
+                    y: 20,
+                    w: 10,
+                    h: 10,
+                },
+            ),
+            (
+                "node-f",
+                Rect {
+                    x: -500,
+                    y: -900,
+                    w: 40,
+                    h: 40,
+                },
+            ),
+        ];
+        let grid = RectBuckets::build(rects.iter().copied());
+        let mut scratch = Vec::new();
+        // Every query is compared against the scan the bucket grid replaces, so
+        // a missed bucket, a duplicate membership and a reordered result each
+        // fail here rather than only in a scene that happens to reach them.
+        for bounds in [
+            Rect {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            },
+            Rect {
+                x: 50,
+                y: 25,
+                w: 80,
+                h: 20,
+            },
+            Rect {
+                x: -600,
+                y: -1000,
+                w: 2000,
+                h: 2000,
+            },
+            Rect {
+                x: 119,
+                y: 299,
+                w: 2,
+                h: 2,
+            },
+            Rect {
+                x: 5000,
+                y: 5000,
+                w: 10,
+                h: 10,
+            },
+        ] {
+            let found = grid.within(bounds, &mut scratch).to_vec();
+            let expected: Vec<u32> = rects
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, rect))| reaches(*rect, bounds))
+                .map(|(index, _)| index as u32)
+                .collect();
+            assert_eq!(found, expected, "bounds {bounds:?}");
+        }
+    }
+
+    #[test]
+    fn rect_buckets_falls_back_to_one_scan_for_a_scene_too_wide_to_bucket() {
+        let span = BUCKET_SPAN;
+        let rects = [
+            (
+                "node-a",
+                Rect {
+                    x: 0,
+                    y: 0,
+                    w: 10,
+                    h: 10,
+                },
+            ),
+            (
+                "node-b",
+                Rect {
+                    x: span * BUCKET_LIMIT as i64,
+                    y: 0,
+                    w: 10,
+                    h: 10,
+                },
+            ),
+        ];
+        let grid = RectBuckets::build(rects.iter().copied());
+        assert!(grid.buckets.is_empty(), "the grid must stay unbucketed");
+        let mut scratch = Vec::new();
+        assert_eq!(
+            grid.within(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    w: 5,
+                    h: 5
+                },
+                &mut scratch
+            ),
+            [0]
+        );
+        assert_eq!(
+            grid.within(
+                Rect {
+                    x: span * BUCKET_LIMIT as i64,
+                    y: 0,
+                    w: 5,
+                    h: 5,
+                },
+                &mut scratch
+            ),
+            [1]
+        );
+    }
+
+    #[test]
+    fn path_extent_holds_every_point_and_grows_by_the_clearance_limit() {
+        let points = [(100, 60), (100, 300), (40, 300)];
+        // The points span x 40..100 and y 60..300; the limit grows both ends.
+        assert_eq!(
+            path_extent(&points, 2),
+            Some(Rect {
+                x: 38,
+                y: 58,
+                w: 64,
+                h: 244
+            })
+        );
+        assert_eq!(path_extent(&[], 2), None);
     }
     #[test]
     fn architecture_rhythm_separates_source_target_and_interior_segments() {

@@ -397,6 +397,14 @@ pub(crate) struct SceneBuilder {
     routing_nodes: BTreeMap<String, GeometryBox>,
     routing_bounds: Option<Result<GeometryBox, Diagnostic>>,
     routing_obstacles: BTreeMap<Coord, Result<Vec<GeometryBox>, Diagnostic>>,
+    /// One route planner per clearance: the normalized obstacles, the obstacle
+    /// axis and the clearance cache are a property of the scene, so every
+    /// connection reuses them instead of rebuilding them per route.
+    routing_planners: BTreeMap<Coord, Result<crate::routing::RoutePlanner, Diagnostic>>,
+    /// Connection indexes grouped by target node, in connection order. Target
+    /// face spreading asks this of every route, so it is one pass over the
+    /// sorted connections instead of one scan of them per route.
+    incoming_peers: BTreeMap<String, Vec<usize>>,
     routing_label_base: usize,
     cache_enabled: bool,
     cards: Vec<(String, common::Card)>,
@@ -575,6 +583,8 @@ impl SceneBuilder {
             routing_nodes: BTreeMap::new(),
             routing_bounds: None,
             routing_obstacles: BTreeMap::new(),
+            routing_planners: BTreeMap::new(),
+            incoming_peers: BTreeMap::new(),
             routing_label_base: 0,
             cache_enabled: true,
             cards: vec![],
@@ -1022,7 +1032,7 @@ impl SceneBuilder {
             NODE_LABEL_STEPS[0],
             roles,
         )?;
-        let (_, overflow_y) = self.placed_node_label_overflow(id, candidate);
+        let (_, overflow_y) = self.placed_node_label_overflow(id, candidate, label_mark);
         self.document.labels.truncate(label_mark);
         self.diagnostics.truncate(diagnostic_mark);
         // An oval's height is the shape the author's rows and bands are drawn
@@ -1047,7 +1057,7 @@ impl SceneBuilder {
         }
         for &sizes in NODE_LABEL_STEPS.iter() {
             self.place_node_labels_at(id, label, detail, tag, candidate, sizes, roles)?;
-            if self.placed_node_labels_fit(id, candidate) {
+            if self.placed_node_labels_fit(id, candidate, label_mark) {
                 return Ok(Some(candidate));
             }
             self.document.labels.truncate(label_mark);
@@ -1187,14 +1197,29 @@ impl SceneBuilder {
     /// in, which is the span the admission check measures: its whole box for a
     /// box-shaped node, its inscribed rectangle for an oval. Zero on both axes
     /// means the text fits as drawn.
-    fn placed_node_label_overflow(&self, id: &str, bounds: GeometryBox) -> (i64, i64) {
+    ///
+    /// `since` is the label mark this attempt started at. Every label a node
+    /// places is appended after its own mark, so the scan reads that node's
+    /// labels instead of compare-filtering every other node's.
+    fn placed_node_label_overflow(
+        &self,
+        id: &str,
+        bounds: GeometryBox,
+        since: usize,
+    ) -> (i64, i64) {
         let prefix = format!("node:{id}:");
         let Ok((left, top, right, bottom)) = self.node_text_area(id, bounds) else {
             return (0, 0);
         };
         let mut overflow_x = 0;
         let mut overflow_y = 0;
-        for label in self.document.labels.iter().filter(|label| {
+        let placed = self
+            .document
+            .labels
+            .get(since..)
+            .map(<[GeometryLabel]>::as_ref)
+            .unwrap_or(&[]);
+        for label in placed.iter().filter(|label| {
             label
                 .id
                 .as_deref()
@@ -1215,8 +1240,8 @@ impl SceneBuilder {
         }
         (overflow_x.max(0), overflow_y.max(0))
     }
-    fn placed_node_labels_fit(&self, id: &str, bounds: GeometryBox) -> bool {
-        self.placed_node_label_overflow(id, bounds) == (0, 0)
+    fn placed_node_labels_fit(&self, id: &str, bounds: GeometryBox, since: usize) -> bool {
+        self.placed_node_label_overflow(id, bounds, since) == (0, 0)
     }
     /// Wrap one node text role into `available` and report the height of the
     /// lines it produced, so the next role stacks below them.
@@ -1404,6 +1429,17 @@ impl SceneBuilder {
         };
         Ok((p, p.checked_translate(dx, dy).map_err(arithmetic)?))
     }
+    /// Group the sorted connections by target so face spreading reads one
+    /// bucket instead of filtering the whole graph per route.
+    fn index_incoming_peers(&mut self) {
+        self.incoming_peers.clear();
+        for (index, route) in self.connections.iter().enumerate() {
+            self.incoming_peers
+                .entry(route.to.clone())
+                .or_default()
+                .push(index);
+        }
+    }
     /// Placement is complete before routing. Cache only immutable geometry;
     /// relationship labels remain a separate append-only obstacle suffix.
     fn prepare_routing(&mut self) {
@@ -1437,7 +1473,7 @@ impl SceneBuilder {
             {
                 continue;
             }
-            let obstacles = self
+            let obstacles: Result<Vec<GeometryBox>, Diagnostic> = self
                 .document
                 .nodes
                 .iter()
@@ -1452,6 +1488,13 @@ impl SceneBuilder {
                 .chain(self.document.labels.iter().map(|label| label.bounds))
                 .map(|bounds| inflate(bounds, clearance))
                 .collect();
+            self.routing_planners.insert(
+                clearance,
+                obstacles
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|obstacles| crate::routing::RoutePlanner::new(obstacles)),
+            );
             self.routing_obstacles.insert(clearance, obstacles);
         }
     }
@@ -1585,9 +1628,14 @@ impl SceneBuilder {
         }
     }
 
+    /// Route one connection and return its points, its endpoint masks, and —
+    /// only when `retain_obstacles` asks — the obstacle set the path cleared.
+    /// Relationship label placement is the only caller that reads that set, so
+    /// a route without a label never copies it.
     fn route_points(
         &self,
         r: &RouteRequest,
+        retain_obstacles: bool,
     ) -> Result<(Vec<GeometryPoint>, Vec<GeometryBox>, EndpointMasks), Diagnostic> {
         #[cfg(any(test, feature = "geometry-corpus"))]
         crate::work::record_route_evaluation();
@@ -1713,37 +1761,71 @@ impl SceneBuilder {
             waypoints = channels;
         }
         let cached = self.routing_obstacles.get(&clearance);
-        let mut obstacles = match cached {
-            Some(value) => value.clone()?,
-            None => self
-                .document
-                .nodes
-                .iter()
-                .map(|node| node.bounds)
-                .chain(
-                    self.document
-                        .containers
-                        .iter()
-                        .filter(|frame| frame.kind == "card")
-                        .map(|frame| frame.bounds),
-                )
-                .map(|bounds| inflate(bounds, clearance))
-                .collect::<Result<Vec<_>, _>>()?,
+        let placed;
+        let base: &[GeometryBox] = match cached {
+            Some(Ok(value)) => value.as_slice(),
+            Some(Err(error)) => return Err(error.clone()),
+            None => {
+                placed = self
+                    .document
+                    .nodes
+                    .iter()
+                    .map(|node| node.bounds)
+                    .chain(
+                        self.document
+                            .containers
+                            .iter()
+                            .filter(|frame| frame.kind == "card")
+                            .map(|frame| frame.bounds),
+                    )
+                    .map(|bounds| inflate(bounds, clearance))
+                    .collect::<Result<Vec<_>, _>>()?;
+                placed.as_slice()
+            }
         };
         let first_label = if cached.is_some() {
             self.routing_label_base
         } else {
             0
         };
-        let base_obstacle_count = obstacles.len();
-        obstacles.extend(
-            self.document
-                .labels
-                .iter()
-                .skip(first_label)
-                .map(|label| inflate(label.bounds, clearance))
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        let base_obstacle_count = base.len();
+        let suffix = self
+            .document
+            .labels
+            .iter()
+            .skip(first_label)
+            .map(|label| inflate(label.bounds, clearance))
+            .collect::<Result<Vec<_>, _>>()?;
+        // A route with no cleared relationship label routes against the cached
+        // set itself; only the label suffix makes a per-route copy necessary.
+        let mut extended;
+        let obstacles: &[GeometryBox] = if suffix.is_empty() {
+            base
+        } else {
+            extended = Vec::new();
+            extended
+                .try_reserve(base.len() + suffix.len())
+                .map_err(|_| {
+                    failure(
+                        "coordinate",
+                        "the routing obstacle set is larger than memory allows",
+                        "reduce the number of nodes, labels or relationships",
+                    )
+                })?;
+            extended.extend_from_slice(base);
+            extended.extend_from_slice(&suffix);
+            extended.as_slice()
+        };
+        // The prepared planner holds exactly the cached obstacle set. Routing
+        // labels appended after placement are a per-route suffix, so a route
+        // that sees one routes through the free functions with its own set.
+        let planner = if cached.is_some() && suffix.is_empty() {
+            self.routing_planners
+                .get(&clearance)
+                .and_then(|planner| planner.as_ref().ok())
+        } else {
+            None
+        };
         let mut endpoint_masks = self.endpoint_masks(r, clearance)?;
         let routing_endpoint_masks = if endpoint_masks
             .by_via
@@ -1808,7 +1890,12 @@ impl SceneBuilder {
         let face_origin = if face_vertical { to.y } else { to.x };
         let mut incoming = Vec::new();
         if automatic_ports {
-            for peer in self.connections.iter().filter(|peer| peer.to == r.to) {
+            let peers = self
+                .incoming_peers
+                .get(&r.to)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            for peer in peers.iter().map(|index| &self.connections[*index]) {
                 let Some(source) = self.node_bounds(&peer.from) else {
                     continue;
                 };
@@ -1987,50 +2074,87 @@ impl SceneBuilder {
                     continue;
                 }
                 #[cfg(test)]
-                let routed = match self.route_budget {
-                    Some(budget) if !routing_endpoint_masks.is_empty() => {
+                let routed = match (self.route_budget, planner) {
+                    (Some(budget), _) if !routing_endpoint_masks.is_empty() => {
                         crate::routing::route_orthogonal_with_endpoint_masks_and_budget(
                             source,
                             target,
-                            &obstacles,
+                            obstacles,
                             &waypoints,
                             &routing_endpoint_masks,
                             budget,
                         )
                         .map(|route| (route.points, route.waypoint_point_indices))
                     }
-                    Some(budget) => crate::routing::route_orthogonal_with_budget(
-                        source, target, &obstacles, &waypoints, budget,
+                    (Some(budget), _) => crate::routing::route_orthogonal_with_budget(
+                        source, target, obstacles, &waypoints, budget,
                     )
                     .map(|points| (points, Vec::new())),
-                    None if !routing_endpoint_masks.is_empty() => {
+                    (None, Some(planner)) if !routing_endpoint_masks.is_empty() => planner
+                        .route(
+                            source,
+                            target,
+                            &waypoints,
+                            &routing_endpoint_masks,
+                            crate::routing::SEARCH_STATES,
+                        )
+                        .map(|route| (route.points, route.waypoint_point_indices)),
+                    (None, Some(planner)) => planner
+                        .route(
+                            source,
+                            target,
+                            &waypoints,
+                            &[],
+                            crate::routing::SEARCH_STATES,
+                        )
+                        .map(|route| (route.points, Vec::new())),
+                    (None, None) if !routing_endpoint_masks.is_empty() => {
                         crate::routing::route_orthogonal_with_endpoint_masks(
                             source,
                             target,
-                            &obstacles,
+                            obstacles,
                             &waypoints,
                             &routing_endpoint_masks,
                         )
                         .map(|route| (route.points, route.waypoint_point_indices))
                     }
-                    None => {
-                        crate::routing::route_orthogonal(source, target, &obstacles, &waypoints)
+                    (None, None) => {
+                        crate::routing::route_orthogonal(source, target, obstacles, &waypoints)
                             .map(|points| (points, Vec::new()))
                     }
                 };
                 #[cfg(not(test))]
-                let routed = if routing_endpoint_masks.is_empty() {
-                    crate::routing::route_orthogonal(source, target, &obstacles, &waypoints)
-                        .map(|points| (points, Vec::new()))
-                } else {
-                    crate::routing::route_orthogonal_with_endpoint_masks(
+                let routed = match planner {
+                    Some(planner) if !routing_endpoint_masks.is_empty() => planner
+                        .route(
+                            source,
+                            target,
+                            &waypoints,
+                            &routing_endpoint_masks,
+                            crate::routing::SEARCH_STATES,
+                        )
+                        .map(|route| (route.points, route.waypoint_point_indices)),
+                    Some(planner) => planner
+                        .route(
+                            source,
+                            target,
+                            &waypoints,
+                            &[],
+                            crate::routing::SEARCH_STATES,
+                        )
+                        .map(|route| (route.points, Vec::new())),
+                    None if routing_endpoint_masks.is_empty() => {
+                        crate::routing::route_orthogonal(source, target, obstacles, &waypoints)
+                            .map(|points| (points, Vec::new()))
+                    }
+                    None => crate::routing::route_orthogonal_with_endpoint_masks(
                         source,
                         target,
-                        &obstacles,
+                        obstacles,
                         &waypoints,
                         &routing_endpoint_masks,
                     )
-                    .map(|route| (route.points, route.waypoint_point_indices))
+                    .map(|route| (route.points, route.waypoint_point_indices)),
                 };
                 match routed {
                     Ok((mut points, waypoint_point_indices)) => {
@@ -2043,7 +2167,15 @@ impl SceneBuilder {
                                 &waypoint_point_indices,
                             );
                         }
-                        return Ok((points, obstacles, endpoint_masks));
+                        return Ok((
+                            points,
+                            if retain_obstacles {
+                                obstacles.to_vec()
+                            } else {
+                                Vec::new()
+                            },
+                            endpoint_masks,
+                        ));
                     }
                     Err(error) => {
                         // A single edge owns one search budget. Alternative
@@ -2199,7 +2331,8 @@ impl SceneBuilder {
         r: &RouteRequest,
         sequence_anchors: &SequenceMessageAnchorIndex,
     ) -> Result<(Vec<GeometryPoint>, EndpointMasks), Diagnostic> {
-        let (points, obstacles, endpoint_masks) = self.route_points(r)?;
+        let wants_obstacles = r.label.as_deref().is_some_and(|text| !text.is_empty());
+        let (points, obstacles, endpoint_masks) = self.route_points(r, wants_obstacles)?;
         if let Some(text) = r.label.as_deref().filter(|s| !s.is_empty()) {
             let sequence_keepout = self.kind == "sequence"
                 && r.label_at.is_none()
@@ -2337,6 +2470,7 @@ impl SceneBuilder {
         self.quality_profile = meta.quality_profile.clone();
         self.connections.sort_by(|a, b| a.id.cmp(&b.id));
         self.settle_grown_nodes()?;
+        self.index_incoming_peers();
         self.prepare_routing();
         let sequence_anchors = self.sequence_message_anchors()?;
         let mut first_routes = BTreeMap::new();
@@ -2372,7 +2506,7 @@ impl SceneBuilder {
                     });
                 let (routed, endpoint_masks) = match reusable {
                     Some((_, points, endpoint_masks)) => (Ok(points), endpoint_masks),
-                    None => match self.route_points(&r) {
+                    None => match self.route_points(&r, false) {
                         Ok((points, _, endpoint_masks)) => (Ok(points), endpoint_masks),
                         Err(error) => (Err(error), EndpointMasks::default()),
                     },
