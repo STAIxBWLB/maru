@@ -2,7 +2,7 @@
 
 **Status date:** 2026-09-04
 **Current product release:** v1.1.3 - Semantic Titles
-**Planning state:** Milestone v1.1 Felt Quality and Native Proof active, phases 6-11
+**Planning state:** Tracked on agent-hub since 2026-11-13 (#598); GSD milestones v1.0 and v1.1 archived
 
 Maru brings Korean knowledge work, document operations, evidence, tasks,
 communications, and AI-assisted workflows into one local-first desktop
@@ -17,10 +17,11 @@ ownership or bypass approval gates.
 - **Partial** means useful primitives exist, but the named end-to-end user flow
   is incomplete.
 - **Candidate** means the work is documented but is not an active commitment.
-- The canonical active delivery plan is `.planning/ROADMAP.md`. It currently
-  carries milestone v1.1, phases 6-11.
-- A candidate becomes committed work only after `$gsd-new-milestone` promotes
-  it into requirements and a phase roadmap.
+- Active delivery is tracked on agent-hub (#598): the GitHub issue body is the
+  spec, hub board tasks carry ownership and review, and releases are hub
+  release trains. `.planning/` is the read-only GSD archive of v1.0 and v1.1.
+- A candidate becomes committed work only after the owner opens a spec issue
+  for it.
 
 The old W1-W26 labels remain below only as compatibility references for prior
 plans and issues. They no longer imply an active weekly schedule.
@@ -30,16 +31,16 @@ plans and issues. They no longer imply an active weekly schedule.
 | Area | Current state | Evidence |
 |------|---------------|----------|
 | Product distribution | v1.1.3 shipped for macOS ARM/Intel, Linux, and Windows | 21 non-empty release assets, 11-platform updater manifest, Homebrew cask and CLI formula |
-| Planning milestone | v1.1 Felt Quality and Native Proof active | Phases 6-11; v1.0 closed at 5 phases, 32 plans, 24/24 requirements |
+| Delivery tracking | agent-hub spec issues, board tasks and release trains (#598) | GSD v1.0 (5 phases, 32 plans, 24/24 requirements) and v1.1 (phases 6-11) archived in `.planning/` |
 | Application surface | 18 top-level modes plus Settings overlay; Explorer is a right-pane tab, not a mode | Typed lazy mode registry on `main`; `RightPaneTab` in `src/lib/settings.ts` |
 | Application shell | Store-backed facades; the flexible split workbench and the fail-closed macOS passkey path shipped in v0.4.41 | Static ceilings and render-isolation tests |
 | Verification | Authoritative local and CI gates | Typecheck, ESLint, frontend/Rust tests, E2E, rustfmt, clippy, build, bundle budgets |
 | Typed IPC | ERR-06 closed after milestone review | Conflict codes preserved across every emitting command; recursive Rust source guard |
 | Security evidence | Phase 1, 3, 4, and 5 reports present; Phase 2 remains optional evidence debt | Phase 3 audit: seven threats closed, `threats_open: 0` |
 
-The detailed milestone record is
-`.planning/reports/MILESTONE_SUMMARY-v1.0.md`. Milestone numbering and release
-versions are aligned: see the numbering rule in README's Release Process.
+The archived v1.0 milestone record is
+`.planning/reports/MILESTONE_SUMMARY-v1.0.md`. For release version numbering,
+see the rule in README's Release Process.
 
 ## Product Capability Map
 
@@ -271,19 +272,22 @@ Additional deferred decisions:
 |--------|-----------|
 | `README.md` | Current product, architecture, storage, safety, development, and release contracts |
 | `CHANGELOG.md` | Release-by-release shipped changes |
-| `.planning/ROADMAP.md` | Active GSD milestone and phases; currently v1.1 phases 6-11 |
+| GitHub issues | Specs for planned and active work; decisions in each issue's Decisions section |
+| agent-hub board | Task ownership, review verdicts, CI evidence and release trains |
+| `.planning/` (archive) | Read-only GSD record of milestones v1.0 and v1.1 |
 | `.planning/MILESTONES.md` | Completed milestone record and post-close amendments |
 | `.planning/reports/MILESTONE_SUMMARY-v1.0.md` | v1.0 outcome, decisions, evidence, and deferred work |
 | `.planning/milestones/v1.0-*` | Archived requirements, roadmap, audit, and phase artifacts |
 | `docs/*.md` | Feature-specific implementation and operating contracts |
 | `~/workspace/work/_meta/rules/*.md` | Workspace-wide document, lifecycle, Hub, and evidence rules |
 
-## Starting the Next Milestone
+## Starting New Work
 
 1. Select one user outcome from the candidate tracks.
 2. Recheck the current code, connected service capability, and production data
    constraints.
-3. Run `$gsd-new-milestone` to create requirements and a phase roadmap.
+3. Open a spec issue with acceptance criteria and decisions, then split it into
+   agent-hub board tasks.
 4. Keep unrelated candidates deferred; do not convert this document wholesale
    into active requirements.
 5. Define release and live-verification gates before implementation begins.

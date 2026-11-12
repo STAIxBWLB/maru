@@ -18,9 +18,9 @@ identifier and on-disk migration to Maru.
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
 | Typed IPC | ERR-06 closed | Every conflict-emitting command preserves `{ code, message }`; recursive source guard active |
 | Main-thread isolation | PERF-01/02 closed | Phase 08 baseline classified 388 production commands: 379 isolated off the UI thread, 9 kept on it for main-thread affinity; Phase 08 baseline native load proof keeps loaded p95 at 2ms with the negative control at 4789ms |
-| Active milestone | None, v1.2 being defined | v1.1 closed 2026-09-27; opening v1.2 moves releases to 1.2.0 |
+| Delivery tracking | agent-hub | Spec issues, hub board tasks and release trains since 2026-11-13 (#598); GSD milestones v1.0 and v1.1 are archived |
 
-The milestone archive, audit, retrospective, and summary live under
+The GSD milestone archive, audit, retrospective, and summary stay read-only under
 `.planning/milestones/`, `.planning/RETROSPECTIVE.md`, and
 `.planning/reports/`.
 
@@ -823,11 +823,10 @@ no removal command and explicitly preserve target directories and contents;
 recursive directory removal is never advised. No new CLI action or automatic
 deletion bypasses these checks.
 
-The release version's major and minor come from the active GSD milestone in
-`.planning/STATE.md`; releases only increment the patch. Milestone v1.1 shipped
-as 1.1.x and closed on 2026-09-27. Opening milestone v1.2, whose scope is being
-defined, moves releases to 1.2.0. There is one tag namespace and it belongs to
-releases: milestone completion no longer creates a git tag.
+Releases only increment the patch. The major and minor change only when the
+owner opens a new release line, which is planned as an agent-hub release train;
+until then releases stay on 1.1.x. There is one tag namespace and it belongs to
+releases.
 
 Version sources must remain synchronized:
 
@@ -1023,12 +1022,13 @@ an application release must carry a newer offline bootstrap.
 
 ## Roadmap
 
-The GSD v1.0 Structural Debt Paydown and v1.1 Felt Quality and Native Proof
-milestones are complete and archived. v1.1 (phases 6-11) closed on 2026-09-27
-with audit status `tech_debt`, and the debt was accepted. The next milestone,
-v1.2, is being defined and is not open yet. The long-range product plan remains
-in [ROADMAP.md](ROADMAP.md), but planned items there are not active commitments
-until a GSD milestone promotes them into requirements.
+Since 2026-11-13 delivery is planned and tracked on agent-hub (#598): a GitHub
+issue body is the spec, hub board tasks carry ownership, review and CI evidence,
+and releases are hub release trains. The GSD v1.0 Structural Debt Paydown and
+v1.1 Felt Quality and Native Proof milestones are complete and archived
+read-only in `.planning/`. The long-range product plan remains in
+[ROADMAP.md](ROADMAP.md); planned items there are not active commitments until
+the owner opens a spec issue for them.
 
 Milestone v1.1 promoted part of the carried-over backlog into requirements. The
 remaining candidates are:
@@ -1063,7 +1063,7 @@ Maru v1.1.0 intentionally does not include:
 - [docs/SSOT-TIERS.md](docs/SSOT-TIERS.md): skill ownership tiers
 - [docs/BOUNDARIES.md](docs/BOUNDARIES.md): cross-repository ownership boundaries
 - [docs/macos-passkeys.md](docs/macos-passkeys.md): opt-in passkey distribution runbook
-- [.planning/reports/MILESTONE_SUMMARY-v1.0.md](.planning/reports/MILESTONE_SUMMARY-v1.0.md): completed structural milestone summary
+- [.planning/reports/MILESTONE_SUMMARY-v1.0.md](.planning/reports/MILESTONE_SUMMARY-v1.0.md): completed structural milestone summary (archived GSD record)
 
 ## License
 

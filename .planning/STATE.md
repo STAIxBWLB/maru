@@ -20,6 +20,8 @@ current_phase_name: Durability and Session Lifecycle
 
 # Project State
 
+**Archived 2026-11-13 (#598).** Delivery is now tracked on agent-hub (spec issues, board tasks, release trains). This file and the rest of `.planning/` are a read-only GSD record; do not update them.
+
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-09-27)

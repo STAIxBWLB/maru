@@ -41,10 +41,14 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 - Branches `<type>/<kebab-topic>`; work lands through PRs, not direct pushes to `main`.
 - Versions live on **five surfaces** that must stay in sync (`package.json`, `tauri.conf.json`,
   `src-tauri/Cargo.toml`, `src-tauri/maru-cli/Cargo.toml`, `src-tauri/Cargo.lock`);
-  `make release-version-check` enforces it. Releases bump the patch; the minor comes from the
-  milestone in `.planning/STATE.md`.
+  `make release-version-check` enforces it. Releases bump the patch; the minor changes only when
+  the owner opens a new release line.
+- Work is planned and tracked on agent-hub: the GitHub issue body is the spec, board tasks carry
+  ownership and review, and releases are hub release trains. Do not run GSD (`$gsd-*`) commands
+  or write `.planning/`; it is a read-only archive whose evidence files scripts still read.
 - Cross-repo ownership: `docs/BOUNDARIES.md`. Skill tiers: `docs/SSOT-TIERS.md`. Rationale for a
-  given decision: the `D-xx` / `GATE-xx` IDs in `.planning/**/NN-CONTEXT.md`.
+  decision: its spec issue's Decisions section; older `D-xx` / `GATE-xx` IDs are in
+  `.planning/**/NN-CONTEXT.md`.
 
 ## Things the agent gets wrong
 
