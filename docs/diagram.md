@@ -1733,10 +1733,10 @@ that own it:
 - route diagnostics stand on a uniform bucket grid over the route's own bounds
   grown by the clearance limit, in build order, so first-match diagnostics do not
   change; a grid wider than 262,144 cells keeps the exact full scan;
-- the route's obstacle set is shared through the clearance cache, and only a
-  route with a placed relationship label copies the base set plus that label
-  suffix; incoming target-face peers and pending node labels read prebuilt
-  indexes instead of re-filtering the whole graph.
+- the route's obstacle set is shared through the clearance cache, and a route
+  with a placed relationship label adds that label's rectangles to the shared
+  set as a suffix; incoming target-face peers and pending node labels read
+  prebuilt indexes instead of re-filtering the whole graph.
 
 | Hosted Chromium/WASM p95, ms | 50 nodes | 200 nodes | 1,000 nodes |
 | --- | --- | --- | --- |
@@ -1770,17 +1770,26 @@ spots now measure 5.3% (route diagnostics), 0.3% (axis population) and 8.3%
 (scene finish). Scene finish is the only one whose share rose: its absolute time
 fell, but the rest of the pass fell faster.
 
-A scene whose edges carry relationship labels does not get this reuse: a route
-that sees a label suffix cannot use the scene's cached obstacle set, so it routes
-through the free functions and builds a fresh `RoutePlanner` and a fresh cache
-for that route alone. On a 1,000-node chain with a one-character label on every
-edge, the native release layout measures 170.6 ms at `27ea454d` and 445.2 ms at
-this head (median of five warm layouts each), and 1,997 of the 1,998 route
-computations take that path; the same chain without labels measures 77.4 ms to
-51.1 ms. The hosted AC6 fixture carries no relationship labels, so the rows above
-do not cover this case. Routing such a leg against the cached base set plus the
-suffix obstacles, rather than through a fresh planner, is the next step for
-label-heavy scenes.
+A scene whose edges carry relationship labels keeps the same reuse. A route that
+sees a label suffix routes against the scene's cached planner: the suffix
+rectangles are merged into that leg's own sorted axis, bucketed once for the leg
+that searches, and read through the same exact clearance predicates as the base
+set, so a leg costs one axis merge and one small bucket build instead of a fresh
+`RoutePlanner` over the whole scene. The combined set is still refused past the
+65,536-obstacle cap, which is the refusal a from-scratch planner would have
+raised. On a 1,000-node chain with a one-character label on every edge, nine warm
+native release layouts measure:
+
+| Native release layout, 1,000-node chain, median of 9 warm layouts | Base `27ea454d` | This head |
+| --- | --- | --- |
+| every edge labelled | 169.0-174.3 ms | 157.4-160.0 ms |
+| no labels | 77.0-77.5 ms | 51.1-53.3 ms |
+
+The labelled chain is therefore about 8% faster than the base engine and the
+unlabelled chain 33% faster, where an earlier head of this PR measured 445.2 ms
+on the labelled chain by building a planner per suffix route. The hosted AC6
+fixture carries no relationship labels, so the hosted rows above do not cover the
+labelled case and this native pair is the only measurement of it.
 
 Scene hashes, SVG hashes, PNG manifests and every corpus case are byte-identical
 to the base engine; the only receipt change is the constraint-evaluation work

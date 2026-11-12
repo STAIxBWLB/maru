@@ -151,9 +151,8 @@ fn point_clear_except(point: GeometryPoint, obstacles: &[Rect], masked: &[usize]
     })
 }
 
-/// The scan every cache answers with, kept as the reference the cache tests
-/// compare against; routing itself only reads a clearance cache.
-#[cfg(test)]
+/// The scan every cache answers with, also the exact predicate for the label
+/// suffix a route adds on top of its cached obstacle set.
 fn segment_clear(from: GeometryPoint, to: GeometryPoint, obstacles: &[Rect]) -> bool {
     if from.y == to.y {
         let (left, right) = (from.x.min(to.x), from.x.max(to.x));
@@ -170,7 +169,6 @@ fn segment_clear(from: GeometryPoint, to: GeometryPoint, obstacles: &[Rect]) -> 
     }
 }
 
-#[cfg(test)]
 fn segment_clear_except(
     from: GeometryPoint,
     to: GeometryPoint,
@@ -529,15 +527,35 @@ impl ClearanceCache {
     }
 }
 
-/// One leg's implicit grid: the scene's obstacle axis plus the two endpoint
-/// coordinates it must offer, plus the one-step outer bounds. `base` is sorted
-/// and deduplicated, so the result is the same set a from-scratch axis build
-/// yields, without re-sorting every obstacle edge per leg.
-fn leg_axis(base: &[Coord], extra: [Coord; 2]) -> Result<Vec<Coord>, Diagnostic> {
+/// One leg's implicit grid: the scene's obstacle axis, merged with the label
+/// suffix this route adds, plus the two endpoint coordinates it must offer and
+/// the one-step outer bounds. Both inputs are sorted and deduplicated, so the
+/// result is the same set a from-scratch axis build over base plus suffix
+/// yields, without re-sorting the scene's edges per leg.
+fn leg_axis(
+    base: &[Coord],
+    suffix: &[Coord],
+    endpoints: [Coord; 2],
+) -> Result<Vec<Coord>, Diagnostic> {
     let mut axis = Vec::new();
-    axis.try_reserve(base.len() + 4).map_err(|_| budget())?;
-    axis.extend_from_slice(base);
-    for coordinate in extra {
+    axis.try_reserve(base.len() + suffix.len() + 4)
+        .map_err(|_| budget())?;
+    let (mut base_index, mut suffix_index) = (0, 0);
+    while base_index < base.len() || suffix_index < suffix.len() {
+        let take_suffix = base_index >= base.len()
+            || (suffix_index < suffix.len() && suffix[suffix_index] < base[base_index]);
+        let coordinate = if take_suffix {
+            suffix_index += 1;
+            suffix[suffix_index - 1]
+        } else {
+            base_index += 1;
+            base[base_index - 1]
+        };
+        if axis.last() != Some(&coordinate) {
+            axis.push(coordinate);
+        }
+    }
+    for coordinate in endpoints {
         if let Err(position) = axis.binary_search(&coordinate) {
             axis.insert(position, coordinate);
         }
@@ -558,32 +576,16 @@ fn leg_axis(base: &[Coord], extra: [Coord; 2]) -> Result<Vec<Coord>, Diagnostic>
 fn search_leg(
     start: GeometryPoint,
     end: GeometryPoint,
-    planner: &RoutePlanner,
-    masked_obstacle_indices: &[usize],
+    leg: &LegObstacles<'_>,
     max_search_states: usize,
 ) -> Result<Vec<GeometryPoint>, Diagnostic> {
-    let obstacles = &planner.obstacles[..];
     if start == end {
         return Ok(vec![start]);
     }
-    // The cache answers about a coordinate, not about a leg, so the visible
-    // fast paths read it too: one bucket replaces a scan of every obstacle.
-    let mut prepared = planner.prepared_mut()?;
-    let Prepared {
-        xs,
-        ys,
-        grid_xs,
-        grid_ys,
-        caches,
-    } = &mut *prepared;
-    let cache = leg_cache(
-        caches,
-        grid_xs.as_slice(),
-        grid_ys.as_slice(),
-        obstacles,
-        masked_obstacle_indices,
-    )?;
-    if cache.segment_clear(start, end, obstacles, masked_obstacle_indices) {
+    if leg
+        .clearance
+        .segment_clear(start, end, leg.base_masked, leg.suffix_masked)
+    {
         return Ok(vec![start, end]);
     }
     // One bend is globally shortest in distance and bends whenever available.
@@ -600,9 +602,15 @@ fn search_leg(
     ];
     corners.sort_by_key(|point| (point.x, point.y));
     for corner in corners {
-        if cache.point_clear(corner, obstacles, masked_obstacle_indices)
-            && cache.segment_clear(start, corner, obstacles, masked_obstacle_indices)
-            && cache.segment_clear(corner, end, obstacles, masked_obstacle_indices)
+        if leg
+            .clearance
+            .point_clear(corner, leg.base_masked, leg.suffix_masked)
+            && leg
+                .clearance
+                .segment_clear(start, corner, leg.base_masked, leg.suffix_masked)
+            && leg
+                .clearance
+                .segment_clear(corner, end, leg.base_masked, leg.suffix_masked)
         {
             return Ok(simplify(vec![start, corner, end]));
         }
@@ -617,11 +625,21 @@ fn search_leg(
     let max_queued_states = max_search_states
         .saturating_mul(4)
         .clamp(1, MAX_QUEUED_STATES);
-    let x_axis = leg_axis(xs.as_slice(), [start.x, end.x])?;
-    let y_axis = leg_axis(ys.as_slice(), [start.y, end.y])?;
+    let x_axis = leg_axis(leg.xs, leg.suffix_x, [start.x, end.x])?;
+    let y_axis = leg_axis(leg.ys, leg.suffix_y, [start.y, end.y])?;
     if x_axis.len() > MAX_AXIS_COORDINATES || y_axis.len() > MAX_AXIS_COORDINATES {
         return Err(budget());
     }
+    // A search asks hundreds of clearance questions, so bucket the suffix over
+    // this leg's axis once instead of walking it per question. A bucket is a
+    // superset that the same exact predicate filters, so no answer moves.
+    let suffix_cache = (!leg.clearance.suffix.is_empty())
+        .then(|| ClearanceCache::build(&x_axis, &y_axis, leg.clearance.suffix, leg.suffix_masked))
+        .transpose()?;
+    let clearance = ClearanceMap {
+        suffix_cache: suffix_cache.as_ref(),
+        ..leg.clearance
+    };
     // Both coordinates were inserted above, so these searches cannot fail.
     let initial = State {
         x: x_axis.binary_search(&start.x).map_err(|_| budget())?,
@@ -649,7 +667,7 @@ fn search_leg(
         #[cfg(any(test, feature = "geometry-corpus"))]
         crate::work::record_astar_expansion();
         #[cfg(any(test, feature = "geometry-corpus"))]
-        if !masked_obstacle_indices.is_empty() {
+        if !(leg.base_masked.is_empty() && leg.suffix_masked.is_empty()) {
             crate::work::record_masked_astar_expansion();
         }
         let point = GeometryPoint {
@@ -697,8 +715,8 @@ fn search_leg(
                 x: x_axis[next.x],
                 y: y_axis[next.y],
             };
-            if !cache.point_clear(target, obstacles, masked_obstacle_indices)
-                || !cache.segment_clear(point, target, obstacles, masked_obstacle_indices)
+            if !clearance.point_clear(target, leg.base_masked, leg.suffix_masked)
+                || !clearance.segment_clear(point, target, leg.base_masked, leg.suffix_masked)
             {
                 continue;
             }
@@ -878,6 +896,140 @@ fn leg_cache<'a>(
     Ok(caches.get(masked).expect("cache inserted above"))
 }
 
+/// The obstacles one route clears against: the planner's cached base set, read
+/// through its clearance cache, plus the label suffix that route appended, which
+/// is small and scanned directly.
+///
+/// The two halves answer the same predicate the scene's own set would have, in
+/// the same order, because the suffix's rects come after every base rect.
+#[derive(Clone, Copy)]
+struct ClearanceMap<'a> {
+    cache: &'a ClearanceCache,
+    base: &'a [Rect],
+    suffix: &'a [Rect],
+    /// The suffix's own buckets over the leg axis. A visible leg asks four
+    /// questions and scans, but a search asks hundreds, so it buckets the suffix
+    /// once per leg instead of walking it per question.
+    suffix_cache: Option<&'a ClearanceCache>,
+}
+
+impl ClearanceMap<'_> {
+    fn point_clear(
+        &self,
+        point: GeometryPoint,
+        base_masked: &[usize],
+        suffix_masked: &[usize],
+    ) -> bool {
+        self.cache.point_clear(point, self.base, base_masked)
+            && match self.suffix_cache {
+                Some(cache) => cache.point_clear(point, self.suffix, suffix_masked),
+                None => point_clear_except(point, self.suffix, suffix_masked),
+            }
+    }
+
+    fn segment_clear(
+        &self,
+        from: GeometryPoint,
+        to: GeometryPoint,
+        base_masked: &[usize],
+        suffix_masked: &[usize],
+    ) -> bool {
+        self.cache.segment_clear(from, to, self.base, base_masked)
+            && match self.suffix_cache {
+                Some(cache) => cache.segment_clear(from, to, self.suffix, suffix_masked),
+                None => segment_clear_except(from, to, self.suffix, suffix_masked),
+            }
+    }
+}
+
+/// One leg's routing inputs: where each clearance is read, the masks in the
+/// combined namespace the endpoint masks use, and the axis pieces.
+struct LegObstacles<'a> {
+    clearance: ClearanceMap<'a>,
+    base_masked: &'a [usize],
+    suffix_masked: &'a [usize],
+    xs: &'a [Coord],
+    ys: &'a [Coord],
+    suffix_x: &'a [Coord],
+    suffix_y: &'a [Coord],
+}
+
+/// The obstacles a route appends after the scene was prepared: a relationship
+/// label placed during routing, which cannot be part of the scene's cached set.
+struct SuffixObstacles {
+    rects: Vec<Rect>,
+    /// Source suffix index to normalized index, already offset into the
+    /// combined namespace so one mask list covers both halves.
+    source_to_normalized: Vec<Option<usize>>,
+    x_edges: Vec<Coord>,
+    y_edges: Vec<Coord>,
+}
+
+impl SuffixObstacles {
+    fn new(
+        suffix: &[GeometryBox],
+        base_source_len: usize,
+        base_len: usize,
+    ) -> Result<Self, Diagnostic> {
+        // The combined set is what a from-scratch planner would normalize, so
+        // the same cap refuses it, and with the same diagnostic.
+        if base_source_len.saturating_add(suffix.len()) > MAX_OBSTACLES {
+            return Err(budget());
+        }
+        let rects = normalize(suffix)?;
+        let mut source_to_normalized = normalized_obstacle_indexes(suffix)?;
+        for index in source_to_normalized.iter_mut().flatten() {
+            *index += base_len;
+        }
+        Ok(Self {
+            x_edges: obstacle_axis(&rects, false)?,
+            y_edges: obstacle_axis(&rects, true)?,
+            rects,
+            source_to_normalized,
+        })
+    }
+}
+
+/// One leg's masks, split into the base-relative half the cache keys on and the
+/// suffix-relative half the suffix scan applies.
+fn split_masks(masked: &[usize], base_len: usize) -> Result<(Vec<usize>, Vec<usize>), Diagnostic> {
+    let mut base = Vec::new();
+    let mut suffix = Vec::new();
+    base.try_reserve(masked.len()).map_err(|_| budget())?;
+    suffix.try_reserve(masked.len()).map_err(|_| budget())?;
+    for index in masked {
+        match index.checked_sub(base_len) {
+            None => base.push(*index),
+            Some(index) => suffix.push(index),
+        }
+    }
+    Ok((base, suffix))
+}
+
+/// A route anchor is tested against the whole obstacle set, so it reads the
+/// unmasked bucket of its row like any other clearance query.
+fn anchor_clear(
+    prepared: &mut Prepared,
+    base: &[Rect],
+    suffix: &[Rect],
+    point: GeometryPoint,
+) -> Result<bool, Diagnostic> {
+    let Prepared {
+        grid_xs,
+        grid_ys,
+        caches,
+        ..
+    } = prepared;
+    let cache = leg_cache(caches, grid_xs.as_slice(), grid_ys.as_slice(), base, &[])?;
+    let clearance = ClearanceMap {
+        cache,
+        base,
+        suffix,
+        suffix_cache: None,
+    };
+    Ok(clearance.point_clear(point, &[], &[]))
+}
+
 impl RoutePlanner {
     pub(crate) fn new(obstacles: &[GeometryBox]) -> Result<Self, Diagnostic> {
         Ok(Self {
@@ -907,26 +1059,6 @@ impl RoutePlanner {
         })
     }
 
-    /// A route anchor is tested against every obstacle, so it reads the
-    /// unmasked bucket of its row like any other clearance query.
-    fn anchor_clear(&self, point: GeometryPoint) -> Result<bool, Diagnostic> {
-        let mut prepared = self.prepared_mut()?;
-        let Prepared {
-            grid_xs,
-            grid_ys,
-            caches,
-            ..
-        } = &mut *prepared;
-        let cache = leg_cache(
-            caches,
-            grid_xs.as_slice(),
-            grid_ys.as_slice(),
-            &self.obstacles,
-            &[],
-        )?;
-        Ok(cache.point_clear(point, &self.obstacles, &[]))
-    }
-
     fn prepared_mut(&self) -> Result<RefMut<'_, Prepared>, Diagnostic> {
         if self.prepared.borrow().is_none() {
             let prepared = self.build_prepared()?;
@@ -946,12 +1078,47 @@ impl RoutePlanner {
         endpoint_masks: &[EndpointObstacleMask],
         max_search_states: usize,
     ) -> Result<MaskedRoute, Diagnostic> {
+        self.route_with_suffix(
+            &[],
+            start,
+            end,
+            waypoints,
+            endpoint_masks,
+            max_search_states,
+        )
+    }
+
+    /// Route one connection, treating `suffix` as obstacles appended to the
+    /// scene's set. A relationship label placed after the scene was prepared is
+    /// exactly that, so the cached axis, buckets and offsets still describe the
+    /// scene: the suffix is merged into the leg axis and scanned on top of every
+    /// clearance, instead of rebuilding a planner for one route.
+    pub(crate) fn route_with_suffix(
+        &self,
+        suffix: &[GeometryBox],
+        start: GeometryPoint,
+        end: GeometryPoint,
+        waypoints: &[GeometryPoint],
+        endpoint_masks: &[EndpointObstacleMask],
+        max_search_states: usize,
+    ) -> Result<MaskedRoute, Diagnostic> {
         if waypoints.len() > MAX_WAYPOINTS {
             return Err(budget());
         }
-        let (via_masked_indexes, leg_masked_indexes) =
-            endpoint_mask_indexes(endpoint_masks, &self.source_to_normalized, waypoints.len());
-        if !self.anchor_clear(start)? {
+        let suffix = SuffixObstacles::new(
+            suffix,
+            self.source_to_normalized.len(),
+            self.obstacles.len(),
+        )?;
+        let base_len = self.obstacles.len();
+        let (via_masked_indexes, leg_masked_indexes) = endpoint_mask_indexes(
+            endpoint_masks,
+            &self.source_to_normalized,
+            &suffix.source_to_normalized,
+            waypoints.len(),
+        );
+        let mut prepared = self.prepared_mut()?;
+        if !anchor_clear(&mut prepared, &self.obstacles, &suffix.rects, start)? {
             return Err(diagnostic(
                 "blocked",
                 "route anchor 0 lies inside a node or label obstacle",
@@ -959,7 +1126,14 @@ impl RoutePlanner {
             ));
         }
         for (index, anchor) in waypoints.iter().enumerate() {
-            if !point_clear_except(*anchor, &self.obstacles, &via_masked_indexes[index]) {
+            let masks = via_masked_indexes
+                .get(index)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let (base_masked, suffix_masked) = split_masks(masks, base_len)?;
+            if !point_clear_except(*anchor, &self.obstacles, &base_masked)
+                || !point_clear_except(*anchor, &suffix.rects, &suffix_masked)
+            {
                 return Err(diagnostic(
                     "blocked",
                     format!(
@@ -970,7 +1144,7 @@ impl RoutePlanner {
                 ));
             }
         }
-        if !self.anchor_clear(end)? {
+        if !anchor_clear(&mut prepared, &self.obstacles, &suffix.rects, end)? {
             return Err(diagnostic(
                 "blocked",
                 format!(
@@ -989,15 +1163,46 @@ impl RoutePlanner {
             .chain(std::iter::once(end))
             .enumerate()
         {
-            let leg_masks = leg_masked_indexes
+            let masks = leg_masked_indexes
                 .get(leg_index)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            let leg = search_leg(previous, target, self, leg_masks, max_search_states)?;
+            let (base_masked, suffix_masked) = split_masks(masks, base_len)?;
+            let leg_points = {
+                let Prepared {
+                    xs,
+                    ys,
+                    grid_xs,
+                    grid_ys,
+                    caches,
+                } = &mut *prepared;
+                let cache = leg_cache(
+                    caches,
+                    grid_xs.as_slice(),
+                    grid_ys.as_slice(),
+                    &self.obstacles,
+                    &base_masked,
+                )?;
+                let leg = LegObstacles {
+                    clearance: ClearanceMap {
+                        cache,
+                        base: &self.obstacles,
+                        suffix: &suffix.rects,
+                        suffix_cache: None,
+                    },
+                    base_masked: &base_masked,
+                    suffix_masked: &suffix_masked,
+                    xs: xs.as_slice(),
+                    ys: ys.as_slice(),
+                    suffix_x: &suffix.x_edges,
+                    suffix_y: &suffix.y_edges,
+                };
+                search_leg(previous, target, &leg, max_search_states)?
+            };
             if route.is_empty() {
-                route.extend(leg.iter().copied());
+                route.extend(leg_points.iter().copied());
             } else {
-                for point in leg.into_iter().skip(1) {
+                for point in leg_points.into_iter().skip(1) {
                     if route.last() != Some(&point) {
                         route.push(point);
                     }
@@ -1047,9 +1252,13 @@ fn normalized_obstacle_indexes(source: &[GeometryBox]) -> Result<Vec<Option<usiz
     Ok(indexes)
 }
 
+/// Resolve one authored mask into indexes of the combined normalized namespace:
+/// the planner's own obstacles first, then the source obstacles this route
+/// appended after them.
 fn endpoint_mask_indexes(
     masks: &[EndpointObstacleMask],
-    source_to_normalized: &[Option<usize>],
+    base_to_normalized: &[Option<usize>],
+    suffix_to_normalized: &[Option<usize>],
     waypoint_count: usize,
 ) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
     let mut by_via = vec![Vec::new(); waypoint_count];
@@ -1058,9 +1267,13 @@ fn endpoint_mask_indexes(
             continue;
         };
         for source_index in &mask.obstacle_indices {
-            if let Some(Some(index)) = source_to_normalized.get(*source_index) {
-                if !allowed.contains(index) {
-                    allowed.push(*index);
+            let resolved = match source_index.checked_sub(base_to_normalized.len()) {
+                None => base_to_normalized.get(*source_index).copied().flatten(),
+                Some(suffix_index) => suffix_to_normalized.get(suffix_index).copied().flatten(),
+            };
+            if let Some(index) = resolved {
+                if !allowed.contains(&index) {
+                    allowed.push(index);
                 }
             }
         }
@@ -1200,6 +1413,111 @@ mod tests {
             elapsed < std::time::Duration::from_secs(1),
             "the counting pass read the cap after {elapsed:?}"
         );
+    }
+
+    #[test]
+    fn suffix_route_matches_a_from_scratch_planner() {
+        // A route that appended a label keeps the scene's cached planner and
+        // takes the label as a suffix. Every path it chooses must be the path a
+        // planner built from both sets chooses, and must clear both sets. The
+        // second suffix rect plugs the only corridor the base set leaves open,
+        // so a search that ignored the suffix would return the base-only path.
+        let base = [rect(-6, -12, 12, 10), rect(-6, 2, 12, 10)];
+        let suffix = [rect(-2, -2, 4, 4), rect(-16, 10, 4, 4)];
+        let mut full = base.to_vec();
+        full.extend_from_slice(&suffix);
+        let planner = RoutePlanner::new(&base).unwrap();
+        let mut detours = 0;
+        for start in [p(-16, 0), p(-20, -16), p(0, -20), p(18, 18), p(-20, 18)] {
+            for end in [p(16, 0), p(20, 16), p(0, 20), p(-18, 18)] {
+                let with_suffix = planner
+                    .route_with_suffix(&suffix, start, end, &[], &[], MAX_SEARCH_STATES)
+                    .map(|route| route.points)
+                    .map_err(|error| error.code);
+                let scratch = route_orthogonal(start, end, &full, &[]).map_err(|error| error.code);
+                assert_eq!(
+                    with_suffix, scratch,
+                    "({}, {}) -> ({}, {})",
+                    start.x, start.y, end.x, end.y
+                );
+                let points = with_suffix.expect("both planners agree above");
+                assert_clear(&points, &full);
+                if points.len() > 2 {
+                    detours += 1;
+                }
+            }
+        }
+        assert!(detours > 0, "the sweep must force real detours");
+        let with_suffix = planner
+            .route_with_suffix(&suffix, p(-16, 0), p(16, 0), &[], &[], MAX_SEARCH_STATES)
+            .expect("the corridor detour routes")
+            .points;
+        let base_only = planner
+            .route(p(-16, 0), p(16, 0), &[], &[], MAX_SEARCH_STATES)
+            .expect("the open corridor routes")
+            .points;
+        assert_ne!(
+            with_suffix, base_only,
+            "the suffix must change a path the base set alone leaves straight"
+        );
+        assert_clear(&with_suffix, &full);
+    }
+
+    #[test]
+    fn suffix_mask_covers_an_obstacle_the_route_appended() {
+        // A mask index past the base set names a suffix obstacle, so the route
+        // must exempt it exactly as a planner over both sets does. Only the
+        // suffix puts an anchor inside an obstacle here, so a route that ignored
+        // the suffix would also succeed without the mask.
+        let base = [rect(24, -40, 8, 80)];
+        let suffix = [rect(-3, -3, 6, 6)];
+        let mut full = base.to_vec();
+        full.extend_from_slice(&suffix);
+        let planner = RoutePlanner::new(&base).unwrap();
+        let waypoints = [p(0, 0)];
+        let masks = [EndpointObstacleMask {
+            waypoint_index: 0,
+            obstacle_indices: vec![base.len()],
+        }];
+        assert!(
+            planner
+                .route_with_suffix(
+                    &suffix,
+                    p(-20, 0),
+                    p(20, 0),
+                    &waypoints,
+                    &[],
+                    MAX_SEARCH_STATES,
+                )
+                .is_err(),
+            "the waypoint lies inside the suffix and no mask exempts it"
+        );
+        // An endpoint anchor carries no mask, so it must read the suffix too.
+        assert!(
+            planner
+                .route_with_suffix(&suffix, p(-20, 0), p(0, 0), &[], &[], MAX_SEARCH_STATES)
+                .is_err(),
+            "an endpoint inside the suffix is refused, not routed through"
+        );
+        let with_suffix = planner
+            .route_with_suffix(
+                &suffix,
+                p(-20, 0),
+                p(20, 0),
+                &waypoints,
+                &masks,
+                MAX_SEARCH_STATES,
+            )
+            .map(|route| (route.points, route.waypoint_point_indices))
+            .map_err(|error| error.code);
+        let scratch =
+            route_orthogonal_with_endpoint_masks(p(-20, 0), p(20, 0), &full, &waypoints, &masks)
+                .map(|route| (route.points, route.waypoint_point_indices))
+                .map_err(|error| error.code);
+        assert_eq!(with_suffix, scratch);
+        let (points, indices) = with_suffix.expect("both planners agree above");
+        assert_eq!(indices, vec![1], "the waypoint is kept in the path");
+        assert_eq!(points[1], p(0, 0), "the route reaches the masked waypoint");
     }
 
     #[test]

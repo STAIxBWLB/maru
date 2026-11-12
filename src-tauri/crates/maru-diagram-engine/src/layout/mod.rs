@@ -531,6 +531,16 @@ fn mark_seeded_endpoint_segments(
     }
 }
 
+/// One route's obstacle inputs: the set the scene prepared, the label suffix
+/// this route appended, the scene planner when one is prepared, and the
+/// endpoint masks that name obstacles the path may touch.
+struct RouteInputs<'a> {
+    obstacles: &'a [GeometryBox],
+    suffix: &'a [GeometryBox],
+    planner: Option<&'a crate::routing::RoutePlanner>,
+    masks: &'a [crate::routing::EndpointObstacleMask],
+}
+
 impl SceneBuilder {
     fn new(request: LayoutRequest, kind: &str) -> Self {
         let pins = request
@@ -1628,6 +1638,70 @@ impl SceneBuilder {
         }
     }
 
+    /// One connection's routing call. The scene's planner serves every route,
+    /// including one that appended a relationship label: that label is handed
+    /// over as the suffix the planner merges and scans on top of its cached
+    /// set. Only a scene with no prepared obstacle set, or one whose planner
+    /// refused, routes through the free functions with a set of its own.
+    fn route_connection(
+        &self,
+        source: GeometryPoint,
+        target: GeometryPoint,
+        waypoints: &[GeometryPoint],
+        inputs: RouteInputs<'_>,
+    ) -> Result<(Vec<GeometryPoint>, Vec<usize>), Diagnostic> {
+        let RouteInputs {
+            obstacles,
+            suffix,
+            planner,
+            masks,
+        } = inputs;
+        #[cfg(test)]
+        if let Some(budget) = self.route_budget {
+            return if masks.is_empty() {
+                crate::routing::route_orthogonal_with_budget(
+                    source, target, obstacles, waypoints, budget,
+                )
+                .map(|points| (points, Vec::new()))
+            } else {
+                crate::routing::route_orthogonal_with_endpoint_masks_and_budget(
+                    source, target, obstacles, waypoints, masks, budget,
+                )
+                .map(|route| (route.points, route.waypoint_point_indices))
+            };
+        }
+        match planner {
+            Some(planner) if !masks.is_empty() => planner
+                .route_with_suffix(
+                    suffix,
+                    source,
+                    target,
+                    waypoints,
+                    masks,
+                    crate::routing::SEARCH_STATES,
+                )
+                .map(|route| (route.points, route.waypoint_point_indices)),
+            Some(planner) => planner
+                .route_with_suffix(
+                    suffix,
+                    source,
+                    target,
+                    waypoints,
+                    &[],
+                    crate::routing::SEARCH_STATES,
+                )
+                .map(|route| (route.points, Vec::new())),
+            None if masks.is_empty() => {
+                crate::routing::route_orthogonal(source, target, obstacles, waypoints)
+                    .map(|points| (points, Vec::new()))
+            }
+            None => crate::routing::route_orthogonal_with_endpoint_masks(
+                source, target, obstacles, waypoints, masks,
+            )
+            .map(|route| (route.points, route.waypoint_point_indices)),
+        }
+    }
+
     /// Route one connection and return its points, its endpoint masks, and —
     /// only when `retain_obstacles` asks — the obstacle set the path cleared.
     /// Relationship label placement is the only caller that reads that set, so
@@ -1818,8 +1892,9 @@ impl SceneBuilder {
         };
         // The prepared planner holds exactly the cached obstacle set. Routing
         // labels appended after placement are a per-route suffix, so a route
-        // that sees one routes through the free functions with its own set.
-        let planner = if cached.is_some() && suffix.is_empty() {
+        // that sees one hands that suffix to the planner, which merges it into
+        // the leg axis and scans it on top of the cached clearances.
+        let planner = if cached.is_some() {
             self.routing_planners
                 .get(&clearance)
                 .and_then(|planner| planner.as_ref().ok())
@@ -2073,89 +2148,17 @@ impl SceneBuilder {
                 {
                     continue;
                 }
-                #[cfg(test)]
-                let routed = match (self.route_budget, planner) {
-                    (Some(budget), _) if !routing_endpoint_masks.is_empty() => {
-                        crate::routing::route_orthogonal_with_endpoint_masks_and_budget(
-                            source,
-                            target,
-                            obstacles,
-                            &waypoints,
-                            &routing_endpoint_masks,
-                            budget,
-                        )
-                        .map(|route| (route.points, route.waypoint_point_indices))
-                    }
-                    (Some(budget), _) => crate::routing::route_orthogonal_with_budget(
-                        source, target, obstacles, &waypoints, budget,
-                    )
-                    .map(|points| (points, Vec::new())),
-                    (None, Some(planner)) if !routing_endpoint_masks.is_empty() => planner
-                        .route(
-                            source,
-                            target,
-                            &waypoints,
-                            &routing_endpoint_masks,
-                            crate::routing::SEARCH_STATES,
-                        )
-                        .map(|route| (route.points, route.waypoint_point_indices)),
-                    (None, Some(planner)) => planner
-                        .route(
-                            source,
-                            target,
-                            &waypoints,
-                            &[],
-                            crate::routing::SEARCH_STATES,
-                        )
-                        .map(|route| (route.points, Vec::new())),
-                    (None, None) if !routing_endpoint_masks.is_empty() => {
-                        crate::routing::route_orthogonal_with_endpoint_masks(
-                            source,
-                            target,
-                            obstacles,
-                            &waypoints,
-                            &routing_endpoint_masks,
-                        )
-                        .map(|route| (route.points, route.waypoint_point_indices))
-                    }
-                    (None, None) => {
-                        crate::routing::route_orthogonal(source, target, obstacles, &waypoints)
-                            .map(|points| (points, Vec::new()))
-                    }
-                };
-                #[cfg(not(test))]
-                let routed = match planner {
-                    Some(planner) if !routing_endpoint_masks.is_empty() => planner
-                        .route(
-                            source,
-                            target,
-                            &waypoints,
-                            &routing_endpoint_masks,
-                            crate::routing::SEARCH_STATES,
-                        )
-                        .map(|route| (route.points, route.waypoint_point_indices)),
-                    Some(planner) => planner
-                        .route(
-                            source,
-                            target,
-                            &waypoints,
-                            &[],
-                            crate::routing::SEARCH_STATES,
-                        )
-                        .map(|route| (route.points, Vec::new())),
-                    None if routing_endpoint_masks.is_empty() => {
-                        crate::routing::route_orthogonal(source, target, obstacles, &waypoints)
-                            .map(|points| (points, Vec::new()))
-                    }
-                    None => crate::routing::route_orthogonal_with_endpoint_masks(
-                        source,
-                        target,
+                let routed = self.route_connection(
+                    source,
+                    target,
+                    &waypoints,
+                    RouteInputs {
                         obstacles,
-                        &waypoints,
-                        &routing_endpoint_masks,
-                    )
-                    .map(|route| (route.points, route.waypoint_point_indices)),
-                };
+                        suffix: &suffix,
+                        planner,
+                        masks: &routing_endpoint_masks,
+                    },
+                );
                 match routed {
                     Ok((mut points, waypoint_point_indices)) => {
                         points.insert(0, tip);
