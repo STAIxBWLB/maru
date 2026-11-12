@@ -96,6 +96,12 @@ pub fn hwp_engine_candidates() -> Vec<PathBuf> {
     engine_candidates_with(resolve_program)
 }
 
+/// `hwp_engine_candidates` over one explicit PATH value and nothing else, for
+/// callers and tests that must not read or change the process PATH.
+pub fn hwp_engine_candidates_in(path_env: &OsStr) -> Vec<PathBuf> {
+    engine_candidates_with(|name| which_in_path(name, Some(path_env)).ok())
+}
+
 /// The HWP engine to spawn: `ahwp`, else the 1.x `hwp` compatibility name.
 pub fn resolve_hwp_engine() -> Option<PathBuf> {
     hwp_engine_candidates().into_iter().next()
@@ -264,8 +270,7 @@ mod tests {
         let bin = dir.path().join("ahwp");
         crate::test_support::write_executable_fixture(&bin, "#!/bin/sh\nexit 0\n", 0o755).unwrap();
         let path_env = std::env::join_paths([dir.path()]).unwrap();
-        let resolve = |name: &str| which_in_path(name, Some(&path_env)).ok();
-        assert_eq!(engine_candidates_with(resolve), vec![bin]);
+        assert_eq!(hwp_engine_candidates_in(&path_env), vec![bin]);
     }
 
     #[cfg(unix)]

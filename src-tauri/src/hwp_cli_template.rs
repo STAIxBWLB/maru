@@ -293,6 +293,13 @@ pub(crate) fn hwp_bin() -> Result<PathBuf, String> {
     )
 }
 
+/// The version-checked choice among `candidates`, as `hwp_bin` makes it once
+/// MARU_HWP_BIN is unset. Tests pass their own search path through this.
+#[cfg(test)]
+pub(crate) fn select_engine_from(candidates: Vec<PathBuf>) -> Result<PathBuf, String> {
+    select_compatible_hwp(candidates)
+}
+
 fn run_hwp(bin: &Path, args: &[OsString]) -> Result<CliRun, String> {
     let subcommand = args
         .first()
@@ -978,6 +985,7 @@ esac
     fn version_parser_requires_the_released_floor() {
         assert_eq!(parse_version(b"hwp 1.2.0"), Some((1, 2, 0)));
         assert_eq!(parse_version(b"hwp 1.3.0"), Some((1, 3, 0)));
+        assert_eq!(parse_version(b"ahwp 1.6.2\n"), Some((1, 6, 2)));
         assert_eq!(parse_version(b"hwp v1.3.0 (abc)"), Some((1, 3, 0)));
         assert_eq!(parse_version(b"broken"), None);
     }

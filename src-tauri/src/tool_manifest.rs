@@ -40,6 +40,9 @@ fn package_for(tool: &str) -> Option<&'static str> {
 
 /// Probe the installed `tool` (amem or vmem). Unknown tools read as absent.
 pub fn read(tool: &str) -> ToolManifest {
+    if tool == HWP_ENGINE_TOOL {
+        return read_hwp_engine();
+    }
     let Some(package) = package_for(tool) else {
         return ToolManifest::default();
     };
@@ -119,6 +122,32 @@ fn parse_version_output(stdout: &[u8]) -> Option<Semver> {
         .find_map(|token| parse_stable(token.strip_prefix('v').unwrap_or(token)))
 }
 
+/// The tool name a skills bundle uses for the HWP engine in `requires`. The
+/// skill and contract names stayed `hwp` through the agent-hwp rename; the
+/// binary is `ahwp`, with `hwp` only as its 1.x compatibility name.
+pub const HWP_ENGINE_TOOL: &str = "hwp";
+
+/// The HWP engine has no npm manifest: its version is the `--version` banner
+/// (`ahwp X.Y.Z`, or `hwp X.Y.Z` before the rename) of the binary the shared
+/// resolver finds, `ahwp` first.
+fn read_hwp_engine() -> ToolManifest {
+    let Some(program) = crate::cli_path::resolve_hwp_engine() else {
+        return ToolManifest::default();
+    };
+    let mut command = Command::new(&program);
+    command
+        .arg("--version")
+        .env("PATH", crate::cli_path::augmented_path());
+    let version = run_command_with_timeout(&mut command, PROBE_TIMEOUT, |_, _| false)
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| parse_version_output(&output.stdout));
+    ToolManifest {
+        version,
+        tools: Vec::new(),
+    }
+}
+
 /// Exactly `X.Y.Z`: a pre-release or build suffix is not a stable version.
 pub fn parse_stable(value: &str) -> Option<Semver> {
     let mut parts = value.split('.');
@@ -180,6 +209,9 @@ mod tests {
         assert_eq!(parse_version_output(b"0.2.4\n"), Some((0, 2, 4)));
         assert_eq!(parse_version_output(b"amem 0.17.0\n"), Some((0, 17, 0)));
         assert_eq!(parse_version_output(b"v1.2.3"), Some((1, 2, 3)));
+        // The HWP engine banner, after and before the agent-hwp rename.
+        assert_eq!(parse_version_output(b"ahwp 1.6.2\n"), Some((1, 6, 2)));
+        assert_eq!(parse_version_output(b"hwp 1.3.0\n"), Some((1, 3, 0)));
         assert_eq!(parse_version_output(b"0.2.4-rc.1"), None);
         assert_eq!(parse_version_output(b""), None);
     }

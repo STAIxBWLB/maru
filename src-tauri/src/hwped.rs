@@ -179,12 +179,16 @@ pub struct HwpedCapabilities {
 /// Binary resolution: MARU_HWP_BIN override -> the engine on the (augmented)
 /// PATH, `ahwp` first and the 1.x `hwp` compatibility name as the fallback.
 fn find_hwp_tool() -> Option<PathBuf> {
+    find_hwp_tool_from(resolve_hwp_engine)
+}
+
+fn find_hwp_tool_from(engine: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("MARU_HWP_BIN").map(PathBuf::from) {
         if is_executable(&path) {
             return Some(path);
         }
     }
-    resolve_hwp_engine()
+    engine()
 }
 
 fn hwp_bin() -> Result<PathBuf, String> {
@@ -1462,6 +1466,7 @@ mod tests {
     #[test]
     fn parse_version_reads_semver_triplets() {
         assert_eq!(parse_version(b"hwp 0.8.7"), Some((0, 8, 7)));
+        assert_eq!(parse_version(b"ahwp 1.6.2\n"), Some((1, 6, 2)));
         assert_eq!(parse_version(b"hwp-cli v1.2.3 (build)"), Some((1, 2, 3)));
         assert_eq!(parse_version(b"no version here"), None);
     }
@@ -1819,7 +1824,9 @@ mod phase08_21 {
     }
 
     /// Restores PATH and MARU_HWP_BIN after a lookup test, under the shared
-    /// env lock every MARU_HWP_BIN test already takes.
+    /// env lock every MARU_HWP_BIN test already takes. Only the ignored
+    /// real-engine test uses it: it runs alone, so changing the process PATH
+    /// cannot reach a parallel test.
     struct LookupEnv {
         _lock: MutexGuard<'static, ()>,
         path: Option<std::ffi::OsString>,
@@ -1856,27 +1863,43 @@ mod phase08_21 {
     #[cfg(unix)]
     #[test]
     fn engine_lookup_finds_ahwp_alone_and_prefers_it_over_hwp() {
-        // agent-hwp 2.0.0 ships only `ahwp`; 1.x ships both names.
+        // agent-hwp 2.0.0 ships only `ahwp`; 1.x ships both names. The search
+        // path is passed in, never set on the process, so parallel tests that
+        // spawn other tools are not affected.
+        let _lock = super::PHASE08_21_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        std::env::remove_var("MARU_HWP_BIN");
         let dir = tempfile::tempdir().unwrap();
         let ahwp = dir.path().join("ahwp");
-        std::fs::rename(fake_hwp(dir.path()), &ahwp).unwrap();
-        {
-            let _env = LookupEnv::path_only(dir.path());
-            assert_eq!(find_hwp_tool(), Some(ahwp.clone()));
-            assert_eq!(hwp_bin().unwrap(), ahwp);
-        }
+        // A released 1.x banner, so the template floor (1.3.0) also admits it.
+        std::fs::rename(fake_hwp_version(dir.path(), "1.6.2"), &ahwp).unwrap();
+        let path_env = std::env::join_paths([dir.path()]).unwrap();
+        let first = || {
+            crate::cli_path::hwp_engine_candidates_in(&path_env)
+                .into_iter()
+                .next()
+        };
+        assert_eq!(find_hwp_tool_from(first), Some(ahwp.clone()));
+        // Template fill and export select through hwp_cli_template from the
+        // same candidates, version-checked.
+        assert_eq!(
+            crate::hwp_cli_template::select_engine_from(crate::cli_path::hwp_engine_candidates_in(
+                &path_env
+            ))
+            .unwrap(),
+            ahwp
+        );
         let legacy = fake_hwp(dir.path());
-        {
-            let _env = LookupEnv::path_only(dir.path());
-            assert_eq!(
-                find_hwp_tool(),
-                Some(ahwp.clone()),
-                "ahwp wins over {}",
-                legacy.display()
-            );
-        }
-        // The `hwp`-only fallback is covered by cli_path's injected resolver:
-        // here the augmented PATH would also reach a host-installed ahwp.
+        assert_eq!(
+            find_hwp_tool_from(first),
+            Some(ahwp.clone()),
+            "ahwp wins over {}",
+            legacy.display()
+        );
+        // A release before the rename, installed only as `hwp`: the fallback.
+        std::fs::remove_file(&ahwp).unwrap();
+        assert_eq!(find_hwp_tool_from(first), Some(legacy));
     }
 
     #[cfg(unix)]
@@ -1895,6 +1918,14 @@ mod phase08_21 {
         let version = run_hwp_ok(&bin, &[OsString::from("--version")]).unwrap();
         let (major, _, _) = parse_version(&version).unwrap();
         assert_eq!(major, 1, "{}", String::from_utf8_lossy(&version));
+        // Template fill, HWPX export and every other spawn go through the
+        // version-checked resolver; the skills floor reads the same engine.
+        assert_eq!(
+            crate::hwp_cli_template::hwp_bin().unwrap(),
+            dir.join("ahwp")
+        );
+        let probed = crate::tool_manifest::read(crate::tool_manifest::HWP_ENGINE_TOOL);
+        assert_eq!(probed.version.map(|(major, _, _)| major), Some(1));
     }
 
     #[cfg(unix)]
