@@ -282,6 +282,11 @@ interface PaintReport {
     transform: string | null;
     /** The shape actually drawn for this member, measured in canvas pixels. */
     drawn: (PaintedBox & { shape: string }) | null;
+    /** What produced `drawn`, read in the same execute: the measured element's
+     *  own size attributes, the member it sits under, the canvas status and
+     *  selection. A mismatch names whether the body still carried a stale size
+     *  (app) or a different shape was measured (spec). */
+    provenance: string;
     /** The same shape when it is an oval: an ellipse the label must stay inside. */
     oval: { cx: number; cy: number; rx: number; ry: number } | null;
   }>;
@@ -336,15 +341,14 @@ async function painted(
     return status === "ready" || status === "refused"
       || (status === null && surface.querySelectorAll("[data-node-id]").length > 0);
   }), { timeout: 60_000, interval: 200, timeoutMsg: "the canvas never settled on a geometry result" });
-  // One React commit writes the status, the box attribute and the body's own
-  // width/height together (CanvasSurface renderNode and NodeBody both read the
-  // same display node), but the spec reads layout through separate WebDriver
-  // round trips, and twice a body measured at its authored 160x64 under a
-  // ready status whose box attribute and transform already matched the engine.
-  // So the measurement below waits until each body's painted size has
-  // caught up with its engine box. This waits for paint, not for the app: when
-  // the body stays wrong, the timeout does not throw and the drawn-box
-  // assertion in assertFamilyPainted still reports it with both boxes.
+  // Twice in CI one execute (one DOM state) saw a member whose box attribute and
+  // transform matched the engine while its body measured at the authored
+  // 160x64 under a ready status. The cause is not established: the canvas
+  // derives all three from one display node in one render, so either a commit
+  // carried inconsistent values or the measured shape was not the body. This
+  // bounded wait tolerates a transient state and is not a proven fix: when the
+  // body stays wrong, the timeout does not throw, and assertFamilyPainted
+  // reports the member, both boxes and the measured element's provenance.
   await browser.waitUntil(async () => browser.execute(() => {
     const surface = document.querySelector(".maru-diagram-canvas");
     if (!surface || surface.getAttribute("data-engine-geometry-status") !== "ready") return true;
@@ -414,7 +418,25 @@ async function painted(
           !candidate.closest("[data-export-ignore]")
           && !candidate.closest(".maru-diagram-port, .maru-diagram-memo-badge")) ?? null;
         const drawn = shape ? { ...paintedBox(shape), shape: shape.tagName.toLowerCase() } : null;
+        const member = group.querySelector("[data-node-id]");
+        const sizeAttrs = shape
+          ? ["width", "height", "rx", "ry", "cx", "cy", "d"]
+            .map((name) => [name, shape.getAttribute(name)] as const)
+            .filter(([, value]) => value !== null)
+            .map(([name, value]) => `${name}=${value!.length > 80 ? `${value!.slice(0, 80)}...` : value}`)
+            .join(" ")
+          : "";
+        const provenance = [
+          `measured=${shape ? describe(shape) : "nothing"}`,
+          `attrs[${sizeAttrs}]`,
+          `member=${member?.getAttribute("data-node-id") ?? "none"}`,
+          `memberTransform=${member?.getAttribute("transform") ?? "none"}`,
+          `selected=${member?.classList.contains("is-selected") ?? false}`,
+          `status=${surface.getAttribute("data-engine-geometry-status")}`,
+          `bodies=${member ? member.querySelectorAll("rect, ellipse, path").length : 0}`,
+        ].join(" ");
         return {
+          provenance,
           id: group.getAttribute("data-engine-source-id") ?? "",
           box: (group.getAttribute("data-engine-box") ?? "").split(" ").map(Number),
           transform: group.querySelector("[data-node-id]")?.getAttribute("transform") ?? group.getAttribute("transform"),
@@ -531,7 +553,7 @@ function assertFamilyPainted(paint: PaintReport, family: NativeE2eDiagramE4Famil
       && Math.abs(actual.drawn.y - expected.box[1]) <= 2
       && Math.abs(actual.drawn.w - expected.box[2]) <= 2
       && Math.abs(actual.drawn.h - expected.box[3]) <= 2,
-      `${family.type}: node ${expected.id} is drawn as a ${actual.drawn.shape} at (${actual.drawn.x.toFixed(1)},${actual.drawn.y.toFixed(1)}) ${actual.drawn.w.toFixed(1)}x${actual.drawn.h.toFixed(1)} instead of the engine box ${expected.box.join(",")}`,
+      `${family.type}: node ${expected.id} is drawn as a ${actual.drawn.shape} at (${actual.drawn.x.toFixed(1)},${actual.drawn.y.toFixed(1)}) ${actual.drawn.w.toFixed(1)}x${actual.drawn.h.toFixed(1)} instead of the engine box ${expected.box.join(",")}; ${actual.provenance}`,
     );
   }
   assert.ok(
