@@ -44,9 +44,15 @@ accepts a flat `edit-ops-v1` array, writes it to an isolated per-call `ops.json`
 and invokes `hwp edit --ops`; this channel requires hwp-cli 0.20.0 or newer.
 Rust checks only the array envelope; the engine owns the operation grammar. Run
 addresses and half-open source WCHAR/UTF-16 `chars` ranges pass through unchanged
-and are never converted to text selectors.
-JSON image paths resolve beside the staged ops file in the temporary directory,
-so callers must supply absolute asset paths until an asset-root contract exists.
+and are never converted to text selectors. The JSON channel's `insert_image` and
+`seal` ops get the same asset containment as the legacy channel's flags, applied
+to every op before the ops file is staged: `workspaceRoot` is required, the path
+resolves inside it, its canonical file (symlink targets included) stays inside,
+and it is a regular file; the op's `path` is then rewritten to that absolute
+path, with the anchor and dimension keys untouched. A non-string `path` is
+refused, and a missing one is left to the engine's schema. Because the rewrite
+is absolute, a relative asset path never depends on where the temporary ops file
+sits.
 Legacy clients keep sending
 `opsArgv` flag/value pairs and remain supported from the global 0.8.7 floor.
 The legacy channel accepts all 28 named edit-operation flags from `opsToArgv`.
