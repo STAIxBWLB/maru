@@ -219,3 +219,69 @@ fn only_asset_ops_are_touched_and_the_array_shape_is_preserved() {
     .unwrap_err()
     .contains("workspaceRoot"));
 }
+
+#[test]
+fn apply_form_bindings_is_refused_on_the_json_channel() {
+    // Even with a workspace root, and a receipt that would resolve inside it,
+    // the op is refused: its own write destinations sit outside the bridge's
+    // contract, so containment is not the answer here.
+    let workspace = tempfile::tempdir().unwrap();
+    let root = text(workspace.path());
+    let error = contain_json_edit_assets(
+        serde_json::json!([{
+            "op": "apply_form_bindings",
+            "receipt": "bindings/receipt.json",
+            "preview": "bindings/preview.hwpx"
+        }]),
+        Some(&root),
+    )
+    .unwrap_err();
+
+    assert!(error.starts_with("hwped_bad_request:"), "{error}");
+    assert!(error.contains("apply_form_bindings"), "{error}");
+    assert!(error.contains("receipt and preview"), "{error}");
+    assert!(error.contains("ahwp edit"), "{error}");
+
+    // The refusal belongs to the op, not to the root: with no root at all it
+    // still names the op instead of asking for workspaceRoot.
+    let without_root =
+        contain_json_edit_assets(serde_json::json!([{"op": "apply_form_bindings"}]), None)
+            .unwrap_err();
+    assert!(
+        without_root.contains("apply_form_bindings"),
+        "{without_root}"
+    );
+    assert!(!without_root.contains("workspaceRoot"), "{without_root}");
+}
+
+#[test]
+fn a_batch_mixing_a_valid_asset_with_apply_form_bindings_is_refused_as_a_whole() {
+    let workspace = tempfile::tempdir().unwrap();
+    let asset = workspace.path().join("assets/chart.png");
+    write_asset(&asset);
+    let root = text(workspace.path());
+
+    let refused = contain_json_edit_assets(
+        serde_json::json!([
+            op("insert_image", "assets/chart.png"),
+            {"op": "apply_form_bindings", "receipt": "bindings/receipt.json"},
+            op("seal", "assets/chart.png")
+        ]),
+        Some(&root),
+    )
+    .unwrap_err();
+    assert!(refused.starts_with("hwped_bad_request:"), "{refused}");
+    assert!(refused.contains("apply_form_bindings"), "{refused}");
+
+    // The control: the same batch without that one op is accepted, so the
+    // refusal is that op's and not an artifact of the batch shape.
+    let accepted = contain_json_edit_assets(
+        serde_json::json!([
+            op("insert_image", "assets/chart.png"),
+            op("seal", "assets/chart.png")
+        ]),
+        Some(&root),
+    )
+    .unwrap();
+    assert_eq!(accepted.as_array().unwrap().len(), 2);
+}
