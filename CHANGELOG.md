@@ -9,9 +9,18 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
-## Unreleased
+## v1.1.27 - Measured Lines (2026-11-12)
 
+- Diagram has its own layout engine. It validates, lays out and routes all five semantic types (architecture, workflow, sequence, data flow, lifecycle), and the canvas draws the engine's geometry: node boxes, routes, label breaks and diagnostics anchored at the element they describe (#548, #556, #557, #558, #559, #577, #578, #580).
+- Korean and English node labels wrap and shrink to fit before a layout is refused, and SVG export draws text from pinned glyph outlines, so it looks the same on machines without the fonts (#571, #572, #574).
+- Verified SVG and PNG export, native PNG export with engine receipts, and an offline interactive HTML viewer. Renders are kept in the workspace and open in Diagram (#539, #542, #562, #565, #566, #573).
+- Semantic structure editing with cascades, range containers, and Floorplan as a new diagram type (#530, #531, #540).
+- Canvas fixes: diagnostic badges stay on the page; hidden and layer-hidden members are no longer snap targets or marquee hits, and select all, find, replace and fit view skip them; header subtitles stay clear of lane and stage captions; endpoint masks are scoped to their routes (#567, #569, #581, #583).
+- Faster layout and routing on large diagrams (#576, #584).
 - Retired the read-only Architecture gallery. Existing Architecture mode preferences open Diagram, where blueprint JSON files can be imported; copied gallery documents and repository architecture documentation remain available (#533).
+- Tasks can opt in to execution ownership with conditional release, and document and Today writers take the task claim lock (#538, #564).
+- Agent runs and background skill dispatch record usage receipts and mark costs that have no price (#529, #568).
+- The HWP editor bridge adds version-gated JSON edits and layout metadata for an upcoming editor release (#570).
 
 ## v1.1.26 - Clear Frames (2026-11-05)
 
