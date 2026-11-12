@@ -9,6 +9,10 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.29 - Counted Tables (2026-11-13)
+
+- The HWP editor bridge now sends the engine's own table count (`bodyTables`, from `hwp info --json --body-stats`) with each read, so the editor's table guard refuses index-addressed table edits when a table inside a note, header, footer or hidden comment would shift the indices. The extra call needs hwp-cli 0.19.2 or newer and never fails the read (#591).
+
 ## v1.1.28 - Single Links (2026-11-12)
 
 - Skills sync no longer links a tool directory through a root that is Maru's skills folder itself. A target whose root resolves to it, such as `~/.qwen/skills` pointing at `~/.maru/skills`, is reported in the sync plan and left alone, so its entries stay the canonical ones, and a link write that would point at its own source is refused before it happens (#587).
