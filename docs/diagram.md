@@ -1739,30 +1739,40 @@ that own it:
 | Hosted Chromium/WASM p95, ms | 50 nodes | 200 nodes | 1,000 nodes |
 | --- | --- | --- | --- |
 | `3212ff93` (#576), run 42834613105 | 7.0 | 31.7 | 279.3 |
+| This head, run 43155594876 | 7.2 | 33.1 | 243.4 |
 
-The hosted figure for this head comes from the `Measure browser apply gate` step
-of the merge candidate's own e2e job. A paired reproduction of that step on one
-machine, three runs per engine and 20 warm samples each, measures:
+The hosted 1,000-node median at this head is 214.9 ms with a 384.1 ms first
+layout, so the harness reports `targetMet:false` for the 200 ms AC6 requirement
+and `budgetMet:true` for the 400 ms E2 budget. The hosted floor is therefore
+243.4 ms p95, better than the accepted interim gate and still above the target;
+the remaining gap is the text-metric, hashing and allocation share that slower
+runners pay more of, not routing. The 50- and 200-node rows move within runner
+variance, as expected for scenes too small to own the per-scene cache build.
+
+A paired reproduction of the same hosted step on one machine, three runs per
+engine and 20 warm samples each, measures:
 
 | Local production WASM, median / p95 ms | 50 nodes | 200 nodes | 1,000 nodes |
 | --- | --- | --- | --- |
 | Base engine `27ea454d` | 3.0 / 3.1-3.2 | 13.4-13.6 / 13.8-14.1 | 126.1-127.5 / 130.3-133.6 |
 | This head | 2.8-2.9 / 2.9-3.0 | 12.1-12.3 / 12.5-12.6 | 83.6-84.1 / 85.7-86.5 |
 
-The 1,000-node first layout falls from 182.9-184.9 ms to 134.1-135.5 ms and the
-harness reports `targetMet:true` for the 200 ms E4 requirement; the same
-`bench-1000.json` fixture still routes all 999 edges. A 5 s native release
-profile at this head (3,403 self samples) still spends 10.8% in the two clearance
-lookups, 8.3% in scene finish, 6.7% in scene hashing and 11.1% in font metric
-measurement, while the three named hot spots now measure 5.3% (route
-diagnostics), 0.3% (axis population) and 8.3% (scene finish). Scene finish is the
-only one whose share rose: its absolute time fell, but the rest of the pass fell
-faster.
+The local 1,000-node first layout falls from 182.9-184.9 ms to 134.1-135.5 ms and
+that reproduction reports `targetMet:true`; this machine is about 2.8x faster than
+the CI runner, so the hosted rows are the acceptance figures and the local pair is
+the engine-to-engine comparison. The same `bench-1000.json` fixture still routes
+all 999 edges. A 5 s native release profile at this head (3,403 self samples)
+still spends 10.8% in the two clearance lookups, 8.3% in scene finish, 6.7% in
+scene hashing and 11.1% in font metric measurement, while the three named hot
+spots now measure 5.3% (route diagnostics), 0.3% (axis population) and 8.3%
+(scene finish). Scene finish is the only one whose share rose: its absolute time
+fell, but the rest of the pass fell faster.
 Scene hashes, SVG hashes, PNG manifests and every corpus case are byte-identical
 to the base engine; the only receipt change is the constraint-evaluation work
 counter, `benchmarkWork.stats.constraintEvaluations` 3,332,334 to 2,013,086,
-because the diagnostics pass now visits fewer candidates. Counter definitions
-and the checked-in ceilings are unchanged.
+because the diagnostics pass now visits fewer candidates. The three-OS native
+matrix and the Linux WASM receipt agree at this head (run 43155594876). Counter
+definitions and the checked-in ceilings are unchanged.
 
 The per-PR regression gate is deterministic logical work on the unchanged
 `bench-1000.json` fixture: live A* expansions, route evaluations and constraint
