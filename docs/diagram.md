@@ -1713,6 +1713,91 @@ samples are route diagnostics (8.1%), axis population (7.9%), and scene finish
 (6.3% of 492 samples). Hosted before/after numbers and cross-platform CI remain
 the acceptance evidence; a successful functional suite alone does not prove AC6.
 
+#### E4 T3 per-scene clearance cache (#552)
+
+The #576 merge head `3212ff93` recorded hosted 50/200/1,000-node layout p95
+7.0 / 31.7 / 279.3 ms in [CI run 42834613105](https://github.com/STAIxBWLB/maru/actions/runs/42834613105),
+down from the 482.8 ms baseline. The owner accepted that as the interim gate for
+T3; the sub-200 ms AC6 target is unchanged. This follow-up re-measured the three
+hot spots #576 named at the new head and moved the remaining work onto the scenes
+that own it:
+
+- one `RoutePlanner` per clearance for the whole scene, whose sorted obstacle
+  axis and clearance cache are built on first use and reused by every leg,
+  instead of re-normalizing and re-sorting every obstacle per route;
+- each axis answers a clearance query from an inclusive interval bucket, so a
+  retained bucket is always a superset that the existing exact predicate filters,
+  and a scene whose retained product exceeds 65,536 records still scans lazily,
+  because the retained-record count comes off one difference-array prefix sum and
+  the bail-out never counts the product it refuses to retain;
+- route diagnostics stand on a uniform bucket grid over the route's own bounds
+  grown by the clearance limit, in build order, so first-match diagnostics do not
+  change; a grid wider than 262,144 cells keeps the exact full scan;
+- the route's obstacle set is shared through the clearance cache, and a route
+  with a placed relationship label adds that label's rectangles to the shared
+  set as a suffix; incoming target-face peers and pending node labels read
+  prebuilt indexes instead of re-filtering the whole graph.
+
+| Hosted Chromium/WASM p95, ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| `3212ff93` (#576), run 42834613105 | 7.0 | 31.7 | 279.3 |
+| This head, run 43155594876 | 7.2 | 33.1 | 243.4 |
+
+The hosted 1,000-node median at this head is 214.9 ms with a 384.1 ms first
+layout, so the harness reports `targetMet:false` for the 200 ms AC6 requirement
+and `budgetMet:true` for the 400 ms E2 budget. The hosted floor is therefore
+243.4 ms p95, better than the accepted interim gate and still above the target;
+the remaining gap is the text-metric, hashing and allocation share that slower
+runners pay more of, not routing. The 50- and 200-node rows move within runner
+variance, as expected for scenes too small to own the per-scene cache build.
+
+A paired reproduction of the same hosted step on one machine, three runs per
+engine and 20 warm samples each, measures:
+
+| Local production WASM, median / p95 ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| Base engine `27ea454d` | 3.0 / 3.1-3.2 | 13.4-13.6 / 13.8-14.1 | 126.1-127.5 / 130.3-133.6 |
+| This head | 2.8-2.9 / 2.9-3.0 | 12.1-12.3 / 12.5-12.6 | 83.6-84.1 / 85.7-86.5 |
+
+The local 1,000-node first layout falls from 182.9-184.9 ms to 134.1-135.5 ms and
+that reproduction reports `targetMet:true`; this machine is about 2.8x faster than
+the CI runner, so the hosted rows are the acceptance figures and the local pair is
+the engine-to-engine comparison. The same `bench-1000.json` fixture still routes
+all 999 edges. A 5 s native release profile at this head (3,403 self samples)
+still spends 10.8% in the two clearance lookups, 8.3% in scene finish, 6.7% in
+scene hashing and 11.1% in font metric measurement, while the three named hot
+spots now measure 5.3% (route diagnostics), 0.3% (axis population) and 8.3%
+(scene finish). Scene finish is the only one whose share rose: its absolute time
+fell, but the rest of the pass fell faster.
+
+A scene whose edges carry relationship labels keeps the same reuse. A route that
+sees a label suffix routes against the scene's cached planner: the suffix
+rectangles are merged into that leg's own sorted axis, bucketed once for the leg
+that searches, and read through the same exact clearance predicates as the base
+set, so a leg costs one axis merge and one small bucket build instead of a fresh
+`RoutePlanner` over the whole scene. The combined set is still refused past the
+65,536-obstacle cap, which is the refusal a from-scratch planner would have
+raised. On a 1,000-node chain with a one-character label on every edge, nine warm
+native release layouts measure:
+
+| Native release layout, 1,000-node chain, median of 9 warm layouts | Base `27ea454d` | This head |
+| --- | --- | --- |
+| every edge labelled | 169.0-174.3 ms | 157.4-160.0 ms |
+| no labels | 77.0-77.5 ms | 51.1-53.3 ms |
+
+The labelled chain is therefore about 8% faster than the base engine and the
+unlabelled chain 33% faster, where an earlier head of this PR measured 445.2 ms
+on the labelled chain by building a planner per suffix route. The hosted AC6
+fixture carries no relationship labels, so the hosted rows above do not cover the
+labelled case and this native pair is the only measurement of it.
+
+Scene hashes, SVG hashes, PNG manifests and every corpus case are byte-identical
+to the base engine; the only receipt change is the constraint-evaluation work
+counter, `benchmarkWork.stats.constraintEvaluations` 3,332,334 to 2,013,086,
+because the diagnostics pass now visits fewer candidates. The three-OS native
+matrix and the Linux WASM receipt agree at this head (run 43155594876). Counter
+definitions and the checked-in ceilings are unchanged.
+
 The per-PR regression gate is deterministic logical work on the unchanged
 `bench-1000.json` fixture: live A* expansions, route evaluations and constraint
 predicate/pair evaluations. Each counter and their total have a checked-in
