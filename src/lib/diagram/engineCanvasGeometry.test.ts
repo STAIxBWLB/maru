@@ -448,6 +448,89 @@ describe("canvas geometry source agreement with the export path", () => {
     };
     expect(canvasGeometryOf(report, doc, dataset)).toBeNull();
   });
+
+  it("publishes the engine's own shapes in canvas pixels and keeps the writer's order", () => {
+    const { doc, dataset } = docFor("sequence");
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    scene.primitives = [
+      {
+        kind: "sequence-lifeline", owner: scene.nodes[0]!.id, layer: "underlay", paint: "line",
+        stroke: "0.8", dash: "3 7", arrow: false,
+        shape: { kind: "line", from: { x: 64 * 130 + 32, y: 64 * 112 }, to: { x: 64 * 130 + 32, y: 64 * 400 } },
+      },
+      {
+        kind: "lifecycle-final-border", owner: scene.nodes[0]!.id, layer: "overlay", paint: "outlineNode",
+        stroke: "1", arrow: false,
+        shape: { kind: "rect", bounds: { x: 64 * 43, y: 64 * 43, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+      },
+      {
+        kind: "legend-node-swatch", owner: "frontend", layer: "overlay", paint: "node",
+        stroke: "1", arrow: false,
+        shape: { kind: "rect", bounds: { x: 64 * 40, y: 64 * 700, width: 64 * 16, height: 64 * 10 }, radius: 0 },
+      },
+    ];
+    const geometry = canvasGeometryOf({ apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() }, doc, dataset)!;
+    // The canvas draws no legend, so it publishes none: a swatch would explain a
+    // colour palette this canvas does not paint with.
+    expect(geometry.primitives.map((primitive) => primitive.kind)).toEqual(["sequence-lifeline", "lifecycle-final-border"]);
+    const [lifeline, border] = geometry.primitives;
+    expect(lifeline!.layer).toBe("underlay");
+    expect(lifeline!.stroke).toBe(0.8);
+    expect(lifeline!.dash).toEqual([3, 7]);
+    expect(lifeline!.shape).toEqual({ kind: "line", from: { x: 130.5, y: 112 }, to: { x: 130.5, y: 400 } });
+    expect(border!.layer).toBe("overlay");
+    expect(border!.shape).toEqual({ kind: "rect", x: 43, y: 43, w: 174, h: 66, radius: 4 });
+  });
+
+  it("keeps page chrome page-owned when a state carries the band's own name", () => {
+    // A lifecycle band is owned by a band name and the rail by the literal
+    // `main`, and both are legal state ids. Membership is decided by kind, so
+    // hiding a state named `phase` cannot take the page band with it.
+    const spec = structuredClone(SEMANTIC_FIXTURES.lifecycle) as Record<string, unknown>;
+    const states = spec.states as Array<Record<string, unknown>>;
+    states[0]!.id = "phase";
+    states[1]!.id = "main";
+    spec.transitions = [
+      { from: "phase", to: "main", label: "start" },
+      { from: "main", to: "done", label: "finish" },
+    ];
+    const { dataset } = archifySpecToDataset("lifecycle", spec, { id: "ds-bandname" });
+    const doc = projectSemanticDocument(dataset).doc;
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    expect(scene.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(["phase", "main"]));
+    scene.primitives = [
+      {
+        kind: "lifecycle-band", owner: "phase", layer: "underlay", paint: "line",
+        stroke: "1.1", arrow: false,
+        shape: { kind: "line", from: { x: 64 * 32, y: 64 * 90 }, to: { x: 64 * 800, y: 64 * 90 } },
+      },
+      {
+        kind: "lifecycle-rail", owner: "main", layer: "underlay", paint: "line",
+        stroke: "1.1", arrow: false,
+        shape: { kind: "line", from: { x: 64 * 700, y: 64 * 32 }, to: { x: 64 * 700, y: 64 * 500 } },
+      },
+      {
+        kind: "lifecycle-final-border", owner: "phase", layer: "overlay", paint: "outlineNode",
+        stroke: "1", arrow: false,
+        shape: { kind: "rect", bounds: { x: 64 * 43, y: 64 * 43, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+      },
+    ];
+    const geometry = canvasGeometryOf({ apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() }, doc, dataset)!;
+    expect(geometry.primitives.map((primitive) => [primitive.kind, primitive.member])).toEqual([
+      ["lifecycle-band", null],
+      ["lifecycle-rail", null],
+      // The state's own border is a member shape, so the same owner still maps.
+      ["lifecycle-final-border", dataset.idMap.phase],
+    ]);
+  });
+
+  it("reads a scene published before primitives existed as having none", () => {
+    const { doc, dataset } = docFor("workflow");
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    delete scene.primitives;
+    const geometry = canvasGeometryOf({ apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() }, doc, dataset)!;
+    expect(geometry.primitives).toEqual([]);
+  });
 });
 
 describe("canvas geometry store", () => {
@@ -871,14 +954,40 @@ describe("which canvases draw engine geometry", () => {
     expect(canvasDisplayNode(free, geometry)).toBe(free);
     expect(canvasDisplayNode(free, null, { ids: new Set(["free-note"]), dx: 10, dy: 10 })).toMatchObject({ x: 910, y: 910 });
   });
+
+  it("draws the shape the engine kept, not the one the projection assumed", () => {
+    const { doc, dataset } = docFor("lifecycle");
+    const scene = sceneFor({ specJson: JSON.stringify(dataset.spec) });
+    const geometry = canvasGeometryOf(
+      { apiVersion: 1, ok: true, geometry: scene, diagnostics: [], receipt: receipt() },
+      doc,
+      dataset,
+    )!;
+    const oval = doc.nodes.find((node) => node.kind === "oval")!;
+    expect(oval).toBeDefined();
+    const box = geometry.boxes.get(oval.id)!;
+
+    // The projection draws a start, success or failure state as an oval. The
+    // engine keeps that only while its own label fits inside the curve; when the
+    // label needed the whole box the engine's text is placed as a box, and an
+    // oval over it would cut through its own label.
+    const kept = canvasDisplayNode(oval, { ...geometry, boxes: new Map([[oval.id, { ...box, ellipse: true }]]) });
+    expect(kept.kind).toBe("oval");
+    const untouched = canvasDisplayNode(oval, { ...geometry, boxes: new Map([[oval.id, { ...box, ellipse: null }]]) });
+    expect(untouched.kind).toBe("oval");
+    const demoted = canvasDisplayNode(oval, { ...geometry, boxes: new Map([[oval.id, { ...box, ellipse: false }]]) });
+    expect(demoted.kind).toBe("simple");
+    expect(demoted).toMatchObject({ id: oval.id, x: box.x, y: box.y, w: box.w, h: box.h });
+  });
 });
 
 describe("a keyboard nudge writes what the canvas shows", () => {
   function scene(member: DiagramNode): CanvasGeometry {
     return {
-      boxes: new Map([[member.id, { id: member.id, sourceId: "draft", role: "node", x: 200, y: 300, w: 180, h: 72 }]]),
+      boxes: new Map([[member.id, { id: member.id, sourceId: "draft", role: "node", x: 200, y: 300, w: 180, h: 72, ellipse: null }]]),
       labels: new Map(),
       routes: new Map(),
+      primitives: [],
       pageLabels: [],
       page: null,
       diagnostics: [],

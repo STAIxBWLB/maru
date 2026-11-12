@@ -277,6 +277,117 @@ describe("semantic canvas draws engine geometry", () => {
     expect(JSON.stringify(probe!.getState().doc)).toBe(saved);
   });
 
+  it("paints the engine's own shapes under the routes and over the members, taking no pointer", async () => {
+    _setCanvasEngineLoaderForTests(async () => ({
+      layout: (input: LayoutRequest) => {
+        requests.push(input);
+        const report = scene(input);
+        report.geometry!.primitives = [
+          {
+            kind: "sequence-lifeline", owner: "draft", layer: "underlay", paint: "line",
+            stroke: "0.8", dash: "3 7", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 290, y: 64 * 372 }, to: { x: 64 * 290, y: 64 * 600 } },
+          },
+          {
+            kind: "lifecycle-final-border", owner: "review", layer: "overlay", paint: "outlineNode",
+            stroke: "1", arrow: false,
+            shape: { kind: "rect", bounds: { x: 64 * 463, y: 64 * 303, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+          },
+        ];
+        return report;
+      },
+    }));
+    harness = renderCanvas(doc);
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+
+    const canvas = document.body.querySelector(".maru-diagram-canvas")!;
+    const lifeline = canvas.querySelector('[data-engine-primitive="sequence-lifeline"]')!;
+    expect(lifeline.tagName.toLowerCase()).toBe("line");
+    expect(lifeline.getAttribute("x1")).toBe("290");
+    expect(lifeline.getAttribute("y2")).toBe("600");
+    expect(lifeline.getAttribute("stroke-width")).toBe("0.8");
+    expect(lifeline.getAttribute("stroke-dasharray")).toBe("3 7");
+    expect(lifeline.getAttribute("data-engine-primitive-owner")).toBe("draft");
+    const border = canvas.querySelector('[data-engine-primitive="lifecycle-final-border"]')!;
+    expect(border.getAttribute("x")).toBe("463");
+    expect(border.getAttribute("data-engine-primitive-owner")).toBe("review");
+
+    // Scenery, not a target: a lifeline that swallowed the pointer would make
+    // every message on it unselectable.
+    for (const layer of canvas.querySelectorAll("[data-engine-primitive-layer]")) {
+      expect(layer.getAttribute("pointer-events")).toBe("none");
+    }
+
+    // The order the SVG writer uses: frames, underlays, routes, members,
+    // overlays, page chrome.
+    const order = [...canvas.querySelectorAll("[data-node-id], [data-edge-id], [data-engine-primitive], [data-engine-label]")]
+      .map((element) => element.getAttribute("data-engine-primitive")
+        ?? element.getAttribute("data-engine-label")
+        ?? element.getAttribute("data-node-id")
+        ?? element.getAttribute("data-edge-id"));
+    const draft = doc.datasets![0] as SemanticSpecDataset;
+    expect(order.indexOf("sequence-lifeline")).toBeGreaterThan(order.indexOf("ds-flow:lane:main"));
+    expect(order.indexOf("sequence-lifeline")).toBeLessThan(order.indexOf("approve"));
+    expect(order.indexOf("lifecycle-final-border")).toBeGreaterThan(order.indexOf(draft.idMap.review!));
+    expect(order.indexOf("lifecycle-final-border")).toBeLessThan(order.indexOf("title"));
+  });
+
+  it("drops an engine shape with the member the canvas stops drawing", async () => {
+    _setCanvasEngineLoaderForTests(async () => ({
+      layout: (input: LayoutRequest) => {
+        requests.push(input);
+        const report = scene(input);
+        report.geometry!.primitives = [
+          {
+            kind: "sequence-lifeline", owner: "draft", layer: "underlay", paint: "line",
+            stroke: "0.8", dash: "3 7", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 290, y: 64 * 372 }, to: { x: 64 * 290, y: 64 * 600 } },
+          },
+          {
+            kind: "sequence-lifeline", owner: "review", layer: "underlay", paint: "line",
+            stroke: "0.8", dash: "3 7", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 560, y: 64 * 372 }, to: { x: 64 * 560, y: 64 * 600 } },
+          },
+          {
+            kind: "lifecycle-final-border", owner: "review", layer: "overlay", paint: "outlineNode",
+            stroke: "1", arrow: false,
+            shape: { kind: "rect", bounds: { x: 64 * 463, y: 64 * 303, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+          },
+          {
+            // Page chrome: a band names a band, not a member, so hiding a
+            // participant must not take the lifecycle's own rail with it.
+            kind: "lifecycle-band", owner: "outcome", layer: "underlay", paint: "line",
+            stroke: "1.1", arrow: false,
+            shape: { kind: "line", from: { x: 64 * 72, y: 64 * 436 }, to: { x: 64 * 800, y: 64 * 436 } },
+          },
+        ];
+        return report;
+      },
+    }));
+    const dataset = doc.datasets![0] as SemanticSpecDataset;
+    const reviewId = dataset.idMap.review!;
+    harness = renderCanvas({
+      ...doc,
+      nodes: doc.nodes.map((node) => node.id === reviewId ? { ...node, hidden: true } : node),
+    });
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+
+    const canvas = document.body.querySelector(".maru-diagram-canvas")!;
+    // The member is gone, so its lifeline and its final border are gone with it:
+    // a dashed line under no participant, and a ring around no state, only
+    // describe a scene the reader is not looking at.
+    expect(document.body.querySelector(`[data-node-id="${reviewId}"]`)).toBeNull();
+    const lifelines = [...canvas.querySelectorAll('[data-engine-primitive="sequence-lifeline"]')];
+    expect(lifelines.map((line) => line.getAttribute("data-engine-primitive-owner"))).toEqual(["draft"]);
+    expect(canvas.querySelector('[data-engine-primitive="lifecycle-final-border"]')).toBeNull();
+    // The band belongs to the page, not to the hidden member.
+    expect(canvas.querySelector('[data-engine-primitive="lifecycle-band"]')).not.toBeNull();
+  });
+
   it("keeps the last scene and says so when the engine refuses", async () => {
     harness = renderCanvas(doc);
     await settle();
@@ -304,7 +415,11 @@ describe("semantic canvas draws engine geometry", () => {
     expect(notice.getAttribute("data-target-id")).toBe((doc.datasets![0] as SemanticSpecDataset).idMap.draft);
     expect(notice.getAttribute("aria-label")).toContain("The label does not fit");
     expect(notice.getAttribute("aria-label")).toContain("shorten it");
-    expect(notice.getAttribute("transform")).toBe("translate(388,300)");
+    // Beside the member is taken by the neighbour's box and above it by the
+    // lane caption, so the badge steps below the member instead of covering
+    // either of them.
+    expect(notice.getAttribute("transform")).toBe("translate(200,380)");
+    expect(notice.getAttribute("tabindex")).toBe("0");
     expect(document.querySelector("[data-canvas-diagnostic-notice]")).toBeNull();
     expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
     let release!: () => void;
@@ -443,6 +558,51 @@ describe("semantic canvas pins a dropped member", () => {
     expect(displayed(draft)).toMatchObject({ x: 460, y: 300 });
     expect(document.querySelectorAll('line[stroke="#ec4899"]').length).toBeGreaterThan(0);
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("moves a state's own engine shapes with it while the drag is live", async () => {
+    // A lifecycle final border is the engine's shape, but it belongs to the
+    // state it rings. The member group is painted at its live position, so a
+    // border left at the settled box would be a ring the state has stepped out
+    // of until the next layout lands.
+    _setCanvasEngineLoaderForTests(async () => ({
+      layout: (input: LayoutRequest) => {
+        requests.push(input);
+        const report = scene(input);
+        report.geometry!.primitives = [
+          {
+            kind: "lifecycle-final-border", owner: "review", layer: "overlay", paint: "outlineNode",
+            stroke: "1", arrow: false,
+            shape: { kind: "rect", bounds: { x: 64 * 463, y: 64 * 303, width: 64 * 174, height: 64 * 66 }, radius: 64 * 4 },
+          },
+        ];
+        return report;
+      },
+    }));
+    harness = renderCanvas(doc);
+    await settle();
+    await vi.waitFor(() => expect(canvasGeometryState("ds-flow").status).toBe("ready"));
+    await settle();
+    act(() => {
+      probe!.setState((state) => ({
+        ...state,
+        ephemeral: { ...state.ephemeral, ui: { ...state.ephemeral.ui, snapOn: false, smartGuideOn: false } },
+      }));
+    });
+    const review = (doc.datasets![0] as SemanticSpecDataset).idMap.review!;
+    const border = () => document.body.querySelector('[data-engine-primitive="lifecycle-final-border"]')!;
+    expect([border().getAttribute("x"), border().getAttribute("y")]).toEqual(["463", "303"]);
+
+    await dragMember(review, 60, 45, false);
+    expect(nodeGroup(review).getAttribute("transform")).toBe("translate(520,345)");
+    // The same delta the member group took, applied to the engine's shape.
+    expect([border().getAttribute("x"), border().getAttribute("y")]).toEqual(["523", "348"]);
+    expect(border().getAttribute("width")).toBe("174");
+
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect([border().getAttribute("x"), border().getAttribute("y")]).toEqual(["463", "303"]);
+    expect(nodeGroup(review).getAttribute("transform")).toBe("translate(460,300)");
     expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
   });
 

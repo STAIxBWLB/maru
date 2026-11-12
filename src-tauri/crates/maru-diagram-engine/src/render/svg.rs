@@ -175,6 +175,21 @@ fn rect(
     }
     out.push_str("/>");
 }
+/// A node body or mask as the oval the engine kept. Same `data-kind` and paint
+/// attributes a box carries, without `rx`: a curve's two radii are its axes,
+/// and the two shapes are told apart by the element name.
+fn oval(out: &mut String, kind: &str, b: GeometryBox, style: (&str, &str, &str)) {
+    let (fill, stroke, width) = style;
+    write!(
+        out,
+        "<ellipse data-kind=\"{kind}\" cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{width}\"/>",
+        fixed(i64::from(b.x) + i64::from(b.width) / 2),
+        fixed(i64::from(b.y) + i64::from(b.height) / 2),
+        fixed(i64::from(b.width) / 2),
+        fixed(i64::from(b.height) / 2)
+    )
+    .unwrap();
+}
 fn caption(g: &GeometryDocument, target: &str) -> String {
     let labels: Vec<_> = g
         .labels
@@ -273,6 +288,7 @@ fn write_primitive(
         Shape::Line { .. } => "line",
         Shape::Polyline { .. } => "polyline",
         Shape::Circle { .. } => "circle",
+        Shape::Ellipse { .. } => "ellipse",
         Shape::Polygon { .. } => "polygon",
     };
     write!(
@@ -309,6 +325,15 @@ fn write_primitive(
             fixed(center.x.into()),
             fixed(center.y.into()),
             fixed((*radius).into())
+        )
+        .unwrap(),
+        Shape::Ellipse { center, rx, ry } => write!(
+            s,
+            " cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"",
+            fixed(center.x.into()),
+            fixed(center.y.into()),
+            fixed((*rx).into()),
+            fixed((*ry).into())
         )
         .unwrap(),
         Shape::Polyline { points } | Shape::Polygon { points } => {
@@ -603,32 +628,45 @@ pub(crate) fn write(g: &GeometryDocument, o: &SvgOptions) -> Result<String, Diag
         s.push_str("/></g>");
     }
     for n in &g.nodes {
-        let radius = if semantics.family == "lifecycle" {
-            7 * 64
-        } else {
-            6 * 64
-        };
         let color = o
             .theme
             .kind(&semantics.nodes[&n.id].kind)
             .expect("semantic kind validated");
         write!(s,"<g id=\"{}\" data-kind=\"node\" data-source-id=\"{}\" role=\"group\" aria-label=\"{}\">",id("node",&n.id),escaped(&n.id),escaped(&super::primitives::node_caption(g,semantics,&n.id))).unwrap();
-        rect(
-            &mut s,
-            "node-mask",
-            n.bounds,
-            radius,
-            (t.mask, "none", "0"),
-            None,
-        );
-        rect(
-            &mut s,
-            "node-box",
-            n.bounds,
-            radius,
-            (color.fill, color.stroke, "1.5"),
-            None,
-        );
+        // An oval state is an oval on every surface: the canvas and the Maru
+        // export draw the curve the geometry published, and a rectangular body
+        // here would put a box around the state's own elliptical final border.
+        if n.ellipse == Some(true) {
+            oval(&mut s, "node-mask", n.bounds, (t.mask, "none", "0"));
+            oval(
+                &mut s,
+                "node-box",
+                n.bounds,
+                (color.fill, color.stroke, "1.5"),
+            );
+        } else {
+            let radius = if semantics.family == "lifecycle" {
+                7 * 64
+            } else {
+                6 * 64
+            };
+            rect(
+                &mut s,
+                "node-mask",
+                n.bounds,
+                radius,
+                (t.mask, "none", "0"),
+                None,
+            );
+            rect(
+                &mut s,
+                "node-box",
+                n.bounds,
+                radius,
+                (color.fill, color.stroke, "1.5"),
+                None,
+            );
+        }
         s.push_str("</g>");
     }
     for e in &g.legend.entries {

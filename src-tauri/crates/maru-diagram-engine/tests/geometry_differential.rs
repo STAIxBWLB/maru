@@ -230,7 +230,8 @@ fn only_recorded_cases_may_accept_beyond_the_reference_model() {
     assert_eq!(
         observed.len(),
         recorded.len(),
-        "two recorded acceptances describe one case; keep each case in exactly one list"
+        "two recorded acceptances describe one case; keep each case in exactly one list: missing {:?}",
+        recorded.difference(&observed).collect::<Vec<_>>()
     );
     assert_eq!(
         observed, recorded,

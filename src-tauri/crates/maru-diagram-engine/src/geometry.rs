@@ -155,6 +155,14 @@ pub struct GeometryNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub final_state: Option<bool>,
+    /// The shape the engine drew this member as. `true` is an ellipse whose
+    /// text was fitted inside the curve, `false` is one the fit demoted to a
+    /// rounded box, and absent means the family never draws this member as a
+    /// curve. The canvas and the writer draw what this says, so a demoted
+    /// state's own label cannot cross a curve the engine removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub ellipse: Option<bool>,
     /// Authored main-lane column, for both versions, independent of pinned positions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
@@ -284,6 +292,149 @@ pub struct GeometryLine {
     pub to: GeometryPoint,
 }
 
+/// What a render primitive is derived from, in the source spec's terms. The
+/// `kind` string is the writer's own vocabulary (`sequence-lifeline`,
+/// `lifecycle-band`, `legend-node-swatch`, ...), so a consumer can special-case
+/// one primitive without guessing from geometry.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub enum GeometryPrimitiveLayer {
+    /// Painted before the routes, like a lane frame: nothing it draws can hide
+    /// an edge the engine routed.
+    Underlay,
+    /// Painted after the members, like a lifecycle final border.
+    Overlay,
+}
+
+/// The semantic colour role of a render primitive. The theme maps each role to
+/// concrete colours; a consumer that has its own palette maps the role instead
+/// of the colour, so canvas and export stay in step.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub enum GeometryPrimitivePaint {
+    Line,
+    AccentLine,
+    SecurityLine,
+    DashedLine,
+    Node,
+    OutlineNode,
+    AccentFill,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typegen", ts(rename_all = "camelCase"))]
+pub enum GeometryPrimitiveShape {
+    Rect {
+        bounds: GeometryBox,
+        radius: Coord,
+    },
+    Line {
+        from: GeometryPoint,
+        to: GeometryPoint,
+    },
+    Polyline {
+        points: Vec<GeometryPoint>,
+    },
+    Circle {
+        center: GeometryPoint,
+        radius: Coord,
+    },
+    /// An ellipse with its own two radii: a lifecycle final border around a
+    /// state the engine kept as a curve has to follow that curve, and a circle
+    /// cannot.
+    Ellipse {
+        center: GeometryPoint,
+        rx: Coord,
+        ry: Coord,
+    },
+    Polygon {
+        points: Vec<GeometryPoint>,
+    },
+}
+
+/// A shape the writer paints that is not a member, a container or a route:
+/// a sequence lifeline, a workflow phase span, a lifecycle initial marker, rail
+/// or band, a lifecycle final border, or a legend swatch.
+///
+/// These are derived from the retained geometry (`maru#552` E4). Without them
+/// the canvas draws a sequence with no lifelines, so the messages float, and a
+/// lifecycle scene with no initial marker or band.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct GeometryPrimitive {
+    pub kind: String,
+    /// The member, container, route or legend key the primitive belongs to.
+    pub owner: String,
+    pub shape: GeometryPrimitiveShape,
+    pub paint: GeometryPrimitivePaint,
+    /// Stroke width exactly as the writer paints it, in pixels.
+    pub stroke: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "typegen", ts(optional = nullable))]
+    pub dash: Option<String>,
+    pub arrow: bool,
+    pub layer: GeometryPrimitiveLayer,
+}
+
+impl GeometryPrimitive {
+    /// The same primitive expressed in the writer's own terms.
+    pub(crate) fn from_derived(p: &crate::primitives::Primitive) -> Self {
+        use crate::primitives::{Layer, Paint, Shape};
+        Self {
+            kind: p.kind.to_owned(),
+            owner: p.owner.clone(),
+            shape: match &p.shape {
+                Shape::Rect { bounds, radius } => GeometryPrimitiveShape::Rect {
+                    bounds: *bounds,
+                    radius: *radius,
+                },
+                Shape::Line { from, to } => GeometryPrimitiveShape::Line {
+                    from: *from,
+                    to: *to,
+                },
+                Shape::Polyline { points } => GeometryPrimitiveShape::Polyline {
+                    points: points.clone(),
+                },
+                Shape::Circle { center, radius } => GeometryPrimitiveShape::Circle {
+                    center: *center,
+                    radius: *radius,
+                },
+                Shape::Ellipse { center, rx, ry } => GeometryPrimitiveShape::Ellipse {
+                    center: *center,
+                    rx: *rx,
+                    ry: *ry,
+                },
+                Shape::Polygon { points } => GeometryPrimitiveShape::Polygon {
+                    points: points.clone(),
+                },
+            },
+            paint: match p.paint {
+                Paint::Line => GeometryPrimitivePaint::Line,
+                Paint::AccentLine => GeometryPrimitivePaint::AccentLine,
+                Paint::SecurityLine => GeometryPrimitivePaint::SecurityLine,
+                Paint::DashedLine => GeometryPrimitivePaint::DashedLine,
+                Paint::Node => GeometryPrimitivePaint::Node,
+                Paint::OutlineNode => GeometryPrimitivePaint::OutlineNode,
+                Paint::AccentFill => GeometryPrimitivePaint::AccentFill,
+            },
+            stroke: p.stroke.to_owned(),
+            dash: p.dash.map(str::to_owned),
+            arrow: p.arrow,
+            layer: match p.layer {
+                Layer::Underlay => GeometryPrimitiveLayer::Underlay,
+                Layer::Overlay => GeometryPrimitiveLayer::Overlay,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
@@ -299,6 +450,11 @@ pub struct GeometryDocument {
     pub containers: Vec<GeometryContainer>,
     pub routes: Vec<GeometryRoute>,
     pub labels: Vec<GeometryLabel>,
+    /// Render primitives derived from this geometry and the source semantics, in
+    /// paint order: every underlay first, then every overlay. Absent for a scene
+    /// decoded from a report written before they were published.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub primitives: Vec<GeometryPrimitive>,
     pub legend: GeometryLegend,
     pub page: GeometryPage,
 }
@@ -559,6 +715,10 @@ pub fn declarations(cfg: &ts_rs::Config) -> Vec<String> {
         GeometryLegend::decl(cfg),
         GeometryPage::decl(cfg),
         GeometryLine::decl(cfg),
+        GeometryPrimitiveLayer::decl(cfg),
+        GeometryPrimitivePaint::decl(cfg),
+        GeometryPrimitiveShape::decl(cfg),
+        GeometryPrimitive::decl(cfg),
         GeometryDocument::decl(cfg),
         GeometryReport::decl(cfg),
         LayoutRequest::decl(cfg),

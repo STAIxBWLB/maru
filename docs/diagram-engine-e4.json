@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "stage": "E4 T4 real-app engine canvas check (maru#552)",
-  "sourceCommit": "501596396f8481dd65e76c5ede6383eaa34bea37",
-  "sourceScope": "the debug native-e2e build of this commit; the receipt, docs/diagram.md and the screenshots below land in the next commit and change no source",
+  "sourceCommit": "9cedd883f8da92350a5d4f2cd97db98d5016c916",
+  "sourceScope": "the source this run executed: the third round's fixes, rebased onto main 469a31fe so the diff carries only this branch's three commits. Every number, capture and screenshot in this receipt comes from that tree; the receipt itself lands in the commit that follows it, the same pattern #579 used",
   "executionScope": {
     "host": "local Apple silicon Mac, arm64",
     "os": "macOS 27.0.1 (26A434)",
@@ -14,13 +14,13 @@
     "rust": "1.98.0",
     "wasmAssets": "engine:assets ran on 1.93.0 because this host's 1.98 rust-lld cannot link the wasm slices; the app itself is 1.98.0",
     "cargoBuildJobs": 2,
-    "command": "make test-e2e-native",
+    "command": "the four steps make test-e2e-native runs, with the toolchain split this host needs: PATH=1.93.0 pnpm engine:assets; PATH=1.98.0 VITE_NATIVE_E2E=1 vite build; touch src-tauri/build.rs and PATH=1.98.0 cargo build --features native-e2e; PATH=1.93.0 pnpm test:e2e:native over all 18 spec files",
     "exitCode": 0,
     "specFiles": "18 passed, 18 total",
-    "suiteDuration": "00:07:51",
-    "specDuration": "7 passing (4.9s)",
+    "suiteDuration": "00:07:56",
+    "specDuration": "12 passing (10.3s) for the focused e4 spec file in the second round; this round's focused runs are the red-proof reruns recorded under reviewRound3",
     "fixture": "temporary MARU_NATIVE_E2E_HOME and config dir seeded per run by e2e-native/wdio.conf.ts",
-    "runNote": "two flakes hit while this branch was being proved, neither in a spec this change touches. An earlier run of the previous commit timed out in e2e-native/specs/family-tools.spec.ts waiting 30 s for the launched acon console to write its proof file; it passed alone in 53 s and in the runs since. A focused run made straight after a rebuilt binary failed the refusal case with the canvas showing null instead of workflow/geometry-label-fit; it passed on the next run and in this suite. Both are recorded here rather than dropped, and neither reproduces on demand."
+    "runNote": "this is the run of the rebased head, executed after the branch was replayed onto main 469a31fe. Each of the third round's five items was proved to bite before it was kept, one item at a time, on the revert-alone rule: the fix was reverted for that gap only, the focused suite was rerun and the case failed, then the fix was restored and the same case passed. Those red runs are per item under reviewRound3. The tree this run executed is byte-identical to the tree of the previous head (git diff between the two heads is empty), so the measured numbers repeat by measurement, not by copying them forward."
   },
   "checks": {
     "familyGeometry": {
@@ -30,6 +30,7 @@
         "data-engine-geometry-status settles on ready for the opened document",
         "data-engine-spec-sha256 equals the hash of the source spec the fixture laid out",
         "every engine member's box equals the engine's box for that member",
+        "the shape actually drawn for a member is measured and equals the engine's box for it within 2 px, so the attribute the canvas writes is not the only evidence",
         "the painted route path equals the engine's route path, compared on the visible stroke path and never on the transparent hit path",
         "every sampled point of a visible route that lands inside a container hit-tests back to that route, so no lane, boundary, stage, segment or activation is painted over a route the engine ran inside it",
         "each engine label carries the engine's wrapped lines, including the mixed Korean and English label",
@@ -89,6 +90,77 @@
         }
       ],
       "containerSampleReading": "521 samples across the five families land inside a container and all of them hit-test back to their own route. Sequence shows 0 because its four routes run outside every container, so it has no sample that a container fill could hide."
+    },
+    "enginePrimitives": {
+      "passed": true,
+      "test": "draws the shapes the writer paints but no member covers",
+      "asserted": [
+        "every primitive the engine publishes for a canvas family — a sequence lifeline, a lifecycle initial marker, stem, head, band, rail or final border — is painted, by owner and in the layer the report names",
+        "each painted primitive's box equals the engine's own coordinates within 1.5 px, measured from the drawn element rather than from an attribute",
+        "a painted primitive takes no pointer, so a lifeline or band never swallows a pan, a marquee or a member drag",
+        "legend swatches are the one kind the canvas drops, because it has no legend for them to key, and it paints none of them",
+        "the check is not vacuous: at least one non-legend primitive was compared"
+      ],
+      "observed": {
+        "sequence": { "published": ["sequence-lifeline", "sequence-lifeline", "sequence-lifeline", "legend-route-swatch", "legend-route-swatch"], "painted": ["sequence-lifeline", "sequence-lifeline", "sequence-lifeline"] },
+        "lifecycle": { "published": ["lifecycle-final-border", "lifecycle-initial-dot", "lifecycle-initial-stem", "lifecycle-initial-head", "legend-initial-dot", "legend-initial-stem", "legend-initial-head", "legend-node-swatch", "legend-node-swatch", "legend-final-outer", "legend-final-inner"], "painted": ["lifecycle-final-border", "lifecycle-initial-dot", "lifecycle-initial-stem", "lifecycle-initial-head"] },
+        "architecture": { "published": ["legend-node-swatch", "legend-node-swatch", "legend-node-swatch"], "painted": [] },
+        "workflow": { "published": ["legend-node-swatch", "legend-node-swatch"], "painted": [] },
+        "dataflow": { "published": ["legend-node-swatch", "legend-route-swatch"], "painted": [] }
+      }
+    },
+    "sequenceLifelines": {
+      "passed": true,
+      "test": "draws a lifeline for every sequence participant",
+      "asserted": [
+        "the engine publishes exactly one sequence lifeline per participant, counted against the scene's own nodes",
+        "the canvas paints that many, each at the engine's own x, y and length within 1.5 px",
+        "each lifeline starts on its own participant's bottom edge at its centre, so the messages read against the right timeline"
+      ],
+      "observed": { "family": "sequence", "participants": 3, "painted": 3 },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-lifelines-sequence.png"
+    },
+    "pageTitle": {
+      "passed": true,
+      "test": "keeps every page title clear of the members and containers the scene paints",
+      "asserted": [
+        "every page label the engine emitted is painted, with the engine's own lines",
+        "every page label is painted after every member and container group in document order, so page chrome sits above the scene",
+        "no member or container outline shares more than 2 px² with a page label's drawn box",
+        "the check is not vacuous: page labels were compared for all five families, and the fixture's lifecycle family is present"
+      ],
+      "observed": {
+        "familiesChecked": 5,
+        "lifecyclePageLabels": [{ "id": "title", "box": [32, 16, 47.046875, 36] }]
+      },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-page-title.png"
+    },
+    "routeLabelBox": {
+      "passed": true,
+      "test": "draws each labelled relation's text inside the box drawn for it",
+      "asserted": [
+        "the box drawn around a route label is the engine's own label box grown by ENGINE_LABEL_BOX_PAD (3 px) on each side, within 2 px",
+        "the text stays at least 2 px inside that box on all four sides, so it is never stroked at its own bounds",
+        "the check is not vacuous: 9 route labels across the five families were compared"
+      ],
+      "observed": { "routeLabelsChecked": 9, "pad": 3, "screenshotFamily": "workflow" },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-route-label-box.png"
+    },
+    "ovalLabel": {
+      "passed": true,
+      "test": "keeps every oval state's label inside the curve it is drawn in",
+      "asserted": [
+        "the canvas draws a lifecycle start, success or failure state as an ellipse, measured from the drawn element",
+        "every corner of that state's painted label lies on or inside the drawn ellipse (reach ≤ 1.02 of its radius)",
+        "the check is not vacuous: at least one oval carried a label"
+      ],
+      "observed": {
+        "ovals": [
+          { "id": "queued", "centre": [130, 152], "radius": [70, 32] },
+          { "id": "done", "centre": [538, 152], "radius": [70, 32] }
+        ]
+      },
+      "screenshot": "e2e-native/evidence/diagram-engine-e4/gap-oval-label.png"
     },
     "legacyDocuments": {
       "passed": true,
@@ -150,7 +222,8 @@
         "both receipts carry a 64-hex output hash",
         "both receipts report readback status passed, a byte comparison by the native host",
         "both written files are non-empty"
-      ]
+      ],
+      "hashesUnchanged": "both hashes are the second round's values because the native export fixture is a workflow document with no oval state, so the writer change of this round (an ellipse body and mask when the engine kept the curve) cannot reach this artifact. The oval writer is covered by tests/svg_semantics.rs, by the artifact gate and by the lifecycle corpus PNGs, whose manifest entries are the ones that moved."
     },
     "interaction": {
       "passed": true,
@@ -175,16 +248,24 @@
         "code": "workflow/geometry-label-fit",
         "targetKind": "node",
         "targetId": "draft",
-        "at": { "x": 232, "y": 72 }
+        "at": { "x": 64, "y": 288 },
+        "paintedDistance": 121.6,
+        "mapperDistance": 121.6,
+        "covers": 0,
+        "titleBands": 0
       },
       "asserted": [
         "the canvas settles on refused and keeps a 64-hex engine spec hash",
         "the badge carries the engine's own code and is anchored to the member the engine named",
         "no unanchored canvas notice appears alongside the anchored diagnostic",
         "the badge's aria-label carries the engine's code and JSON path",
-        "the badge transform equals the engine's anchor",
-        "the badge sits 0 to 24 px right of the member's box and within 2 px of its top edge"
+        "the badge's drawn transform equals the placement the same mapper produces from the same document and the same displayed members, so the expectation does not come from the DOM",
+        "the drawn badge is no farther from its member than the mapper's own placement, scaled by the scene: measured 121.6 px drawn against 121.6 px placed at 0.8x, so the painted box is the box the mapper placed and not a second size",
+        "the badge overlaps no other member's box and no other label, measured on drawn client rectangles, while it may cover its own anchor and sit inside a lane frame",
+        "the badge covers no container's opaque title band, measured on the same drawn rectangles against the band strip the mapper uses",
+        "the badge stays in the keyboard order (tabIndex 0) and is announced as a note (role=\"note\")"
       ],
+      "placementNote": "adjacency is not a constant in this fixture: a 300 px badge does not fit between the members of the packed refusal lane and both lane title bands are opaque, so the mapper slides it three steps below its member to a slot that covers nothing. Covering nothing outranks proximity, the rule is pinned in canvasDiagnostics.test.ts, and the trade-off is recorded under followUps.",
       "screenshot": "e2e-native/evidence/diagram-engine-e4/refusal-diagnostic.png"
     },
     "englishUi": {
@@ -219,11 +300,127 @@
       "redBeforeFix": "a local 4 px shift of the painted label origin failed with: architecture: label container:boundary:0:label paints its first line at (186.0,56.0); the engine put the label box at (182,56)",
       "greenAfterFix": "after reverting the shift: 7 passing in the focused run and 7 passing (4.9s) in the suite recorded here",
       "testSurface": "e2e-native/specs/diagram-engine-e4.spec.ts and src/lib/nativeE2eBridge.ts; the spec keeps its own copy of the family type, so both declarations gained the box field"
+    },
+    "enginePrimitives": {
+      "defect": "the canvas drew members, containers and routes but dropped every shape the writer paints that no member covers — a sequence's lifelines, a lifecycle initial marker, stem, head, band and final border — so a sequence's messages floated with no participant timeline under them",
+      "fix": "one derivation in src/primitives.rs, published as GeometryDocument.primitives in paint order by the layout and consumed by both writers: the canvas through src/components/diagram/canvas/EnginePrimitives.tsx in the underlay and overlay bands CanvasSurface already paints, and the export through enginePrimitivesSvg in src/lib/diagram/renderSvg.ts. Legend swatches stay out of the canvas adapter because it has no legend for them to key.",
+      "redBeforeFix": "with the two <EnginePrimitives> bands removed and everything else in place, the run failed twice: 'sequence: the engine published a sequence-lifeline for api and the canvas painted none; painted []' and 'sequence: the canvas painted 0 of the engine's 3 lifelines'",
+      "greenAfterFix": "this run: 3 of 3 lifelines painted for the three sequence participants, and 4 of 4 lifecycle shapes (final border, initial dot, stem, head), each at the engine's coordinates with pointer-events none",
+      "unitGuard": "src-tauri/crates/maru-diagram-engine/tests/published_primitives.rs holds the report and the SVG against each other, and src/lib/diagram/engineCanvasGeometry.test.ts plus src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx cover the adapter and the two bands"
+    },
+    "pageTitleBand": {
+      "defect": "the lifecycle page title was painted under the lane that frames the scene. Two causes: the engine's emitted header band shifted workflow and dataflow but not lifecycle, so its first row started inside the band, and the canvas painted page chrome before the containers.",
+      "fix": "layout header_shift includes lifecycle, so the drawing moves below the measured band in Korean or multi-line titles too, and both renderers paint page chrome last: CanvasSurface after the overlay band and renderSvg after the members.",
+      "redBeforeFix": "both halves were proved separately. With page chrome painted first again: 'architecture: page label title is painted before a member or container group, so the scene covers it'. With lifecycle dropped from header_shift and the paint order kept: 'lifecycle: page label title is covered by lane:main over 1496.6px²; the title band must stay clear of the scene'",
+      "greenAfterFix": "this run: page labels painted for all five families, each after every member and container group, with no shared area; the lifecycle title's box (32,16,47.046875,36) sits clear of lane:main",
+      "unitGuard": "src-tauri/crates/maru-diagram-engine/tests/lifecycle_band_title_svg.rs pins the shifted geometry and the emitted band, and the T4 label checks in CanvasSurface.engineGeometry.test.tsx keep the page label in the last band"
+    },
+    "routeLabelBox": {
+      "defect": "a route label's background box was stroked at the engine's measured text bounds, so the text touched its own border and read as cramped against a diagonal route",
+      "fix": "ENGINE_LABEL_BOX_PAD (3 px) grows the drawn box outward in EdgeView and in renderSvg's edge label, and the text origin is left exactly where the engine put it, so the label-origin assertion still holds",
+      "redBeforeFix": "with the pad set back to 0: 'architecture: route label edge:conn1:label draws its box at (161.1,34.0) 37.9x18.0 instead of the engine's label box (161.078125,34,37.859375,18) grown by 3px'",
+      "greenAfterFix": "this run: 9 route labels across the five families draw their box at the engine's label box grown by 3 px on each side, with the text at least 2 px inside on all four sides",
+      "unitGuard": "src/lib/diagram/renderSvg.engineGeometry.test.ts emits the padded box, and src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx asserts the canvas draws the same padded rect"
+    },
+    "ovalLabelPlacement": {
+      "decision": "engine label placement, not a canvas inset. The canvas draws the oval the document asks for and must not move text the engine measured, so a label that crosses the curve is a layout defect.",
+      "defect": "a lifecycle start, success or failure state is drawn as an oval, but its label was placed from the box's own text inset and wrapped to the box's whole width, so the text ran across the curve",
+      "fix": "layout marks those states as ellipses before placing them (SceneBuilder.mark_ellipse from the lifecycle placer) and fits their text inside the ellipse's inscribed rectangle (ELLIPSE_INSET = (1 − 1/√2)/2 per axis). A label that cannot fit that way demotes the node to its full box instead of turning an accepted document into a refusal, and no oval grows to make room.",
+      "redBeforeFix": "with ELLIPSE_INSET set back to 0 and everything else in place: 'lifecycle: label node:queued:label reaches 2.000 of oval queued's radius at (60.0,120.0), so it is painted across the curve'",
+      "greenAfterFix": "this run: both ovals (queued at centre (130,152) radius (70,32) and done at (538,152) radius (70,32)) carry their labels wholly inside the curve",
+      "unitGuard": "the lifecycle layout tests assert the inscribed-rectangle origin and the demotion ladder, and src-tauri/crates/maru-diagram-engine/tests/lifecycle_band_title_svg.rs keeps the emitted label boxes pinned"
+    },
+    "badgeCollision": {
+      "closesPreviousFollowUp": "the followUps entry of the previous receipt, which recorded the anchored badge overlapping the neighbouring member's label and blocking its pointer",
+      "defect": "the anchored refusal badge was drawn at a fixed offset from its anchor at a fixed 300x44 size, so on a packed workflow scene it covered the neighbouring member's label and took that member's click",
+      "fix": "the mapper owns the size (CANVAS_DIAGNOSTIC_BADGE) and the placement: right of the anchor first, then above, below, right-and-under, and opposite last, sliding a step at a time and scoring off-page as unreachable, so the badge lands on the first side that covers nothing. It may cover its own anchor and sit inside a lane frame, never another member or label; the renderer draws at exactly the placed box and keeps the badge in the keyboard order.",
+      "redBeforeFix": "with placeBadge reduced to the fixed right-side offset: 'the badge covers [{\"name\":\"merge\",\"shared\":1915}]; it may hide its own anchor but never another member or label'",
+      "greenAfterFix": "the first round's run: the badge sat at (64,20), above its own member and clear of every other member and label, 0 members covered, still tabIndex 0 and role=\"note\". The second round moved it again for the lane title band; see reviewRound2.badgeTitleBand.",
+      "unitGuard": "src/lib/diagram/canvasDiagnostics.test.ts asserts zero overlap with every drawn box except the badge's own member for all five diagnostic families, and src/components/diagram/canvas/CanvasDiagnostics.test.tsx asserts the drawn size and the keyboard order"
+    }
+  },
+  "reviewRound2": {
+    "verifyGate": {
+      "asked": "CI make verify failed on 0bf33634; diagnose it and fix the code, not the gate",
+      "defect": "the head was not rustfmt-clean: 16 diffs across the 8 engine files the round touched, so the job's cargo fmt --check step failed before any test ran. Fixing it exposed two more failures of the same step's later commands, and the SVG vocabulary gate rejected the new shape.",
+      "fix": "ran rustfmt over both Rust workspaces (formatting only, no behaviour); allowlisted <ellipse> as an artifact element and rx/ry as semantic attributes in render/gate.rs; replaced the old rect-border assertion in tests/svg_semantics.rs with the ellipse geometry the writer now emits",
+      "redBeforeFix": "'cargo fmt --manifest-path src-tauri/crates/Cargo.toml --all --check' exited 1 with 16 diffs in geometry.rs, layout/{lifecycle,mod}.rs, lib.rs, primitives.rs, render/{primitives,semantics}.rs and tests/published_primitives.rs; cargo test failed with 'svg-artifact-element' and 'svg-artifact-unexpected-attribute \"ry\"' in pinned_v1_and_v2_initial_markers_extend_page_without_moving_nodes, and 'Option::unwrap() on a None value' in lifecycle_v1_and_v2_emit_initial_final_and_final_legend_symbols",
+      "greenAfterFix": "the four commands of that CI step pass locally in order: check-diagram-engine-boundary.mjs (PASS for maru-diagram-engine and tauri-plugin-maru-diagram), cargo fmt --check in both the crates workspace and src-tauri (exit 0), diagram-engine-e0.mjs types (E0 Rust-to-TypeScript bindings match), check-diagram-engine-subtree.sh (subtree split dc513059, default standalone suites and the production plugin IPC fixture passed)",
+      "localLimit": "make verify as a whole was not rerun end to end on this host: its cargo test --lib leg has the pre-existing skill_host::store::tests::phase08_03_network_lock failure this host reproduces (os error 13). The legs that this change can move were run and are green: typecheck, eslint, the 310-file TS suite, the engine suite, clippy and the native suite."
+    },
+    "badgeStacking": {
+      "defect": "two diagnostics on one anchor could pick the same free spot: a placed badge never joined the obstacle set and the slot only shifted the search start. The renderer's old 48 px stacking was already gone, so both badges drew on top of each other over 13,200 px².",
+      "fix": "every placed badge is pushed into the obstacles as member: null, so the next badge for the same element slides clear of the first; placeBadge no longer takes a slot. The badge's own member stays exempt for the badge that belongs to it.",
+      "redBeforeFix": "with the obstacle push removed: 'stacks two diagnostics on one element instead of drawing them on top of each other' failed with AssertionError: expected 13200 to be +0, the same 300x44 overlap the review reported",
+      "greenAfterFix": "this run: 20 tests in canvasDiagnostics.test.ts pass; the two badges share 0 px², land on different sides of one label, and each stays within a badge of the label"
+    },
+    "primitiveVisibility": {
+      "defect": "nodes and edges went through the visibility and layer filter, but EnginePrimitives and enginePrimitivesSvg filtered primitives by layer only, so hiding a sequence participant or turning a layer off left its lifeline, lifecycle marker and final border painted on the canvas and in the export.",
+      "fix": "canvasPrimitivesOf records the canvas member each primitive's owner maps to, and both renderers drop a primitive whose member is not in the set they are drawing: CanvasSurface passes its drawn members, renderSvg builds the set from the nodes it emits. Page chrome keeps member: null, because a band names a band, and is never dropped.",
+      "redBeforeFix": "with both member filters removed: CanvasSurface.engineGeometry.test.tsx 'drops an engine shape with the member the canvas stops drawing' failed with AssertionError: expected [ 'draft', 'review' ] to deeply equal [ 'draft' ], and renderSvg.engineGeometry.test.ts 'drops an engine shape with the member the export stops drawing' failed with AssertionError: expected SVGElement{ …(2) } to be null",
+      "greenAfterFix": "this run: both pass. Hiding the participant removes its group and its lifeline from the canvas and from the export, while the lifecycle band beside it stays."
+    },
+    "drawnStateShape": {
+      "asked": "the oval 'demote to box' decision never reached the renderers (blocking), and the final border around an oval state was a rectangle (nit)",
+      "defect": "the demotion only dropped the id from the layout's internal ellipses set, so a demoted label was placed across the full box while semantic.ts still projected the state as an oval and both renderers drew an ellipse; and the lifecycle final border was always an inset rounded rect, even around a state drawn as a curve.",
+      "fix": "GeometryNode publishes ellipse: Some(true) for a curve the engine kept, Some(false) for one its label placement demoted, and null for anything that is not an oval candidate. canvasDisplayNode turns a demoted oval into a plain box, and the final border follows the same flag in primitives.rs: a concentric ellipse inset by ELLIPSE_INSET when the state is an ellipse, an inset rounded rect otherwise, with the artifact gate re-deriving the same decision independently.",
+      "redBeforeFix": "with the canvasDisplayNode override removed: engineCanvasGeometry.test.ts 'draws the shape the engine kept, not the one the projection assumed' failed with AssertionError: expected 'oval' to be 'simple', and renderSvg.engineGeometry.test.ts 'draws the state shape the engine kept and an oval border around it' failed with AssertionError: expected SVGElement{ …(1) } to be null",
+      "greenAfterFix": "this run: published_primitives.rs keeps Done as Some(true) with a concentric ellipse (centre doubled equals bounds doubled plus size, rx/ry half minus the inset) and demotes a 180x72 labelled state to Some(false) with an inset rect; the artifact gate accepts the ellipse and rejects an arrow on one",
+      "reachability": "the app's own lifecycle fixture (Queued/Running/Done) still keeps its ovals, so the screenshots do not change on this account; the measured glyph ink of 'Archived' already overflows the inscribed rectangle by 4 units, so the demoted case is reached by a long label or a tight authored box, and it is covered by tests rather than by a screenshot",
+      "screenshotReading": "family-lifecycle.png now shows the Done state as two concentric curves (the state's own oval and the final border one inset inside it) instead of an oval inside a rectangle"
+    },
+    "badgeTitleBand": {
+      "asked": "in refusal-diagnostic.png the badge covered the 'Author' lane header; include container header bands, or prefer below/left before above",
+      "defect": "a container contributed no obstacle at all in the fallback view, so the badge could sit on the opaque title strip a lane paints above its body.",
+      "fix": "a container contributes its title band (CANVAS_CONTAINER_HEADER_BAND = 26 px, the strip NodeView draws and renderSvg emits) and still contributes no body, so a badge may sit inside a frame but never over its name. NodeView reads the same constant instead of a literal.",
+      "redBeforeFix": "with containers skipped as before: 'keeps the badge off a container's title band in the fallback view' failed with AssertionError: expected 6000 to be +0, and 'slides clear of the members and title bands on every side it prefers' failed with AssertionError: expected { x: 64, y: 20, w: 300, h: 44 } to match object { x: 64, y: 288 }: the old badge sat above its member and covered 6000 px² of the lane band, which is the screenshot the review read",
+      "greenAfterFix": "this run: the badge sits at (64,288), three steps below its member, and the drawn rectangles cover 0 px² of any member, label or lane title band",
+      "specRebase": "the old 'nearest edge within 24 px' assertion is gone. This fixture cannot satisfy it once both lane bands are opaque (a 300 px badge does not fit between members 60 px apart), so the e4 case now asserts that the drawn badge is the mapper's box (same translate, same measured gap at the scene's zoom) and that it covers nothing, and the placement rule itself is pinned in canvasDiagnostics.test.ts with this exact geometry."
+    }
+  },
+  "reviewRound3": {
+    "memberOwnedPrimitiveOffsets": {
+      "asked": "member-owned primitives kept their committed geometry while bodies and labels followed the live display positions, so dragging a lifecycle final state left its inner border behind, the initial marker detached, and a sequence participant's lifeline stayed put until the next layout. Translate each member-owned primitive by its member's display offset, in the canvas only, and add a test that drags a state and checks the border moves with it.",
+      "defect": "EnginePrimitives drew every primitive at the engine's committed coordinates, while CanvasSurface moved a member's body and labels to the displayed position. Nothing carried that delta into the shapes the member owns, so the two disagreed for the whole length of a drag and snapped back together only when the layout was recomputed.",
+      "fix": "CanvasSurface derives memberOffsets once per render from the delta between each drawn node and the engine box it came from, and only for members that actually moved. EnginePrimitives takes that map and adds the member's dx and dy to every coordinate a shape can carry: x and y, x1 and y1, x2 and y2, cx and cy, and each point of a polyline. Page chrome (member null) is never translated, and the export path is untouched because it draws settled geometry.",
+      "redBeforeFix": "with the offsets map not threaded into EnginePrimitives: src/components/diagram/canvas/CanvasSurface.engineGeometry.test.tsx 'moves a state's own engine shapes with it while the drag is live' failed with AssertionError: expected [ '463', '303' ] to deeply equal [ '523', '348' ], the state moved 60/45 and its final border stayed at the committed spot",
+      "greenAfterFix": "this run: the same case drags the review state by 60/45, the drawn final border follows from (463,303) to (523,348), and Escape restores the body and the border together",
+      "unitGuard": "the same test reads the border against the body before the drag, during it and after the revert, so a fix that moved only one of the two would fail on one of the three readings"
+    },
+    "primitiveMembershipByKind": {
+      "asked": "owner strings were matched to node ids regardless of primitive kind, so a legal state id that collides with a band or rail owner made page chrome member-owned: hiding a state named 'phase' also removed the page band, on the canvas and in the export. Decide membership by kind, and add a test with a state id 'phase'.",
+      "defect": "canvasPrimitivesOf mapped any primitive whose owner matched a node or container id. Lifecycle band owners ('phase', 'outcome') and the rail owner ('main') therefore became members whenever a document used one of those words as a state id, which made page chrome hideable with a member that has nothing to do with it.",
+      "fix": "ENGINE_MEMBER_PRIMITIVE_KINDS lists the six kinds a member can own: sequence-lifeline, workflow-phase-span, lifecycle-initial-dot, lifecycle-initial-stem, lifecycle-initial-head and lifecycle-final-border. primitiveMember consults that set first and returns null for every other kind before it looks at the owner string, so the band, the rail and the legend swatches stay page chrome whatever a state is called.",
+      "redBeforeFix": "with the kind gate removed and the code back to an owner-only match: src/lib/diagram/engineCanvasGeometry.test.ts 'keeps page chrome page-owned when a state carries the band's own name' failed with AssertionError: expected [ [ 'lifecycle-band', 'phase' ], ...(2) ] to deeply equal [ [ 'lifecycle-band', null ], ...(2) ]",
+      "greenAfterFix": "this run: a lifecycle document whose states are renamed 'phase' and 'main' publishes [ [ 'lifecycle-band', null ], [ 'lifecycle-rail', null ], [ 'lifecycle-final-border', the state id ] ], so a state named phase owns only its own final border, while the band and the rail stay page chrome that no member can hide",
+      "exportSide": "the same derivation feeds renderSvg, so the export inherits the fix; the kind set is the single place that decides it for both renderers"
+    },
+    "ovalBodyInTheWriter": {
+      "asked": "the shared derivation emitted an elliptical inner final border when ellipse == Some(true), but the Rust SVG writer still drew every node mask and body as a rect, so the painted artifact disagreed with the geometry it was derived from. Draw the oval body and mask, apply the same shape in the artifact gate, add an engine SVG test asserting body and final border share the shape, and restamp the PNG manifests that move on purpose.",
+      "defect": "render/svg.rs wrote a rect for every node's mask and body regardless of the ellipse flag, so a state the engine kept as a curve was exported as a rectangle with an elliptical border floating inside it. The canvas had drawn an ellipse all along, which is why only the artifact disagreed.",
+      "fix": "a new oval() writer emits an ellipse element with data-kind, cx, cy, rx and ry taken from the node's box, and the node loop hoists the colour and then picks exactly one shape for both the mask and the body, so the two cannot diverge. render/gate.rs re-derives the same decision independently: check_child_shape and check_member_shape validate an ellipse child on cx, cy, rx and ry instead of a rect's corner radius, the tag allowlist gains cx, cy and ry for ellipse, and the rect rule keeps its own corner check. tests/svg_semantics.rs asserts for every node that node-box and node-mask are an ellipse if and only if node.ellipse == Some(true), and that a rect node still carries the corner radius of its family.",
+      "redBeforeFix": "with the writer's oval branch disabled (if false && n.ellipse == Some(true)) and everything else in place: cargo test -p maru-diagram-engine --features render-svg,geometry-corpus failed 2 tests at tests/svg_semantics.rs:18:5, both of them the shape assertions this change exists for, while the geometry and report suites stayed green",
+      "greenAfterFix": "this run: the engine suite is 40 suites and 333 passed, including the per-node shape assertion and the lifecycle initial and final legend test",
+      "pngManifest": "regenerating the pinned corpus at this head moves exactly two entries against the stored file for this round's reason: lifecycle-light (svg 04c40b78 to 31d0878b, png 41815209 to 2735638a) and lifecycle-dark (svg 19a7b58b to a3d8e03d, png 3160455b to 9a4ad791), which is the oval body and mask. The dataflow and workflow entries were already stale against the stored file before this round, because the previous round's manifest carries the same values as this one, so the restamp also records main's own geometry drift. architecture, sequence and bench are byte-identical.",
+      "artifactGateNote": "the gate had to learn the shape rather than be loosened: an ellipse is validated on its own nine permitted attributes (data-kind, cx, cy, rx, ry, stroke-dasharray, fill, stroke, stroke-width), anything else on it is refused as an unexpected-attribute, and the rect rule keeps its own corner check, so a box cannot pass by claiming a curve or the other way round"
+    },
+    "badgeNoticeFallback": {
+      "asked": "when every candidate collides, the least-overlap spot is returned and can still cover a neighbour and take its clicks (OCR repro: 8,448 square px of overlap while (100,1176) was free). Fall back to the canvas notice rather than draw over a member.",
+      "defect": "placeBadge returned the best-scoring candidate even when its score was non-zero, so on a scene packed enough that no candidate slot was clear, the badge was drawn on top of a neighbour: it hid that member's text and swallowed the click meant for it, which is the failure the anchored badge exists to prevent.",
+      "fix": "placeBadge returns null when no candidate covers nothing, and mapCanvasDiagnostics then leaves the diagnostic unanchored, so it renders in the canvas notice with its category summary and next step instead of on another member. The doc comment in canvasDiagnostics.ts and the badge passage in docs/diagram.md now state the rule. The alternative the review allowed, a wider search, was not taken: widening the search only moves the boundary at which the same overlap appears, while the notice has no click to steal.",
+      "redBeforeFix": "with the least-overlap return restored: src/lib/diagram/canvasDiagnostics.test.ts 'leaves the badge to the canvas notice rather than cover a member' failed with AssertionError: expected { kind: 'node', id: 'draft', ...(2) } to be null",
+      "greenAfterFix": "this run: the packed refusal fixture still places its badge at (64,288) covering no member, label or lane band, and the wall fixture (a 30,000 px member under every candidate) leaves the diagnostic to the notice",
+      "unitGuard": "canvasDiagnostics.test.ts keeps both halves: a placeable badge is placed, and an unplaceable one is not drawn anywhere"
+    },
+    "receiptProvenance": {
+      "asked": "the receipt's sourceCommit was 0bf33634 while the native run was on a later tree. Record the commit whose source the run executed.",
+      "fix": "sourceCommit now names the rebased head this run executed, and the receipt itself lands in the commit after it, which is the pattern #579 used. The executionScope numbers, the captures and the screenshot timestamp all come from that run.",
+      "check": "the diff between this run's tree and the previous head is empty, so the repeat of every measured number is a measurement rather than a copied value; what the rebase changed is the base, not the tree"
     }
   },
   "screenshots": {
     "directory": "e2e-native/evidence/diagram-engine-e4/",
-    "capturedAt": "2026-11-11T07:38:15.969Z",
+    "capturedAt": "2026-11-11T11:10:54.521Z",
     "uiLanguages": {
       "korean": [
         "family-architecture.png",
@@ -231,6 +428,10 @@
         "family-sequence.png",
         "family-dataflow.png",
         "family-lifecycle.png",
+        "gap-lifelines-sequence.png",
+        "gap-page-title.png",
+        "gap-route-label-box.png",
+        "gap-oval-label.png",
         "legacy-v7.png",
         "legacy-v8.png",
         "selection.png",
@@ -240,7 +441,13 @@
       ],
       "english": ["english-ui.png"]
     },
-    "regenerate": "make test-e2e-native rewrites this directory from the run it makes; screenshots.json there is written by the spec's after() hook, so a failing case still leaves its captures"
+    "regenerate": "make test-e2e-native rewrites this directory from the run it makes; screenshots.json there is written by the spec's after() hook, so a failing case still leaves its captures",
+    "review": {
+      "method": "every one of the 16 captures of this run was compared against the round-2 copy of the same capture, pixel by pixel on luminance with a threshold of 24, and the changed pixels were reported as contiguous row and column bands; the bands were then read as ink density and, where a band was small enough, at one pixel per character",
+      "chromeOnly": "every capture differs in app chrome and nowhere else in the window frame: a toolbar text chip at rows 130-150, columns 2619-2698 (636 px, the same band in all 16), and a status-bar text row at rows 1802-1829 whose horizontal extent varies by capture (columns 43-2856 full width for gap-oval-label, gap-route-label-box, legacy-v7 and legacy-v8; columns 425-943 for pan, selection, zoom and refusal-diagnostic; columns 2205-2284 for the five family captures). Both bands sit outside the diagram page, carry a value that changes per launch, and are identical across the set within one run, so they read as chrome text and not as scene content",
+      "sequenceBottomStrip": "gap-lifelines-sequence.png also differs in a bottom strip at rows 1682-1773, columns 2000-2839 (19,380 px). It is not this round's: the same strip differs between the two runs of the previous head (18,163 px, both built from the same source tree) and between round 1 and round 2 (rows 1678-1779, 23,397 px). A capture-time overlay in the canvas viewport's bottom strip is what varies; the sequence scene itself, family-sequence.png, is byte-identical apart from chrome in all three rounds",
+      "sceneReading": "no diagram pixel changed in any capture, which is what this round predicts: the offsets only apply while a member is being dragged and no capture is taken mid-drag, the kind gate needs a document that names a state after a band or the rail and no fixture does, and the oval writer change is in the artifact path, not the app canvas. The one capture that could have shown an oval artifact, gap-oval-label.png, is a canvas capture and is unchanged apart from chrome"
+    }
   },
   "productDefect": {
     "classification": "harness-surfaced robustness change, not a reproduced product defect",
@@ -252,8 +459,8 @@
   },
   "relatedGate": {
     "command": "make verify",
-    "localResult": "typecheck, lint, release-version, icons, i18n, select-chrome, DOM sanitizer, iframes, type tokens, archify pin, the TS suite, the diagram plugin suite, cargo fmt --check, clippy -D warnings, the frontend build with its bundle-budget, native-e2e-isolation, CSP and mode-css guards, and the 392-command isolation gate all passed locally; cargo test --lib ended 2235 passed, 2 failed in skill_host::store::tests::phase08_03_network_lock (untouched by this change and reproducible on this host: a temporary skills directory refuses a registry write with os error 13)",
-    "hostedCi": "not polled from here; the PR carries it"
+    "localResult": "this round's rerun at the rebased head with the split toolchain: cargo fmt --check in both Rust workspaces (exit 0), the engine suite (40 suites, 333 passed), cargo clippy -- -D warnings over the engine crate, the diagram plugin and maru (exit 0, no warnings), the four commands of the CI step that had failed in the second round (SDK boundary PASS for maru-diagram-engine and tauri-plugin-maru-diagram, both fmt checks, generated Rust-to-TypeScript bindings match, subtree split 03ccfa35 with the default standalone suites and the production plugin IPC fixture passed), tsc -b, eslint over src, e2e and e2e-native with --max-warnings 0, the TS suite (310 files, 3267 tests, its script tests included), the pinned PNG corpus regenerated and restamped, the native-e2e frontend build, and make test-e2e-native (18 spec files, 00:07:56). Not rerun: cargo test --lib, whose skill_host::store::tests::phase08_03_network_lock failure is this host's (a temporary skills directory refuses a registry write with os error 13) and was recorded when the previous round ran the whole target, which was otherwise green; make verify as a whole for the same reason.",
+    "hostedCi": "recorded after the push: see the filing note in the task, which names the head and the ci-ok state it was filed at"
   },
   "limits": {
     "koreanIme": "not covered; WebDriver cannot compose through the macOS input method, so Korean IME composition stays a human check",
@@ -261,6 +468,7 @@
     "scope": "a debug native-e2e build on one macOS host; no notarization, updater or release-binary claim, and Chromium Playwright evidence remains the separate frontend gate"
   },
   "followUps": [
-    "the anchored refusal badge in refusal-diagnostic.png overlaps the neighbouring member's label; a small offset would clear it, but the badge's anchor rule is itself asserted here, so it is left as a follow-up rather than widened in this change"
+    "the refusal badge's proximity: once lane title bands are opaque a 300 px badge has no adjacent free slot in a packed lane, so the mapper puts it three steps below its member (152 scene px). It covers nothing, which is the rule that matters, but a narrower badge or a slot search that tries another member's side would keep it beside what it explains. Left for a follow-up rather than widened here, because the width is the mapper's published contract and both renderers draw that box. The third round's notice fallback bounds the damage: where no slot is clear at all the badge is not drawn and the diagnostic reads in the canvas notice, so proximity is now the only thing left to improve, never coverage.",
+    "the capture-time overlay at the canvas viewport's bottom strip that varies between captures of the same source tree (see screenshots.review.sequenceBottomStrip). It is outside the diagram scene and touches no assertion, so it does not block this receipt, but a capture that varies run to run cannot be used to read a 2 px layout change until it is identified and held still."
   ]
 }

@@ -136,6 +136,18 @@ fn lifecycle_band_title_is_not_a_second_legacy_text_path() {
         layout.diagnostics
     );
     let geometry = layout.geometry.expect("accepted layout retains geometry");
+    // The recorded parity numbers below are the pinned source drawing's. A
+    // lifecycle scene now moves below the emitted header band like workflow and
+    // dataflow already did, and `page.contentOffset` is the only retained field
+    // that says by how much, so every expectation here is source + offset.
+    let shift = i64::from(
+        geometry
+            .page
+            .content_offset
+            .expect("a shifted lifecycle page reports its content offset")
+            .y,
+    );
+    assert!(shift > 0, "the emitted title band did not move the drawing");
 
     let main = geometry
         .labels
@@ -150,14 +162,19 @@ fn lifecycle_band_title_is_not_a_second_legacy_text_path() {
     assert_eq!(
         (
             main.bounds.x,
-            main.bounds.y,
+            i64::from(main.bounds.y) - shift,
             main.bounds.width,
             main.bounds.height
         ),
         (1472, 5120, 1988, 1248)
     );
     assert_eq!(
-        (go.bounds.x, go.bounds.y, go.bounds.width, go.bounds.height),
+        (
+            go.bounds.x,
+            i64::from(go.bounds.y) - shift,
+            go.bounds.width,
+            go.bounds.height
+        ),
         (5903, 6719, 995, 1152)
     );
     let main_bottom = i64::from(main.bounds.y) + i64::from(main.bounds.height);

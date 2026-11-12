@@ -2380,6 +2380,7 @@ mod tests {
                 containers: vec![],
                 routes,
                 labels: vec![],
+                primitives: vec![],
                 legend: crate::geometry::GeometryLegend {
                     content_bounds: None,
                     title_y: None,
@@ -2751,6 +2752,7 @@ mod tests {
         );
         g.nodes.push(crate::geometry::GeometryNode {
             final_state: None,
+            ellipse: None,
             phase_order: None,
             id: "source".into(),
             bounds: crate::geometry::GeometryBox {
@@ -2838,6 +2840,7 @@ mod tests {
         g.labels.push(label_for(0, 15, 15, 10, 10));
         g.nodes.push(crate::geometry::GeometryNode {
             final_state: None,
+            ellipse: None,
             phase_order: None,
             id: "obstacle".into(),
             bounds: crate::geometry::GeometryBox {
@@ -2927,6 +2930,7 @@ mod tests {
         );
         g.nodes.push(crate::geometry::GeometryNode {
             final_state: None,
+            ellipse: None,
             phase_order: None,
             id: "obstacle".into(),
             bounds: crate::geometry::GeometryBox {
@@ -2953,6 +2957,7 @@ mod tests {
         );
         g.nodes.push(crate::geometry::GeometryNode {
             final_state: None,
+            ellipse: None,
             phase_order: None,
             id: "s0".into(),
             bounds: crate::geometry::GeometryBox {
@@ -2998,6 +3003,7 @@ mod tests {
             .into_iter()
             .map(|(id, x)| crate::geometry::GeometryNode {
                 final_state: None,
+                ellipse: None,
                 phase_order: None,
                 id: id.into(),
                 bounds: crate::geometry::GeometryBox {

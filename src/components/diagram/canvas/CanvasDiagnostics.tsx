@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Diagnostic } from "../../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
-import { mapCanvasDiagnostics, type CanvasDiagnosticPlacement } from "../../../lib/diagram/canvasDiagnostics";
+import { CANVAS_DIAGNOSTIC_BADGE, mapCanvasDiagnostics, type CanvasDiagnosticPlacement } from "../../../lib/diagram/canvasDiagnostics";
 import type { CanvasGeometry } from "../../../lib/diagram/engineCanvasGeometry";
 import type { DiagramDoc, DiagramNode } from "../../../lib/diagram/types";
 import { useTranslation } from "../../../lib/i18n";
@@ -35,18 +35,28 @@ export function CanvasDiagnostics({ items, scope = "elements" }: {
       </foreignObject>
     );
   }
-  const slots = new Map<string, number>();
   return (
     <g data-export-ignore>
       {visible.map((item, index) => {
         const target = item.target!;
-        const key = `${target.kind}:${target.id}`;
-        const slot = slots.get(key) ?? 0;
-        slots.set(key, slot + 1);
         return (
-          <g key={`${item.diagnostic.code}:${item.diagnostic.path}:${index}`} data-canvas-diagnostic={item.diagnostic.code} data-target-kind={target.kind} data-target-id={target.id} transform={`translate(${target.x},${target.y + slot * 48})`} role="note" aria-label={original(item)} onPointerDown={(event) => event.stopPropagation()}>
+          // `tabIndex` matters: WebKit does not put an SVG group in the tab
+          // order without it, and a reader that can see this badge has to be
+          // able to reach its text as well. The position comes from the mapper,
+          // which has already moved the badge clear of every other box.
+          <g
+            key={`${item.diagnostic.code}:${item.diagnostic.path}:${index}`}
+            data-canvas-diagnostic={item.diagnostic.code}
+            data-target-kind={target.kind}
+            data-target-id={target.id}
+            transform={`translate(${target.x},${target.y})`}
+            role="note"
+            tabIndex={0}
+            aria-label={original(item)}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             <title>{original(item)}</title>
-            <rect width={300} height={44} rx={4} fill="#fffbeb" stroke="#b45309" />
+            <rect width={CANVAS_DIAGNOSTIC_BADGE.width} height={CANVAS_DIAGNOSTIC_BADGE.height} rx={4} fill="#fffbeb" stroke="#b45309" />
             <text x={8} y={16} fontSize={12} fill="#78350f">{t(`diagram.canvasDiagnostic.${item.category}.summary`)}</text>
             <text x={8} y={33} fontSize={10} fill="#78350f">{t(`diagram.canvasDiagnostic.${item.category}.fix`)}</text>
           </g>

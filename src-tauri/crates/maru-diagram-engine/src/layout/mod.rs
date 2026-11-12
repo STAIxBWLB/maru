@@ -34,6 +34,12 @@ use std::collections::{BTreeMap, BTreeSet};
 const NODE_TEXT_INSET: Coord = 12 * 64;
 /// Distance from a node's top edge to the first line's origin.
 const NODE_TOP_INSET: Coord = 8 * 64;
+/// How far an ellipse's inscribed rectangle is inset from its bounding box on
+/// each axis, as a fraction of that axis: `(1 - 1/√2) / 2`. The inscribed
+/// rectangle's corners lie on the curve, so text inside it never crosses the
+/// outline of the oval Maru draws for a lifecycle start, success or failure
+/// state.
+const ELLIPSE_INSET: f64 = 0.146_446_609_406_726_2;
 
 /// The three node text roles at one auto-fit step.
 #[derive(Clone, Copy)]
@@ -213,9 +219,14 @@ pub(crate) fn header_floor(geometry: &GeometryDocument) -> Result<Coord, Diagnos
 /// band. The band is added above the drawing, so nothing the source drew in its
 /// own top margin ends up under the header. Families that do not reserve it
 /// return 0.
+///
+/// Lifecycle reserves it too: its first row starts 56 px below the page origin,
+/// which is inside the band a measured title and subtitle occupy, so the lane
+/// frame would paint over the emitted page title. The band is measured here, so
+/// Korean and multi-line titles move the drawing as far as they need.
 pub(crate) fn header_shift(geometry: &GeometryDocument, kind: &str) -> Result<Coord, Diagnostic> {
     match kind {
-        "workflow" | "dataflow" => header_floor(geometry),
+        "workflow" | "dataflow" | "lifecycle" => header_floor(geometry),
         _ => Ok(0),
     }
 }
@@ -392,6 +403,16 @@ pub(crate) struct SceneBuilder {
     kinds: BTreeMap<String, String>,
     pins: BTreeMap<String, GeometryPin>,
     grown: Vec<GrownNode>,
+    /// Nodes whose drawn outline is an ellipse, so their text has to stay inside
+    /// the inscribed rectangle rather than the whole box. Maru draws lifecycle
+    /// start, success and failure states as ovals; a label placed across the
+    /// full width of that box crosses the curve.
+    ellipses: BTreeSet<String>,
+    /// Every node the family asked for an ellipse, whether or not the label fit
+    /// kept one. A demoted node leaves `ellipses` so the shared ladder runs on
+    /// the whole box, and this set is what still tells the published geometry
+    /// that its shape was decided rather than never offered.
+    ellipse_candidates: BTreeSet<String>,
 }
 
 /// A node auto-fit grew before every other node was placed, kept so the scene
@@ -521,6 +542,7 @@ impl SceneBuilder {
                 containers: vec![],
                 routes: vec![],
                 labels: vec![],
+                primitives: vec![],
                 legend: GeometryLegend {
                     content_bounds: None,
                     title_y: None,
@@ -559,10 +581,19 @@ impl SceneBuilder {
             kinds: BTreeMap::new(),
             pins,
             grown: vec![],
+            ellipses: BTreeSet::new(),
+            ellipse_candidates: BTreeSet::new(),
         }
     }
     pub(crate) fn pinned_position(&self, id: &str) -> Option<GeometryPoint> {
         self.pins.get(id).map(|p| p.position)
+    }
+    /// Record that this node's drawn outline is an ellipse, before it is placed,
+    /// so its label is fitted inside the inscribed rectangle instead of across
+    /// the whole box.
+    pub(crate) fn mark_ellipse(&mut self, id: &str) {
+        self.ellipses.insert(id.into());
+        self.ellipse_candidates.insert(id.into());
     }
     pub(crate) fn node_bounds(&self, id: &str) -> Option<GeometryBox> {
         self.routing_nodes.get(id).copied().or_else(|| {
@@ -720,6 +751,13 @@ impl SceneBuilder {
         }
         self.document.nodes.push(GeometryNode {
             final_state: None,
+            // The label fit above is what decides the shape: a node still in
+            // `ellipses` kept its curve, one only in `ellipse_candidates` was
+            // demoted, and a node in neither was never offered one.
+            ellipse: self
+                .ellipse_candidates
+                .contains(id)
+                .then(|| self.ellipses.contains(id)),
             phase_order: None,
             id: id.into(),
             bounds,
@@ -848,6 +886,66 @@ impl SceneBuilder {
     ) -> Result<GeometryBox, Diagnostic> {
         let label_mark = self.document.labels.len();
         let diagnostic_mark = self.diagnostics.len();
+        // An oval state fits its text inside the ellipse when it can. A label
+        // that needs the whole box keeps the box placement rather than turning a
+        // document that laid out before into a refusal, so a failed oval attempt
+        // demotes the node and the shared ladder below runs unchanged. The
+        // demotion leaves `ellipse_candidates`, so `add_node` publishes the box
+        // it actually drew and the renderers stop drawing a curve over text that
+        // crosses it.
+        if self.ellipses.contains(id) {
+            if let Some(fitted) = self.place_node_labels_ladder(
+                id,
+                label,
+                detail,
+                tag,
+                bounds,
+                grow_height_to,
+                label_mark,
+                diagnostic_mark,
+            )? {
+                return Ok(fitted);
+            }
+            self.ellipses.remove(id);
+        }
+        if let Some(fitted) = self.place_node_labels_ladder(
+            id,
+            label,
+            detail,
+            tag,
+            bounds,
+            grow_height_to,
+            label_mark,
+            diagnostic_mark,
+        )? {
+            return Ok(fitted);
+        }
+        self.place_node_labels_at(
+            id,
+            label,
+            detail,
+            tag,
+            bounds,
+            NODE_LABEL_STEPS[0],
+            RoleCuts::NONE,
+        )?;
+        Ok(bounds)
+    }
+
+    /// The wrap, wrong-width cut and type-step ladder for one node, under the
+    /// area its current shape admits text in.
+    #[allow(clippy::too_many_arguments)]
+    fn place_node_labels_ladder(
+        &mut self,
+        id: &str,
+        label: &str,
+        detail: Option<&str>,
+        tag: Option<&str>,
+        bounds: GeometryBox,
+        grow_height_to: Option<Coord>,
+        label_mark: usize,
+        diagnostic_mark: usize,
+    ) -> Result<Option<GeometryBox>, Diagnostic> {
         if let Some(fitted) = self.place_node_labels_pass(
             id,
             label,
@@ -859,12 +957,12 @@ impl SceneBuilder {
             label_mark,
             diagnostic_mark,
         )? {
-            return Ok(fitted);
+            return Ok(Some(fitted));
         }
         // Every word kept whole and nothing fit. A role earns a cut only when
         // its own word alone overflows the width at the floor size, so a node
         // whose primary fits whole is never cut because its sublabel did not.
-        let available = bounds.width - NODE_TEXT_INSET;
+        let available = self.node_text_origin(id, bounds)?.2;
         let cuts = RoleCuts {
             label: role_needs_cut(label, 700, smallest_size(|sizes| sizes.label), available)?,
             detail: match detail {
@@ -892,19 +990,10 @@ impl SceneBuilder {
                 label_mark,
                 diagnostic_mark,
             )? {
-                return Ok(fitted);
+                return Ok(Some(fitted));
             }
         }
-        self.place_node_labels_at(
-            id,
-            label,
-            detail,
-            tag,
-            bounds,
-            NODE_LABEL_STEPS[0],
-            RoleCuts::NONE,
-        )?;
-        Ok(bounds)
+        Ok(None)
     }
 
     /// One full ladder - grow, then every size step - under the given cut
@@ -936,7 +1025,12 @@ impl SceneBuilder {
         let (_, overflow_y) = self.placed_node_label_overflow(id, candidate);
         self.document.labels.truncate(label_mark);
         self.diagnostics.truncate(diagnostic_mark);
-        if overflow_y > 0 {
+        // An oval's height is the shape the author's rows and bands are drawn
+        // around, so it never grows to absorb text: growing it would push an
+        // accepted scene into the band below it and refuse a document that laid
+        // out before. Oval text takes the wrap and type steps instead, and a
+        // label that still does not fit is placed as it always was.
+        if overflow_y > 0 && !self.ellipses.contains(id) {
             // The wrapped lines are fixed once the width is, so one growth
             // step absorbs the whole overflow; only the ceiling limits it.
             let grown = i64::from(candidate.height) + overflow_y;
@@ -962,6 +1056,84 @@ impl SceneBuilder {
         Ok(None)
     }
 
+    /// Where this node's text starts and how wide one wrapped line may be.
+    ///
+    /// A box-shaped node starts 12 px inside its left edge and may wrap across
+    /// its whole width. An elliptical node — the oval Maru draws for a lifecycle
+    /// start, success or failure state — starts at the left edge of its inscribed
+    /// rectangle and wraps inside that rectangle, because text placed across the
+    /// full box paints over the curve.
+    fn node_text_origin(
+        &self,
+        id: &str,
+        bounds: GeometryBox,
+    ) -> Result<(Coord, Coord, Coord), Diagnostic> {
+        if !self.ellipses.contains(id) {
+            return Ok((
+                add(bounds.x, NODE_TEXT_INSET)?,
+                add(bounds.y, NODE_TOP_INSET)?,
+                bounds.width - NODE_TEXT_INSET,
+            ));
+        }
+        let (left, top, right, _) = self.node_text_area(id, bounds)?;
+        let available = Coord::try_from(right - left).map_err(|_| {
+            failure(
+                "node-text-area",
+                "the oval's own text area is not a representable width",
+                "use a wider node box",
+            )
+        })?;
+        let x = Coord::try_from(left).map_err(|_| {
+            failure(
+                "node-text-area",
+                "the oval's text origin is not a representable coordinate",
+                "move the state inside the representable range",
+            )
+        })?;
+        let y = Coord::try_from(top).map_err(|_| {
+            failure(
+                "node-text-area",
+                "the oval's text origin is not a representable coordinate",
+                "move the state inside the representable range",
+            )
+        })?;
+        if available <= 0 {
+            return Err(failure(
+                "node-text-area",
+                "the oval leaves no room for its own text",
+                "widen the state or shorten its label",
+            ));
+        }
+        Ok((x, y, available))
+    }
+    /// The rectangle this node's own text has to stay inside, as
+    /// `(left, top, right, bottom)` in fixed-point units.
+    ///
+    /// A box-shaped node admits text anywhere inside its own box: the 12 px text
+    /// origin is a placement rule, not a clip boundary, so a bearing may reach
+    /// left of it. An elliptical node admits text only inside the inscribed
+    /// rectangle, whose corners lie on the curve.
+    fn node_text_area(
+        &self,
+        id: &str,
+        bounds: GeometryBox,
+    ) -> Result<(i64, i64, i64, i64), Diagnostic> {
+        let left = i64::from(bounds.x);
+        let top = i64::from(bounds.y);
+        let right = left + i64::from(bounds.width);
+        let bottom = top + i64::from(bounds.height);
+        if !self.ellipses.contains(id) {
+            return Ok((left, top, right, bottom));
+        }
+        let inset_x = i64::from(px(i64::from(bounds.width) as f64 / 64.0 * ELLIPSE_INSET)?);
+        let inset_y = i64::from(px(i64::from(bounds.height) as f64 / 64.0 * ELLIPSE_INSET)?);
+        Ok((
+            left + inset_x,
+            top + inset_y,
+            right - inset_x,
+            bottom - inset_y,
+        ))
+    }
     #[allow(clippy::too_many_arguments)]
     fn place_node_labels_at(
         &mut self,
@@ -973,9 +1145,7 @@ impl SceneBuilder {
         sizes: NodeLabelSizes,
         roles: RoleCuts,
     ) -> Result<(), Diagnostic> {
-        let available = bounds.width - NODE_TEXT_INSET;
-        let x = add(bounds.x, NODE_TEXT_INSET)?;
-        let mut y = add(bounds.y, NODE_TOP_INSET)?;
+        let (x, mut y, available) = self.node_text_origin(id, bounds)?;
         let (wrapped, height) =
             self.wrap_node_text(label, 700, sizes.label, available, roles.label)?;
         self.label(
@@ -1013,15 +1183,15 @@ impl SceneBuilder {
         }
         Ok(())
     }
-    /// How far this node's painted glyphs reach past its own bounds, which is
-    /// the span the admission check measures. Zero on both axes means the text
-    /// fits as drawn.
+    /// How far this node's painted glyphs reach past the area it admits text
+    /// in, which is the span the admission check measures: its whole box for a
+    /// box-shaped node, its inscribed rectangle for an oval. Zero on both axes
+    /// means the text fits as drawn.
     fn placed_node_label_overflow(&self, id: &str, bounds: GeometryBox) -> (i64, i64) {
         let prefix = format!("node:{id}:");
-        let left = i64::from(bounds.x);
-        let top = i64::from(bounds.y);
-        let right = left + i64::from(bounds.width);
-        let bottom = top + i64::from(bounds.height);
+        let Ok((left, top, right, bottom)) = self.node_text_area(id, bounds) else {
+            return (0, 0);
+        };
         let mut overflow_x = 0;
         let mut overflow_y = 0;
         for label in self.document.labels.iter().filter(|label| {
@@ -2750,6 +2920,43 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
                     diagnostics: vec![diagnostic],
                     receipt: validity.receipt,
                 };
+            }
+            // The canvas draws this report instead of the source, so the shapes
+            // the writer paints but no member, container or route covers — a
+            // lifeline, a phase span, a lifecycle initial marker or band, a
+            // legend swatch — are published with it, in emitted coordinates.
+            // One derivation feeds both (`crate::primitives`), and a snapshot the
+            // semantic projection cannot read leaves the list empty with a notice
+            // rather than refusing a scene that already laid out.
+            match crate::semantics::SemanticContext::from_spec(&spec)
+                .and_then(|context| crate::primitives::derive(&geometry, &context))
+            {
+                Ok(derived) => {
+                    // Published in paint order: every underlay, then every
+                    // overlay, so a consumer that splits on the layer paints what
+                    // the writer paints in the order it paints it.
+                    let ordered = derived
+                        .iter()
+                        .filter(|primitive| primitive.layer == crate::primitives::Layer::Underlay)
+                        .chain(
+                            derived
+                                .iter()
+                                .filter(|primitive| primitive.layer == crate::primitives::Layer::Overlay),
+                        );
+                    geometry.primitives = ordered
+                        .map(GeometryPrimitive::from_derived)
+                        .collect();
+                }
+                Err(cause) => diagnostics.push(Diagnostic {
+                    code: "document/primitive-source".into(),
+                    path: "/specJson".into(),
+                    rule: "geometry-v1/primitive-source".into(),
+                    message: format!(
+                        "the scene's drawing primitives cannot be derived: {}",
+                        cause.message
+                    ),
+                    fix: "repair the source snapshot so the canvas can draw the lifelines, bands and markers the writer paints".into(),
+                }),
             }
             let mut receipt = validity.receipt;
             receipt.engine_output_sha256 = Some(crate::spec_hash(

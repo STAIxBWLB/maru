@@ -5,6 +5,10 @@
     "e2e-native/evidence/diagram-engine-e4/family-sequence.png",
     "e2e-native/evidence/diagram-engine-e4/family-dataflow.png",
     "e2e-native/evidence/diagram-engine-e4/family-lifecycle.png",
+    "e2e-native/evidence/diagram-engine-e4/gap-lifelines-sequence.png",
+    "e2e-native/evidence/diagram-engine-e4/gap-page-title.png",
+    "e2e-native/evidence/diagram-engine-e4/gap-route-label-box.png",
+    "e2e-native/evidence/diagram-engine-e4/gap-oval-label.png",
     "e2e-native/evidence/diagram-engine-e4/legacy-v7.png",
     "e2e-native/evidence/diagram-engine-e4/legacy-v8.png",
     "e2e-native/evidence/diagram-engine-e4/selection.png",
@@ -13,5 +17,5 @@
     "e2e-native/evidence/diagram-engine-e4/refusal-diagnostic.png",
     "e2e-native/evidence/diagram-engine-e4/english-ui.png"
   ],
-  "at": "2026-11-11T07:38:15.969Z"
+  "at": "2026-11-11T11:10:54.521Z"
 }

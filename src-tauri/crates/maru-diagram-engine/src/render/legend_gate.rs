@@ -94,6 +94,15 @@ pub(crate) fn check(g: &GeometryDocument, primitives: &[Primitive]) -> Vec<Diagn
                 );
                 points.extend([(x - r, y - r), (x + r, y + r)]);
             }
+            Shape::Ellipse { center, rx, ry } => {
+                let (x, y, rx, ry) = (
+                    f64::from(center.x) / 64.0,
+                    f64::from(center.y) / 64.0,
+                    f64::from(*rx) / 64.0,
+                    f64::from(*ry) / 64.0,
+                );
+                points.extend([(x - rx, y - ry), (x + rx, y + ry)]);
+            }
             Shape::Line { from, to } => {
                 points.push((f64::from(from.x) / 64.0, f64::from(from.y) / 64.0));
                 points.push((f64::from(to.x) / 64.0, f64::from(to.y) / 64.0));

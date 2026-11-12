@@ -100,6 +100,14 @@ export type GeometryNode = {
  */
 finalState?: boolean | null,
 /**
+ * The shape the engine drew this member as. `true` is an ellipse whose
+ * text was fitted inside the curve, `false` is one the fit demoted to a
+ * rounded box, and absent means the family never draws this member as a
+ * curve. The canvas and the writer draw what this says, so a demoted
+ * state's own label cannot cross a curve the engine removed.
+ */
+ellipse?: boolean | null,
+/**
  * Authored main-lane column, for both versions, independent of pinned positions.
  */
 phaseOrder?: number | null, id: string, bounds: GeometryBox,
@@ -138,7 +146,29 @@ contentOffset?: GeometryPoint | null, };
 
 export type GeometryLine = { from: GeometryPoint, to: GeometryPoint, };
 
-export type GeometryDocument = { lifecycleRail?: GeometryLine | null, nodes: Array<GeometryNode>, containers: Array<GeometryContainer>, routes: Array<GeometryRoute>, labels: Array<GeometryLabel>, legend: GeometryLegend, page: GeometryPage, };
+export type GeometryPrimitiveLayer = "underlay" | "overlay";
+
+export type GeometryPrimitivePaint = "line" | "accentLine" | "securityLine" | "dashedLine" | "node" | "outlineNode" | "accentFill";
+
+export type GeometryPrimitiveShape = { "kind": "rect", bounds: GeometryBox, radius: number, } | { "kind": "line", from: GeometryPoint, to: GeometryPoint, } | { "kind": "polyline", points: Array<GeometryPoint>, } | { "kind": "circle", center: GeometryPoint, radius: number, } | { "kind": "ellipse", center: GeometryPoint, rx: number, ry: number, } | { "kind": "polygon", points: Array<GeometryPoint>, };
+
+export type GeometryPrimitive = { kind: string,
+/**
+ * The member, container, route or legend key the primitive belongs to.
+ */
+owner: string, shape: GeometryPrimitiveShape, paint: GeometryPrimitivePaint,
+/**
+ * Stroke width exactly as the writer paints it, in pixels.
+ */
+stroke: string, dash?: string | null, arrow: boolean, layer: GeometryPrimitiveLayer, };
+
+export type GeometryDocument = { lifecycleRail?: GeometryLine | null, nodes: Array<GeometryNode>, containers: Array<GeometryContainer>, routes: Array<GeometryRoute>, labels: Array<GeometryLabel>,
+/**
+ * Render primitives derived from this geometry and the source semantics, in
+ * paint order: every underlay first, then every overlay. Absent for a scene
+ * decoded from a report written before they were published.
+ */
+primitives?: Array<GeometryPrimitive>, legend: GeometryLegend, page: GeometryPage, };
 
 export type GeometryReport = { apiVersion: number, ok: boolean, geometry?: GeometryDocument | null, diagnostics: Array<Diagnostic>, receipt: EngineReceipt, };
 

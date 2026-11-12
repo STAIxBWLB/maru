@@ -27,10 +27,14 @@ import {
   canvasDisplayNode,
   canvasLabelLines,
   canvasLabelsFor,
+  ENGINE_LABEL_BOX_PAD,
+  ENGINE_PRIMITIVE_PAINT,
   matchingCanvasGeometry,
   routePathOf,
   type CanvasGeometry,
   type CanvasGeometryLabel,
+  type CanvasGeometryPoint,
+  type CanvasGeometryPrimitive,
   type CanvasGeometryRoute,
   type CanvasLabelLines,
 } from "./engineCanvasGeometry";
@@ -451,6 +455,52 @@ function arrowMarkerAttr(kind: DiagramEdge["arrowStart"] | DiagramEdge["arrowEnd
   return "";
 }
 
+function pointsAttrOf(points: readonly CanvasGeometryPoint[]): string {
+  return points.map((point) => `${num(point.x)},${num(point.y)}`).join(" ");
+}
+
+/**
+ * The engine's published underlay or overlay shapes as SVG — the export's copy
+ * of `EnginePrimitives`, drawing the same list in the same two bands the canvas
+ * paints, so an exported sequence keeps its lifelines and an exported lifecycle
+ * keeps its band, rail, initial markers and final borders.
+ */
+function enginePrimitivesSvg(
+  geometry: CanvasGeometry | null,
+  layer: "underlay" | "overlay",
+  members: ReadonlySet<string>,
+): string {
+  const drawn = (geometry?.primitives ?? []).filter(
+    (primitive) => primitive.layer === layer
+      && (primitive.member === null || members.has(primitive.member)),
+  );
+  if (drawn.length === 0) return "";
+  const shapes = drawn.map((primitive: CanvasGeometryPrimitive) => {
+    const paint = ENGINE_PRIMITIVE_PAINT[primitive.paint] ?? { fill: "none", stroke: "#1f2937" };
+    const style =
+      ` fill="${paint.fill}" stroke="${paint.stroke}" stroke-width="${num(primitive.stroke)}"` +
+      (primitive.dash ? ` stroke-dasharray="${primitive.dash.map((part) => num(part)).join(" ")}"` : "") +
+      (primitive.arrow ? ` marker-end="url(#${ARROW_MARKER_ID.filled})"` : "");
+    const meta = ` data-engine-primitive="${escapeHtml(primitive.kind)}" data-engine-primitive-owner="${escapeHtml(primitive.owner)}"`;
+    const shape = primitive.shape;
+    switch (shape.kind) {
+      case "rect":
+        return `<rect${meta} x="${num(shape.x)}" y="${num(shape.y)}" width="${num(shape.w)}" height="${num(shape.h)}" rx="${num(shape.radius)}"${style}/>`;
+      case "line":
+        return `<line${meta} x1="${num(shape.from.x)}" y1="${num(shape.from.y)}" x2="${num(shape.to.x)}" y2="${num(shape.to.y)}"${style}/>`;
+      case "circle":
+        return `<circle${meta} cx="${num(shape.center.x)}" cy="${num(shape.center.y)}" r="${num(shape.radius)}"${style}/>`;
+      case "ellipse":
+        return `<ellipse${meta} cx="${num(shape.center.x)}" cy="${num(shape.center.y)}" rx="${num(shape.rx)}" ry="${num(shape.ry)}"${style}/>`;
+      case "polygon":
+        return `<polygon${meta} points="${pointsAttrOf(shape.points)}"${style}/>`;
+      default:
+        return `<polyline${meta} points="${pointsAttrOf(shape.points)}"${style}/>`;
+    }
+  });
+  return `<g data-engine-primitive-layer="${layer}">${shapes.join("")}</g>`;
+}
+
 // Mirrors `EdgeView` (visible path only — the transparent hit-area path is
 // interactive chrome and stays out of exports).
 function edgeSvg(
@@ -477,7 +527,8 @@ function edgeSvg(
   if (engineRoute) {
     if (engineLabel) {
       out += `<g data-engine-label-box="${engineLabel.x} ${engineLabel.y} ${engineLabel.w} ${engineLabel.h}">` +
-        `<rect x="${engineLabel.x}" y="${engineLabel.y}" width="${engineLabel.w}" height="${engineLabel.h}"` +
+        `<rect x="${engineLabel.x - ENGINE_LABEL_BOX_PAD}" y="${engineLabel.y - ENGINE_LABEL_BOX_PAD}"` +
+        ` width="${engineLabel.w + ENGINE_LABEL_BOX_PAD * 2}" height="${engineLabel.h + ENGINE_LABEL_BOX_PAD * 2}"` +
         ` rx="3" ry="3" fill="#ffffff" stroke="${color}" stroke-width="1"/>` +
         engineLabelsSvg([engineLabel], color) + `</g>`;
     }
@@ -577,6 +628,10 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
     (node) => !node.hidden && !(node.layerId && hiddenLayers.has(node.layerId)),
   ).map((node) => canvasDisplayNode(node, geometry));
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  // The members this export actually draws: the engine's shapes belong to them,
+  // so a lifeline under a hidden participant or a border around a state on an
+  // unlisted layer goes with the member instead of staying in the artifact.
+  const drawnMembers = new Set(nodeById.keys());
   const edges = doc.edges.filter(
     (edge) => nodeById.has(edge.fromNode) && nodeById.has(edge.toNode),
   );
@@ -614,8 +669,12 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
   };
 
   const content =
-    (geometry ? engineLabelsSvg(geometry.pageLabels, "#111827") : "") +
     containerNodes.map(nodeSvgFor).join("") +
+    // The engine's underlays (lifelines, phase spans, bands) paint after the
+    // frames and before the routes, in the writer's own order; the overlays
+    // (a lifecycle final border) after the members. `CanvasSurface` keeps the
+    // same two bands, and both drop the shapes of a member the model hides.
+    enginePrimitivesSvg(geometry, "underlay", drawnMembers) +
     edges.map((edge) => edgeSvg(
       edge,
       nodeById.get(edge.fromNode)!,
@@ -623,7 +682,11 @@ export function renderDocToSvg(doc: DiagramDoc, opts: RenderSvgOpts = {}): Rende
       geometry?.routes.get(edge.id),
       geometry ? canvasLabelsFor(geometry, edge.id, "edge")[0] : undefined,
     )).join("") +
-    memberNodes.map(nodeSvgFor).join("");
+    memberNodes.map(nodeSvgFor).join("") +
+    enginePrimitivesSvg(geometry, "overlay", drawnMembers) +
+    // Page chrome paints last: a lane, boundary or stage frame that reaches up
+    // into the header band must not hide the engine's title or subtitle.
+    (geometry ? engineLabelsSvg(geometry.pageLabels, "#111827") : "");
 
   const svg =
     `<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink"` +

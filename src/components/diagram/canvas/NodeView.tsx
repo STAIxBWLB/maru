@@ -1,5 +1,6 @@
 import { memo, useCallback, type MouseEvent, type PointerEvent, type ReactElement } from "react";
 
+import { CANVAS_CONTAINER_HEADER_BAND } from "../../../lib/diagram/canvasDiagnostics";
 import type { CanvasLabelLines } from "../../../lib/diagram/engineCanvasGeometry";
 import { portPoint } from "../../../lib/diagram/geometry";
 import type { MatrixDataset } from "../../../lib/diagram/reportTypes";
@@ -81,7 +82,7 @@ function NodeBody({ node, band = true }: { node: DiagramNode; band?: boolean }) 
   const s = shapeFor(node);
   const w = node.w;
   const h = node.h;
-  const headerH = 26;
+  const headerH = CANVAS_CONTAINER_HEADER_BAND;
 
   switch (node.kind) {
     case "simple":
@@ -240,7 +241,7 @@ function NodeLabel({ node }: { node: DiagramNode }) {
   const bullets = node.bullets ?? [];
   if (!title && !body && bullets.length === 0) return null;
   const s = shapeFor(node);
-  const headerH = headered ? 26 : 0;
+  const headerH = headered ? CANVAS_CONTAINER_HEADER_BAND : 0;
   const padTop = node.kind === "numbered" ? 24 : 0;
   return (
     <foreignObject
@@ -318,7 +319,7 @@ export function EngineLabels({ labels, color }: { labels: readonly CanvasLabelLi
 function SectionHeader({ node }: { node: DiagramNode }) {
   if (node.kind !== "section" && node.kind !== "titled-box") return null;
   return (
-    <foreignObject x={0} y={0} width={node.w} height={26} pointerEvents="none">
+    <foreignObject x={0} y={0} width={node.w} height={CANVAS_CONTAINER_HEADER_BAND} pointerEvents="none">
       <div
         className="maru-diagram-node-header"
         style={{

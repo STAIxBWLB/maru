@@ -15,7 +15,7 @@
  * history and saving never wait for the engine.
  */
 import { resetCanvasPositions } from "./canvasDisplayPositions";
-import type { Diagnostic, GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
+import type { Diagnostic, GeometryPrimitive, GeometryReport } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { fixedToPixels, isPinnableCanvasMember, layoutCanvasRequest, type ContentOffset } from "./engineGeometryCanvas";
 import type { GeometryEngine } from "./engineGeometry";
 import { ENGINE_DIAGRAM_TYPES, type SemanticSpecDataset } from "./reportTypes";
@@ -37,6 +37,14 @@ export interface CanvasGeometryBox {
   y: number;
   w: number;
   h: number;
+  /**
+   * The shape the engine drew this member as. `true` and `false` are an oval it
+   * kept and an oval its own label fit demoted to a rounded box; `null` is a
+   * member the family never draws as a curve. The canvas and the export draw
+   * this shape, so a demoted state's own text cannot cross a curve the engine
+   * removed.
+   */
+  ellipse: boolean | null;
 }
 
 export type CanvasGeometryLabelRole = "label" | "sublabel" | "tag";
@@ -64,6 +72,82 @@ export interface CanvasGeometryRoute {
   points: readonly CanvasGeometryPoint[];
 }
 
+export type CanvasGeometryPrimitiveShape =
+  | { kind: "rect"; x: number; y: number; w: number; h: number; radius: number }
+  | { kind: "line"; from: CanvasGeometryPoint; to: CanvasGeometryPoint }
+  | { kind: "polyline"; points: readonly CanvasGeometryPoint[] }
+  | { kind: "circle"; center: CanvasGeometryPoint; radius: number }
+  | { kind: "ellipse"; center: CanvasGeometryPoint; rx: number; ry: number }
+  | { kind: "polygon"; points: readonly CanvasGeometryPoint[] };
+
+/**
+ * A shape the engine's writer paints that is not a member, a container or a
+ * route: a lifeline, a phase span, a lifecycle initial marker, rail or band, a
+ * final border, or a legend swatch. They are the engine's own, in canvas pixels,
+ * so the canvas never re-derives one from node boxes.
+ */
+export interface CanvasGeometryPrimitive {
+  kind: string;
+  /** The member, container, route or legend key the primitive belongs to. */
+  owner: string;
+  /**
+   * The canvas member this shape belongs to, or null for page chrome such as a
+   * lifecycle band or rail. A primitive whose member is hidden or unlistable
+   * goes with it instead of staying behind on its own.
+   */
+  member: string | null;
+  layer: "underlay" | "overlay";
+  /** The engine's semantic colour role, which the canvas maps to its palette. */
+  paint: string;
+  stroke: number;
+  dash: readonly number[] | null;
+  arrow: boolean;
+  shape: CanvasGeometryPrimitiveShape;
+}
+
+/**
+ * How far the drawn box around a route label sits outside the engine's measured
+ * text box. The engine's box is the glyph ink the label was fitted to, so a box
+ * drawn at exactly those bounds has the text touching its own border; the canvas
+ * and the SVG export both draw it this much larger and leave the text where the
+ * engine put it.
+ */
+export const ENGINE_LABEL_BOX_PAD = 3;
+
+/**
+ * The engine's semantic paint role, mapped to this canvas's own palette. The
+ * report names the role rather than the colour for exactly this reason: the
+ * canvas paints members with the document's style, so the shared shapes take
+ * that same neutral member colour instead of importing the engine's theme.
+ */
+export const ENGINE_PRIMITIVE_PAINT: Readonly<Record<string, { fill: string; stroke: string }>> = {
+  line: { fill: "none", stroke: "#94a3b8" },
+  accentLine: { fill: "none", stroke: "#059669" },
+  securityLine: { fill: "none", stroke: "#e11d48" },
+  dashedLine: { fill: "none", stroke: "#7c3aed" },
+  node: { fill: "#ffffff", stroke: "#1f2937" },
+  outlineNode: { fill: "none", stroke: "#1f2937" },
+  accentFill: { fill: "#059669", stroke: "none" },
+};
+
+/**
+ * The primitive kinds the engine names a member for: a lifeline belongs to its
+ * participant, a phase span to its phase, an initial marker or final border to
+ * its state. Membership is decided by kind first, because the owners of the
+ * page-chrome kinds are band names (`phase`, `outcome`) and the rail's literal
+ * `main`, every one of which is a legal state id; matching an owner against the
+ * scene's ids regardless of kind would let hiding a state named `phase` take
+ * the page band with it. Kinds absent here stay page chrome, member null.
+ */
+export const ENGINE_MEMBER_PRIMITIVE_KINDS: ReadonlySet<string> = new Set([
+  "sequence-lifeline",
+  "workflow-phase-span",
+  "lifecycle-initial-dot",
+  "lifecycle-initial-stem",
+  "lifecycle-initial-head",
+  "lifecycle-final-border",
+]);
+
 export interface CanvasGeometryPage {
   x: number;
   y: number;
@@ -78,6 +162,12 @@ export interface CanvasGeometry {
   labels: ReadonlyMap<string, readonly CanvasGeometryLabel[]>;
   /** Canvas edge id → engine route points. */
   routes: ReadonlyMap<string, CanvasGeometryRoute>;
+  /**
+   * The engine's own shapes that no member, container or route covers — a
+   * sequence lifeline, a workflow phase span, a lifecycle marker, rail, band or
+   * final border — in canvas pixels and in painter order, underlays first.
+   */
+  primitives: readonly CanvasGeometryPrimitive[];
   /** Document title and subtitle in page coordinates: no member owns them. */
   pageLabels: readonly CanvasGeometryLabel[];
   page: CanvasGeometryPage | null;
@@ -153,6 +243,72 @@ function labelRole(id: string): CanvasGeometryLabelRole {
 }
 
 /**
+ * The engine's published shapes, in canvas pixels, keeping the order the writer
+ * paints them in. Every coordinate goes through `fixedToPixels`; the stroke
+ * width and dash come as the writer's own pixel strings, so they are parsed and
+ * never divided.
+ *
+ * A legend swatch is published too, but this canvas draws no legend: it paints
+ * members with the document's own style, so a colour key would explain colours
+ * the canvas does not use. Those kinds are dropped here rather than left to the
+ * renderers, so the count a consumer sees is the count it must draw.
+ */
+function canvasPrimitivesOf(
+  primitives: readonly GeometryPrimitive[],
+  memberOf: (primitive: { kind: string; owner: string }) => string | null,
+): readonly CanvasGeometryPrimitive[] {
+  const points = (list: readonly { x: number; y: number }[], what: string): CanvasGeometryPoint[] =>
+    list.map((point, index) => ({
+      x: fixedToPixels(point.x, `${what} point ${index} x`),
+      y: fixedToPixels(point.y, `${what} point ${index} y`),
+    }));
+  const px = (value: string, what: string): number => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      throw new Error(`Cannot read engine canvas geometry: ${what} is "${value}", not a pixel length; rebuild the same SDK bindings and retry.`);
+    }
+    return number;
+  };
+  return primitives
+    .filter((primitive) => !primitive.kind.startsWith("legend-"))
+    .map((primitive) => {
+      const what = `the ${primitive.kind} primitive`;
+      const shape = primitive.shape;
+      return {
+        kind: primitive.kind,
+        owner: primitive.owner,
+        member: memberOf({ kind: primitive.kind, owner: primitive.owner }),
+        layer: primitive.layer,
+        paint: primitive.paint,
+        stroke: px(primitive.stroke, `${what} stroke width`),
+        dash: primitive.dash ? primitive.dash.trim().split(/\s+/).map((part) => px(part, `${what} dash`)) : null,
+        arrow: primitive.arrow,
+        shape: shape.kind === "rect"
+          ? {
+            kind: "rect",
+            x: fixedToPixels(shape.bounds.x, `${what} x`),
+            y: fixedToPixels(shape.bounds.y, `${what} y`),
+            w: fixedToPixels(shape.bounds.width, `${what} width`),
+            h: fixedToPixels(shape.bounds.height, `${what} height`),
+            radius: fixedToPixels(shape.radius, `${what} radius`),
+          }
+          : shape.kind === "line"
+            ? { kind: "line", from: points([shape.from], what)[0]!, to: points([shape.to], what)[0]! }
+            : shape.kind === "circle"
+              ? { kind: "circle", center: points([shape.center], what)[0]!, radius: fixedToPixels(shape.radius, `${what} radius`) }
+              : shape.kind === "ellipse"
+                ? {
+                  kind: "ellipse",
+                  center: points([shape.center], what)[0]!,
+                  rx: fixedToPixels(shape.rx, `${what} rx`),
+                  ry: fixedToPixels(shape.ry, `${what} ry`),
+                }
+                : { kind: shape.kind, points: points(shape.points, what) },
+      };
+    });
+}
+
+/**
  * Map one engine report onto canvas ids. Entity ids come from the dataset's
  * recorded id map; a container id (`lane:main`, `segment:0`) becomes the doc's
  * projected container id. Returns null when the engine refused the document.
@@ -209,7 +365,12 @@ export function canvasGeometryOf(
     return canvasId(targetId, "node");
   };
   const boxes = new Map<string, CanvasGeometryBox>();
-  const box = (role: "node" | "container", sourceId: string, bounds: { x: number; y: number; width: number; height: number }) => {
+  const box = (
+    role: "node" | "container",
+    sourceId: string,
+    bounds: { x: number; y: number; width: number; height: number },
+    ellipse: boolean | null = null,
+  ) => {
     const id = canvasId(sourceId, role);
     return {
       id,
@@ -219,10 +380,11 @@ export function canvasGeometryOf(
       y: fixedToPixels(bounds.y, `the ${role} ${sourceId} y`),
       w: fixedToPixels(bounds.width, `the ${role} ${sourceId} width`),
       h: fixedToPixels(bounds.height, `the ${role} ${sourceId} height`),
+      ellipse,
     };
   };
   for (const node of scene.nodes) {
-    const entry = box("node", node.id, node.bounds);
+    const entry = box("node", node.id, node.bounds, node.ellipse ?? null);
     boxes.set(entry.id, entry);
   }
   for (const container of scene.containers) {
@@ -268,10 +430,26 @@ export function canvasGeometryOf(
       })),
     });
   });
+  // A shape belongs to a member when the engine named one: a lifeline to its
+  // participant, a phase span to its phase, an initial marker or final border
+  // to its state. A band or rail is anchored to a band name and a legend swatch
+  // to a legend key, so those stay page chrome and never disappear with a
+  // member. The kind decides first, because those page-chrome owners are legal
+  // member ids themselves.
+  const nodeIds = new Set(scene.nodes.map((node) => node.id));
+  const containerIds = new Set(scene.containers.map((container) => container.id));
+  const primitiveMember = (primitive: { kind: string; owner: string }): string | null => {
+    if (!ENGINE_MEMBER_PRIMITIVE_KINDS.has(primitive.kind)) return null;
+    const { owner } = primitive;
+    if (nodeIds.has(owner)) return canvasId(owner, "node");
+    if (containerIds.has(owner)) return canvasId(owner, "container");
+    return null;
+  };
   return {
     boxes,
     labels,
     routes,
+    primitives: canvasPrimitivesOf(scene.primitives ?? [], primitiveMember),
     pageLabels,
     page: {
       x: fixedToPixels(scene.page.bounds.x, "the page x"),
@@ -303,6 +481,12 @@ export interface CanvasDisplayOffset {
  * the node, plus the live drag offset while a gesture is moving it. A node the
  * engine did not emit keeps its own placement, so free-form, template, pattern
  * and mermaid canvases are unchanged.
+ *
+ * The engine also decides the outline: a lifecycle state is projected as an
+ * oval from its source type, and the engine demotes one to a box when its own
+ * label needed the whole width. The drawn shape is the engine's, because the
+ * label the engine placed is what the reader sees, and an oval over a
+ * full-width label cuts through its own text.
  */
 export function canvasDisplayNode(
   node: DiagramNode,
@@ -318,7 +502,10 @@ export function canvasDisplayNode(
   const y = position?.y ?? (box?.y ?? node.y) + dy;
   const w = box?.w ?? node.w;
   const h = box?.h ?? node.h;
-  return node.x === x && node.y === y && node.w === w && node.h === h ? node : { ...node, x, y, w, h };
+  const kind = box?.ellipse === false && node.kind === "oval" ? "simple" : node.kind;
+  return node.x === x && node.y === y && node.w === w && node.h === h && node.kind === kind
+    ? node
+    : { ...node, x, y, w, h, kind };
 }
 
 /**

@@ -38,11 +38,24 @@ pub mod layout;
 pub mod lifecycle;
 #[cfg(feature = "geometry")]
 pub mod metrics;
+/// The writing primitives that are not members, containers or routes. They are
+/// derived in one place so the layout publishes them and the SVG writer paints
+/// the same list (`maru#552` E4).
+#[cfg(feature = "geometry")]
+pub(crate) mod primitives;
+/// The vocabulary a published [`geometry::GeometryPrimitive`] can carry.
+#[cfg(feature = "geometry")]
+pub use primitives::KINDS as RENDER_PRIMITIVE_KINDS;
 #[cfg(feature = "render-svg")]
 pub mod render;
 #[cfg(feature = "geometry")]
 pub mod routing;
 pub mod rules;
+/// Semantic projection of an accepted source spec: the node kinds, lanes and
+/// variants the render primitives are derived from. It lives outside `render`
+/// so the layout build can publish those primitives too (`maru#552` E4).
+#[cfg(feature = "geometry")]
+pub mod semantics;
 pub mod sequence;
 #[cfg(all(feature = "geometry", any(test, feature = "geometry-corpus")))]
 pub mod work;

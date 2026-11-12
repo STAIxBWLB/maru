@@ -227,9 +227,18 @@ pub(crate) fn expected(g: &GeometryDocument, options: &SvgOptions) -> Vec<Primit
             }
             if n.final_state == Some(true) {
                 let inset = (3 * 64).min(n.bounds.width.min(n.bounds.height) / 4).max(0);
-                out.push(expected_primitive(
-                    "lifecycle-final-border",
-                    &n.id,
+                // An oval state's border follows its curve; a box state keeps
+                // the inset rectangle.
+                let shape = if n.ellipse == Some(true) {
+                    Shape::Ellipse {
+                        center: point(
+                            i64::from(n.bounds.x) + i64::from(n.bounds.width) / 2,
+                            i64::from(n.bounds.y) + i64::from(n.bounds.height) / 2,
+                        ),
+                        rx: n.bounds.width / 2 - inset,
+                        ry: n.bounds.height / 2 - inset,
+                    }
+                } else {
                     Shape::Rect {
                         bounds: crate::geometry::GeometryBox {
                             x: n.bounds.x + inset,
@@ -238,7 +247,12 @@ pub(crate) fn expected(g: &GeometryDocument, options: &SvgOptions) -> Vec<Primit
                             height: n.bounds.height - 2 * inset,
                         },
                         radius: 4 * 64,
-                    },
+                    }
+                };
+                out.push(expected_primitive(
+                    "lifecycle-final-border",
+                    &n.id,
+                    shape,
                     Paint::OutlineNode,
                     "1",
                     Layer::Overlay,
@@ -252,11 +266,18 @@ pub(crate) fn expected(g: &GeometryDocument, options: &SvgOptions) -> Vec<Primit
             bands.entry(band).or_default().push(n);
         }
         if c.schema_version == 1 {
+            // Band baselines are anchored in the source drawing; the emitted
+            // drawing may sit below an emitted header band, and the retained
+            // `page.contentOffset` is the only place that says by how much.
+            let shift = g
+                .page
+                .content_offset
+                .map_or(0, |offset| i64::from(offset.y));
             for band in bands.keys() {
                 let y = match *band {
-                    "phase" => 112 * 64,
-                    "event" => 264 * 64,
-                    "outcome" => 436 * 64,
+                    "phase" => 112 * 64 + shift,
+                    "event" => 264 * 64 + shift,
+                    "outcome" => 436 * 64 + shift,
                     _ => continue,
                 };
                 let left = i64::from(g.page.bounds.x) + 72 * 64;
@@ -455,6 +476,7 @@ fn expected_element(primitive: &Primitive) -> &'static str {
         Shape::Line { .. } => "line",
         Shape::Polyline { .. } => "polyline",
         Shape::Circle { .. } => "circle",
+        Shape::Ellipse { .. } => "ellipse",
         Shape::Polygon { .. } => "polygon",
     }
 }
@@ -555,6 +577,7 @@ fn validate_one(
         Shape::Line { .. } => &["x1", "y1", "x2", "y2"],
         Shape::Polyline { .. } | Shape::Polygon { .. } => &["points"],
         Shape::Circle { .. } => &["cx", "cy", "r"],
+        Shape::Ellipse { .. } => &["cx", "cy", "rx", "ry"],
     };
     for attribute in node.attributes() {
         if attribute.namespace().is_some()
@@ -649,6 +672,11 @@ fn validate_one(
         }
         Shape::Circle { center, radius } => {
             for (name, expected) in [("cx", center.x), ("cy", center.y), ("r", *radius)] {
+                check_number(node, name, expected, &path, errors);
+            }
+        }
+        Shape::Ellipse { center, rx, ry } => {
+            for (name, expected) in [("cx", center.x), ("cy", center.y), ("rx", *rx), ("ry", *ry)] {
                 check_number(node, name, expected, &path, errors);
             }
         }
@@ -754,6 +782,16 @@ fn primitive_paint_bounds(primitive: &Primitive) -> Result<(f64, f64, f64, f64),
                 f64::from(center.y) + radius,
             )
         }
+        Shape::Ellipse { center, rx, ry } => {
+            let rx = f64::from(*rx) + half_stroke;
+            let ry = f64::from(*ry) + half_stroke;
+            (
+                f64::from(center.x) - rx,
+                f64::from(center.y) - ry,
+                f64::from(center.x) + rx,
+                f64::from(center.y) + ry,
+            )
+        }
         Shape::Line { from, to } => exact_line_stroke_bounds(*from, *to, half_stroke)?,
         Shape::Polyline { points } if points.len() == 2 => {
             exact_line_stroke_bounds(points[0], points[1], half_stroke)?
@@ -820,7 +858,10 @@ fn primitive_paint_bounds(primitive: &Primitive) -> Result<(f64, f64, f64, f64),
                     .ok_or("arrow marker path has no direction")?;
                 (pair[0], pair[1])
             }
-            Shape::Rect { .. } | Shape::Circle { .. } | Shape::Polygon { .. } => {
+            Shape::Rect { .. }
+            | Shape::Circle { .. }
+            | Shape::Ellipse { .. }
+            | Shape::Polygon { .. } => {
                 return Err("arrow marker is attached to a non-line primitive");
             }
         };

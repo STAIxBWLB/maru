@@ -35,6 +35,15 @@ interface NativeE2eDiagramE4Family {
   containers: Array<{ id: string; box: [number, number, number, number] }>;
   routes: Array<{ id: string; path: string }>;
   labels: Array<{ id: string; targetId: string; lines: string[]; box: [number, number, number, number] }>;
+  pageLabels: Array<{ id: string; lines: string[]; box: [number, number, number, number] }>;
+  primitives: Array<{
+    kind: string;
+    owner: string;
+    layer: string;
+    box: [number, number, number, number];
+    from?: [number, number];
+    to?: [number, number];
+  }>;
 }
 
 interface NativeE2eDiagramE4Version {
@@ -59,6 +68,12 @@ interface NativeE2eDiagramE4Refusal {
   targetId: string;
   targetX: number;
   targetY: number;
+  /** Edge-to-edge gap the mapper placed the badge at, in scene pixels. */
+  targetDistance: number;
+  /** Height of the opaque title band a container paints, in scene pixels. */
+  headerBand: number;
+  /** Members that are frames: a badge inside one covers nothing. */
+  frames: string[];
 }
 
 interface NativeE2eDiagramE4Result {
@@ -255,10 +270,21 @@ async function openDocument(
   });
 }
 
+interface PaintedBox { x: number; y: number; w: number; h: number }
+
 interface PaintReport {
   specSha256: string | null;
   status: string | null;
-  nodes: Array<{ id: string; box: number[]; transform: string | null }>;
+  nodes: Array<{
+    id: string;
+    /** The attribute the canvas wrote, kept for debugging only. */
+    box: number[];
+    transform: string | null;
+    /** The shape actually drawn for this member, measured in canvas pixels. */
+    drawn: (PaintedBox & { shape: string }) | null;
+    /** The same shape when it is an oval: an ellipse the label must stay inside. */
+    oval: { cx: number; cy: number; rx: number; ry: number } | null;
+  }>;
   routes: Array<{
     id: string;
     path: string | null;
@@ -274,6 +300,19 @@ interface PaintReport {
     height: number;
     /** Painted top-left, in canvas coordinates. */
     painted: { x: number; y: number };
+    /** The drawn label box, measured — the padded background rect, not the text. */
+    box: PaintedBox;
+    /** Whether every member and container group is painted before this label,
+     *  which is what puts page chrome above the scene rather than under it. */
+    afterMembers: boolean;
+  }>;
+  /** The engine's own shapes as the canvas painted them, measured. */
+  primitives: Array<{
+    kind: string;
+    owner: string;
+    layer: string | null;
+    box: PaintedBox;
+    pointer: string;
   }>;
   surface: { width: number; height: number };
 }
@@ -340,11 +379,28 @@ async function painted(
     return {
       specSha256: surface.getAttribute("data-engine-spec-sha256"),
       status: surface.getAttribute("data-engine-geometry-status"),
-      nodes: [...surface.querySelectorAll("[data-engine-source-id]")].map((group) => ({
-        id: group.getAttribute("data-engine-source-id") ?? "",
-        box: (group.getAttribute("data-engine-box") ?? "").split(" ").map(Number),
-        transform: group.querySelector("[data-node-id]")?.getAttribute("transform") ?? group.getAttribute("transform"),
-      })),
+      nodes: [...surface.querySelectorAll("[data-engine-source-id]")].map((group) => {
+        // The box attribute is what the canvas says it drew, so the outline is
+        // measured as well. NodeView paints a member's body before its status
+        // chip, progress bar, memo badge and ports, none of which is marked
+        // `data-export-ignore` individually, so the first shape that is not
+        // pointer chrome is the body.
+        const shape = [...group.querySelectorAll("rect, ellipse, path, circle, polygon, line")].find((candidate) =>
+          !candidate.closest("[data-export-ignore]")
+          && !candidate.closest(".maru-diagram-port, .maru-diagram-memo-badge")) ?? null;
+        const drawn = shape ? { ...paintedBox(shape), shape: shape.tagName.toLowerCase() } : null;
+        return {
+          id: group.getAttribute("data-engine-source-id") ?? "",
+          box: (group.getAttribute("data-engine-box") ?? "").split(" ").map(Number),
+          transform: group.querySelector("[data-node-id]")?.getAttribute("transform") ?? group.getAttribute("transform"),
+          drawn,
+          // An oval is the one body shape whose label has a curve to stay
+          // inside; every other shape admits text anywhere in its own box.
+          oval: drawn && drawn.shape === "ellipse"
+            ? { cx: drawn.x + drawn.w / 2, cy: drawn.y + drawn.h / 2, rx: drawn.w / 2, ry: drawn.h / 2 }
+            : null,
+        };
+      }),
       routes: [...surface.querySelectorAll<SVGGElement>("[data-engine-route]")].map((group) => {
         const paths = [...group.querySelectorAll<SVGPathElement>("path")];
         // The interactive hit path is transparent and owns the pointer; the
@@ -384,8 +440,15 @@ async function painted(
         };
       }),
       labels: [...surface.querySelectorAll<SVGGraphicsElement>("[data-engine-label]")].map((element) => {
-        const box = element.getBBox();
-        const painted = paintedBox(element);
+        // A route label's `data-engine-label` sits on the group that also holds
+        // the background box it is drawn in, so the text is measured on its own
+        // element: the group's box would report that padding back to the
+        // assertion which checks the text sits inside it.
+        const text = element.tagName.toLowerCase() === "text"
+          ? element
+          : element.querySelector<SVGGraphicsElement>("text") ?? element;
+        const box = text.getBBox();
+        const painted = paintedBox(text);
         // Only what the canvas painted is read here. Where the label belongs
         // comes from the engine's own label bounds, so an adapter that moved a
         // label but kept it inside its owner cannot satisfy the comparison.
@@ -395,8 +458,23 @@ async function painted(
           width: box.width,
           height: box.height,
           painted: { x: painted.x, y: painted.y },
+          box: paintedBox(element),
+          // Paint order, read from the document itself: a label that comes
+          // after every member and container group cannot be painted under one,
+          // whatever their boxes do.
+          afterMembers: [...surface.querySelectorAll("[data-engine-source-id]")].every((group) =>
+            (group.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0),
         };
       }),
+      primitives: [...surface.querySelectorAll("[data-engine-primitive]")].map((element) => ({
+        kind: element.getAttribute("data-engine-primitive") ?? "",
+        owner: element.getAttribute("data-engine-primitive-owner") ?? "",
+        layer: element.parentElement?.getAttribute("data-engine-primitive-layer") ?? null,
+        box: paintedBox(element),
+        // A lifeline or band is scaffolding: it may never take a pointer the
+        // canvas needs for a pan, a marquee or a member drag.
+        pointer: getComputedStyle(element).pointerEvents,
+      })),
       surface: { width: rect.width, height: rect.height },
     };
   }, { members: memberBoxes as number[][], containers: containerBoxes as number[][] });
@@ -417,7 +495,24 @@ function assertFamilyPainted(paint: PaintReport, family: NativeE2eDiagramE4Famil
         `${family.type}: node ${expected.id} is painted at ${actual.transform}`,
       );
     }
+    // The attribute above is what the canvas claims; this is the shape it
+    // actually drew. A member painted at its engine box is the precondition of
+    // every later check, and an outline that drifted would make them read
+    // against the wrong geometry. The stroke straddles the outline, so the
+    // measured box is up to half a stroke wider than the fill it encloses.
+    if (!actual.drawn) continue;
+    assert.ok(
+      Math.abs(actual.drawn.x - expected.box[0]) <= 2
+      && Math.abs(actual.drawn.y - expected.box[1]) <= 2
+      && Math.abs(actual.drawn.w - expected.box[2]) <= 2
+      && Math.abs(actual.drawn.h - expected.box[3]) <= 2,
+      `${family.type}: node ${expected.id} is drawn as a ${actual.drawn.shape} at (${actual.drawn.x.toFixed(1)},${actual.drawn.y.toFixed(1)}) ${actual.drawn.w.toFixed(1)}x${actual.drawn.h.toFixed(1)} instead of the engine box ${expected.box.join(",")}`,
+    );
   }
+  assert.ok(
+    paint.nodes.some((node) => node.drawn),
+    `${family.type}: no member's outline was measurable, so the drawn-box check was vacuous`,
+  );
   for (const expected of family.routes) {
     const actual = paint.routes.find((route) => route.id === expected.id);
     assert.ok(actual, `${family.type}: route ${expected.id} is not painted`);
@@ -484,6 +579,208 @@ function assertFamilyPainted(paint: PaintReport, family: NativeE2eDiagramE4Famil
   }
 }
 
+function sharedArea(a: PaintedBox, b: PaintedBox): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** Mirrors `ENGINE_LABEL_BOX_PAD` in src/lib/diagram/engineCanvasGeometry.ts.
+ *  This project does not import src/lib into its typecheck, so the number is
+ *  kept here and the comparison below reads it from this one place. */
+const ENGINE_LABEL_BOX_PAD = 3;
+
+/**
+ * Gap: the canvas drew members, containers and routes but dropped every shape
+ * the writer paints that no member covers, so a sequence's messages floated
+ * without the lifelines they hang from. Each published primitive has to be
+ * painted at the engine's own coordinates.
+ *
+ * Legend swatches are the exception, and only those: the canvas has no legend,
+ * so a colour key there would explain colours it does not use. Its own adapter
+ * drops exactly the `legend-*` kinds, and this filter restates that from the
+ * other side of the bridge.
+ */
+function assertPrimitivesPainted(paint: PaintReport, family: NativeE2eDiagramE4Family): number {
+  const expected = family.primitives.filter((primitive) => !primitive.kind.startsWith("legend-"));
+  for (const want of expected) {
+    const painted = paint.primitives.filter((actual) => actual.kind === want.kind);
+    assert.ok(
+      painted.length > 0,
+      `${family.type}: the engine published a ${want.kind} for ${want.owner} and the canvas painted none; painted ${JSON.stringify([...new Set(paint.primitives.map((actual) => actual.kind))])}`,
+    );
+    const hit = painted.find((actual) =>
+      actual.owner === want.owner
+      && actual.layer === want.layer
+      && Math.abs(actual.box.x - want.box[0]) <= 1.5
+      && Math.abs(actual.box.y - want.box[1]) <= 1.5
+      && Math.abs(actual.box.w - want.box[2]) <= 1.5
+      && Math.abs(actual.box.h - want.box[3]) <= 1.5);
+    assert.ok(
+      hit,
+      `${family.type}: no ${want.kind} for ${want.owner} is painted at (${want.box.join(",")}); the canvas drew ${JSON.stringify(painted.map((actual) => ({ owner: actual.owner, box: actual.box })))}`,
+    );
+    assert.equal(
+      hit.pointer,
+      "none",
+      `${family.type}: the ${want.kind} for ${want.owner} takes a pointer that a pan or member drag needs`,
+    );
+  }
+  assert.ok(
+    paint.primitives.every((actual) => !actual.kind.startsWith("legend-")),
+    `${family.type}: the canvas painted a legend swatch it has no legend for`,
+  );
+  return expected.length;
+}
+
+/**
+ * Gap: a sequence's messages are drawn against its participants' lifelines, so
+ * one lifeline per participant is not a detail — without it the arrows hang in
+ * empty space. The count comes from the engine's own report, not from the
+ * canvas.
+ */
+function assertLifelinesPerParticipant(paint: PaintReport, family: NativeE2eDiagramE4Family): void {
+  const expected = family.primitives.filter((primitive) => primitive.kind === "sequence-lifeline");
+  assert.equal(
+    expected.length,
+    family.nodes.length,
+    `${family.type}: the engine published ${expected.length} lifelines for ${family.nodes.length} participants`,
+  );
+  const painted = paint.primitives.filter((primitive) => primitive.kind === "sequence-lifeline");
+  assert.equal(
+    painted.length,
+    expected.length,
+    `${family.type}: the canvas painted ${painted.length} of the engine's ${expected.length} lifelines`,
+  );
+  for (const want of expected) {
+    const [x, y, , h] = want.box;
+    const hit = painted.find((actual) =>
+      Math.abs(actual.box.x - x) <= 1.5
+      && Math.abs(actual.box.y - y) <= 1.5
+      && Math.abs(actual.box.h - h) <= 1.5);
+    assert.ok(
+      hit,
+      `${family.type}: no lifeline hangs from ${want.owner} at (${x},${y}) down ${h}px; painted ${JSON.stringify(painted.map((actual) => actual.box))}`,
+    );
+    const participant = family.nodes.find((node) => node.id === want.owner);
+    assert.ok(participant, `${family.type}: lifeline owner ${want.owner} is not a participant`);
+    // The lifeline is the participant's own timeline: it starts on the
+    // participant's bottom edge, at its centre.
+    assert.ok(
+      Math.abs(x - (participant.box[0] + participant.box[2] / 2)) <= 1
+      && Math.abs(y - (participant.box[1] + participant.box[3])) <= 1,
+      `${family.type}: the lifeline for ${want.owner} starts at (${x},${y}) instead of the participant's bottom centre`,
+    );
+    const below = family.nodes.filter((node) => node.box[1] > participant.box[1] + participant.box[3]);
+    assert.ok(
+      below.length === 0 || h > 0,
+      `${family.type}: the lifeline for ${want.owner} has no length`,
+    );
+  }
+}
+
+/**
+ * Gap: the page's title and subtitle are page chrome, and a container painted
+ * after them hid the title under the lifecycle lane. No member or container
+ * outline may share pixels with them.
+ */
+function assertPageLabelsClear(paint: PaintReport, family: NativeE2eDiagramE4Family): void {
+  assert.ok(family.pageLabels.length > 0, `${family.type}: the engine published no page chrome to check`);
+  const covers = paint.nodes.flatMap((node) => (node.drawn ? [{ id: node.id, box: node.drawn }] : []));
+  for (const expected of family.pageLabels) {
+    const actual = paint.labels.find((label) => label.id === expected.id);
+    assert.ok(
+      actual,
+      `${family.type}: page label ${expected.id} is not painted; painted ${paint.labels.map((label) => label.id).join(",")}`,
+    );
+    assert.deepEqual(actual.lines, expected.lines, `${family.type}: page label ${expected.id} lines differ from the engine's`);
+    // Two halves of one defect: the engine moves the page below its emitted
+    // title band, and the canvas paints that chrome after the scene. A title
+    // under a lane needs both, so both are checked.
+    assert.equal(
+      actual.afterMembers,
+      true,
+      `${family.type}: page label ${expected.id} is painted before a member or container group, so the scene covers it`,
+    );
+    for (const cover of covers) {
+      const shared = sharedArea(actual.box, cover.box);
+      assert.ok(
+        shared <= 2,
+        `${family.type}: page label ${expected.id} is covered by ${cover.id} over ${shared.toFixed(1)}px²; the title band must stay clear of the scene`,
+      );
+    }
+  }
+}
+
+/**
+ * Gap: a route label's box was drawn at the engine's own text bounds, so the
+ * text touched its own border. The box is drawn a few pixels larger and the
+ * text stays exactly where the engine put it.
+ */
+function assertRouteLabelBoxesPadded(paint: PaintReport, family: NativeE2eDiagramE4Family): void {
+  const routed = new Set(family.routes.map((route) => route.id));
+  const expected = family.labels.filter((label) => routed.has(label.targetId) && label.id.startsWith("edge:"));
+  assert.ok(expected.length > 0, `${family.type}: the scene has no labelled relation to check`);
+  for (const want of expected) {
+    const actual = paint.labels.find((label) => label.id === want.id);
+    assert.ok(actual, `${family.type}: route label ${want.id} is not painted`);
+    assert.ok(
+      Math.abs(actual.box.x - (want.box[0] - ENGINE_LABEL_BOX_PAD)) <= 2
+      && Math.abs(actual.box.y - (want.box[1] - ENGINE_LABEL_BOX_PAD)) <= 2
+      && Math.abs(actual.box.w - (want.box[2] + ENGINE_LABEL_BOX_PAD * 2)) <= 2
+      && Math.abs(actual.box.h - (want.box[3] + ENGINE_LABEL_BOX_PAD * 2)) <= 2,
+      `${family.type}: route label ${want.id} draws its box at (${actual.box.x.toFixed(1)},${actual.box.y.toFixed(1)}) ${actual.box.w.toFixed(1)}x${actual.box.h.toFixed(1)} instead of the engine's label box (${want.box.join(",")}) grown by ${ENGINE_LABEL_BOX_PAD}px`,
+    );
+    const right = actual.painted.x + actual.width;
+    const bottom = actual.painted.y + actual.height;
+    const least = Math.min(
+      actual.painted.x - actual.box.x,
+      actual.box.x + actual.box.w - right,
+      actual.painted.y - actual.box.y,
+      actual.box.y + actual.box.h - bottom,
+    );
+    assert.ok(
+      least >= ENGINE_LABEL_BOX_PAD - 1,
+      `${family.type}: route label ${want.id}'s text comes within ${least.toFixed(1)}px of its own box, so it is stroked at the text's own bounds`,
+    );
+  }
+}
+
+/**
+ * Gap: a lifecycle start, success or failure state is drawn as an oval, and its
+ * label spanned the whole box, so the text crossed the curve. The engine fits
+ * the label inside the ellipse's inscribed rectangle; the canvas may not paint
+ * text outside the curve it drew.
+ */
+function assertOvalLabelsInside(paint: PaintReport, family: NativeE2eDiagramE4Family): void {
+  const ovals = paint.nodes.filter((node) => node.oval !== null);
+  assert.ok(
+    ovals.length > 0,
+    `${family.type}: the canvas drew no oval member, so the ellipse check was vacuous; drawn ${JSON.stringify(paint.nodes.map((node) => [node.id, node.drawn?.shape ?? null]))}`,
+  );
+  let checked = 0;
+  for (const node of ovals) {
+    const oval = node.oval!;
+    for (const want of family.labels.filter((label) => label.targetId === node.id)) {
+      const actual = paint.labels.find((label) => label.id === want.id);
+      assert.ok(actual, `${family.type}: label ${want.id} of oval ${node.id} is not painted`);
+      const left = actual.painted.x;
+      const top = actual.painted.y;
+      const right = left + actual.width;
+      const bottom = top + actual.height;
+      for (const [x, y] of [[left, top], [right, top], [left, bottom], [right, bottom]] as const) {
+        const reach = ((x - oval.cx) / oval.rx) ** 2 + ((y - oval.cy) / oval.ry) ** 2;
+        assert.ok(
+          reach <= 1.02,
+          `${family.type}: label ${want.id} reaches ${reach.toFixed(3)} of oval ${node.id}'s radius at (${x.toFixed(1)},${y.toFixed(1)}), so it is painted across the curve`,
+        );
+      }
+      checked += 1;
+    }
+  }
+  assert.ok(checked > 0, `${family.type}: no oval carried a label, so the ellipse check was vacuous`);
+}
+
 describe("native engine canvas (T4)", () => {
   let fixture: NativeE2eDiagramE4Result;
   const shots: string[] = [];
@@ -524,6 +821,101 @@ describe("native engine canvas (T4)", () => {
       "no engine route was sampled inside a container, so the paint-order check was vacuous",
     );
   }).timeout(300_000);
+
+  it("draws the shapes the writer paints but no member covers", async () => {
+    let compared = 0;
+    for (const family of fixture.families) {
+      await openDocument(family.documentTitle, { specSha256: family.specSha256 });
+      const paint = await painted(
+        family.nodes.map((node) => node.box),
+        family.containers.map((container) => container.box),
+      );
+      compared += assertPrimitivesPainted(paint, family);
+      console.log(`NATIVE_E4_PRIMITIVES ${JSON.stringify({
+        type: family.type,
+        published: family.primitives.map((primitive) => primitive.kind),
+        painted: paint.primitives.map((primitive) => primitive.kind),
+      })}`);
+    }
+    // A family whose report carries nothing would make the loop above look
+    // green without a single shape being compared.
+    assert.ok(compared > 0, "the engine published no canvas shape at all, so the shape check was vacuous");
+  }).timeout(300_000);
+
+  it("draws a lifeline for every sequence participant", async () => {
+    const family = fixture.families.find((candidate) =>
+      candidate.primitives.some((primitive) => primitive.kind === "sequence-lifeline"));
+    assert.ok(family, "no family published a lifeline, so the check has nothing to compare");
+    await openDocument(family.documentTitle, { specSha256: family.specSha256 });
+    const paint = await painted(
+      family.nodes.map((node) => node.box),
+      family.containers.map((container) => container.box),
+    );
+    assertLifelinesPerParticipant(paint, family);
+    shots.push(await screenshot(`gap-lifelines-${family.type}`));
+    console.log(`NATIVE_E4_LIFELINES ${JSON.stringify({
+      type: family.type,
+      participants: family.nodes.length,
+      painted: paint.primitives.filter((primitive) => primitive.kind === "sequence-lifeline").length,
+    })}`);
+  }).timeout(180_000);
+
+  it("keeps every page title clear of the members and containers the scene paints", async () => {
+    // The lifecycle lane is the one that used to reach up over its own title.
+    let checked = 0;
+    for (const family of fixture.families) {
+      await openDocument(family.documentTitle, { specSha256: family.specSha256 });
+      const paint = await painted(
+        family.nodes.map((node) => node.box),
+        family.containers.map((container) => container.box),
+      );
+      assertPageLabelsClear(paint, family);
+      checked += family.pageLabels.length;
+    }
+    assert.ok(checked > 0, "no page label was compared, so the title check was vacuous");
+    const lifecycle = fixture.families.find((candidate) => candidate.type === "lifecycle");
+    assert.ok(lifecycle, "the fixture has no lifecycle family, so the reported defect is untested");
+    shots.push(await screenshot("gap-page-title"));
+    console.log(`NATIVE_E4_PAGE_TITLE ${JSON.stringify({
+      lifecycle: lifecycle.pageLabels.map((label) => ({ id: label.id, box: label.box })),
+      checked,
+    })}`);
+  }).timeout(300_000);
+
+  it("draws each labelled relation's text inside the box drawn for it", async () => {
+    let checked = 0;
+    for (const family of fixture.families) {
+      await openDocument(family.documentTitle, { specSha256: family.specSha256 });
+      const paint = await painted(
+        family.nodes.map((node) => node.box),
+        family.containers.map((container) => container.box),
+      );
+      assertRouteLabelBoxesPadded(paint, family);
+      checked += family.labels.filter((label) => label.id.startsWith("edge:")).length;
+    }
+    assert.ok(checked > 0, "no route label was compared, so the padding check was vacuous");
+    // The evidence shot shows the workflow family: its labelled relation runs
+    // across the page, so the box around its text is the thing on screen.
+    const labelled = fixture.families.find((family) => family.type === "workflow") ?? fixture.families[0]!;
+    await openDocument(labelled.documentTitle, { specSha256: labelled.specSha256 });
+    shots.push(await screenshot("gap-route-label-box"));
+    console.log(`NATIVE_E4_ROUTE_LABELS ${JSON.stringify({ checked, pad: ENGINE_LABEL_BOX_PAD, shot: labelled.type })}`);
+  }).timeout(300_000);
+
+  it("keeps every oval state's label inside the curve it is drawn in", async () => {
+    const family = fixture.families.find((candidate) => candidate.type === "lifecycle");
+    assert.ok(family, "the fixture has no lifecycle family, so the oval check is untested");
+    await openDocument(family.documentTitle, { specSha256: family.specSha256 });
+    const paint = await painted(
+      family.nodes.map((node) => node.box),
+      family.containers.map((container) => container.box),
+    );
+    assertOvalLabelsInside(paint, family);
+    shots.push(await screenshot("gap-oval-label"));
+    console.log(`NATIVE_E4_OVALS ${JSON.stringify({
+      ovals: paint.nodes.filter((node) => node.oval).map((node) => ({ id: node.id, oval: node.oval })),
+    })}`);
+  }).timeout(180_000);
 
   it("reopens v7, v8 and v9 documents without losing content", async () => {
     const byVersion = new Map(fixture.versions.map((version) => [version.v, version]));
@@ -790,6 +1182,9 @@ describe("native engine canvas (T4)", () => {
       const badgeRect = badge?.getBoundingClientRect() ?? null;
       const targetRect = target?.getBoundingClientRect() ?? null;
       const match = /translate\(([-\d.]+),\s*([-\d.]+)\)/.exec(badge?.getAttribute("transform") ?? "");
+      const view = /scale\(([-\d.]+)\)/.exec(
+        canvas.querySelector(":scope > g[transform]")?.getAttribute("transform") ?? "",
+      );
       return {
         status: canvas.getAttribute("data-engine-geometry-status"),
         specSha256: canvas.getAttribute("data-engine-spec-sha256"),
@@ -798,9 +1193,17 @@ describe("native engine canvas (T4)", () => {
         targetId: badge?.getAttribute("data-target-id") ?? null,
         label: badge?.getAttribute("aria-label") ?? "",
         at: match ? { x: Number(match[1]), y: Number(match[2]) } : null,
+        zoom: view ? Number(view[1]) : 1,
         notice: document.querySelectorAll("[data-canvas-diagnostic-notice]").length,
-        gap: badgeRect && targetRect ? badgeRect.left - targetRect.right : null,
-        topDelta: badgeRect && targetRect ? badgeRect.top - targetRect.top : null,
+        // How far the drawn badge's box sits from the member it names, edge to
+        // edge — in client pixels, so it has to be read against the scene
+        // scale.
+        distance: badgeRect && targetRect
+          ? Math.hypot(
+            Math.max(0, badgeRect.left - targetRect.right, targetRect.left - badgeRect.right),
+            Math.max(0, badgeRect.top - targetRect.bottom, targetRect.top - badgeRect.bottom),
+          )
+          : null,
       };
     });
     assert.ok(state, "the diagram canvas is not mounted");
@@ -812,16 +1215,105 @@ describe("native engine canvas (T4)", () => {
     assert.equal(state.notice, 0, "an anchored diagnostic must not also collapse into the canvas notice");
     assert.ok(state.label.includes(refusal.code) && state.label.includes(refusal.path),
       `the badge's details do not carry the engine's code and path: ${state.label}`);
-    // The engine's own anchor: immediately right of the member's box, at its top.
+    // The engine's own anchor: the badge is placed beside the member it names.
+    // Which side depends on what is already painted there, so the spec checks
+    // that it is adjacent and on the page rather than pinning one side.
     assert.ok(state.at, "the diagnostic badge carries no placement transform");
-    assert.equal(state.at.x, refusal.targetX, `the badge sits at x=${state.at.x}, the engine anchored x=${refusal.targetX}`);
-    assert.equal(state.at.y, refusal.targetY, `the badge sits at y=${state.at.y}, the engine anchored y=${refusal.targetY}`);
-    assert.ok(state.gap !== null && state.gap >= 0 && state.gap <= 24,
-      `the badge is not beside the member it names (gap ${state.gap}px)`);
-    assert.ok(state.topDelta !== null && Math.abs(state.topDelta) <= 2,
-      `the badge is not at the member's top edge (offset ${state.topDelta}px)`);
+    assert.equal(state.at.x, refusal.targetX, `the badge sits at x=${state.at.x}, the mapper placed it at x=${refusal.targetX}`);
+    assert.equal(state.at.y, refusal.targetY, `the badge sits at y=${state.at.y}, the mapper placed it at y=${refusal.targetY}`);
+    // Adjacency is not a constant here. A 300 px badge does not fit between the
+    // members of this lane, and the lane title bands are opaque, so the mapper
+    // slides the badge a step at a time until it covers nothing (the rule and
+    // the cramped case are pinned in canvasDiagnostics.test.ts). What the app
+    // must not do is drift from the mapper: the same translate, and a drawn box
+    // no farther from its anchor than the one the mapper measured. The coverage
+    // checks below are the real bound.
+    assert.ok(state.distance !== null, "the badge has no measured distance to its member");
+    assert.ok(state.distance <= refusal.targetDistance * state.zoom + 1,
+      `the badge is drawn ${state.distance}px from its member, farther than the mapper's ${refusal.targetDistance}px at ${state.zoom}x`);
+    // Gap: at a fixed offset and its full size the badge covered the next
+    // member's box and label, which also took that member's pointer input. A
+    // badge may hide its own anchor and sit inside a frame — a lane encloses
+    // the scene rather than being part of it — but never cover another member
+    // or label. Nothing is converted here: the badge and the scene share one
+    // transform, so a client rectangle overlap is the same overlap the user
+    // sees.
+    const collision = await browser.execute((options: { targetId: string; frames: string[]; headerBand: number }) => {
+      const canvas = document.querySelector(".maru-diagram-canvas");
+      const badge = canvas?.querySelector<SVGGElement>("[data-canvas-diagnostic]");
+      if (!canvas || !badge) return null;
+      const shared = (a: DOMRect, b: DOMRect) => {
+        const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        return w > 0 && h > 0 ? w * h : 0;
+      };
+      const badgeRect = badge.getBoundingClientRect();
+      const view = /scale\(([-\d.]+)\)/.exec(
+        canvas.querySelector(":scope > g[transform]")?.getAttribute("transform") ?? "",
+      );
+      const zoom = view ? Number(view[1]) : 1;
+      const obstacles = [
+        ...canvas.querySelectorAll<SVGGraphicsElement>("[data-node-id]"),
+        ...canvas.querySelectorAll<SVGGraphicsElement>("[data-engine-label]"),
+      ].map((element) => ({
+        // A node label lives inside its member's group; a route label has no
+        // member above it and belongs to no member.
+        owner: element.closest("[data-node-id]")?.getAttribute("data-node-id") ?? null,
+        name: element.getAttribute("data-node-id") ?? element.getAttribute("data-engine-label") ?? "",
+        shared: shared(badgeRect, element.getBoundingClientRect()),
+      }));
+      // A frame's body is translucent, so a badge may sit inside one, but the
+      // title it paints across the top is opaque: a badge over that strip hides
+      // the lane or stage the reader is reading the scene by.
+      const bands = options.frames.flatMap((id) => {
+        const group = canvas.querySelector<SVGGraphicsElement>(`[data-node-id="${id}"]`);
+        if (!group) return [];
+        const rect = group.getBoundingClientRect();
+        return [{
+          name: id,
+          shared: shared(badgeRect, new DOMRect(rect.left, rect.top, rect.width, options.headerBand * zoom)),
+        }];
+      });
+      return {
+        tabIndex: badge.tabIndex,
+        role: badge.getAttribute("role"),
+        covered: obstacles
+          .filter((obstacle) =>
+            obstacle.owner !== options.targetId
+            && !options.frames.includes(obstacle.name)
+            && obstacle.shared > 4)
+          .map((obstacle) => ({ name: obstacle.name, shared: Math.round(obstacle.shared) })),
+        banded: bands.filter((band) => band.shared > 4).map((band) => ({
+          name: band.name,
+          shared: Math.round(band.shared),
+        })),
+      };
+    }, { targetId: refusal.targetId, frames: refusal.frames, headerBand: refusal.headerBand });
+    assert.ok(collision, "the anchored diagnostic badge is not painted");
+    assert.deepEqual(
+      collision.covered,
+      [],
+      `the badge covers ${JSON.stringify(collision.covered)}; it may hide its own anchor but never another member or label`,
+    );
+    assert.deepEqual(
+      collision.banded,
+      [],
+      `the badge covers the title band of ${JSON.stringify(collision.banded)}`,
+    );
+    // A badge that cannot be reached without a pointer is still a notice: it
+    // stays in the tab order and names itself to a screen reader.
+    assert.equal(collision.tabIndex, 0, "the badge is not in the keyboard order");
+    assert.equal(collision.role, "note", "the badge is not announced as a note");
     shots.push(await screenshot("refusal-diagnostic"));
-    console.log(`NATIVE_E4_DIAGNOSTIC ${JSON.stringify({ code: state.code, targetId: state.targetId, at: state.at })}`);
+    console.log(`NATIVE_E4_DIAGNOSTIC ${JSON.stringify({
+      code: state.code,
+      targetId: state.targetId,
+      at: state.at,
+      distance: state.distance,
+      mapperDistance: refusal.targetDistance * state.zoom,
+      covers: collision.covered.length,
+      bands: collision.banded.length,
+    })}`);
   }).timeout(180_000);
 
   it("draws the same scene in the English UI", async () => {

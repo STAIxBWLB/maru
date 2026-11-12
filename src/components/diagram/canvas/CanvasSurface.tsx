@@ -36,6 +36,8 @@ import {
   canvasLabelLines,
   canvasMoveBase,
   type CanvasGeometry,
+  type CanvasGeometryPoint,
+  type CanvasGeometryPrimitive,
   type CanvasLabelLines,
 } from "../../../lib/diagram/engineCanvasGeometry";
 import { isPinnableCanvasMember } from "../../../lib/diagram/engineGeometryCanvas";
@@ -74,6 +76,7 @@ import {
 } from "../DiagramStoreContext";
 import { EdgeMarkers } from "./EdgeMarkers";
 import { EdgeView, type EngineRoute } from "./EdgeView";
+import { EnginePrimitives } from "./EnginePrimitives";
 import { Marquee } from "./Marquee";
 import { EngineLabels, NodeView } from "./NodeView";
 import { SmartGuides } from "./SmartGuides";
@@ -177,6 +180,8 @@ export interface CanvasSurfaceProps {
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const SMART_GUIDE_THRESHOLD_PX = 6;
+/** Stable empty list, so a canvas without a scene does not re-render the layer. */
+const NO_PRIMITIVES: readonly CanvasGeometryPrimitive[] = [];
 
 function marqueeRect(g: MarqueeState): Rect {
   const x = Math.min(g.startCanvasX, g.currentCanvasX);
@@ -326,22 +331,53 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
 
   const pageSize = page && page !== "free" ? DIAGRAM_PAGE_SIZES[page] : null;
 
+  // A hidden member is not drawn at all. That is the model's own rule, so it
+  // applies before the cull and needs no measurement: the canvas would otherwise
+  // paint a hidden node until its first resize and then drop it.
+  const drawnNodes = useMemo(() => displayNodes.filter((node) => !node.hidden), [displayNodes]);
+
   // Culling: pick only the visible subset of nodes + edges. Selection is
   // forced-visible so an off-screen drag target doesn't disappear mid-gesture.
   // Skip when we haven't measured yet (avoid culling everything on first paint).
   const visible = useMemo(() => {
     if (svgSize.width === 0 || svgSize.height === 0) {
-      return { nodes: displayNodes, edges, full: true };
+      return { nodes: drawnNodes, edges, full: true };
     }
     const tl = screenToCanvas(0, 0, viewport);
     const br = screenToCanvas(svgSize.width, svgSize.height, viewport);
     return visibleSubset({
-      nodes: displayNodes,
+      nodes: drawnNodes,
       edges,
       viewport: { x: tl.x, y: tl.y, w: br.x - tl.x, h: br.y - tl.y },
       forceVisible: selection.nodes,
     });
-  }, [displayNodes, edges, selection.nodes, svgSize.height, svgSize.width, viewport]);
+  }, [drawnNodes, edges, selection.nodes, svgSize.height, svgSize.width, viewport]);
+
+  // The engine's shapes follow the members they belong to. This is the model's
+  // own visibility and not the viewport subset: a lifeline whose participant
+  // sits above the viewport still crosses the part of the scene the reader is
+  // looking at, so culling it would tear the timeline in half.
+  const drawnMembers = useMemo(
+    () => new Set(drawnNodes.map((node) => node.id)),
+    [drawnNodes],
+  );
+
+  // The engine's member-owned shapes follow the same displacement the member
+  // groups do: a member sits at its engine box plus its live drag offset, so a
+  // shape anchored to it needs that delta too, or a dragged state leaves its
+  // inner border behind and a dragged lifeline waits for the next layout.
+  const memberOffsets = useMemo(() => {
+    const offsets = new Map<NodeId, CanvasGeometryPoint>();
+    if (!geometry) return offsets;
+    for (const node of drawnNodes) {
+      const box = geometry.boxes.get(node.id);
+      if (!box) continue;
+      const dx = node.x - box.x;
+      const dy = node.y - box.y;
+      if (dx !== 0 || dy !== 0) offsets.set(node.id, { x: dx, y: dy });
+    }
+    return offsets;
+  }, [drawnNodes, geometry]);
 
   const transform = `translate(${viewport.px}, ${viewport.py}) scale(${viewport.zoom})`;
 
@@ -939,16 +975,16 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
             />
           </g>
         ) : null}
-        {geometry && geometry.pageLabels.length > 0 ? (
-          // The engine's title and subtitle sit in the header band its page
-          // offset reserves; without them the band is blank.
-          <EngineLabels labels={geometry.pageLabels} color="#111827" />
-        ) : null}
         {/* Engine containers (lanes, boundaries, stages, segments) are frames:
             their fills would hide every route inside them if they were painted
             with the members, so they go under the edges. `renderSvg` keeps the
             same order. */}
         {visible.nodes.filter(isEngineContainer).map(renderNode)}
+        {/* The engine's underlay shapes — a sequence lifeline, a phase span, a
+            lifecycle band — paint after the frames and before the routes, in
+            the writer's own order, so a message reads against its participant's
+            timeline and no shape covers a route the engine ran. */}
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="underlay" members={drawnMembers} offsets={memberOffsets} />
         {visible.edges.map((edge) => (
           <EdgeView
             key={edge.id}
@@ -961,6 +997,16 @@ export function CanvasSurface({ onMemoOpen, onNodeDoubleClick, onBlankDoubleClic
           />
         ))}
         {visible.nodes.filter((n) => !isEngineContainer(n)).map(renderNode)}
+        {/* Overlays come after the members: a lifecycle final border sits on its
+            own state and would be hidden by the state's box. */}
+        <EnginePrimitives primitives={geometry?.primitives ?? NO_PRIMITIVES} layer="overlay" members={drawnMembers} offsets={memberOffsets} />
+        {geometry && geometry.pageLabels.length > 0 ? (
+          // The engine's title and subtitle sit in the header band its page
+          // offset reserves. They are page chrome, so they paint after the
+          // scene: above a lane, boundary or stage frame that reaches up to
+          // them, exactly as `renderSvg` emits them.
+          <EngineLabels labels={geometry.pageLabels} color="#111827" />
+        ) : null}
         <SmartGuides guides={guides} />
         {connectGhost ? (
           <line

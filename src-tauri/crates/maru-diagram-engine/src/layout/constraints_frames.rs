@@ -511,6 +511,7 @@ mod tests {
             containers,
             routes: Vec::new(),
             labels,
+            primitives: Vec::new(),
             legend: GeometryLegend {
                 content_bounds: None,
                 title_y: None,
@@ -537,6 +538,7 @@ mod tests {
     fn node(id: &str, x: i32, y: i32, width: i32, height: i32) -> GeometryNode {
         GeometryNode {
             final_state: None,
+            ellipse: None,
             phase_order: None,
             id: id.into(),
             bounds: GeometryBox {
