@@ -96,8 +96,9 @@ pub fn hwp_engine_candidates() -> Vec<PathBuf> {
     engine_candidates_with(resolve_program)
 }
 
-/// `hwp_engine_candidates` over one explicit PATH value and nothing else, for
-/// callers and tests that must not read or change the process PATH.
+/// `hwp_engine_candidates` over one explicit PATH value and nothing else, so
+/// tests never read or change the process PATH.
+#[cfg(test)]
 pub fn hwp_engine_candidates_in(path_env: &OsStr) -> Vec<PathBuf> {
     engine_candidates_with(|name| which_in_path(name, Some(path_env)).ok())
 }
