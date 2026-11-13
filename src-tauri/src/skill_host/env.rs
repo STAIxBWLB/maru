@@ -349,13 +349,25 @@ fn done_event(invocation_id: &str, outcome: &EnvBootstrapOutcome) -> EnvDoneEven
     }
 }
 
+/// Refusal prefix when the active env is already complete and `force` is off.
+pub const ENV_REPAIR_NOT_NEEDED: &str = "skills_env_healthy";
+
 /// `maru skills env repair`: rebuild the active env with the same core as the
-/// app's Bootstrap button, on the calling thread.
+/// app's Bootstrap button, on the calling thread. Setup clears the completion
+/// marker before it runs, so a failed run on a complete env would leave it
+/// worse (maru#608 AC4): without `force`, a complete env is refused.
 pub fn skills_env_repair_headless(
     work_path: Option<String>,
+    force: bool,
     on_output: EnvOutputSink,
 ) -> Result<EnvBootstrapOutcome, String> {
     let root = host_fs::env_root()?;
+    if !force && env_is_complete(&root)? {
+        return Err(format!(
+            "{ENV_REPAIR_NOT_NEEDED}: the active skills env {} is complete; nothing to repair. Use `maru skills env repair --force` to rebuild it anyway (a failed forced rebuild leaves it marked incomplete)",
+            host_fs::display_path(&root)
+        ));
+    }
     let parent = env_parent_snapshot(&root)?;
     let setup = default_public_env_setup(work_path.as_deref())?;
     let lease = PathTransactionRequest::new(env_mutation_paths(&root, setup.as_deref()))?
@@ -371,6 +383,13 @@ pub fn skills_env_repair_headless(
         EnvBootstrapJob::Settled(outcome) => outcome,
         EnvBootstrapJob::Setup(run) => run.run(on_output),
     })
+}
+
+/// The same health rule as `skills_env_status`: a `.venv`, plus the
+/// completion marker for a hashed env.
+fn env_is_complete(root: &Path) -> Result<bool, String> {
+    Ok(root.join(".venv").is_dir()
+        && (!host_fs::is_hashed_env_root(root)? || root.join(".maru-env-complete").is_file()))
 }
 
 /// Read-only: the repair hint when the active hashed env is missing,
@@ -879,6 +898,7 @@ mod phase08_04 {
                 let seen = lines.clone();
                 let outcome = skills_env_repair_headless(
                     None,
+                    false,
                     Arc::new(move |_, line| seen.lock().unwrap().push(line)),
                 )
                 .unwrap();
@@ -900,6 +920,48 @@ mod phase08_04 {
             trees.push(tree);
         }
         assert_eq!(trees[0], trees[1]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn headless_repair_refuses_complete_env_and_keeps_it_on_failed_force() {
+        use crate::skill_host::bundle_update;
+        let _home = host_fs::test_home_for_bundle_tests();
+        let setup = default_public_env_setup(None).unwrap().unwrap();
+        let mut state = bundle_update::read_state().unwrap().unwrap();
+        let active = state.active.as_mut().unwrap();
+        active.env_hash = "complete-env".into();
+        let record = host_fs::skills_root()
+            .unwrap()
+            .join("_cache/bundle-compatibility")
+            .join(format!("{}.json", active.bundle_id));
+        host_fs::write_json_pretty(
+            &record,
+            &serde_json::json!({"minAppVersion":"0.0.1", "envLayout":"hashed"}),
+        )
+        .unwrap();
+        bundle_update::write_state(&state).unwrap();
+        let root = host_fs::env_root().unwrap();
+        fs::create_dir_all(root.join(".venv/bin")).unwrap();
+        fs::write(root.join(".venv/bin/python"), "prior").unwrap();
+        fs::write(root.join(".maru-env-complete"), "").unwrap();
+        fs::write(&setup, "#!/bin/sh\nrm -rf \"$2/.venv\"\nexit 3\n").unwrap();
+        let before = walk(&root);
+        let error = skills_env_repair_headless(None, false, Arc::new(|_, _| ())).unwrap_err();
+        assert!(error.starts_with(ENV_REPAIR_NOT_NEEDED), "{error}");
+        assert!(error.contains("--force"), "{error}");
+        assert_eq!(walk(&root), before);
+        assert!(root.join(".maru-env-complete").is_file());
+        assert_eq!(
+            fs::read_to_string(root.join(".venv/bin/python")).unwrap(),
+            "prior"
+        );
+        assert!(active_env_repair_hint().is_none());
+        // An explicit --force does run setup, and its failure is reported.
+        let outcome = skills_env_repair_headless(None, true, Arc::new(|_, _| ())).unwrap();
+        assert!(!outcome.success);
+        assert_eq!(outcome.exit_code, Some(3));
+        assert!(active_env_repair_hint().is_some());
     }
 
     fn walk(root: &Path) -> Vec<String> {

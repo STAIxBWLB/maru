@@ -19,7 +19,7 @@ maru skills dirty
 maru skills dirty --json
 maru skills update --check
 maru skills update --apply [--repair-env] [--json]
-maru skills env repair [--json]
+maru skills env repair [--force] [--json]
 maru skills sync --check --tools claude,codex
 maru skills sync --apply --tools claude,codex
 ```
@@ -37,8 +37,11 @@ the current env.
 `skills env repair` rebuilds the active env (`~/.maru/env/<hash>/`) without
 a bundle update, using the same code as Settings > Skills > Bootstrap. It
 runs the bundle's env setup, writes `.maru-env-complete` only on success, and
-exits `1` with the cause and the next step on failure; a failed run leaves
-the env marked incomplete. Setup output goes to stderr, so `--json` keeps
+exits `1` with the cause and the next step on failure. Setup clears the
+completion marker before it runs, so the command refuses (exit `0`, JSON
+`{"repaired": false}`) when the env is already complete: a failed run could
+only make a healthy env worse. `--force` rebuilds a complete env anyway; if
+that forced run fails, the env stays marked incomplete. Setup output goes to stderr, so `--json` keeps
 stdout to the outcome object.
 
 When the active hashed env is missing, has no `.venv`, or lacks
