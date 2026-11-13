@@ -15,7 +15,7 @@ import { ImageViewer } from "./binaryViewers/ImageViewer";
 import { PdfViewer } from "./binaryViewers/PdfViewer";
 import { DocxViewer } from "./binaryViewers/DocxViewer";
 import { XlsxViewer } from "./binaryViewers/XlsxViewer";
-import { HwpxViewer } from "./binaryViewers/HwpxViewer";
+import { HwpxEditorPane } from "./binaryViewers/HwpxEditorPane";
 import { MediaViewer } from "./binaryViewers/MediaViewer";
 import { TextViewer } from "./binaryViewers/TextViewer";
 import { ArchiveViewer } from "./binaryViewers/ArchiveViewer";
@@ -150,7 +150,7 @@ function ViewerBody({
       );
     case "hwpx":
       return (
-        <HwpxViewer
+        <HwpxEditorPane
           entry={entry}
           workspacePath={workspacePath}
           onPreviewExternal={onPreviewExternal}

@@ -133,18 +133,34 @@ parser of its own.
 
 ## Frontend
 
-Typed invoke wrappers live in `src/lib/hwped.ts`. Once the published `@hwp-editor/core` release supports `capabilities.editOps`,
-the migration replaces the mirrored wire types with its engine factory:
+`src/lib/hwped.ts` holds one factory over the published package and no wire
+types of its own:
 
 ```ts
-import { invoke } from "@tauri-apps/api/core";
-import { createTauriEngine } from "@hwp-editor/core";
+import { createHwpedEngine } from "./lib/hwped";
 
-const engine = createTauriEngine(invoke, {
+const engine = createHwpedEngine({
   workspaceRoot,
   pathOf: (doc) => /* workspace-relative path when on disk */,
 });
 ```
+
+`@hwp-editor/core` and `@hwp-editor/react` are pinned at exactly `1.3.0`. The
+engine asks `hwped_capabilities` before an edit and sends the `edit-ops-v1` JSON
+array when this host advertises `editOps: "v1"`, which it does; the `opsArgv`
+fallback for older hosts lives inside the package, so this repository carries no
+dual channel.
+
+The editor mounts through the `.hwpx` surface: `BinaryViewerPane` renders
+`HwpxEditorPane`, which shows the read-only preview by default and loads
+`HwpEditor` (its own chunk) only when the reader asks for it. `locale` follows
+maru's UI locale, and the host element maps maru's tokens onto the editor's
+`--hwped-*` contract.
+
+Edits stay in memory. Maru has no command that writes an edited document back to
+a workspace path, so the surface says so instead of offering a save; giving it
+one means a managed write (validate, snapshot, revision-checked atomic replace)
+rather than a plain file overwrite.
 
 Theming maps Maru's tokens onto the editor's `--hwped-*` contract; see
 `docs/integration-maru.md` and `docs/theme-contract.md` in the hwp-editor
