@@ -55,7 +55,9 @@ and it is a regular file; the op's `path` is then rewritten to that absolute
 path, with the anchor and dimension keys untouched. A non-string `path` is
 refused, and a missing one is left to the engine's schema. Because the rewrite
 is absolute, a relative asset path never depends on where the temporary ops file
-sits.
+sits. `apply_form_bindings` is refused on this channel instead of contained: it
+writes its receipt and preview files outside the editor's workspace contract, so
+form bindings run through the `ahwp edit` CLI flow.
 Legacy clients keep sending
 `opsArgv` flag/value pairs and remain supported from the global 0.8.7 floor.
 The legacy channel accepts all 28 named edit-operation flags from `opsToArgv`.

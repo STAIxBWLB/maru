@@ -1177,12 +1177,23 @@ mod argv_tests;
 /// channel contains its `=>path` half, and its `path` becomes that absolute
 /// file before the ops file is staged. An op whose `path` is not a string is
 /// refused here; a missing one is left to the engine's own schema.
+///
+/// `apply_form_bindings` is refused before any other check: it carries `receipt`
+/// and `preview` write destinations that maru cannot contain inside the
+/// workspace, and the legacy channel has no flag for it either, so a refused
+/// batch never reaches the engine.
 fn contain_json_edit_assets(ops: Value, workspace_root: Option<&str>) -> Result<Value, String> {
     let Value::Array(items) = ops else {
         return Ok(ops);
     };
     let mut contained = Vec::with_capacity(items.len());
     for mut op in items {
+        if op.get("op").and_then(Value::as_str) == Some("apply_form_bindings") {
+            return Err(
+                "hwped_bad_request: apply_form_bindings is not accepted on the JSON edit channel; it writes its receipt and preview files outside the editor's workspace contract, so run form bindings through the `ahwp edit` CLI flow instead of the editor bridge"
+                    .to_string(),
+            );
+        }
         let is_asset = matches!(
             op.get("op").and_then(Value::as_str),
             Some("insert_image") | Some("seal")
@@ -2784,6 +2795,50 @@ esac
                 .count()
                 == 1,
             "only the accepted call reaches the engine: {invocations}"
+        );
+        assert_eq!(
+            std::fs::read(root.join("docs/a.hwpx")).unwrap(),
+            b"original document"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn json_edit_channel_never_spawns_the_engine_for_a_refused_batch() {
+        let home = crate::atomic_file::phase08_06::Home::new();
+        let root = home.root.path().join("work");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.hwpx"), b"original document").unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("assets/chart.png"), b"fixture asset bytes").unwrap();
+        let bin_dir = home.root.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let _env = EnvGuard::set("MARU_HWP_BIN", &fake_hwp(&bin_dir));
+
+        // The batch carries one op every other rule accepts, so the refused op
+        // is the only possible reason nothing ran.
+        let refused = run(edit_request(
+            doc_with_path("docs/a.hwpx"),
+            None,
+            Some(serde_json::json!([
+                {"op": "insert_image", "anchor": "삽화", "path": "assets/chart.png"},
+                {"op": "apply_form_bindings", "receipt": "bindings/receipt.json"}
+            ])),
+            None,
+            None,
+            Some(text(&root)),
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(refused.starts_with("hwped_bad_request:"), "{refused}");
+        assert!(refused.contains("apply_form_bindings"), "{refused}");
+
+        // Zero invocations: the refusal precedes the binary lookup, the version
+        // probe and every staging step, so the log the fake engine appends to
+        // is never even created.
+        assert!(
+            !bin_dir.join("invocations").exists(),
+            "the engine is never spawned for a refused batch"
         );
         assert_eq!(
             std::fs::read(root.join("docs/a.hwpx")).unwrap(),
