@@ -10,9 +10,11 @@
 // because a skipped editor check is not evidence that the editor works.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {} from "webdriverio";
+import { readHwpxHostState, type HwpxHostState } from "../helpers/hwpxHostState";
 
 import {
   FIXTURE_DOC_NAME,
@@ -190,15 +192,10 @@ function applyQueuedEdits(_arg: null, pollMs: number, done: (report: StepReport)
 }
 
 async function hostState() {
-  return browser.execute(() => ({
-    saveEnabled: document.querySelector<HTMLButtonElement>('[data-testid="hwpx-save"]')?.disabled === false,
-    status: document.querySelector('[data-testid="hwpx-status"]')?.textContent ?? "",
-    error: document.querySelector('[data-testid="hwpx-error"]')?.textContent ?? "",
-    conflict: Boolean(document.querySelector('[data-testid="hwpx-conflict"]')),
-    discard: Boolean(document.querySelector('[data-testid="hwpx-discard-dialog"]')),
-    paragraphs: [...document.querySelectorAll('.hwped-side [role="listbox"] [role="option"]')]
-      .map((node) => node.textContent ?? ""),
-  }));
+  // A successful WebDriver reply { value: { error: "..." } } is classified as
+  // a protocol error by webdriver@9.31.4, even with HTTP 200. This specifically
+  // matters when the expected conflict/refusal UI displays an application error.
+  return JSON.parse(await browser.execute(readHwpxHostState)) as HwpxHostState;
 }
 
 async function clickHost(testId: string): Promise<void> {
@@ -215,11 +212,41 @@ async function waitHost(
   description: string,
   predicate: (state: Awaited<ReturnType<typeof hostState>>) => boolean,
 ): Promise<void> {
+  console.info(`NATIVE_HWPX_WAIT_BEGIN ${description}`);
   await browser.waitUntil(async () => predicate(await hostState()), {
     timeout: 90_000,
     interval: 250,
     timeoutMsg: `${description}; inspect the host save/conflict status and rerun this native spec`,
   });
+  console.info(`NATIVE_HWPX_WAIT_PASS ${description}`);
+}
+
+interface RevisionEvidence {
+  step: string;
+  editorBaselineRevision: string;
+  captureRevision: string;
+  diskRevision: string;
+}
+
+/** Observe the real capture command and disk independently, without updating
+ * the editor's retained baseline or replacing/mocking any native invocation. */
+async function revisionEvidence(step: string, editorBaselineRevision: string): Promise<RevisionEvidence> {
+  const diskRevision = createHash("sha256").update(await fs.readFile(fixtureHwpxPath())).digest("hex");
+  const workspaceRoot = path.dirname(fixtureHwpxPath());
+  const serialized = await browser.execute(async (root, documentPath) => {
+    const scope = window as unknown as {
+      __TAURI_INTERNALS__: { invoke: (command: string, args: unknown) => Promise<{ source: { revision: string } }> };
+    };
+    const captured = await scope.__TAURI_INTERNALS__.invoke("hwped_read", {
+      workspaceRoot: root, document: { name: documentPath, path: documentPath }, captureSource: true,
+    });
+    return JSON.stringify({ revision: captured.source.revision });
+  }, workspaceRoot, FIXTURE_HWPX_NAME);
+  const captureRevision = (JSON.parse(serialized) as { revision: string }).revision;
+  const evidence = { step, editorBaselineRevision, captureRevision, diskRevision };
+  console.info(`NATIVE_HWPX_REVISIONS ${JSON.stringify(evidence)}`);
+  assert.equal(captureRevision, diskRevision, `${step}: captureSource revision differs from the exact disk bytes`);
+  return evidence;
 }
 
 async function selectFile(name: string): Promise<void> {
@@ -278,6 +305,9 @@ describe("native hwpx editor", () => {
     const source = await fs.readFile(fixtureHwpxSource());
     const seeded = await fs.readFile(fixtureHwpxPath());
     assert.deepEqual(seeded, source, "the seeded .hwpx is not the template copy the fixture promises");
+    const sourceRevision = createHash("sha256").update(source).digest("hex");
+    const revisionChecks: RevisionEvidence[] = [];
+    revisionChecks.push(await revisionEvidence("initial-capture", sourceRevision));
 
     // 1-2. Open the document from Files. The read-only preview is the default
     // view, so the editor must not be mounted yet.
@@ -572,10 +602,13 @@ describe("native hwpx editor", () => {
     assert.match(unsaved.status, /저장하지 않은 변경 사항|Unsaved changes/, "Apply/back to preview lost the unsaved state (T66-N3)");
     await openEditor();
     await waitHost("Save did not enable after Apply completed", (state) => state.saveEnabled);
+    revisionChecks.push(await revisionEvidence("save-applied-cumulative-edits", sourceRevision));
     await clickHost("hwpx-save");
     await waitHost("The explicit save did not finish", (state) => /저장됨|Saved/.test(state.status) && !state.saveEnabled);
 
     const saved = await fs.readFile(fixtureHwpxPath());
+    const savedRevision = createHash("sha256").update(saved).digest("hex");
+    revisionChecks.push(await revisionEvidence("saved-cumulative-edits", savedRevision));
     assert.notDeepEqual(saved, source, "Save reported success without changing the fixture bytes");
     const versions = path.join(path.dirname(fixtureHwpxPath()), ".maru", "versions");
     const snapshots = await snapshotFiles(versions);
@@ -599,6 +632,7 @@ describe("native hwpx editor", () => {
       state.paragraphs.some((text) => text.includes("네이티브 Native edit"))
       && state.paragraphs.some((text) => text.includes("Native second")));
     assert.equal((await hostState()).saveEnabled, false, "Reopening persisted bytes starts dirty");
+    revisionChecks.push(await revisionEvidence("reopened-saved-file", savedRevision));
 
     await step("queue the conflict edit", queueOneEdit, { marker: "충돌 Conflict retained", from: 0, requireNote: false });
     await step("apply the conflict edit", applyQueuedEdits, null);
@@ -606,13 +640,19 @@ describe("native hwpx editor", () => {
     // Replace with a different known-valid HWPX, as a non-cooperating external
     // writer would. This must conflict rather than update the revision/retry.
     await fs.writeFile(fixtureHwpxPath(), source);
+    const conflictRevisions = await revisionEvidence("external-replacement-conflict", savedRevision);
+    revisionChecks.push(conflictRevisions);
+    assert.notEqual(conflictRevisions.editorBaselineRevision, conflictRevisions.diskRevision,
+      "The external-replacement case must exercise a genuinely stale editor baseline");
     await clickHost("hwpx-save");
     await waitHost("An externally replaced file did not produce conflict recovery", (state) => state.conflict);
+    assert.match((await hostState()).error, /document_conflict/, "The expected conflict notice lost its refusal cause");
     assert.deepEqual(await fs.readFile(fixtureHwpxPath()), source, "The conflict path overwrote the external revision");
     assert.ok((await hostState()).paragraphs.some((text) => text.includes("충돌 Conflict retained")), "The conflict discarded the in-memory edit");
     await clickHost("hwpx-keep-editing");
     await waitHost("Keep editing did not retain the current document", (state) =>
       !state.conflict && state.paragraphs.some((text) => text.includes("충돌 Conflict retained")));
+    revisionChecks.push(await revisionEvidence("retry-retains-stale-baseline", savedRevision));
     await clickHost("hwpx-save");
     await waitHost("Retry silently refreshed the expected disk revision", (state) => state.conflict);
     await clickHost("hwpx-reload");
@@ -626,6 +666,7 @@ describe("native hwpx editor", () => {
     await waitHost("Explicit disk reload did not clear the old edit", (state) =>
       !state.discard && !state.conflict && state.paragraphs.length > 0
       && !state.paragraphs.some((text) => text.includes("충돌 Conflict retained")));
+    revisionChecks.push(await revisionEvidence("confirmed-disk-reload", sourceRevision));
 
     await step("queue the failed-save edit", queueOneEdit, { marker: "실패 Failed save retained", from: 0, requireNote: false });
     await step("apply the failed-save edit", applyQueuedEdits, null);
@@ -636,6 +677,7 @@ describe("native hwpx editor", () => {
     await fs.rename(versions, parkedVersions);
     try {
       await fs.writeFile(versions, "Native fixture obstructs the snapshot directory\n", { flag: "wx", mode: 0o600 });
+      revisionChecks.push(await revisionEvidence("snapshot-directory-failure", sourceRevision));
       await clickHost("hwpx-save");
       await waitHost("A snapshot-directory failure did not surface an error", (state) => state.error.length > 0 && state.saveEnabled);
       const failed = await hostState();
@@ -659,6 +701,7 @@ describe("native hwpx editor", () => {
     await fs.mkdir(artifactDir, { recursive: true });
     await fs.writeFile(path.join(artifactDir, "result.json"), `${JSON.stringify({
       appVersion: manifest.version,
+      revisionChecks,
       packages: { core: manifest.dependencies["@hwp-editor/core"], react: manifest.dependencies["@hwp-editor/react"] },
       appEngineVersion: rendered.version,
       rereadEngineVersion: reread.version,
