@@ -265,6 +265,22 @@ function ownership(sources) {
   insist(owners.size, "Empty exact ownership table");
   return owners;
 }
+// The Phase 08 inventory and ownership map are archival. Later commands record
+// their exact owner in the explicit additions ledger instead of editing history.
+export function applyRegistrationAdditions(rows, owners, changes) {
+  insist(changes.baselineCount === 365 && rows.size === 365 && Array.isArray(changes.additions) && !changes.removals?.length, "Registration reconciliation must preserve the 365 baseline");
+  for (const addition of changes.additions) {
+    const owner = owners.get(addition.name);
+    insist(nonempty(addition.name) && !rows.has(addition.name) && nonempty(addition.reason)
+      && /^08-(?:0[1-9]|1[0-9]|2[0-4])$/.test(addition.owner)
+      && nonempty(addition.module) && DISPOSITIONS.has(addition.originalDisposition)
+      && (!owner || (owner.plan === addition.owner && owner.module === addition.module)),
+    "Invalid explicit new production registration/owner");
+    rows.set(addition.name, addition);
+    if (!owner) owners.set(addition.name, { plan: addition.owner, module: addition.module });
+  }
+}
+
 function validateTests(row, sources, label) {
   insist(Array.isArray(row.tests) && row.tests.length, `${label}: missing tests`);
   const successful = row.tests.filter((test) => {
@@ -501,7 +517,7 @@ function cfgFeatureEnabled(expression, enabledFeatures) {
   return enabledFeatures.has(feature[1]);
 }
 export function parseArgs(argv) {
-  const options = { expectedCount: 392 };
+  const options = { expectedCount: 393 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--all") { insist(!options.all, "Duplicate --all"); options.all = true; }
@@ -768,11 +784,7 @@ export function checkIsolation(options, root = process.cwd()) {
   const changesPath = "docs/performance/phase08-registration-changes.json";
   if (existsSync(resolve(root, changesPath))) {
     const changes = readJson(changesPath);
-    insist(changes.baselineCount === 365 && rows.size === 365 && Array.isArray(changes.additions) && !changes.removals?.length, "Registration reconciliation must preserve the 365 baseline");
-    for (const addition of changes.additions) {
-      insist(!rows.has(addition.name) && nonempty(addition.reason) && owners.get(addition.name)?.plan === addition.owner && owners.get(addition.name)?.module === addition.module && DISPOSITIONS.has(addition.originalDisposition), "Invalid explicit new production registration/owner");
-      rows.set(addition.name, addition);
-    }
+    applyRegistrationAdditions(rows, owners, changes);
   }
   const historicalRowsCount = rows.size;
   const historicalOwners = owners;

@@ -21,8 +21,10 @@
 
 #[cfg(test)]
 use crate::atomic_file::PathTransactionLease;
+mod persistence;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+pub use persistence::HwpedSaveResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,6 +43,8 @@ use crate::win_process::NoWindow;
 
 /// Mirrors the Node engine's 60s timeout and 32MB maxBuffer.
 const HWP_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(test)]
+static HWP_TEST_TIMEOUT: Mutex<Option<(PathBuf, Duration)>> = Mutex::new(None);
 const STDOUT_LIMIT: usize = 32 * 1024 * 1024;
 const STDERR_LIMIT: usize = 1024 * 1024;
 const MIN_VERSION: (u64, u64, u64) = (0, 8, 7);
@@ -214,13 +218,25 @@ fn run_hwp(bin: &Path, args: &[OsString]) -> Result<CliRun, String> {
     let mut cmd = Command::new(bin);
     cmd.args(args);
     cmd.env("PATH", augmented_path());
+    let timeout = HWP_TIMEOUT;
+    #[cfg(test)]
+    let timeout = HWP_TEST_TIMEOUT
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|(path, _)| path == bin)
+        .map(|(_, timeout)| *timeout)
+        .unwrap_or(timeout);
     let output = run_command_with_timeout_and_limits(
         cmd.no_window(),
-        HWP_TIMEOUT,
+        timeout,
         OutputLimits::new(STDOUT_LIMIT, STDERR_LIMIT),
         |_, _| false,
     )
     .map_err(|err| format!("hwp_spawn_failed: hwp {subcommand}: {err}"))?;
+    if output.stdout_truncated || output.stderr_truncated {
+        return Err(format!("hwp_output_limit: hwp {subcommand} exceeded its output limit; reduce document complexity or check the HWP engine, then retry."));
+    }
     match output.termination {
         CommandTermination::TimedOut => Err(format!(
             "hwp_timeout: hwp {subcommand} timed out after {}s",
@@ -514,8 +530,12 @@ fn read_now(document: HwpedDocumentRef, workspace_root: Option<String>) -> Resul
     let version = ensure_version(&bin)?;
     let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
+    read_staged(&bin, &version, &input)
+}
+
+fn read_staged(bin: &Path, version: &str, input: &Path) -> Result<Value, String> {
     let stdout = run_hwp_ok(
-        &bin,
+        bin,
         &[
             OsString::from("cat"),
             input.as_os_str().to_os_string(),
@@ -527,7 +547,7 @@ fn read_now(document: HwpedDocumentRef, workspace_root: Option<String>) -> Resul
     )?;
     let mut envelope: Value = serde_json::from_slice(&stdout)
         .map_err(|err| format!("hwp_parse_failed: cat envelope is not JSON: {err}"))?;
-    if let Some(tables) = body_table_count(&bin, &version, &input) {
+    if let Some(tables) = body_table_count(bin, version, input) {
         if let Some(object) = envelope.as_object_mut() {
             object.insert("bodyTables".to_string(), Value::from(tables));
         }
@@ -1422,14 +1442,42 @@ fn capabilities_now() -> Result<HwpedCapabilities, String> {
 pub async fn hwped_read(
     document: HwpedDocumentRef,
     workspace_root: Option<String>,
+    capture_source: Option<bool>,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(test)]
         PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_read");
-        read_now(document, workspace_root)
+        if capture_source == Some(true) {
+            persistence::capture_now(document, workspace_root)
+        } else {
+            read_now(document, workspace_root)
+        }
     })
     .await
     .map_err(|err| format!("hwped_task_failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn hwped_save(
+    workspace_root: String,
+    document_path: String,
+    data_base64: String,
+    expected_revision: String,
+) -> Result<HwpedSaveResponse, crate::ipc_error::IpcError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[workspace_root.as_str().into()], "worker:hwped_save");
+        persistence::save_now(
+            workspace_root,
+            document_path,
+            data_base64,
+            expected_revision,
+        )
+    })
+    .await
+    .map_err(|_| {
+        "hwped_task_failed: save worker failed; keep your edits and retry saving.".to_string()
+    })?
 }
 
 #[tauri::command]
@@ -1751,6 +1799,138 @@ pub(crate) static PHASE08_21_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 #[cfg(test)]
 mod phase08_21 {
     use super::*;
+
+    #[test]
+    fn phase08_21_hwped_save_yields_same_poll_and_maps_join_failure() {
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_save",
+            hwped_save(
+                std::env::temp_dir().to_string_lossy().into_owned(),
+                "test.hwpx".into(),
+                "YQ==".into(),
+                "0".repeat(64),
+            ),
+        );
+    }
+
+    #[test]
+    fn phase08_21_hwped_save_persists_exact_snapshot_and_conflicts() {
+        use sha2::{Digest, Sha256};
+        let fixture = persistence::tests::Fixture::new();
+        let original = format!("{:x}", Sha256::digest(b"original"));
+        let result = fixture.save("수정 edited".as_bytes(), &original).unwrap();
+        assert_eq!(
+            result.revision,
+            format!("{:x}", Sha256::digest("수정 edited".as_bytes()))
+        );
+        assert_eq!(result.size_bytes, "수정 edited".len() as u64);
+        assert_eq!(
+            std::fs::read(fixture.root.join(&result.snapshot_path)).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            std::fs::read(fixture.root.join("docs/test.hwpx")).unwrap(),
+            "수정 edited".as_bytes()
+        );
+        assert_eq!(
+            fixture.save(b"stale", &original).unwrap_err().code,
+            crate::ipc_error::DOCUMENT_CONFLICT
+        );
+        assert_eq!(
+            std::fs::read_dir(fixture.root.join(".maru/versions"))
+                .unwrap()
+                .count(),
+            1
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(fixture.root.join(result.snapshot_path))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn phase08_21_hwped_save_serializes_aliases_and_releases_failed_admission() {
+        use crate::atomic_file::phase08_06::Held;
+        use sha2::{Digest, Sha256};
+        let fixture = persistence::tests::Fixture::new();
+        let revision = format!("{:x}", Sha256::digest(b"original"));
+        let mut orders = vec![
+            ("docs/test.hwpx", "docs/./test.hwpx"),
+            ("docs/../docs/test.hwpx", "docs/test.hwpx"),
+        ];
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                fixture.root.join("docs/test.hwpx"),
+                fixture.root.join("alias.hwpx"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(fixture.root.join("docs"), fixture.root.join("directory"))
+                .unwrap();
+            orders.extend([
+                ("alias.hwpx", "docs/test.hwpx"),
+                ("docs/test.hwpx", "alias.hwpx"),
+                ("directory/test.hwpx", "docs/test.hwpx"),
+                ("docs/test.hwpx", "directory/test.hwpx"),
+            ]);
+        }
+        for (first_relative, second_relative) in orders {
+            std::fs::write(fixture.root.join("docs/test.hwpx"), b"original").unwrap();
+            let held = Held::new(
+                crate::vault::resolve_inside_vault(&fixture.root_text(), first_relative).unwrap(),
+                "admitted",
+            );
+            let root = fixture.root_text();
+            let expected = revision.clone();
+            let first = std::thread::spawn(move || {
+                crate::atomic_file::phase08_06::run(hwped_save(
+                    root,
+                    first_relative.into(),
+                    BASE64.encode(b"first"),
+                    expected,
+                ))
+            });
+            held.wait();
+            let waiting = Held::new(
+                crate::vault::resolve_inside_vault(&fixture.root_text(), second_relative).unwrap(),
+                "before-admission",
+            );
+            let root = fixture.root_text();
+            let expected = revision.clone();
+            let second = std::thread::spawn(move || {
+                crate::atomic_file::phase08_06::run(hwped_save(
+                    root,
+                    second_relative.into(),
+                    BASE64.encode(b"second"),
+                    expected,
+                ))
+            });
+            waiting.wait();
+            waiting.release();
+            held.release();
+            assert!(first.join().unwrap().is_ok());
+            assert_eq!(
+                second.join().unwrap().unwrap_err().code,
+                crate::ipc_error::DOCUMENT_CONFLICT
+            );
+        }
+        // A failure in validation releases both source and version admission.
+        std::fs::write(fixture.root.join("docs/test.hwpx"), b"original").unwrap();
+        fixture.engine("hwpx", "false", false);
+        assert!(fixture.save(b"refused", &revision).is_err());
+        fixture.engine("hwpx", "true", false);
+        assert!(fixture.save(b"after failure", &revision).is_ok());
+    }
+
     use crate::atomic_file::phase08_06::run;
     use std::path::{Path, PathBuf};
     use std::sync::MutexGuard;
@@ -2069,7 +2249,12 @@ esac
         std::fs::create_dir_all(&bin_dir).unwrap();
         let binary = fake_hwp_body_stats(&bin_dir, version, info);
         let _env = EnvGuard::set("MARU_HWP_BIN", &binary);
-        let read = run(hwped_read(doc_with_path("docs/a.hwpx"), Some(text(&root)))).unwrap();
+        let read = run(hwped_read(
+            doc_with_path("docs/a.hwpx"),
+            Some(text(&root)),
+            None,
+        ))
+        .unwrap();
         let invocations = std::fs::read_to_string(bin_dir.join("invocations")).unwrap();
         (read, invocations)
     }
@@ -2150,7 +2335,12 @@ esac
         let _env = EnvGuard::set("MARU_HWP_BIN", &binary);
         let work = text(&root);
 
-        let read = run(hwped_read(doc_with_path("docs/a.hwpx"), Some(work.clone()))).unwrap();
+        let read = run(hwped_read(
+            doc_with_path("docs/a.hwpx"),
+            Some(work.clone()),
+            None,
+        ))
+        .unwrap();
         assert_eq!(read["title"], "문서");
 
         let rendered = run(hwped_render(
@@ -2296,7 +2486,7 @@ echo "hwp 0.20.0"
         boundary_hwped(
             std::env::temp_dir(),
             "hwped_read",
-            hwped_read(doc_with_path("docs/a.hwpx"), Some("/tmp".to_string())),
+            hwped_read(doc_with_path("docs/a.hwpx"), Some("/tmp".to_string()), None),
         );
         boundary_hwped(
             std::env::temp_dir(),
@@ -3048,7 +3238,12 @@ esac
         let _env = EnvGuard::set("MARU_HWP_BIN", &fake_hwp(&bin_dir));
         let work = text(&root);
 
-        let read = run(hwped_read(doc_with_path("docs/a.hwpx"), Some(work.clone()))).unwrap();
+        let read = run(hwped_read(
+            doc_with_path("docs/a.hwpx"),
+            Some(work.clone()),
+            None,
+        ))
+        .unwrap();
         assert_eq!(read["title"], serde_json::json!("문서"));
 
         let rendered = run(hwped_render(
@@ -3161,6 +3356,7 @@ esac
                 data_base64: None,
             },
             Some(work),
+            None,
         ))
         .unwrap_err()
         .contains("hwped_bad_request"));

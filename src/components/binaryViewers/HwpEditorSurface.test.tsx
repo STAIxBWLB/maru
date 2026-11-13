@@ -1,116 +1,51 @@
 // @vitest-environment jsdom
-
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const { invokeMock, surface } = vi.hoisted(() => ({
-  invokeMock: vi.fn(),
-  surface: {
-    engine: null as null | {
-      edit: (
-        document: { name: string; data: Uint8Array },
-        ops: unknown[],
-      ) => Promise<{ name: string; data: Uint8Array }>;
-    },
-    file: null as null | { name: string; data: Uint8Array },
-  },
-}));
-
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
-
-vi.mock("@hwp-editor/react", () => ({
-  HwpEditor: (props: {
-    engine: typeof surface.engine;
-    file: { name: string; data: Uint8Array };
-  }) => {
-    surface.engine = props.engine;
-    surface.file = props.file;
-    return <div data-testid="editor" />;
-  },
-}));
-
+import type { DocumentHandle, HwpEngine } from "@hwp-editor/core";
+import { unmountReactRoot } from "../../lib/testing/unmountReactRoot";
+const mocks = vi.hoisted(() => ({ factory: vi.fn(), props: null as null | { file: DocumentHandle; engine: HwpEngine; readOnly: boolean } }));
+vi.mock("../../lib/hwped", () => ({ createHwpedEngine: mocks.factory }));
+vi.mock("@hwp-editor/react", () => ({ HwpEditor: (props: NonNullable<typeof mocks.props>) => { mocks.props = props; return <div />; } }));
 import { HwpEditorSurface } from "./HwpEditorSurface";
 import { LocaleContext } from "../../lib/i18n";
-import type { WorkspaceFileEntry } from "../../lib/types";
 
-const entry: WorkspaceFileEntry = {
-  path: "/workspace/report.hwpx",
-  relPath: "report.hwpx",
-  name: "report.hwpx",
-  extension: "hwpx",
-  fileKind: "hwpx",
-  sizeBytes: 10,
-  updatedAt: null,
-  gitTracked: false,
-  binary: true,
-};
-
-const ops = [{ kind: "replace" as const, find: "가", replace: "나" }];
-
-function editRefs(): Array<Record<string, unknown>> {
-  return invokeMock.mock.calls
-    .filter(([command]) => command === "hwped_edit")
-    .map(([, args]) => (args as { document: Record<string, unknown> }).document);
-}
-
-describe("HwpEditorSurface engine", () => {
-  let container: HTMLDivElement;
-  let root: Root | null = null;
-
+describe("HwpEditorSurface memory and activity boundary", () => {
+  let root: Root; let container: HTMLDivElement;
+  const file = { name: "report.hwpx", data: new Uint8Array([1, 2, 3]) };
+  const activity = vi.fn();
+  const base = { read: vi.fn(), render: vi.fn(), edit: vi.fn(), validate: vi.fn(), compose: vi.fn(), capabilities: vi.fn() };
   beforeEach(() => {
-    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    surface.engine = null;
-    surface.file = null;
-    invokeMock.mockReset();
-    invokeMock.mockImplementation((command: string) => {
-      if (command === "hwped_capabilities") {
-        return Promise.resolve({ version: "1.6.2", editable: true, formats: [], editOps: "v1" });
-      }
-      if (command === "hwped_edit") {
-        // What src-tauri/src/hwped.rs answers: the same name and the edited
-        // bytes, with nothing pointing back at the file on disk.
-        return Promise.resolve({ name: "report.hwpx", dataBase64: "CQk=" });
-      }
-      throw new Error(`unexpected command ${command}`);
-    });
-    container = document.createElement("div");
-    document.body.appendChild(container);
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.clearAllMocks(); mocks.props = null; mocks.factory.mockReturnValue(base);
+    container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
   });
-
-  afterEach(async () => {
-    await act(async () => {
-      root?.unmount();
-    });
-    root = null;
-    container.remove();
+  afterEach(async () => { await unmountReactRoot(root); container.remove(); });
+  async function render(locked = false) {
+    await act(async () => root.render(<LocaleContext.Provider value={{ locale: "ko", setLocale: () => {}, t: (key) => key }}><HwpEditorSurface workspacePath="/workspace" file={file} locked={locked} onReady={() => {}} onChange={() => {}} onDirtyChange={() => {}} onActivityChange={activity} onError={() => {}} /></LocaleContext.Provider>));
+  }
+  it("never resolves an initial or same-name edited handle to a disk path", async () => {
+    await render(); const options = mocks.factory.mock.calls[0][0] as { pathOf: (document: DocumentHandle) => string | undefined };
+    expect(options.pathOf(file)).toBeUndefined(); expect(options.pathOf({ name: file.name, data: new Uint8Array([9]) })).toBeUndefined(); expect(mocks.props!.file.data).toEqual(file.data);
   });
-
-  it("crosses the handle it opened by path and each edited handle by its bytes", async () => {
-    root = createRoot(container);
-    await act(async () => {
-      root!.render(
-        <LocaleContext.Provider
-          value={{ locale: "ko", setLocale: () => {}, t: (key: string) => key }}
-        >
-          <HwpEditorSurface entry={entry} workspacePath="/workspace" />
-        </LocaleContext.Provider>,
-      );
-    });
-    const engine = surface.engine;
-    const file = surface.file;
-    if (engine === null || file === null) throw new Error("the surface never mounted the editor");
-
-    // The handle the reader opened holds no bytes of its own, so a rule that
-    // looked at `data` would send an empty document; it answers by identity.
-    const edited = await engine.edit(file, ops);
-    expect(editRefs()[0]).toEqual({ name: "report.hwpx", path: "report.hwpx" });
-
-    // Apply again with what the engine returned: the same name, the edited
-    // bytes, and a different object. Sent back as a path, the host would read
-    // the original file and the first edit would be thrown away.
-    await engine.edit(edited, ops);
-    expect(editRefs()[1]).toEqual({ name: "report.hwpx", dataBase64: "CQk=" });
+  it("tracks overlapping read/render activity until both settle", async () => {
+    let readDone!: (value: unknown) => void; let renderDone!: (value: unknown) => void;
+    base.read.mockReturnValue(new Promise((resolve) => { readDone = resolve; })); base.render.mockReturnValue(new Promise((resolve) => { renderDone = resolve; }));
+    await render(); const reading = mocks.props!.engine.read(file); const rendering = mocks.props!.engine.render(file);
+    expect(activity.mock.calls).toEqual([[true], [true]]); readDone({}); await reading; expect(activity).toHaveBeenLastCalledWith(true); renderDone([]); await rendering; expect(activity).toHaveBeenLastCalledWith(false);
+  });
+  it("refuses composition before creating a document with a different origin", async () => {
+    await render(); await expect(mocks.props!.engine.compose({} as never, "new.hwpx")).rejects.toThrow("hwpEditorComposeUnsupported"); expect(base.compose).not.toHaveBeenCalled();
+  });
+  it("allows safe reads while locked so cancelling navigation cannot strand a loading editor", async () => {
+    base.read.mockResolvedValue({ markdown: "safe captured bytes" }); base.render.mockResolvedValue([]);
+    await render(true); await expect(mocks.props!.engine.read(file)).resolves.toEqual({ markdown: "safe captured bytes" });
+    await expect(mocks.props!.engine.render(file)).resolves.toEqual([]);
+    expect(activity).toHaveBeenLastCalledWith(false);
+    await expect(mocks.props!.engine.edit(file, [])).rejects.toThrow("hwpEditorBusy"); expect(base.edit).not.toHaveBeenCalled();
+  });
+  it("refuses engine mutations while saving and restores activity on failure", async () => {
+    await render(true); await expect(mocks.props!.engine.edit(file, [])).rejects.toThrow("hwpEditorBusy"); expect(base.edit).not.toHaveBeenCalled();
+    await render(false); base.edit.mockRejectedValue(new Error("engine failed")); await expect(mocks.props!.engine.edit(file, [])).rejects.toThrow("engine failed"); expect(activity).toHaveBeenLastCalledWith(false);
   });
 });

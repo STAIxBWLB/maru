@@ -1,3 +1,5 @@
+import { useHwpxSaveRefresh } from "./lib/useHwpxSaveRefresh";
+import { lockHwpxEditorNavigation, guardHwpxEditorNavigationAsync, guardHwpxEditorNavigation, hasHwpxEditorChanges, requestHwpxEditorNavigation, saveFocusedHwpxEditor } from "./lib/hwpxEditorGuard";
 import { hasDirtyMeetingSourceDrafts } from "./lib/meetingSourceEditorStore";
 import {
   lazy,
@@ -50,7 +52,6 @@ import { DocumentList } from "./components/DocumentList";
 import { EditorPaneFacade } from "./components/EditorPaneFacade";
 import { type EditorViewMode, type HtmlViewMode } from "./components/EditorPane";
 import type { HtmlEditorFlushHandle } from "./components/HtmlVisualEditor";
-import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { AgentUsageBar } from "./components/AgentUsageBar";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
@@ -580,6 +581,7 @@ const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
 const LazySettingsSurface = lazy(() => import("./components/settings/SettingsSurface"));
+const BinaryViewerPane = lazy(() => import("./components/BinaryViewerPane").then((module) => ({ default: module.BinaryViewerPane })));
 
 type PendingExplorerReveal = {
   pane: ExplorerPaneMode;
@@ -2247,28 +2249,28 @@ export function MainApp() {
   const refreshSkills = agentRuntimeController.refreshSkills;
 
   const setPersistedAppMode = useCallback(
-    (activeAppMode: AppMode) => {
+    (activeAppMode: AppMode) => guardHwpxEditorNavigation(() => {
       todayAutoOpenPathRef.current = null; // explicit user choice from here on
       todayAutoOpenModeRef.current = null;
       userPickedAppModeRef.current = activeAppMode;
       setAppMode(activeAppMode);
       updateSettings((current) => withActiveAppMode(current, activeAppMode), { guardedIntent: ["ui.activeAppMode"] });
-    },
+    }),
     [updateSettings],
   );
 
   const setPersistedRightWorkbenchSurface = useCallback(
-    (rightWorkbenchSurface: RightWorkbenchSurface) => {
+    (rightWorkbenchSurface: RightWorkbenchSurface) => guardHwpxEditorNavigation(() => {
       updateSettings((current) => ({
         ...current,
         ui: { ...current.ui, rightWorkbenchSurface },
       }));
-    },
+    }),
     [updateSettings],
   );
 
   const openGraphMode = useCallback(
-    (target?: GraphOpenTarget) => {
+    (target?: GraphOpenTarget) => guardHwpxEditorNavigation(() => {
       visualModeController.setGraphFocusTarget(target ?? null);
       todayAutoOpenPathRef.current = null;
       todayAutoOpenModeRef.current = null;
@@ -2290,7 +2292,7 @@ export function MainApp() {
           terminalMaximized: false,
         });
       }
-    },
+    }),
     [layoutSettings.toolPanelSurface, updateSettings, updateLayoutSettings],
   );
 
@@ -3596,6 +3598,7 @@ export function MainApp() {
   });
 
   const refreshWorkspaceFiles = useWorkspaceFilesLifecycle({ scanOptions, setError });
+  useHwpxSaveRefresh(refreshWorkspaceFiles);
   useInitialWorkspaceFilesScan(
     explorerWorkspacePath,
     shouldScanExplorerWorkspaceFiles,
@@ -3785,6 +3788,8 @@ export function MainApp() {
 
   const switchActiveWorkspace = useCallback(
     async (path: string, visibility: WorkspaceVisibility) => {
+      if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
+      const releaseNavigation = lockHwpxEditorNavigation();
       try {
         const registry = await setActiveWorkspaceRoot(path, visibility);
         activateWorkspace(registry, visibility);
@@ -3795,6 +3800,8 @@ export function MainApp() {
         await loadWorkspace(path, visibility, lastRel);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        releaseNavigation();
       }
     },
     [lastOpenKeyForWorkspace, loadWorkspace],
@@ -3817,18 +3824,26 @@ export function MainApp() {
 
   const handleAddWorkspace = useCallback(
     async (entry: WorkspaceRootEntry) => {
-      const registry = await addWorkspaceRoot(entry);
-      activateWorkspace(registry, entry.visibility);
-      await loadWorkspace(entry.path, entry.visibility);
+      if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
+      const releaseNavigation = lockHwpxEditorNavigation();
+      try {
+        const registry = await addWorkspaceRoot(entry);
+        activateWorkspace(registry, entry.visibility);
+        await loadWorkspace(entry.path, entry.visibility);
+      } finally { releaseNavigation(); }
     },
     [loadWorkspace],
   );
 
   const handleRegisterWorkspace = useCallback(
     async (workPath: string) => {
-      const outcome = await registerWorkspaceRoots(workPath);
-      activateWorkspace(outcome.workspaceRegistry, "private");
-      await loadWorkspace(outcome.privateWorkspacePath, "private");
+      if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
+      const releaseNavigation = lockHwpxEditorNavigation();
+      try {
+        const outcome = await registerWorkspaceRoots(workPath);
+        activateWorkspace(outcome.workspaceRegistry, "private");
+        await loadWorkspace(outcome.privateWorkspacePath, "private");
+      } finally { releaseNavigation(); }
     },
     [loadWorkspace],
   );
@@ -3862,23 +3877,27 @@ export function MainApp() {
     async (path: string) => {
       const confirmation = await confirmDialog(`${path}\n\n${t("workspace.remove.confirm")}`);
       if (!confirmation) return;
-      const registry = await removeWorkspaceRoot(path);
-      setWorkspaceRegistry(registry);
-      removeWorkspaceState(path);
-      removeWorkspaceDocTabs(path);
-      cleanupDocumentBrowserWorkspace(path);
-      cleanupEditorSurfaceWorkspace(editorSurfacePersistence, path);
-      const nextPath =
-        registry.activeByVisibility[explorerVisibility] ??
-        registry.activeByVisibility.private ??
-        registry.activeByVisibility.public;
-      if (nextPath) {
-        const nextVisibility =
-          registry.workspaces.find((workspace) => workspace.path === nextPath)?.visibility ??
-          explorerVisibility;
-        setExplorerVisibility(nextVisibility);
-        await loadWorkspace(nextPath, nextVisibility);
-      }
+      if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
+      const releaseNavigation = lockHwpxEditorNavigation();
+      try {
+        const registry = await removeWorkspaceRoot(path);
+        setWorkspaceRegistry(registry);
+        removeWorkspaceState(path);
+        removeWorkspaceDocTabs(path);
+        cleanupDocumentBrowserWorkspace(path);
+        cleanupEditorSurfaceWorkspace(editorSurfacePersistence, path);
+        const nextPath =
+          registry.activeByVisibility[explorerVisibility] ??
+          registry.activeByVisibility.private ??
+          registry.activeByVisibility.public;
+        if (nextPath) {
+          const nextVisibility =
+            registry.workspaces.find((workspace) => workspace.path === nextPath)?.visibility ??
+            explorerVisibility;
+          setExplorerVisibility(nextVisibility);
+          await loadWorkspace(nextPath, nextVisibility);
+        }
+      } finally { releaseNavigation(); }
     },
     [editorSurfacePersistence, explorerVisibility, loadWorkspace, t],
   );
@@ -3950,6 +3969,7 @@ export function MainApp() {
 
   const selectEntry = useCallback(
     async (entry: VaultEntry, requestedGroup?: EditorGroupId) => {
+      if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return false;
       const owner =
         workspaceRegistry.workspaces
           .filter(
@@ -3991,6 +4011,7 @@ export function MainApp() {
 
       const reqId = ++selectRequestRef.current;
       setError(null);
+      const releaseNavigation = lockHwpxEditorNavigation();
       try {
         const payload = await readDocument(workspacePath, entry.path);
         // Drop stale responses — a later click already superseded this one.
@@ -4016,6 +4037,8 @@ export function MainApp() {
         setPendingSelectedPath(null);
         setError(err instanceof Error ? err.message : String(err));
         return false;
+      } finally {
+        releaseNavigation();
       }
     },
     [
@@ -4141,10 +4164,11 @@ export function MainApp() {
       const visibility = workspace?.visibility ?? explorerVisibility;
       const targetPath = joinWorkspaceRelPath(workspacePath, relPath);
 
-      void (async () => {
-        setPersistedAppMode("files");
-        setExplorerVisibility(visibility);
+      void guardHwpxEditorNavigationAsync(async () => {
+        const releaseNavigation = lockHwpxEditorNavigation();
         try {
+          setPersistedAppMode("files");
+          setExplorerVisibility(visibility);
           // Read at call time: the scan may have completed while the async
           // gap above was in flight.
           if (getWorkspaceStoreState().fileStates[workspacePath]?.scanStatus !== "ready") {
@@ -4153,11 +4177,12 @@ export function MainApp() {
           setWorkspaceFileFilter("all");
           setFileQueryByVisibility(visibility, "");
           setFilesPaneFilters(EMPTY_WORKSPACE_FILES_PANE_FILTERS);
+          setSelectedFilePathsByWorkspace(workspacePath, [targetPath]);
           setPendingExplorerReveal({ pane: "files", targetPath });
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err));
-        }
-      })();
+        } finally { releaseNavigation(); }
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t is read only in the early-return error string; excluding it avoids recreating this callback on every locale change
     [
@@ -4462,7 +4487,7 @@ export function MainApp() {
     [applyQueuedFiles, fileQueue, outlinePaneScope, selectedQueuedFileQueueItems],
   );
 
-  const navigateBack = useCallback(() => {
+  const navigateBack = useCallback(() => guardHwpxEditorNavigation(() => {
     if (!selectedEntry) return;
     const { history, target } = goBack(navHistory, selectedEntry.path);
     if (!target) return;
@@ -4471,9 +4496,9 @@ export function MainApp() {
     setNavHistory(history);
     skipNextHistoryPushRef.current = true;
     void selectEntry(entry);
-  }, [selectedEntry, navHistory, activeDocumentEntries, selectEntry]);
+  }), [selectedEntry, navHistory, activeDocumentEntries, selectEntry]);
 
-  const navigateForward = useCallback(() => {
+  const navigateForward = useCallback(() => guardHwpxEditorNavigation(() => {
     if (!selectedEntry) return;
     const { history, target } = goForward(navHistory, selectedEntry.path);
     if (!target) return;
@@ -4482,29 +4507,33 @@ export function MainApp() {
     setNavHistory(history);
     skipNextHistoryPushRef.current = true;
     void selectEntry(entry);
-  }, [selectedEntry, navHistory, activeDocumentEntries, selectEntry]);
+  }), [selectedEntry, navHistory, activeDocumentEntries, selectEntry]);
 
   const restoreDiscardedEdit = useCallback(async () => {
-    if (!discardedEdit) return;
-    const reqId = ++selectRequestRef.current;
+    if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
+    const releaseNavigation = lockHwpxEditorNavigation();
     try {
-      const payload = await readDocument(discardedEdit.workspacePath, discardedEdit.entry.path);
-      if (reqId !== selectRequestRef.current) return;
-      const restoredTab: EditorTab = {
-        id: tabIdForEntry(discardedEdit.entry),
-        workspacePath: discardedEdit.workspacePath,
-        visibility: discardedEdit.visibility,
-        entry: discardedEdit.entry,
-        document: payload,
-        draftContent: discardedEdit.draft,
-      };
-      insertDocTab(restoredTab, { activate: true, group: "left" });
-      setExplorerVisibility(restoredTab.visibility);
-      setPendingSelectedPath(null);
-      setDiscardedEdit(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+      if (!discardedEdit) return;
+      const reqId = ++selectRequestRef.current;
+      try {
+        const payload = await readDocument(discardedEdit.workspacePath, discardedEdit.entry.path);
+        if (reqId !== selectRequestRef.current) return;
+        const restoredTab: EditorTab = {
+          id: tabIdForEntry(discardedEdit.entry),
+          workspacePath: discardedEdit.workspacePath,
+          visibility: discardedEdit.visibility,
+          entry: discardedEdit.entry,
+          document: payload,
+          draftContent: discardedEdit.draft,
+        };
+        insertDocTab(restoredTab, { activate: true, group: "left" });
+        setExplorerVisibility(restoredTab.visibility);
+        setPendingSelectedPath(null);
+        setDiscardedEdit(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally { releaseNavigation(); }
   }, [discardedEdit]);
 
   const saveTab = useCallback(async (
@@ -4623,55 +4652,59 @@ export function MainApp() {
       targetRelPath,
       extras,
     }: StudioCreateDocumentInput): Promise<DocumentPayload | null> => {
-      if (!activeDocumentWorkspacePath) return null;
-      if (blockWorkspaceWrite("create")) return null;
-      // Phase 4 W7: Hub template/guideline metadata flows into proper
-      // frontmatter via `extras`, not an HTML comment trailer. Rust core
-      // preserves byte-identity for any unrelated fields downstream.
-      const created = await createDocument(
-        activeDocumentWorkspacePath,
-        title,
-        docType,
-        body,
-        targetRelPath,
-        extras && (extras.templateSlug || extras.templateId || extras.guidelineIds?.length)
-          ? {
-              templateId: extras.templateId,
-              templateSlug: extras.templateSlug,
-              templateVersion: extras.templateVersion,
-              guidelineIds: extras.guidelineIds,
-              businessUnit: extras.businessUnit,
-            }
-          : undefined,
-      );
-      const fresh = await rescanWorkspaceEntries(activeDocumentWorkspacePath, scanOptions);
-      void refreshWorkspaceFiles(activeDocumentWorkspacePath);
-      const entry =
-        fresh?.find((item) => item.relPath === created.relPath || item.path === created.path) ??
-        ({
-          path: created.path,
-          relPath: created.relPath,
-          title: created.title,
-          frontmatter: { type: docType },
-          updatedAt: null,
-          wordCount: 0,
-          snippet: "",
-          fileKind: "md",
-          versionCount: 0,
-        } satisfies VaultEntry);
-      const payload = await readDocument(activeDocumentWorkspacePath, created.path);
-      const newTab: EditorTab = {
-        id: tabIdForEntry(entry),
-        workspacePath: activeDocumentWorkspacePath,
-        visibility: activeDocumentWorkspace?.visibility ?? explorerVisibility,
-        entry,
-        document: payload,
-        draftContent: payload.content,
-      };
-      insertDocTab(newTab, { activate: true, group: "left" });
-      setPendingSelectedPath(null);
-      pushRecent(entry.path);
-      return payload;
+      if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return null;
+      const releaseNavigation = lockHwpxEditorNavigation();
+      try {
+        if (!activeDocumentWorkspacePath) return null;
+        if (blockWorkspaceWrite("create")) return null;
+        // Phase 4 W7: Hub template/guideline metadata flows into proper
+        // frontmatter via `extras`, not an HTML comment trailer. Rust core
+        // preserves byte-identity for any unrelated fields downstream.
+        const created = await createDocument(
+          activeDocumentWorkspacePath,
+          title,
+          docType,
+          body,
+          targetRelPath,
+          extras && (extras.templateSlug || extras.templateId || extras.guidelineIds?.length)
+            ? {
+                templateId: extras.templateId,
+                templateSlug: extras.templateSlug,
+                templateVersion: extras.templateVersion,
+                guidelineIds: extras.guidelineIds,
+                businessUnit: extras.businessUnit,
+              }
+            : undefined,
+        );
+        const fresh = await rescanWorkspaceEntries(activeDocumentWorkspacePath, scanOptions);
+        void refreshWorkspaceFiles(activeDocumentWorkspacePath);
+        const entry =
+          fresh?.find((item) => item.relPath === created.relPath || item.path === created.path) ??
+          ({
+            path: created.path,
+            relPath: created.relPath,
+            title: created.title,
+            frontmatter: { type: docType },
+            updatedAt: null,
+            wordCount: 0,
+            snippet: "",
+            fileKind: "md",
+            versionCount: 0,
+          } satisfies VaultEntry);
+        const payload = await readDocument(activeDocumentWorkspacePath, created.path);
+        const newTab: EditorTab = {
+          id: tabIdForEntry(entry),
+          workspacePath: activeDocumentWorkspacePath,
+          visibility: activeDocumentWorkspace?.visibility ?? explorerVisibility,
+          entry,
+          document: payload,
+          draftContent: payload.content,
+        };
+        insertDocTab(newTab, { activate: true, group: "left" });
+        setPendingSelectedPath(null);
+        pushRecent(entry.path);
+        return payload;
+      } finally { releaseNavigation(); }
     },
     [
       activeDocumentWorkspace,
@@ -4841,7 +4874,11 @@ export function MainApp() {
       typeof window !== "undefined"
         ? window.localStorage.getItem(lastOpenKeyForWorkspace(explorerWorkspacePath))
         : null;
-    await loadWorkspace(explorerWorkspacePath, explorerVisibility, lastRel);
+    await guardHwpxEditorNavigationAsync(async () => {
+      const releaseNavigation = lockHwpxEditorNavigation();
+      try {        await loadWorkspace(explorerWorkspacePath, explorerVisibility, lastRel);       }
+      finally { releaseNavigation(); }
+    });
   }, [
     explorerVisibility,
     explorerWorkspacePath,
@@ -4938,10 +4975,10 @@ export function MainApp() {
   // Dashboard deep link: opening a recent document hands off to the Docs
   // mode, which owns the editor surface.
   const openDashboardDocument = useCallback(
-    (entry: VaultEntry) => {
+    (entry: VaultEntry) => guardHwpxEditorNavigation(() => {
       setPersistedAppMode("pkm");
       void selectEntry(entry);
-    },
+    }),
     [setPersistedAppMode, selectEntry],
   );
 
@@ -5171,7 +5208,7 @@ export function MainApp() {
   );
 
   const selectTab = useCallback(
-    (tabId: string, group?: EditorGroupId) => {
+    (tabId: string, group?: EditorGroupId) => guardHwpxEditorNavigation(() => {
       const { tabs: docTabs, binaryTabs: binTabs } = getEditorTabsState();
       const docTab = docTabs.find((item) => item.id === tabId);
       if (docTab) {
@@ -5184,7 +5221,7 @@ export function MainApp() {
       if (!binaryTab) return;
       activateEditorTab(tabId, group);
       setExplorerVisibility(binaryTab.visibility);
-    },
+    }),
     [pushRecent],
   );
 
@@ -5402,7 +5439,7 @@ export function MainApp() {
   );
 
   const closeTab = useCallback(
-    (tabId: string) => {
+    (tabId: string) => guardHwpxEditorNavigation(() => {
       const state = getEditorTabsState();
       if (!orderedTabsInState(state).some((tab) => tab.id === tabId)) return;
       const flushed = flushHtmlDraft(tabId);
@@ -5423,7 +5460,7 @@ export function MainApp() {
       );
       if (closing) cleanupEditorPaneTabAcrossGroups(closing.workspacePath, closing.id);
       if (rightClosed) updateLayoutSettings({ editorSplitOpen: false });
-    },
+    }),
     [
       flushHtmlDraft,
       leftResolvedTabId,
@@ -5434,7 +5471,7 @@ export function MainApp() {
   );
 
   const closeTabsByIds = useCallback(
-    (tabIds: string[], postIds?: EditorTabIdsPatch) => {
+    (tabIds: string[], postIds?: EditorTabIdsPatch) => guardHwpxEditorNavigation(() => {
       const closeSet = new Set(tabIds);
       if (closeSet.size === 0) return;
       const closingTabs = getEditorTabsState().tabs.filter((tab) => closeSet.has(tab.id));
@@ -5462,7 +5499,7 @@ export function MainApp() {
       );
       for (const tab of closingTabs) cleanupEditorPaneTabAcrossGroups(tab.workspacePath, tab.id);
       if (rightClosed) updateLayoutSettings({ editorSplitOpen: false });
-    },
+    }),
     [
       flushHtmlDraft,
       leftResolvedTabId,
@@ -5562,7 +5599,7 @@ export function MainApp() {
   );
 
   const closeOtherTabs = useCallback(
-    (tabId: string) => {
+    (tabId: string) => guardHwpxEditorNavigation(() => {
       const ordered = orderedTabsInState(getEditorTabsState());
       if (!ordered.some((tab) => tab.id === tabId)) return;
       closeTabsByIds(tabIdsToCloseOthers(ordered, tabId), {
@@ -5572,7 +5609,7 @@ export function MainApp() {
         focusedEditorGroup: "left",
       });
       updateLayoutSettings({ editorSplitOpen: false });
-    },
+    }),
     [closeTabsByIds, updateLayoutSettings],
   );
 
@@ -5707,27 +5744,31 @@ export function MainApp() {
 
   const duplicateTabDocument = useCallback(
     async (tabId: string) => {
-      const tab = getEditorTabsState().tabs.find((item) => item.id === tabId);
-      if (!tab || blockTabWrite(tab, "create")) return;
+      if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
+      const releaseNavigation = lockHwpxEditorNavigation();
       try {
-        const duplicated = await duplicateDocument(tab.workspacePath, tab.document.path);
-        const fresh = await refreshAfterDocumentMutation(tab.workspacePath);
-        const entry = entryFromPayload(duplicated, fresh, tab.entry);
-        const newTab: EditorTab = {
-          id: tabIdForEntry(entry),
-          workspacePath: tab.workspacePath,
-          visibility: tab.visibility,
-          entry,
-          document: duplicated,
-          draftContent: duplicated.content,
-        };
-        insertDocTab(newTab, { activate: true, group: "left" });
-        setExplorerVisibility(tab.visibility);
-        setPendingSelectedPath(null);
-        pushRecent(entry.path);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+        const tab = getEditorTabsState().tabs.find((item) => item.id === tabId);
+        if (!tab || blockTabWrite(tab, "create")) return;
+        try {
+          const duplicated = await duplicateDocument(tab.workspacePath, tab.document.path);
+          const fresh = await refreshAfterDocumentMutation(tab.workspacePath);
+          const entry = entryFromPayload(duplicated, fresh, tab.entry);
+          const newTab: EditorTab = {
+            id: tabIdForEntry(entry),
+            workspacePath: tab.workspacePath,
+            visibility: tab.visibility,
+            entry,
+            document: duplicated,
+            draftContent: duplicated.content,
+          };
+          insertDocTab(newTab, { activate: true, group: "left" });
+          setExplorerVisibility(tab.visibility);
+          setPendingSelectedPath(null);
+          pushRecent(entry.path);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally { releaseNavigation(); }
     },
     [
       blockTabWrite,
@@ -5818,7 +5859,7 @@ export function MainApp() {
       workspacePath: string,
       visibility: WorkspaceVisibility,
       targetPath: string,
-    ) => {
+    ) => guardHwpxEditorNavigation(() => {
       setPersistedAppMode("files");
       setExplorerVisibility(visibility);
       setWorkspaceFileFilter("all");
@@ -5827,7 +5868,7 @@ export function MainApp() {
       setSelectedFilePathsByWorkspace(workspacePath, [targetPath]);
       setPendingExplorerReveal({ pane: "files", targetPath });
       void refreshWorkspaceFiles(workspacePath);
-    },
+    }),
     [
       refreshWorkspaceFiles,
       setPersistedAppMode,
@@ -5836,7 +5877,7 @@ export function MainApp() {
   );
 
   const revealTabInExplorer = useCallback(
-    (tabId: string, group: EditorGroupId) => {
+    (tabId: string, group: EditorGroupId) => guardHwpxEditorNavigation(() => {
       const { tabs: docTabs, binaryTabs: binTabs } = getEditorTabsState();
       const docTab = docTabs.find((item) => item.id === tabId) ?? null;
       const binaryTab = docTab ? null : binTabs.find((item) => item.id === tabId) ?? null;
@@ -5867,7 +5908,7 @@ export function MainApp() {
       } else {
         requestDocumentReveal({ workspacePath, visibility }, targetPath);
       }
-    },
+    }),
     [
       documentsPaneOpen,
       revealPathInFiles,
@@ -5880,7 +5921,7 @@ export function MainApp() {
     ],
   );
 
-  const closeRightEditorPane = useCallback(() => {
+  const closeRightEditorPane = useCallback(() => guardHwpxEditorNavigation(() => {
     patchEditorIds({
       rightActiveTabId: null,
       focusedEditorGroup: "left",
@@ -5889,7 +5930,7 @@ export function MainApp() {
     if (rightTab) cleanupEditorPaneGroup(rightTab.workspacePath, "right");
     setFocusedWorkbenchSide("left");
     updateLayoutSettings({ editorSplitOpen: false });
-  }, [leftResolvedTabId, rightTab, updateLayoutSettings]);
+  }), [leftResolvedTabId, rightTab, updateLayoutSettings]);
 
   const closeActiveSurface = useCallback(() => {
     const terminalPanel = terminalPanelRef.current;
@@ -5916,12 +5957,14 @@ export function MainApp() {
       return;
     }
     if (rightWorkbenchMode && focusedWorkbenchSide === "right") {
-      setFocusedWorkbenchSide("left");
-      patchEditorIds({
-        focusedEditorGroup: "left",
-        ...(leftResolvedTabId ? { activeTabId: leftResolvedTabId } : {}),
+      guardHwpxEditorNavigation(() => {
+        setFocusedWorkbenchSide("left");
+        patchEditorIds({
+          focusedEditorGroup: "left",
+          ...(leftResolvedTabId ? { activeTabId: leftResolvedTabId } : {}),
+        });
+        updateLayoutSettings({ editorSplitOpen: false });
       });
-      updateLayoutSettings({ editorSplitOpen: false });
       return;
     }
     if (focusedEditorGroup === "right" && rightResolvedTabId) {
@@ -5941,7 +5984,7 @@ export function MainApp() {
     updateLayoutSettings,
   ]);
 
-  const closeAllCleanTabs = useCallback(() => {
+  const closeAllCleanTabs = useCallback(() => guardHwpxEditorNavigation(() => {
     const dirtyTabs = orderedTabsInState(getEditorTabsState()).filter(
       (tab): tab is EditorTab =>
         !isBinaryTab(tab) && tab.draftContent !== tab.document.content,
@@ -5957,9 +6000,9 @@ export function MainApp() {
     if (dirtyTabs.length > 0) {
       setError(t("editor.tabs.closeAll.dirtyKept", { count: dirtyTabs.length }));
     }
-  }, [t, updateLayoutSettings]);
+  }), [t, updateLayoutSettings]);
 
-  const splitEditorRight = useCallback(() => {
+  const splitEditorRight = useCallback(() => guardHwpxEditorNavigation(() => {
     const state = getEditorTabsState();
     const { leftResolvedTabId: leftId, resolvedActiveTabId: activeId } = resolveEditorTabIds(
       state,
@@ -5983,13 +6026,13 @@ export function MainApp() {
     updateLayoutSettings({
       editorSplitOpen: true,
     });
-  }, [
+  }), [
     editorSplitOpen,
     setPersistedRightWorkbenchSurface,
     updateLayoutSettings,
   ]);
 
-  const openSourcePreviewSplit = useCallback(() => {
+  const openSourcePreviewSplit = useCallback(() => guardHwpxEditorNavigation(() => {
     const state = getEditorTabsState();
     const { leftResolvedTabId: leftId, resolvedActiveTabId: activeId } = resolveEditorTabIds(
       state,
@@ -6018,7 +6061,7 @@ export function MainApp() {
       { left: "source", right: "preview" },
     );
     updateLayoutSettings({ editorSplitOpen: true });
-  }, [
+  }), [
     editorSurfacePersistence,
     editorSplitOpen,
     setPersistedRightWorkbenchSurface,
@@ -6026,7 +6069,7 @@ export function MainApp() {
   ]);
 
   const openGraphPanel = useCallback(
-    (rawTarget?: GraphOpenTarget) => {
+    (rawTarget?: GraphOpenTarget) => guardHwpxEditorNavigation(() => {
       // Reject non-target values (e.g. a MouseEvent when passed as an onClick
       // handler directly) so a plain toolbar click never rewrites graph.source.
       const target =
@@ -6050,7 +6093,7 @@ export function MainApp() {
           },
         }));
       }
-    },
+    }),
     [setPersistedAppMode, updateLayoutSettings, updateSettings],
   );
 
@@ -6132,7 +6175,7 @@ export function MainApp() {
     ownerRef: kgRefOwnerRef,
   });
 
-  const openGraphWorkspace = useCallback(() => {
+  const openGraphWorkspace = useCallback(() => guardHwpxEditorNavigation(() => {
     setPersistedAppMode("graph");
     if (layoutSettings.toolPanelSurface === "graph") {
       updateLayoutSettings({
@@ -6141,14 +6184,14 @@ export function MainApp() {
         terminalMaximized: false,
       });
     }
-  }, [
+  }), [
     layoutSettings.toolPanelSurface,
     setPersistedAppMode,
     updateLayoutSettings,
   ]);
 
   const openPrimaryWorkbenchMode = useCallback(
-    (mode: Exclude<AppMode, "pkm">) => {
+    (mode: Exclude<AppMode, "pkm">) => guardHwpxEditorNavigation(() => {
       updateLayoutSettings({ editorSplitOpen: false });
       setFocusedWorkbenchSide("left");
       switch (mode) {
@@ -6173,7 +6216,7 @@ export function MainApp() {
         default:
           setPersistedAppMode(mode);
       }
-    },
+    }),
     [
       openComms,
       openGraphWorkspace,
@@ -6186,7 +6229,7 @@ export function MainApp() {
   );
 
   const openWorkbenchModeRight = useCallback(
-    (mode: RightWorkbenchMode) => {
+    (mode: RightWorkbenchMode) => guardHwpxEditorNavigation(() => {
       if (mode === "inbox") setInboxFocusTick((value) => value + 1);
       if (mode === "gap") knowledgeModeController.clearGapDraft();
       if (mode === "graph" && layoutSettings.toolPanelSurface === "graph") {
@@ -6200,7 +6243,7 @@ export function MainApp() {
       setPersistedRightWorkbenchSurface(mode);
       setFocusedWorkbenchSide("right");
       updateLayoutSettings({ editorSplitOpen: true });
-    },
+    }),
     [
       layoutSettings.toolPanelSurface,
       setPersistedAppMode,
@@ -6209,20 +6252,20 @@ export function MainApp() {
     ],
   );
 
-  const closeRightWorkbench = useCallback(() => {
+  const closeRightWorkbench = useCallback(() => guardHwpxEditorNavigation(() => {
     setFocusedWorkbenchSide("left");
     patchEditorIds({
       focusedEditorGroup: "left",
       ...(leftResolvedTabId ? { activeTabId: leftResolvedTabId } : {}),
     });
     updateLayoutSettings({ editorSplitOpen: false });
-  }, [leftResolvedTabId, updateLayoutSettings]);
+  }), [leftResolvedTabId, updateLayoutSettings]);
 
   const handleToolPanelSurfaceChange = useCallback(
-    (toolPanelSurface: ToolPanelSurface) => {
+    (toolPanelSurface: ToolPanelSurface) => guardHwpxEditorNavigation(() => {
       if (toolPanelSurface === "graph") setPersistedAppMode("pkm");
       updateLayoutSettings({ toolPanelSurface, terminalOpen: true }, { flush: true });
-    },
+    }),
     [setPersistedAppMode, updateLayoutSettings],
   );
 
@@ -6374,8 +6417,10 @@ export function MainApp() {
         setError(t("files.openUnavailable"));
         return;
       }
-      setPersistedAppMode("pkm");
-      const opened = await selectEntry(docEntry, "left");
+      const opened = await guardHwpxEditorNavigationAsync(() => {
+        setPersistedAppMode("pkm");
+        return selectEntry(docEntry, "left");
+      });
       if (opened && line != null) {
         window.requestAnimationFrame(() =>
           jumpToOutlineLine(Math.max(0, line - 1), "left"),
@@ -6472,11 +6517,11 @@ export function MainApp() {
     confirmReload: () => confirmDialog(t("files.editor.reloadConfirm")),
   });
 
-  const openFilesPreviewInDocuments = useCallback(() => {
+  const openFilesPreviewInDocuments = useCallback(() => guardHwpxEditorNavigation(() => {
     if (!filesPreviewTab) return;
     activateEditorTab(filesPreviewTab.id, "left");
     setPersistedAppMode("pkm");
-  }, [filesPreviewTab, setPersistedAppMode]);
+  }), [filesPreviewTab, setPersistedAppMode]);
 
   const filesHtmlKey = filesPreviewTab ? `files:${filesPreviewTab.id}` : null;
   const filesHtmlState = filesHtmlKey ? htmlPaneModes[filesHtmlKey] : undefined;
@@ -6506,6 +6551,7 @@ export function MainApp() {
   );
 
   const saveActiveSurfaceDocument = useCallback(async () => {
+    if (await saveFocusedHwpxEditor()) return;
     const filesOwnFocus =
       visibleAppMode === "files" ||
       (rightWorkbenchMode === "files" && focusedWorkbenchSide === "right");
@@ -7369,10 +7415,10 @@ export function MainApp() {
             scope={{ workspacePath: inboxWorkspacePath ?? settingsWorkPath, documentBrowserScope }}
             commands={{
               renderPrimarySurface: () => null,
-              openGraphEntry: (entry) => {
+              openGraphEntry: (entry) => guardHwpxEditorNavigation(() => {
                 setPersistedAppMode("pkm");
                 void selectEntry(entry as VaultEntry, "left");
-              },
+              }),
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,
               toggleGraphFavorite: toggleFavorite,
@@ -7781,26 +7827,30 @@ export function MainApp() {
   const leftBinaryBody = useMemo(
     () =>
       isBinaryTab(leftTab) ? (
+        <Suspense fallback={<div role="status">{t("binaryViewer.loading")}</div>}>
         <BinaryViewerPane
           entry={leftTab.fileEntry}
           workspacePath={leftTab.workspacePath}
           classification={leftTab.classification}
           onError={handleBinaryViewerError}
         />
+        </Suspense>
       ) : null,
-    [leftTab, handleBinaryViewerError],
+    [leftTab, handleBinaryViewerError, t],
   );
   const rightBinaryBody = useMemo(
     () =>
       isBinaryTab(rightTab) ? (
+        <Suspense fallback={<div role="status">{t("binaryViewer.loading")}</div>}>
         <BinaryViewerPane
           entry={rightTab.fileEntry}
           workspacePath={rightTab.workspacePath}
           classification={rightTab.classification}
           onError={handleBinaryViewerError}
         />
+        </Suspense>
       ) : null,
-    [rightTab, handleBinaryViewerError],
+    [rightTab, handleBinaryViewerError, t],
   );
   const handleLeftSelectTab = useCallback(
     (nextTabId: string) => selectTab(nextTabId, "left"),
@@ -7813,17 +7863,17 @@ export function MainApp() {
   const handleLeftCloseTab = useCallback((nextTabId: string) => closeTab(nextTabId), [closeTab]);
   const handleRightCloseTab = useCallback(() => closeRightEditorPane(), [closeRightEditorPane]);
   const handleLeftOpenTabPreview = useCallback(
-    (nextTabId: string) => {
+    (nextTabId: string) => guardHwpxEditorNavigation(() => {
       selectTab(nextTabId, "left");
       setPersistedEditorViewMode("preview", "left");
-    },
+    }),
     [selectTab, setPersistedEditorViewMode],
   );
   const handleRightOpenTabPreview = useCallback(
-    (nextTabId: string) => {
+    (nextTabId: string) => guardHwpxEditorNavigation(() => {
       selectTab(nextTabId, "right");
       setPersistedEditorViewMode("preview", "right");
-    },
+    }),
     [selectTab, setPersistedEditorViewMode],
   );
   const handleLeftRevealTabInExplorer = useCallback(
@@ -8019,10 +8069,10 @@ export function MainApp() {
     void startWindowDrag().catch(() => {});
   }, []);
 
-  const openPkmFromActivityRail = useCallback(() => {
+  const openPkmFromActivityRail = useCallback(() => guardHwpxEditorNavigation(() => {
     updateLayoutSettings({ editorSplitOpen: false });
     setPersistedAppMode("pkm");
-  }, [setPersistedAppMode, updateLayoutSettings]);
+  }), [setPersistedAppMode, updateLayoutSettings]);
   const toggleOutlineFromActivityRail = useCallback(
     () => updateLayoutSettings({ outlineOpen: !outlineOpen }),
     [outlineOpen, updateLayoutSettings],
@@ -8034,11 +8084,14 @@ export function MainApp() {
 
   const handleExplorerWorkspaceVisibilityChange = useCallback(
     (visibility: WorkspaceVisibility) => {
-      setExplorerVisibility(visibility);
-      const nextPath = workspaceRegistry.activeByVisibility[visibility];
-      if (nextPath && !workspaceStates[nextPath]?.entries.length) {
-        void loadWorkspace(nextPath, visibility);
-      }
+      void guardHwpxEditorNavigationAsync(async () => {
+        const releaseNavigation = lockHwpxEditorNavigation();
+        try {
+          setExplorerVisibility(visibility);
+          const nextPath = workspaceRegistry.activeByVisibility[visibility];
+          if (nextPath && !workspaceStates[nextPath]?.entries.length) await loadWorkspace(nextPath, visibility);
+        } finally { releaseNavigation(); }
+      });
     },
     [loadWorkspace, workspaceRegistry.activeByVisibility, workspaceStates],
   );
@@ -8593,10 +8646,10 @@ export function MainApp() {
                 if (!root) return Promise.reject(new Error("workspace required"));
                 return saveDocument(root, path, content, expectedRevision);
               },
-              openGraphEntry: (entry) => {
+              openGraphEntry: (entry) => guardHwpxEditorNavigation(() => {
                 setPersistedAppMode("pkm");
                 void selectEntry(entry as VaultEntry, "left");
-              },
+              }),
               createGraphNote: handleWikilinkClick,
               isGraphFavorite: isFavorite,
               toggleGraphFavorite: toggleFavorite,

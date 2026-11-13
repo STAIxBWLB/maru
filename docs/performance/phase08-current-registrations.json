@@ -761,6 +761,12 @@
     },
     {
       "surface": "app",
+      "name": "hwped_save",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_save",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
       "name": "hwped_validate",
       "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_validate",
       "sourcePath": "src-tauri/src/hwped.rs"
@@ -2357,14 +2363,14 @@
     }
   ],
   "counts": {
-    "app": 385,
+    "app": 386,
     "plugin": 7,
-    "total": 392
+    "total": 393
   },
   "sourceFiles": [
     {
       "path": "scripts/check-command-isolation.mjs",
-      "sha256": "58b2d2e7692fdbfa1bbfde36c65c960b78e938ee251c6437de0c6fee4aa7e741"
+      "sha256": "c56af79c150bd2d30b099996f40af604020218a435a99c5e120fed21d4a7d14a"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -2516,7 +2522,7 @@
     },
     {
       "path": "src-tauri/src/hwped.rs",
-      "sha256": "c06a505bbadb3e6017db49bc1ca38adb55a71c48790ff4e97dbfe4ce182237c4"
+      "sha256": "20a149be054f3b70ed83b57ead0dcb6416896471ca6f04583600e4f4ca9f1576"
     },
     {
       "path": "src-tauri/src/inbox.rs",
@@ -2556,7 +2562,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "5ac953f18e25181139584e9c650f58c7070c0b653959b4f8fd80e48a13ff9498"
+      "sha256": "e051e72c0f9b2aa72571b1bbf9b1126090424b1a47ba0b8ad76f1ad90cc6ae37"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2712,7 +2718,7 @@
     },
     {
       "path": "src-tauri/src/vault_list.rs",
-      "sha256": "b61faccc9ffa29432ca365a0b664ed02b0405c04eb18137b18c0ebca2b532e62"
+      "sha256": "c1a7cd218f56b7c23aa5fc259a281b784527acdbf2175f95182c55c8051539fb"
     },
     {
       "path": "src-tauri/src/vault_watcher.rs",
@@ -2735,5 +2741,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "43b6fe501cbc3e585196e9e0d5aab759cc0e6ed9"
+  "sourceCommit": "137329ff84f082fdbf06b176aff3a2205891be69"
 }

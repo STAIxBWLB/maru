@@ -248,6 +248,26 @@ pub(crate) fn load_registry() -> Result<WorkspaceRegistry, String> {
     load_registry_at(&workspace_registry_path()?, &legacy_vault_list_path()?)
 }
 
+/// Authorization for read-only source capture must not publish a legacy
+/// registry migration. Reuse the same normalization, ownership and policy rules.
+pub(crate) fn assert_document_write_readonly(
+    caller_root: &str,
+    target: &Path,
+    action: WorkspaceWriteAction,
+) -> Result<(), String> {
+    let mut registry: WorkspaceRegistry = match fs::read_to_string(workspace_registry_path()?) {
+        Ok(content) => serde_json::from_str(&content)
+            .map_err(|error| format!("Failed to parse workspace list: {error}"))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            migrate_legacy_vault_list(load_legacy_at(&legacy_vault_list_path()?)?)
+        }
+        Err(error) => return Err(format!("Failed to read workspace list: {error}")),
+    };
+    normalize_registry(&mut registry);
+    assert_document_owner_in_registry(&registry, caller_root, target)?;
+    assert_maru_can_write_in_registry(&registry, caller_root, action)
+}
+
 /// Distinguish "no registry has ever been created" (standalone mode, Ok(None))
 /// from "a registry exists but cannot be read" (Err). Callers that route
 /// writes by workspace visibility must fail closed on the latter.
@@ -589,6 +609,14 @@ pub fn assert_maru_can_write(
     action: WorkspaceWriteAction,
 ) -> Result<(), String> {
     let registry = load_registry()?;
+    assert_maru_can_write_in_registry(&registry, workspace_path, action)
+}
+
+fn assert_maru_can_write_in_registry(
+    registry: &WorkspaceRegistry,
+    workspace_path: &str,
+    action: WorkspaceWriteAction,
+) -> Result<(), String> {
     let requested = comparable_root(workspace_path);
     // Registry files may retain supported aliases (including legacy spellings).
     // Every matching entry must allow the action; a permissive duplicate cannot

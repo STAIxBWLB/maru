@@ -29,32 +29,159 @@
       "originalDisposition": "ISOLATED",
       "reason": "New Settings > Jobs feature: removes one crontab entry by index via a crontab - stdin rewrite; finite subprocess work isolated in an awaited spawn_blocking worker."
     },
-    { "name": "create_meeting_source_session", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Plaud source-review session creation is isolated in an awaited blocking worker." },
-    { "name": "import_meeting_source", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Plaud TXT/Markdown source import is isolated in an awaited blocking worker." },
-    { "name": "read_meeting_source_session", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review session reads are isolated in an awaited blocking worker." },
-    { "name": "list_meeting_source_sessions", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review session enumeration is isolated in an awaited blocking worker." },
-    { "name": "delete_meeting_source_session", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review session-directory delete is isolated in an awaited blocking worker." },
-    { "name": "save_meeting_source_draft", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Revision-checked source-review draft writes are isolated in an awaited blocking worker." },
-    { "name": "checkpoint_meeting_source", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Immutable source-review checkpoints are written in an awaited blocking worker." },
-    { "name": "confirm_meeting_source", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review confirmation and pinned version writes are isolated in an awaited blocking worker." },
-    { "name": "restore_meeting_source_version", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Source-review version restoration is isolated in an awaited blocking worker." },
-    { "name": "read_meeting_source_version", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Immutable source-review version reads are isolated in an awaited blocking worker." },
-    { "name": "list_meeting_correction_examples", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Correction-example reads are isolated in an awaited blocking worker." },
-    { "name": "save_meeting_correction_example", "owner": "08-09", "module": "src-tauri/src/meeting_sources.rs", "originalDisposition": "ISOLATED", "reason": "Explicit correction-example writes are isolated in an awaited blocking worker." },
-    {"name": "calendar_sync_run", "owner": "08-12", "module": "src-tauri/src/calendar_sync.rs", "originalDisposition": "ISOLATED", "reason": "Issue #316: one-way reconcile of timed notes to the configured Google calendar (insert/patch/delete through the Google outbox). Filesystem walk, ledger/outbox writes and the gws drain run inside an awaited spawn_blocking worker; the same function is the maru calendar-sync CLI entry."},
-    {"name": "write_recovery_copy", "owner": "08-22", "module": "src-tauri/src/maru_dir.rs", "originalDisposition": "ISOLATED", "reason": "Phase 9 D-08: a failed teardown save is preserved as a real file under <work>/.maru/recovery/. The size cap, admission, symlink refusal, naming and the no-clobber write all run inside an awaited spawn_blocking worker."},
-    {"name": "archify_render_candidate", "owner": "08-10", "module": "src-tauri/src/archify.rs", "originalDisposition": "ISOLATED", "reason": "Issue #528 T1: the pinned engine validates and renders private HTML on an awaited blocking worker; the frontend converts it to safe receipt-bound static artifacts."},
-    {"name": "diagram_list_renders", "owner": "08-10", "module": "src-tauri/src/diagram/renders.rs", "originalDisposition": "ISOLATED", "reason": "Issue #534: receipt-bound workspace render IO runs in an awaited blocking worker; grants are exact-file after hash verification."},
-    {"name": "diagram_prepare_render_view", "owner": "08-10", "module": "src-tauri/src/diagram/renders.rs", "originalDisposition": "ISOLATED", "reason": "Issue #534: receipt-bound workspace render IO runs in an awaited blocking worker; grants are exact-file after hash verification."},
-    {"name": "diagram_delete_render", "owner": "08-10", "module": "src-tauri/src/diagram/renders.rs", "originalDisposition": "ISOLATED", "reason": "Issue #534: receipt-bound workspace render IO runs in an awaited blocking worker; grants are exact-file after hash verification."},
-    {"name": "archify_validate_candidate", "owner": "08-10", "module": "src-tauri/src/archify.rs", "originalDisposition": "ISOLATED", "reason": "Issue #433: validates a candidate diagram spec with the vendored, hash-pinned Archify engine (sidecars/archify, PIN.json). The job-private staging write under <work>/.maru/diagram-gen and the timeout-bounded node validate run happen inside an awaited spawn_blocking worker."},
-    {"name": "document_delete_plan", "owner": "08-07", "module": "src-tauri/src/document.rs", "originalDisposition": "ISOLATED", "reason": "Issue #441: read-only plan of the files a document delete would move to the system Trash (export bundle, versions, Studio outputs, Binder/Studio/kg-cache metadata) with a (relPath, size, mtime) fingerprint; manifest, frontmatter and state reads run inside an awaited spawn_blocking worker. trash_document keeps its baseline registration and becomes the reviewed apply step."},
+    {
+      "name": "create_meeting_source_session",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Plaud source-review session creation is isolated in an awaited blocking worker."
+    },
+    {
+      "name": "import_meeting_source",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Plaud TXT/Markdown source import is isolated in an awaited blocking worker."
+    },
+    {
+      "name": "read_meeting_source_session",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Source-review session reads are isolated in an awaited blocking worker."
+    },
+    {
+      "name": "list_meeting_source_sessions",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Source-review session enumeration is isolated in an awaited blocking worker."
+    },
+    {
+      "name": "delete_meeting_source_session",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Source-review session-directory delete is isolated in an awaited blocking worker."
+    },
+    {
+      "name": "save_meeting_source_draft",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Revision-checked source-review draft writes are isolated in an awaited blocking worker."
+    },
+    {
+      "name": "checkpoint_meeting_source",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Immutable source-review checkpoints are written in an awaited blocking worker."
+    },
+    {
+      "name": "confirm_meeting_source",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Source-review confirmation and pinned version writes are isolated in an awaited blocking worker."
+    },
+    {
+      "name": "restore_meeting_source_version",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Source-review version restoration is isolated in an awaited blocking worker."
+    },
+    {
+      "name": "read_meeting_source_version",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Immutable source-review version reads are isolated in an awaited blocking worker."
+    },
+    {
+      "name": "list_meeting_correction_examples",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Correction-example reads are isolated in an awaited blocking worker."
+    },
+    {
+      "name": "save_meeting_correction_example",
+      "owner": "08-09",
+      "module": "src-tauri/src/meeting_sources.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Explicit correction-example writes are isolated in an awaited blocking worker."
+    },
+    {
+      "name": "calendar_sync_run",
+      "owner": "08-12",
+      "module": "src-tauri/src/calendar_sync.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #316: one-way reconcile of timed notes to the configured Google calendar (insert/patch/delete through the Google outbox). Filesystem walk, ledger/outbox writes and the gws drain run inside an awaited spawn_blocking worker; the same function is the maru calendar-sync CLI entry."
+    },
+    {
+      "name": "write_recovery_copy",
+      "owner": "08-22",
+      "module": "src-tauri/src/maru_dir.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Phase 9 D-08: a failed teardown save is preserved as a real file under <work>/.maru/recovery/. The size cap, admission, symlink refusal, naming and the no-clobber write all run inside an awaited spawn_blocking worker."
+    },
+    {
+      "name": "archify_render_candidate",
+      "owner": "08-10",
+      "module": "src-tauri/src/archify.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #528 T1: the pinned engine validates and renders private HTML on an awaited blocking worker; the frontend converts it to safe receipt-bound static artifacts."
+    },
+    {
+      "name": "diagram_list_renders",
+      "owner": "08-10",
+      "module": "src-tauri/src/diagram/renders.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #534: receipt-bound workspace render IO runs in an awaited blocking worker; grants are exact-file after hash verification."
+    },
+    {
+      "name": "diagram_prepare_render_view",
+      "owner": "08-10",
+      "module": "src-tauri/src/diagram/renders.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #534: receipt-bound workspace render IO runs in an awaited blocking worker; grants are exact-file after hash verification."
+    },
+    {
+      "name": "diagram_delete_render",
+      "owner": "08-10",
+      "module": "src-tauri/src/diagram/renders.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #534: receipt-bound workspace render IO runs in an awaited blocking worker; grants are exact-file after hash verification."
+    },
+    {
+      "name": "archify_validate_candidate",
+      "owner": "08-10",
+      "module": "src-tauri/src/archify.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #433: validates a candidate diagram spec with the vendored, hash-pinned Archify engine (sidecars/archify, PIN.json). The job-private staging write under <work>/.maru/diagram-gen and the timeout-bounded node validate run happen inside an awaited spawn_blocking worker."
+    },
+    {
+      "name": "document_delete_plan",
+      "owner": "08-07",
+      "module": "src-tauri/src/document.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #441: read-only plan of the files a document delete would move to the system Trash (export bundle, versions, Studio outputs, Binder/Studio/kg-cache metadata) with a (relPath, size, mtime) fingerprint; manifest, frontmatter and state reads run inside an awaited spawn_blocking worker. trash_document keeps its baseline registration and becomes the reviewed apply step."
+    },
     {
       "name": "family_tools_status",
       "owner": "08-24",
       "module": "src-tauri/src/family_tools.rs",
       "originalDisposition": "ISOLATED",
       "reason": "Read-only Settings family-tool inventory: bounded registry HTTP and trusted manifest subprocesses run entirely in an awaited owned spawn_blocking worker."
+    },
+    {
+      "name": "hwped_save",
+      "owner": "08-21",
+      "module": "src-tauri/src/hwped.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #610: revision-checked HWPX overwrite with byte-exact recovery snapshots and shared lexical/physical path admission inside an awaited blocking worker."
     }
   ]
 }
