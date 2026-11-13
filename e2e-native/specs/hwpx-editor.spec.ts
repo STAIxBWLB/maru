@@ -74,6 +74,115 @@ async function step<A>(
   throw new Error(`${name} stalled: ${last.detail ?? "no detail"}`);
 }
 
+/** Queues one replace through the editor's own controls: pick the paragraph at
+ *  `from` (advancing past any the replace field refuses), type the marker, press
+ *  the replace button. Success is the editor's pending list growing, because
+ *  maru's not-saved note is on screen from the moment the editor opens.
+ *
+ *  The options arrive as the step's argument, never as a closure: the runner
+ *  ships this function's source to the webview, so anything it captures from the
+ *  module scope is not there. */
+function queueOneEdit(
+  options: { marker: string; from: number; requireNote: boolean },
+  pollMs: number,
+  done: (report: StepReport) => void,
+): void {
+  const { marker, from, requireNote } = options;
+  const deadline = Date.now() + pollMs;
+  const text = (node: Element | null | undefined) => (node?.textContent ?? "").trim();
+  const field = () => document.querySelector<HTMLInputElement>("#hwped-replace");
+  const submit = () => {
+    const parent = field()?.closest(".hwped-field");
+    return [...(parent?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => /^(교체|Replace)$/.test(text(button)));
+  };
+  const note = () => document.querySelector(".hwp-editor-pane-note");
+  const pending = () => [...document.querySelectorAll(".hwped-pending-list li")];
+  // The selected paragraph's text is shown in its own field above the input;
+  // the replace op refuses an empty `find`, so an option without text is not a
+  // candidate.
+  const quoteText = () => text(document.querySelector(".hwped-side .hwped-quote"));
+  let optionIndex = from;
+  const tick = () => {
+    if (pending().length > 0 && (!requireNote || note())) {
+      done({ ok: true, detail: `${text(pending()[0])} | ${text(note())}` });
+      return;
+    }
+    const options = [...document.querySelectorAll<HTMLButtonElement>('.hwped-side [role="listbox"] [role="option"]')];
+    const input = field();
+    const quote = quoteText();
+    if (!input || input.disabled || quote === "") {
+      const option = options[optionIndex];
+      if (option && option.getAttribute("aria-selected") !== "true") option.click();
+      else if (option) optionIndex += 1;
+    } else if (input.value !== marker) {
+      // A plain assignment reads as unchanged to React's controlled input;
+      // the native setter plus an input event is what a keystroke produces.
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, marker);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    } else {
+      const button = submit();
+      if (button && !button.disabled) button.click();
+    }
+    if (Date.now() > deadline) {
+      done({
+        ok: false,
+        detail: JSON.stringify({
+          options: options.length,
+          selected: options[optionIndex]?.getAttribute("aria-selected") ?? null,
+          field: input ? { disabled: input.disabled, value: input.value } : null,
+          quote: quote.slice(0, 80),
+          submit: text(submit()).slice(0, 40),
+          pending: pending().length,
+        }),
+      });
+      return;
+    }
+    setTimeout(tick, 250);
+  };
+  tick();
+}
+
+/** Applies whatever is queued: the engine performs the ops in memory, which is
+ *  the path decision B leaves without a writer. The button only enables while
+ *  ops are pending and disables again once the engine returns. */
+function applyQueuedEdits(_arg: null, pollMs: number, done: (report: StepReport) => void): void {
+  const deadline = Date.now() + pollMs;
+  const text = (node: Element | null | undefined) => (node?.textContent ?? "").trim();
+  const root = () => document.querySelector(".hwped-root");
+  let clicked = false;
+  const tick = () => {
+    const failure = document.querySelector(".hwped-root .hwped-error");
+    if (failure) {
+      done({ ok: false, detail: text(failure) });
+      return;
+    }
+    const apply = document.querySelector<HTMLButtonElement>(".hwped-toolbar .hwped-btn-primary");
+    if (!apply) {
+      done({ ok: false, detail: "the editor toolbar has no apply button" });
+      return;
+    }
+    const pending = Boolean(document.querySelector(".hwped-pending-list"));
+    if (clicked && !pending && apply.disabled && root()?.getAttribute("data-status") !== "applying") {
+      done({ ok: true });
+      return;
+    }
+    if (!clicked && !apply.disabled && pending) {
+      apply.click();
+      clicked = true;
+    }
+    if (Date.now() > deadline) {
+      done({
+        ok: false,
+        detail: JSON.stringify({ clicked, pending, disabled: apply.disabled, status: root()?.getAttribute("data-status") ?? null }),
+      });
+      return;
+    }
+    setTimeout(tick, 250);
+  };
+  tick();
+}
+
 describe("native hwpx editor", () => {
   it("renders a sanitized page, takes an edit, and leaves the file on disk untouched", async () => {
     assert.equal(process.platform, "darwin");
@@ -164,8 +273,12 @@ describe("native hwpx editor", () => {
 
     // The sanitizer ran: the same document is rendered twice, once through the
     // package's own factory and once through the app's wrapped engine, and the
-    // painted page must be the sanitized one. For a benign page the two parse
-    // to the same tree, so the DOM alone cannot tell them apart — this can.
+    // probe reports for every page whether the wrapped markup is exactly what
+    // sanitizeHwpedPageSvg returns for the raw one. That string equality is the
+    // proof; for a benign page the two parse to the same tree, so the painted
+    // DOM cannot distinguish them — which is why the equality is measured here
+    // and the painted page below is only compared against the sanitized page's
+    // own geometry, a shape it shares with the raw page.
     const probe = (await browser.executeAsync((done: (value?: unknown) => void) => {
       const bridge = (window as unknown as {
         __MARU_NATIVE_E2E__?: { hwpedRenderProbe(documentPath: string): Promise<HwpedProbe> };
@@ -212,7 +325,7 @@ describe("native hwpx editor", () => {
     assert.deepEqual(
       { paths: painted.paths, dTotal: painted.dTotal, viewBox: painted.viewBox, width: painted.width, height: painted.height },
       rendered.firstPage,
-      "the painted page is not the page the sanitizer returned for this document",
+      "the painted page is not the page the sanitized render describes for this document",
     );
 
     // 4. One edit through the editor's own UI: select a paragraph the replace
@@ -220,102 +333,93 @@ describe("native hwpx editor", () => {
     // screen from the moment the editor opens (it says edits stay in the
     // window, whether or not anything is queued yet), so the observable that
     // an edit really happened is the editor's own pending list.
-    const edited = await step("queue one edit", (_arg: null, pollMs: number, done: (report: StepReport) => void) => {
-      const deadline = Date.now() + pollMs;
-      const text = (node: Element | null | undefined) => (node?.textContent ?? "").trim();
-      const field = () => document.querySelector<HTMLInputElement>("#hwped-replace");
-      const submit = () => {
-        const parent = field()?.closest(".hwped-field");
-        return [...(parent?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
-          .find((button) => /^(교체|Replace)$/.test(text(button)));
-      };
-      const note = () => document.querySelector(".hwp-editor-pane-note");
-      const pending = () => [...document.querySelectorAll(".hwped-pending-list li")];
-      // The selected paragraph's text is shown in its own field above the
-      // input; the replace op refuses an empty `find`, so an option without
-      // text is not a candidate.
-      const quoteText = () => text(document.querySelector(".hwped-side .hwped-quote"));
-      let optionIndex = 0;
-      const tick = () => {
-        if (note() && pending().length > 0) {
-          done({ ok: true, detail: `${text(pending()[0])} | ${text(note())}` });
-          return;
-        }
-        const options = [...document.querySelectorAll<HTMLButtonElement>('.hwped-side [role="listbox"] [role="option"]')];
-        const input = field();
-        const quote = quoteText();
-        if (!input || input.disabled || quote === "") {
-          const option = options[optionIndex];
-          if (option && option.getAttribute("aria-selected") !== "true") option.click();
-          else if (option) optionIndex += 1;
-        } else if (input.value === "") {
-          // A plain assignment reads as unchanged to React's controlled input;
-          // the native setter plus an input event is what a keystroke produces.
-          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Native edit");
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        } else {
-          const button = submit();
-          if (button && !button.disabled) button.click();
-        }
-        if (Date.now() > deadline) {
-          done({
-            ok: false,
-            detail: JSON.stringify({
-              options: options.length,
-              selected: options[optionIndex]?.getAttribute("aria-selected") ?? null,
-              field: input ? { disabled: input.disabled, value: input.value } : null,
-              quote: quote.slice(0, 80),
-              submit: text(submit()).slice(0, 40),
-              pending: pending().length,
-            }),
-          });
-          return;
-        }
-        setTimeout(tick, 250);
-      };
-      tick();
-    }, null);
+    const edited = await step(
+      "queue one edit",
+      queueOneEdit,
+      { marker: "Native edit", from: 0, requireNote: true },
+    );
     assert.match(edited.detail ?? "", /저장하지 않습니다|does not write them back/, "the queued edit did not show maru's not-saved note");
 
-    // Apply the queued edit: the engine performs it in memory, which is the
-    // path decision B leaves without a writer. The apply button only enables
-    // while ops are pending and disables again once the engine returns.
-    await step("apply the edit", (_arg: null, pollMs: number, done: (report: StepReport) => void) => {
+    // The engine performs the queued ops in memory, which is the path decision B
+    // leaves without a writer.
+    await step("apply the edit", applyQueuedEdits, null);
+
+    // The edit has to reach the page. An apply that re-reads the file on disk
+    // clears the pending list just as happily and paints the same glyphs again,
+    // so the shape of the first page is what says the document changed.
+    await step("paint the applied edit", (baseline: { paths: number; dTotal: number }, pollMs: number, done: (report: StepReport) => void) => {
       const deadline = Date.now() + pollMs;
-      const text = (node: Element | null | undefined) => (node?.textContent ?? "").trim();
-      const root = () => document.querySelector(".hwped-root");
-      let clicked = false;
+      const read = () => {
+        const first = document.querySelector(".hwp-editor-host .hwped-page-svg svg");
+        if (!first) return null;
+        const paths = [...first.querySelectorAll("path")];
+        return {
+          paths: paths.length,
+          dTotal: paths.reduce((total, path) => total + (path.getAttribute("d")?.length ?? 0), 0),
+        };
+      };
       const tick = () => {
-        const failure = document.querySelector(".hwped-root .hwped-error");
-        if (failure) {
-          done({ ok: false, detail: text(failure) });
+        const now = read();
+        if (now !== null && (now.paths !== baseline.paths || now.dTotal !== baseline.dTotal)) {
+          done({ ok: true, detail: JSON.stringify(now) });
           return;
-        }
-        const apply = document.querySelector<HTMLButtonElement>(".hwped-toolbar .hwped-btn-primary");
-        if (!apply) {
-          done({ ok: false, detail: "the editor toolbar has no apply button" });
-          return;
-        }
-        const pending = Boolean(document.querySelector(".hwped-pending-list"));
-        if (clicked && !pending && apply.disabled && root()?.getAttribute("data-status") !== "applying") {
-          done({ ok: true });
-          return;
-        }
-        if (!clicked && !apply.disabled && pending) {
-          apply.click();
-          clicked = true;
         }
         if (Date.now() > deadline) {
-          done({
-            ok: false,
-            detail: JSON.stringify({ clicked, pending, disabled: apply.disabled, status: root()?.getAttribute("data-status") ?? null }),
-          });
+          done({ ok: false, detail: JSON.stringify({ baseline, now }) });
           return;
         }
         setTimeout(tick, 250);
       };
       tick();
-    }, null);
+    }, { paths: painted.paths, dTotal: painted.dTotal });
+
+    // The paragraph list is text the reader reads, and it is rendered from the
+    // document the editor holds, so it shows the replacement only if the engine
+    // handed back the edited document rather than the file it started from.
+    await step("show the edited paragraph", (marker: string, pollMs: number, done: (report: StepReport) => void) => {
+      const deadline = Date.now() + pollMs;
+      const firstOption = () =>
+        (document.querySelector('.hwped-side [role="listbox"] [role="option"]')?.textContent ?? "");
+      const tick = () => {
+        const label = firstOption();
+        if (label.includes(marker)) {
+          done({ ok: true, detail: label.slice(0, 120) });
+          return;
+        }
+        if (Date.now() > deadline) {
+          done({ ok: false, detail: label.slice(0, 200) });
+          return;
+        }
+        setTimeout(tick, 250);
+      };
+      tick();
+    }, "Native edit");
+
+    // A second edit and a second apply. The engine hands an edit back as a new
+    // handle carrying the edited bytes; sent back as a path it would be re-read
+    // from disk, so this apply would start from the original file and the first
+    // edit would be gone.
+    await step("queue a second edit", queueOneEdit, { marker: "Native second", from: 1, requireNote: false });
+    await step("apply the second edit", applyQueuedEdits, null);
+    await step("keep the first edit", (markers: string[], pollMs: number, done: (report: StepReport) => void) => {
+      const deadline = Date.now() + pollMs;
+      const options = () =>
+        [...document.querySelectorAll('.hwped-side [role="listbox"] [role="option"]')]
+          .map((node) => (node.textContent ?? ""));
+      const tick = () => {
+        const texts = options();
+        if (markers.every((marker, index) => (texts[index] ?? "").includes(marker))) {
+          done({ ok: true, detail: JSON.stringify(texts.slice(0, 3)) });
+          return;
+        }
+        if (Date.now() > deadline) {
+          done({ ok: false, detail: JSON.stringify(texts.slice(0, 4)) });
+          return;
+        }
+        setTimeout(tick, 250);
+      };
+      tick();
+    }, ["Native edit", "Native second"]);
 
     // 5. N1: back to the preview keeps the editor mounted, hidden, because its
     // edit lives in that component's memory and an unmount would drop it.

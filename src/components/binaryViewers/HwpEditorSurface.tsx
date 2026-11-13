@@ -21,21 +21,25 @@ interface Props {
 export function HwpEditorSurface({ entry, workspacePath, onDirtyChange }: Props) {
   const { locale } = useTranslation();
 
-  const engine = useMemo(
-    () =>
-      createHwpedEngine({
-        workspaceRoot: workspacePath,
-        pathOf: (document) =>
-          document.name === entry.name ? entry.relPath : undefined,
-      }),
-    [entry.name, entry.relPath, workspacePath],
-  );
-
   // The document crosses the bridge as a path (`pathOf`), so `data` is the
   // fallback the engine never reads while that path answers.
   const file = useMemo<DocumentHandle>(
     () => ({ name: entry.name, data: new Uint8Array() }),
     [entry.name],
+  );
+
+  const engine = useMemo(
+    () =>
+      createHwpedEngine({
+        workspaceRoot: workspacePath,
+        // Only the handle this surface opened still holds nothing but a path.
+        // The engine answers an edit with a new object carrying the same name
+        // and the edited bytes, so matching by name would send that handle back
+        // as a path: the next read and the next apply would start from the
+        // untouched file and the previous edit would disappear.
+        pathOf: (document) => (document === file ? entry.relPath : undefined),
+      }),
+    [entry.relPath, file, workspacePath],
   );
 
   return (

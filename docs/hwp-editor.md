@@ -145,6 +145,13 @@ const engine = createHwpedEngine({
 });
 ```
 
+`pathOf` answers only for the handle the surface opened. An edit comes back from
+the host as a new handle carrying the edited bytes, so a rule that matched
+edited handles by name would send them back as paths: the next read and the next
+apply would start from the untouched file on disk, the page would repaint
+unchanged and the first edit would be lost. Mount it by identity
+(`document === file`), never by name.
+
 `@hwp-editor/core` and `@hwp-editor/react` are pinned at exactly `1.3.0`. The
 engine asks `hwped_capabilities` before an edit and sends the `edit-ops-v1` JSON
 array when this host advertises `editOps: "v1"`, which it does; the `opsArgv`
@@ -206,4 +213,16 @@ cargo test --lib hwped::phase08_21::released_hwp_changes_only_the_addressed_dupl
 ```
 
 The resulting HWPX is generated test input, not a third-party-authored sample.
-This CLI/MockRuntime evidence does not establish WKWebView or Korean IME behavior.
+This CLI/MockRuntime evidence does not establish WKWebView or Korean IME
+behavior; the native spec below is what covers WKWebView.
+
+The real-app surface is covered by `e2e-native/specs/hwpx-editor.spec.ts`, which
+runs in the macOS native-e2e job (the job installs the engine from the
+`staixbwlb/hwp` tap first). It opens a seeded copy of
+`src-tauri/testdata/hwp-cli-plan-template.hwpx` in the built app, asserts the
+read-only preview comes first, proves the painted page is the sanitizer's output
+for the engine's page, queues two edits through the editor's own controls, and
+requires each apply to change what is painted and listed before the next one
+starts. An apply that re-read the file on disk would clear the pending queue and
+repaint the original instead. It finally requires the `.hwpx` on disk to be
+unchanged.
