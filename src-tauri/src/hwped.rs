@@ -1465,7 +1465,7 @@ pub async fn hwped_save(
 ) -> Result<HwpedSaveResponse, crate::ipc_error::IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(test)]
-        PathTransactionLease::test_stage(&[PathBuf::from(&workspace_root)], "worker:hwped_save");
+        PathTransactionLease::test_stage(&[workspace_root.as_str().into()], "worker:hwped_save");
         persistence::save_now(
             workspace_root,
             document_path,

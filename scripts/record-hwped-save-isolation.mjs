@@ -60,7 +60,7 @@ export function recordHwpedSaveIsolation(root, logFile, sourceCommit) {
     originalDisposition: "ISOLATED", disposition: "ISOLATED",
     helperChain: [
       "src-tauri/src/hwped.rs::hwped_save owns the request and awaits spawn_blocking calling src-tauri/src/hwped/persistence.rs::save_now; worker join failure becomes a display-only IpcError.",
-      "src-tauri/src/hwped/persistence.rs::save_now bounds both byte buffers, validates the privately staged candidate with the selected engine, snapshots the exact original and replaces through src-tauri/src/atomic_file.rs::write_atomic_checked only after final path, owner, policy and revision checks.",
+      "src-tauri/src/hwped/persistence.rs::save_now delegates to src-tauri/src/hwped/persistence.rs::save_with_engine, which bounds both byte buffers, validates the privately staged candidate with the selected engine, snapshots the exact original and replaces through src-tauri/src/atomic_file.rs::write_atomic_checked only after final path, owner, policy and revision checks.",
     ],
     workerBoundary: "src-tauri/src/hwped.rs::hwped_save awaits tauri::async_runtime::spawn_blocking before filesystem access, registry checks, admission waits or engine subprocess work; owned Strings cross the await and structured inner document_conflict errors pass through unchanged.",
     syncCallers: ["No production synchronous caller invokes hwped_save; src-tauri/src/hwped/persistence.rs::save_now remains private to the worker and focused fixture tests."],
@@ -68,7 +68,7 @@ export function recordHwpedSaveIsolation(root, logFile, sourceCommit) {
       readOnly: false,
       lexicalPaths: ["selected workspace .hwpx", ".maru/versions and the generated recovery snapshot"],
       aliasPaths: ["PathTransactionRequest reserves lexical and physical file/ancestor aliases while authorization remains lexical; replacement follows the existing physical destination without replacing its symlink entry."],
-      sharedAdmissionEntry: "src-tauri/src/hwped/persistence.rs::save_now acquires src-tauri/src/atomic_file.rs::PathTransactionRequest with target and versions paths, with_workspace_registry and require_parent before any workspace effect.",
+      sharedAdmissionEntry: "src-tauri/src/hwped/persistence.rs::save_with_engine acquires src-tauri/src/atomic_file.rs::PathTransactionRequest with target and versions paths, with_workspace_registry and require_parent before any workspace effect.",
       postAdmissionPreconditions: ["Registry lease, owner/write policy and full path coverage are checked inside admission.", "Final revalidate_paths, before_effect, owner/policy and expected revision run after candidate sync and immediately before replacement."],
       domainLockOrder: "Complete shared path admission happens before any domain lock or workspace write; the lease spans validation, snapshots, replacement and failure cleanup.",
     },
