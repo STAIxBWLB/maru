@@ -1,3 +1,4 @@
+import { hasHwpxEditorChanges, requestHwpxEditorNavigation } from "./hwpxEditorGuard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 
@@ -151,6 +152,7 @@ export function useDestructiveActionGuard({
   }, []);
 
   const requestRelaunch = useCallback(async () => {
+    if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
     const outcome = await runQuitFlush("relaunch");
     if (outcome.kind !== "clean") return;
     if (hasDirtyDrafts()) {
@@ -268,6 +270,7 @@ export function useDestructiveActionGuard({
           }
           event.preventDefault();
           closing = true;
+          if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) { closing = false; return; }
           // D-03/D-04/D-05: flush every mounted autosave surface first,
           // bounded to 3 s. A failed or timed-out flush never closes — it
           // raises the save-failed dialog instead (runQuitFlush).

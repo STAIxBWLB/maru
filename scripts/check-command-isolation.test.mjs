@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { checkPluginEvidence, createCurrentRegistrationManifest, filterHistoricalRegistrations, maskRust, parseArgs } from "./check-command-isolation.mjs";
+import { applyRegistrationAdditions, checkPluginEvidence, createCurrentRegistrationManifest, filterHistoricalRegistrations, maskRust, parseArgs } from "./check-command-isolation.mjs";
+
+import { HWPED_SAVE_CASES, parseHwpedSaveBehavior } from "./record-hwped-save-isolation.mjs";
 
 const CHECKER = fileURLToPath(new URL("./check-command-isolation.mjs", import.meta.url));
 const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
@@ -273,8 +275,8 @@ test("Rust mask preserves offsets and ignores nested comments, raw strings and l
 });
 test("CLI rejects missing/mixed/unknown modes and invalid counts", () => {
   for (const args of [[], ["--all", "--plan", "04"], ["--plan"], ["--plan", "29"], ["--integration", "07"], ["--all", "--expected-count", "0"], ["--refresh-current-manifest", "--all"], ["--wat"]]) assert.throws(() => parseArgs(args));
-  assert.deepEqual(parseArgs(["--plan", "4"]), { plan: "04", expectedCount: 392 });
-  assert.deepEqual(parseArgs(["--refresh-current-manifest"]), { expectedCount: 392, refreshCurrentManifest: true });
+  assert.deepEqual(parseArgs(["--plan", "4"]), { plan: "04", expectedCount: 393 });
+  assert.deepEqual(parseArgs(["--refresh-current-manifest"]), { expectedCount: 393, refreshCurrentManifest: true });
 });
 
 test("read-only evidence permits explicitly empty write sets", (t) => {
@@ -615,4 +617,44 @@ test("plugin scanner requires outlined SVG invoke evidence for the registered co
   f.evidence.svgCases[1].textMode = "outlines";
   f.saveEvidence();
   assert.equal(checkPluginEvidence(f.root), 3);
+});
+
+
+test("explicit later registration owns its shard without rewriting archival ownership", () => {
+  const rows = new Map(Array.from({ length: 365 }, (_, i) => [`baseline_${i}`, { module: MOD }]));
+  const owners = new Map([...rows.keys()].map((name) => [name, { plan: "08-06", module: MOD }]));
+  const addition = { name: "hwped_save", owner: "08-21", module: "src-tauri/src/hwped.rs", originalDisposition: "ISOLATED", reason: "Guarded binary save in an awaited worker" };
+  applyRegistrationAdditions(rows, owners, { baselineCount: 365, additions: [addition] });
+  assert.equal(rows.size, 366);
+  assert.deepEqual(owners.get("hwped_save"), { plan: "08-21", module: "src-tauri/src/hwped.rs" });
+  assert.equal(owners.get("baseline_0").plan, "08-06");
+});
+
+test("later registrations cannot change recorded owners or remove the baseline", () => {
+  const baseline = () => new Map(Array.from({ length: 365 }, (_, i) => [`baseline_${i}`, { module: MOD }]));
+  const addition = { name: "hwped_save", owner: "08-21", module: "src-tauri/src/hwped.rs", originalDisposition: "ISOLATED", reason: "Guarded binary save in an awaited worker" };
+  for (const changes of [
+    { baselineCount: 364, additions: [addition] },
+    { baselineCount: 365, additions: [addition], removals: ["baseline_0"] },
+    { baselineCount: 365, additions: [{ ...addition, owner: "08-29" }] },
+    { baselineCount: 365, additions: [{ ...addition, name: "baseline_0" }] },
+  ]) assert.throws(() => applyRegistrationAdditions(baseline(), new Map(), changes), /Registration reconciliation|Invalid explicit/);
+  const owners = new Map([["hwped_save", { plan: "08-06", module: MOD }]]);
+  assert.throws(() => applyRegistrationAdditions(baseline(), owners, { baselineCount: 365, additions: [addition] }), /Invalid explicit/);
+});
+
+
+test("HWPX save recorder requires every actual passing case and complete non-skipped summary", () => {
+  const log = HWPED_SAVE_CASES.map((name) => `test hwped::phase08_21::${name} ... ok`).join("\n")
+    + "\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.01s\n";
+  assert.deepEqual(parseHwpedSaveBehavior(log), { passed: 3, failed: 0, ignored: 0, exitCode: 0 });
+  for (const invalid of [
+    log.replace(HWPED_SAVE_CASES[0], "invented_case"),
+    log.replace("3 passed", "0 passed"),
+    log.replace("0 ignored", "1 ignored"),
+    log.replace("0 failed", "1 failed"),
+    log.replace("test result: ok.", "test result: FAILED."),
+    log + log,
+    log.slice(0, log.indexOf("test result:")),
+  ]) assert.throws(() => parseHwpedSaveBehavior(invalid), /Expected one complete|behavioral evidence|Missing unique/);
 });

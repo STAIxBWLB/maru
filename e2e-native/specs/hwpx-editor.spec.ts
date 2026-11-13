@@ -1,8 +1,7 @@
-// maru#563 real-app check: a .hwpx opens, renders through the HWP engine,
-// takes one edit and never writes that edit back to the file. Chromium cannot
+// maru#563 and #610 real-app check: a .hwpx opens through the HWP engine,
+// takes edits in memory and saves only on an explicit host Save. Chromium cannot
 // prove any of it: the preview and the editor both spawn the engine over
-// native IPC, and decision B (an edit stays in the window) is a claim about
-// the bytes on disk.
+// native IPC, and snapshot/conflict assertions concern real filesystem bytes.
 //
 // The engine is a real dependency, so this spec needs `ahwp` (or the 1.x `hwp`
 // compatibility name) on the app's PATH: the macOS CI job installs it before
@@ -10,13 +9,17 @@
 // engine's own `cli_missing` sentence in the detail — it is never skipped,
 // because a skipped editor check is not evidence that the editor works.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
+import path from "node:path";
 import type {} from "webdriverio";
 
 import {
+  FIXTURE_DOC_NAME,
   FIXTURE_HWPX_NAME,
   fixtureHwpxPath,
   fixtureHwpxSource,
+  fixtureRootDir,
 } from "../helpers/fixtureWorkspace";
 
 interface StepReport {
@@ -77,7 +80,7 @@ async function step<A>(
 /** Queues one replace through the editor's own controls: pick the paragraph at
  *  `from` (advancing past any the replace field refuses), type the marker, press
  *  the replace button. Success is the editor's pending list growing, because
- *  maru's not-saved note is on screen from the moment the editor opens.
+ *  pending operations appear before Apply and are separate from unsaved bytes.
  *
  *  The options arrive as the step's argument, never as a closure: the runner
  *  ships this function's source to the webview, so anything it captures from the
@@ -111,10 +114,11 @@ function queueOneEdit(
     const options = [...document.querySelectorAll<HTMLButtonElement>('.hwped-side [role="listbox"] [role="option"]')];
     const input = field();
     const quote = quoteText();
-    if (!input || input.disabled || quote === "") {
-      const option = options[optionIndex];
-      if (option && option.getAttribute("aria-selected") !== "true") option.click();
-      else if (option) optionIndex += 1;
+    const option = options[optionIndex];
+    if (option && option.getAttribute("aria-selected") !== "true") {
+      option.click();
+    } else if (!input || input.disabled || quote === "") {
+      if (option) optionIndex += 1;
     } else if (input.value !== marker) {
       // A plain assignment reads as unchanged to React's controlled input;
       // the native setter plus an input event is what a keystroke produces.
@@ -143,9 +147,8 @@ function queueOneEdit(
   tick();
 }
 
-/** Applies whatever is queued: the engine performs the ops in memory, which is
- *  the path decision B leaves without a writer. The button only enables while
- *  ops are pending and disables again once the engine returns. */
+/** Applies queued operations in memory. The button only enables while ops are
+ *  pending and disables again once the engine returns; persistence is separate. */
 function applyQueuedEdits(_arg: null, pollMs: number, done: (report: StepReport) => void): void {
   const deadline = Date.now() + pollMs;
   const text = (node: Element | null | undefined) => (node?.textContent ?? "").trim();
@@ -163,7 +166,10 @@ function applyQueuedEdits(_arg: null, pollMs: number, done: (report: StepReport)
       return;
     }
     const pending = Boolean(document.querySelector(".hwped-pending-list"));
-    if (clicked && !pending && apply.disabled && root()?.getAttribute("data-status") !== "applying") {
+    // A repeated polling slice can begin after the previous slice's click has
+    // finished. The applied state, rather than a slice-local click flag, is
+    // what makes this step idempotent for an engine call taking over 15s.
+    if (!pending && apply.disabled && root()?.getAttribute("data-status") !== "applying") {
       done({ ok: true });
       return;
     }
@@ -183,8 +189,90 @@ function applyQueuedEdits(_arg: null, pollMs: number, done: (report: StepReport)
   tick();
 }
 
+async function hostState() {
+  return browser.execute(() => ({
+    saveEnabled: document.querySelector<HTMLButtonElement>('[data-testid="hwpx-save"]')?.disabled === false,
+    status: document.querySelector('[data-testid="hwpx-status"]')?.textContent ?? "",
+    error: document.querySelector('[data-testid="hwpx-error"]')?.textContent ?? "",
+    conflict: Boolean(document.querySelector('[data-testid="hwpx-conflict"]')),
+    discard: Boolean(document.querySelector('[data-testid="hwpx-discard-dialog"]')),
+    paragraphs: [...document.querySelectorAll('.hwped-side [role="listbox"] [role="option"]')]
+      .map((node) => node.textContent ?? ""),
+  }));
+}
+
+async function clickHost(testId: string): Promise<void> {
+  const clicked = await browser.execute((id) => {
+    const button = document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  }, testId);
+  assert.equal(clicked, true, `The ${testId} control is missing or disabled; inspect the host status and retry the spec`);
+}
+
+async function waitHost(
+  description: string,
+  predicate: (state: Awaited<ReturnType<typeof hostState>>) => boolean,
+): Promise<void> {
+  await browser.waitUntil(async () => predicate(await hostState()), {
+    timeout: 90_000,
+    interval: 250,
+    timeoutMsg: `${description}; inspect the host save/conflict status and rerun this native spec`,
+  });
+}
+
+async function selectFile(name: string): Promise<void> {
+  await browser.waitUntil(async () => browser.execute((fileName) => {
+    const row = [...document.querySelectorAll<HTMLElement>(".files-workbench .files-list-row")]
+      .find((node) => (node.textContent ?? "").includes(fileName));
+    if (!row) return false;
+    row.click();
+    return true;
+  }, name), { timeout: 30_000, timeoutMsg: `Fixture file ${name} is absent from Files; inspect fixture seeding and the file filter` });
+}
+
+async function openEditor(): Promise<void> {
+  await browser.waitUntil(async () => browser.execute(() => {
+    const toggle = document.querySelector<HTMLButtonElement>(".hwp-editor-pane-toggle");
+    if (!toggle) return false;
+    if (toggle.getAttribute("aria-pressed") !== "true") toggle.click();
+    return true;
+  }), { timeout: 30_000, timeoutMsg: "The editor toggle is missing; inspect the selected fixture and retry" });
+  await waitHost("The reopened editor did not finish loading its disk snapshot", (state) => state.paragraphs.length > 0);
+}
+
+/** Fixed argv against the same non-private fixture, independently of the UI's
+ *  in-memory handle. A missing engine is a failure, never a skipped proof. */
+function engineRead(file: string): { version: string; envelope: string } {
+  const candidates = process.env.MARU_HWP_BIN ? [process.env.MARU_HWP_BIN] : ["ahwp", "hwp"];
+  for (const binary of candidates) {
+    try {
+      const options = { encoding: "utf8" as const, timeout: 60_000, maxBuffer: 32 * 1024 * 1024 };
+      const version = execFileSync(binary, ["--version"], options).trim();
+      const envelope = execFileSync(binary, ["cat", file, "--format", "markdown", "--with-segments"], options);
+      JSON.parse(envelope);
+      return { version, envelope };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error("The HWP engine is missing; install ahwp on the native runner PATH and rerun the spec");
+}
+
+async function snapshotFiles(directory: string): Promise<string[]> {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const result: string[] = [];
+  for (const entry of entries) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) result.push(...await snapshotFiles(file));
+    else if (entry.isFile() && entry.name.endsWith(".hwpx")) result.push(file);
+  }
+  return result;
+}
+
 describe("native hwpx editor", () => {
-  it("renders a sanitized page, takes an edit, and leaves the file on disk untouched", async () => {
+  it("renders, explicitly saves and reopens edits, and retains edits after conflicts and failed saves", async () => {
     assert.equal(process.platform, "darwin");
 
     const source = await fs.readFile(fixtureHwpxSource());
@@ -249,7 +337,7 @@ describe("native hwpx editor", () => {
           toggle.click();
           clicked = true;
         }
-        const page = document.querySelector(".hwp-editor-host .hwped-page-svg svg");
+        const page = document.querySelector('.hwp-editor-host .hwped-page-svg svg, .hwp-editor-host .hwped-page-svg img, .hwp-editor-host img.hwped-page-img[src^="data:image/svg+xml"]');
         if (page) {
           done({ ok: true });
           return;
@@ -304,11 +392,16 @@ describe("native hwpx editor", () => {
 
     const painted = (await browser.execute(() => {
       const host = document.querySelector(".hwp-editor-host");
-      const pages = [...(host?.querySelectorAll(".hwped-page-svg svg") ?? [])];
-      const first = pages[0];
-      if (!first) return null;
+      const pages = [...(host?.querySelectorAll('.hwped-page-svg svg, .hwped-page-svg img, img.hwped-page-img[src^="data:image/svg+xml"]') ?? [])];
+      const painted = pages[0];
+      if (!painted) return null;
+      const image = painted instanceof HTMLImageElement ? painted : null;
+      if (image && (!image.complete || image.naturalWidth === 0)) return null;
+      const first = image
+        ? new DOMParser().parseFromString(atob(image.src.split(",")[1] ?? ""), "image/svg+xml").documentElement
+        : painted;
       const paths = [...first.querySelectorAll("path")];
-      const box = first.getBoundingClientRect();
+      const box = painted.getBoundingClientRect();
       return {
         pages: pages.length,
         paths: paths.length,
@@ -328,20 +421,18 @@ describe("native hwpx editor", () => {
       "the painted page is not the page the sanitized render describes for this document",
     );
 
-    // 4. One edit through the editor's own UI: select a paragraph the replace
-    // field accepts, type a replacement and queue the op. maru's note is on
-    // screen from the moment the editor opens (it says edits stay in the
-    // window, whether or not anything is queued yet), so the observable that
-    // an edit really happened is the editor's own pending list.
+    // One edit through the editor's own UI: select a paragraph the replace
+    // field accepts, type a replacement and queue it. Pending operations must
+    // disable Save until Apply finishes; Save cannot implicitly apply them.
     const edited = await step(
       "queue one edit",
       queueOneEdit,
-      { marker: "Native edit", from: 0, requireNote: true },
+      { marker: "네이티브 Native edit", from: 0, requireNote: false },
     );
-    assert.match(edited.detail ?? "", /저장하지 않습니다|does not write them back/, "the queued edit did not show maru's not-saved note");
+    assert.ok(edited.ok, "the editor did not queue the replacement");
+    assert.equal((await hostState()).saveEnabled, false, "Save is enabled with unapplied operations");
 
-    // The engine performs the queued ops in memory, which is the path decision B
-    // leaves without a writer.
+    // The engine performs the queued operations on the memory bytes.
     await step("apply the edit", applyQueuedEdits, null);
 
     // The edit has to reach the page. An apply that re-reads the file on disk
@@ -350,8 +441,13 @@ describe("native hwpx editor", () => {
     await step("paint the applied edit", (baseline: { paths: number; dTotal: number }, pollMs: number, done: (report: StepReport) => void) => {
       const deadline = Date.now() + pollMs;
       const read = () => {
-        const first = document.querySelector(".hwp-editor-host .hwped-page-svg svg");
-        if (!first) return null;
+        const painted = document.querySelector('.hwp-editor-host .hwped-page-svg svg, .hwp-editor-host .hwped-page-svg img, .hwp-editor-host img.hwped-page-img[src^="data:image/svg+xml"]');
+        if (!painted) return null;
+        const image = painted instanceof HTMLImageElement ? painted : null;
+        if (image && (!image.complete || image.naturalWidth === 0)) return null;
+        const first = image
+          ? new DOMParser().parseFromString(atob(image.src.split(",")[1] ?? ""), "image/svg+xml").documentElement
+          : painted;
         const paths = [...first.querySelectorAll("path")];
         return {
           paths: paths.length,
@@ -393,7 +489,7 @@ describe("native hwpx editor", () => {
         setTimeout(tick, 250);
       };
       tick();
-    }, "Native edit");
+    }, "네이티브 Native edit");
 
     // A second edit and a second apply. The engine hands an edit back as a new
     // handle carrying the edited bytes; sent back as a path it would be re-read
@@ -419,7 +515,7 @@ describe("native hwpx editor", () => {
         setTimeout(tick, 250);
       };
       tick();
-    }, ["Native edit", "Native second"]);
+    }, ["네이티브 Native edit", "Native second"]);
 
     // 5. N1: back to the preview keeps the editor mounted, hidden, because its
     // edit lives in that component's memory and an unmount would drop it.
@@ -469,9 +565,107 @@ describe("native hwpx editor", () => {
     assert.equal(remount.height, 0, "the hidden editor host still occupies layout");
     assert.equal(remount.mounted, true, "the editor was unmounted on the way back to the preview, dropping its edit");
 
-    // 6. Decision B: the edit existed only in the window. The file on disk is
-    // still the template byte for byte.
+    // Apply and Back to preview cannot silently persist or forget edits.
     const afterEdit = await fs.readFile(fixtureHwpxPath());
-    assert.deepEqual(afterEdit, source, "the .hwpx on disk changed; maru has no write path and must not gain one by accident");
-  }).timeout(300_000);
+    assert.deepEqual(afterEdit, source, "Apply wrote the .hwpx before an explicit host Save");
+    const unsaved = await hostState();
+    assert.match(unsaved.status, /저장하지 않은 변경 사항|Unsaved changes/, "Apply/back to preview lost the unsaved state (T66-N3)");
+    await openEditor();
+    await waitHost("Save did not enable after Apply completed", (state) => state.saveEnabled);
+    await clickHost("hwpx-save");
+    await waitHost("The explicit save did not finish", (state) => /저장됨|Saved/.test(state.status) && !state.saveEnabled);
+
+    const saved = await fs.readFile(fixtureHwpxPath());
+    assert.notDeepEqual(saved, source, "Save reported success without changing the fixture bytes");
+    const versions = path.join(path.dirname(fixtureHwpxPath()), ".maru", "versions");
+    const snapshots = await snapshotFiles(versions);
+    const originals = await Promise.all(snapshots.map(async (file) => ({ file, bytes: await fs.readFile(file) })));
+    const originalSnapshot = originals.find(({ bytes }) => bytes.equals(source));
+    assert.ok(originalSnapshot, "No byte-identical .hwpx recovery snapshot exists after Save");
+    assert.equal((await fs.stat(originalSnapshot.file)).mode & 0o077, 0, "The binary snapshot is not private to its owner");
+    const reread = engineRead(fixtureHwpxPath());
+    assert.ok(reread.envelope.includes("네이티브 Native edit"), "The saved disk file lost the Korean/English first edit");
+    assert.ok(reread.envelope.includes("Native second"), "The second edit did not operate on the first edited bytes");
+
+    // Selecting another file destroys the old surface. Opening this file again
+    // must capture disk bytes; showing a still-mounted handle is insufficient.
+    await selectFile(`${FIXTURE_DOC_NAME}.md`);
+    await browser.waitUntil(async () => browser.execute(() => !document.querySelector(".hwp-editor-host")), {
+      timeout: 30_000, timeoutMsg: "The saved editor did not unmount when another file was selected; inspect Files selection",
+    });
+    await selectFile(FIXTURE_HWPX_NAME);
+    await openEditor();
+    await waitHost("Reopening lost the two saved edits", (state) =>
+      state.paragraphs.some((text) => text.includes("네이티브 Native edit"))
+      && state.paragraphs.some((text) => text.includes("Native second")));
+    assert.equal((await hostState()).saveEnabled, false, "Reopening persisted bytes starts dirty");
+
+    await step("queue the conflict edit", queueOneEdit, { marker: "충돌 Conflict retained", from: 0, requireNote: false });
+    await step("apply the conflict edit", applyQueuedEdits, null);
+    await waitHost("Save is unavailable after the conflict edit", (state) => state.saveEnabled);
+    // Replace with a different known-valid HWPX, as a non-cooperating external
+    // writer would. This must conflict rather than update the revision/retry.
+    await fs.writeFile(fixtureHwpxPath(), source);
+    await clickHost("hwpx-save");
+    await waitHost("An externally replaced file did not produce conflict recovery", (state) => state.conflict);
+    assert.deepEqual(await fs.readFile(fixtureHwpxPath()), source, "The conflict path overwrote the external revision");
+    assert.ok((await hostState()).paragraphs.some((text) => text.includes("충돌 Conflict retained")), "The conflict discarded the in-memory edit");
+    await clickHost("hwpx-keep-editing");
+    await waitHost("Keep editing did not retain the current document", (state) =>
+      !state.conflict && state.paragraphs.some((text) => text.includes("충돌 Conflict retained")));
+    await clickHost("hwpx-save");
+    await waitHost("Retry silently refreshed the expected disk revision", (state) => state.conflict);
+    await clickHost("hwpx-reload");
+    await waitHost("Reload did not request explicit discard confirmation", (state) => state.discard);
+    await clickHost("hwpx-discard-cancel");
+    await waitHost("Cancel did not preserve the conflict edit", (state) =>
+      !state.discard && state.paragraphs.some((text) => text.includes("충돌 Conflict retained")));
+    await clickHost("hwpx-reload");
+    await waitHost("The second reload did not ask to discard", (state) => state.discard);
+    await clickHost("hwpx-discard");
+    await waitHost("Explicit disk reload did not clear the old edit", (state) =>
+      !state.discard && !state.conflict && state.paragraphs.length > 0
+      && !state.paragraphs.some((text) => text.includes("충돌 Conflict retained")));
+
+    await step("queue the failed-save edit", queueOneEdit, { marker: "실패 Failed save retained", from: 0, requireNote: false });
+    await step("apply the failed-save edit", applyQueuedEdits, null);
+    await waitHost("Save did not enable for the failed-save case", (state) => state.saveEnabled);
+    // Force a real snapshot-directory failure inside this disposable fixture.
+    // Preserve the successful snapshot directory and restore it in all cases.
+    const parkedVersions = path.join(path.dirname(versions), "native-save-versions-backup");
+    await fs.rename(versions, parkedVersions);
+    try {
+      await fs.writeFile(versions, "Native fixture obstructs the snapshot directory\n", { flag: "wx", mode: 0o600 });
+      await clickHost("hwpx-save");
+      await waitHost("A snapshot-directory failure did not surface an error", (state) => state.error.length > 0 && state.saveEnabled);
+      const failed = await hostState();
+      assert.equal(failed.conflict, false, "A filesystem failure entered revision-conflict recovery");
+      assert.match(failed.status, /저장하지 않은 변경 사항|Unsaved changes/, "A failed save cleared unsaved state");
+      assert.ok(failed.paragraphs.some((text) => text.includes("실패 Failed save retained")), "A failed save discarded its edits");
+      assert.deepEqual(await fs.readFile(fixtureHwpxPath()), source, "The failed save changed the original file");
+    } finally {
+      await fs.rm(versions, { force: true });
+      await fs.rename(parkedVersions, versions);
+    }
+
+    // This receipt exists only after the native assertions above have passed.
+    // It records versions and scope, never upgrades Chromium or compile-only
+    // results into native proof. Text replacement exercises Korean bytes; it
+    // does not establish interactive Korean IME composition.
+    const manifest = JSON.parse(await fs.readFile(new URL("../../package.json", import.meta.url), "utf8")) as {
+      version: string; dependencies: Record<string, string>;
+    };
+    const artifactDir = path.join(process.cwd(), "artifacts", "native-hwpx-save");
+    await fs.mkdir(artifactDir, { recursive: true });
+    await fs.writeFile(path.join(artifactDir, "result.json"), `${JSON.stringify({
+      appVersion: manifest.version,
+      packages: { core: manifest.dependencies["@hwp-editor/core"], react: manifest.dependencies["@hwp-editor/react"] },
+      appEngineVersion: rendered.version,
+      rereadEngineVersion: reread.version,
+      platform: process.platform,
+      fixtureRoot: path.relative(fixtureRootDir(), path.dirname(fixtureHwpxPath())),
+      assertions: ["explicit-save", "korean-english-reopen", "second-edit-memory-bytes", "exact-private-snapshot", "external-conflict", "keep-editing", "reload-cancel", "confirmed-reload", "snapshot-failure-retains-edits"],
+      unverified: ["interactive Korean IME composition"],
+    }, null, 2)}\n`);
+  }).timeout(600_000);
 });

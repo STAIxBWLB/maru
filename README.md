@@ -143,7 +143,7 @@ brew upgrade maru-cli
   ISOLATED commands run on awaited `spawn_blocking` workers and
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  392-command inventory, worker-boundary, and admission evidence are gated by
+  393-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 - Diagram's File > Renders keeps immutable engine HTML plus receipts in the
   workspace, verifies artifact hashes before exact-file grants, and uses an
@@ -533,8 +533,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (392 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 392
+# Phase 08 evidence closure gate alone (393 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 393
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -637,9 +637,9 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 392-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 392`).
-  The current source manifest records 385 app handlers
+  mutation-admission and processing-caller evidence against the 393-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 393`).
+  The current source manifest records 386 app handlers
   plus seven production plugin commands. Historical Phase 08 behavior evidence
   remains archival for retired entries; plugin invocation and compiled-capability
   MockRuntime results are recorded separately and do not certify native WebView transport.

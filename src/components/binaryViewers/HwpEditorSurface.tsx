@@ -1,53 +1,62 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { HwpEditor } from "@hwp-editor/react";
 import "@hwp-editor/react/style.css";
-import type { DocumentHandle } from "@hwp-editor/core";
+import type { DocumentHandle, HwpEngine } from "@hwp-editor/core";
 import { useTranslation } from "../../lib/i18n";
 import { createHwpedEngine } from "../../lib/hwped";
-import type { WorkspaceFileEntry } from "../../lib/types";
 
-interface Props {
-  entry: WorkspaceFileEntry;
+export interface HwpEditorSurfaceProps {
+  file: DocumentHandle;
   workspacePath: string;
-  /** Lifted so the pane keeps saying the edits are unsaved after the reader
-   *  switches back to the preview without unmounting the editor. */
-  onDirtyChange?: (dirty: boolean) => void;
+  locked: boolean;
+  onReady: (document: DocumentHandle) => void;
+  onChange: (document: DocumentHandle) => void;
+  onDirtyChange: (dirty: boolean) => void;
+  onActivityChange: (busy: boolean) => void;
+  onError: (error: unknown) => void;
 }
 
-/**
- * The mounted editor. Kept in its own module so `HwpxEditorPane` can load the
- * package, its CSS and the engine factory only when someone opens an editor.
- */
-export function HwpEditorSurface({ entry, workspacePath, onDirtyChange }: Props) {
-  const { locale } = useTranslation();
-
-  // The document crosses the bridge as a path (`pathOf`), so `data` is the
-  // fallback the engine never reads while that path answers.
-  const file = useMemo<DocumentHandle>(
-    () => ({ name: entry.name, data: new Uint8Array() }),
-    [entry.name],
-  );
-
-  const engine = useMemo(
-    () =>
-      createHwpedEngine({
-        workspaceRoot: workspacePath,
-        // Only the handle this surface opened still holds nothing but a path.
-        // The engine answers an edit with a new object carrying the same name
-        // and the edited bytes, so matching by name would send that handle back
-        // as a path: the next read and the next apply would start from the
-        // untouched file and the previous edit would disappear.
-        pathOf: (document) => (document === file ? entry.relPath : undefined),
-      }),
-    [entry.relPath, file, workspacePath],
-  );
+/** All handles, including the initial capture, cross the engine as bytes. */
+export function HwpEditorSurface(props: HwpEditorSurfaceProps) {
+  const { locale, t } = useTranslation();
+  const translate = useRef(t);
+  translate.current = t;
+  const latest = useRef(props);
+  latest.current = props;
+  const engine = useMemo<HwpEngine>(() => {
+    const base = createHwpedEngine({ workspaceRoot: props.workspacePath, pathOf: () => undefined });
+    let active = 0;
+    const track = async <T,>(operation: () => Promise<T>): Promise<T> => {
+      if (latest.current.locked) throw new Error(translate.current("binaryViewer.hwpEditorBusy"));
+      active += 1;
+      latest.current.onActivityChange(true);
+      try { return await operation(); }
+      finally {
+        active -= 1;
+        latest.current.onActivityChange(active > 0);
+      }
+    };
+    return {
+      ...base,
+      read: (document) => track(() => base.read(document)),
+      render: (document, options) => track(() => base.render(document, options)),
+      edit: (document, ops, options) => track(() => base.edit(document, ops, options)),
+      validate: (document) => track(() => base.validate(document)),
+      // A composed document has a different origin and no supported save
+      // destination in this host. Refuse before the engine creates one.
+      compose: async () => { throw new Error(translate.current("binaryViewer.hwpEditorComposeUnsupported")); },
+      ...(base.create ? { create: async () => { throw new Error(translate.current("binaryViewer.hwpEditorComposeUnsupported")); } } : {}),
+      ...(base.template ? { template: async () => { throw new Error(translate.current("binaryViewer.hwpEditorComposeUnsupported")); } } : {}),
+      ...(base.fill ? { fill: (document, values) => track(() => base.fill!(document, values)) } : {}),
+    };
+  }, [props.workspacePath]);
 
   return (
-    <HwpEditor
-      engine={engine}
-      file={file}
-      locale={locale}
-      onDirtyChange={onDirtyChange}
-    />
+    <fieldset disabled={props.locked} className="hwp-editor-surface-lock" style={{ border: 0, padding: 0, margin: 0, minWidth: 0, minHeight: 0, display: "flex", flex: 1 }}>
+      <div inert={props.locked} style={{ minWidth: 0, minHeight: 0, display: "flex", flex: 1 }}>
+        <HwpEditor engine={engine} file={props.file} locale={locale} readOnly={props.locked}
+          onReady={props.onReady} onChange={props.onChange} onDirtyChange={props.onDirtyChange} onError={props.onError} />
+      </div>
+    </fieldset>
   );
 }

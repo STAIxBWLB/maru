@@ -1,3 +1,4 @@
+import { guardHwpxEditorNavigation, hasHwpxEditorChanges, requestHwpxEditorNavigation } from "../lib/hwpxEditorGuard";
 import {
   ArrowLeft,
   ArrowRight,
@@ -358,6 +359,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     // would look missing — bail so the restored folder is not wiped.
     if (entries.length === 0) return;
     if (currentFolder && !directoryPaths.has(currentFolder)) {
+      if (hasHwpxEditorChanges()) return;
       setCurrentFolder("");
       setBackStack([]);
       setForwardStack([]);
@@ -491,8 +493,11 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
 
   const selectPaths = useCallback(
     (paths: string[]) => {
-      selectionRef.current = paths;
-      onSelectionChange(paths);
+      if (paths.length === selectionRef.current.length && paths.every((value, index) => value === selectionRef.current[index])) return;
+      return guardHwpxEditorNavigation(() => {
+        selectionRef.current = paths;
+        onSelectionChange(paths);
+      });
     },
     [onSelectionChange],
   );
@@ -501,35 +506,44 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     (relPath: string, push = true) => {
       const next = normalizeRelPath(relPath);
       if (next === currentFolder) return;
-      if (push) {
-        setBackStack((current) => [...current, currentFolder]);
-        setForwardStack([]);
-      }
-      setCurrentFolder(next);
-      // Keep the tree showing where you are, without closing anything else.
-      if (next) onExpandedFoldersChange(expandFolderChain(next));
-      setRenamingPath(null);
-      selectPaths([]);
+      return guardHwpxEditorNavigation(() => {
+        if (push) {
+          setBackStack((current) => [...current, currentFolder]);
+          setForwardStack([]);
+        }
+        setCurrentFolder(next);
+        // Keep the tree showing where you are, without closing anything else.
+        if (next) onExpandedFoldersChange(expandFolderChain(next));
+        setRenamingPath(null);
+        selectionRef.current = [];
+        onSelectionChange([]);
+      });
     },
-    [currentFolder, expandFolderChain, onExpandedFoldersChange, selectPaths],
+    [currentFolder, expandFolderChain, onExpandedFoldersChange, onSelectionChange],
   );
 
   const navigateBack = () => {
-    const target = backStack.at(-1);
-    if (target === undefined) return;
-    setBackStack((current) => current.slice(0, -1));
-    setForwardStack((current) => [currentFolder, ...current]);
-    setCurrentFolder(target);
-    selectPaths([]);
+    return guardHwpxEditorNavigation(() => {
+      const target = backStack.at(-1);
+      if (target === undefined) return;
+      setBackStack((current) => current.slice(0, -1));
+      setForwardStack((current) => [currentFolder, ...current]);
+      setCurrentFolder(target);
+      selectionRef.current = [];
+      onSelectionChange([]);
+    });
   };
 
   const navigateForward = () => {
-    const target = forwardStack[0];
-    if (target === undefined) return;
-    setForwardStack((current) => current.slice(1));
-    setBackStack((current) => [...current, currentFolder]);
-    setCurrentFolder(target);
-    selectPaths([]);
+    return guardHwpxEditorNavigation(() => {
+      const target = forwardStack[0];
+      if (target === undefined) return;
+      setForwardStack((current) => current.slice(1));
+      setBackStack((current) => [...current, currentFolder]);
+      setCurrentFolder(target);
+      selectionRef.current = [];
+      onSelectionChange([]);
+    });
   };
 
   const activateEntry = useCallback(
@@ -805,16 +819,18 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     );
     if (!target) return;
     const parent = isDirectoryNode(target) ? target.relPath : target.parentRelPath;
-    setCurrentFolder(parent);
-    // Exclusive: revealing a file shows its own chain and nothing else, so the
-    // target is not buried under unrelated open folders.
-    onExpandedFoldersChange(filesFolderAncestors(parent));
-    selectPaths([target.path]);
+    guardHwpxEditorNavigation(() => {
+      setCurrentFolder(parent);
+      // Revealing a file shows its own chain after the discard guard passes.
+      onExpandedFoldersChange(filesFolderAncestors(parent));
+      selectionRef.current = [target.path];
+      onSelectionChange([target.path]);
+    });
   }, [
     entries,
     onExpandedFoldersChange,
+    onSelectionChange,
     pendingRevealTargetPath,
-    selectPaths,
     workspacePath,
   ]);
 
@@ -1379,6 +1395,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
                       ? selectionRef.current
                       : [entry.path];
                     const dragPaths = collapseNestedPaths(paths);
+                    if (hasHwpxEditorChanges()) { event.preventDefault(); void selectPaths(dragPaths); return; }
                     selectionRef.current = dragPaths;
                     onSelectionChange(dragPaths);
                     event.dataTransfer.effectAllowed = "copyMove";
@@ -1522,7 +1539,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             </span>
             <button
               type="button"
-              onClick={() => onLayoutChange({ filesPreviewOpen: false })}
+              onClick={() => { void requestHwpxEditorNavigation().then((ok) => { if (ok) onLayoutChange({ filesPreviewOpen: false }); }); }}
               title={t("files.preview.hide")}
               aria-label={t("files.preview.hide")}
             >
@@ -1533,6 +1550,7 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
             workspacePath={workspacePath}
             entries={entries}
             selectedEntries={selectedEntries}
+            selectedPaths={selectedPaths}
             documentEditorPath={documentEditorPath}
             documentEditorNode={documentEditorNode}
             documentEditorError={documentEditorError}
@@ -1750,10 +1768,11 @@ function DirectoryTreeRow({
   );
 }
 
-function FilesPreview({
+export function FilesPreview({
   workspacePath,
   entries,
   selectedEntries,
+  selectedPaths,
   documentEditorPath,
   documentEditorNode,
   documentEditorError,
@@ -1763,6 +1782,7 @@ function FilesPreview({
   workspacePath: string | null;
   entries: WorkspaceEntryNode[];
   selectedEntries: WorkspaceEntryNode[];
+  selectedPaths: string[];
   documentEditorPath: string | null;
   documentEditorNode: React.ReactNode;
   documentEditorError: string | null;
@@ -1784,7 +1804,8 @@ function FilesPreview({
   useEffect(() => {
     const request = ++requestRef.current;
     if (!workspacePath || selectedEntries.length !== 1 || !primary || isDirectoryNode(primary)) {
-      setPreview({ status: "idle" });
+      setPreview((current) => current.status === "binary" && current.classification.category === "hwpx" &&
+        selectedPaths.length === 1 && selectedPaths[0] === current.entry.path ? current : { status: "idle" });
       return;
     }
     const fileEntry = workspaceNodeToFileEntry(primary);
@@ -1792,7 +1813,10 @@ function FilesPreview({
       setPreview({ status: "error", message: t("files.preview.unavailable") });
       return;
     }
-    setPreview({ status: "loading" });
+    // Watcher metadata updates must not unmount a live editor and discard
+    // its in-memory bytes. Keep the same file's pane while classifying again.
+    setPreview((current) => current.status === "binary" && current.entry.path === fileEntry.path
+      ? current : { status: "loading" });
     void (async () => {
       try {
         if (/\.(md|markdown|html|htm)$/i.test(primary.name)) {
@@ -1805,7 +1829,10 @@ function FilesPreview({
           ? await binaryViewerPrepareAsset(workspacePath, primary.path)
           : primary.path;
         if (request !== requestRef.current) return;
-        setPreview({
+        setPreview((current) => current.status === "binary" && current.classification.category === "hwpx" && current.entry.path === fileEntry.path
+          ? { ...current, entry: { ...current.entry, sizeBytes: fileEntry.sizeBytes, updatedAt: fileEntry.updatedAt },
+            classification: { ...current.classification, sizeBytes: fileEntry.sizeBytes } }
+          : {
           status: "binary",
           entry: {
             ...fileEntry,
@@ -1818,14 +1845,18 @@ function FilesPreview({
         });
       } catch (error) {
         if (request !== requestRef.current) return;
-        setPreview({
-          status: "error",
-          message: error instanceof Error ? error.message : String(error),
-        });
+        setPreview((current) => current.status === "binary" && current.classification.category === "hwpx" && current.entry.path === fileEntry.path
+          ? current : { status: "error", message: error instanceof Error ? error.message : String(error) });
       }
     })();
-  }, [onPrepareDocument, primary, selectedEntries.length, t, workspacePath]);
+  }, [onPrepareDocument, primary, selectedEntries.length, selectedPaths, t, workspacePath]);
 
+  // A disappeared selected file must still keep unsaved editor bytes. Saving
+  // then reports a revision conflict rather than silently dropping the pane.
+  if (preview.status === "binary" && preview.classification.category === "hwpx" && workspacePath &&
+    selectedPaths.length === 1 && selectedPaths[0] === preview.entry.path) {
+    return <BinaryViewerPane entry={preview.entry} workspacePath={workspacePath} classification={preview.classification} onError={setError} />;
+  }
   if (selectedEntries.length === 0) {
     return (
       <div className="files-preview-empty">

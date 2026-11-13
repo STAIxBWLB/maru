@@ -1,7 +1,7 @@
 # hwp-editor integration (hwped_*)
 
 Maru hosts the [hwp-editor](https://github.com/STAIxBWLB/hwp-editor) engine
-bridge: six Tauri commands (`src-tauri/src/hwped.rs`) that spawn the HWP engine
+bridge: seven Tauri commands (`src-tauri/src/hwped.rs`) that spawn the HWP engine
 ([agent-hwp](https://github.com/STAIxBWLB/agent-hwp) >= 0.8.7, formerly hwp-cli)
 behind the editor's `HwpEngine` contract. Maru looks for the engine's own name
 `ahwp` first and falls back to `hwp`, the compatibility name every 1.x release
@@ -22,7 +22,8 @@ CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 
 | Command | CLI invocation | Returns |
 |---|---|---|
-| `hwped_read` | `hwp cat <in> --format markdown --with-segments`, then `hwp info <in> --json --body-stats` | CatEnvelope JSON, plus `bodyTables?` |
+| `hwped_read` | `hwp cat <in> --format markdown --with-segments`, then `hwp info <in> --json --body-stats` | CatEnvelope JSON, plus `bodyTables?`; opt-in `captureSource` adds `source: { dataBase64, revision }` from the same immutable copy |
+| `hwped_save` | Private candidate validation and re-read, guarded workspace replacement | `{ revision, sizeBytes, snapshotPath }` |
 | `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report [--layout-json <file>]` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }], notes?: [{ code, message }] }` |
 | `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial]` | `{ name, dataBase64 }` |
 | `hwped_compose` | `hwp compose <spec.json> -o <out> --report` | `{ name, dataBase64, report? }` |
@@ -133,24 +134,24 @@ parser of its own.
 
 ## Frontend
 
-`src/lib/hwped.ts` holds one factory over the published package and no wire
-types of its own:
+`src/lib/hwped.ts` holds one engine factory over the published package and
+host-owned capture/save transport:
 
 ```ts
 import { createHwpedEngine } from "./lib/hwped";
 
 const engine = createHwpedEngine({
   workspaceRoot,
-  pathOf: (doc) => /* workspace-relative path when on disk */,
+  pathOf: () => undefined, // this editor session uses captured in-memory bytes
 });
 ```
 
-`pathOf` answers only for the handle the surface opened. An edit comes back from
-the host as a new handle carrying the edited bytes, so a rule that matched
-edited handles by name would send them back as paths: the next read and the next
-apply would start from the untouched file on disk, the page would repaint
-unchanged and the first edit would be lost. Mount it by identity
-(`document === file`), never by name.
+The host opens through `hwped_read` with `captureSource: true`, receiving a
+real `DocumentHandle` plus the disk revision from the same bounded immutable
+source copy. Every handle, including edited and undo handles sharing the source
+name, uses bytes: `pathOf` always returns undefined in this session. Reload uses
+the same capture flow. The selected workspace entry supplies the save path;
+the engine-returned document name never selects a destination.
 
 `@hwp-editor/core` and `@hwp-editor/react` are pinned at exactly `1.3.0`. The
 engine asks `hwped_capabilities` before an edit and sends the `edit-ops-v1` JSON
@@ -162,8 +163,8 @@ The editor mounts through the `.hwpx` surface: `BinaryViewerPane` renders
 `HwpxEditorPane`, which shows the read-only preview by default and loads
 `HwpEditor` (its own chunk) only when the reader asks for it. Once opened the
 editor stays mounted behind the preview, so switching back does not drop an
-in-memory edit, and above the preview's own inline bound (`INLINE_HWPX_MAX_BYTES`)
-the surface offers no editor at all. `locale` follows maru's UI locale, and the
+in-memory edit. The editor admits at most 32 MiB independently of the read-only
+preview's existing inline bound (`INLINE_HWPX_MAX_BYTES`). `locale` follows maru's UI locale, and the
 host element maps maru's tokens onto the editor's `--hwped-*` contract.
 
 Rendered pages are sanitized on the way out of the host. The package paints each
@@ -178,10 +179,50 @@ scrub it leaves undone) before the package holds the bytes; raster pages pass
 through untouched. `check-dom-sanitizer` cannot see this sink, because it lives
 in `node_modules`, which is why the wrap is tested in `src/lib/hwped.test.ts`.
 
-Edits stay in memory. Maru has no command that writes an edited document back to
-a workspace path, so the surface says so instead of offering a save; giving it
-one means a managed write (validate, snapshot, revision-checked atomic replace)
-rather than a plain file overwrite.
+## Explicit workspace save
+
+`hwped_save(workspaceRoot, documentPath, dataBase64, expectedRevision)` replaces
+only an existing regular `.hwpx`. Its response is `{ revision, sizeBytes,
+snapshotPath }`, with a workspace-relative recovery path. The required revision
+is lowercase SHA-256 of the exact opened bytes. There is no unconditional
+write, autosave, Save As, new-document destination, native `.hwp` write, or
+filesystem policy added to the published engine.
+
+Rust admits the complete lexical/physical source aliases, `.maru/versions`,
+registry and parent identity before effects, and rechecks owner and write policy
+inside that lease. Both original and candidate are bounded at 32 MiB; base64
+is bounded at 44,739,244 ASCII bytes before decoding. The selected engine must
+validate the staged candidate as HWPX and successfully re-read its envelope.
+Missing engines, timeouts, malformed reports, native HWP disguised as HWPX and
+read failures refuse before snapshots or replacement. Binary bytes do not enter
+frontmatter APIs; the normalized `.hwpx` path still passes managed-write policy.
+
+Every successful overwrite first publishes a private, byte-exact original
+snapshot in `.maru/versions/<timestamp>-<uuid>.hwpx`, including ordinary writable
+workspaces. Candidate replacement preserves destination permissions, stages and
+syncs in the destination directory, then rechecks aliases, pinned parents,
+policy and expected revision immediately before rename. File and directory
+symlinks retain their entries. A failed replacement preserves the source and
+may retain a completed recovery snapshot. No fallible disk read follows commit.
+Cooperating in-process aliases serialize; external writers do not participate in
+an atomic cross-process compare-and-swap.
+
+The host tracks pending operations separately from current applied bytes and
+the persisted baseline. Apply clears pending operations but does not clear
+unsaved disk changes; undo to the exact baseline does. Save is enabled only for
+a modified, loaded, writable session with no pending operations or engine/save
+activity. It never silently applies operations. Composition and new-document
+origins cannot overwrite the selected file.
+
+Save captures bytes, revision and session generation and disables mutations
+until completion. Only that session's baseline advances on success; preview and
+file metadata refresh afterwards. Errors retain edits and baseline. A structured
+`document_conflict` offers Keep editing or Reload from disk, with explicit
+confirmation before discarding edits. Unknown IPC codes stay plain errors.
+Closing the editor, changing file/workspace or closing the window prompts before
+discard; navigation waits for a permitted Save to succeed. Focused Save routes
+to this host without also invoking text-document saving. All host statuses and
+recovery controls use ko/en strings and accessible announcements.
 
 Theming maps Maru's tokens onto the editor's `--hwped-*` contract; see
 `docs/integration-maru.md` and `docs/theme-contract.md` in the hwp-editor
@@ -224,5 +265,10 @@ read-only preview comes first, proves the painted page is the sanitizer's output
 for the engine's page, queues two edits through the editor's own controls, and
 requires each apply to change what is painted and listed before the next one
 starts. An apply that re-read the file on disk would clear the pending queue and
-repaint the original instead. It finally requires the `.hwpx` on disk to be
-unchanged.
+repaint the original instead. Before explicit Save, disk bytes remain unchanged.
+It then saves Korean/English changes, verifies the exact recovery snapshot,
+reopens and re-reads the file, exercises external-modification conflict and
+confirmed reload, and blocks the snapshot directory to verify failed-save edit
+retention. Its successful artifact records app/package/engine versions.
+Korean text insertion through test controls does not establish Korean IME input;
+IME remains UNVERIFIED unless separately exercised in the real app.

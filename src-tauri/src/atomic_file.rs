@@ -23,6 +23,12 @@ impl PathTransactionParent {
             pin: ParentPin::new(handle)?,
         })
     }
+
+    pub(crate) fn revalidate(&self) -> Result<(), String> {
+        let current = PathTransactionRequest::open_parent(&self.path)
+            .map_err(|_| "Transaction parent disappeared; retry the operation".to_string())?;
+        self.pin.matches(&current)
+    }
 }
 
 /// Stable identity of a captured transaction parent. Unix keeps the directory
@@ -317,9 +323,7 @@ impl PathTransactionRequest {
             }
         }
         for parent in &self.parents {
-            let current = Self::open_parent(&parent.path)
-                .map_err(|_| "Transaction parent disappeared; retry the operation".to_string())?;
-            parent.pin.matches(&current)?;
+            parent.revalidate()?;
         }
         for (path, alias) in self.paths.iter().zip(&self.aliases) {
             if *alias != Self::physical_path(path)? {
@@ -391,6 +395,11 @@ pub(crate) struct PathTransactionLease {
 }
 
 impl PathTransactionLease {
+    /// Recheck aliases and pinned parents after staging effects. Unlike
+    /// `before_effect`, this always checks, for a final guarded replacement.
+    pub(crate) fn revalidate_paths(&self) -> Result<(), String> {
+        self.request.revalidate()
+    }
     pub(crate) fn ensure_workspace_registry(&self) -> Result<(), String> {
         let output = crate::vault_list::workspace_registry_path()?;
         let legacy = crate::vault_list::legacy_vault_list_path()?;
@@ -869,6 +878,18 @@ fn write_atomic_with_create_mode(
     content: &[u8],
     create_mode: u32,
 ) -> Result<(), String> {
+    write_atomic_checked(path, content, create_mode, || Ok(()))
+}
+
+/// Stage, preserve permissions and sync before the caller's final revision
+/// check. A refusal drops only the private temporary file, never the target.
+pub(crate) fn write_atomic_checked<E: From<String>>(
+    path: &Path,
+    content: &[u8],
+    create_mode: u32,
+    before_replace: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    atomic_write_stage(path, "create")?;
     let parent = path
         .parent()
         .ok_or_else(|| format!("Cannot determine parent directory for {}", path.display()))?;
@@ -888,6 +909,7 @@ fn write_atomic_with_create_mode(
     let mut temp = builder
         .tempfile_in(parent)
         .map_err(|err| format!("Cannot create temporary file: {err}"))?;
+    atomic_write_stage(path, "write")?;
     temp.write_all(content)
         .map_err(|err| format!("Cannot write temporary file: {err}"))?;
     // Only a file's permissions carry over; a directory in the way fails at persist.
@@ -895,20 +917,66 @@ fn write_atomic_with_create_mode(
         .ok()
         .filter(|metadata| metadata.is_file())
     {
+        atomic_write_stage(path, "permissions")?;
         temp.as_file()
             .set_permissions(metadata.permissions())
             .map_err(|err| format!("Cannot preserve {} permissions: {err}", path.display()))?;
     }
+    atomic_write_stage(path, "sync")?;
     temp.as_file()
         .sync_all()
         .map_err(|err| format!("Cannot sync temporary file: {err}"))?;
+    before_replace()?;
+    atomic_write_stage(path, "rename")?;
     temp.persist(path).map(|_| ()).map_err(|err| {
         format!(
             "Cannot atomically replace {}: {}",
             path.display(),
             err.error
         )
+        .into()
     })
+}
+
+fn atomic_write_stage(path: &Path, stage: &str) -> Result<(), String> {
+    #[cfg(test)]
+    if ATOMIC_WRITE_TEST_FAILURES
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(key, label)| key == path && label == stage)
+    {
+        return Err(format!(
+            "Injected atomic {stage} failure; retry the operation"
+        ));
+    }
+    let _ = (path, stage);
+    Ok(())
+}
+
+#[cfg(test)]
+static ATOMIC_WRITE_TEST_FAILURES: Mutex<Vec<(PathBuf, String)>> = Mutex::new(Vec::new());
+
+#[cfg(test)]
+pub(crate) struct AtomicWriteTestFailure(PathBuf, String);
+#[cfg(test)]
+impl AtomicWriteTestFailure {
+    pub(crate) fn new(path: PathBuf, stage: &str) -> Self {
+        ATOMIC_WRITE_TEST_FAILURES
+            .lock()
+            .unwrap()
+            .push((path.clone(), stage.into()));
+        Self(path, stage.into())
+    }
+}
+#[cfg(test)]
+impl Drop for AtomicWriteTestFailure {
+    fn drop(&mut self) {
+        ATOMIC_WRITE_TEST_FAILURES
+            .lock()
+            .unwrap()
+            .retain(|(path, stage)| path != &self.0 || stage != &self.1);
+    }
 }
 
 /// Atomically publish a fully written file only when the destination does not

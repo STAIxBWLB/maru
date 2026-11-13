@@ -1,156 +1,116 @@
 // @vitest-environment jsdom
-
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HwpEditorSurfaceProps } from "./HwpEditorSurface";
+import { unmountReactRoot } from "../../lib/testing/unmountReactRoot";
 
-const surface = vi.hoisted(() => ({
-  onDirtyChange: undefined as undefined | ((dirty: boolean) => void),
-}));
-
-vi.mock("./HwpxViewer", () => ({
-  HwpxViewer: () => <div data-testid="preview" />,
-}));
-
-vi.mock("./HwpEditorSurface", () => ({
-  HwpEditorSurface: (props: { onDirtyChange?: (dirty: boolean) => void }) => {
-    surface.onDirtyChange = props.onDirtyChange;
-    return <div data-testid="editor-surface" />;
-  },
-}));
+const mocks = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), surface: null as HwpEditorSurfaceProps | null, writable: true }));
+vi.mock("../../lib/hwped", () => ({ captureHwpedSource: mocks.capture, saveHwpedDocument: mocks.save }));
+vi.mock("../../lib/workspaceStore", () => ({ useWorkspaceRegistry: () => ({ workspaces: [{ path: "/workspace", provider: "local", visibility: "private", writePolicy: mocks.writable ? "direct" : "readOnly" }] }) }));
+vi.mock("./HwpxViewer", () => ({ HwpxViewer: () => <div data-testid="preview" /> }));
+vi.mock("./HwpEditorSurface", () => ({ HwpEditorSurface: (props: HwpEditorSurfaceProps) => { mocks.surface = props; return <div data-testid="editor-surface" />; } }));
 
 import { HwpxEditorPane } from "./HwpxEditorPane";
 import { LocaleContext } from "../../lib/i18n";
+import { requestHwpxEditorNavigation } from "../../lib/hwpxEditorGuard";
 import type { WorkspaceFileEntry } from "../../lib/types";
-
 const t = (key: string) => key;
+const entry: WorkspaceFileEntry = { path: "/workspace/report.hwpx", relPath: "report.hwpx", name: "report.hwpx", extension: "hwpx", fileKind: "hwpx", sizeBytes: 10, updatedAt: null, gitTracked: false, binary: true };
+const baseline = new Uint8Array([1, 2, 3]);
 
-const entry: WorkspaceFileEntry = {
-  path: "/workspace/report.hwpx",
-  relPath: "report.hwpx",
-  name: "report.hwpx",
-  extension: "hwpx",
-  fileKind: "hwpx",
-  sizeBytes: 10,
-  updatedAt: null,
-  gitTracked: false,
-  binary: true,
-};
-
-describe("HwpxEditorPane", () => {
+describe("HwpxEditorPane persistence", () => {
   let container: HTMLDivElement;
   let root: Root | null = null;
-
   beforeEach(() => {
-    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    container = document.createElement("div");
-    document.body.appendChild(container);
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    mocks.surface = null; mocks.writable = true; mocks.capture.mockReset(); mocks.save.mockReset();
+    mocks.capture.mockResolvedValue({ source: { dataBase64: "AQID", revision: "a".repeat(64) } });
+    mocks.save.mockResolvedValue({ revision: "b".repeat(64), sizeBytes: 2, snapshotPath: ".maru/versions/original.hwpx" });
+    container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
   });
-
-  afterEach(async () => {
-    await act(async () => {
-      root?.unmount();
-    });
-    root = null;
-    container.remove();
-  });
-
-  async function renderPane(target: WorkspaceFileEntry = entry): Promise<void> {
-    root = createRoot(container);
-    await act(async () => {
-      root!.render(
-        <LocaleContext.Provider value={{ locale: "ko", setLocale: () => {}, t }}>
-          <HwpxEditorPane
-            entry={target}
-            workspacePath="/workspace"
-            onPreviewExternal={() => {}}
-            onOpenExternal={() => {}}
-          />
-        </LocaleContext.Provider>,
-      );
-    });
+  afterEach(async () => { if (root) await unmountReactRoot(root); root = null; container.remove(); });
+  async function render(target = entry, workspacePath = "/workspace") {
+    await act(async () => { root!.render(<LocaleContext.Provider value={{ locale: "ko", setLocale: () => {}, t }}><HwpxEditorPane entry={target} workspacePath={workspacePath} onPreviewExternal={() => {}} onOpenExternal={() => {}} /></LocaleContext.Provider>); });
   }
-
-  function toggle(): HTMLButtonElement {
-    const button = container.querySelector<HTMLButtonElement>(
-      "button.hwp-editor-pane-toggle",
-    );
-    if (button === null) throw new Error("toggle button is missing");
-    return button;
+  const query = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
+  async function open() {
+    await act(async () => { container.querySelector<HTMLButtonElement>(".hwp-editor-pane-toggle")!.click(); });
+    await act(async () => {});
+    await act(async () => { mocks.surface!.onReady(mocks.surface!.file); });
   }
-
-  it("opens on the preview and loads the editor only on request", async () => {
-    await renderPane();
-
-    expect(container.querySelector('[data-testid="preview"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="editor-surface"]')).toBeNull();
-    expect(container.textContent).not.toContain("binaryViewer.hwpEditorNotSaved");
-    expect(toggle().textContent).toBe("binaryViewer.hwpEditorOpen");
+  async function change(data = new Uint8Array([9, 9])) {
+    await act(async () => { mocks.surface!.onChange({ name: entry.name, data }); });
+  }
+  it("keeps preview default and captures real bytes only when opening", async () => {
+    await render(); expect(query("preview")).not.toBeNull(); expect(mocks.capture).not.toHaveBeenCalled();
+    await open(); expect(mocks.capture).toHaveBeenCalledWith("/workspace", "report.hwpx"); expect(mocks.surface!.file.data).toEqual(baseline); expect(query("hwpx-save").disabled).toBe(true);
   });
-
-  it("mounts the editor with the unsaved notice and no save affordance", async () => {
-    await renderPane();
-    await act(async () => {
-      toggle().click();
-    });
-    // The editor rides a lazy chunk, so let its module promise settle.
-    await act(async () => {});
-
-    expect(container.querySelector('[data-testid="preview"]')).toBeNull();
-    expect(container.querySelector('[data-testid="editor-surface"]')).not.toBeNull();
-    expect(container.textContent).toContain("binaryViewer.hwpEditorNotSaved");
-    expect(toggle().textContent).toBe("binaryViewer.hwpEditorClose");
-    expect(toggle().getAttribute("aria-pressed")).toBe("true");
-    expect(
-      container
-        .querySelector('[data-testid="editor-surface"]')
-        ?.closest(".hwp-editor-host"),
-    ).not.toBeNull();
+  it("separates pending from applied-unsaved and preserves unsaved after Apply and preview", async () => {
+    await render(); await open();
+    await act(async () => mocks.surface!.onDirtyChange(true));
+    expect(query("hwpx-save").disabled).toBe(true); expect(query("hwpx-status").textContent).toContain("hwpEditorApplyFirst");
+    await change(); await act(async () => mocks.surface!.onDirtyChange(false));
+    expect(query("hwpx-save").disabled).toBe(false);
+    await act(async () => container.querySelector<HTMLButtonElement>(".hwp-editor-pane-toggle")!.click());
+    expect(container.querySelector(".hwp-editor-host")!.hasAttribute("hidden")).toBe(true); expect(query("hwpx-status").textContent).toContain("hwpEditorNotSaved");
   });
-
-  it("keeps the editor mounted and hidden when the preview is shown again", async () => {
-    await renderPane();
-    await act(async () => {
-      toggle().click();
-    });
-    await act(async () => {});
-    await act(async () => {
-      toggle().click();
-    });
-
-    expect(container.querySelector('[data-testid="preview"]')).not.toBeNull();
-    // Still mounted, and hidden: unmounting would drop in-memory edits.
-    const host = container.querySelector(".hwp-editor-host");
-    expect(host?.querySelector('[data-testid="editor-surface"]')).not.toBeNull();
-    expect(host?.hasAttribute("hidden")).toBe(true);
-    expect(toggle().getAttribute("aria-pressed")).toBe("false");
-    // Nothing was edited, so there is nothing to say about unsaved edits.
-    expect(container.textContent).not.toContain("binaryViewer.hwpEditorNotSaved");
+  it("undo back to exact baseline clears unsaved", async () => {
+    await render(); await open(); await change(); await change(baseline.slice()); expect(query("hwpx-save").disabled).toBe(true); expect(query("hwpx-status").textContent).not.toContain("hwpEditorNotSaved");
   });
-
-  it("keeps the unsaved notice after a dirty editor goes back behind the preview", async () => {
-    await renderPane();
-    await act(async () => {
-      toggle().click();
-    });
-    await act(async () => {});
-    await act(async () => {
-      surface.onDirtyChange?.(true);
-    });
-    await act(async () => {
-      toggle().click();
-    });
-
-    expect(container.querySelector('[data-testid="preview"]')).not.toBeNull();
-    expect(container.querySelector(".hwp-editor-host")?.hasAttribute("hidden")).toBe(true);
-    expect(container.textContent).toContain("binaryViewer.hwpEditorNotSaved");
+  it("saves captured applied bytes and revision once, then advances the baseline", async () => {
+    let finish!: (value: unknown) => void; mocks.save.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    await render(); await open(); await change();
+    await act(async () => { query("hwpx-save").click(); query("hwpx-save").click(); });
+    expect(mocks.save).toHaveBeenCalledTimes(1); expect(mocks.save).toHaveBeenCalledWith("/workspace", "report.hwpx", "CQk=", "a".repeat(64)); expect(mocks.surface!.locked).toBe(true);
+    await act(async () => finish({ revision: "b".repeat(64), sizeBytes: 2, snapshotPath: ".maru/versions/a.hwpx" }));
+    expect(query("hwpx-status").textContent).toContain("hwpEditorSaved"); expect(query("hwpx-save").disabled).toBe(true);
   });
-
-  it("does not offer the editor above the preview's inline bound", async () => {
-    await renderPane({ ...entry, sizeBytes: 20 * 1024 * 1024 + 1 });
-
-    expect(container.querySelector("button.hwp-editor-pane-toggle")).toBeNull();
-    expect(container.querySelector('[data-testid="preview"]')).not.toBeNull();
+  it("blocks saving during engine activity and in a read-only workspace", async () => {
+    await render(); await open(); await change(); await act(async () => mocks.surface!.onActivityChange(true)); expect(query("hwpx-save").disabled).toBe(true);
+    await act(async () => mocks.surface!.onActivityChange(false)); mocks.writable = false; await render(); expect(query("hwpx-save").disabled).toBe(true);
+  });
+  it("synchronously refuses a save as engine activity starts before React commits", async () => {
+    await render(); await open(); await change();
+    await act(async () => { mocks.surface!.onActivityChange(true); query("hwpx-save").click(); });
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it("retains edits on failure and only normalized document conflicts offer reload", async () => {
+    mocks.save.mockRejectedValue({ code: "forged_conflict", message: "denied" });
+    await render(); await open(); await change(); await act(async () => query("hwpx-save").click());
+    expect(query("hwpx-error")).not.toBeNull(); expect(query("hwpx-conflict")).toBeNull(); expect(query("hwpx-save").disabled).toBe(false);
+    mocks.save.mockRejectedValue({ code: "document_conflict", message: "changed" }); await act(async () => query("hwpx-save").click());
+    expect(query("hwpx-conflict")).not.toBeNull(); expect(mocks.surface!.file.data).toEqual(baseline);
+    await act(async () => query("hwpx-reload").click()); await act(async () => query("hwpx-discard-cancel").click()); expect(mocks.capture).toHaveBeenCalledTimes(1);
+    mocks.capture.mockRejectedValue(new Error("read failed")); await act(async () => query("hwpx-reload").click()); await act(async () => query("hwpx-discard").click());
+    expect(query("hwpx-save").disabled).toBe(false); expect(query("hwpx-status").textContent).toContain("hwpEditorNotSaved");
+  });
+  it("cancelled navigation preserves edits; failed save cannot approve leaving", async () => {
+    await render(); await open(); await change(); let decision!: Promise<boolean>;
+    await act(async () => { decision = requestHwpxEditorNavigation(); }); expect(query("hwpx-discard-dialog")).not.toBeNull();
+    await act(async () => query("hwpx-discard-cancel").click()); expect(await decision).toBe(false); expect(query("hwpx-save").disabled).toBe(false);
+    await act(async () => { decision = requestHwpxEditorNavigation(); }); mocks.save.mockRejectedValue(new Error("failed")); await act(async () => query("hwpx-discard-save").click());
+    expect(query("hwpx-discard-dialog")).not.toBeNull(); await act(async () => query("hwpx-discard-cancel").click()); expect(await decision).toBe(false);
+  });
+  it("a late save cannot clear another path or workspace session", async () => {
+    let finish!: (value: unknown) => void; mocks.save.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    await render(); await open(); await change(); await act(async () => query("hwpx-save").click());
+    await render({ ...entry, path: "/workspace/other/report.hwpx", relPath: "other/report.hwpx" }); await open(); await change(new Uint8Array([8]));
+    await act(async () => finish({ revision: "b".repeat(64), sizeBytes: 2, snapshotPath: "old.hwpx" })); expect(query("hwpx-status").textContent).toContain("hwpEditorNotSaved");
+    await render({ ...entry, path: "/second/report.hwpx" }, "/second"); expect(container.querySelector('[data-testid="editor-surface"]')).toBeNull();
+  });
+  it("reload ignores callbacks from the old handle and keeps the new baseline", async () => {
+    await render(); await open(); const oldSurface = mocks.surface!; await change();
+    mocks.save.mockRejectedValue({ code: "document_conflict", message: "changed" });
+    await act(async () => query("hwpx-save").click());
+    mocks.capture.mockResolvedValue({ source: { dataBase64: "CAg=", revision: "c".repeat(64) } });
+    await act(async () => query("hwpx-reload").click()); await act(async () => query("hwpx-discard").click());
+    await act(async () => { mocks.surface!.onReady(mocks.surface!.file); oldSurface.onReady(oldSurface.file); oldSurface.onChange({ name: entry.name, data: new Uint8Array([9]) }); oldSurface.onDirtyChange(true); oldSurface.onActivityChange(true); });
+    expect(query("hwpx-status").textContent).not.toContain("hwpEditorNotSaved"); expect(query("hwpx-status").textContent).not.toContain("hwpEditorApplyFirst");
+    await change(new Uint8Array([7])); expect(query("hwpx-save").disabled).toBe(false);
+  });
+  it("editor accepts files beyond preview bound up to 32 MiB", async () => {
+    await render({ ...entry, sizeBytes: 20 * 1024 * 1024 + 1 }); expect(container.querySelector(".hwp-editor-pane-toggle")).not.toBeNull();
+    await render({ ...entry, sizeBytes: 32 * 1024 * 1024 + 1 }); expect(container.querySelector(".hwp-editor-pane-toggle")).toBeNull();
   });
 });
