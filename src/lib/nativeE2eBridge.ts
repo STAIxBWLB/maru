@@ -131,6 +131,41 @@ export interface MaruNativeE2eBridge {
    *  v7/v8 bodies, then reports what a fresh engine layout expects, so the
    *  spec can compare it with the boxes this WKWebView paints. */
   diagramEngineE4Fixture(): Promise<NativeE2eDiagramE4Result>;
+  /** The .hwpx editor check: renders one workspace document twice, once
+   *  through the package's own factory (the un-sanitized page) and once
+   *  through the app's wrapped engine, so the spec can compare the painted
+   *  page against the sanitizer's own output instead of trusting that it ran. */
+  hwpedRenderProbe(documentPath: string): Promise<NativeE2eHwpedProbe>;
+}
+
+export interface NativeE2eHwpedProbe {
+  version: string;
+  pageCount: number;
+  /** UTF-8 bytes of the un-sanitized page the package's factory returns. */
+  rawBytes: number;
+  /** UTF-8 bytes of the same page as the app's wrapped engine returns it. */
+  sanitizedBytes: number;
+  /** Every wrapped page is exactly the sanitizer's output for the raw page. */
+  wrappedIsSanitizerOutput: boolean;
+  /** The sanitized first page's own geometry, read back out of its markup, so
+   *  the spec measures what this webview painted against that page. */
+  firstPage: {
+    paths: number;
+    dTotal: number;
+    viewBox: string | null;
+    width: string | null;
+    height: string | null;
+  };
+  /** What the sanitizer kept from a deliberately hostile page. The raster is
+   *  the inclusion control: a scrub that dropped everything would also report
+   *  the four negatives. */
+  hostile: {
+    script: boolean;
+    handler: boolean;
+    javascriptHref: boolean;
+    externalHref: boolean;
+    dataRaster: boolean;
+  };
 }
 
 export interface NativeE2eDiagramE4Family {
@@ -949,6 +984,89 @@ function bridgeNamespace(): MaruNativeE2eBridge {
             addedFields: [...new Set(added.map((field) => field.replace(/\[\d+\]/g, "[]")))].sort(),
           } satisfies NativeE2eDiagramE4Result["apply"],
         };
+      },
+      // The .hwpx editor paints whatever page bytes the engine returned, so
+      // "the sanitizer ran" is not observable in the painted DOM: for a benign
+      // page the sanitized and the raw markup parse to the same tree. This
+      // probe turns it into an observable: the same document goes through the
+      // package's own factory (raw) and through the app's wrapped engine, and
+      // the spec both checks the equality here and measures the painted page
+      // against the sanitized page's own geometry.
+      hwpedRenderProbe: async (documentPath) => {
+        if (import.meta.env.VITE_NATIVE_E2E !== "1") {
+          throw new Error("The hwped render probe is available only in native-e2e builds.");
+        }
+        const state = appStateRegistration?.read();
+        const workspaceRoot = state?.workspacePath?.replace(/\\/g, "/").replace(/\/+$/, "") ?? "";
+        const segments = workspaceRoot.split("/");
+        if (
+          !/^(?:[A-Za-z]:)?\//.test(workspaceRoot)
+          || segments.includes(".") || segments.includes("..")
+          || !/(?:^|\/)maru-native-e2e-[^/]+\/workspace$/.test(workspaceRoot)
+        ) {
+          throw new Error("The native hwped probe requires the app's isolated maru-native-e2e workspace; restart the native fixture and retry.");
+        }
+        if (
+          typeof documentPath !== "string" || documentPath === ""
+          || documentPath.startsWith("/") || documentPath.split("/").includes("..")
+        ) {
+          throw new Error("The native hwped probe takes one workspace-relative document path and nothing else.");
+        }
+
+        const [{ createTauriEngine }, { createHwpedEngine }, { sanitizeHwpedPageSvg }] = await Promise.all([
+          import("@hwp-editor/core"),
+          import("./hwped"),
+          import("./hwpedSvg"),
+        ]);
+        const file = { name: documentPath.split("/").pop() ?? documentPath, data: new Uint8Array() };
+        const pathOf = () => documentPath;
+        const rawEngine = createTauriEngine(invoke, { workspaceRoot, pathOf });
+        const [capabilities, raw, wrapped] = await Promise.all([
+          rawEngine.capabilities(),
+          rawEngine.render(file, { format: "svg" }),
+          createHwpedEngine({ workspaceRoot, pathOf }).render(file, { format: "svg" }),
+        ]);
+        const decode = new TextDecoder();
+        const encode = new TextEncoder();
+        const rawText = raw.map((page) => (page.format === "svg" ? decode.decode(page.data) : null));
+        const wrappedText = wrapped.map((page) => (page.format === "svg" ? decode.decode(page.data) : null));
+        const firstPageMarkup = wrappedText[0] ?? null;
+        if (firstPageMarkup === null) {
+          throw new Error("The hwped probe needs one SVG page; this engine returned a raster page or none at all.");
+        }
+        const sanitizedFirst = new DOMParser().parseFromString(firstPageMarkup, "image/svg+xml");
+        const sanitizedPaths = [...sanitizedFirst.querySelectorAll("path")];
+
+        // Hostile sample, scrubbed by the same function the app's engine wraps.
+        const HOSTILE_PAGE = `<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><a href="javascript:alert(1)"><rect width="10" height="10" fill="#000"/></a><image href="https://example.invalid/x.png" width="10" height="10"/><image href="data:image/png;base64,iVBORw0KGgo=" width="4" height="4"/></svg>`;
+        const scrubbed = new DOMParser().parseFromString(sanitizeHwpedPageSvg(HOSTILE_PAGE), "image/svg+xml");
+        const elements = [scrubbed.documentElement, ...scrubbed.querySelectorAll("*")];
+        const attributes = elements.flatMap((element) => [...element.attributes]);
+        const hrefs = attributes.filter((attribute) => attribute.localName.toLowerCase() === "href");
+
+        return {
+          version: capabilities.version,
+          pageCount: wrapped.length,
+          rawBytes: rawText.reduce((total, text) => total + (text === null ? 0 : encode.encode(text).length), 0),
+          sanitizedBytes: wrappedText.reduce((total, text) => total + (text === null ? 0 : encode.encode(text).length), 0),
+          wrappedIsSanitizerOutput:
+            raw.length === wrapped.length
+            && rawText.every((text, index) => text !== null && wrappedText[index] === sanitizeHwpedPageSvg(text)),
+          firstPage: {
+            paths: sanitizedPaths.length,
+            dTotal: sanitizedPaths.reduce((total, path) => total + (path.getAttribute("d")?.length ?? 0), 0),
+            viewBox: sanitizedFirst.documentElement.getAttribute("viewBox"),
+            width: sanitizedFirst.documentElement.getAttribute("width"),
+            height: sanitizedFirst.documentElement.getAttribute("height"),
+          },
+          hostile: {
+            script: scrubbed.querySelectorAll("script").length > 0,
+            handler: attributes.some((attribute) => attribute.localName.toLowerCase().startsWith("on")),
+            javascriptHref: attributes.some((attribute) => /javascript:/i.test(attribute.value)),
+            externalHref: hrefs.some((attribute) => /^https?:/i.test(attribute.value)),
+            dataRaster: hrefs.some((attribute) => /^data:image\/png;base64,/.test(attribute.value)),
+          },
+        } satisfies NativeE2eHwpedProbe;
       },
     };
   }
