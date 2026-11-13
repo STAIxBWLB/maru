@@ -337,10 +337,13 @@ impl EnvSetupRun {
         // Settle the aside copy while the lease and repair lock are still held.
         let completion_error = match backup.as_deref() {
             Some(backup) if succeeded => fs::remove_dir_all(backup).err().map(|error| {
-                host_fs::operation_error(
-                    "remove the prior environment after a successful repair",
-                    backup,
-                    error,
+                format!(
+                    "{}; the repaired env is complete, and Maru removes this leftover copy on its next env check",
+                    host_fs::operation_error(
+                        "remove the prior environment after a successful repair",
+                        backup,
+                        error,
+                    )
                 )
             }),
             Some(backup) => {
@@ -443,6 +446,14 @@ pub fn skills_env_repair_headless(
     on_output: EnvOutputSink,
 ) -> Result<EnvBootstrapOutcome, String> {
     let root = host_fs::env_root()?;
+    // Only a hashed env can be moved aside to `<hash>.prev`; the legacy root
+    // is the parent of every hashed env, so a failure could not be undone.
+    if !host_fs::is_hashed_env_root(&root)? {
+        return Err(format!(
+            "skills_env_legacy_layout: the active env uses the legacy layout {}, which repair cannot back up, so nothing was changed. Run `maru skills update --apply` to move to a hashed env, or use Settings > Skills > Bootstrap",
+            host_fs::display_path(&root)
+        ));
+    }
     if !force && env_is_complete(&root)? {
         return Err(format!(
             "{ENV_REPAIR_NOT_NEEDED}: the active skills env {} is complete; nothing to repair. Use `maru skills env repair --force` to rebuild it anyway (a failed rebuild restores the current env)",
@@ -1111,6 +1122,29 @@ mod phase08_04 {
         assert!(!root.join(".venv/lib/partial.py").exists());
         assert!(root.join(".maru-env-complete").is_file());
         assert!(!root.with_extension("prev").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn headless_repair_refuses_legacy_layout_without_changes() {
+        let _home = host_fs::test_home_for_bundle_tests();
+        let setup = default_public_env_setup(None).unwrap().unwrap();
+        let root = host_fs::env_root().unwrap();
+        assert!(!host_fs::is_hashed_env_root(&root).unwrap());
+        fs::create_dir_all(root.join(".venv/bin")).unwrap();
+        fs::write(root.join(".venv/bin/python"), "legacy").unwrap();
+        fs::write(&setup, "#!/bin/sh\nrm -rf \"$2/.venv\"\nexit 4\n").unwrap();
+        let before = walk(&root);
+        for force in [false, true] {
+            let error = skills_env_repair_headless(None, force, Arc::new(|_, _| ())).unwrap_err();
+            assert!(error.starts_with("skills_env_legacy_layout"), "{error}");
+            assert!(error.contains("maru skills update --apply"), "{error}");
+            assert_eq!(walk(&root), before, "force={force}");
+        }
+        assert_eq!(
+            fs::read_to_string(root.join(".venv/bin/python")).unwrap(),
+            "legacy"
+        );
     }
 
     fn walk(root: &Path) -> Vec<String> {

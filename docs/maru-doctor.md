@@ -42,7 +42,9 @@ existing env is moved aside to `<hash>.prev` and setup builds from empty. On
 success the aside copy is removed; on failure the attempt is removed and the
 prior env, completion marker included, is restored exactly. The command
 refuses (exit `0`, JSON `{"repaired": false}`) when the env is already
-complete; `--force` rebuilds it anyway, with the same restore on failure. An
+complete; `--force` rebuilds it anyway, with the same restore on failure. It also refuses the legacy
+layout (`~/.maru/env` with no active hash), which cannot be backed up; run
+`maru skills update --apply` first. An
 error before setup starts (for example a `workspace.config.yaml` that does
 not parse) leaves the env unchanged and names the next step. Setup output
 goes to stderr, so `--json` keeps stdout to the outcome object.
