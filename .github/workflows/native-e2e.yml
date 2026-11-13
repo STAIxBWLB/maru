@@ -105,6 +105,28 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # The .hwpx editor spec renders a real document through the HWP engine,
+      # which the app resolves from PATH (`ahwp` first, else the 1.x `hwp`
+      # compatibility name). The tap installs the engine project's prebuilt
+      # release binary: no Rust build, and `render --format svg` ships glyph
+      # outlines rather than text, so no font package is involved. Homebrew
+      # refuses to load a formula from a third-party tap until it is trusted,
+      # so the step trusts this one formula of this one tap, and the install
+      # below is the check that the trust took. The engine version is whatever
+      # the tap's formula points at: the app's floor rejects an engine that is
+      # too old (`hwped.rs` compares against a minimum), and nothing here
+      # rejects a newer one, so a breaking engine release would change this
+      # job's outcome without a maru change.
+      - name: Install the HWP engine
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew tap staixbwlb/hwp https://github.com/STAIxBWLB/agent-hwp
+          brew trust --formula staixbwlb/hwp/ahwp
+          brew install ahwp
+          ahwp --version
+
       # An explicit `shell: bash` runs with `-o pipefail`; the implicit default
       # (`bash -e`) does not, so the step took tee's exit status and stayed
       # green while spec files failed (#368).

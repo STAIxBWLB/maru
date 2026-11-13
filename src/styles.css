@@ -15400,6 +15400,68 @@ button.git-badge:hover {
   color: var(--danger);
 }
 
+/* The .hwpx surface: preview by default, editor on request. The host element
+   carries maru's tokens onto the editor's --hwped-* contract, so dark mode
+   follows the theme without a second block. */
+.hwp-editor-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.hwp-editor-pane-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.hwp-editor-pane-toggle {
+  font-size: var(--type-label-size);
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.hwp-editor-pane-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hwp-editor-pane-note {
+  font-size: var(--type-meta-size);
+  color: var(--muted);
+  margin: 0;
+}
+
+.hwp-editor-host {
+  --hwped-bg: var(--panel);
+  --hwped-fg: var(--ink);
+  --hwped-muted: var(--muted);
+  --hwped-accent: var(--accent);
+  --hwped-border: var(--line);
+  --hwped-radius: var(--radius);
+  --hwped-font: "Pretendard", "Pretendard Variable", "Malgun Gothic",
+    "맑은 고딕", -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+/* The pane keeps the editor mounted behind the preview so in-memory edits
+   survive the switch back; `display: flex` above outranks the UA `[hidden]`. */
+.hwp-editor-host[hidden] {
+  display: none;
+}
+
 .binary-viewer-meta-warning {
   display: inline-block;
   min-width: 18px;

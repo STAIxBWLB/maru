@@ -204,6 +204,23 @@ export async function restoreSkillFixtures(): Promise<void> {
  * against the same literal rather than duplicating it. */
 export const FIXTURE_DOC_NAME = "Welcome";
 
+/** The `.hwpx` the editor spec opens: a byte-for-byte copy of the template
+ *  the hwped Rust fixtures already use, seeded into the workspace so the
+ *  app's first catalog scan sees it and nothing depends on a network or a
+ *  build step. */
+export const FIXTURE_HWPX_NAME = "hwp-cli-plan-template.hwpx";
+
+/** The repository's own copy, read by the spec so the untouched-on-disk check
+ *  compares against that source rather than a copy the spec wrote itself. */
+export function fixtureHwpxSource(): URL {
+  return new URL("../../src-tauri/testdata/hwp-cli-plan-template.hwpx", import.meta.url);
+}
+
+/** The seeded copy inside this worker's fixture workspace. */
+export function fixtureHwpxPath(): string {
+  return path.join(fixturePaths(requireFixtureRoot()).workspaceDir, FIXTURE_HWPX_NAME);
+}
+
 export const FIXTURE_DOC_CONTENT = [
   "# Welcome",
   "",
@@ -289,6 +306,10 @@ async function writeFixtureContent(root: string): Promise<void> {
   await fs.mkdir(registryDir, { recursive: true });
 
   await fs.writeFile(path.join(workspaceDir, `${FIXTURE_DOC_NAME}.md`), FIXTURE_DOC_CONTENT, "utf8");
+  // Seeded here, not by the spec: the catalog scan that runs at launch is what
+  // puts the row in front of the reader, and a file written afterwards needs a
+  // reload the spec would otherwise have to drive.
+  await fs.copyFile(fixtureHwpxSource(), path.join(workspaceDir, FIXTURE_HWPX_NAME));
 
   // Minimal valid src-tauri/src/vault_list.rs WorkspaceRegistry shape: one
   // private local workspace, registered and active, nothing else.

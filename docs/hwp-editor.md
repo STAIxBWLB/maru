@@ -133,18 +133,55 @@ parser of its own.
 
 ## Frontend
 
-Typed invoke wrappers live in `src/lib/hwped.ts`. Once the published `@hwp-editor/core` release supports `capabilities.editOps`,
-the migration replaces the mirrored wire types with its engine factory:
+`src/lib/hwped.ts` holds one factory over the published package and no wire
+types of its own:
 
 ```ts
-import { invoke } from "@tauri-apps/api/core";
-import { createTauriEngine } from "@hwp-editor/core";
+import { createHwpedEngine } from "./lib/hwped";
 
-const engine = createTauriEngine(invoke, {
+const engine = createHwpedEngine({
   workspaceRoot,
   pathOf: (doc) => /* workspace-relative path when on disk */,
 });
 ```
+
+`pathOf` answers only for the handle the surface opened. An edit comes back from
+the host as a new handle carrying the edited bytes, so a rule that matched
+edited handles by name would send them back as paths: the next read and the next
+apply would start from the untouched file on disk, the page would repaint
+unchanged and the first edit would be lost. Mount it by identity
+(`document === file`), never by name.
+
+`@hwp-editor/core` and `@hwp-editor/react` are pinned at exactly `1.3.0`. The
+engine asks `hwped_capabilities` before an edit and sends the `edit-ops-v1` JSON
+array when this host advertises `editOps: "v1"`, which it does; the `opsArgv`
+fallback for older hosts lives inside the package, so this repository carries no
+dual channel.
+
+The editor mounts through the `.hwpx` surface: `BinaryViewerPane` renders
+`HwpxEditorPane`, which shows the read-only preview by default and loads
+`HwpEditor` (its own chunk) only when the reader asks for it. Once opened the
+editor stays mounted behind the preview, so switching back does not drop an
+in-memory edit, and above the preview's own inline bound (`INLINE_HWPX_MAX_BYTES`)
+the surface offers no editor at all. `locale` follows maru's UI locale, and the
+host element maps maru's tokens onto the editor's `--hwped-*` contract.
+
+Rendered pages are sanitized on the way out of the host. The package paints each
+SVG page with `dangerouslySetInnerHTML` behind its own blocklist sanitizer, which
+removes `script`/`foreignObject`, `on*` attributes and `javascript:` hrefs but
+not SMIL `<set>`/`<animate>`, parser-decoded schemes, or external `data:` and
+`url()` references. That sink also sits in the main webview next to Tauri IPC,
+over bytes from a document that may come from anywhere. `src/lib/hwped.ts`
+therefore wraps `render` and passes every `format: "svg"` page through
+`src/lib/hwpedSvg.ts` (DOMPurify's SVG profile, then the href and paint-attribute
+scrub it leaves undone) before the package holds the bytes; raster pages pass
+through untouched. `check-dom-sanitizer` cannot see this sink, because it lives
+in `node_modules`, which is why the wrap is tested in `src/lib/hwped.test.ts`.
+
+Edits stay in memory. Maru has no command that writes an edited document back to
+a workspace path, so the surface says so instead of offering a save; giving it
+one means a managed write (validate, snapshot, revision-checked atomic replace)
+rather than a plain file overwrite.
 
 Theming maps Maru's tokens onto the editor's `--hwped-*` contract; see
 `docs/integration-maru.md` and `docs/theme-contract.md` in the hwp-editor
@@ -176,4 +213,16 @@ cargo test --lib hwped::phase08_21::released_hwp_changes_only_the_addressed_dupl
 ```
 
 The resulting HWPX is generated test input, not a third-party-authored sample.
-This CLI/MockRuntime evidence does not establish WKWebView or Korean IME behavior.
+This CLI/MockRuntime evidence does not establish WKWebView or Korean IME
+behavior; the native spec below is what covers WKWebView.
+
+The real-app surface is covered by `e2e-native/specs/hwpx-editor.spec.ts`, which
+runs in the macOS native-e2e job (the job installs the engine from the
+`staixbwlb/hwp` tap first). It opens a seeded copy of
+`src-tauri/testdata/hwp-cli-plan-template.hwpx` in the built app, asserts the
+read-only preview comes first, proves the painted page is the sanitizer's output
+for the engine's page, queues two edits through the editor's own controls, and
+requires each apply to change what is painted and listed before the next one
+starts. An apply that re-read the file on disk would clear the pending queue and
+repaint the original instead. It finally requires the `.hwpx` on disk to be
+unchanged.
