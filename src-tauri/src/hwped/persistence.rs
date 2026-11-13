@@ -96,8 +96,14 @@ fn target(root: &str, document_path: &str) -> Result<(PathBuf, PathBuf, String),
         .map_err(|_| failure("source escapes the workspace"))?
         .to_string_lossy()
         .replace('\\', "/");
-    authorize(root, &path)?;
     Ok((vault, path, relative))
+}
+
+fn registry_paths() -> Result<[PathBuf; 2], String> {
+    Ok([
+        crate::vault_list::workspace_registry_path()?,
+        crate::vault_list::legacy_vault_list_path()?,
+    ])
 }
 
 fn authorize(root: &str, path: &Path) -> Result<(), String> {
@@ -118,12 +124,15 @@ pub(super) fn capture_now(
         .path
         .ok_or_else(|| failure("source capture requires the selected workspace path"))?;
     let (vault, path, _) = target(&root, &selected)?;
-    let lease = PathTransactionRequest::new([path.clone()])?
+    let mut paths = vec![path.clone()];
+    paths.extend(registry_paths()?);
+    let lease = PathTransactionRequest::new(paths)?
         .with_workspace_registry()?
         .require_parent(&vault)?
         .acquire()?;
     lease.ensure_workspace_registry()?;
-    authorize(&root, &path)?;
+    crate::vault_list::assert_document_write_readonly(&root, &path, WorkspaceWriteAction::Modify)
+        .map_err(failure)?;
     let bytes = bounded_source(&path).map_err(|error| error.to_string())?;
     if bytes.is_empty() {
         return Err(failure("the captured source is empty"));
@@ -228,7 +237,9 @@ fn save_with_engine(
     let revision = digest(&candidate);
     let (vault, path, relative) = target(&root, &selected)?;
     let versions = vault.join(".maru/versions");
-    let lease = PathTransactionRequest::new([path.clone(), versions.clone()])?
+    let mut paths = vec![path.clone(), versions.clone()];
+    paths.extend(registry_paths()?);
+    let lease = PathTransactionRequest::new(paths)?
         .with_workspace_registry()?
         .require_parent(&vault)?
         .acquire()
@@ -238,6 +249,9 @@ fn save_with_engine(
         })?;
     lease.ensure_workspace_registry()?;
     lease.ensure_covered([path.clone(), versions.clone()])?;
+    // Existing registry loaders may migrate legacy metadata. The complete
+    // registry set is held and parent identities checked before that effect.
+    lease.before_effect()?;
     authorize(&root, &path)?;
     crate::vault_guard::validate_managed_write(&root, &relative, "").map_err(failure)?;
     stage(&vault, "source-read")?;
@@ -263,6 +277,7 @@ fn save_with_engine(
     stage(&vault, "validated")?;
     // Refuse changes during engine work before producing any recovery snapshot.
     check_revision(&path, &expected)?;
+    lease.revalidate_paths()?;
     lease.before_effect()?;
     authorize(&root, &path)?;
     stage(&vault, "snapshot-directory")?;

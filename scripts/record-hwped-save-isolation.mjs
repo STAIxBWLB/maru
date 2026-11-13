@@ -36,7 +36,7 @@ export function recordHwpedSaveIsolation(root, logFile, sourceCommit) {
   insist(/^[a-f0-9]{40}$/.test(sourceCommit) && git("rev-parse", "HEAD") === sourceCommit,
     "The tested source commit must equal current HEAD; commit the intended source and run the fixed selector before recording.");
   const paths = ["src-tauri/src/lib.rs", "src-tauri/src/hwped.rs", "src-tauri/src/hwped/persistence.rs",
-    "src-tauri/src/hwped/persistence/tests.rs", "src-tauri/src/atomic_file.rs", "src/lib/hwpedPersistence.ts",
+    "src-tauri/src/hwped/persistence/tests.rs", "src-tauri/src/atomic_file.rs", "src-tauri/src/vault_list.rs", "src/lib/hwpedPersistence.ts",
     "src/components/binaryViewers/HwpxEditorPane.tsx"];
   for (const path of paths) git("ls-files", "--error-unmatch", "--", path);
   insist(!git("status", "--porcelain", "--untracked-files=all", "--", ...paths),

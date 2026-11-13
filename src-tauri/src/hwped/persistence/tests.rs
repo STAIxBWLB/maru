@@ -328,6 +328,75 @@ fn hwped_capture_envelope_and_revision_use_the_same_immutable_copy() {
 }
 
 #[test]
+fn hwped_capture_legacy_registry_is_read_only_without_migration() {
+    let fixture = Fixture::new();
+    let legacy = crate::vault_list::legacy_vault_list_path().unwrap();
+    let output = crate::vault_list::workspace_registry_path().unwrap();
+    fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    let content =
+        serde_json::json!({"vaults":[{"label":"fixture","path":fixture.root_text()}]}).to_string();
+    fs::write(&legacy, &content).unwrap();
+    assert!(!output.exists());
+    let result = capture_now(
+        HwpedDocumentRef {
+            name: "test.hwpx".into(),
+            path: Some("docs/test.hwpx".into()),
+            data_base64: None,
+        },
+        Some(fixture.root_text()),
+    )
+    .unwrap();
+    assert_eq!(result["markdown"], "original");
+    assert!(!output.exists(), "capture must not migrate metadata");
+    assert_eq!(fs::read_to_string(legacy).unwrap(), content);
+    fixture.original();
+    fixture.no_snapshot();
+}
+
+#[test]
+fn hwped_save_holds_existing_registry_lease_and_observes_new_policy() {
+    let fixture = Fixture::new();
+    fixture.registry(serde_json::json!([{"label":"fixture","path":fixture.root_text(),"visibility":"private","provider":"local","writePolicy":"direct"}]));
+    let registry = crate::vault_list::workspace_registry_path().unwrap();
+    let registry_writer = PathTransactionRequest::new([registry])
+        .unwrap()
+        .acquire()
+        .unwrap();
+    let held = crate::atomic_file::phase08_06::Held::new(
+        fixture.root.join("docs/test.hwpx"),
+        "before-admission",
+    );
+    let root = fixture.root_text();
+    let (done, result) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let outcome = run(hwped_save(
+            root,
+            "docs/test.hwpx".into(),
+            BASE64.encode(b"edited"),
+            digest(b"original"),
+        ));
+        done.send(outcome).unwrap();
+    });
+    held.wait();
+    held.release();
+    assert!(
+        result.recv_timeout(Duration::from_millis(40)).is_err(),
+        "save must wait for an existing registry writer"
+    );
+    fixture.registry(serde_json::json!([{"label":"fixture","path":fixture.root_text(),"visibility":"private","provider":"local","writePolicy":"readOnly"}]));
+    drop(registry_writer);
+    assert!(result
+        .recv_timeout(Duration::from_secs(15))
+        .unwrap()
+        .unwrap_err()
+        .message
+        .contains("blocked"));
+    worker.join().unwrap();
+    fixture.original();
+    fixture.no_snapshot();
+}
+
+#[test]
 fn hwped_save_every_injected_precommit_failure_keeps_original_and_completed_snapshots() {
     let fixture = Fixture::new();
     for label in [
