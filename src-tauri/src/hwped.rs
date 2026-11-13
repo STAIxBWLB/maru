@@ -19,6 +19,7 @@
 //! documented follow-up (docs/hwp-editor.md) — deliberately not implemented
 //! here.
 
+#[cfg(test)]
 use crate::atomic_file::PathTransactionLease;
 mod persistence;
 use base64::engine::general_purpose::STANDARD as BASE64;

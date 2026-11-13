@@ -66,10 +66,10 @@ export function recordHwpedSaveIsolation(root, logFile, sourceCommit) {
     syncCallers: ["No production synchronous caller invokes hwped_save; src-tauri/src/hwped/persistence.rs::save_now remains private to the worker and focused fixture tests."],
     mutationKey: {
       readOnly: false,
-      lexicalPaths: ["selected workspace .hwpx", ".maru/versions and the generated recovery snapshot"],
+      lexicalPaths: ["selected workspace .hwpx", ".maru/versions and the generated recovery snapshot", "current workspace registry output and legacy registry input, always reserved even after migration"],
       aliasPaths: ["PathTransactionRequest reserves lexical and physical file/ancestor aliases while authorization remains lexical; replacement follows the existing physical destination without replacing its symlink entry."],
-      sharedAdmissionEntry: "src-tauri/src/hwped/persistence.rs::save_with_engine acquires src-tauri/src/atomic_file.rs::PathTransactionRequest with target and versions paths, with_workspace_registry and require_parent before any workspace effect.",
-      postAdmissionPreconditions: ["Registry lease, owner/write policy and full path coverage are checked inside admission.", "Final revalidate_paths, before_effect, owner/policy and expected revision run after candidate sync and immediately before replacement."],
+      sharedAdmissionEntry: "src-tauri/src/hwped/persistence.rs::save_with_engine reserves the target, versions and both paths from src-tauri/src/hwped/persistence.rs::registry_paths through src-tauri/src/atomic_file.rs::PathTransactionRequest with with_workspace_registry and require_parent before any workspace effect.",
+      postAdmissionPreconditions: ["Registry lease, owner/write policy and full path coverage are checked inside admission; before_effect precedes any legacy migration.", "Final revalidate_paths, before_effect, owner/policy and expected revision run after candidate sync and immediately before replacement."],
       domainLockOrder: "Complete shared path admission happens before any domain lock or workspace write; the lease spans validation, snapshots, replacement and failure cleanup.",
     },
     tests: [{ command: HWPED_SAVE_CHECK, ...result }],
@@ -84,7 +84,7 @@ export function recordHwpedSaveIsolation(root, logFile, sourceCommit) {
     },
     evidence: {
       behaviorCases: HWPED_SAVE_CASES,
-      workerProof: "Actual-wrapper same-task polling proves off-thread progress and join-failure propagation. Competing alias saves and failed admission prove serialization and release; the original snapshot and stale/missing conflicts are checked on fixture files.",
+      workerProof: "Actual-wrapper same-task polling proves off-thread progress and join-failure propagation. Competing alias saves and failed admission prove serialization and release; the original snapshot and stale/missing conflicts are checked on fixture files. src-tauri/src/hwped/persistence/tests.rs::hwped_save_holds_existing_registry_lease_and_observes_new_policy also proves existing-registry writer exclusion and post-admission policy refusal.",
       platformScope: "Disposable fixture workspaces and fake engine processes only; these Rust checks do not establish native WebView, Korean IME or production acceptance.",
       limits: "Admission serializes cooperating same-process writers. An external non-cooperating writer can still race the final revision check and rename; no cross-process compare-and-swap is claimed.",
       sourceCommit, logSha256: sha256(log),

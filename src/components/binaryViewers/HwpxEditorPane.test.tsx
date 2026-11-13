@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HwpEditorSurfaceProps } from "./HwpEditorSurface";
 import { unmountReactRoot } from "../../lib/testing/unmountReactRoot";
 
-const mocks = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), surface: null as HwpEditorSurfaceProps | null, writable: true }));
+const mocks = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), surface: null as HwpEditorSurfaceProps | null, writable: true, workspaceRoot: "/workspace" }));
 vi.mock("../../lib/hwpedPersistence", () => ({ captureHwpedSource: mocks.capture, saveHwpedDocument: mocks.save }));
-vi.mock("../../lib/workspaceStore", () => ({ useWorkspaceRegistry: () => ({ workspaces: [{ path: "/workspace", provider: "local", visibility: "private", writePolicy: mocks.writable ? "direct" : "readOnly" }] }) }));
+vi.mock("../../lib/workspaceStore", () => ({ useWorkspaceRegistry: () => ({ workspaces: [{ path: mocks.workspaceRoot, provider: "local", visibility: "private", writePolicy: mocks.writable ? "direct" : "readOnly" }] }) }));
 vi.mock("./HwpxViewer", () => ({ HwpxViewer: () => <div data-testid="preview" /> }));
 vi.mock("./HwpEditorSurface", () => ({ HwpEditorSurface: (props: HwpEditorSurfaceProps) => { mocks.surface = props; return <div data-testid="editor-surface" />; } }));
 
@@ -24,7 +24,7 @@ describe("HwpxEditorPane persistence", () => {
   let root: Root | null = null;
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    mocks.surface = null; mocks.writable = true; mocks.capture.mockReset(); mocks.save.mockReset();
+    mocks.surface = null; mocks.writable = true; mocks.workspaceRoot = "/workspace"; mocks.capture.mockReset(); mocks.save.mockReset();
     mocks.capture.mockResolvedValue({ source: { dataBase64: "AQID", revision: "a".repeat(64) } });
     mocks.save.mockResolvedValue({ revision: "b".repeat(64), sizeBytes: 2, snapshotPath: ".maru/versions/original.hwpx" });
     container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
@@ -100,6 +100,43 @@ describe("HwpxEditorPane persistence", () => {
     await render({ ...entry, path: "/workspace/other/report.hwpx", relPath: "other/report.hwpx" }); await open(); await change(new Uint8Array([8]));
     await act(async () => finish({ revision: "b".repeat(64), sizeBytes: 2, snapshotPath: "old.hwpx" })); expect(query("hwpx-status").textContent).toContain("hwpEditorNotSaved");
     await render({ ...entry, path: "/second/report.hwpx" }, "/second"); expect(container.querySelector('[data-testid="editor-surface"]')).toBeNull();
+  });
+  it("separates newline-containing workspace/path pairs and ignores the old session's results", async () => {
+    const firstRoot = "/workspace";
+    const firstRelPath = "nested\nreport.hwpx";
+    const secondRoot = "/workspace\nnested";
+    const secondRelPath = "report.hwpx";
+    expect(`${firstRoot}\n${firstRelPath}`).toBe(`${secondRoot}\n${secondRelPath}`);
+    const firstEntry = { ...entry, path: `${firstRoot}/${firstRelPath}`, relPath: firstRelPath, name: firstRelPath };
+    const secondEntry = { ...entry, path: `${secondRoot}/${secondRelPath}`, relPath: secondRelPath };
+    let finishOldSave!: (value: unknown) => void;
+    mocks.save.mockReturnValueOnce(new Promise((resolve) => { finishOldSave = resolve; }));
+    await render(firstEntry, firstRoot); await open(); await change();
+    const oldSurface = mocks.surface!;
+    await act(async () => query("hwpx-save").click());
+
+    mocks.workspaceRoot = secondRoot;
+    await render(secondEntry, secondRoot);
+    expect(container.querySelector('[data-testid="editor-surface"]')).toBeNull();
+    expect(query("hwpx-save")).toBeNull();
+    await open();
+    expect(mocks.capture).toHaveBeenCalledTimes(2);
+    expect(mocks.capture).toHaveBeenNthCalledWith(1, firstRoot, firstRelPath);
+    expect(mocks.capture).toHaveBeenNthCalledWith(2, secondRoot, secondRelPath);
+    // Both disk files intentionally have identical baseline bytes and SHA.
+    // The old save and callbacks still belong solely to the first session.
+    await act(async () => {
+      finishOldSave({ revision: "b".repeat(64), sizeBytes: 2, snapshotPath: "old.hwpx" });
+      oldSurface.onChange({ name: firstEntry.name, data: new Uint8Array([99]) });
+      oldSurface.onDirtyChange(true); oldSurface.onActivityChange(true);
+    });
+    expect(query("hwpx-status").textContent).not.toContain("hwpEditorNotSaved");
+    expect(query("hwpx-status").textContent).not.toContain("hwpEditorApplyFirst");
+    expect(query("hwpx-status").textContent).not.toContain("hwpEditorSaved");
+    expect(query("hwpx-save").disabled).toBe(true);
+    await change(new Uint8Array([8]));
+    await act(async () => query("hwpx-save").click());
+    expect(mocks.save).toHaveBeenLastCalledWith(secondRoot, secondRelPath, "CA==", "a".repeat(64));
   });
   it("reload ignores callbacks from the old handle and keeps the new baseline", async () => {
     await render(); await open(); const oldSurface = mocks.surface!; await change();

@@ -135,7 +135,8 @@ use hub_client::ipc::{
 };
 use hwp_cli_template::ipc::{hwp_cli_template_fields, hwp_cli_template_fill};
 use hwped::{
-    hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_save, hwped_validate,
+    hwped_capabilities, hwped_compose, hwped_edit, hwped_read, hwped_render, hwped_save,
+    hwped_validate,
 };
 use inbox_settings::ipc::{
     read_inbox_runtime_config, read_inbox_settings, save_inbox_runtime_config, save_inbox_settings,
