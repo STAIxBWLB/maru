@@ -2472,7 +2472,7 @@
     },
     {
       "path": "src-tauri/src/export/dispatch.rs",
-      "sha256": "7f5e21e8c8103a79a96cf72fc718e0083879e51aae3d2304f84285f449ed3792"
+      "sha256": "f5145eea6737f3fdd3b464153343bbb3204246db2148a3bf8b25d6397b8958a1"
     },
     {
       "path": "src-tauri/src/export/mod.rs",
@@ -2512,11 +2512,11 @@
     },
     {
       "path": "src-tauri/src/hwp_cli_template.rs",
-      "sha256": "8a598883342de447cf0a6be277283afbafbd51e5365cd3218861f3c31f1bc8eb"
+      "sha256": "5f18ce6d1b260f10e1e199cf010f69aca264fa8d15af1fab5c2840ab353c6123"
     },
     {
       "path": "src-tauri/src/hwped.rs",
-      "sha256": "bbe882e3b9c1905f44c3078376be522d5cee0b25b45796ca4ea5f649bc2cf7ed"
+      "sha256": "8fbff15abe79693e485254034a1de115b46a09608bf4f43534b68ae94d87deb3"
     },
     {
       "path": "src-tauri/src/inbox.rs",
@@ -2735,5 +2735,5 @@
       "sha256": "2025ae2c4af528e26d8928f2beff151a1ea41a8990ef49a51ff1b886116d628f"
     }
   ],
-  "sourceCommit": "fb2ab2d4c28f60af5f2bbcb4ba2252abbeabe105"
+  "sourceCommit": "0f353726bce42ee51f238820252fe8adafdefb97"
 }

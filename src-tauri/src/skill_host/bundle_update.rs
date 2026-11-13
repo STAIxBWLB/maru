@@ -421,7 +421,8 @@ pub fn unmet_tool_floors(
             .trim()
             .strip_prefix(">=")
             .and_then(|v| crate::tool_manifest::parse_stable(v.trim()));
-        let known = matches!(tool.as_str(), "amem" | "vmem");
+        let known = matches!(tool.as_str(), "amem" | "vmem")
+            || tool == crate::tool_manifest::HWP_ENGINE_TOOL;
         let (Some(floor), true) = (floor, known) else {
             unmet.push(format!("{tool} {range} (not understood by this build)"));
             continue;
@@ -1607,12 +1608,36 @@ mod tests {
                 "vmem >=0.2.3 (installed 0.2.2)".to_string(),
             ]
         );
-        for (tool, range) in [("vmem", "^0.2.3"), ("vmem", ">=0.2"), ("hwp", ">=1.0.0")] {
+        for (tool, range) in [
+            ("vmem", "^0.2.3"),
+            ("vmem", ">=0.2"),
+            ("hwp", "^1.0.0"),
+            ("ahwp", ">=1.0.0"),
+        ] {
             assert_eq!(
                 unmet_tool_floors(&requires(&[(tool, range)]), |_| Some((99, 0, 0))),
                 vec![format!("{tool} {range} (not understood by this build)")]
             );
         }
+    }
+
+    #[test]
+    fn hwp_engine_floor_is_read_from_the_engine_however_it_is_installed() {
+        // The bundle names the engine by its skill/contract name `hwp`; the
+        // probe behind `installed` resolves `ahwp` first, so an install that
+        // has only `ahwp` (agent-hwp 2.0.0) satisfies the floor.
+        let requires = BTreeMap::from([("hwp".to_string(), ">=1.0.0".to_string())]);
+        assert!(
+            unmet_tool_floors(&requires, |tool| (tool == "hwp").then_some((1, 6, 2))).is_empty()
+        );
+        assert_eq!(
+            unmet_tool_floors(&requires, |_| Some((0, 20, 0))),
+            vec!["hwp >=1.0.0 (installed 0.20.0)".to_string()]
+        );
+        assert_eq!(
+            unmet_tool_floors(&requires, |_| None),
+            vec!["hwp >=1.0.0 (not installed)".to_string()]
+        );
     }
 
     #[test]
