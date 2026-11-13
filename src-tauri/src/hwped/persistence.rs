@@ -318,6 +318,8 @@ fn save_with_engine(
         .to_string_lossy()
         .replace('\\', "/");
     stage(&vault, "replacement-stage")?;
+    check_revision(&path, &expected)?;
+    lease.revalidate_paths()?;
     write_atomic_checked(&physical, &candidate, 0o600, || {
         stage(&vault, "before-replace")?;
         // Missing selected aliases are document conflicts, even when their
@@ -339,6 +341,12 @@ fn save_with_engine(
     .map_err(|error: IpcError| {
         if error.code == DOCUMENT_CONFLICT {
             error
+        } else if let Err(conflict) = check_revision(&path, &expected) {
+            if conflict.code == DOCUMENT_CONFLICT {
+                conflict
+            } else {
+                failure(error.message).into()
+            }
         } else {
             failure(error.message).into()
         }

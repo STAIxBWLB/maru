@@ -648,6 +648,27 @@ fn hwped_save_parent_replacement_after_snapshot_refuses_without_new_target_write
 }
 
 #[test]
+fn hwped_save_missing_parent_after_snapshot_is_not_recreated() {
+    let fixture = Fixture::new();
+    let root = fixture.root.clone();
+    let _hook = PathTransactionTestHook::new(root.clone(), "hwped:snapshot-complete", move || {
+        fs::rename(root.join("docs"), root.join("retained-docs")).unwrap();
+    });
+    assert_eq!(
+        fixture
+            .save(b"edited", &digest(b"original"))
+            .unwrap_err()
+            .code,
+        DOCUMENT_CONFLICT
+    );
+    assert!(!fixture.root.join("docs").exists());
+    assert_eq!(
+        fs::read(fixture.root.join("retained-docs/test.hwpx")).unwrap(),
+        b"original"
+    );
+}
+
+#[test]
 fn hwped_save_new_snapshot_parent_replacement_or_snapshot_loss_refuses_commit() {
     for sabotage in ["directory", "delete", "modify"] {
         let fixture = Fixture::new();

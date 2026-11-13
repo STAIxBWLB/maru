@@ -878,6 +878,11 @@ fn write_atomic_with_create_mode(
     content: &[u8],
     create_mode: u32,
 ) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Cannot determine parent directory for {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|err| format!("Cannot create {}: {err}", parent.display()))?;
     write_atomic_checked(path, content, create_mode, || Ok(()))
 }
 
@@ -893,8 +898,8 @@ pub(crate) fn write_atomic_checked<E: From<String>>(
     let parent = path
         .parent()
         .ok_or_else(|| format!("Cannot determine parent directory for {}", path.display()))?;
-    fs::create_dir_all(parent)
-        .map_err(|err| format!("Cannot create {}: {err}", parent.display()))?;
+    // Overwrite callers must not recreate a parent that disappeared while
+    // staging. Creation-capable wrappers establish their parents above.
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
