@@ -52,7 +52,6 @@ import { DocumentList } from "./components/DocumentList";
 import { EditorPaneFacade } from "./components/EditorPaneFacade";
 import { type EditorViewMode, type HtmlViewMode } from "./components/EditorPane";
 import type { HtmlEditorFlushHandle } from "./components/HtmlVisualEditor";
-import { BinaryViewerPane } from "./components/BinaryViewerPane";
 import { GitStatusBadge } from "./components/GitStatusBadge";
 import { AgentUsageBar } from "./components/AgentUsageBar";
 import { WritingGuidelineSidebar } from "./components/catalog/WritingGuidelineSidebar";
@@ -582,6 +581,7 @@ const MIN_OUTLINE_PANE_WIDTH = 240;
 const MAX_OUTLINE_PANE_WIDTH = 520;
 
 const LazySettingsSurface = lazy(() => import("./components/settings/SettingsSurface"));
+const BinaryViewerPane = lazy(() => import("./components/BinaryViewerPane").then((module) => ({ default: module.BinaryViewerPane })));
 
 type PendingExplorerReveal = {
   pane: ExplorerPaneMode;
@@ -7827,26 +7827,30 @@ export function MainApp() {
   const leftBinaryBody = useMemo(
     () =>
       isBinaryTab(leftTab) ? (
+        <Suspense fallback={<div role="status">{t("binaryViewer.loading")}</div>}>
         <BinaryViewerPane
           entry={leftTab.fileEntry}
           workspacePath={leftTab.workspacePath}
           classification={leftTab.classification}
           onError={handleBinaryViewerError}
         />
+        </Suspense>
       ) : null,
-    [leftTab, handleBinaryViewerError],
+    [leftTab, handleBinaryViewerError, t],
   );
   const rightBinaryBody = useMemo(
     () =>
       isBinaryTab(rightTab) ? (
+        <Suspense fallback={<div role="status">{t("binaryViewer.loading")}</div>}>
         <BinaryViewerPane
           entry={rightTab.fileEntry}
           workspacePath={rightTab.workspacePath}
           classification={rightTab.classification}
           onError={handleBinaryViewerError}
         />
+        </Suspense>
       ) : null,
-    [rightTab, handleBinaryViewerError],
+    [rightTab, handleBinaryViewerError, t],
   );
   const handleLeftSelectTab = useCallback(
     (nextTabId: string) => selectTab(nextTabId, "left"),
