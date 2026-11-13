@@ -1,9 +1,9 @@
 // Graph model for the "graph" app mode (maru-vault-graph-spec §F2).
 //
 // Dual source: the live graph is derived from VaultEntry[] (always fresh, no
-// community); `<vault>/reports/vault-graph.json` — produced by build-graph.py
-// on the weekly ritual — overlays `community` per node. Absent/corrupt JSON
-// degrades gracefully to the live graph (enriched=false).
+// community); `<vault>/reports/vault-graph.json` — produced by `vmem graph
+// build` on the weekly ritual — overlays `community` per node. Absent/corrupt
+// JSON degrades gracefully to the live graph (enriched=false).
 
 import { collectWikilinkTargets } from "../neighborhood";
 import type { GraphSource } from "../settings";
@@ -128,8 +128,9 @@ export function edgeOrigin(
 }
 
 /** Build the live graph from scanned entries. Node id = lowercase stem
- *  (matches build-graph.py `f.stem`); every member of a stem collision uses
- *  its rel-path-without-extension so ids stay unique and scan-order stable. */
+ *  (matches `vmem graph build`'s note-stem id; the join case-folds both sides);
+ *  every member of a stem collision uses its rel-path-without-extension so ids
+ *  stay unique and scan-order stable. */
 export function buildVaultGraph(
   entries: VaultEntry[],
   index?: EntryIndex,

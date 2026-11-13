@@ -2704,7 +2704,7 @@
     },
     {
       "path": "src-tauri/src/vault_graph.rs",
-      "sha256": "343d4be46ab8202b3fe48f39d4316130ad84313e01128624ff713e2f0eb549b8"
+      "sha256": "acc9277e4efcd4359ab0856e24c2a894430bbe7f1c7eaef35f13e05492dbfd90"
     },
     {
       "path": "src-tauri/src/vault_guard.rs",
@@ -2735,5 +2735,5 @@
       "sha256": "2025ae2c4af528e26d8928f2beff151a1ea41a8990ef49a51ff1b886116d628f"
     }
   ],
-  "sourceCommit": "ad1119a886af39b7becf492583756687484d9d98"
+  "sourceCommit": "fb2ab2d4c28f60af5f2bbcb4ba2252abbeabe105"
 }

@@ -1,7 +1,7 @@
 //! vault_graph — enrichment reader for `<vault>/reports/vault-graph.json`.
 //!
-//! The knowledge-graph JSON is produced by build-graph.py (skills/lib/) on the
-//! weekly ritual. The app never builds the graph itself — the live graph comes
+//! The knowledge-graph JSON is produced by `vmem graph build` on the weekly
+//! ritual. The app never builds the graph itself — the live graph comes
 //! from `VaultEntry.links` in the frontend; this file only supplies the
 //! community overlay (maru-vault-graph-spec §2.1 / work repo
 //! `_meta/rules/knowledge-graph-integration.md` schema-freeze table).
