@@ -178,13 +178,18 @@ pub(crate) struct EnvSetupRun {
     lease: PathTransactionLease,
     repair_lock: Option<fs::File>,
     completion_marker: Option<PathBuf>,
+    /// CLI repair only: the prior hashed env, moved aside to `<root>.prev`.
+    backup: Option<PathBuf>,
 }
 
 /// Synchronous preflight shared by `skills_env_bootstrap` and `maru skills env repair`.
+/// `preserve` (CLI repair) moves an existing hashed env aside so setup builds
+/// from empty and a failure restores it exactly; the app passes `false`.
 pub(crate) fn prepare_env_bootstrap(
     root: PathBuf,
     setup: Option<PathBuf>,
     dry_run: bool,
+    preserve: bool,
     lease: PathTransactionLease,
 ) -> Result<EnvBootstrapJob, String> {
     lease.ensure_covered(env_mutation_paths(&root, setup.as_deref()))?;
@@ -205,14 +210,49 @@ pub(crate) fn prepare_env_bootstrap(
     }
     let setup = setup.expect("setup checked above");
     let repair_lock = host_fs::lock_direct_hash_env_repair(&lease, &root)?;
-    let completion_marker = prepare_hashed_completion_marker(&lease, &root)?;
-    host_fs::ensure_dir(&root.join("temp"))?;
+    // The repair lock refused a pending `<root>.prev`, so the aside slot is free.
+    let backup = if preserve && repair_lock.is_some() {
+        let backup = root.with_extension("prev");
+        lease.ensure_covered([backup.clone()])?;
+        lease.before_effect()?;
+        fs::rename(&root, &backup).map_err(|error| {
+            host_fs::operation_error("move the prior environment aside", &backup, error)
+        })?;
+        if let Err(error) = host_fs::ensure_dir(&root) {
+            let restore = fs::rename(&backup, &root).err();
+            return Err(match restore {
+                None => format!("{error}; the prior env was restored"),
+                Some(restore) => format!(
+                    "{error}; restoring the prior env failed ({restore}); its bytes remain at {}",
+                    host_fs::display_path(&backup)
+                ),
+            });
+        }
+        Some(backup)
+    } else {
+        None
+    };
+    let prepared = prepare_hashed_completion_marker(&lease, &root)
+        .and_then(|marker| host_fs::ensure_dir(&root.join("temp")).map(|_| marker));
+    let completion_marker = match prepared {
+        Ok(marker) => marker,
+        Err(error) => {
+            return Err(
+                match backup.as_deref().map(|b| restore_env_backup(&root, b)) {
+                    Some(Err(restore)) => format!("{error}; {restore}"),
+                    Some(Ok(())) => format!("{error}; the prior env was restored"),
+                    None => error,
+                },
+            )
+        }
+    };
     Ok(EnvBootstrapJob::Setup(EnvSetupRun {
         root,
         setup,
         lease,
         repair_lock,
         completion_marker,
+        backup,
     }))
 }
 
@@ -225,6 +265,7 @@ impl EnvSetupRun {
             lease,
             repair_lock,
             completion_marker,
+            backup,
         } = self;
         #[cfg(all(test, unix))]
         let mut cmd = Command::new("/bin/bash");
@@ -292,11 +333,34 @@ impl EnvSetupRun {
                 Some(error)
             }
         };
+        let succeeded = success && completion_error.is_none();
+        // Settle the aside copy while the lease and repair lock are still held.
+        let completion_error = match backup.as_deref() {
+            Some(backup) if succeeded => fs::remove_dir_all(backup).err().map(|error| {
+                host_fs::operation_error(
+                    "remove the prior environment after a successful repair",
+                    backup,
+                    error,
+                )
+            }),
+            Some(backup) => {
+                let restored = restore_env_backup(&root, backup);
+                let note = match restored {
+                    Ok(()) => "the prior env was restored".to_string(),
+                    Err(error) => error,
+                };
+                Some(match completion_error {
+                    Some(error) => format!("{error}; {note}"),
+                    None => note,
+                })
+            }
+            None => completion_error,
+        };
         drop(repair_lock);
         drop(lease);
         EnvBootstrapOutcome {
             root: host_fs::display_path(&root),
-            success: success && completion_error.is_none(),
+            success: succeeded && completion_error.is_none(),
             exit_code,
             setup_error: error,
             completion_error,
@@ -313,7 +377,7 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
     lease: PathTransactionLease,
 ) -> Result<String, String> {
     let invocation_id = format!("skills-env-{}", Uuid::new_v4());
-    let run = match prepare_env_bootstrap(root, setup, dry_run, lease)? {
+    let run = match prepare_env_bootstrap(root, setup, dry_run, false, lease)? {
         EnvBootstrapJob::Settled(outcome) => {
             let _ = app.emit("skills-env://done", done_event(&invocation_id, &outcome));
             return Ok(invocation_id);
@@ -340,6 +404,23 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
     Ok(invocation_id)
 }
 
+/// Put the env moved aside before a CLI repair back exactly as it was.
+fn restore_env_backup(root: &Path, backup: &Path) -> Result<(), String> {
+    let failed = |action: &str, path: &Path, error: std::io::Error| {
+        format!(
+            "{}; the prior env bytes remain at {}",
+            host_fs::operation_error(action, path, error),
+            host_fs::display_path(backup)
+        )
+    };
+    match fs::remove_dir_all(root) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(failed("remove the failed repair attempt", root, error)),
+    }
+    fs::rename(backup, root).map_err(|error| failed("restore the prior environment", backup, error))
+}
+
 fn done_event(invocation_id: &str, outcome: &EnvBootstrapOutcome) -> EnvDoneEvent {
     EnvDoneEvent {
         invocation_id: invocation_id.to_string(),
@@ -364,7 +445,7 @@ pub fn skills_env_repair_headless(
     let root = host_fs::env_root()?;
     if !force && env_is_complete(&root)? {
         return Err(format!(
-            "{ENV_REPAIR_NOT_NEEDED}: the active skills env {} is complete; nothing to repair. Use `maru skills env repair --force` to rebuild it anyway (a failed forced rebuild leaves it marked incomplete)",
+            "{ENV_REPAIR_NOT_NEEDED}: the active skills env {} is complete; nothing to repair. Use `maru skills env repair --force` to rebuild it anyway (a failed rebuild restores the current env)",
             host_fs::display_path(&root)
         ));
     }
@@ -379,10 +460,12 @@ pub fn skills_env_repair_headless(
             host_fs::display_path(&root)
         ));
     }
-    Ok(match prepare_env_bootstrap(root, setup, false, lease)? {
-        EnvBootstrapJob::Settled(outcome) => outcome,
-        EnvBootstrapJob::Setup(run) => run.run(on_output),
-    })
+    Ok(
+        match prepare_env_bootstrap(root, setup, false, true, lease)? {
+            EnvBootstrapJob::Settled(outcome) => outcome,
+            EnvBootstrapJob::Setup(run) => run.run(on_output),
+        },
+    )
 }
 
 /// The same health rule as `skills_env_status`: a `.venv`, plus the
@@ -957,11 +1040,77 @@ mod phase08_04 {
             "prior"
         );
         assert!(active_env_repair_hint().is_none());
-        // An explicit --force does run setup, and its failure is reported.
+        // An explicit --force does run setup; its failure is reported and the
+        // prior env, marker included, comes back exactly.
         let outcome = skills_env_repair_headless(None, true, Arc::new(|_, _| ())).unwrap();
         assert!(!outcome.success);
         assert_eq!(outcome.exit_code, Some(3));
-        assert!(active_env_repair_hint().is_some());
+        assert!(outcome
+            .completion_error
+            .as_deref()
+            .unwrap()
+            .contains("the prior env was restored"));
+        assert_eq!(walk(&root), before);
+        assert!(root.join(".maru-env-complete").is_file());
+        assert_eq!(
+            fs::read_to_string(root.join(".venv/bin/python")).unwrap(),
+            "prior"
+        );
+        assert!(!root.with_extension("prev").exists());
+        assert!(active_env_repair_hint().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_repair_of_incomplete_env_restores_it_byte_identical() {
+        use crate::skill_host::bundle_update;
+        let _home = host_fs::test_home_for_bundle_tests();
+        let setup = default_public_env_setup(None).unwrap().unwrap();
+        let mut state = bundle_update::read_state().unwrap().unwrap();
+        let active = state.active.as_mut().unwrap();
+        active.env_hash = "incomplete-env".into();
+        let record = host_fs::skills_root()
+            .unwrap()
+            .join("_cache/bundle-compatibility")
+            .join(format!("{}.json", active.bundle_id));
+        host_fs::write_json_pretty(
+            &record,
+            &serde_json::json!({"minAppVersion":"0.0.1", "envLayout":"hashed"}),
+        )
+        .unwrap();
+        bundle_update::write_state(&state).unwrap();
+        let root = host_fs::env_root().unwrap();
+        fs::create_dir_all(root.join(".venv/lib")).unwrap();
+        fs::write(root.join(".venv/lib/partial.py"), "usable").unwrap();
+        fs::write(root.join("status.json"), "{\"success\":false}").unwrap();
+        fs::write(
+            &setup,
+            "#!/bin/sh\nrm -rf \"$2\"/*\nmkdir -p \"$2/.venv/half\"\nexit 5\n",
+        )
+        .unwrap();
+        let snapshot = |root: &Path| {
+            walk(root)
+                .into_iter()
+                .map(|entry| {
+                    let path = root.join(&entry);
+                    let bytes = path.is_file().then(|| fs::read(&path).unwrap());
+                    (entry, bytes)
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = snapshot(&root);
+        let outcome = skills_env_repair_headless(None, false, Arc::new(|_, _| ())).unwrap();
+        assert!(!outcome.success);
+        assert_eq!(outcome.exit_code, Some(5));
+        assert_eq!(snapshot(&root), before);
+        assert!(!root.with_extension("prev").exists());
+        // A successful repair builds from empty and drops the aside copy.
+        fs::write(&setup, "#!/bin/sh\nmkdir -p \"$2/.venv\"\n").unwrap();
+        let outcome = skills_env_repair_headless(None, false, Arc::new(|_, _| ())).unwrap();
+        assert!(outcome.success, "{outcome:?}");
+        assert!(!root.join(".venv/lib/partial.py").exists());
+        assert!(root.join(".maru-env-complete").is_file());
+        assert!(!root.with_extension("prev").exists());
     }
 
     fn walk(root: &Path) -> Vec<String> {

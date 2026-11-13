@@ -410,13 +410,23 @@ fn run_skills_env(args: &[String]) -> i32 {
             if outcome.success {
                 0
             } else {
-                let cause = outcome
-                    .completion_error
-                    .as_deref()
-                    .or(outcome.setup_error.as_deref())
-                    .unwrap_or("env setup failed");
+                // setup_error is the cause; completion_error says whether the
+                // prior env was restored (or where its bytes remain).
+                let cause = [
+                    outcome.setup_error.as_deref(),
+                    outcome.completion_error.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("; ");
+                let cause = if cause.is_empty() {
+                    "env setup failed".to_string()
+                } else {
+                    cause
+                };
                 eprintln!(
-                    "skills env repair failed at {}: {cause}; the env stays marked incomplete. Fix the cause shown in the setup output above, then rerun `maru skills env repair`",
+                    "skills env repair failed at {}: {cause}. Fix the cause shown in the setup output above, then rerun `maru skills env repair`",
                     outcome.root
                 );
                 1
@@ -434,10 +444,21 @@ fn run_skills_env(args: &[String]) -> i32 {
             0
         }
         Err(err) => {
-            eprintln!("{err}");
+            eprintln!("{}", env_repair_preflight_error(&err));
             1
         }
     }
+}
+
+/// Preflight failures (before setup runs) leave the env untouched; name that
+/// and the next step, since this line is the only signal of the exit.
+fn env_repair_preflight_error(err: &str) -> String {
+    if err.contains("maru skills env repair") || err.contains("maru skills update") {
+        return format!("skills env repair did not start: {err}");
+    }
+    format!(
+        "skills env repair did not start, so the env is unchanged: {err}. Fix the cause above (for a parse error, repair that file or run from a directory without a broken workspace.config.yaml), then rerun `maru skills env repair`"
+    )
 }
 
 fn run_skills_rollback(args: &[String]) -> i32 {
@@ -1175,7 +1196,24 @@ fn usage() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_cli, skills_capabilities_json};
+
+    #[test]
+    fn env_repair_preflight_error_names_the_next_step() {
+        let message = env_repair_preflight_error("Cannot parse /w/workspace.config.yaml: bad");
+        assert!(message.contains("env is unchanged"), "{message}");
+        assert!(message.contains("Cannot parse /w/workspace.config.yaml: bad"));
+        assert!(message.contains("workspace.config.yaml"));
+        assert!(
+            message.ends_with("then rerun `maru skills env repair`"),
+            "{message}"
+        );
+        let hinted = env_repair_preflight_error(
+            "skills_env_setup_missing: x; then retry `maru skills env repair`",
+        );
+        assert!(!hinted.contains("Fix the cause above"), "{hinted}");
+    }
+
+    use super::{env_repair_preflight_error, run_cli, skills_capabilities_json};
 
     #[test]
     fn capabilities_json_matches_the_federation_contract_exactly() {

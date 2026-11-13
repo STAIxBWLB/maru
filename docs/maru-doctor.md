@@ -37,12 +37,15 @@ the current env.
 `skills env repair` rebuilds the active env (`~/.maru/env/<hash>/`) without
 a bundle update, using the same code as Settings > Skills > Bootstrap. It
 runs the bundle's env setup, writes `.maru-env-complete` only on success, and
-exits `1` with the cause and the next step on failure. Setup clears the
-completion marker before it runs, so the command refuses (exit `0`, JSON
-`{"repaired": false}`) when the env is already complete: a failed run could
-only make a healthy env worse. `--force` rebuilds a complete env anyway; if
-that forced run fails, the env stays marked incomplete. Setup output goes to stderr, so `--json` keeps
-stdout to the outcome object.
+exits `1` with the cause and the next step on failure. Before setup runs, the
+existing env is moved aside to `<hash>.prev` and setup builds from empty. On
+success the aside copy is removed; on failure the attempt is removed and the
+prior env, completion marker included, is restored exactly. The command
+refuses (exit `0`, JSON `{"repaired": false}`) when the env is already
+complete; `--force` rebuilds it anyway, with the same restore on failure. An
+error before setup starts (for example a `workspace.config.yaml` that does
+not parse) leaves the env unchanged and names the next step. Setup output
+goes to stderr, so `--json` keeps stdout to the outcome object.
 
 When the active hashed env is missing, has no `.venv`, or lacks
 `.maru-env-complete`, `maru doctor` reports an `env_incomplete` warning and
