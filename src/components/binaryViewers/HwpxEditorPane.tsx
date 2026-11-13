@@ -36,9 +36,14 @@ export function HwpxEditorPane(props: Props) {
 function HwpxEditorSession({ entry, workspacePath, onPreviewExternal, onOpenExternal }: Props) {
   const { t } = useTranslation();
   const registry = useWorkspaceRegistry();
+  const selectedWorkspace = registry.workspaces.find((root) => root.path === workspacePath);
   const owner = registry.workspaces.filter((root) => entry.path === root.path || entry.path.startsWith(`${root.path}/`))
-    .sort((a, b) => b.path.length - a.path.length)[0];
-  const writable = workspaceCapabilities(owner).canModify;
+    .sort((a, b) => b.path.length - a.path.length)[0]
+    // Scanners can return a physical path for a selected symlink/dot alias.
+    // Rust still rechecks alias ownership and nested policies on every save.
+    ?? selectedWorkspace;
+  const writable = workspaceCapabilities(owner).canModify &&
+    (!selectedWorkspace || workspaceCapabilities(selectedWorkspace).canModify);
   const [editing, setEditing] = useState(false);
   const [file, setFile] = useState<DocumentHandle | null>(null);
   const [fileGeneration, setFileGeneration] = useState(0);

@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HwpEditorSurfaceProps } from "./HwpEditorSurface";
 import { unmountReactRoot } from "../../lib/testing/unmountReactRoot";
 
-const mocks = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), surface: null as HwpEditorSurfaceProps | null, writable: true, workspaceRoot: "/workspace" }));
+const mocks = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), surface: null as HwpEditorSurfaceProps | null, writable: true, workspaceRoot: "/workspace", nestedRoot: null as null | { path: string; writePolicy: "direct" | "readOnly" } }));
 vi.mock("../../lib/hwpedPersistence", () => ({ captureHwpedSource: mocks.capture, saveHwpedDocument: mocks.save }));
-vi.mock("../../lib/workspaceStore", () => ({ useWorkspaceRegistry: () => ({ workspaces: [{ path: mocks.workspaceRoot, provider: "local", visibility: "private", writePolicy: mocks.writable ? "direct" : "readOnly" }] }) }));
+vi.mock("../../lib/workspaceStore", () => ({ useWorkspaceRegistry: () => ({ workspaces: [{ path: mocks.workspaceRoot, provider: "local", visibility: "private", writePolicy: mocks.writable ? "direct" : "readOnly" }, ...(mocks.nestedRoot ? [{ ...mocks.nestedRoot, provider: "local", visibility: "private" }] : [])] }) }));
 vi.mock("./HwpxViewer", () => ({ HwpxViewer: () => <div data-testid="preview" /> }));
 vi.mock("./HwpEditorSurface", () => ({ HwpEditorSurface: (props: HwpEditorSurfaceProps) => { mocks.surface = props; return <div data-testid="editor-surface" />; } }));
 
@@ -24,7 +24,7 @@ describe("HwpxEditorPane persistence", () => {
   let root: Root | null = null;
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    mocks.surface = null; mocks.writable = true; mocks.workspaceRoot = "/workspace"; mocks.capture.mockReset(); mocks.save.mockReset();
+    mocks.surface = null; mocks.writable = true; mocks.workspaceRoot = "/workspace"; mocks.nestedRoot = null; mocks.capture.mockReset(); mocks.save.mockReset();
     mocks.capture.mockResolvedValue({ source: { dataBase64: "AQID", revision: "a".repeat(64) } });
     mocks.save.mockResolvedValue({ revision: "b".repeat(64), sizeBytes: 2, snapshotPath: ".maru/versions/original.hwpx" });
     container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
@@ -69,6 +69,34 @@ describe("HwpxEditorPane persistence", () => {
   it("blocks saving during engine activity and in a read-only workspace", async () => {
     await render(); await open(); await change(); await act(async () => mocks.surface!.onActivityChange(true)); expect(query("hwpx-save").disabled).toBe(true);
     await act(async () => mocks.surface!.onActivityChange(false)); mocks.writable = false; await render(); expect(query("hwpx-save").disabled).toBe(true);
+  });
+  it.each(["/tmp/link", "/tmp/real/."])("uses the selected registered root %s when the scanner returns a canonical path", async (workspaceRoot) => {
+    mocks.workspaceRoot = workspaceRoot;
+    await render({ ...entry, path: "/tmp/real/report.hwpx" }, workspaceRoot); await open(); await change();
+    expect(mocks.capture).toHaveBeenCalledWith(workspaceRoot, "report.hwpx");
+    expect(query("hwpx-save").disabled).toBe(false);
+    await act(async () => query("hwpx-save").click());
+    expect(mocks.save).toHaveBeenCalledWith(workspaceRoot, "report.hwpx", "CQk=", "a".repeat(64));
+  });
+  it("does not replace a nested lexical read-only owner with the selected writable alias", async () => {
+    mocks.workspaceRoot = "/tmp/link";
+    mocks.nestedRoot = { path: "/tmp/real/nested", writePolicy: "readOnly" };
+    await render({ ...entry, path: "/tmp/real/nested/report.hwpx", relPath: "nested/report.hwpx" }, mocks.workspaceRoot);
+    await open(); await change(); expect(query("hwpx-save").disabled).toBe(true); expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it("keeps a selected alias read-only when no lexical owner matches", async () => {
+    mocks.workspaceRoot = "/tmp/link"; mocks.writable = false;
+    await render({ ...entry, path: "/tmp/real/report.hwpx" }, mocks.workspaceRoot);
+    await open(); await change(); expect(query("hwpx-save").disabled).toBe(true); expect(mocks.save).not.toHaveBeenCalled();
+  });
+  it("honors a selected alias becoming read-only even when its canonical owner stays writable", async () => {
+    mocks.workspaceRoot = "/tmp/link";
+    mocks.nestedRoot = { path: "/tmp/real", writePolicy: "direct" };
+    const canonicalEntry = { ...entry, path: "/tmp/real/report.hwpx" };
+    await render(canonicalEntry, mocks.workspaceRoot); await open(); await change();
+    expect(query("hwpx-save").disabled).toBe(false);
+    mocks.writable = false; await render(canonicalEntry, mocks.workspaceRoot);
+    expect(query("hwpx-save").disabled).toBe(true); expect(mocks.capture).toHaveBeenCalledTimes(1); expect(mocks.save).not.toHaveBeenCalled();
   });
   it("synchronously refuses a save as engine activity starts before React commits", async () => {
     await render(); await open(); await change();
