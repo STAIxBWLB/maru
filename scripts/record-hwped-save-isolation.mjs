@@ -68,7 +68,7 @@ export function recordHwpedSaveIsolation(root, logFile, sourceCommit) {
       readOnly: false,
       lexicalPaths: ["selected workspace .hwpx", ".maru/versions and the generated recovery snapshot", "current workspace registry output and legacy registry input, always reserved even after migration"],
       aliasPaths: ["PathTransactionRequest reserves lexical and physical file/ancestor aliases while authorization remains lexical; replacement follows the existing physical destination without replacing its symlink entry."],
-      sharedAdmissionEntry: "src-tauri/src/hwped/persistence.rs::save_with_engine reserves the target, versions and both paths from src-tauri/src/hwped/persistence.rs::registry_paths through src-tauri/src/atomic_file.rs::PathTransactionRequest with with_workspace_registry and require_parent before any workspace effect.",
+      sharedAdmissionEntry: "src-tauri/src/hwped/persistence.rs::save_with_engine reserves the target, versions and both paths from src-tauri/src/vault_list.rs::workspace_registry_path and src-tauri/src/vault_list.rs::legacy_vault_list_path through src-tauri/src/atomic_file.rs::PathTransactionRequest with with_workspace_registry and require_parent before any workspace effect.",
       postAdmissionPreconditions: ["Registry lease, owner/write policy and full path coverage are checked inside admission; before_effect precedes any legacy migration.", "Final revalidate_paths, before_effect, owner/policy and expected revision run after candidate sync and immediately before replacement."],
       domainLockOrder: "Complete shared path admission happens before any domain lock or workspace write; the lease spans validation, snapshots, replacement and failure cleanup.",
     },

@@ -49,8 +49,7 @@
           "src/lib/export.test.ts"
         ],
         "payload": "planExport (src/lib/export.ts:41) invokes export_plan with workspaceRoot, sourcePath, formats and the optional outputDir whenever the export dialog plans a bundle; the export dialog keeps owning that flow regardless of screen changes.",
-        "terminalNoticeOwner": "The export dialog surface owns current export state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The export dialog surface owns current export state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a: read/plan result returned to caller",
         "successRetention": "plan/fields retained in flow state when current",
         "failureReasons": "component preflight catch (single publisher for plan/validate failures)",
@@ -108,8 +107,7 @@
           "src/lib/export.test.ts"
         ],
         "payload": "validateExport (src/lib/export.ts:73) invokes export_validate with the manifest path after planning or dispatching a bundle; the export dialog keeps owning that refresh regardless of screen changes.",
-        "terminalNoticeOwner": "The export dialog surface owns current export state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The export dialog surface owns current export state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a: read/plan result returned to caller",
         "successRetention": "plan/fields retained in flow state when current",
         "failureReasons": "component preflight catch (single publisher for plan/validate failures)",
@@ -177,8 +175,7 @@
           "src/lib/export.test.ts"
         ],
         "payload": "dispatchExport (src/lib/export.ts:96) invokes export_dispatch with workspaceRoot, manifestPath and formats after the user confirms an export plan; the export dialog keeps owning that flow regardless of screen changes.",
-        "terminalNoticeOwner": "The export dialog surface owns current export state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The export dialog surface owns current export state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "classifyExportDispatchCompletion (src/lib/export.ts:96)",
         "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
         "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
@@ -235,8 +232,7 @@
           "src/lib/hwped.ts"
         ],
         "payload": "src/lib/hwped.ts:84 invokes hwped_read from the hwped editor surface whenever it reads a document (path, base64 data or temp stage) and returns its parsed structure; the hwped surface keeps owning that call regardless of screen changes.",
-        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a",
         "successRetention": "n/a",
         "failureReasons": "n/a",
@@ -292,8 +288,7 @@
           "src/lib/hwped.ts"
         ],
         "payload": "src/lib/hwped.ts:95 invokes hwped_render from the hwped editor surface whenever it renders a document to SVG pages plus a render report; the hwped surface keeps owning that call regardless of screen changes.",
-        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a",
         "successRetention": "n/a",
         "failureReasons": "n/a",
@@ -349,8 +344,7 @@
           "src/lib/hwped.ts"
         ],
         "payload": "src/lib/hwped.ts:110 invokes hwped_edit from the hwped editor surface whenever it applies argv edit operations and returns the edited bytes plus ops report; the hwped surface keeps owning that call regardless of screen changes.",
-        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a",
         "successRetention": "n/a",
         "failureReasons": "n/a",
@@ -406,8 +400,7 @@
           "src/lib/hwped.ts"
         ],
         "payload": "src/lib/hwped.ts:123 invokes hwped_compose from the hwped editor surface whenever it composes a new document from a page spec and returns the bytes plus report; the hwped surface keeps owning that call regardless of screen changes.",
-        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a",
         "successRetention": "n/a",
         "failureReasons": "n/a",
@@ -463,8 +456,7 @@
           "src/lib/hwped.ts"
         ],
         "payload": "src/lib/hwped.ts:130 invokes hwped_validate from the hwped editor surface whenever it validates a document and returns a per-check report; the hwped surface keeps owning that call regardless of screen changes.",
-        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a",
         "successRetention": "n/a",
         "failureReasons": "n/a",
@@ -520,8 +512,7 @@
           "src/lib/hwped.ts"
         ],
         "payload": "src/lib/hwped.ts:137 invokes hwped_capabilities from the hwped editor surface whenever it probes the bundled hwp-cli version and reports editable formats; the hwped surface keeps owning that call regardless of screen changes.",
-        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The hwped editor surface owns current document state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a",
         "successRetention": "n/a",
         "failureReasons": "n/a",
@@ -578,8 +569,7 @@
           "src/components/studio/StudioMode.tsx"
         ],
         "payload": "fetchHwpCliTemplateFields (src/lib/studio.ts:385) invokes hwp_cli_template_fields with the fields request whenever the Studio hwp template panel inspects a template; the Studio surface keeps owning that refresh regardless of screen changes.",
-        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a: read/plan result returned to caller",
         "successRetention": "plan/fields retained in flow state when current",
         "failureReasons": "component preflight catch (single publisher for plan/validate failures)",
@@ -645,8 +635,7 @@
           "src/components/studio/StudioMode.tsx"
         ],
         "payload": "fillHwpCliTemplate (src/lib/studio.ts:393) invokes hwp_cli_template_fill with workPath and the fill request whenever the Studio hwp template panel fills a template; the Studio surface keeps owning that flow regardless of screen changes.",
-        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "HwpCliTemplateFillResponse checked in-flow",
         "successRetention": "output path patched into flow state when current",
         "failureReasons": "outer catch error message (component-owned, single publisher)",
@@ -705,8 +694,7 @@
           "src/components/studio/StudioMode.tsx"
         ],
         "payload": "getTemplateFields (src/lib/studio.ts:359) invokes template_get_fields with workPath and the field request whenever the Studio template panel inspects a hwpx template; the Studio surface keeps owning that refresh regardless of screen changes.",
-        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "n/a: read/plan result returned to caller",
         "successRetention": "plan/fields retained in flow state when current",
         "failureReasons": "component preflight catch (single publisher for plan/validate failures)",
@@ -763,8 +751,7 @@
           "src/components/studio/StudioMode.tsx"
         ],
         "payload": "prepareTemplate (src/lib/studio.ts:367) invokes template_prepare_hwpx_template with workPath and the template path before a fill; the Studio surface keeps owning that check regardless of screen changes.",
-        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "classifyTemplatePrepareCompletion (src/lib/studio.ts:367)",
         "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
         "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
@@ -832,8 +819,7 @@
           "src/components/studio/StudioMode.tsx"
         ],
         "payload": "fillTemplate (src/lib/studio.ts:378) invokes template_fill_hwpx with workPath and the fill request whenever the Studio template panel fills a hwpx template; the Studio surface keeps owning that flow regardless of screen changes.",
-        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only."
-      ,
+        "terminalNoticeOwner": "The Studio surface (src/components/studio) owns current template-fill state display and error toasts. Navigation-safe terminal notices and fulfilled-payload classifiers remain the explicit Plan25/26 frontend handoff; this shard claims backend isolation only.",
         "classifier": "classifyTemplateFillCompletion (src/lib/studio.ts:393)",
         "successRetention": "payload returned unchanged to the caller; ProcessingOperationRecord.completion.succeeded retains successful item/output references after navigation",
         "failureReasons": "per-item error strings trimmed into completion.failed[].reason; IPC rejection mapped by rejectionReason() (message + code); component no longer publishes a second error toast",
@@ -851,6 +837,105 @@
         "platformScope": "macOS unit fixtures only: atomic_file::phase08_06::Home isolation, disposable tempdir workspaces, a fake hwp/hwpx shell binary and the test-only worker-stage hook; no live workspace, credential, network endpoint or native test hook is touched.",
         "limits": "Shared admission serializes cooperating in-process writers only; external editor or converter processes are outside the in-process guarantee. PERF-01/PERF-02 remain globally outstanding for the whole phase.",
         "contract": "The TemplateFillResponse payload, the replaced_count/validation_ok semantics and the no-values / requires-a-.hwpx-template rejections are unchanged; the only new failure paths are the JoinError-to-String mapping at the worker boundary plus fail-closed admission rejections for out-of-set writes and blocked-workspace retries."
+      }
+    },
+    {
+      "name": "hwped_save",
+      "module": "src-tauri/src/hwped.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_save",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hwped.rs::hwped_save owns the request and awaits spawn_blocking calling src-tauri/src/hwped/persistence.rs::save_now; worker join failure becomes a display-only IpcError.",
+        "src-tauri/src/hwped/persistence.rs::save_now delegates to src-tauri/src/hwped/persistence.rs::save_with_engine, which bounds both byte buffers, validates the privately staged candidate with the selected engine, snapshots the exact original and replaces through src-tauri/src/atomic_file.rs::write_atomic_checked only after final path, owner, policy and revision checks."
+      ],
+      "workerBoundary": "src-tauri/src/hwped.rs::hwped_save awaits tauri::async_runtime::spawn_blocking before filesystem access, registry checks, admission waits or engine subprocess work; owned Strings cross the await and structured inner document_conflict errors pass through unchanged.",
+      "syncCallers": [
+        "No production synchronous caller invokes hwped_save; src-tauri/src/hwped/persistence.rs::save_now remains private to the worker and focused fixture tests."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "selected workspace .hwpx",
+          ".maru/versions and the generated recovery snapshot",
+          "current workspace registry output and legacy registry input, always reserved even after migration"
+        ],
+        "aliasPaths": [
+          "PathTransactionRequest reserves lexical and physical file/ancestor aliases while authorization remains lexical; replacement follows the existing physical destination without replacing its symlink entry."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/hwped/persistence.rs::save_with_engine reserves the target, versions and both paths from src-tauri/src/vault_list.rs::workspace_registry_path and src-tauri/src/vault_list.rs::legacy_vault_list_path through src-tauri/src/atomic_file.rs::PathTransactionRequest with with_workspace_registry and require_parent before any workspace effect.",
+        "postAdmissionPreconditions": [
+          "Registry lease, owner/write policy and full path coverage are checked inside admission; before_effect precedes any legacy migration.",
+          "Final revalidate_paths, before_effect, owner/policy and expected revision run after candidate sync and immediately before replacement."
+        ],
+        "domainLockOrder": "Complete shared path admission happens before any domain lock or workspace write; the lease spans validation, snapshots, replacement and failure cleanup."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped_save -- --test-threads=2",
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/hwpedPersistence.ts",
+          "src/components/binaryViewers/HwpxEditorPane.tsx"
+        ],
+        "payload": "saveHwpedDocument sends selected workspace path, applied bytes and the original expected revision; the host pane captures its session generation and persists only on fulfilled save.",
+        "terminalNoticeOwner": "HwpxEditorPane owns Saved, conflict and failure status for the originating session.",
+        "classifier": "Known document_conflict enters explicit keep-editing/reload recovery; unknown IPC codes normalize to a plain Error.",
+        "successRetention": "Only the captured session baseline advances to the returned revision; preview metadata refresh follows success.",
+        "failureReasons": "Edits and persisted baseline remain on failed save; the pane displays cause and retry/reload guidance.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_21_hwped_save_yields_same_poll_and_maps_join_failure",
+          "phase08_21_hwped_save_serializes_aliases_and_releases_failed_admission",
+          "phase08_21_hwped_save_persists_exact_snapshot_and_conflicts"
+        ],
+        "workerProof": "Actual-wrapper same-task polling proves off-thread progress and join-failure propagation. Competing alias saves and failed admission prove serialization and release; the original snapshot and stale/missing conflicts are checked on fixture files. src-tauri/src/hwped/persistence/tests.rs::hwped_save_holds_existing_registry_lease_and_observes_new_policy also proves existing-registry writer exclusion and post-admission policy refusal.",
+        "platformScope": "Disposable fixture workspaces and fake engine processes only; these Rust checks do not establish native WebView, Korean IME or production acceptance.",
+        "limits": "Admission serializes cooperating same-process writers. An external non-cooperating writer can still race the final revision check and rename; no cross-process compare-and-swap is claimed.",
+        "sourceCommit": "137329ff84f082fdbf06b176aff3a2205891be69",
+        "logSha256": "b70e7fe616c897ec9a79641d07079a8057e9d1577ed3c3bfcae3e1e5a85acbd8",
+        "sourceFiles": [
+          {
+            "path": "src-tauri/src/lib.rs",
+            "sha256": "e051e72c0f9b2aa72571b1bbf9b1126090424b1a47ba0b8ad76f1ad90cc6ae37"
+          },
+          {
+            "path": "src-tauri/src/hwped.rs",
+            "sha256": "20a149be054f3b70ed83b57ead0dcb6416896471ca6f04583600e4f4ca9f1576"
+          },
+          {
+            "path": "src-tauri/src/hwped/persistence.rs",
+            "sha256": "6d0b44ca77d62212dba3d301ecd5a0bc3f542da37ae9823f1e737753fe3d0125"
+          },
+          {
+            "path": "src-tauri/src/hwped/persistence/tests.rs",
+            "sha256": "43ddd4f748af973c891cab125d2ba0a8f4e4b17f554ef9ac3a0a62b831b50989"
+          },
+          {
+            "path": "src-tauri/src/atomic_file.rs",
+            "sha256": "8cb7d52f64e729be0724ba9abb48fa6ec6eca467141cbde2020dc39998e950d2"
+          },
+          {
+            "path": "src-tauri/src/vault_list.rs",
+            "sha256": "c1a7cd218f56b7c23aa5fc259a281b784527acdbf2175f95182c55c8051539fb"
+          },
+          {
+            "path": "src/lib/hwpedPersistence.ts",
+            "sha256": "2fec2f530a3b73b02d64b90b2b3b6032392101fe6d2d0eefc139e47143900357"
+          },
+          {
+            "path": "src/components/binaryViewers/HwpxEditorPane.tsx",
+            "sha256": "33c05e96938afa9b8231a9dcdec0e6be975a8b44552ba254626236661d4c2541"
+          }
+        ]
       }
     }
   ]
