@@ -223,14 +223,16 @@ async function waitHost(
 
 interface RevisionEvidence {
   step: string;
-  editorBaselineRevision: string;
+  expectedBaselineRevision: string;
   captureRevision: string;
   diskRevision: string;
 }
 
 /** Observe the real capture command and disk independently, without updating
- * the editor's retained baseline or replacing/mocking any native invocation. */
-async function revisionEvidence(step: string, editorBaselineRevision: string): Promise<RevisionEvidence> {
+ * the editor's retained baseline or replacing/mocking any native invocation.
+ * expectedBaselineRevision is fixture-derived: source SHA, then the SHA verified
+ * after a completed save/reopen. It is not a second live editor-state read. */
+async function revisionEvidence(step: string, expectedBaselineRevision: string): Promise<RevisionEvidence> {
   const diskRevision = createHash("sha256").update(await fs.readFile(fixtureHwpxPath())).digest("hex");
   const workspaceRoot = path.dirname(fixtureHwpxPath());
   const serialized = await browser.execute(async (root, documentPath) => {
@@ -243,7 +245,7 @@ async function revisionEvidence(step: string, editorBaselineRevision: string): P
     return JSON.stringify({ revision: captured.source.revision });
   }, workspaceRoot, FIXTURE_HWPX_NAME);
   const captureRevision = (JSON.parse(serialized) as { revision: string }).revision;
-  const evidence = { step, editorBaselineRevision, captureRevision, diskRevision };
+  const evidence = { step, expectedBaselineRevision, captureRevision, diskRevision };
   console.info(`NATIVE_HWPX_REVISIONS ${JSON.stringify(evidence)}`);
   assert.equal(captureRevision, diskRevision, `${step}: captureSource revision differs from the exact disk bytes`);
   return evidence;
@@ -642,7 +644,7 @@ describe("native hwpx editor", () => {
     await fs.writeFile(fixtureHwpxPath(), source);
     const conflictRevisions = await revisionEvidence("external-replacement-conflict", savedRevision);
     revisionChecks.push(conflictRevisions);
-    assert.notEqual(conflictRevisions.editorBaselineRevision, conflictRevisions.diskRevision,
+    assert.notEqual(conflictRevisions.expectedBaselineRevision, conflictRevisions.diskRevision,
       "The external-replacement case must exercise a genuinely stale editor baseline");
     await clickHost("hwpx-save");
     await waitHost("An externally replaced file did not produce conflict recovery", (state) => state.conflict);
