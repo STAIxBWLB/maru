@@ -236,15 +236,23 @@ fn run_hwp(bin: &Path, args: &[OsString]) -> Result<CliRun, String> {
 }
 
 /// Run a command that must succeed; error with stderr detail otherwise.
-fn run_hwp_ok(bin: &Path, args: &[OsString]) -> Result<Vec<u8>, String> {
+///
+/// `work_dir` is the directory the failing run was staged in. It is reported as
+/// `[work dir <json>]` between the exit code and the raw stderr, so a transport
+/// holding that directory can redact it exactly instead of guessing at a path
+/// inside the text.
+fn run_hwp_ok(bin: &Path, args: &[OsString], work_dir: Option<&str>) -> Result<Vec<u8>, String> {
     let run = run_hwp(bin, args)?;
     if run.code != 0 {
         let subcommand = args
             .first()
             .map(|arg| arg.to_string_lossy().to_string())
             .unwrap_or_default();
+        let reported = work_dir
+            .map(|dir| format!(" [work dir {}]", Value::String(dir.to_string())))
+            .unwrap_or_default();
         return Err(format!(
-            "hwp_failed: hwp {subcommand} failed (exit {}): {}",
+            "hwp_failed: hwp {subcommand} failed (exit {}){reported}: {}",
             run.code, run.stderr
         ));
     }
@@ -286,8 +294,12 @@ fn invalidate_version(bin: &Path) {
 
 /// A manager shim may change its selected engine without changing its mtime.
 /// Preserve the command error, but make the next feature call re-probe it.
-fn run_hwp_feature_ok(bin: &Path, args: &[OsString]) -> Result<Vec<u8>, String> {
-    let result = run_hwp_ok(bin, args);
+fn run_hwp_feature_ok(
+    bin: &Path,
+    args: &[OsString],
+    work_dir: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let result = run_hwp_ok(bin, args, work_dir);
     if matches!(&result, Err(error) if error.starts_with("hwp_failed:")) {
         invalidate_version(bin);
     }
@@ -350,7 +362,7 @@ fn ensure_version(bin: &Path) -> Result<String, String> {
         }
     }
 
-    let stdout = run_hwp_ok(bin, &[OsString::from("--version")]).map_err(|cause| {
+    let stdout = run_hwp_ok(bin, &[OsString::from("--version")], None).map_err(|cause| {
         format!(
             "hwp_version: cannot query the selected hwp binary: {cause}; check MARU_HWP_BIN or PATH and retry"
         )
@@ -511,6 +523,7 @@ fn read_now(document: HwpedDocumentRef, workspace_root: Option<String>) -> Resul
             OsString::from("markdown"),
             OsString::from("--with-segments"),
         ],
+        None,
     )?;
     let mut envelope: Value = serde_json::from_slice(&stdout)
         .map_err(|err| format!("hwp_parse_failed: cat envelope is not JSON: {err}"))?;
@@ -747,9 +760,9 @@ fn render_attempt(
         ]);
     }
     if include_layout {
-        run_hwp_feature_ok(bin, &args)?;
+        run_hwp_feature_ok(bin, &args, None)?;
     } else {
-        run_hwp_ok(bin, &args)?;
+        run_hwp_ok(bin, &args, None)?;
     }
     let mut notes = Vec::new();
     let mut layouts = match layout_mode {
@@ -1221,6 +1234,28 @@ fn contain_json_edit_assets(ops: Value, workspace_root: Option<&str>) -> Result<
 #[path = "hwped/json_ops_tests.rs"]
 mod json_ops_tests;
 
+#[cfg(test)]
+#[path = "hwped/edit_failure_tests.rs"]
+mod edit_failure_tests;
+
+/// The stage dir a failing `hwp edit` reports has to be the same string its argv
+/// carries, so the editor can redact the reported prefix exactly. `canonicalize`
+/// on unix keeps a `/var` tempdir and the `/private/var` path the engine prints
+/// from diverging; Windows keeps the tempdir path, because `canonicalize` there
+/// returns a `\\?\` verbatim path.
+fn edit_stage_dir(dir: &Path) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        Ok(dir.to_string_lossy().into_owned())
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::canonicalize(dir)
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|err| format!("hwp_stage_failed: {err}"))
+    }
+}
+
 fn edit_now(
     document: HwpedDocumentRef,
     ops_argv: Option<Value>,
@@ -1253,9 +1288,11 @@ fn edit_now(
         require_feature_version(&version, "JSON edit ops")?;
     }
     let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
-    let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
+    let stage_dir = edit_stage_dir(tmp.path())?;
+    let stage = Path::new(&stage_dir);
+    let input = stage_document(stage, &document, workspace_root.as_deref())?;
     let ext = sniff_extension(&document.name);
-    let output = tmp.path().join(format!("out{ext}"));
+    let output = stage.join(format!("out{ext}"));
     let mut args = vec![
         OsString::from("edit"),
         input.into_os_string(),
@@ -1265,7 +1302,7 @@ fn edit_now(
     match operations {
         EditOperations::Argv(argv) => args.extend(argv.into_iter().map(OsString::from)),
         EditOperations::Json(ops) => {
-            let ops_file = tmp.path().join("ops.json");
+            let ops_file = stage.join("ops.json");
             let bytes = serde_json::to_vec(&ops).map_err(|err| {
                 format!("hwp_stage_failed: could not encode edit operations JSON: {err}; check the operation payload and retry")
             })?;
@@ -1282,9 +1319,9 @@ fn edit_now(
         args.push(OsString::from("--allow-partial"));
     }
     if json_ops {
-        run_hwp_feature_ok(&bin, &args)?;
+        run_hwp_feature_ok(&bin, &args, Some(&stage_dir))?;
     } else {
-        run_hwp_ok(&bin, &args)?;
+        run_hwp_ok(&bin, &args, Some(&stage_dir))?;
     }
     let data = std::fs::read(&output).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     Ok(HwpedEditResponse {
@@ -1314,6 +1351,7 @@ fn compose_now(spec: Value, name: String) -> Result<HwpedComposeResponse, String
             out_path.clone().into_os_string(),
             OsString::from("--report"),
         ],
+        None,
     )?;
     let report = serde_json::from_slice::<Value>(&stdout).ok();
     let data = std::fs::read(&out_path).map_err(|err| format!("hwp_stage_failed: {err}"))?;
@@ -1926,7 +1964,7 @@ mod phase08_21 {
         let _env = LookupEnv::path_only(&dir);
         let bin = hwp_bin().unwrap();
         assert_eq!(bin, dir.join("ahwp"));
-        let version = run_hwp_ok(&bin, &[OsString::from("--version")]).unwrap();
+        let version = run_hwp_ok(&bin, &[OsString::from("--version")], None).unwrap();
         let (major, _, _) = parse_version(&version).unwrap();
         assert_eq!(major, 1, "{}", String::from_utf8_lossy(&version));
         // Template fill, HWPX export and every other spawn go through the
@@ -2922,6 +2960,7 @@ esac
                 OsString::from("-o"),
                 input.as_os_str().to_os_string(),
             ],
+            None,
         )
         .unwrap();
         let original_bytes = std::fs::read(&input).unwrap();
@@ -2935,6 +2974,7 @@ esac
                         OsString::from("--format"),
                         OsString::from("json"),
                     ],
+                    None,
                 )
                 .unwrap(),
             )
