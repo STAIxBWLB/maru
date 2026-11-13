@@ -19,6 +19,7 @@ maru skills dirty
 maru skills dirty --json
 maru skills update --check
 maru skills update --apply [--repair-env] [--json]
+maru skills env repair [--json]
 maru skills sync --check --tools claude,codex
 maru skills sync --apply --tools claude,codex
 ```
@@ -29,7 +30,21 @@ app too old) without touching the active bundle, registry, or tool links.
 `skills update --apply` downloads, verifies (minisign signature + sha256),
 and atomically applies the bundle; `--repair-env` additionally runs the
 bundle's env setup when the runtime env hash changed, rolling the bundle back
-if the repair fails.
+if the repair fails. An up-to-date bundle stops before any env work
+(`bundle_id_reused` / `bundle_not_newer`), so `--repair-env` cannot rebuild
+the current env.
+
+`skills env repair` rebuilds the active env (`~/.maru/env/<hash>/`) without
+a bundle update, using the same code as Settings > Skills > Bootstrap. It
+runs the bundle's env setup, writes `.maru-env-complete` only on success, and
+exits `1` with the cause and the next step on failure; a failed run leaves
+the env marked incomplete. Setup output goes to stderr, so `--json` keeps
+stdout to the outcome object.
+
+When the active hashed env is missing, has no `.venv`, or lacks
+`.maru-env-complete`, `maru doctor` reports an `env_incomplete` warning and
+`skills update --check` prints a line (JSON: `envRepairHint`); both name
+`maru skills env repair`. The check is read-only.
 
 `skills sync --check` is also read-only and exits `1` when changes are needed.
 `skills sync --apply` creates canonical `~/.maru/skills/<name>` links, points
@@ -50,6 +65,7 @@ skills issue exists.
 | `source_invalid` | error | Registry source path is missing or invalid. |
 | `install_skill_missing` | error | Install record references a missing skill. |
 | `install_link_broken` | error | Install symlink no longer points through Maru. |
+| `env_incomplete` | warn | The active hashed skills env is missing or incomplete; run `maru skills env repair`. |
 | `skill_dirty` | warn | Skill content differs from its saved hash or source working tree. |
 
 Invalid skills remain visible so they can be repaired, but install/dispatch

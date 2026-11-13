@@ -4,8 +4,8 @@ use crate::secrets::{secrets_doctor, secrets_migrate, secrets_scan};
 // The CLI shares synchronous transactions; async scheduling belongs to desktop IPC.
 use crate::skill_host::{
     skills_apply_bundle_update_headless, skills_check_bundle_update, skills_doctor,
-    skills_import_external, skills_import_unmanage, skills_list_dirty, skills_reconcile_skill,
-    skills_sync_tools,
+    skills_env_repair_headless, skills_import_external, skills_import_unmanage, skills_list_dirty,
+    skills_reconcile_skill, skills_sync_tools,
 };
 
 pub fn run_cli(args: Vec<String>) -> i32 {
@@ -299,10 +299,13 @@ fn run_doctor(args: &[String]) -> i32 {
                 );
                 if report.ok {
                     println!("{line}");
+                    for issue in report.issues.iter().filter(|i| i.code == "env_incomplete") {
+                        println!("{}: {}", issue.code, issue.message);
+                    }
                 } else {
                     eprintln!("{line}");
                     for issue in &report.issues {
-                        if issue.severity == "error" {
+                        if issue.severity == "error" || issue.code == "env_incomplete" {
                             eprintln!(
                                 "{}: {}{}",
                                 issue.code,
@@ -359,6 +362,7 @@ fn run_skills(args: &[String]) -> i32 {
         }
         "sync" => run_skills_sync(&args[1..]),
         "update" => run_skills_update(&args[1..]),
+        "env" => run_skills_env(&args[1..]),
         "rollback" => run_skills_rollback(&args[1..]),
         "dirty" => run_skills_dirty(&args[1..]),
         "reconcile" => run_skills_reconcile(&args[1..]),
@@ -367,6 +371,50 @@ fn run_skills(args: &[String]) -> i32 {
         _ => {
             eprintln!("{}", skills_usage());
             2
+        }
+    }
+}
+
+fn run_skills_env(args: &[String]) -> i32 {
+    let json = match args {
+        [repair] if repair == "repair" => false,
+        [repair, flag] if repair == "repair" && flag == "--json" => true,
+        _ => {
+            eprintln!("usage: maru skills env repair [--json]");
+            return 2;
+        }
+    };
+    // Setup output goes to stderr so `--json` keeps stdout machine-readable.
+    let sink: crate::skill_host::EnvOutputSink =
+        std::sync::Arc::new(|_stream, line| eprintln!("{line}"));
+    match skills_env_repair_headless(current_work_path(), sink) {
+        Ok(outcome) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&outcome).unwrap_or_default()
+                );
+            } else if outcome.success {
+                println!("skills env repaired: {}", outcome.root);
+            }
+            if outcome.success {
+                0
+            } else {
+                let cause = outcome
+                    .completion_error
+                    .as_deref()
+                    .or(outcome.setup_error.as_deref())
+                    .unwrap_or("env setup failed");
+                eprintln!(
+                    "skills env repair failed at {}: {cause}; the env stays marked incomplete. Fix the cause shown in the setup output above, then rerun `maru skills env repair`",
+                    outcome.root
+                );
+                1
+            }
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            1
         }
     }
 }
@@ -493,6 +541,9 @@ fn run_skills_update(args: &[String]) -> i32 {
                         .unwrap_or_else(|| "none published".to_string());
                     println!("skills bundle: active {active}; channel {channel}");
                     println!("{}", skills_update_check_text(&status));
+                    if let Some(hint) = &status.env_repair_hint {
+                        println!("{hint}");
+                    }
                 }
                 0
             }
@@ -1075,7 +1126,7 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn skills_usage() -> &'static str {
-    "usage: maru skills capabilities|list|sync|update|rollback|dirty|reconcile|import|import-unmanage"
+    "usage: maru skills capabilities|list|sync|update|env repair|rollback|dirty|reconcile|import|import-unmanage"
 }
 
 /// The additive federation contract dotfiles discovers first (issue #396).
@@ -1098,7 +1149,7 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills rollback [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills env repair [--json]\n  skills rollback [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
 }
 
 #[cfg(test)]

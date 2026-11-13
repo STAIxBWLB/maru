@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
@@ -146,40 +147,85 @@ pub fn skills_env_bootstrap<R: tauri::Runtime>(
     bootstrap_in_transaction(app, root, setup, dry_run.unwrap_or(false), lease)
 }
 
-/// The owned lease moves to the detached worker, never to a borrowed callback.
-fn bootstrap_in_transaction<R: tauri::Runtime>(
-    app: AppHandle<R>,
+/// Receives each setup output line with its stream name ("stdout"/"stderr").
+pub type EnvOutputSink = Arc<dyn Fn(&str, String) + Send + Sync>;
+
+/// Result of one environment bootstrap, shared by the app and the CLI.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvBootstrapOutcome {
+    pub root: String,
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    /// Setup failure cause (exit status, spawn or stream failure).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_error: Option<String>,
+    /// Failure to persist the completion marker or status after setup ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_error: Option<String>,
+}
+
+/// Runtime-free bootstrap: either settled without a setup run, or a setup
+/// run that owns the lease and the repair lock until it finishes.
+pub(crate) enum EnvBootstrapJob {
+    Settled(EnvBootstrapOutcome),
+    Setup(EnvSetupRun),
+}
+
+pub(crate) struct EnvSetupRun {
+    root: PathBuf,
+    setup: PathBuf,
+    lease: PathTransactionLease,
+    repair_lock: Option<fs::File>,
+    completion_marker: Option<PathBuf>,
+}
+
+/// Synchronous preflight shared by `skills_env_bootstrap` and `maru skills env repair`.
+pub(crate) fn prepare_env_bootstrap(
     root: PathBuf,
     setup: Option<PathBuf>,
     dry_run: bool,
     lease: PathTransactionLease,
-) -> Result<String, String> {
+) -> Result<EnvBootstrapJob, String> {
     lease.ensure_covered(env_mutation_paths(&root, setup.as_deref()))?;
     lease.before_effect()?;
-    let invocation_id = format!("skills-env-{}", Uuid::new_v4());
     host_fs::ensure_dir(&root)?;
     if dry_run || setup.is_none() {
         if !dry_run {
             host_fs::ensure_dir(&root.join(".venv"))?;
         }
         write_status_in_transaction(&lease, &root, None, None)?;
-        let _ = app.emit(
-            "skills-env://done",
-            EnvDoneEvent {
-                invocation_id: invocation_id.clone(),
-                success: true,
-                exit_code: Some(0),
-                error: None,
-            },
-        );
-        return Ok(invocation_id);
+        return Ok(EnvBootstrapJob::Settled(EnvBootstrapOutcome {
+            root: host_fs::display_path(&root),
+            success: true,
+            exit_code: Some(0),
+            setup_error: None,
+            completion_error: None,
+        }));
     }
     let setup = setup.expect("setup checked above");
     let repair_lock = host_fs::lock_direct_hash_env_repair(&lease, &root)?;
     let completion_marker = prepare_hashed_completion_marker(&lease, &root)?;
     host_fs::ensure_dir(&root.join("temp"))?;
-    let id = invocation_id.clone();
-    thread::spawn(move || {
+    Ok(EnvBootstrapJob::Setup(EnvSetupRun {
+        root,
+        setup,
+        lease,
+        repair_lock,
+        completion_marker,
+    }))
+}
+
+impl EnvSetupRun {
+    /// Blocks until setup exits and its outcome is persisted; releases the lease.
+    pub(crate) fn run(self, on_output: EnvOutputSink) -> EnvBootstrapOutcome {
+        let EnvSetupRun {
+            root,
+            setup,
+            lease,
+            repair_lock,
+            completion_marker,
+        } = self;
         #[cfg(all(test, unix))]
         let mut cmd = Command::new("/bin/bash");
         #[cfg(not(all(test, unix)))]
@@ -196,11 +242,11 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
                 let stdout = child
                     .stdout
                     .take()
-                    .map(|source| pump(app.clone(), id.clone(), "stdout", source));
+                    .map(|source| pump(on_output.clone(), "stdout", source));
                 let stderr = child
                     .stderr
                     .take()
-                    .map(|source| pump(app.clone(), id.clone(), "stderr", source));
+                    .map(|source| pump(on_output.clone(), "stderr", source));
                 let result = child.wait();
                 // A failed wait must still settle the owned child before release.
                 if result.is_err() {
@@ -231,41 +277,128 @@ fn bootstrap_in_transaction<R: tauri::Runtime>(
         };
         #[cfg(test)]
         PathTransactionLease::test_stage(&[root.clone()], "env:before-status");
-        let (persisted, completion_error) = match finish_bootstrap_in_transaction(
+        let completion_error = match finish_bootstrap_in_transaction(
             &lease,
             &root,
             completion_marker.as_deref(),
             success,
-            error,
+            error.clone(),
         ) {
-            Ok(()) => (true, None),
+            Ok(()) => None,
             Err(error) => {
-                let _ = app.emit(
-                    "skills-env://output",
-                    EnvOutputEvent {
-                        invocation_id: id.clone(),
-                        stream: "stderr".into(),
-                        line: error.clone(),
-                    },
-                );
+                on_output("stderr", error.clone());
                 let _ =
                     write_status_in_transaction(&lease, &root, Some(false), Some(error.clone()));
-                (false, Some(error))
+                Some(error)
             }
         };
         drop(repair_lock);
-        let _ = app.emit(
-            "skills-env://done",
-            EnvDoneEvent {
-                invocation_id: id,
-                success: success && persisted,
-                exit_code,
-                error: completion_error,
-            },
-        );
         drop(lease);
+        EnvBootstrapOutcome {
+            root: host_fs::display_path(&root),
+            success: success && completion_error.is_none(),
+            exit_code,
+            setup_error: error,
+            completion_error,
+        }
+    }
+}
+
+/// The owned lease moves to the detached worker, never to a borrowed callback.
+fn bootstrap_in_transaction<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    root: PathBuf,
+    setup: Option<PathBuf>,
+    dry_run: bool,
+    lease: PathTransactionLease,
+) -> Result<String, String> {
+    let invocation_id = format!("skills-env-{}", Uuid::new_v4());
+    let run = match prepare_env_bootstrap(root, setup, dry_run, lease)? {
+        EnvBootstrapJob::Settled(outcome) => {
+            let _ = app.emit("skills-env://done", done_event(&invocation_id, &outcome));
+            return Ok(invocation_id);
+        }
+        EnvBootstrapJob::Setup(run) => run,
+    };
+    let id = invocation_id.clone();
+    thread::spawn(move || {
+        let emitter = app.clone();
+        let output_id = id.clone();
+        let sink: EnvOutputSink = Arc::new(move |stream, line| {
+            let _ = emitter.emit(
+                "skills-env://output",
+                EnvOutputEvent {
+                    invocation_id: output_id.clone(),
+                    stream: stream.to_string(),
+                    line,
+                },
+            );
+        });
+        let outcome = run.run(sink);
+        let _ = app.emit("skills-env://done", done_event(&id, &outcome));
     });
     Ok(invocation_id)
+}
+
+fn done_event(invocation_id: &str, outcome: &EnvBootstrapOutcome) -> EnvDoneEvent {
+    EnvDoneEvent {
+        invocation_id: invocation_id.to_string(),
+        success: outcome.success,
+        exit_code: outcome.exit_code,
+        error: outcome.completion_error.clone(),
+    }
+}
+
+/// `maru skills env repair`: rebuild the active env with the same core as the
+/// app's Bootstrap button, on the calling thread.
+pub fn skills_env_repair_headless(
+    work_path: Option<String>,
+    on_output: EnvOutputSink,
+) -> Result<EnvBootstrapOutcome, String> {
+    let root = host_fs::env_root()?;
+    let parent = env_parent_snapshot(&root)?;
+    let setup = default_public_env_setup(work_path.as_deref())?;
+    let lease = PathTransactionRequest::new(env_mutation_paths(&root, setup.as_deref()))?
+        .require_parent_snapshot(&parent)?
+        .acquire()?;
+    if setup.is_none() {
+        return Err(format!(
+            "skills_env_setup_missing: no env setup script found for {}; run `maru skills update --apply` or `maru skills sync --apply` to restore the bundled skills, then retry `maru skills env repair`",
+            host_fs::display_path(&root)
+        ));
+    }
+    Ok(match prepare_env_bootstrap(root, setup, false, lease)? {
+        EnvBootstrapJob::Settled(outcome) => outcome,
+        EnvBootstrapJob::Setup(run) => run.run(on_output),
+    })
+}
+
+/// Read-only: the repair hint when the active hashed env is missing,
+/// incomplete (no `.maru-env-complete`) or has no `.venv`. Never creates or
+/// recovers anything, so doctor and `--check` stay diagnostic.
+pub fn active_env_repair_hint() -> Option<String> {
+    let state = crate::skill_host::bundle_update::read_state().ok()??;
+    let active = state.active?;
+    if active.env_hash.is_empty() {
+        return None;
+    }
+    let root = host_fs::hashed_env_root(&active.env_hash).ok()?;
+    let problem = if !root.is_dir() {
+        if !crate::skill_host::store::bundle_uses_hashed_env(&active.bundle_id).unwrap_or(false) {
+            return None;
+        }
+        "is missing"
+    } else if !root.join(".venv").is_dir() {
+        "has no .venv"
+    } else if !root.join(".maru-env-complete").is_file() {
+        "is incomplete (no .maru-env-complete)"
+    } else {
+        return None;
+    };
+    Some(format!(
+        "active skills env {} {problem}; run `maru skills env repair`",
+        host_fs::display_path(&root)
+    ))
 }
 
 pub fn skills_env_repair<R: tauri::Runtime>(
@@ -364,12 +497,7 @@ pub(crate) fn env_status_in_transaction(
     })
 }
 
-fn pump<R: tauri::Runtime, S>(
-    app: AppHandle<R>,
-    invocation_id: String,
-    stream: &str,
-    source: S,
-) -> thread::JoinHandle<()>
+fn pump<S>(on_output: EnvOutputSink, stream: &str, source: S) -> thread::JoinHandle<()>
 where
     S: std::io::Read + Send + 'static,
 {
@@ -381,14 +509,7 @@ where
             let Ok(line) = line else {
                 break;
             };
-            let _ = app.emit(
-                "skills-env://output",
-                EnvOutputEvent {
-                    invocation_id: invocation_id.clone(),
-                    stream: stream.clone(),
-                    line,
-                },
-            );
+            on_output(&stream, line);
         }
     })
 }
@@ -703,6 +824,100 @@ mod phase08_04 {
         assert!(status.last_error.is_none());
         assert!(std::path::Path::new(&status.root).starts_with(host_fs::maru_home().unwrap()));
     }
+    #[cfg(unix)]
+    #[test]
+    fn headless_repair_rebuilds_current_hashed_env_like_bootstrap() {
+        use crate::skill_host::bundle_update;
+        use tauri::Listener;
+        let mut trees = Vec::new();
+        for path in ["app", "cli", "cli-failure"] {
+            let _home = host_fs::test_home_for_bundle_tests();
+            let setup = default_public_env_setup(None).unwrap().unwrap();
+            let mut state = bundle_update::read_state().unwrap().unwrap();
+            let active = state.active.as_mut().unwrap();
+            active.env_hash = "headless-repair-env".into();
+            let record = host_fs::skills_root()
+                .unwrap()
+                .join("_cache/bundle-compatibility")
+                .join(format!("{}.json", active.bundle_id));
+            host_fs::write_json_pretty(
+                &record,
+                &serde_json::json!({"minAppVersion":"0.0.1", "envLayout":"hashed"}),
+            )
+            .unwrap();
+            bundle_update::write_state(&state).unwrap();
+            let root = host_fs::env_root().unwrap();
+            // Half-built: venv present but no completion marker.
+            fs::create_dir_all(root.join(".venv")).unwrap();
+            let hint = active_env_repair_hint().unwrap();
+            assert!(hint.contains("maru skills env repair"), "{hint}");
+            assert!(crate::skill_host::skills_doctor(None)
+                .unwrap()
+                .issues
+                .iter()
+                .any(|issue| issue.code == "env_incomplete"
+                    && issue.message.contains("maru skills env repair")));
+            fs::remove_dir_all(root.join(".venv")).unwrap();
+            fs::write(
+                &setup,
+                format!(
+                    "#!/bin/sh\nmkdir -p \"$2/.venv/bin\"\necho built > \"$2/.venv/bin/marker\"\necho out\nexit {}\n",
+                    if path == "cli-failure" { 9 } else { 0 }
+                ),
+            )
+            .unwrap();
+            if path == "app" {
+                let app = tauri::test::mock_app();
+                let (tx, rx) = mpsc::channel();
+                app.listen("skills-env://done", move |event| {
+                    tx.send(event.payload().to_string()).unwrap();
+                });
+                skills_env_bootstrap(app.handle().clone(), None, None).unwrap();
+                rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            } else {
+                let lines = Arc::new(std::sync::Mutex::new(Vec::new()));
+                let seen = lines.clone();
+                let outcome = skills_env_repair_headless(
+                    None,
+                    Arc::new(move |_, line| seen.lock().unwrap().push(line)),
+                )
+                .unwrap();
+                assert_eq!(outcome.success, path == "cli");
+                assert_eq!(lines.lock().unwrap().as_slice(), ["out".to_string()]);
+                if path == "cli-failure" {
+                    assert_eq!(outcome.exit_code, Some(9));
+                    assert!(outcome.setup_error.unwrap().contains("env_bootstrap_exit"));
+                    assert!(!root.join(".maru-env-complete").exists());
+                    assert!(active_env_repair_hint().is_some());
+                    continue;
+                }
+            }
+            assert!(root.join(".maru-env-complete").is_file(), "{path}");
+            assert!(active_env_repair_hint().is_none(), "{path}");
+            assert!(skills_env_status(None).unwrap().healthy, "{path}");
+            let mut tree: Vec<String> = walk(&root);
+            tree.retain(|entry| !entry.starts_with("status.json"));
+            trees.push(tree);
+        }
+        assert_eq!(trees[0], trees[1]);
+    }
+
+    fn walk(root: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                out.push(path.strip_prefix(root).unwrap().display().to_string());
+                if path.is_dir() {
+                    stack.push(path);
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
     #[cfg(unix)]
     #[test]
     fn hashed_setup_marks_only_successful_real_setup_and_reports_marker_failure() {

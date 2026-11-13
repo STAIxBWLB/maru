@@ -536,11 +536,6 @@ export async function skillsEnvBootstrap(
   return invoke<string>("skills_env_bootstrap", { workPath, dryRun });
 }
 
-export async function skillsEnvRepair(workPath: string | null): Promise<string> {
-  if (!isTauri()) throw new Error("Skills env repair requires the Tauri shell.");
-  return invoke<string>("skills_env_repair", { workPath });
-}
-
 export interface SkillBundleRef {
   bundleId: string;
   revision: number;
@@ -571,6 +566,8 @@ export interface SkillBundleStatus {
   dirtySkills: string[];
   staleCopyInstalls: string[];
   envUpdateRequired: boolean;
+  /** Present when the active hashed env is missing or incomplete. */
+  envRepairHint?: string;
   minAppOk: boolean;
   unmetRequires: string[];
   autoApplicable: boolean;
