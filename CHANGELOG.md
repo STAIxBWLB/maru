@@ -9,6 +9,13 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.30 - Editable Pages (2026-11-13)
+
+- A `.hwpx` file now opens in the published hwp-editor (`@hwp-editor/core` and `@hwp-editor/react` 1.3.0) on request, while the read-only preview stays the default. Edits travel over the engine's edit-ops-v1 JSON channel, every rendered SVG page is sanitized before it is painted, and edits stay in that window: nothing is written back to the file yet. A native macOS test opens, edits and re-applies a real `.hwpx` (#563, #609).
+- `maru skills env repair [--force] [--json]` rebuilds the active hashed skills env without a bundle update, using the same setup code as Settings > Skills > Bootstrap. A healthy env is refused unless `--force` is given, the legacy env layout is refused, and a failed repair restores the prior env exactly. `maru doctor` and `maru skills update --check` name the command when the env is missing or incomplete (#608, #611).
+- The HWP engine is resolved as `ahwp` first, with `hwp` as the 1.x fallback (#592, #604).
+- The hwped JSON edit channel keeps insert-image and seal paths inside the workspace (#590, #600), refuses `apply_form_bindings` (#601, #606), and a failed edit now reports its stage directory (#605, #607).
+
 ## v1.1.29 - Counted Tables (2026-11-13)
 
 - The HWP editor bridge now sends the engine's own table count (`bodyTables`, from `hwp info --json --body-stats`) with each read, so the editor's table guard refuses index-addressed table edits when a table inside a note, header, footer or hidden comment would shift the indices. The extra call needs hwp-cli 0.19.2 or newer and never fails the read (#591).
