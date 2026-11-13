@@ -3,6 +3,9 @@
   "repoSlug": "STAIxBWLB/skills",
   "channelTag": "skills-channel",
   "minAppVersion": "1.1.6",
+  "requires": {
+    "vmem": ">=0.8.0"
+  },
   "skillsSubdir": "skills",
   "envSubdir": "envs/default",
   "libSubdir": "lib",
@@ -199,6 +202,17 @@
       ]
     },
     {
+      "name": "academic-pptx",
+      "path": "skills/academic-pptx",
+      "tier": "core",
+      "tags": [
+        "slides",
+        "pptx",
+        "academic",
+        "korean"
+      ]
+    },
+    {
       "name": "share-outbox",
       "path": "skills/share-outbox",
       "tier": "core",
@@ -271,24 +285,6 @@
       ]
     },
     {
-      "name": "vault-next",
-      "path": "skills/vault-next",
-      "tier": "core",
-      "tags": [
-        "vault",
-        "planning"
-      ]
-    },
-    {
-      "name": "vault-pipeline",
-      "path": "skills/vault-pipeline",
-      "tier": "core",
-      "tags": [
-        "vault",
-        "pipeline"
-      ]
-    },
-    {
       "name": "vault-refactor",
       "path": "skills/vault-refactor",
       "tier": "core",
@@ -304,15 +300,6 @@
       "tags": [
         "vault",
         "memory"
-      ]
-    },
-    {
-      "name": "vault-rename",
-      "path": "skills/vault-rename",
-      "tier": "core",
-      "tags": [
-        "vault",
-        "rename"
       ]
     },
     {
@@ -349,6 +336,15 @@
       "tags": [
         "vault",
         "update"
+      ]
+    },
+    {
+      "name": "vmem-status",
+      "path": "skills/vmem-status",
+      "tier": "core",
+      "tags": [
+        "vault",
+        "vmem"
       ]
     },
     {

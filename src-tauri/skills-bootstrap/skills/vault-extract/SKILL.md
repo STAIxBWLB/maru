@@ -6,6 +6,8 @@ description: Extract insights from a source document into vault notes
 
 # /vault-extract [source]
 
+> Before the first vmem call, read `lib/vault_adapter.md` §Runtime Discovery and bind the vmem vault id for the workspace `vault.path`; pass it as `vault` on every vmem tool call and as the `<vault>` argument of every `vmem` CLI command.
+
 Extract insights, decisions, observations from a source document and create vault notes.
 
 ## Input
@@ -18,33 +20,31 @@ Before writing ANY vault note, verify the source summary.md frontmatter has **al
 1. **`description`** — string, ≥10 chars, not equal to title
 2. **`domain`** — ∈ `{research | projects | teaching | operations | people | ai-practice}`
 3. **`topics`** — array containing ≥1 `[[wiki-link]]` **AND every `[[target]]` must exist as a real note in `vault/notes/<target>.md`** (MOC enforcement — topics carry hub navigation only, not keyword tags)
-   - Verify existence via `mcp__obsidian__get_notes_info(paths: [notes/<target>.md, ...])` for the full list of topic targets, or by listing `vault/notes/` and checking each
+   - vmem checks this at write time; `vmem_mocs` lists the existing MOCs when you need to choose one. expect: vmem refuses (V02) a `topics` entry that is not an existing MOC
    - If any `[[target]]` is missing: **ABORT** (do NOT auto-create the MOC) — the caller (or user) must either fix the summary's topics or create the MOC note first
    - Concept/keyword tags (e.g., `credit-recognition`, `partnership-mapping`) belong in body text, NOT in `topics`. Schema is "topics = MOC only" per `vault/AGENTS.md §Schema`.
 
-**Read the summary's frontmatter via `mcp__obsidian__get_frontmatter` (or equivalent YAML parse) BEFORE building the vault note body.**
+**Read the summary's frontmatter with a YAML parse of the work/ file BEFORE building the vault note body.** expect: vmem refuses (V01) a missing `description`, `type` or `domain` and an enum value outside the vocabulary.
 
 If any check fails:
 - **ABORT** the extract for this summary
-- Emit failed event to `log`: `YYYY-MM-DD HH:MM  EXTRACT  <proj>  <summary> → -  — failed: <reason>` (reasons include: `missing required fields: <field list>`, `dead topic: [[<target>]] not in vault/notes/`)
-- Return error to caller (`inbox-process`, /vault-sync, /vault-pipeline) — caller decides whether to continue with other items
+- Emit failed event with `vmem_log_append(type: "EXTRACT", project: <proj>, source: <summary>, note: "failed: <reason>")` (reasons include: `missing required fields: <field list>`, `dead topic: [[<target>]] not in vault/notes/`)
+- Return error to caller (`inbox-process`, /vault-sync) — caller decides whether to continue with other items
 - **Do NOT synthesize empty values. Do NOT guess. Do NOT proceed to write.**
 - User must fix summary.md and re-run. `inbox-process` must re-emit summary with correct fields when the summary came from an inbox item.
 
-**Why strict**:
-- 2026-04-11 L02 incident — 2 notes created via automated EXTRACT without these fields, caught only by later `/vault-lint`.
-- 2026-05-22 L01 incident — 21 notes accumulated 26 unique dead `topics` wiki-links (e.g., `[[credit-recognition]]`, `[[partnership-mapping]]`) because `topics` was copied verbatim from summary.md without MOC existence check. The MOC check above prevents recurrence at the write site.
+## Extraction Fidelity and Concurrent Writers
+
+These rules govern every extraction:
+
+1. **Key facts stay verbatim.** Quote numbers, dates, amounts, contract terms and named obligations exactly as the source states them, with the source path on the same line. Keep analysis in a separate `## Synthesis` section of the note.
+2. **Conflicts stay conflicts.** When two sources disagree on a value, record both values with their sources; `## Synthesis` may say which source is later or more authoritative, and both attributed values remain.
+3. **One writer per entity page**, when more than one agent or session writes vault notes in one pass: assign each entity (person, organization, project, document, contract) to one writer, and every other writer links to that page from the notes it owns and writes only the pages it owns. Owners create, or confirm the existence of, their entity pages at the start of the pass, and another writer adds its link only after that create succeeded; vmem refuses a new unresolved wiki link (V03), so until then it records the pending link as plain text in the run output (never as a `[[link]]` in a note), adds it once the target resolves, and reports it as unresolved if the owner's create never succeeds.
 
 ## Process
 
 1. Read the source document completely
-2. Classify the source document's project via registry:
-   - Read `<workspace-root>/project-registry.yaml` (status: active only)
-   - Extract signals from the source (keywords, people, organizations, acronyms)
-   - Score: people +3, acronyms +2, keywords +2, orgs +1, tags +1
-   - top score >= 3 & single match → use `vault_note` for topics, `path` to validate source
-   - tie/ambiguous → disambiguation field → ask user
-   - score < 3 → fall back to content-based domain analysis
+2. Classify the source document's project per `lib/vault_adapter.md` §Project Registry Pattern (scoring and fallback)
 3. Identify extractable items by domain:
    - research: claims, methods, contradictions, open-questions, tech-trends
    - projects: decisions, rationale, lessons-learned, risks, milestones
@@ -56,38 +56,40 @@ If any check fails:
 5. For each item, create a note in vault/notes/:
    - Filename: prose-as-title (lowercase, hyphens, .md)
    - YAML frontmatter with required fields (`description`, `type`, `domain`, `topics`)
-   - **Copy source-derived fields verbatim**: `description`, `domain`, `topics` are copied directly from summary.md frontmatter (verified in preconditions above). See `~/.maru/skills/_builtin/lib/vault_adapter.md` for the summary-to-vault field policy.
+   - **Copy source-derived fields verbatim**: `description`, `domain`, `topics` are copied directly from summary.md frontmatter (verified in preconditions above). See `lib/vault_adapter.md` §Summary To Vault Fields.
    - **type remapping**: summary `type` (regulation|report|plan|...) maps to vault `type` (insight|decision|observation|person|project|method|moc|reference) based on semantic intent. Common mappings: report→observation, plan→decision, memo→insight, proposal→decision, regulation→observation.
    - If registry matched in step 2, add `vault_note` wiki link to topics array
    - Set source field to the work/ relative path. If the source carries backref
      frontmatter (`source_doc`, `meetingSourcePath`, `relatedMeetings`,
-     `relatedTasks` — context-enrichment §4), preserve those origins in the
+     `relatedTasks`), preserve those origins in the
      note's source / Relevant Notes; emit a `[[wiki-link]]` only for targets that
      resolve (consistent with the MOC dead-link gate above)
-   - Body: the insight with context
+   - Body: the insight with context, with quoted facts and `## Synthesis` placed per §Extraction Fidelity and Concurrent Writers
    - Relevant Notes section with wiki links
    - Topics section with MOC wiki links
-6. **Post-write verification** (MANDATORY): re-read the created note via `mcp__obsidian__get_frontmatter`. If `description`, `domain`, or `topics` is missing or empty in the written note, **delete the note** via `mcp__obsidian__delete_note`, log `— failed: post-write verification`, and return error. This catches edge cases where write succeeds but frontmatter gets stripped (Obsidian linter, encoding, etc.).
+6. **Pre-validate, write, and read the receipt** (MANDATORY):
+   a. `vmem_check(path: "notes/<stem>.md", text: <the full note text>)` validates the prospective note without writing, so an invalid frontmatter (V01), a `topics` entry that is not an existing MOC (V02), a new unresolved wiki link (V03) and secret-looking text (V06) cost no write. It does not see a stem collision; only the create does.
+   b. Duplicate check: `vmem_brief(intent: "<title> <description>", paths: ["<source work file>"], bytes: 1024)`. `paths` only adds the file's basename words to the ranked terms (a hint, not a citation filter), so also confirm a pointer with `vmem_search`. A pointer that is already this insight is a merge, not a second note: run `vmem_merge(keep, absorb)` as a preview, then confirm it with the fingerprint.
+   c. Create with `vmem_create(stem, type, domain, topics, description, source, body, log: {type: "EXTRACT", project, source, dest: "notes/<stem>.md", note: "<type>"})`. vmem validates the full frontmatter before it saves, so a stripped or invalid note is never written.
+   d. Read the whole receipt. `possibleDuplicates` is a warning, not a refusal: the note was written, and vmem lists the notes whose indexed title terms match it (V08 at warning severity). Surface that list with the merge option (keep the existing note, absorb the new one) or keep both and link them — never write a second copy of the same insight. The hard V08 (`same stem or normalized H1 already exists`) is the refusing form and stops before anything is written. `ok: false` with `applied: false` wrote nothing: record `failed: <issue codes>` with `vmem_log_append` and return the issues. `ok` false with `applied: true` persisted: reconcile per `lib/vault_adapter.md` §Write results.
+   e. expect: vmem refuses the V01/V02/V03/V06 issues `vmem_check` reports, V08 on a duplicate stem or normalized H1, and V09 on a note over 256 KiB; `vmem_merge` refuses two notes of different types, a person or MOC note, and a merged result over the size bound. Report the named issues; never retry with guessed values.
 7. After creating notes, invoke /vault-connect with entities hint (from summary.md):
    - Read `entities` field from source summary.md (if present — list of 인물/기관 names)
    - Pass entities list to `/vault-connect` as wiki-link candidate seeds (`entities_hint` parameter)
    - `/vault-connect` uses entities to prioritize wiki-link discovery in its first pass
    - **Note**: `keywords` field is NOT carried forward to vault notes — it exists only for route scoring reproducibility
-8. **Append EXTRACT event to vault/log** (ingest chain audit trail)
-
-> **Registry fallback**: when project registry scoring < 3 → content-based domain analysis → if still ambiguous, prompt user. SSOT: `<workspace-root>/_meta/rules/project-registry-scoring.md`
+8. **EXTRACT event in vault/log** (ingest chain audit trail) comes from the step 6 `log` argument
 
 ## Log Append (Step 8 — REQUIRED)
 
-Every note created or updated by /vault-extract must produce one `log` line. `vault/log` is a plain logfile (no extension): append via direct fs write (`>>`), the sole exception to MCP-only vault writes.
+Every note created or updated by /vault-extract must produce one `log` line. `vmem_create` writes it from its `log` argument. An update (`vmem_patch` / `vmem_append`) records a default EXTRACT line; when the contract needs the `updated: <type>` note text, pass it as that write's `log` argument. Failures use `vmem_log_append`. Never append to the log file directly.
 
-**Format** (see `<workspace-root>/_meta/rules/ingest-chain.md` §"vault/log 포맷"):
+**Format** (`lib/vault_adapter.md` §Log Append):
 
 ```
 YYYY-MM-DD HH:MM  EXTRACT  <project>  <source> → <vault/notes/x.md>  — <type>
 ```
 
-- `<project>`: project id from registry (`project-registry.yaml`), or `-` if unclassified
 - `<source>`: work/ relative path of the source document
 - `<vault/notes/x.md>`: newly created note path (use `notes/x.md` form)
 - `<type>`: note type (`insight | decision | observation | person | project | method | moc | reference`)
@@ -96,11 +98,11 @@ YYYY-MM-DD HH:MM  EXTRACT  <project>  <source> → <vault/notes/x.md>  — <type
 
 **Update vs create**: for updates, use `— updated: <type>` to distinguish.
 
-**Failure**: if note creation succeeds but log append fails, warn user and proceed (do not roll back). If note creation fails, do not append.
+**Failure**: `lib/vault_adapter.md` §Log failure handling.
 
-**Vault access**: MCP Obsidian only. No filesystem Write/Edit on vault paths.
+**Vault access**: vmem MCP only. No filesystem Write/Edit on vault paths.
 
-## Sibling Meeting Merge Rule (2026-04-16)
+## Sibling Meeting Merge Rule
 
 복수 회의 소스(같은 프로젝트·같은 날·보완적 관점)를 **단일 vault 노트**로 merge할지, **분리**할지 결정:
 

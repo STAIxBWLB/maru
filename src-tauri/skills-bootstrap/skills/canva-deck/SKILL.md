@@ -1,7 +1,7 @@
 ---
 name: canva-deck
 description: |
-  Canva 슬라이드 덱(Magic Design for Presentations / AI 프레젠테이션 / Docs to Decks)용 디자인 시스템 프롬프트 조립 스킬. <skills-bundle>/docs/slide-decks/에 보관된 14종 스타일 카탈로그(Anti-Gravity, Refined Minimal Portfolio, Blood Orange Agency, Comic Story, Neo-Retro Dev, Yellow Fashion Mag, Red Accent Editorial, Royal Watercolor, Premium Mockup, Sports Energy, Sculpture Pop, Constructivism Tech, Vitamin Pop, Flat Illustration)에서 발표 맥락에 맞는 스타일을 선택하고, Canva의 짧은 프롬프트 입력 박스에 맞춰 압축된 1-2문단 프롬프트를 조립한다. 또한 Canva의 템플릿 검색 키워드(예: "minimal architectural deck", "comic style presentation")와 폰트·컬러 추천도 함께 제시.
+  Canva 슬라이드 덱(Magic Design for Presentations / AI 프레젠테이션 / Docs to Decks)용 프롬프트가 필요할 때: 스타일 카탈로그에서 발표 맥락에 맞는 스타일을 골라 Canva의 짧은 입력 박스에 맞춘 1-2문단 프롬프트, 템플릿 검색 키워드, 폰트·컬러 추천을 조립한다.
   트리거: canva, Canva 슬라이드, Canva 발표, Canva AI, Magic Design, Magic Write, Docs to Decks, Canva 프롬프트, Canva 템플릿, /canva-deck, 캔바 슬라이드, 캔바 프레젠테이션, 캔바 AI, Canva presentation prompt
 ---
 
@@ -13,18 +13,6 @@ Canva의 AI 프레젠테이션 도구(Magic Design for Presentations / AI 프레
 - `<skills-bundle>`: 이 스킬이 설치된 스킬 번들 루트. 배포 시 `~/.maru/skills/_builtin/`, 개발 중에는 skills repo 루트. 워크스페이스(`~/workspace/work/`) 경로가 아니다.
 - 단일 진입점: 본 스킬 (`canva-deck`)
 - 출력: Canva의 짧은 프롬프트 입력에 맞춘 1-2문단 + 템플릿 검색 키워드 + 폰트·컬러 명세
-
-## 왜 별도 스킬인가
-
-| 항목 | NotebookLM | Canva |
-|------|-----------|-------|
-| 입력 길이 | 사실상 무제한 (긴 master prompt 가능) | 짧음 (Magic Design 입력은 ~150-300자, AI 프레젠테이션 prompt도 단문 위주) |
-| 스타일 컨트롤 | 프롬프트가 곧 디자인 시스템 | Canva 템플릿 + brand kit이 우선, 프롬프트는 보조 |
-| 슬라이드 수 | NotebookLM이 자동 결정 | 사용자가 직접 지정 가능 (5/10/15/20) |
-| 레이아웃 어휘 | 자유 서술 | Canva 내장 템플릿 카테고리에 맞춰야 효과적 |
-| 이미지 | 텍스트→AI 일러스트 | 자체 stock + Magic Media 생성 가능 |
-
-→ NotebookLM용 master prompt를 그대로 붙이면 Canva가 무시한다. Canva는 **압축된 톤 + 템플릿 검색어 + 슬라이드 개수 + 청중**의 4-5요소 조합을 선호.
 
 ## 14종 카탈로그 한눈에 → Canva 템플릿 매핑
 
@@ -96,11 +84,7 @@ Language: [언어].
 
 ### 5단계 — Canva 사용 가이드 안내
 
-사용자가 처음이라면 다음 경로를 안내:
-
-- **Magic Design for Presentations**: Canva 홈 → "Create" → "Presentation" → 상단 "Magic Design" 또는 "AI 프레젠테이션" 클릭 → 프롬프트 입력 박스에 `Canva Prompt` 블록 붙여넣기
-- **Docs to Decks**: 긴 마크다운/텍스트가 있을 때 → Canva Docs에 붙여넣고 "Convert to Deck" 사용 → 슬라이드 톤 커스터마이즈
-- **Brand Hub**: 반복 사용하는 스타일은 Brand Hub에 색·폰트·로고 등록 → 모든 신규 덱에 자동 적용
+사용자가 처음이라면 안내 전에 `references/canva-prompt-format.md` §처음 사용자 안내를 읽고 그 경로를 안내.
 
 ### 6단계 — 후속 제안 (선택)
 
@@ -130,19 +114,9 @@ Brand Kit Spec:
 - Fonts: Heading "Helvetica Now Display Bold" · Body "Noto Sans KR Light"
 ```
 
-### 예시 2 — vibe만 제공
-> "캐주얼 캠페인 제안서를 Canva로 7장 만들고 싶어."
-
-→ 추천 1순위: Blood Orange Agency, 2순위: Yellow Fashion Mag → 사용자 선택 → 3단계 출력
-
-### 예시 3 — 인터랙티브 outline
-> "위 프롬프트로 슬라이드별 outline도 같이 줘."
-
-→ 4단계 4번째 블록 추가: 10장 각 슬라이드 한 줄씩 (Cover / Setup / Year 2 KPIs / Pivot / Outcomes / etc.)
-
 ## 운영 원칙
 
-- **카탈로그 단일 소스**: `<skills-bundle>/docs/slide-decks/`만 참조. 새 스타일 추가 시 거기에 파일 추가하면 본 스킬과 `notebooklm-deck` 둘 다 자동 인식
+- **카탈로그 단일 소스**: `<skills-bundle>/docs/slide-decks/`만 참조
 - **압축 우선**: NotebookLM master prompt 통째로 붙이지 말 것. Canva가 길면 무시함
 - **영문 키워드 + 한국어 본문**: Canva의 디자인 어휘는 영문이 더 정확. 톤 설명만 입력 언어로
 - **Brand Kit 권장**: 동일 스타일을 반복 사용하면 Brand Hub에 등록해 일관성 자동화

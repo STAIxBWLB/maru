@@ -1,7 +1,7 @@
 # PDF Print Path (Markdown -> HTML -> Chrome headless)
 
 Outgoing PDFs are produced by printing HTML with Chrome, not by rendering
-HWPX. Reason: the hwp-cli PDF renderer cannot continue a table across a page
+HWPX. Reason: the agent-hwp PDF renderer cannot continue a table across a page
 boundary; every row after the boundary is silently dropped (data loss, not
 just visual clipping). Chunking tables only shrinks the loss; it does not
 remove it. The browser print engine paginates tables correctly (rows stay
@@ -22,7 +22,8 @@ extra packages):
   candidates. This keeps the Chrome-first route working when a Homebrew
   `chromium` shim is stale. Override with `--chrome <bin>` or `CHROME_BIN`.
   An explicit `--chrome` that does not resolve is an error (no silent
-  fallback). Exits with code 2 and a fallback hint when no browser is found.
+  fallback). Exits with code 2 and tells the agent to ask the user when no
+  browser is found.
 - A leading YAML frontmatter block is stripped before rendering, so
   internal metadata never reaches the outgoing PDF.
 - The intermediate HTML goes to a temp file, removed on success and kept
@@ -55,11 +56,8 @@ the theme by editing the constant, not by post-processing the HTML.
 
 ## Fallbacks
 
-- No Chrome on the machine: convert first, then print the DOCX with
-  LibreOffice if installed: `md2docx <src.md>` then
-  `soffice --headless --convert-to pdf <stem>.docx`. LibreOffice cannot
-  import raw Markdown, and a direct HWPX-to-LibreOffice route is not a
-  verified fallback for this consumer.
+- No Chrome/Chromium on the machine: stop and ask the user how to proceed
+  (for example, install Chrome or pass `--chrome <bin>`).
 - Bare native HWPX rendering is a last resort for table-free documents only,
   and the output pages must be visually verified before sending. The table
   row loss exits 0, so it cannot be used as an automatic fallback.

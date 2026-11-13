@@ -1,3 +1,0 @@
-networkx>=3.0
-graphifyy>=0.1
-graspologic>=3.0

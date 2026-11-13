@@ -14,7 +14,7 @@ document, not a Python module.
 Every other workspace collection declares its own root (`inbox.root`,
 `meeting_notes.root`, `task_management.root`, `share_outbox.root`) and skills
 resolve through it. The scratchpad was the exception: its config keys existed
-but only `lib/build-graph.py` read them, so skills wrote `scratchpad/...`
+but only the retired `lib/build-graph.py` read them, so skills wrote `scratchpad/...`
 literals that silently ignore a relocated or renamed collection.
 
 ## Runtime Discovery

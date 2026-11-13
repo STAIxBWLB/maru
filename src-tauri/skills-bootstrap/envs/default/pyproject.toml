@@ -36,8 +36,6 @@ dependencies = [
     "python-pptx>=1.0.0",
     # Graph workflows
     "networkx>=3.0",
-    "graphifyy>=0.9.45",
-    "graspologic>=3.0",
     # Telegram
     "telethon>=1.36.0",
     "mcp-telegram>=0.1.0",

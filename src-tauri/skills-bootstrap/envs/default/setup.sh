@@ -156,7 +156,7 @@ else
     echo "⚠️  pnpm 미설치 — Node.js docx 패키지 사용 불가 (brew install pnpm)" >&2
 fi
 
-# (3b. Java 런타임 설치 — 제거됨. hwpx는 hwp-cli로 전환되어 JRE 불필요.)
+# (3b. Java 런타임 설치 — 제거됨. hwpx는 agent-hwp로 전환되어 JRE 불필요.)
 
 # 3c. Node 런타임 설치 (md2docx docx-js 변환 실행용)
 # ~/.maru/env/node 에 번들 — 실행 시 시스템 node(fnm/nvm) 의존 제거.

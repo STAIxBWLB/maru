@@ -1,15 +1,13 @@
 ---
 name: linkedin-manager
 description: >
-  Manage a LinkedIn channel as local Markdown records: initialize from approved
-  profile/site sources, capture ideas, plan weekly or on demand, prepare drafts
-  and publish packs, record manually published posts and metrics, review
-  performance, propose profile text, draft replies, and inventory/import exports.
   Use for LinkedIn setup, content calendars, post pipelines, profile audits,
-  LinkedIn 관리, and 링크드인 관리. Publishing and profile updates remain manual.
-  Setup may read one explicitly authorized public profile without login or
-  interaction, stopping on access failure. Identity and paths come from workspace
-  configuration; new post drafting uses the configured writer.
+  LinkedIn 관리, and 링크드인 관리. Manages a LinkedIn channel as local Markdown
+  records: initialize from approved profile/site sources, capture ideas, plan
+  weekly or on demand, prepare drafts and publish packs, record manually
+  published posts and metrics, review performance, propose profile text, draft
+  replies, and inventory/import exports. Publishing and profile updates remain
+  manual.
 ---
 
 # LinkedIn Manager
@@ -73,9 +71,9 @@ the source of truth; the user publishes and applies profile changes by hand.
   numeric suffix before the extension (`-2`, `-3`). Filenames are unique across
   all lifecycle directories, so a filename identifies a post wherever it sits.
 - **Refer to posts by filename, not by path**, in plans, reminders and logs;
-  resolve a filename by looking through the lifecycle directories. A move then
-  breaks nothing. When a transition touches a post that a plan row names,
-  update that row's `state` in the same step.
+  resolve a filename by looking through the lifecycle directories. When a
+  transition touches a post that a plan row names, update that row's `state`
+  in the same step.
 - Do not write to a knowledge vault. Surface a vault-worthy item as a proposed
   handoff only.
 
@@ -112,9 +110,8 @@ closest mode; when two fit, ask.
 `published` is final. Running `published` on a record that is already published
 changes nothing unless the user is correcting `url` or `publishedAt`; confirm
 the correction and note it in the working notes. Recording a post that went out
-without passing through `ready` (from `idea` or `draft`) is allowed, because the
-record must match reality: confirm once, set `readySkipped: true`, and say so in
-the working notes. Any other transition is refused with the legal options
+without passing through `ready` (from `idea` or `draft`) is allowed: confirm
+once, set `readySkipped: true`, and say so in the working notes. Any other transition is refused with the legal options
 listed; for a published record say that the only changes left are a `url` or
 `publishedAt` correction and new metrics. Drop and restore each leave a dated
 line in the working notes.
@@ -192,17 +189,8 @@ the notes intact.
 
 ### metrics
 
-Append one snapshot per reading: `{date, impressions, reactions, comments,
-reposts}` plus any other fields the user supplies, with the user's own labels.
-Never overwrite an earlier snapshot, never fill an omitted field, never
-estimate. To fix a mistyped reading, append a new snapshot with the same `date`,
-`corrects: true` and a `reason`. A correction repeats the whole reading: the
-corrected fields take the new values and every field the user did not retract
-is copied from the snapshot it corrects. For any date the last snapshot written
-is the effective one and earlier ones stay as history. A late reading for an earlier
-date is inserted in date order. From an analytics export, read `.xlsx` through the workspace's
-spreadsheet skill and `.csv` directly, show the rows you matched to posts by
-URL, and ask before writing.
+Read `references/metrics.md` before appending a snapshot. Append only: never
+overwrite an earlier snapshot, never fill an omitted field, never estimate.
 
 ### review
 
@@ -216,25 +204,9 @@ raised by one.
 
 ### profile
 
-`linkedin.cv_source` is the factual source; `profile/current.md` is the text
-believed to be live on LinkedIn, as last recorded by the user. Without a
-configured `cv_source`, `audit` and `propose` stop and say what is missing;
-`record` still works.
-
-- `audit`: compare section by section. List what is stale, missing or
-  inconsistent, with the CV line that shows it. If `profile/current.md` does not
-  exist, ask the user to paste the live text first; do not reconstruct it. Offer
-  to save the paste as `profile/current.md` with `source: pasted by the user`
-  as a baseline; that is not a `record` of a change and writes no history copy.
-  Where the CV holds something with no obvious profile section (a project role,
-  an award), list it and ask where the user wants it rather than placing it.
-- `propose <section>`: write new text for that section within the field limit
-  in `references/publish-pack.md`, from CV facts and approved source citations.
-  Write a `linkedin-profile-proposal` under `profile/proposals/`, never
-  `profile/current.md`. Reuse an identical proposal and suffix a changed
-  collision. Offer the polish skill.
-- `record`: after the user has updated LinkedIn by hand, save the new live text
-  to `profile/current.md` and a dated copy to `profile/history/`.
+Read `references/profile.md` before `audit`, `propose` or `record`. Only
+`record`, or a pasted baseline the user agreed to save, writes
+`profile/current.md`; proposals go to `profile/proposals/`.
 
 ### reply
 
@@ -247,40 +219,17 @@ make first. Log the exchange in `engagement/` only when the user asks.
 
 ### import
 
-From LinkedIn's data export (`Shares.csv` and related files) or loose post
-files the user points at, create one record per post in `published/YYYY/` only
-when publication evidence belongs to the owner and an absolute publication
-date is available (for example from the owner's export or supplied post
-URL/date), with
-`status: published`, `publishedAt`, `url` when present, the original text as
-the body, and `source` naming the file it came from. Field rules for imported
-records are in `references/record-schema.md` §Imported posts. Show the list and ask
-before writing. Leave the original files where they are. Skip a post that is
-already in the archive: match on `url` when the export has one, otherwise on
-`importKey` (the raw export timestamp joined to the first 60 characters of the
-text). Show a near match (same day, similar opening) to the user instead of
-deciding.
+Read `references/import.md` before importing. Show the list and ask before
+writing; leave the original files where they are.
 
 ## Maru Run Contract
 
 When Maru runs this skill in background or review mode (the prompt asks for
 proposals only), write no files and run no follow-up skills during the run.
-Emit progress lines with exactly one marker at the start of the line:
-`[phase:source]` after config and input records are read, `[phase:normalize]`
-while resolving paths, dates, language and pillar, `[phase:draft]` while
-composing record content, `[phase:proposal]` when preparing the JSON object,
-`[phase:review]` when listing what the user must confirm; errors use `ERROR:`
-or `[phase:error]`. Return exactly one
-`maru_skill_proposal_v1` object with the markdown file writes; items the user
-must confirm go in its `risks` and are repeated in plain text. Only writes that
-move no file are proposed as file writes: for example a new idea, a metrics
-snapshot, a profile record, a plan or review, an in-place drop or restore, a
-`url` or `publishedAt` correction. A transition that moves a file is described
-in `summary` and left for a terminal run; do not propose a status change that
-would leave a record in the wrong directory. An empty `files` list is valid when
-nothing can be written. Shape and allowed handoffs:
-`references/maru-integration.md`. Terminal use of this skill is unchanged by
-this section.
+Read `references/maru-integration.md` §Background and Review Runs before
+composing the run: it defines the progress markers, the single
+`maru_skill_proposal_v1` object, which writes may be proposed, and the allowed
+handoffs. Terminal use of this skill is unchanged by this section.
 
 ## References
 
@@ -289,4 +238,5 @@ this section.
 - `references/publish-pack.md` - pre-post checklist and LinkedIn field limits
 - `references/calendar-and-cadence.md` - how a plan is built and what it may claim
 - `references/review-report.md` - review format and the arithmetic it may do
-- `references/maru-integration.md` - directories, parsing rules, proposal and review objects
+- `references/maru-integration.md` - directories, parsing rules, background-run markers and proposal object
+- `references/profile.md`, `references/import.md`, `references/metrics.md` - mode procedures

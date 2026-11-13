@@ -13568,11 +13568,11 @@ exit 0
     }
 
     #[test]
-    fn isolated_home_bootstraps_five_ownership_classes_and_48_by_96_catalog() {
+    fn isolated_home_bootstraps_five_ownership_classes_and_47_by_94_catalog() {
         let home = test_home();
         let skills_root = host_fs::skills_root().unwrap();
         materialize_builtin_bundle(&skills_root.join(BUILTIN_DIR_NAME)).unwrap();
-        assert_eq!(embedded_builtin_skill_count(), 39);
+        assert_eq!(embedded_builtin_skill_count(), 38);
 
         let public_root = skills_root.join("_sources").join("skills-public");
         let private_root = skills_root.join("_sources").join("skills-private");
@@ -13607,8 +13607,8 @@ exit 0
 
         let tools = vec!["claude".to_string(), "codex".to_string()];
         let applied = skills_sync_tools(None, tools.clone(), true, false).unwrap();
-        assert_eq!(applied.desired_skills, 48);
-        assert_eq!(applied.desired_installs, 96);
+        assert_eq!(applied.desired_skills, 47);
+        assert_eq!(applied.desired_installs, 94);
 
         let registry = load_registry().unwrap();
         let classes: BTreeSet<_> = registry
@@ -13656,8 +13656,8 @@ exit 0
         let before = fs::read(&registry_path).unwrap();
         let checked = skills_sync_tools(None, tools, false, false).unwrap();
         assert!(checked.actions.is_empty());
-        assert_eq!(checked.desired_skills, 48);
-        assert_eq!(checked.desired_installs, 96);
+        assert_eq!(checked.desired_skills, 47);
+        assert_eq!(checked.desired_installs, 94);
         assert_eq!(fs::read(&registry_path).unwrap(), before);
     }
 

@@ -12,8 +12,7 @@ description: >
 # Task Management
 
 Manage workspace-local tasks backed by markdown files, Google Tasks, and Google
-Calendar. This skill is public-safe: it contains workflows and schemas only.
-Workspace-specific identity, calendar IDs, task list IDs, and CLI paths must be
+Calendar. Workspace-specific identity, calendar IDs, task list IDs, and CLI paths must be
 loaded at runtime.
 
 ## Boot Sequence
@@ -60,16 +59,10 @@ quality. Google Tasks/Calendar mutations happen only later, through this
 skill's approved-execution path — never as Maru file writes. Terminal and
 direct-CLI use of this skill is unchanged by this section.
 
-1. Emit concise human-readable progress logs while working. Prefix major
-   progress logs with stable phase markers so Maru can render stepwise status:
-   - `[phase:source]` after the schedule/task source text or files are read.
-   - `[phase:normalize]` while resolving title, dates, timezone, project, and
-     checking the configured calendar/task list for conflicts.
-   - `[phase:draft]` while drafting the task/calendar markdown.
-   - `[phase:proposal]` when preparing the `maru_skill_proposal_v1` block.
-   - `[phase:review]` when preparing the `maru_task_review_v1` block.
-   - Include exactly one phase marker per line, at the start of the line (after
-     the timestamp). For errors, prepend `ERROR:` or use `[phase:error]`.
+Read `references/maru-integration.md` §Background and Review Runs before
+starting; it defines the phase markers and the `maru_task_review_v1` shape.
+
+1. Emit concise human-readable progress logs with those phase markers.
 2. Return exactly one `maru_skill_proposal_v1` JSON object with the local
    markdown file writes:
    - Schedule-from-text run: the new task note under `active/` and/or a
@@ -78,34 +71,11 @@ direct-CLI use of this skill is unchanged by this section.
      (`googleTaskId`, `googleTaskListId`, `calendarId`, `calendarEventId`,
      `calendarStart`, `calendarEnd`, `timezone`) on existing task files. Do not
      add create-only backref fields in a sync proposal.
-3. Return exactly one `maru_task_review_v1` JSON object for user confirmation:
-
-```json
-{
-  "schemaVersion": "maru_task_review_v1",
-  "summary": "short review summary; for sync, name which Google side-effects run after approval",
-  "taskDetails": { "title": "…", "status": "active", "priority": "medium", "due": "YYYY-MM-DD or null", "start": "ISO or null", "project": "… or null" },
-  "fields": [ { "label": "raw title", "normalized": "clean title", "note": "why", "required": true } ],
-  "schedule": [ { "label": "tomorrow 3pm", "normalized": "2026-06-10T15:00+09:00", "note": "Asia/Seoul", "required": true } ],
-  "conflicts": [ { "label": "overlaps existing event", "normalized": "keep / move / ignore", "note": "calendar clash detail", "required": true, "conflictKind": "calendar" } ],
-  "uncertainties": [ { "label": "uncertain owner", "normalized": "best guess", "note": "needs user check", "required": true } ],
-  "enrichment": {
-    "project": "[[note]] or null",
-    "relatedTasks": ["[[task-note]]"],
-    "relatedMeetings": ["[[meeting-note]]"],
-    "calendarLink": { "calendarId": "id-or-null", "calendarEventId": "id-or-null" },
-    "resolvedAssignee": "canonical or null"
-  },
-  "followups": [ { "skill": "vault-extract", "title": "…", "prompt": "proposal-only follow-up", "reason": "why", "selected": false } ]
-}
-```
+3. Return exactly one `maru_task_review_v1` JSON object for user confirmation.
 
 Allowed follow-up skills are `vault-extract`, `vault-connect`, and
 `meeting-notes` (never `task-management` itself). Follow-ups must be proposals
-for the user to review. The `enrichment` object and the
-`conflicts[].conflictKind` field are additive and optional — populate them only
-from resolved data and omit or null them otherwise. Parsers ignore unknown
-fields, so existing consumers are unaffected.
+for the user to review.
 
 ## Workflows
 
@@ -122,14 +92,11 @@ fields, so existing consumers are unaffected.
    `relatedMeetings`/`relatedTasks` when resolved — and inject a
    `## 관련 컨텍스트` block summarizing the bundle. Emit a wiki-link only for
    resolved entities. **Never add these backref fields to a later
-   schedule-update payload** — Maru `UpdateTaskScheduleFields` is
-   `deny_unknown_fields` (allows only project/priority/due/calendarStart/
-   calendarEnd/estimateMinutes); they belong to create frontmatter only.
+   schedule-update payload**; it accepts only project, priority, due,
+   calendarStart, calendarEnd, and estimateMinutes.
 3. Create a markdown file in `active/` using `templates/task.md`. Always write a
-   human-readable `title` to frontmatter — Maru shows the note by
-   `title -> name -> filename`, so a missing `title` makes it appear as the raw
-   filename. The body `# {title}` H1 is for readability only and is not used for
-   display.
+   human-readable `title` to frontmatter; the body `# {title}` H1 is not used
+   for display.
 4. If Google Tasks is enabled, create a task in the configured default list and
    write `googleTaskId` and `googleTaskListId` back to frontmatter.
 5. If the task has a scheduled time or calendar-visible deadline, first search
@@ -153,7 +120,7 @@ fields, so existing consumers are unaffected.
 
 Use `calendar/` when the user asks for a schedule item with no actionable task.
 Create a markdown receipt with `taskSourceType: calendarEvent`, a human-readable
-`title` in frontmatter (so it does not show as the raw filename), and the
+`title` in frontmatter, and the
 calendar extra fields documented in `references/frontmatter-schema.md`.
 
 ### Vault-Value Hook
@@ -175,7 +142,7 @@ skill.
 
 - `references/workspace-config.md` - runtime configuration keys
 - `references/frontmatter-schema.md` - file schema
-- `references/maru-integration.md` - app-facing contract
+- `references/maru-integration.md` - app-facing contract and review-mode output
 - `references/google-cli-cheatsheet.md` - Google CLI examples
 - `references/integration-ids.template.md` - local receipt template
 - `ssot.context_enrichment` (`_meta/rules/context-enrichment.md`) - entity

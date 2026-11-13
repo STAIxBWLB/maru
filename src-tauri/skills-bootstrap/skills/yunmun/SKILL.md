@@ -1,25 +1,20 @@
 ---
 name: yunmun
 description: >
-  Public-safe de-AI writing skill (윤문) for professional prose in Korean and
-  English. Makes AI-assisted text read as written by the person whose name is on
-  it: checks structure, density, stance and specificity before word choice, then
-  applies a Korean calibration built on two measured corpora, for both failure
-  poles: padded (comma-by-rule, `A가 아니라 B` antithesis, cleft framing, generic
-  policy verbs) and compressed (dropped particles and endings, noun strings),
-  or the English lists. Routes by document
-  type: 보고서·계획서, 사업계획서·제안서, 이메일·메신저, 논문·초록, release notes, PR and
-  issue replies, postmortems, tickets, technical articles, journalism. Four
-  operations: write, review (diagnose only), refactor (minimal edits), recreate
-  (full rewrite). Use when asked to 윤문, AI 티 제거, 번역투 고치기, 자연스럽게 다듬기,
-  humanize, de-AI or unslop a text, or when output must not read as
-  machine-written. Does not cover fiction. 개조식 form stays with gaejosik.
+  Use when asked to 윤문, AI 티 제거, 번역투 고치기, 자연스럽게 다듬기, humanize,
+  de-AI or unslop a text, or when output must not read as machine-written.
+  De-AI writing for professional prose in Korean and English, routed by
+  document type: 보고서·계획서, 사업계획서·제안서, 이메일·메신저, 논문·초록, release
+  notes, PR and issue replies, postmortems, tickets, technical articles,
+  journalism. Four operations: write, review (diagnose only), refactor (minimal
+  edits), recreate (full rewrite). Does not cover fiction. 개조식 form stays
+  with gaejosik.
 license: MIT
 ---
 
 # Yunmun — 윤문, de-AI writing for professional prose
 
-Adapted from sepia v0.11.0 (MIT, see `references/ATTRIBUTION.md`) with a Korean calibration added. It combines measured findings with marked editorial heuristics; every reference file says which is which. Route first, then operate. The goal is text that carries information, takes a stance, and sounds like its author. It is not tuned to pass any automated AI-text detector, and it does not help conceal AI use from a venue that forbids it.
+Route first, then operate. The goal is text that carries information, takes a stance, and sounds like its author. It is not tuned to pass any automated AI-text detector, and it does not help conceal AI use from a venue that forbids it.
 
 ## Security boundary
 
@@ -71,7 +66,7 @@ Every route ends with the closing checks in `references/professional-pass.md` (s
 | **refactor** | Minimal in-place revision preserving structure, voice and intent. Two stages: the full review report first, then fix item by item, deepest layer first (relevance and stance before words). Skew replace and delete over insert (measured editor ratio 74/18/8). Before finishing, run the deletion test on what you added and the reversion test on what you replaced (`references/professional-pass.md`, closing check 2), then the rewriter gates (closing check 3): your own edit must not plant the tells it removed elsewhere. Show the changes as a diff or a before/after list. Attended run with a missing fact or an unclear ask: finish the edit, place `〔확인필요: what is needed〕` at the spot, and list the questions after the change list; never invent the answer. Unattended: use the `Deferred:` line. |
 | **recreate** | Full rewrite. Extract facts, claims and intent from the original into a bare list, verify nothing is invented, then write fresh under the domain rules. Use when defects are structural and the text is short enough that surgery costs more than rebuilding. |
 
-The two-stage protocol is not optional for refactor and recreate: paraphrasing without a defect list makes AI fingerprints more visible, not less.
+The two-stage protocol is not optional for refactor and recreate.
 
 ## Calibration — the rule that governs all rules
 
@@ -83,7 +78,7 @@ The two-stage protocol is not optional for refactor and recreate: paraphrasing w
 
 ## Hard guardrails
 
-- **Never invent specifics.** Versions, numbers, dates, amounts, names, results, citations and quotations come from the actual source. Missing information means ask the user or leave an explicit marker (`TODO`, `〔확인필요〕`), never fill. A confident wrong fact is itself a top-tier tell.
+- **Never invent specifics.** Versions, numbers, dates, amounts, names, results, citations and quotations come from the actual source. Missing information means ask the user or leave an explicit marker (`TODO`, `〔확인필요〕`), never fill.
 - **Meaning is protected.** Facts, amounts, dates, names, titles, article numbers, indicator values and commitments are not edited. Modality is meaning: a hedge (`~할 수 있다`, may) is never turned into an assertion and an obligation (`~해야 한다`, must) is never softened or dropped; vary the form, keep the force. Report a suspected error; do not correct it silently.
 - **Deletion beats addition** (74% replace / 18% delete / 8% insert). Text may grow only for real specificity or to repair a broken sentence. In Korean, restoring dropped particles, endings and omitted constituents on compressed text is repair (`references/languages/ko.md` §2B), and the text will get longer. No register drift: a rewrite must not come out more promotional than its source.
 - **Respect the author's voice and the venue's corpus.** Extract habits from the user's samples or the venue's recent artifacts before editing, and edit toward that profile. Do not remove a mannerism the author actually uses.
