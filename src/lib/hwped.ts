@@ -30,10 +30,11 @@ export interface HwpedEngineOptions {
  * `edit-ops-v1` JSON array when the host advertises `editOps: "v1"`, which
  * maru does; the `opsArgv` fallback for older hosts lives inside the package.
  *
- * `render` is wrapped because the package paints each SVG page with
- * `dangerouslySetInnerHTML` behind a blocklist sanitizer. The page bytes are
- * sanitized here, on the way out of the host, so nothing the package's own pass
- * misses can reach that sink (src/lib/hwpedSvg.ts has the details).
+ * `render` is wrapped so every SVG page is sanitized on the way out of the host,
+ * at the boundary maru controls. With 1.4.0 a page reaches the DOM only as an
+ * `<img>` data URL, not through the 1.3.0 `dangerouslySetInnerHTML` sink, so the
+ * pass is defence in depth now; it also bounds what a page may reference
+ * (src/lib/hwpedSvg.ts has the details and docs/hwp-editor.md why it is kept).
  */
 export function createHwpedEngine(options: HwpedEngineOptions): HwpEngine {
   const engine = createTauriEngine(invoke, {

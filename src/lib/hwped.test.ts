@@ -115,9 +115,10 @@ async function renderFirstPageSvg(): Promise<string> {
   return new TextDecoder().decode(first.data);
 }
 
-// The package paints each SVG page with dangerouslySetInnerHTML behind its own
-// blocklist sanitizer, so a hostile page must be neutral here, before the
-// package holds the bytes. Each construct is one its blocklist misses.
+// Every SVG page is neutralized here, at the engine boundary, before the package
+// holds the bytes: 1.3.0 wrote the markup into the host document behind its own
+// blocklist sanitizer, and 1.4.0 turns it into an <img> source. Each construct
+// below is one that blocklist missed.
 describe("createHwpedEngine render sanitization", () => {
   beforeEach(() => {
     invokeMock.mockReset();
@@ -200,6 +201,27 @@ describe("createHwpedEngine render sanitization", () => {
 
     expect(svg).toBe('<svg xmlns="http://www.w3.org/2000/svg"/>');
     expect(svg).not.toContain("not a page");
+  });
+
+  it("keeps the root size and path geometry an img page is laid out from", async () => {
+    // 1.4.0 renders the page as `data:image/svg+xml;base64,…` on an <img>, so
+    // the image's intrinsic size comes from the SVG's own width/height and
+    // viewBox. A scrub that dropped them would paint every page at the wrong
+    // size with no error anywhere.
+    answerRender([
+      svgPage(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="595.28" height="841.86" viewBox="0 0 595.28 841.86">` +
+          `<path d="M10 10H100V100H10Z"/><path d="M200 200H300"/>` +
+          `</svg>`,
+      ),
+    ]);
+
+    const svg = await renderFirstPageSvg();
+
+    expect(svg).toContain('width="595.28"');
+    expect(svg).toContain('height="841.86"');
+    expect(svg).toContain('viewBox="0 0 595.28 841.86"');
+    expect(svg.match(/<path/g) ?? []).toHaveLength(2);
   });
 
   it("passes raster pages through untouched", async () => {

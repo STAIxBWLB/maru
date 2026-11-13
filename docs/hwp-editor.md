@@ -5,9 +5,8 @@ bridge: seven Tauri commands (`src-tauri/src/hwped.rs`) that spawn the HWP engin
 ([agent-hwp](https://github.com/STAIxBWLB/agent-hwp) >= 0.8.7, formerly hwp-cli)
 behind the editor's `HwpEngine` contract. Maru looks for the engine's own name
 `ahwp` first and falls back to `hwp`, the compatibility name every 1.x release
-still ships; `MARU_HWP_BIN` overrides both. This is a
-backend milestone; the published-engine UI migration follows the release
-gate described below.
+still ships; `MARU_HWP_BIN` overrides both. The Rust channel is the backend of the
+editor surface; the published engine is mounted in the reader's view (§Frontend).
 
 ## Commands
 
@@ -107,10 +106,12 @@ whose selected engine changed without changing the shim's path or mtime.
 availability. It includes `editOps: "v1"` only when the detected binary meets
 the 0.20.0 feature floor; older accepted binaries omit that capability.
 
-The Rust channel and capability are the first milestone of [#563](https://github.com/STAIxBWLB/maru/issues/563).
-The frontend switch to published `createTauriEngine`, editor mount and theme-token
-mapping wait for the core release that reads `capabilities.editOps`. Existing
-Maru wrappers continue using the legacy channel until that migration.
+The Rust channel and capability are the first half of
+[#563](https://github.com/STAIxBWLB/maru/issues/563); the second half is the
+frontend (published `createTauriEngine`, the editor mount and the theme-token
+mapping), which landed in #609 (§Frontend). No maru code sends `opsArgv` itself
+any more: that fallback lives inside the package, and `src/lib/hwped.test.ts`
+exercises both columns of it.
 
 Most errors remain prefixed strings (`cli_missing:`, `hwp_timeout:`,
 `hwp_failed:`, `hwp_parse_failed:`, `hwped_bad_request:`), matching the `gws`
@@ -153,11 +154,26 @@ name, uses bytes: `pathOf` always returns undefined in this session. Reload uses
 the same capture flow. The selected workspace entry supplies the save path;
 the engine-returned document name never selects a destination.
 
-`@hwp-editor/core` and `@hwp-editor/react` are pinned at exactly `1.3.0`. The
+`@hwp-editor/core` and `@hwp-editor/react` are pinned at exactly `1.4.0`. The
 engine asks `hwped_capabilities` before an edit and sends the `edit-ops-v1` JSON
 array when this host advertises `editOps: "v1"`, which it does; the `opsArgv`
 fallback for older hosts lives inside the package, so this repository carries no
 dual channel.
+
+1.4.0 changed how a page reaches the screen, not the engine contract:
+`createTauriEngine`, `HwpEngine`, `DocumentHandle` and `PageImage` typecheck the
+same, so the package surface is the pin plus a lockfile regeneration. A page is
+now an `<img>` whose source is `data:image/svg+xml;base64,…`
+(hwp-editor#161), where 1.3.0 wrote the markup into the element with
+`dangerouslySetInnerHTML`; the package's `sanitizeSvg` is still exported and
+deprecated. Maru's CSP already allows the new source (`img-src 'self' data:
+blob: asset: http://asset.localhost` in `src-tauri/tauri.conf.json`), so the
+upgrade moved no configuration. What did move is the one place that read a page
+off the DOM: `e2e-native/specs/hwpx-editor.spec.ts` decodes that source and reads
+it only once the image has decoded, which is how the painted page's geometry is
+still compared with the page the engine rendered. A source the CSP blocked or
+that failed to decode keeps an element and a box of its own, so the source alone
+would pass for a painted page.
 
 The editor mounts through the `.hwpx` surface: `BinaryViewerPane` renders
 `HwpxEditorPane`, which shows the read-only preview by default and loads
@@ -167,17 +183,30 @@ in-memory edit. The editor admits at most 32 MiB independently of the read-only
 preview's existing inline bound (`INLINE_HWPX_MAX_BYTES`). `locale` follows maru's UI locale, and the
 host element maps maru's tokens onto the editor's `--hwped-*` contract.
 
-Rendered pages are sanitized on the way out of the host. The package paints each
-SVG page with `dangerouslySetInnerHTML` behind its own blocklist sanitizer, which
-removes `script`/`foreignObject`, `on*` attributes and `javascript:` hrefs but
-not SMIL `<set>`/`<animate>`, parser-decoded schemes, or external `data:` and
-`url()` references. That sink also sits in the main webview next to Tauri IPC,
-over bytes from a document that may come from anywhere. `src/lib/hwped.ts`
-therefore wraps `render` and passes every `format: "svg"` page through
+Rendered pages are sanitized on the way out of the host. `src/lib/hwped.ts`
+wraps `render` and passes every `format: "svg"` page through
 `src/lib/hwpedSvg.ts` (DOMPurify's SVG profile, then the href and paint-attribute
 scrub it leaves undone) before the package holds the bytes; raster pages pass
-through untouched. `check-dom-sanitizer` cannot see this sink, because it lives
-in `node_modules`, which is why the wrap is tested in `src/lib/hwped.test.ts`.
+through untouched.
+
+That pass used to be the guard in front of a live sink, and since 1.4.0 it is
+defence in depth. In 1.3.0 the package wrote each page into the element with
+`dangerouslySetInnerHTML` in the main webview next to Tauri IPC, behind its own
+blocklist `sanitizeSvg`, which removes `script`/`foreignObject`, `on*` attributes
+and `javascript:` hrefs but not SMIL `<set>`/`<animate>`, parser-decoded schemes,
+or external `data:` and `url()` references. Now the markup only ever reaches an
+`<img>` source, a separate document in which scripts and external references do
+not run, so the page can no longer reach the host either way.
+
+The wrap is kept, and the reason is not "a sink is still there". It is the one
+point in this path maru controls: it bounds what a page may reference whatever
+the renderer does next, the packages are pinned exactly so a change of rendering
+mode arrives only with a deliberate upgrade, and retiring it would first rework
+the native probe (`hwpedRenderProbe`, which compares the wrapped render with the
+package's own) and the WKWebView assertions built on it. `check-dom-sanitizer`
+scans maru's own sinks and cannot see one inside `node_modules`, which is why the
+wrap is tested in `src/lib/hwped.test.ts`, including that an `<img>` page keeps
+the root `width`/`height`/`viewBox` its intrinsic size comes from.
 
 ## Explicit workspace save
 
