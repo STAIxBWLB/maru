@@ -45,6 +45,11 @@ describe("HWPX navigation and menu Save ownership", () => {
     releaseFirst(); expect(setBusy).not.toHaveBeenCalledWith(false);
     releaseSecond(); expect(setBusy).toHaveBeenLastCalledWith(false);
   });
+  it("also freezes an editor registered during an in-flight close or async switch", () => {
+    const release = lockHwpxEditorNavigation(); const setBusy = vi.fn(); register({ setNavigationBusy: setBusy });
+    expect(setBusy).toHaveBeenLastCalledWith(true); release(); expect(setBusy).toHaveBeenLastCalledWith(false);
+    release(); expect(setBusy.mock.calls.filter(([busy]) => busy === false)).toHaveLength(1);
+  });
   it("does not steal another pane's Save command", async () => {
     const guard = register(); expect(await saveFocusedHwpxEditor()).toBe(false); expect(guard.save).not.toHaveBeenCalled();
   });

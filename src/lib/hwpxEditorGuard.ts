@@ -7,6 +7,12 @@ interface HwpxEditorGuard {
   setNavigationBusy?: (busy: boolean) => void;
 }
 const guards = new Set<HwpxEditorGuard>();
+const activeNavigationLocks = new Set<Set<HwpxEditorGuard>>();
+const navigationLocks = new WeakMap<HwpxEditorGuard, number>();
+function addNavigationLock(guard: HwpxEditorGuard): void {
+  navigationLocks.set(guard, (navigationLocks.get(guard) ?? 0) + 1);
+  guard.setNavigationBusy?.(true);
+}
 let pending: Promise<boolean> | null = null;
 let navigationDepth = 0;
 
@@ -17,6 +23,11 @@ function withinNavigation<T>(action: () => T): T {
 
 export function registerHwpxEditorGuard(guard: HwpxEditorGuard): () => void {
   guards.add(guard);
+  // A close/async switch also freezes editors mounted after it started.
+  for (const locked of activeNavigationLocks) {
+    locked.add(guard);
+    addNavigationLock(guard);
+  }
   return () => { guards.delete(guard); };
 }
 
@@ -57,15 +68,16 @@ export async function guardHwpxEditorNavigationAsync<T>(action: () => T | Promis
   return withinNavigation(action);
 }
 
-const navigationLocks = new WeakMap<HwpxEditorGuard, number>();
 /** Freeze the outgoing editor while an already-approved async switch reads disk. */
 export function lockHwpxEditorNavigation(): () => void {
-  const locked = Array.from(guards);
-  for (const guard of locked) {
-    navigationLocks.set(guard, (navigationLocks.get(guard) ?? 0) + 1);
-    guard.setNavigationBusy?.(true);
-  }
+  const locked = new Set(guards);
+  activeNavigationLocks.add(locked);
+  for (const guard of locked) addNavigationLock(guard);
+  let released = false;
   return () => {
+    if (released) return;
+    released = true;
+    activeNavigationLocks.delete(locked);
     for (const guard of locked) {
       const remaining = Math.max(0, (navigationLocks.get(guard) ?? 1) - 1);
       navigationLocks.set(guard, remaining);

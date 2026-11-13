@@ -26,8 +26,8 @@ export function HwpEditorSurface(props: HwpEditorSurfaceProps) {
   const engine = useMemo<HwpEngine>(() => {
     const base = createHwpedEngine({ workspaceRoot: props.workspacePath, pathOf: () => undefined });
     let active = 0;
-    const track = async <T,>(operation: () => Promise<T>): Promise<T> => {
-      if (latest.current.locked) throw new Error(translate.current("binaryViewer.hwpEditorBusy"));
+    const track = async <T,>(operation: () => Promise<T>, mutates = false): Promise<T> => {
+      if (mutates && latest.current.locked) throw new Error(translate.current("binaryViewer.hwpEditorBusy"));
       active += 1;
       latest.current.onActivityChange(true);
       try { return await operation(); }
@@ -40,14 +40,14 @@ export function HwpEditorSurface(props: HwpEditorSurfaceProps) {
       ...base,
       read: (document) => track(() => base.read(document)),
       render: (document, options) => track(() => base.render(document, options)),
-      edit: (document, ops, options) => track(() => base.edit(document, ops, options)),
+      edit: (document, ops, options) => track(() => base.edit(document, ops, options), true),
       validate: (document) => track(() => base.validate(document)),
       // A composed document has a different origin and no supported save
       // destination in this host. Refuse before the engine creates one.
       compose: async () => { throw new Error(translate.current("binaryViewer.hwpEditorComposeUnsupported")); },
       ...(base.create ? { create: async () => { throw new Error(translate.current("binaryViewer.hwpEditorComposeUnsupported")); } } : {}),
       ...(base.template ? { template: async () => { throw new Error(translate.current("binaryViewer.hwpEditorComposeUnsupported")); } } : {}),
-      ...(base.fill ? { fill: (document, values) => track(() => base.fill!(document, values)) } : {}),
+      ...(base.fill ? { fill: (document, values) => track(() => base.fill!(document, values), true) } : {}),
     };
   }, [props.workspacePath]);
 

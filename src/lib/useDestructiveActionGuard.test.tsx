@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { registerHwpxEditorGuard } from "./hwpxEditorGuard";
 
 import { act } from "react";
 import { createElement } from "react";
@@ -735,5 +736,71 @@ describe("useDestructiveActionGuard requestAppQuit (review finding #2)", () => {
 
     expect(mocks.requestSkillEditorQuitCheck).toHaveBeenCalledTimes(1);
     expect(mocks.relaunchApp).not.toHaveBeenCalled();
+  });
+});
+
+describe("HWPX lock through close and relaunch", () => {
+  let container: HTMLDivElement;
+  let root: Root | null = null;
+  let guard: DestructiveActionGuard;
+  let removeHwpx: (() => void) | null = null;
+  const setBusy = vi.fn();
+  const beforeLeave = vi.fn<() => Promise<boolean>>();
+  const flushSettings = vi.fn<() => Promise<void>>();
+  beforeEach(() => {
+    vi.useRealTimers(); vi.clearAllMocks();
+    mocks.close.mockResolvedValue(undefined); mocks.relaunchApp.mockResolvedValue(undefined);
+    mocks.flushPendingSavesForQuit.mockResolvedValue({ kind: "clean" });
+    mocks.requestSkillEditorQuitCheck.mockResolvedValue(true); mocks.closeSkillEditorForQuit.mockResolvedValue(undefined);
+    beforeLeave.mockResolvedValue(true); flushSettings.mockResolvedValue(undefined);
+    removeHwpx = registerHwpxEditorGuard({ hasChanges: () => true, ownsFocus: () => false, save: async () => false, beforeLeave, setNavigationBusy: setBusy });
+  });
+  afterEach(async () => {
+    if (root) await act(async () => { root!.unmount(); });
+    root = null; container?.remove(); removeHwpx?.(); removeHwpx = null;
+  });
+  async function mount(dirty = false) {
+    container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
+    await act(async () => root!.render(createElement(Probe, {
+      onGuard: (value) => { guard = value; }, hasDirtyDrafts: () => dirty,
+      settingsSaverRef: { current: { schedule: vi.fn(), flush: flushSettings, cancel: vi.fn() } },
+    })));
+    await settleEffect();
+  }
+  it("locks through both quit flush and settings flush, releasing if native close fails", async () => {
+    let startQuit!: () => void; let finishQuit!: (value: { kind: "clean" }) => void;
+    let startSettings!: () => void; let finishSettings!: () => void;
+    const quitStarted = new Promise<void>((done) => { startQuit = done; });
+    const settingsStarted = new Promise<void>((done) => { startSettings = done; });
+    mocks.flushPendingSavesForQuit.mockImplementation(() => { startQuit(); return new Promise((done) => { finishQuit = done; }); });
+    flushSettings.mockImplementation(() => { startSettings(); return new Promise<void>((done) => { finishSettings = done; }); });
+    mocks.close.mockRejectedValue(new Error("close failed")); await mount();
+    let finished!: Promise<void>;
+    await act(async () => { finished = capturedHandler()(makeEvent()); await quitStarted; });
+    expect(setBusy).toHaveBeenLastCalledWith(true); expect(setBusy).not.toHaveBeenCalledWith(false);
+    await act(async () => { finishQuit({ kind: "clean" }); await settingsStarted; });
+    expect(setBusy).not.toHaveBeenCalledWith(false);
+    await act(async () => { finishSettings(); await finished; }); expect(setBusy).toHaveBeenLastCalledWith(false);
+  });
+  it("Cancel at the later text-draft dialog releases the outgoing HWPX", async () => {
+    await mount(true); await act(async () => capturedHandler()(makeEvent()));
+    expect(guard.pendingDestructiveAction).toBe("close"); expect(setBusy).toHaveBeenLastCalledWith(true);
+    await act(async () => guard.cancelDestructiveAction()); expect(setBusy).toHaveBeenLastCalledWith(false); expect(mocks.close).not.toHaveBeenCalled();
+  });
+  it("relaunch keeps the HWPX frozen during settings flush and releases on failure", async () => {
+    let started!: () => void; let fail!: (reason: Error) => void;
+    const settingsStarted = new Promise<void>((done) => { started = done; });
+    flushSettings.mockImplementation(() => { started(); return new Promise<void>((_, reject) => { fail = reject; }); });
+    await mount(); let finished!: Promise<void>;
+    await act(async () => { finished = guard.requestRelaunch(); await settingsStarted; });
+    expect(setBusy).toHaveBeenLastCalledWith(true);
+    await act(async () => { fail(new Error("settings failed")); await finished; });
+    expect(setBusy).toHaveBeenLastCalledWith(false); expect(mocks.relaunchApp).not.toHaveBeenCalled();
+  });
+  it("a failed quit flush releases the lock and quit-anyway asks again", async () => {
+    mocks.flushPendingSavesForQuit.mockResolvedValue({ kind: "failed", failures: 1 });
+    await mount(); await act(async () => capturedHandler()(makeEvent()));
+    expect(setBusy).toHaveBeenLastCalledWith(false); beforeLeave.mockResolvedValue(false);
+    await act(async () => guard.quitAnyway()); expect(beforeLeave).toHaveBeenCalledTimes(2); expect(mocks.close).not.toHaveBeenCalled();
   });
 });

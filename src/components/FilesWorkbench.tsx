@@ -819,17 +819,14 @@ export const FilesWorkbench = memo(function FilesWorkbench(props: FilesWorkbench
     );
     if (!target) return;
     const parent = isDirectoryNode(target) ? target.relPath : target.parentRelPath;
-    guardHwpxEditorNavigation(() => {
-      setCurrentFolder(parent);
-      // Revealing a file shows its own chain after the discard guard passes.
-      onExpandedFoldersChange(filesFolderAncestors(parent));
-      selectionRef.current = [target.path];
-      onSelectionChange([target.path]);
-    });
+    // App's reveal/favorite transitions already confirmed and selected this
+    // path while the outgoing editor was locked. This effect only reveals it.
+    setCurrentFolder(parent);
+    onExpandedFoldersChange(filesFolderAncestors(parent));
+    selectionRef.current = [target.path];
   }, [
     entries,
     onExpandedFoldersChange,
-    onSelectionChange,
     pendingRevealTargetPath,
     workspacePath,
   ]);

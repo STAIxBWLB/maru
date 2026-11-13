@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
-import { captureHwpedSource, saveHwpedDocument } from "./hwped";
+import { captureHwpedSource, saveHwpedDocument } from "./hwpedPersistence";
 import { IpcError } from "./ipcError";
 
 describe("HWPX host persistence transport", () => {

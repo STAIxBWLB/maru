@@ -134,8 +134,8 @@ parser of its own.
 
 ## Frontend
 
-`src/lib/hwped.ts` holds one engine factory over the published package and
-host-owned capture/save transport:
+`src/lib/hwped.ts` holds the published engine factory. Host capture/save
+transport lives in `src/lib/hwpedPersistence.ts` so the core stays lazy:
 
 ```ts
 import { createHwpedEngine } from "./lib/hwped";

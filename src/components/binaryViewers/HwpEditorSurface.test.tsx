@@ -37,6 +37,13 @@ describe("HwpEditorSurface memory and activity boundary", () => {
   it("refuses composition before creating a document with a different origin", async () => {
     await render(); await expect(mocks.props!.engine.compose({} as never, "new.hwpx")).rejects.toThrow("hwpEditorComposeUnsupported"); expect(base.compose).not.toHaveBeenCalled();
   });
+  it("allows safe reads while locked so cancelling navigation cannot strand a loading editor", async () => {
+    base.read.mockResolvedValue({ markdown: "safe captured bytes" }); base.render.mockResolvedValue([]);
+    await render(true); await expect(mocks.props!.engine.read(file)).resolves.toEqual({ markdown: "safe captured bytes" });
+    await expect(mocks.props!.engine.render(file)).resolves.toEqual([]);
+    expect(activity).toHaveBeenLastCalledWith(false);
+    await expect(mocks.props!.engine.edit(file, [])).rejects.toThrow("hwpEditorBusy"); expect(base.edit).not.toHaveBeenCalled();
+  });
   it("refuses engine mutations while saving and restores activity on failure", async () => {
     await render(true); await expect(mocks.props!.engine.edit(file, [])).rejects.toThrow("hwpEditorBusy"); expect(base.edit).not.toHaveBeenCalled();
     await render(false); base.edit.mockRejectedValue(new Error("engine failed")); await expect(mocks.props!.engine.edit(file, [])).rejects.toThrow("engine failed"); expect(activity).toHaveBeenLastCalledWith(false);

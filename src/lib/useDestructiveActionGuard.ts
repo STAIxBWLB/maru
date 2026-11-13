@@ -1,11 +1,11 @@
-import { hasHwpxEditorChanges, requestHwpxEditorNavigation } from "./hwpxEditorGuard";
+import { lockHwpxEditorNavigation, hasHwpxEditorChanges, requestHwpxEditorNavigation } from "./hwpxEditorGuard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 
 import type { DebouncedSaver } from "./debouncedSave";
 import { setError } from "./errorStore";
 import type { MaruSettings } from "./settings";
-import { flushPendingSavesForQuit } from "./teardownSave";
+import { flushPendingSavesForQuit, type QuitFlushOutcome } from "./teardownSave";
 import { relaunchApp } from "./updater";
 import {
   closeSkillEditorForQuit,
@@ -89,18 +89,34 @@ export function useDestructiveActionGuard({
   // main's re-ask for that same quit without a second dialog, while a later
   // quit (after this one was cancelled) always asks again.
   const quitAttemptRef = useRef(0);
+  const releaseHwpxNavigationRef = useRef<(() => void) | null>(null);
+  const lockHwpxNavigation = useCallback(() => {
+    releaseHwpxNavigationRef.current ??= lockHwpxEditorNavigation();
+  }, []);
+  const releaseHwpxNavigation = useCallback(() => {
+    releaseHwpxNavigationRef.current?.();
+    releaseHwpxNavigationRef.current = null;
+  }, []);
+  useEffect(() => releaseHwpxNavigation, [releaseHwpxNavigation]);
+  const confirmHwpxNavigation = useCallback(async () => {
+    if (releaseHwpxNavigationRef.current) return true;
+    if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return false;
+    lockHwpxNavigation();
+    return true;
+  }, [lockHwpxNavigation]);
 
   const relaunchAfterSettingsFlush = useCallback(async () => {
     try {
       await settingsSaverRef.current?.flush();
       // Relaunch is the other whole-app exit and takes the skill editor
       // down with the process, so it gets the same ask as a quit.
-      if (!(await requestSkillEditorQuitCheck())) return;
+      if (!(await requestSkillEditorQuitCheck())) { releaseHwpxNavigation(); return; }
       await relaunchApp();
     } catch (err) {
+      releaseHwpxNavigation();
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [settingsSaverRef]);
+  }, [releaseHwpxNavigation, settingsSaverRef]);
 
   const closeAfterSettingsFlush = useCallback(async () => {
     try {
@@ -118,7 +134,7 @@ export function useDestructiveActionGuard({
         // Ask again: main's own dialogs are in-page, so the skill editor
         // stayed editable while one was open and its first answer can be
         // stale. An unchanged editor answers without a second dialog.
-        if (!(await requestSkillEditorQuitCheck(quitAttemptRef.current))) return;
+        if (!(await requestSkillEditorQuitCheck(quitAttemptRef.current))) { releaseHwpxNavigation(); return; }
         await closeSkillEditorForQuit();
       }
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -128,11 +144,12 @@ export function useDestructiveActionGuard({
       await getCurrentWindow().close();
     } catch (err) {
       closeConfirmedRef.current = false;
+      releaseHwpxNavigation();
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       quitWholeAppRef.current = false;
     }
-  }, [settingsSaverRef]);
+  }, [releaseHwpxNavigation, settingsSaverRef]);
 
   // D-03/D-04/D-05: the flush step shared by close and relaunch alike. A
   // clean settle clears the 300 ms indicator and lets the caller continue; a
@@ -140,19 +157,27 @@ export function useDestructiveActionGuard({
   // raises the save-failed dialog instead.
   const runQuitFlush = useCallback(async (action: "close" | "relaunch") => {
     const indicatorTimer = setTimeout(() => setQuitSaving(true), QUIT_SAVING_INDICATOR_MS);
-    const outcome = await flushPendingSavesForQuit();
-    clearTimeout(indicatorTimer);
-    setQuitSaving(false);
+    let outcome: QuitFlushOutcome;
+    try {
+      outcome = await flushPendingSavesForQuit();
+    } catch (cause) {
+      outcome = { kind: "failed", failures: 1 };
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      clearTimeout(indicatorTimer);
+      setQuitSaving(false);
+    }
     if (outcome.kind !== "clean") {
+      releaseHwpxNavigation();
       setFailedQuitAction(action);
       setQuitFailureKind(outcome.kind);
       setPendingDestructiveAction("save-failed");
     }
     return outcome;
-  }, []);
+  }, [releaseHwpxNavigation]);
 
   const requestRelaunch = useCallback(async () => {
-    if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) return;
+    if (!(await confirmHwpxNavigation())) return;
     const outcome = await runQuitFlush("relaunch");
     if (outcome.kind !== "clean") return;
     if (hasDirtyDrafts()) {
@@ -160,7 +185,7 @@ export function useDestructiveActionGuard({
       return;
     }
     await relaunchAfterSettingsFlush();
-  }, [hasDirtyDrafts, relaunchAfterSettingsFlush, runQuitFlush]);
+  }, [confirmHwpxNavigation, hasDirtyDrafts, relaunchAfterSettingsFlush, runQuitFlush]);
 
   const confirmDestructiveAction = useCallback(async () => {
     const action = pendingDestructiveAction;
@@ -175,6 +200,7 @@ export function useDestructiveActionGuard({
   }, [pendingDestructiveAction, relaunchAfterSettingsFlush, closeAfterSettingsFlush]);
 
   const cancelDestructiveAction = useCallback(() => {
+    releaseHwpxNavigation();
     setPendingDestructiveAction(null);
     setQuitFailureKind(null);
     setFailedQuitAction(null);
@@ -182,13 +208,13 @@ export function useDestructiveActionGuard({
     // a whole-app quit in flight must not leave the skill editor destroyed
     // on a later plain close.
     quitWholeAppRef.current = false;
-  }, []);
+  }, [releaseHwpxNavigation]);
 
   const requestWindowClose = useCallback(() => {
     void import("@tauri-apps/api/window")
       .then(({ getCurrentWindow }) => getCurrentWindow().close())
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, []);
+      .catch((err) => { releaseHwpxNavigation(); setError(err instanceof Error ? err.message : String(err)); });
+  }, [releaseHwpxNavigation]);
 
   const requestAppQuit = useCallback(async () => {
     if (!quitWholeAppRef.current) {
@@ -198,14 +224,18 @@ export function useDestructiveActionGuard({
       let proceed: boolean;
       try {
         proceed = await requestSkillEditorQuitCheck(quitAttemptRef.current);
+      } catch (cause) {
+        releaseHwpxNavigation();
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return;
       } finally {
         quitCheckInFlightRef.current = false;
       }
-      if (!proceed) return;
+      if (!proceed) { releaseHwpxNavigation(); return; }
       quitWholeAppRef.current = true;
     }
     requestWindowClose();
-  }, [requestWindowClose]);
+  }, [releaseHwpxNavigation, requestWindowClose]);
 
   const retryQuit = useCallback(() => {
     const action = failedQuitAction;
@@ -221,6 +251,7 @@ export function useDestructiveActionGuard({
 
   const quitAnyway = useCallback(async () => {
     const action = failedQuitAction;
+    if (!(await confirmHwpxNavigation())) return;
     setPendingDestructiveAction(null);
     setQuitFailureKind(null);
     setFailedQuitAction(null);
@@ -237,7 +268,7 @@ export function useDestructiveActionGuard({
       }
       await relaunchAfterSettingsFlush();
     }
-  }, [failedQuitAction, hasDirtyDrafts, closeAfterSettingsFlush, relaunchAfterSettingsFlush]);
+  }, [failedQuitAction, confirmHwpxNavigation, hasDirtyDrafts, closeAfterSettingsFlush, relaunchAfterSettingsFlush]);
 
   // Main-window close: flush pending settings writes before the window goes
   // away, and gate on unsaved drafts instead of losing them silently. The
@@ -270,7 +301,7 @@ export function useDestructiveActionGuard({
           }
           event.preventDefault();
           closing = true;
-          if (hasHwpxEditorChanges() && !(await requestHwpxEditorNavigation())) { closing = false; return; }
+          if (!(await confirmHwpxNavigation())) { closing = false; return; }
           // D-03/D-04/D-05: flush every mounted autosave surface first,
           // bounded to 3 s. A failed or timed-out flush never closes — it
           // raises the save-failed dialog instead (runQuitFlush).
@@ -299,7 +330,7 @@ export function useDestructiveActionGuard({
       disposed = true;
       unlisten?.();
     };
-  }, [closeAfterSettingsFlush, hasDirtyDrafts, runQuitFlush]);
+  }, [closeAfterSettingsFlush, confirmHwpxNavigation, hasDirtyDrafts, runQuitFlush]);
 
   return {
     pendingDestructiveAction,

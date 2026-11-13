@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentHandle } from "@hwp-editor/core";
 import { useTranslation } from "../../lib/i18n";
-import { captureHwpedSource, saveHwpedDocument } from "../../lib/hwped";
+import { captureHwpedSource, saveHwpedDocument } from "../../lib/hwpedPersistence";
 import { IpcError, ipcErrorMessage, normalizeIpcError } from "../../lib/ipcError";
 import { registerHwpxEditorGuard } from "../../lib/hwpxEditorGuard";
 import { useWorkspaceRegistry } from "../../lib/workspaceStore";
@@ -175,7 +175,7 @@ function HwpxEditorSession({ entry, workspacePath, onPreviewExternal, onOpenExte
       }
     }}>
       <div className="hwp-editor-pane-bar">
-        {entry.sizeBytes > EDITOR_MAX_BYTES ? null : <button type="button" className="hwp-editor-pane-toggle" aria-pressed={editing} disabled={loading || saving}
+        {entry.sizeBytes > EDITOR_MAX_BYTES ? null : <button type="button" className="hwp-editor-pane-toggle" aria-pressed={editing} disabled={loading || saving || navigating}
           onClick={() => { if (!file && !editing) void capture(); setEditing((value) => !value); }}>
           {editing ? t("binaryViewer.hwpEditorClose") : t("binaryViewer.hwpEditorOpen")}
         </button>}
@@ -190,13 +190,14 @@ function HwpxEditorSession({ entry, workspacePath, onPreviewExternal, onOpenExte
         <p>{t("binaryViewer.hwpEditorConflict")}</p>
         <button type="button" data-testid="hwpx-keep-editing" onClick={() => { setConflict(false); setError(null); }}>{t("binaryViewer.hwpEditorKeepEditing")}</button>
         <button type="button" data-testid="hwpx-reload" disabled={busy} onClick={() => void reload()}>{t("binaryViewer.hwpEditorReload")}</button>
-      </div> : error ? <div role="alert" data-testid="hwpx-error">{error}{!file ? <button type="button" onClick={() => void capture()}>{t("binaryViewer.hwpEditorRetry")}</button> : null}</div> : null}
+      </div> : null}
+      {error ? <div role="alert" data-testid="hwpx-error">{error}{!file ? <button type="button" onClick={() => void capture()}>{t("binaryViewer.hwpEditorRetry")}</button> : null}</div> : null}
       <DialogSurface open={discard} onOpenChange={(open) => { if (!open) answerDiscard(false); }} ariaLabel={t("binaryViewer.hwpEditorDiscardTitle")} data-testid="hwpx-discard-dialog">
         <DialogSurfaceTitle>{t("binaryViewer.hwpEditorDiscardTitle")}</DialogSurfaceTitle>
         <p>{t(reloading ? "binaryViewer.hwpEditorReloadConfirm" : "binaryViewer.hwpEditorDiscardPrompt")}</p>
         <button type="button" data-testid="hwpx-discard-cancel" onClick={() => answerDiscard(false)}>{t("binaryViewer.hwpEditorCancel")}</button>
         <button type="button" data-testid="hwpx-discard" disabled={busy} onClick={() => answerDiscard(true)}>{t("binaryViewer.hwpEditorDiscard")}</button>
-        {canSave && !reloading ? <button type="button" data-testid="hwpx-discard-save" onClick={() => { void save().then((ok) => { if (ok) answerDiscard(true); }); }}>{t("binaryViewer.hwpEditorSave")}</button> : null}
+        {canSave && !reloading ? <button type="button" data-testid="hwpx-discard-save" onClick={() => { void save().then(answerDiscard); }}>{t("binaryViewer.hwpEditorSave")}</button> : null}
       </DialogSurface>
       {file ? <div className="hwp-editor-host" hidden={!editing}>
         <Suspense fallback={<p>{t("binaryViewer.loading")}</p>}>

@@ -6,7 +6,7 @@ import type { HwpEditorSurfaceProps } from "./HwpEditorSurface";
 import { unmountReactRoot } from "../../lib/testing/unmountReactRoot";
 
 const mocks = vi.hoisted(() => ({ capture: vi.fn(), save: vi.fn(), surface: null as HwpEditorSurfaceProps | null, writable: true }));
-vi.mock("../../lib/hwped", () => ({ captureHwpedSource: mocks.capture, saveHwpedDocument: mocks.save }));
+vi.mock("../../lib/hwpedPersistence", () => ({ captureHwpedSource: mocks.capture, saveHwpedDocument: mocks.save }));
 vi.mock("../../lib/workspaceStore", () => ({ useWorkspaceRegistry: () => ({ workspaces: [{ path: "/workspace", provider: "local", visibility: "private", writePolicy: mocks.writable ? "direct" : "readOnly" }] }) }));
 vi.mock("./HwpxViewer", () => ({ HwpxViewer: () => <div data-testid="preview" /> }));
 vi.mock("./HwpEditorSurface", () => ({ HwpEditorSurface: (props: HwpEditorSurfaceProps) => { mocks.surface = props; return <div data-testid="editor-surface" />; } }));
@@ -15,7 +15,7 @@ import { HwpxEditorPane } from "./HwpxEditorPane";
 import { LocaleContext } from "../../lib/i18n";
 import { requestHwpxEditorNavigation } from "../../lib/hwpxEditorGuard";
 import type { WorkspaceFileEntry } from "../../lib/types";
-const t = (key: string) => key;
+const t = (key: string, vars?: Record<string, string | number>) => vars?.message ? `${key}: ${vars.message}` : key;
 const entry: WorkspaceFileEntry = { path: "/workspace/report.hwpx", relPath: "report.hwpx", name: "report.hwpx", extension: "hwpx", fileKind: "hwpx", sizeBytes: 10, updatedAt: null, gitTracked: false, binary: true };
 const baseline = new Uint8Array([1, 2, 3]);
 
@@ -84,13 +84,15 @@ describe("HwpxEditorPane persistence", () => {
     await act(async () => query("hwpx-reload").click()); await act(async () => query("hwpx-discard-cancel").click()); expect(mocks.capture).toHaveBeenCalledTimes(1);
     mocks.capture.mockRejectedValue(new Error("read failed")); await act(async () => query("hwpx-reload").click()); await act(async () => query("hwpx-discard").click());
     expect(query("hwpx-save").disabled).toBe(false); expect(query("hwpx-status").textContent).toContain("hwpEditorNotSaved");
+    expect(query("hwpx-error").textContent).toContain("read failed"); expect(query("hwpx-conflict")).not.toBeNull();
   });
   it("cancelled navigation preserves edits; failed save cannot approve leaving", async () => {
     await render(); await open(); await change(); let decision!: Promise<boolean>;
     await act(async () => { decision = requestHwpxEditorNavigation(); }); expect(query("hwpx-discard-dialog")).not.toBeNull();
     await act(async () => query("hwpx-discard-cancel").click()); expect(await decision).toBe(false); expect(query("hwpx-save").disabled).toBe(false);
     await act(async () => { decision = requestHwpxEditorNavigation(); }); mocks.save.mockRejectedValue(new Error("failed")); await act(async () => query("hwpx-discard-save").click());
-    expect(query("hwpx-discard-dialog")).not.toBeNull(); await act(async () => query("hwpx-discard-cancel").click()); expect(await decision).toBe(false);
+    expect(query("hwpx-discard-dialog")).toBeNull(); expect(await decision).toBe(false);
+    expect(query("hwpx-error").textContent).toContain("failed"); expect(query("hwpx-save").disabled).toBe(false);
   });
   it("a late save cannot clear another path or workspace session", async () => {
     let finish!: (value: unknown) => void; mocks.save.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
