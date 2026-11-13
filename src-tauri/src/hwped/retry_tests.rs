@@ -170,6 +170,7 @@ fn failed_json_edit_feature_command_invalidates_cached_version_without_touching_
             OsString::from("--ops"),
             OsString::from("ops.json"),
         ],
+        None,
     )
     .unwrap_err();
     assert!(error.contains("hwp_failed"), "{error}");
