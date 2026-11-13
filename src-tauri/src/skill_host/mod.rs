@@ -9,7 +9,10 @@ pub use dispatch::{
     skills_dispatch_background, skills_dispatch_compose, skills_dispatch_terminal,
     skills_runtime_status, SkillDispatchBackgroundArgs,
 };
-pub use env::{skills_env_bootstrap, skills_env_repair, skills_env_status};
+pub use env::{
+    skills_env_bootstrap, skills_env_repair, skills_env_repair_headless, skills_env_status,
+    EnvOutputSink, ENV_REPAIR_NOT_NEEDED,
+};
 // Domain exports remain synchronous for the CLI and Rust callers. Desktop
 // registration uses store::ipc for its remaining registry commands.
 pub use store::{

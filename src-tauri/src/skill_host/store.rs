@@ -2246,6 +2246,15 @@ pub fn skills_doctor(work_path: Option<String>) -> Result<SkillDoctorReport, Str
     apply_registry_validation(&mut registry);
     let mut report = build_doctor_report(&registry);
     report.issues.extend(doctor_foreign_root_issues(&registry));
+    if let Some(hint) = crate::skill_host::env::active_env_repair_hint() {
+        report.issues.push(doctor_issue(
+            "warn",
+            "env_incomplete",
+            None,
+            Vec::new(),
+            hint,
+        ));
+    }
     if !scan_issues.is_empty() {
         report.issues.splice(0..0, scan_issues);
         report.ok = !report.issues.iter().any(|issue| issue.severity == "error");
@@ -4793,6 +4802,10 @@ pub struct SkillBundleStatus {
     /// The available bundle's `requires` floors the installed tools miss.
     pub unmet_requires: Vec<String>,
     pub auto_applicable: bool,
+    /// Set when the active hashed env is missing or incomplete; names
+    /// `maru skills env repair`, which works without a newer bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_repair_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -5704,6 +5717,7 @@ fn skills_bundle_status_impl(
         min_app_ok,
         unmet_requires,
         auto_applicable,
+        env_repair_hint: crate::skill_host::env::active_env_repair_hint(),
     })
 }
 
@@ -5762,7 +5776,7 @@ fn compatibility_path(id: &str) -> Result<PathBuf, String> {
 }
 
 /// Activation provenance is optional only for installs predating this record.
-pub(super) fn bundle_uses_hashed_env(id: &str) -> Result<bool, String> {
+pub(crate) fn bundle_uses_hashed_env(id: &str) -> Result<bool, String> {
     let path = compatibility_path(id)?;
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),

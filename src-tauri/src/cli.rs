@@ -4,8 +4,8 @@ use crate::secrets::{secrets_doctor, secrets_migrate, secrets_scan};
 // The CLI shares synchronous transactions; async scheduling belongs to desktop IPC.
 use crate::skill_host::{
     skills_apply_bundle_update_headless, skills_check_bundle_update, skills_doctor,
-    skills_import_external, skills_import_unmanage, skills_list_dirty, skills_reconcile_skill,
-    skills_sync_tools,
+    skills_env_repair_headless, skills_import_external, skills_import_unmanage, skills_list_dirty,
+    skills_reconcile_skill, skills_sync_tools,
 };
 
 pub fn run_cli(args: Vec<String>) -> i32 {
@@ -299,10 +299,13 @@ fn run_doctor(args: &[String]) -> i32 {
                 );
                 if report.ok {
                     println!("{line}");
+                    for issue in report.issues.iter().filter(|i| i.code == "env_incomplete") {
+                        println!("{}: {}", issue.code, issue.message);
+                    }
                 } else {
                     eprintln!("{line}");
                     for issue in &report.issues {
-                        if issue.severity == "error" {
+                        if issue.severity == "error" || issue.code == "env_incomplete" {
                             eprintln!(
                                 "{}: {}{}",
                                 issue.code,
@@ -359,6 +362,7 @@ fn run_skills(args: &[String]) -> i32 {
         }
         "sync" => run_skills_sync(&args[1..]),
         "update" => run_skills_update(&args[1..]),
+        "env" => run_skills_env(&args[1..]),
         "rollback" => run_skills_rollback(&args[1..]),
         "dirty" => run_skills_dirty(&args[1..]),
         "reconcile" => run_skills_reconcile(&args[1..]),
@@ -369,6 +373,92 @@ fn run_skills(args: &[String]) -> i32 {
             2
         }
     }
+}
+
+fn run_skills_env(args: &[String]) -> i32 {
+    let usage = "usage: maru skills env repair [--force] [--json]";
+    if args.first().map(String::as_str) != Some("repair") {
+        eprintln!("{usage}");
+        return 2;
+    }
+    let mut json = false;
+    let mut force = false;
+    for arg in &args[1..] {
+        match arg.as_str() {
+            "--json" => json = true,
+            "--force" => force = true,
+            other => {
+                eprintln!("unknown option: {other}");
+                eprintln!("{usage}");
+                return 2;
+            }
+        }
+    }
+    // Setup output goes to stderr so `--json` keeps stdout machine-readable.
+    let sink: crate::skill_host::EnvOutputSink =
+        std::sync::Arc::new(|_stream, line| eprintln!("{line}"));
+    match skills_env_repair_headless(current_work_path(), force, sink) {
+        Ok(outcome) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&outcome).unwrap_or_default()
+                );
+            } else if outcome.success {
+                println!("skills env repaired: {}", outcome.root);
+            }
+            if outcome.success {
+                0
+            } else {
+                // setup_error is the cause; completion_error says whether the
+                // prior env was restored (or where its bytes remain).
+                let cause = [
+                    outcome.setup_error.as_deref(),
+                    outcome.completion_error.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("; ");
+                let cause = if cause.is_empty() {
+                    "env setup failed".to_string()
+                } else {
+                    cause
+                };
+                eprintln!(
+                    "skills env repair failed at {}: {cause}. Fix the cause shown in the setup output above, then rerun `maru skills env repair`",
+                    outcome.root
+                );
+                1
+            }
+        }
+        Err(err) if err.starts_with(crate::skill_host::ENV_REPAIR_NOT_NEEDED) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "repaired": false, "reason": err })
+                );
+            } else {
+                println!("{err}");
+            }
+            0
+        }
+        Err(err) => {
+            eprintln!("{}", env_repair_preflight_error(&err));
+            1
+        }
+    }
+}
+
+/// Preflight failures (before setup runs) leave the env untouched; name that
+/// and the next step, since this line is the only signal of the exit.
+fn env_repair_preflight_error(err: &str) -> String {
+    if err.contains("maru skills env repair") || err.contains("maru skills update") {
+        return format!("skills env repair did not start: {err}");
+    }
+    format!(
+        "skills env repair did not start, so the env is unchanged: {err}. Fix the cause above (for a parse error, repair that file or run from a directory without a broken workspace.config.yaml), then rerun `maru skills env repair`"
+    )
 }
 
 fn run_skills_rollback(args: &[String]) -> i32 {
@@ -493,6 +583,9 @@ fn run_skills_update(args: &[String]) -> i32 {
                         .unwrap_or_else(|| "none published".to_string());
                     println!("skills bundle: active {active}; channel {channel}");
                     println!("{}", skills_update_check_text(&status));
+                    if let Some(hint) = &status.env_repair_hint {
+                        println!("{hint}");
+                    }
                 }
                 0
             }
@@ -1075,7 +1168,7 @@ fn yes_no(value: bool) -> &'static str {
 }
 
 fn skills_usage() -> &'static str {
-    "usage: maru skills capabilities|list|sync|update|rollback|dirty|reconcile|import|import-unmanage"
+    "usage: maru skills capabilities|list|sync|update|env repair|rollback|dirty|reconcile|import|import-unmanage"
 }
 
 /// The additive federation contract dotfiles discovers first (issue #396).
@@ -1098,12 +1191,29 @@ fn secrets_usage() -> &'static str {
 }
 
 fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills rollback [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
+    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills env repair [--force] [--json]\n  skills rollback [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{run_cli, skills_capabilities_json};
+
+    #[test]
+    fn env_repair_preflight_error_names_the_next_step() {
+        let message = env_repair_preflight_error("Cannot parse /w/workspace.config.yaml: bad");
+        assert!(message.contains("env is unchanged"), "{message}");
+        assert!(message.contains("Cannot parse /w/workspace.config.yaml: bad"));
+        assert!(message.contains("workspace.config.yaml"));
+        assert!(
+            message.ends_with("then rerun `maru skills env repair`"),
+            "{message}"
+        );
+        let hinted = env_repair_preflight_error(
+            "skills_env_setup_missing: x; then retry `maru skills env repair`",
+        );
+        assert!(!hinted.contains("Fix the cause above"), "{hinted}");
+    }
+
+    use super::{env_repair_preflight_error, run_cli, skills_capabilities_json};
 
     #[test]
     fn capabilities_json_matches_the_federation_contract_exactly() {
