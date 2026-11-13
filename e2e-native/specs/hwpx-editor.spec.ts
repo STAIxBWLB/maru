@@ -29,8 +29,10 @@ interface StepReport {
   detail?: string;
 }
 
-/** What the painted editor reports about its first page, read straight off the
- *  DOM so it can be compared with the page the sanitizer produced. */
+/** What the painted editor reports about its first page: the numbers are decoded
+ *  from the `<img>` source the editor paints (1.4.0's rendering mode), and the
+ *  box is the area that image occupies, so it can be compared with the page the
+ *  sanitizer produced. */
 interface PaintedPage {
   pages: number;
   paths: number;
@@ -369,8 +371,16 @@ describe("native hwpx editor", () => {
           toggle.click();
           clicked = true;
         }
-        const page = document.querySelector('.hwp-editor-host .hwped-page-svg svg, .hwp-editor-host .hwped-page-svg img, .hwp-editor-host img.hwped-page-img[src^="data:image/svg+xml"]');
-        if (page) {
+        // 1.4.0 paints a page as an <img> whose source is the sanitized SVG as a
+        // data URL; 1.3.0 put that markup straight into the document. A decoded
+        // image of non-zero intrinsic size is what proves a page reached the
+        // screen: a source the CSP blocked or the browser could not decode
+        // leaves the element in place, occupying a box, so the source alone
+        // passes for a painted page.
+        const page = document.querySelector<HTMLImageElement>(
+          '.hwp-editor-host .hwped-page img[src^="data:image/svg+xml"]',
+        );
+        if (page && page.complete && page.naturalWidth > 0 && page.naturalHeight > 0) {
           done({ ok: true });
           return;
         }
@@ -381,6 +391,9 @@ describe("native hwpx editor", () => {
               toggle: toggle?.getAttribute("aria-pressed") ?? null,
               host: Boolean(document.querySelector(".hwp-editor-host")),
               root: Boolean(document.querySelector(".hwp-editor-host .hwped-root")),
+              image: page
+                ? { complete: page.complete, naturalWidth: page.naturalWidth, naturalHeight: page.naturalHeight }
+                : null,
               error: (document.querySelector(".hwped-error, .hwp-editor-host .hwped-notice")?.textContent ?? "").slice(0, 400),
             }),
           });
@@ -422,29 +435,38 @@ describe("native hwpx editor", () => {
     assert.equal(rendered.hostile.externalHref, false, "the sanitizer kept an external reference");
     assert.equal(rendered.hostile.dataRaster, true, "the sanitizer dropped a legitimate embedded raster; the scrub is not usable");
 
+    // The page's markup is decoded from the <img> source rather than read off
+    // the document: 1.4.0 hands the sanitized bytes to an image, so the decoded
+    // markup is exactly what the sanitizer produced and the numbers below are
+    // comparable with the probe's.
     const painted = (await browser.execute(() => {
       const host = document.querySelector(".hwp-editor-host");
-      const pages = [...(host?.querySelectorAll('.hwped-page-svg svg, .hwped-page-svg img, img.hwped-page-img[src^="data:image/svg+xml"]') ?? [])];
-      const painted = pages[0];
-      if (!painted) return null;
-      const image = painted instanceof HTMLImageElement ? painted : null;
-      if (image && (!image.complete || image.naturalWidth === 0)) return null;
-      const first = image
-        ? new DOMParser().parseFromString(atob(image.src.split(",")[1] ?? ""), "image/svg+xml").documentElement
-        : painted;
-      const paths = [...first.querySelectorAll("path")];
-      const box = painted.getBoundingClientRect();
+      const pages = [...(host?.querySelectorAll<HTMLImageElement>(".hwped-page img") ?? [])];
+      const first = pages[0];
+      const src = first?.getAttribute("src") ?? "";
+      const marker = "data:image/svg+xml;base64,";
+      if (!first || !src.startsWith(marker)) return null;
+      // The mount step already waited for this image to decode; the guard keeps
+      // a re-painted, still-decoding image from being read as its own page.
+      if (!first.complete || first.naturalWidth === 0 || first.naturalHeight === 0) return null;
+      const bytes = Uint8Array.from(atob(src.slice(marker.length)), (char) => char.charCodeAt(0));
+      const page = new DOMParser().parseFromString(
+        new TextDecoder().decode(bytes),
+        "image/svg+xml",
+      ).documentElement;
+      const paths = [...page.querySelectorAll("path")];
+      const box = first.getBoundingClientRect();
       return {
         pages: pages.length,
         paths: paths.length,
         dTotal: paths.reduce((total, path) => total + (path.getAttribute("d")?.length ?? 0), 0),
-        viewBox: first.getAttribute("viewBox"),
-        width: first.getAttribute("width"),
-        height: first.getAttribute("height"),
+        viewBox: page.getAttribute("viewBox"),
+        width: page.getAttribute("width"),
+        height: page.getAttribute("height"),
         box: [box.x, box.y, box.width, box.height] as [number, number, number, number],
       } satisfies PaintedPage;
     })) as PaintedPage | null;
-    assert.ok(painted, "the editor painted no SVG page");
+    assert.ok(painted, "the editor painted no decoded SVG page");
     assert.ok(painted.pages >= 1, "the editor painted no page");
     assert.ok(painted.box[2] > 0 && painted.box[3] > 0, `the painted page has no area: ${JSON.stringify(painted.box)}`);
     assert.deepEqual(
@@ -473,14 +495,21 @@ describe("native hwpx editor", () => {
     await step("paint the applied edit", (baseline: { paths: number; dTotal: number }, pollMs: number, done: (report: StepReport) => void) => {
       const deadline = Date.now() + pollMs;
       const read = () => {
-        const painted = document.querySelector('.hwp-editor-host .hwped-page-svg svg, .hwp-editor-host .hwped-page-svg img, .hwp-editor-host img.hwped-page-img[src^="data:image/svg+xml"]');
-        if (!painted) return null;
-        const image = painted instanceof HTMLImageElement ? painted : null;
-        if (image && (!image.complete || image.naturalWidth === 0)) return null;
-        const first = image
-          ? new DOMParser().parseFromString(atob(image.src.split(",")[1] ?? ""), "image/svg+xml").documentElement
-          : painted;
-        const paths = [...first.querySelectorAll("path")];
+        const image = document.querySelector<HTMLImageElement>(".hwp-editor-host .hwped-page img");
+        const src = image?.getAttribute("src") ?? "";
+        const marker = "data:image/svg+xml;base64,";
+        if (!image || !src.startsWith(marker)) return null;
+        // The repainted page is not readable until the browser has decoded it:
+        // a source the CSP blocked or that failed to decode still has a source
+        // and a box, so polling the data URL alone would read a page that is
+        // not on screen.
+        if (!image.complete || image.naturalWidth === 0 || image.naturalHeight === 0) return null;
+        const bytes = Uint8Array.from(atob(src.slice(marker.length)), (char) => char.charCodeAt(0));
+        const page = new DOMParser().parseFromString(
+          new TextDecoder().decode(bytes),
+          "image/svg+xml",
+        ).documentElement;
+        const paths = [...page.querySelectorAll("path")];
         return {
           paths: paths.length,
           dTotal: paths.reduce((total, path) => total + (path.getAttribute("d")?.length ?? 0), 0),

@@ -1,19 +1,22 @@
 // The SVG page sanitizer for the hwp editor surface.
 //
-// @hwp-editor/react paints each rendered page with
-// `dangerouslySetInnerHTML: { __html: svgHtml }` (dist/index.js, PageView), and
-// the only guard in front of it is the package's own `sanitizeSvg`: a blocklist
-// that removes `script`/`foreignObject`, `on*` attributes and `href` values that
-// start with `javascript:` after trim and lowercase. It misses SMIL
-// `<set attributeName="href" to="javascript:…">`, entity- or whitespace-
-// obfuscated schemes that the XML parser decodes before the check sees them,
-// `data:` and external `<use>`/`<image>` references, and CSS `url()` values.
+// @hwp-editor/react 1.4.0 paints a rendered page as an <img> whose source is
+// `data:image/svg+xml;base64,…` (dist/index.js, pageData), so the markup only
+// ever becomes an image document and a script inside it never runs against the
+// main webview. That was not true in 1.3.0, whose PageView used
+// `dangerouslySetInnerHTML: { __html: svgHtml }` there; the package's own
+// `sanitizeSvg` (still exported, deprecated) was the only guard, and it is a
+// blocklist that misses SMIL `<set attributeName="href" to="javascript:…">`,
+// entity- or whitespace-obfuscated schemes that the XML parser decodes before
+// the check sees them, `data:` and external `<use>`/`<image>` references, and
+// CSS `url()` values.
 //
-// The SVG is the engine's render of a `.hwpx` the reader may have received from
-// anywhere, and that sink lives in the main webview next to Tauri IPC, so the
-// bytes are sanitized here, at the engine boundary, before the package ever
-// holds them. check-dom-sanitizer cannot see this sink (it lives in
-// node_modules), which is why the wrap is in src/lib/hwped.ts and tested there.
+// The pages are still the engine's render of a `.hwpx` the reader may have
+// received from anywhere, so this pass stays at the engine boundary: with 1.4.0
+// it is defence in depth rather than the guard in front of a live sink (see
+// docs/hwp-editor.md §Frontend for why it is kept rather than retired).
+// check-dom-sanitizer scans maru's own sinks and cannot see one inside
+// node_modules, which is why the wrap is tested in src/lib/hwped.test.ts.
 
 import DOMPurify from "dompurify";
 import type { PageImage } from "@hwp-editor/core";
