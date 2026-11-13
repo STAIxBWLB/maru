@@ -8,6 +8,7 @@ import {
   type DocumentHandle,
   type HwpEngine,
 } from "@hwp-editor/core";
+import { sanitizeHwpedPages } from "./hwpedSvg";
 
 export interface HwpedEngineOptions {
   /** Maru's active workspace root; Rust resolves relative document paths
@@ -28,10 +29,20 @@ export interface HwpedEngineOptions {
  * The engine asks `hwped_capabilities` before an edit and sends the
  * `edit-ops-v1` JSON array when the host advertises `editOps: "v1"`, which
  * maru does; the `opsArgv` fallback for older hosts lives inside the package.
+ *
+ * `render` is wrapped because the package paints each SVG page with
+ * `dangerouslySetInnerHTML` behind a blocklist sanitizer. The page bytes are
+ * sanitized here, on the way out of the host, so nothing the package's own pass
+ * misses can reach that sink (src/lib/hwpedSvg.ts has the details).
  */
 export function createHwpedEngine(options: HwpedEngineOptions): HwpEngine {
-  return createTauriEngine(invoke, {
+  const engine = createTauriEngine(invoke, {
     workspaceRoot: options.workspaceRoot,
     ...(options.pathOf === undefined ? {} : { pathOf: options.pathOf }),
   });
+  return {
+    ...engine,
+    render: async (document, renderOptions) =>
+      sanitizeHwpedPages(await engine.render(document, renderOptions)),
+  };
 }

@@ -9,13 +9,16 @@ import type { WorkspaceFileEntry } from "../../lib/types";
 interface Props {
   entry: WorkspaceFileEntry;
   workspacePath: string;
+  /** Lifted so the pane keeps saying the edits are unsaved after the reader
+   *  switches back to the preview without unmounting the editor. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
  * The mounted editor. Kept in its own module so `HwpxEditorPane` can load the
  * package, its CSS and the engine factory only when someone opens an editor.
  */
-export function HwpEditorSurface({ entry, workspacePath }: Props) {
+export function HwpEditorSurface({ entry, workspacePath, onDirtyChange }: Props) {
   const { locale } = useTranslation();
 
   const engine = useMemo(
@@ -35,5 +38,12 @@ export function HwpEditorSurface({ entry, workspacePath }: Props) {
     [entry.name],
   );
 
-  return <HwpEditor engine={engine} file={file} locale={locale} />;
+  return (
+    <HwpEditor
+      engine={engine}
+      file={file}
+      locale={locale}
+      onDirtyChange={onDirtyChange}
+    />
+  );
 }

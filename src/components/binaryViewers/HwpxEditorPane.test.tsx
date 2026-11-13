@@ -4,12 +4,19 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const surface = vi.hoisted(() => ({
+  onDirtyChange: undefined as undefined | ((dirty: boolean) => void),
+}));
+
 vi.mock("./HwpxViewer", () => ({
   HwpxViewer: () => <div data-testid="preview" />,
 }));
 
 vi.mock("./HwpEditorSurface", () => ({
-  HwpEditorSurface: () => <div data-testid="editor-surface" />,
+  HwpEditorSurface: (props: { onDirtyChange?: (dirty: boolean) => void }) => {
+    surface.onDirtyChange = props.onDirtyChange;
+    return <div data-testid="editor-surface" />;
+  },
 }));
 
 import { HwpxEditorPane } from "./HwpxEditorPane";
@@ -49,13 +56,13 @@ describe("HwpxEditorPane", () => {
     container.remove();
   });
 
-  async function renderPane(): Promise<void> {
+  async function renderPane(target: WorkspaceFileEntry = entry): Promise<void> {
     root = createRoot(container);
     await act(async () => {
       root!.render(
         <LocaleContext.Provider value={{ locale: "ko", setLocale: () => {}, t }}>
           <HwpxEditorPane
-            entry={entry}
+            entry={target}
             workspacePath="/workspace"
             onPreviewExternal={() => {}}
             onOpenExternal={() => {}}
@@ -102,7 +109,7 @@ describe("HwpxEditorPane", () => {
     ).not.toBeNull();
   });
 
-  it("returns to the preview and drops the notice", async () => {
+  it("keeps the editor mounted and hidden when the preview is shown again", async () => {
     await renderPane();
     await act(async () => {
       toggle().click();
@@ -113,7 +120,37 @@ describe("HwpxEditorPane", () => {
     });
 
     expect(container.querySelector('[data-testid="preview"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="editor-surface"]')).toBeNull();
+    // Still mounted, and hidden: unmounting would drop in-memory edits.
+    const host = container.querySelector(".hwp-editor-host");
+    expect(host?.querySelector('[data-testid="editor-surface"]')).not.toBeNull();
+    expect(host?.hasAttribute("hidden")).toBe(true);
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    // Nothing was edited, so there is nothing to say about unsaved edits.
     expect(container.textContent).not.toContain("binaryViewer.hwpEditorNotSaved");
+  });
+
+  it("keeps the unsaved notice after a dirty editor goes back behind the preview", async () => {
+    await renderPane();
+    await act(async () => {
+      toggle().click();
+    });
+    await act(async () => {});
+    await act(async () => {
+      surface.onDirtyChange?.(true);
+    });
+    await act(async () => {
+      toggle().click();
+    });
+
+    expect(container.querySelector('[data-testid="preview"]')).not.toBeNull();
+    expect(container.querySelector(".hwp-editor-host")?.hasAttribute("hidden")).toBe(true);
+    expect(container.textContent).toContain("binaryViewer.hwpEditorNotSaved");
+  });
+
+  it("does not offer the editor above the preview's inline bound", async () => {
+    await renderPane({ ...entry, sizeBytes: 20 * 1024 * 1024 + 1 });
+
+    expect(container.querySelector("button.hwp-editor-pane-toggle")).toBeNull();
+    expect(container.querySelector('[data-testid="preview"]')).not.toBeNull();
   });
 });

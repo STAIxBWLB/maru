@@ -1,4 +1,4 @@
-// @vitest-environment node
+// @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -85,5 +85,132 @@ describe("createHwpedEngine", () => {
     expect(ref.name).toBe("report.hwpx");
     expect(ref.path).toBeUndefined();
     expect(ref.dataBase64).toBe("AQID");
+  });
+});
+
+function answerRender(pages: Array<Record<string, unknown>>): void {
+  invokeMock.mockImplementation((command: string) => {
+    if (command === "hwped_render") return Promise.resolve({ pages });
+    throw new Error(`unexpected command ${command}`);
+  });
+}
+
+function svgPage(svg: string, page = 1): Record<string, unknown> {
+  return {
+    page,
+    width: 595,
+    height: 842,
+    dpi: 96,
+    format: "svg",
+    dataBase64: Buffer.from(svg, "utf8").toString("base64"),
+  };
+}
+
+async function renderFirstPageSvg(): Promise<string> {
+  const pages = await createHwpedEngine({ workspaceRoot: "/workspace" }).render(document, {
+    format: "svg",
+  });
+  const first = pages[0];
+  if (first === undefined) throw new Error("render returned no pages");
+  return new TextDecoder().decode(first.data);
+}
+
+// The package paints each SVG page with dangerouslySetInnerHTML behind its own
+// blocklist sanitizer, so a hostile page must be neutral here, before the
+// package holds the bytes. Each construct is one its blocklist misses.
+describe("createHwpedEngine render sanitization", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it("removes the SVG constructs the package's blocklist misses", async () => {
+    answerRender([
+      svgPage(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">` +
+          `<set attributeName="href" to="javascript:alert(1)"/>` +
+          `<animate attributeName="href" to="javascript:alert(2)"/>` +
+          `<a href="java&#9;script:alert(3)"><text>link</text></a>` +
+          `<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">` +
+          `<img src="x" onerror="alert(4)"/></div></foreignObject>` +
+          `<use href="https://example.invalid/sprite.svg#a"/>` +
+          `<image href="data:text/html;base64,PHNjcmlwdD5hbGVydCg1KTwvc2NyaXB0Pg=="/>` +
+          `<text onload="alert(6)">body</text>` +
+          `<rect style="fill:url(javascript:alert(7))"/>` +
+          `</svg>`,
+      ),
+    ]);
+
+    const svg = await renderFirstPageSvg();
+
+    for (const hostile of [
+      "javascript:",
+      "<set",
+      "<animate",
+      "<a ",
+      "foreignObject",
+      "http://www.w3.org/1999/xhtml",
+      "onload",
+      "onerror",
+      "example.invalid",
+      "data:text/html",
+      "style=",
+    ]) {
+      expect(svg).not.toContain(hostile);
+    }
+    // The page survives as SVG: the body text is still there.
+    expect(svg).toContain("<text");
+    expect(svg).toContain("body");
+  });
+
+  it("keeps local paint references and raster data urls", async () => {
+    answerRender([
+      svgPage(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">` +
+          `<defs><clipPath id="c1"><rect width="1" height="1"/></clipPath></defs>` +
+          `<path d="M0 0L2 2" fill="url(#c1)" clip-path="url(#c1)"/>` +
+          `<image href="data:image/png;base64,iVBORw0KGgo="/>` +
+          `<path d="M0 0L2 2" fill="url(https://example.invalid/f)"/>` +
+          `</svg>`,
+      ),
+    ]);
+
+    const svg = await renderFirstPageSvg();
+
+    expect(svg).toContain('fill="url(#c1)"');
+    expect(svg).toContain('clip-path="url(#c1)"');
+    expect(svg).toContain("data:image/png;base64");
+    expect(svg).not.toContain("example.invalid");
+  });
+
+  it("answers a blank SVG page when the bytes are not SVG at all", async () => {
+    answerRender([
+      {
+        page: 1,
+        width: 595,
+        height: 842,
+        dpi: 96,
+        format: "svg",
+        dataBase64: Buffer.from("<html><body>not a page</body></html>", "utf8").toString(
+          "base64",
+        ),
+      },
+    ]);
+
+    const svg = await renderFirstPageSvg();
+
+    expect(svg).toBe('<svg xmlns="http://www.w3.org/2000/svg"/>');
+    expect(svg).not.toContain("not a page");
+  });
+
+  it("passes raster pages through untouched", async () => {
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]).toString("base64");
+    answerRender([{ page: 1, width: 595, height: 842, dpi: 96, format: "png", dataBase64: png }]);
+
+    const pages = await createHwpedEngine({ workspaceRoot: "/workspace" }).render(document, {
+      format: "png",
+    });
+
+    expect(pages[0]?.format).toBe("png");
+    expect([...(pages[0]?.data ?? [])]).toEqual([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
   });
 });

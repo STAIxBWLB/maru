@@ -153,9 +153,23 @@ dual channel.
 
 The editor mounts through the `.hwpx` surface: `BinaryViewerPane` renders
 `HwpxEditorPane`, which shows the read-only preview by default and loads
-`HwpEditor` (its own chunk) only when the reader asks for it. `locale` follows
-maru's UI locale, and the host element maps maru's tokens onto the editor's
-`--hwped-*` contract.
+`HwpEditor` (its own chunk) only when the reader asks for it. Once opened the
+editor stays mounted behind the preview, so switching back does not drop an
+in-memory edit, and above the preview's own inline bound (`INLINE_HWPX_MAX_BYTES`)
+the surface offers no editor at all. `locale` follows maru's UI locale, and the
+host element maps maru's tokens onto the editor's `--hwped-*` contract.
+
+Rendered pages are sanitized on the way out of the host. The package paints each
+SVG page with `dangerouslySetInnerHTML` behind its own blocklist sanitizer, which
+removes `script`/`foreignObject`, `on*` attributes and `javascript:` hrefs but
+not SMIL `<set>`/`<animate>`, parser-decoded schemes, or external `data:` and
+`url()` references. That sink also sits in the main webview next to Tauri IPC,
+over bytes from a document that may come from anywhere. `src/lib/hwped.ts`
+therefore wraps `render` and passes every `format: "svg"` page through
+`src/lib/hwpedSvg.ts` (DOMPurify's SVG profile, then the href and paint-attribute
+scrub it leaves undone) before the package holds the bytes; raster pages pass
+through untouched. `check-dom-sanitizer` cannot see this sink, because it lives
+in `node_modules`, which is why the wrap is tested in `src/lib/hwped.test.ts`.
 
 Edits stay in memory. Maru has no command that writes an edited document back to
 a workspace path, so the surface says so instead of offering a save; giving it

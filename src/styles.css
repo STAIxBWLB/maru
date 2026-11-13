@@ -15456,6 +15456,12 @@ button.git-badge:hover {
   overflow: auto;
 }
 
+/* The pane keeps the editor mounted behind the preview so in-memory edits
+   survive the switch back; `display: flex` above outranks the UA `[hidden]`. */
+.hwp-editor-host[hidden] {
+  display: none;
+}
+
 .binary-viewer-meta-warning {
   display: inline-block;
   min-width: 18px;
