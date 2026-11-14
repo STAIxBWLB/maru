@@ -1872,6 +1872,12 @@ pub(crate) fn scratchpad_cleanup_apply_in_transaction(
     Ok(result)
 }
 
+fn migration_stage_dir(parent: &Path) -> std::io::Result<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix("scratchpad-migration-staging-")
+        .tempdir_in(parent)
+}
+
 pub fn scratchpad_migrate_legacy_memos(
     work_path: String,
 ) -> Result<ScratchpadMigrationResult, String> {
@@ -1941,9 +1947,7 @@ pub(crate) fn scratchpad_migrate_legacy_memos_in_transaction(
         let staging_parent = work.join(".maru");
         fs::create_dir_all(&staging_parent)
             .map_err(|err| format!("Cannot create migration staging parent: {err}"))?;
-        let staging_root = tempfile::Builder::new()
-            .prefix("scratchpad-migration-staging-")
-            .tempdir_in(&staging_parent)
+        let staging_root = migration_stage_dir(&staging_parent)
             .map_err(|err| format!("Cannot create migration staging directory: {err}"))?
             .keep();
         let mut staged_index = 0_u32;
@@ -3800,5 +3804,72 @@ pub(crate) mod phase08_08 {
         assert!(!run(ipc::scratchpad_list(text(root))).unwrap().is_empty());
         assert!(output.is_file());
         assert_eq!(fs::read_to_string(legacy).unwrap(), data);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod private_migration_stage_tests {
+    use super::migration_stage_dir;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn migration_stage_dir_is_private_under_umask_022() {
+        const CHILD: &str = "MARU_MIGRATION_STAGE_TEST_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok("1") {
+            let parent = std::env::temp_dir().join("workspace/.maru");
+            std::fs::create_dir_all(&parent).unwrap();
+            let directory = migration_stage_dir(&parent).unwrap();
+            assert!(directory
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("scratchpad-migration-staging-"));
+            assert_eq!(
+                std::fs::canonicalize(directory.path().parent().unwrap()).unwrap(),
+                std::fs::canonicalize(&parent).unwrap(),
+                "migration staging must remain under the selected workspace .maru parent"
+            );
+            let mode = std::fs::metadata(directory.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            println!("MIGRATION_STAGE_OBSERVED mode={mode:o}");
+            assert_eq!(
+                mode, 0o700,
+                "create migration staging owner-only under umask 022"
+            );
+            println!("MIGRATION_PRIVATE_STAGE_CHILD mode=700 prefix=ok parent=ok");
+            return;
+        }
+        // Process-global umask changes stay in the isolated re-executed child.
+        let fixture = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(crate::test_support::posix_shell())
+            .args(["-c", "umask 022; exec \"$@\"", "migration-private-stage-test"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "scratchpad::private_migration_stage_tests::migration_stage_dir_is_private_under_umask_022",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .env("TMPDIR", fixture.path())
+            .env("TMP", fixture.path())
+            .env("TEMP", fixture.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "umask child failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("MIGRATION_PRIVATE_STAGE_CHILD mode=700 prefix=ok parent=ok"),
+            "the child must execute the actual migration factory permission check"
+        );
     }
 }
