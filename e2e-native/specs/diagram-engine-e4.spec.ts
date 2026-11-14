@@ -1225,56 +1225,43 @@ describe("native engine canvas (T4)", () => {
     // read. The hosted run on 11-12 read the canvas at `refused` with the right
     // spec hash and found neither a badge nor a notice, and the read after a
     // notice appears can still find none, because the two are separate
-    // renderings of the same mapping. Wait for what is asserted: the anchored
-    // badge for this fixture's own diagnostic, carrying the target attributes
-    // only the badge has.
-    const diagnosis = (await browser.executeAsync(
+    // renderings of the same mapping. What this waits for is that the layer
+    // finished mapping the settled document and drew an anchored badge - not
+    // that it drew this diagnostic: a wait keyed on the expected code, target
+    // and placement would poll a wrong mapping until it timed out and then
+    // report a missing badge, which is the mismatch the assertions below exist
+    // to catch. So any anchored badge ends the wait, and they check which one
+    // it is.
+    const rendered = (await browser.executeAsync(
       (
-        wanted: { code: string; targetId: string; targetKind: string },
         timeout: number,
-        done: (state: "anchored" | "notice" | "other-badge" | "nothing") => void,
+        done: (state: "badge" | "notice" | "nothing") => void,
       ) => {
         const deadline = Date.now() + timeout;
         const tick = () => {
           const canvas = document.querySelector(".maru-diagram-canvas");
           const badges = [...(canvas?.querySelectorAll("[data-canvas-diagnostic][data-target-id]") ?? [])];
-          const anchored = badges.some(
-            (badge) =>
-              badge.getAttribute("data-canvas-diagnostic") === wanted.code &&
-              badge.getAttribute("data-target-id") === wanted.targetId &&
-              badge.getAttribute("data-target-kind") === wanted.targetKind &&
-              badge.getAttribute("transform") !== null,
-          );
-          if (anchored) {
-            done("anchored");
+          if (badges.length > 0) {
+            done("badge");
             return;
           }
           if (Date.now() > deadline) {
             const notice = document.querySelectorAll("[data-canvas-diagnostic-notice]").length;
-            done(
-              notice > 0
-                ? "notice"
-                : badges.length > 0
-                  ? "other-badge"
-                  : "nothing",
-            );
+            done(notice > 0 ? "notice" : "nothing");
             return;
           }
           setTimeout(tick, 100);
         };
         tick();
       },
-      { code: refusal.code, targetId: refusal.targetId, targetKind: refusal.targetKind },
       10_000,
-    )) as "anchored" | "notice" | "other-badge" | "nothing";
+    )) as "badge" | "notice" | "nothing";
     assert.equal(
-      diagnosis,
-      "anchored",
-      diagnosis === "notice"
-        ? `the refused canvas rendered the engine's ${refusal.code} in the canvas notice instead of anchoring it to ${refusal.targetKind} ${refusal.targetId}`
-        : diagnosis === "other-badge"
-          ? `the refused canvas anchored a badge for another diagnostic within 10 s, never ${refusal.code} at ${refusal.targetKind} ${refusal.targetId}`
-          : "the refused canvas drew no diagnostic badge within 10 s",
+      rendered,
+      "badge",
+      rendered === "notice"
+        ? "the refused canvas rendered its diagnostics in the canvas notice instead of anchoring a badge"
+        : "the refused canvas drew no diagnostic badge within 10 s",
     );
     const state = await browser.execute(() => {
       const canvas = document.querySelector(".maru-diagram-canvas");
