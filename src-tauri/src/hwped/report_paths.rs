@@ -56,9 +56,13 @@ fn is_hangul(ch: char) -> bool {
         | '\u{FFD2}'..='\u{FFD7}' | '\u{FFDA}'..='\u{FFDC}')
 }
 
-/// JS `\s` on the characters a report can carry.
+/// JS `\s` (WhiteSpace plus LineTerminator), the set `String.prototype.trim`
+/// also trims. Rust's `char::is_whitespace` is a different set: it adds U+0085
+/// (NEL) and drops U+FEFF, so each mismatch moves a path boundary.
 fn is_space(ch: char) -> bool {
-    ch.is_whitespace() || ch == '\u{FEFF}'
+    matches!(ch,
+        '\u{9}'..='\u{D}' | '\u{20}' | '\u{A0}' | '\u{1680}' | '\u{2000}'..='\u{200A}'
+        | '\u{2028}' | '\u{2029}' | '\u{202F}' | '\u{205F}' | '\u{3000}' | '\u{FEFF}')
 }
 
 /// Length of a known extension (`.ext` plus a word boundary) at `at`.
@@ -69,11 +73,9 @@ fn extension_at(chars: &[char], at: usize) -> Option<usize> {
     EXTENSIONS.iter().find_map(|ext| {
         let ext: Vec<char> = ext.chars().collect();
         let end = at + 1 + ext.len();
-        let matches = chars.len() >= end
-            && chars[at + 1..end]
-                .iter()
-                .zip(&ext)
-                .all(|(a, b)| a.eq_ignore_ascii_case(b));
+        // Case-sensitive, as upstream's PATH_END is (its regexes carry `gu`, no
+        // `i`): `.TXT` is not `.txt`, so the path stops at its first space.
+        let matches = chars.len() >= end && chars[at + 1..end] == ext[..];
         // `\b`: the next char is not a word char (ASCII semantics in JS `\b`).
         let boundary = chars
             .get(end)
@@ -348,7 +350,9 @@ fn text(value: Option<&Value>) -> Option<String> {
 }
 
 fn nonempty(value: Option<&Value>) -> Option<String> {
-    text(value).filter(|text| !text.trim().is_empty())
+    // JS `trim` removes the `\s` set, not Rust's White_Space: a U+FEFF-only
+    // style name is empty upstream.
+    text(value).filter(|text| !text.trim_matches(is_space).is_empty())
 }
 
 /// A non-negative safe integer (JS `Number.isSafeInteger(n) && n >= 0`), which

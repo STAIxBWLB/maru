@@ -116,6 +116,63 @@ const UPSTREAM: &[(&str, &str, &str)] = &[
         "",
         "<path>: permission denied",
     ),
+    // A 2,812-input differential sweep against upstream `withoutPaths` at
+    // hwp-editor ce9d7e9 diverged on these 87 inputs before the fix: JS `\s`
+    // is not Rust's White_Space (U+0085 is one here, not there), and PATH_END
+    // is case-sensitive. One representative per cause and direction; the
+    // expected values are upstream's output, not retyped.
+    (
+        "cannot read /Users/A\u{85}B\u{85}C/private.bin",
+        "",
+        "cannot read <path>",
+    ),
+    (
+        "입출력 오류: \u{85}/tmp/x.hwp\u{85}: bad",
+        "",
+        "입출력 오류: \u{85}/tmp/x.hwp\u{85}: bad",
+    ),
+    ("cannot read C:\\a\u{85}b", "", "cannot read <path>"),
+    (
+        "cannot read //host/share/a\u{85}b",
+        "",
+        "cannot read <path>",
+    ),
+    (
+        "cannot read C:\\A B\u{85}NOTES.TXT",
+        "",
+        "cannot read <path> B\u{85}NOTES.TXT",
+    ),
+    ("cannot read /Users/A b/notes.TXT", "", "cannot read <path>"),
+    (
+        "cannot read C:/A B\u{feff}NOTES.TXT",
+        "",
+        "cannot read <path> B\u{feff}NOTES.TXT",
+    ),
+    (
+        "cannot read C:\\A B\u{180e}NOTES.TXT",
+        "",
+        "cannot read <path> B\u{180e}NOTES.TXT",
+    ),
+    (
+        "cannot read C:\\A B\u{200b}NOTES.TXT",
+        "",
+        "cannot read <path> B\u{200b}NOTES.TXT",
+    ),
+    (
+        "cannot read C:\\A B\u{3000}NOTES.TXT",
+        "",
+        "cannot read <path> B\u{3000}NOTES.TXT",
+    ),
+    (
+        "cannot read C:\\A B\u{2028}NOTES.TXT",
+        "",
+        "cannot read <path> B\u{2028}NOTES.TXT",
+    ),
+    (
+        "cannot read C:\\A B\u{a0}NOTES.TXT",
+        "",
+        "cannot read <path> B\u{a0}NOTES.TXT",
+    ),
 ];
 
 #[test]
@@ -173,4 +230,17 @@ fn an_integral_float_count_keeps_the_report_structured() {
     assert_eq!(out["failed_count"], serde_json::json!(0));
     assert_eq!(out["ops"][0]["index"], serde_json::json!(0));
     assert_eq!(out["ops"][0]["pieces_touched"], serde_json::json!(2));
+}
+
+#[test]
+fn a_js_whitespace_only_style_name_is_empty() {
+    use serde_json::json;
+    // JS `trim` removes the `\s` set, which holds U+FEFF; Rust's `trim` keeps it,
+    // so a U+FEFF-only style name passed here and is empty upstream (T124-R4.3).
+    for blank in ["\u{feff}", "\u{3000}", "\u{a0}", " \t\n"] {
+        assert_eq!(nonempty(Some(&json!(blank))), None, "{blank:?}");
+    }
+    // U+0085 is not `\s`, so it is not blank.
+    assert_eq!(nonempty(Some(&json!("\u{85}"))), Some("\u{85}".to_string()));
+    assert_eq!(nonempty(Some(&json!("한글"))), Some("한글".to_string()));
 }

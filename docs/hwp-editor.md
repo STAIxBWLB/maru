@@ -122,8 +122,9 @@ the message includes the detected version, required minimum, and upgrade action.
 **Refused edits (maru#620).** On ahwp >= 1.6.3, `hwped_edit` passes
 `--report <stage>/edit-report.json` on every call and reads the report before
 the stage dir is removed. The version parser takes plain `X.Y.Z` only, so a
-prerelease or build-tagged engine (`1.6.3-rc.1`, `1.6.3+build`) gets no
-`--report` and keeps the string error.
+prerelease or build-tagged engine (`1.6.3-rc.1`, `1.6.3+build`) fails closed
+before any edit, as an older engine does: `hwp_version: cannot parse the
+engine's --version output`, with its install-or-repoint step.
 
 A refused run (`hwp_failed:`) with a readable report rejects with the object
 hwp-editor's Tauri client reads, `{ code: "failed", message, report,
