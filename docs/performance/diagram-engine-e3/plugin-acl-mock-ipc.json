@@ -3,6 +3,7 @@
   "deniedWindowLabel": "sites",
   "mainHandlerReached": [
     "validate",
+    "scan_repository",
     "render_png",
     "render_svg",
     "diagram_list_renders",
@@ -15,6 +16,7 @@
   "scope": "Tauri MockRuntime invocation with the app's compiled generate_context capabilities; not native WebView transport evidence",
   "sitesChildDeniedByAcl": [
     "validate",
+    "scan_repository",
     "render_png",
     "render_svg",
     "diagram_list_renders",
@@ -24,6 +26,7 @@
   ],
   "sitesDeniedByAcl": [
     "validate",
+    "scan_repository",
     "render_png",
     "render_svg",
     "diagram_list_renders",

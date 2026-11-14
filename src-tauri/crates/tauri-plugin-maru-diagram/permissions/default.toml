@@ -2,7 +2,7 @@
 
 [default]
 description = ""
-permissions = ["allow-validate"]
+permissions = ["allow-validate", "allow-scan-repository"]
 
 [render-store]
 description = "List, view, delete, and store verified diagram renders"
