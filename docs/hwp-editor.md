@@ -118,6 +118,14 @@ name before the engine runs and by magic bytes once staged. A target without
 reflow permission may not grow past its original UTF-16 length
 (`growth_without_reflow`). An engine refusal comes back as `engine_refused`
 without engine prose, because 2.0.0 emits no structured report for this op.
+The plan, values, discovery, receipt and preview go through a port of
+hwp-editor's own parsers (`src-tauri/src/hwped/forms/wire.rs`): the host refuses
+what they refuse and returns only the fields they return, with the preview's
+`native_warnings` emptied because native diagnostics may name local paths.
+`forms/parity.json` holds upstream outputs recorded by
+`scripts/record-hwped-form-parity.mjs`, real ahwp 2.0.0 output included, and is
+regenerated from upstream, never by hand. Receipt, preview and document reads are
+capped at 32 MiB through one handle.
 Evidence is recorded with `scripts/record-hwped-form-isolation.mjs`.
 
 The Rust channel and capability are the first half of

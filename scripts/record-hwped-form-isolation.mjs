@@ -26,6 +26,10 @@ export const HWPED_FORM_CASES = [
   "a_cross_format_request_is_refused_before_the_engine_runs",
   "caller_artifact_paths_and_non_literal_values_never_reach_the_engine",
   "a_workspace_document_path_keeps_the_json_edit_containment",
+  "artifacts_cross_the_bridge_reduced_to_the_v1_contract",
+  "an_oversized_artifact_is_refused_by_size_without_its_path",
+  "a_successful_edit_without_its_document_names_the_missing_product",
+  "a_plan_or_value_upstream_refuses_is_refused_by_its_path",
 ];
 export const HWPED_FORM_CHECK = "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=4";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -49,7 +53,7 @@ export function parseHwpedFormBehavior(log) {
 }
 
 const PATHS = ["src-tauri/src/lib.rs", "src-tauri/src/hwped.rs", "src-tauri/src/hwped/forms.rs",
-  "src-tauri/src/hwped/forms/tests.rs", "src/lib/hwped.ts"];
+  "src-tauri/src/hwped/forms/wire.rs", "src-tauri/src/hwped/forms/tests.rs", "src/lib/hwped.ts"];
 
 function row(name, sourceCommit, log, result, root) {
   const discover = name === "hwped_discover_forms";
@@ -88,7 +92,7 @@ function row(name, sourceCommit, log, result, root) {
       contractTests: HWPED_FORM_CASES.map((test) => `src-tauri/src/hwped/forms/tests.rs::${test}`),
       workerProof: `hwped::phase08_21::${HWPED_FORM_BOUNDARY_CASE} holds the ${name} future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.`,
       platformScope: "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
-      limits: "Containment covers the source path and the host-made artifact paths; engine-side semantics of the plan are the engine's own contract.",
+      limits: "Containment covers the source path and the host-made artifact paths. Discovery, receipt and preview cross the bridge only after the ported upstream parsers (src-tauri/src/hwped/forms/wire.rs), checked against outputs recorded from hwp-editor's own functions; engine-side plan semantics are the engine's own contract.",
       sourceCommit, logSha256: sha256(log),
       sourceFiles: PATHS.map((path) => ({ path, sha256: sha256(readFileSync(resolve(root, path))) })),
     },

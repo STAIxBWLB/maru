@@ -19,7 +19,7 @@ use super::{
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
@@ -27,17 +27,6 @@ use std::path::Path;
 /// `apply_form_bindings` match the client's v1 parsers. A prerelease such as
 /// `2.0.0-rc.1` does not parse as a version triplet, so it never qualifies.
 pub(super) const FORM_BINDINGS_MIN_VERSION: (u64, u64, u64) = (2, 0, 0);
-
-/// Fields the client's `parseFormBindingPlan` admits. Anything else is refused
-/// rather than forwarded, so a plan cannot smuggle an op field to the engine.
-const PLAN_FIELDS: &[&str] = &[
-    "version",
-    "source_sha256",
-    "structural_sha256",
-    "bindings",
-    "repeats",
-    "constraints",
-];
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -92,10 +81,14 @@ fn form_format(name: &str) -> Option<&'static str> {
 fn staged_format(path: &Path) -> Result<Option<&'static str>, String> {
     use std::io::Read as _;
     let mut head = [0u8; 4];
-    let mut file = std::fs::File::open(path).map_err(|err| format!("hwp_stage_failed: {err}"))?;
-    let read = file
-        .read(&mut head)
-        .map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let failed = |err: std::io::Error| {
+        format!(
+            "hwp_stage_failed: could not read the staged form source to check its format ({}); check the document is readable, then retry",
+            err.kind()
+        )
+    };
+    let mut file = std::fs::File::open(path).map_err(failed)?;
+    let read = file.read(&mut head).map_err(failed)?;
     Ok(match &head[..read] {
         [0xD0, 0xCF, 0x11, 0xE0] => Some(".hwp"),
         [b'P', b'K', 0x03, 0x04] => Some(".hwpx"),
@@ -107,82 +100,36 @@ fn bad_request(message: &str) -> String {
     format!("hwped_bad_request: {message}")
 }
 
-fn parse_discovery(stdout: &[u8]) -> Result<Value, String> {
-    let invalid = || {
-        "hwp_parse_failed: invalid form payload from the engine; upgrade agent-hwp to 2.0.0 and rediscover targets"
-            .to_string()
-    };
-    let value: Value = serde_json::from_slice(stdout).map_err(|_| invalid())?;
-    let object = value.as_object().ok_or_else(invalid)?;
-    let shaped = object.get("version").and_then(Value::as_u64) == Some(1)
-        && object.get("source_sha256").is_some_and(Value::is_string)
-        && object
-            .get("structural_sha256")
-            .is_some_and(Value::is_string)
-        && object.get("occurrences").is_some_and(Value::is_array);
-    if !shaped {
-        return Err(invalid());
-    }
-    Ok(value)
+/// Largest receipt, preview or discovery the host reads back. The client caps
+/// occurrences and changes at 20,000 rows, which fits well inside this.
+const ARTIFACT_LIMIT: u64 = 32 * 1024 * 1024;
+
+/// Largest bound document the host returns; the same cap as a saved document.
+const OUTPUT_LIMIT: u64 = 32 * 1024 * 1024;
+
+fn invalid_payload(what: &str, error: &wire::FormDataError) -> String {
+    format!(
+        "hwp_parse_failed: the engine's form {what} does not match the v1 contract ({error}); upgrade agent-hwp to 2.0.0 and rediscover targets"
+    )
 }
 
-/// Shape checks the host owns. The engine and the client parser validate the
-/// plan in depth; the host only refuses what would let a request reach past
-/// the one op: unknown plan fields, values that are not literal strings, and
-/// keys that do not match the bindings.
-fn checked_plan(plan: Value, values: Value) -> Result<(Value, Map<String, Value>), String> {
-    let object = plan.as_object().ok_or_else(|| {
-        bad_request("plan must be a FormBindingPlan v1 object; rediscover targets and retry")
+fn parse_discovery(stdout: &[u8]) -> Result<Value, String> {
+    let value: Value = serde_json::from_slice(stdout).map_err(|_| {
+        "hwp_parse_failed: the engine's form discovery is not JSON; upgrade agent-hwp to 2.0.0 and rediscover targets".to_string()
     })?;
-    if let Some(field) = object
-        .keys()
-        .find(|key| !PLAN_FIELDS.contains(&key.as_str()))
-    {
-        return Err(bad_request(&format!(
-            "plan field {field:?} is not part of FormBindingPlan v1; send only the reviewed plan"
-        )));
-    }
-    if object.get("version").and_then(Value::as_u64) != Some(1)
-        || !object.get("source_sha256").is_some_and(Value::is_string)
-        || !object
-            .get("structural_sha256")
-            .is_some_and(Value::is_string)
-    {
-        return Err(bad_request(
-            "plan must be FormBindingPlan version 1 with source and structural hashes; rediscover targets and retry",
-        ));
-    }
-    let bindings = object
-        .get("bindings")
-        .and_then(Value::as_array)
-        .filter(|bindings| !bindings.is_empty())
-        .ok_or_else(|| bad_request("plan needs at least one binding; select a target and retry"))?;
-    let mut keys = BTreeSet::new();
-    for binding in bindings {
-        let key = binding.get("key").and_then(Value::as_str).ok_or_else(|| {
-            bad_request("every binding needs a string key; rediscover targets and retry")
-        })?;
-        if !keys.insert(key.to_string()) {
-            return Err(bad_request(&format!(
-                "binding key {key:?} occurs more than once; give each binding its own key"
-            )));
-        }
-    }
-    let Value::Object(values) = values else {
-        return Err(bad_request(
-            "values must be an object of literal strings keyed by binding",
-        ));
-    };
-    if values.values().any(|value| !value.is_string()) {
-        return Err(bad_request(
-            "every value must be a literal string; send text, not structured data",
-        ));
-    }
-    if values.keys().cloned().collect::<BTreeSet<_>>() != keys {
-        return Err(bad_request(
-            "values must name exactly the plan's binding keys; send one value per binding",
-        ));
-    }
+    wire::parse_discovery(&value).map_err(|error| invalid_payload("discovery", &error))
+}
+
+/// `parseFormBindingPlan` and `validateFormValues`, as the client and the HTTP
+/// adapter run them: the host refuses what they refuse, and forwards only the
+/// normalized plan they would send.
+fn checked_plan(plan: Value, values: Value) -> Result<(Value, Map<String, Value>), String> {
+    let plan = wire::parse_plan(&plan).map_err(|error| {
+        bad_request(&format!("{error}; the plan is not FormBindingPlan v1, so rediscover targets and review the plan again"))
+    })?;
+    let values = wire::validate_values(&plan, &values).map_err(|error| {
+        bad_request(&format!("{error}; send one literal string per binding key, within each target's max_chars, then preview again"))
+    })?;
     Ok((plan, values))
 }
 
@@ -278,7 +225,12 @@ fn discover(bin: &Path, input: &Path, work_dir: &str) -> Result<Value, String> {
 }
 
 fn work_dir() -> Result<(tempfile::TempDir, String), String> {
-    let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = tempfile::tempdir().map_err(|err| {
+        format!(
+            "hwp_stage_failed: could not create the private form binding directory ({}); check temporary storage permissions and free space, then retry",
+            err.kind()
+        )
+    })?;
     let dir = super::edit_stage_dir(tmp.path())?;
     Ok((tmp, dir))
 }
@@ -294,16 +246,41 @@ pub(super) fn discover_now(
     discover(&bin, &input, &dir)
 }
 
-fn read_artifact(path: &Path, what: &str) -> Result<Value, String> {
-    let bytes = std::fs::read(path).map_err(|_| {
-        format!("hwp_parse_failed: the engine wrote no form {what}; upgrade agent-hwp to 2.0.0 and preview again")
+/// Read one engine product through a single handle, refusing it past `limit`
+/// instead of buffering whatever the engine wrote (maru#626 T126-R1). The cause
+/// names the product, never its staged path.
+fn read_bounded(path: &Path, limit: u64, what: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read as _;
+    let file = std::fs::File::open(path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("hwp_parse_failed: ahwp edit exited successfully but wrote no form {what}; upgrade agent-hwp to 2.0.0, then rediscover targets and preview again")
+        } else {
+            format!("hwp_stage_failed: could not open the form {what} the engine wrote ({}); check temporary storage permissions, then preview again", err.kind())
+        }
     })?;
-    serde_json::from_slice::<Value>(&bytes)
-        .ok()
-        .filter(Value::is_object)
-        .ok_or_else(|| {
-            format!("hwp_parse_failed: invalid form {what} from the engine; upgrade agent-hwp to 2.0.0 and preview again")
-        })
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes).map_err(|err| {
+        format!("hwp_stage_failed: could not read the form {what} the engine wrote ({}); check temporary storage, then preview again", err.kind())
+    })?;
+    if bytes.len() as u64 > limit {
+        return Err(format!(
+            "hwp_output_limit: the form {what} the engine wrote exceeds {} MiB; bind fewer targets or split the document, then preview again",
+            limit / (1024 * 1024)
+        ));
+    }
+    Ok(bytes)
+}
+
+fn read_artifact(
+    path: &Path,
+    what: &str,
+    parse: fn(&Value) -> Result<Value, wire::FormDataError>,
+) -> Result<Value, String> {
+    let bytes = read_bounded(path, ARTIFACT_LIMIT, what)?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| {
+        format!("hwp_parse_failed: the engine's form {what} is not JSON; upgrade agent-hwp to 2.0.0 and preview again")
+    })?;
+    parse(&value).map_err(|error| invalid_payload(what, &error))
 }
 
 pub(super) fn apply_now(
@@ -352,10 +329,10 @@ pub(super) fn apply_now(
         "receipt": receipt.to_string_lossy(),
         "preview": preview.to_string_lossy(),
     }]);
-    write_private(
-        &ops,
-        &serde_json::to_vec(&op).map_err(|err| format!("hwp_stage_failed: {err}"))?,
-    )?;
+    let encoded = serde_json::to_vec(&op).map_err(|_| {
+        "hwp_stage_failed: could not encode the form binding op; rediscover targets and review the plan, then preview again".to_string()
+    })?;
+    write_private(&ops, &encoded)?;
     let mut args = vec![
         OsString::from("edit"),
         input.into_os_string(),
@@ -370,10 +347,19 @@ pub(super) fn apply_now(
     }
     run_hwp_feature_ok(&bin, &args, Some(&dir)).map_err(refused("ahwp edit"))?;
 
-    let receipt = read_artifact(&receipt, "receipt")?;
-    let preview = read_artifact(&preview, "preview")?;
+    let receipt = read_artifact(&receipt, "receipt", wire::parse_receipt)?;
+    let preview = read_artifact(&preview, "preview", wire::parse_preview)?;
     if receipt.get("published").and_then(Value::as_bool) != Some(!options.dry_run) {
         return Err("hwp_parse_failed: Form publication receipt disagrees with requested mode; rediscover targets and retry".to_string());
+    }
+    // `decodeFormResult`: both artifacts describe this source, plan and values.
+    let source = plan.get("source_sha256");
+    let agrees = receipt.get("source_sha256") == source
+        && preview.get("source_sha256") == source
+        && receipt.get("plan_sha256") == preview.get("plan_sha256")
+        && receipt.get("values_sha256") == preview.get("values_sha256");
+    if !agrees {
+        return Err("hwp_parse_failed: Form receipt and preview identities disagree; rediscover targets and preview again".to_string());
     }
     if options.dry_run {
         return Ok(HwpedFormResult {
@@ -383,7 +369,7 @@ pub(super) fn apply_now(
             data_base64: None,
         });
     }
-    let data = std::fs::read(&output).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let data = read_bounded(&output, OUTPUT_LIMIT, "document")?;
     Ok(HwpedFormResult {
         receipt,
         preview,
@@ -403,12 +389,17 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    let mut file = options.open(path).map_err(|err| {
-        format!("hwp_stage_failed: could not write the per-call binding op: {err}")
-    })?;
-    file.write_all(bytes)
-        .map_err(|err| format!("hwp_stage_failed: could not write the per-call binding op: {err}"))
+    let failed = |err: std::io::Error| {
+        format!(
+            "hwp_stage_failed: could not write the per-call form binding op ({}); check temporary storage permissions and free space, then preview again",
+            err.kind()
+        )
+    };
+    let mut file = options.open(path).map_err(failed)?;
+    file.write_all(bytes).map_err(failed)
 }
+
+mod wire;
 
 #[cfg(test)]
 mod tests;

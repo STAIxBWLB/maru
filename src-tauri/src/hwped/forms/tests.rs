@@ -11,6 +11,8 @@ use std::path::PathBuf;
 const SOURCE: &str = "a47e3bd7aab96d0ba170549f650b27be8f088835c8a05b76d0534b872bf5d809";
 const STRUCTURE: &str = "e12b515427aa4cec7cd7af1d8b1e825565fc8fdee09470449dacfc9b67a08fab";
 const STALE: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+const OCCA: &str = "occ-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OCCB: &str = "occ-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const HWPX: &[u8] = b"PK\x03\x04hwpx form";
 const HWP: &[u8] = b"\xD0\xCF\x11\xE0hwp form";
 
@@ -37,6 +39,8 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         std::env::remove_var("MARU_HWP_BIN");
+        std::env::remove_var("SIZE_BOMB");
+        std::env::remove_var("NO_OUTPUT");
     }
 }
 
@@ -55,7 +59,7 @@ esac
 printf '%s\n' "$*" >> "$here/invocations"
 case "$1" in
   slots)
-    printf '{"version":1,"source_sha256":"__SOURCE__","structural_sha256":"__STRUCTURE__","occurrences":[{"id":"occ-a","kind":"cell_text","old_text":"AB","bindable":true},{"id":"occ-b","kind":"cell_text","old_text":"","bindable":false,"cause":"merged cell","next_step":"bind another cell"}]}'
+    printf '{"version":1,"source_sha256":"__SOURCE__","structural_sha256":"__STRUCTURE__","occurrences":[{"id":"__OCCA__","kind":"cell_text","label":"성명","paragraph_id":"p.0","section":0,"indices":[1],"model_route":"s0/p1","table_id":null,"table_index":null,"row":null,"col":null,"start":0,"end":2,"old_text":"AB","prior_sha256":"__PRIOR__","bindable":true,"cause":null,"next_step":null,"label_occurrences":1,"label_ambiguous":false},{"id":"__OCCB__","kind":"cell_text","label":"","paragraph_id":"p.1","section":0,"indices":[2],"model_route":"s0/p2","table_id":null,"table_index":null,"row":null,"col":null,"start":0,"end":0,"old_text":"","prior_sha256":"__PRIOR__","bindable":false,"cause":"rich_target","next_step":"edit this cell by hand","label_occurrences":0,"label_ambiguous":false}]}'
     ;;
   edit)
     out=""; ops=""; dry=0
@@ -76,8 +80,10 @@ case "$1" in
     receipt=$(sed -n 's/.*"receipt":"\([^"]*\)".*/\1/p' "$ops")
     preview=$(sed -n 's/.*"preview":"\([^"]*\)".*/\1/p' "$ops")
     if [ "$dry" = 1 ]; then published=false; else published=true; printf 'PK\003\004bound' > "$out"; fi
-    printf '{"version":1,"published":%s,"source_sha256":"__SOURCE__","plan_sha256":"p","values_sha256":"v"}' "$published" > "$receipt"
-    printf '{"version":1,"source_sha256":"__SOURCE__","plan_sha256":"p","values_sha256":"v","changes":[{"occurrence_id":"occ-a","new_text":"Lee"}]}' > "$preview"
+    printf '{"version":1,"source_sha256":"__SOURCE__","plan_sha256":"__PLAN__","values_sha256":"__VALUES__","output_sha256":"__OUTPUT__","published":%s,"occurrence_ids":["__OCCA__"],"targets":1,"cloned_profiles":0,"semantic_budget":"selected_text_and_declared_clones_only","render_font_native":"unverified","native_warning_count":1}' "$published" > "$receipt"
+    printf '{"version":1,"source_sha256":"__SOURCE__","plan_sha256":"__PLAN__","values_sha256":"__VALUES__","copies":[],"changes":[{"occurrence_id":"__OCCA__","copy":0,"profile_id":null,"paragraph_id":"p.0","section":0,"indices":[1],"row":null,"col":null,"start":0,"end":2,"old_text":"AB","new_text":"Lee","max_chars":30,"allow_reflow":true}],"native_warnings":["font fallback reading %s"]}' "$ops" > "$preview"
+    if [ -n "$SIZE_BOMB" ]; then head -c 40000000 /dev/zero >> "$preview"; fi
+    if [ -n "$NO_OUTPUT" ]; then rm -f "$out"; fi
     ;;
   *) exit 2 ;;
 esac
@@ -85,7 +91,13 @@ esac
     .replace("__VERSION__", version)
     .replace("__SOURCE__", SOURCE)
     .replace("__STRUCTURE__", STRUCTURE)
-    .replace("__STALE__", STALE);
+    .replace("__STALE__", STALE)
+    .replace("__OCCA__", OCCA)
+    .replace("__OCCB__", OCCB)
+    .replace("__PRIOR__", &"c".repeat(64))
+    .replace("__PLAN__", &"d".repeat(64))
+    .replace("__VALUES__", &"e".repeat(64))
+    .replace("__OUTPUT__", &"f".repeat(64));
     crate::test_support::write_executable_fixture(&binary, &script, 0o755).unwrap();
     std::env::set_var("MARU_HWP_BIN", &binary);
     Engine { dir, _lock: lock }
@@ -106,7 +118,7 @@ fn plan(source: &str, allow_reflow: bool) -> Value {
         "structural_sha256": STRUCTURE,
         "bindings": [{
             "key": "name",
-            "targets": [{ "occurrence_id": "occ-a", "max_chars": 30, "allow_reflow": allow_reflow }]
+            "targets": [{ "occurrence_id": OCCA, "max_chars": 30, "allow_reflow": allow_reflow }]
         }]
     })
 }
@@ -165,7 +177,7 @@ fn discovery_returns_the_engine_catalogue_and_removes_its_directory() {
     let discovery = run(hwped_discover_forms(document("양식.hwpx", HWPX), None)).unwrap();
     assert_eq!(discovery["version"], 1);
     assert_eq!(discovery["source_sha256"], SOURCE);
-    assert_eq!(discovery["occurrences"][1]["cause"], "merged cell");
+    assert_eq!(discovery["occurrences"][1]["cause"], "rich_target");
     let slots = engine.invocations();
     assert_eq!(slots.len(), 1);
     assert!(slots[0].starts_with("slots "), "{slots:?}");
@@ -547,5 +559,119 @@ fn released_engine_discovers_previews_applies_and_refuses_a_stale_plan() {
     assert!(
         error.contains("engine_refused") && error.contains("Rediscover"),
         "{error}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn artifacts_cross_the_bridge_reduced_to_the_v1_contract() {
+    let engine = engine("2.0.0");
+    let result = run(hwped_apply_form_bindings(
+        document("양식.hwpx", HWPX),
+        None,
+        plan(SOURCE, true),
+        values("Lee"),
+        options(true, None),
+    ))
+    .unwrap();
+    // The engine's preview warning names the staged ops path and its receipt
+    // carries an unknown path field; neither crosses.
+    assert_eq!(result.preview["native_warnings"], serde_json::json!([]));
+    assert!(
+        result.receipt.get("engine_path").is_none(),
+        "{}",
+        result.receipt
+    );
+    let stage = staged_dir(&engine);
+    let wire = serde_json::to_string(&result).unwrap();
+    assert!(
+        !wire.contains(&*stage.to_string_lossy()),
+        "a staged path crossed: {wire}"
+    );
+    assert!(!wire.contains("/Users/"), "{wire}");
+    assert_eq!(result.receipt["native_warning_count"], 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_oversized_artifact_is_refused_by_size_without_its_path() {
+    let engine = engine("2.0.0");
+    std::env::set_var("SIZE_BOMB", "1");
+    let error = run(hwped_apply_form_bindings(
+        document("양식.hwpx", HWPX),
+        None,
+        plan(SOURCE, true),
+        values("Lee"),
+        options(true, None),
+    ))
+    .unwrap_err();
+    std::env::remove_var("SIZE_BOMB");
+    assert!(error.starts_with("hwp_output_limit:"), "{error}");
+    assert!(
+        error.contains("form preview") && error.contains("preview again"),
+        "{error}"
+    );
+    assert!(
+        !error.contains(&*staged_dir(&engine).to_string_lossy()),
+        "{error}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_successful_edit_without_its_document_names_the_missing_product() {
+    let engine = engine("2.0.0");
+    std::env::set_var("NO_OUTPUT", "1");
+    let error = run(hwped_apply_form_bindings(
+        document("양식.hwpx", HWPX),
+        None,
+        plan(SOURCE, true),
+        values("Lee"),
+        options(false, None),
+    ))
+    .unwrap_err();
+    std::env::remove_var("NO_OUTPUT");
+    assert!(error.starts_with("hwp_parse_failed:"), "{error}");
+    assert!(error.contains("wrote no form document"), "{error}");
+    assert!(error.contains("upgrade agent-hwp to 2.0.0"), "{error}");
+    assert!(!error.contains("No such file"), "{error}");
+    assert!(
+        !error.contains(&*staged_dir(&engine).to_string_lossy()),
+        "{error}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_plan_or_value_upstream_refuses_is_refused_by_its_path() {
+    let engine = engine("2.0.0");
+    let mut nested = plan(SOURCE, true);
+    nested["bindings"][0]["targets"][0]["receipt"] = Value::from("/tmp/r.json");
+    let mut hash = plan(SOURCE, true);
+    hash["structural_sha256"] = Value::from("ABC");
+    for (plan, values, path) in [
+        (nested, values("Lee"), "bindings[0].targets[0]"),
+        (hash, values("Lee"), "structural_sha256"),
+        (plan(SOURCE, true), values(&"x".repeat(31)), "values[0]"),
+        (plan(SOURCE, true), values("bell\u{7}"), "values[0]"),
+    ] {
+        let error = run(hwped_apply_form_bindings(
+            document("양식.hwpx", HWPX),
+            None,
+            plan,
+            values,
+            options(true, None),
+        ))
+        .unwrap_err();
+        assert!(error.starts_with("hwped_bad_request:"), "{error}");
+        assert!(
+            error.contains(&format!("Invalid form data at {path};")),
+            "{error}"
+        );
+    }
+    assert!(
+        engine.invocations().is_empty(),
+        "{:?}",
+        engine.invocations()
     );
 }
