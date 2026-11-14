@@ -198,6 +198,12 @@ pub fn template_fill_hwpx(
     })
 }
 
+fn template_stage_dir(parent: &Path) -> std::io::Result<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix(".maru-template-fill-")
+        .tempdir_in(parent)
+}
+
 fn template_fill_hwpx_in_transaction(
     _work_path: String,
     request: TemplateFillRequest,
@@ -215,10 +221,8 @@ fn template_fill_hwpx_in_transaction(
 
     // Build and check the fill in a sibling staging directory; the output is
     // published only once every requested {{slot}} is filled.
-    let stage = tempfile::Builder::new()
-        .prefix(".maru-template-fill-")
-        .tempdir_in(&parent)
-        .map_err(|err| format!("Cannot stage template fill: {err}"))?;
+    let stage =
+        template_stage_dir(&parent).map_err(|err| format!("Cannot stage template fill: {err}"))?;
     let staged = stage.path().join("filled.hwpx");
 
     // One `hwp fill --forms` pass fills the slots and the form fields. A
@@ -1156,5 +1160,72 @@ esac
     fn done<T>(rx: std::sync::mpsc::Receiver<T>) -> T {
         rx.recv_timeout(Duration::from_secs(10))
             .expect("fixture completion")
+    }
+}
+
+#[cfg(all(test, unix))]
+mod private_template_stage_tests {
+    use super::template_stage_dir;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn template_stage_dir_is_private_under_umask_022() {
+        const CHILD: &str = "MARU_TEMPLATE_STAGE_TEST_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok("1") {
+            let parent = std::env::temp_dir().join("template-output");
+            std::fs::create_dir(&parent).unwrap();
+            let directory = template_stage_dir(&parent).unwrap();
+            assert!(directory
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".maru-template-fill-"));
+            assert_eq!(
+                std::fs::canonicalize(directory.path().parent().unwrap()).unwrap(),
+                std::fs::canonicalize(&parent).unwrap(),
+                "template staging must remain a sibling of the selected output"
+            );
+            let mode = std::fs::metadata(directory.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            println!("TEMPLATE_STAGE_OBSERVED mode={mode:o}");
+            assert_eq!(
+                mode, 0o700,
+                "create template staging owner-only under umask 022"
+            );
+            println!("TEMPLATE_PRIVATE_STAGE_CHILD mode=700 prefix=ok parent=ok");
+            return;
+        }
+        // Process-global umask changes stay in the isolated re-executed child.
+        let fixture = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(crate::test_support::posix_shell())
+            .args(["-c", "umask 022; exec \"$@\"", "template-private-stage-test"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "template_fill::private_template_stage_tests::template_stage_dir_is_private_under_umask_022",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .env("TMPDIR", fixture.path())
+            .env("TMP", fixture.path())
+            .env("TEMP", fixture.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "umask child failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("TEMPLATE_PRIVATE_STAGE_CHILD mode=700 prefix=ok parent=ok"),
+            "the child must execute the actual template factory permission check"
+        );
     }
 }
