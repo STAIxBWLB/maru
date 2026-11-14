@@ -2624,7 +2624,7 @@
     },
     {
       "path": "src-tauri/src/scratchpad.rs",
-      "sha256": "a4d5874f835ff6d7a81ad0d93ee7326f5968edc8701ac8e00ef467d76a4af059"
+      "sha256": "b4933959b2b7f63b52088355bf01b5aef57f5211f4a216388b2e3b3c6e489c41"
     },
     {
       "path": "src-tauri/src/scratchpad_watcher.rs",
@@ -2763,5 +2763,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "8ef5ba194a03e8c7b382cc35dc100f5269fdd767"
+  "sourceCommit": "deb1b96647e1540bae5c3236688a1a76c7dc9cf1"
 }
