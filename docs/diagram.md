@@ -346,13 +346,21 @@ edge attaches to, so a route crosses a frame border and the E2 orthogonal router
 never blocks on the frame; only `card` containers are obstacles. Cell heights and
 each title band come from the pinned font metrics, so Korean, English and mixed
 labels wrap inside their box rather than past it. An edge's kind travels as the
-route's role, and `event`/`queue` take the dashed variant. Flows and tours are
-overlays: they are never an input to placed geometry, so editing one cannot move
-a cell, and no flow overlay is drawn yet. Rendering goes through the E3 writer
+route's role, and `event`/`queue` take the dashed variant. An edge's `label` is
+validated and kept in the document but not painted by this layout: no canvas
+renders a Floorplan document yet (E5 T1 landed the codec and the validity rules)
+and a route label is positioned before routing, where an unplaceable one refuses
+the whole map (`route-label-space`), so the painting decision stays with the
+canvas that draws the family. Flows and tours are overlays: they are never an
+input to placed geometry, so editing one cannot move a cell, and no flow overlay
+is drawn yet. Rendering goes through the E3 writer
 (`render_svg`, `render_and_store`), which paints the finished document, so a
 floorplan export uses the same request envelope as the other families and a map
 with no `diagram_type` is recognized by its own shape. `layout_json`'s dispatch
-stays with E5 T4.
+stays with E5 T4. The whole-scene determinism corpus carries one Floorplan case
+(`testdata/floorplan-scene.json`, a synthetic nested map), so the platform
+matrix hashes this family's geometry and both SVG themes beside the five
+`diagram_type` families.
 
 **Validation and the apply gate (temporary exception).** The engine validates a
 Floorplan document (`validate_floorplan_json` in

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { combinedCorpus, denseContents, generateDenseScenes } from "./diagram-engine-e2-dense.mjs";
+import { combinedCorpus, denseContents, floorplanContents, generateDenseScenes } from "./diagram-engine-e2-dense.mjs";
 
 function positioned(spec) {
   const nodes = spec.components ?? spec.nodes;
@@ -71,24 +71,48 @@ describe("seeded dense whole-scene fixtures", () => {
     }
   });
 
-  it("combines base parity and every dense case with deterministic source hashes", () => {
+  it("combines base parity, every dense case and the floorplan fixture with deterministic source hashes", () => {
     const base = JSON.stringify({ schemaVersion: 2, cases: [{ id: "base-case", inputJson: "{}" }] });
-    const first = combinedCorpus(base, denseContents());
-    expect(first).toBe(combinedCorpus(base, denseContents()));
+    const first = combinedCorpus(base, denseContents(), floorplanContents());
+    expect(first).toBe(combinedCorpus(base, denseContents(), floorplanContents()));
     const combined = JSON.parse(first);
-    expect(combined.cases).toHaveLength(4);
+    expect(combined.cases).toHaveLength(5);
     expect(combined.cases[0].id).toBe("base-case");
-    expect(combined.cases.slice(1).every((item) => item.origin.kind === "synthetic-seeded" && item.expectedCoreOk === true)).toBe(true);
+    expect(combined.cases.slice(1, 4).every((item) => item.origin.kind === "synthetic-seeded" && item.expectedCoreOk === true)).toBe(true);
     expect(combined.determinismSources.paritySha256).toMatch(/^[a-f0-9]{64}$/);
     expect(combined.determinismSources.denseSha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(() => combinedCorpus("{", denseContents())).toThrow("invalid JSON");
+    expect(() => combinedCorpus("{", denseContents(), floorplanContents())).toThrow("invalid JSON");
     const duplicate = JSON.stringify({ cases: [{ id: generateDenseScenes().cases[0].id, inputJson: "{}" }] });
-    expect(() => combinedCorpus(duplicate, denseContents())).toThrow("duplicate IDs");
+    expect(() => combinedCorpus(duplicate, denseContents(), floorplanContents())).toThrow("duplicate IDs");
+  });
+
+  it("carries the floorplan case as a document the five-family dispatcher would refuse", () => {
+    const combined = JSON.parse(combinedCorpus(JSON.stringify({ cases: [{ id: "base-case", inputJson: "{}" }] }), denseContents(), floorplanContents()));
+    const floorplan = combined.cases.at(-1);
+    const spec = JSON.parse(floorplan.inputJson);
+    expect(floorplan.id).toBe(JSON.parse(floorplanContents()).cases[0].id);
+    expect(floorplan.diagramType).toBe("floorplan/architecture@1");
+    expect(spec.diagram_type).toBeUndefined();
+    expect(spec.$schema).toBe(floorplan.diagramType);
+    expect(floorplan.origin).toEqual({ kind: "synthetic-seeded", source: "src-tauri/crates/maru-diagram-engine/testdata/floorplan-scene.json" });
+    expect(floorplan.comparison).toBeUndefined();
+    expect(floorplan.expectedCoreOk).toBeUndefined();
+  });
+
+  it("refuses a floorplan fixture with no case, no spec, or a diagram_type family", () => {
+    const base = JSON.stringify({ cases: [{ id: "base-case", inputJson: "{}" }] });
+    for (const [fixture, message] of [
+      ["{}", "no cases"],
+      [{ cases: [{ id: "no-spec" }] }, "missing ID or spec object"],
+      [{ cases: [{ id: "typed", spec: { diagram_type: "architecture" } }] }, "belongs in the parity corpus"],
+    ]) {
+      expect(() => combinedCorpus(base, denseContents(), JSON.stringify(fixture))).toThrow(message);
+    }
   });
 });
 
 it("keeps every layered boundary input in the deterministic combined corpus",()=>{
   const base={cases:[{id:"parity",inputJson:"{}"}],boundaryCases:[{id:"boundary",inputJson:"{}",boundary:{layer:"model-difference"}}]};
-  const report=JSON.parse(combinedCorpus(JSON.stringify(base),denseContents()));
+  const report=JSON.parse(combinedCorpus(JSON.stringify(base),denseContents(),floorplanContents()));
   expect(report.cases.map((item:{id:string})=>item.id).slice(0,2)).toEqual(["parity","boundary"]);
 });

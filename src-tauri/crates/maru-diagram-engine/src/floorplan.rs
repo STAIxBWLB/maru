@@ -869,9 +869,15 @@ fn resolves(reference: &str, node_ids: &HashSet<String>, claims: &Claims) -> boo
 
 /// Chars of `glob` before its first wildcard: the upstream tie-break between two
 /// nodes that claim a file at the same depth.
+///
+/// Counted in UTF-16 code units, the way `literalPrefixLength` counts them in
+/// `src/lib/diagram/floorplan.ts` (`search` and `length` on a JavaScript string):
+/// a byte offset would let a non-ASCII prefix win a tie the canvas gives away, so
+/// the same edge would attach to different nodes there and here.
 #[cfg(feature = "geometry")]
 fn literal_prefix_length(glob: &str) -> usize {
-    glob.find(['*', '?', '{']).unwrap_or(glob.len())
+    let at = glob.find(['*', '?', '{']).unwrap_or(glob.len());
+    glob[..at].encode_utf16().count()
 }
 
 /// Which node a reference is drawn on.

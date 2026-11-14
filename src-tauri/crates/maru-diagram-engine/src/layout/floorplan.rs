@@ -58,6 +58,11 @@ const LEAF_PAD: Coord = 28 * 64;
 const TITLE_SIZE: Coord = 24 * 64;
 const SUBTITLE_SIZE: Coord = 12 * 64;
 const SUBTITLE_WRAP_X: f64 = 920.0;
+/// Deepest nesting the layout will place. `measure` and `place_rows` walk one
+/// level per call, and validation only requires that a parent exists and forms no
+/// cycle, so an acyclic chain past this would overflow the stack: the app or the
+/// WASM instance aborts instead of refusing. Real maps nest a handful of levels.
+const MAX_NESTING_DEPTH: usize = 64;
 
 /// One placed cell, in emitted coordinates.
 #[derive(Clone, Copy)]
@@ -144,6 +149,18 @@ fn rows(items: &[usize], columns: usize) -> Vec<Vec<usize>> {
             .push(*item);
     }
     rows
+}
+
+/// The deepest level any node sits at, walked with an explicit stack so the check
+/// itself cannot overflow the stack it is guarding.
+fn nesting_depth(tree: &Tree) -> usize {
+    let mut deepest = 0;
+    let mut pending: Vec<(usize, usize)> = tree.roots.iter().map(|root| (*root, 0)).collect();
+    while let Some((index, depth)) = pending.pop() {
+        deepest = deepest.max(depth);
+        pending.extend(tree.children[index].iter().map(|child| (*child, depth + 1)));
+    }
+    deepest
 }
 
 /// A leaf's cell: the reference's fixed column, and the height its own label and
@@ -311,6 +328,19 @@ pub(crate) fn place(
     origin: GeometryPoint,
 ) -> Result<(), Diagnostic> {
     let tree = Tree::new(spec);
+    let deepest = nesting_depth(&tree);
+    if deepest > MAX_NESTING_DEPTH {
+        let fix = format!(
+            "flatten the deepest frames to {MAX_NESTING_DEPTH} levels or fewer, or split the map into several documents"
+        );
+        return Err(failure(
+            "nesting-depth",
+            format!(
+                "the map nests {deepest} levels deep, past the {MAX_NESTING_DEPTH} levels this layout places"
+            ),
+            &fix,
+        ));
+    }
     let mut sizes: Vec<Option<(Coord, Coord, Coord)>> = vec![None; spec.nodes.len()];
     for index in 0..spec.nodes.len() {
         measure(scene, spec, &tree, &mut sizes, index)?;
@@ -407,6 +437,10 @@ pub(crate) fn place(
                 Some("event") | Some("queue") => Some("dashed".into()),
                 _ => None,
             },
+            // `edge.label` is validated and kept in the document but not
+            // carried: no canvas paints a Floorplan edge label yet, and a route
+            // label is placed before routing where an unplaceable one refuses
+            // the map, so the painting decision stays with that canvas.
             ..RouteRequest::default()
         });
     }
@@ -856,5 +890,71 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.path.contains("/project/name")));
+    }
+
+    /// One acyclic parent chain whose deepest node sits at `depth`, which is the
+    /// shape validation accepts however long it gets.
+    fn chain(depth: usize) -> serde_json::Value {
+        let nodes: Vec<serde_json::Value> = (0..=depth)
+            .map(|level| {
+                let mut node = serde_json::json!({
+                    "id": format!("n{level}"),
+                    "label": format!("L{level}"),
+                    "kind": "service",
+                });
+                if level > 0 {
+                    node["parent"] = serde_json::json!(format!("n{}", level - 1));
+                }
+                node
+            })
+            .collect();
+        serde_json::json!({ "project": { "name": "사슬" }, "nodes": nodes })
+    }
+
+    #[test]
+    fn a_parent_chain_deeper_than_the_cap_is_refused_instead_of_overflowing() {
+        // The cap itself still places, so the refusal is about the level past it
+        // and not about nesting in general.
+        let allowed = layout(&chain(MAX_NESTING_DEPTH));
+        assert!(allowed.ok, "{:?}", allowed.diagnostics);
+
+        let report = layout(&chain(MAX_NESTING_DEPTH + 1));
+        assert!(!report.ok, "a chain past the cap is refused, never placed");
+        assert!(report.geometry.is_none());
+        let diagnostic = report
+            .diagnostics
+            .first()
+            .expect("a refusal carries its cause");
+        assert_eq!(diagnostic.code, "floorplan/nesting-depth");
+        assert!(
+            diagnostic
+                .message
+                .contains(&(MAX_NESTING_DEPTH + 1).to_string()),
+            "the cause names the depth it found: {}",
+            diagnostic.message
+        );
+        assert!(
+            diagnostic.fix.contains(&MAX_NESTING_DEPTH.to_string()),
+            "the fix names the limit to flatten to: {}",
+            diagnostic.fix
+        );
+    }
+
+    #[test]
+    fn a_non_ascii_prefix_tie_breaks_the_way_the_canvas_does() {
+        // Both claimants are top level, so depth ties and the literal prefix
+        // decides. In UTF-16 code units "[가]" is 3 and "가나" is 2, so the canvas
+        // keeps the first (`literalPrefixLength`); counting bytes would invert it
+        // at 5 against 6 and draw the edge somewhere else.
+        let spec = serde_json::json!({
+            "project": { "name": "tie" },
+            "nodes": [
+                { "id": "bracket", "label": "가", "kind": "service", "paths": ["[가]*"] },
+                { "id": "plain", "label": "나", "kind": "service", "paths": ["가나*"] },
+                { "id": "store", "label": "저장", "kind": "data" }
+            ],
+            "edges": [{ "from": "가나x", "to": "store", "kind": "import" }]
+        });
+        assert_eq!(scene(&spec).routes[0].from, "bracket");
     }
 }
