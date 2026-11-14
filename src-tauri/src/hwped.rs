@@ -63,11 +63,16 @@ const REFUSAL_REPORT_MIN_VERSION: (u64, u64, u64) = (1, 6, 3);
 const EDIT_REPORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 fn form_worker_error(error: tauri::Error) -> String {
-    format!("hwped_task_failed: {error}")
+    let cause = match error {
+        tauri::Error::JoinError(error) if error.is_cancelled() => "worker_cancelled",
+        tauri::Error::JoinError(error) if error.is_panic() => "worker_panicked",
+        _ => "worker_failed",
+    };
+    format!("hwped_task_failed: form worker did not complete ({cause}); retry the operation. If it repeats, restart Maru and check the application diagnostics.")
 }
 
-fn stage_io_error(_operation: &str, error: std::io::Error) -> String {
-    format!("hwp_stage_failed: {error}")
+fn stage_io_error(operation: &str, error: std::io::Error) -> String {
+    format!("hwp_stage_failed: cannot {operation} ({:?}); check the temporary storage directory, permissions and free space, then retry", error.kind())
 }
 
 #[cfg(test)]
@@ -559,10 +564,10 @@ fn stage_document(
             .map(str::trim)
             .filter(|root| !root.is_empty())
             .ok_or_else(|| {
-                "hwped_bad_request: relative document.path requires workspaceRoot".to_string()
+                "hwped_bad_request: relative document.path requires workspaceRoot; select the owning workspace and retry".to_string()
             })?;
         let canonical_root = std::fs::canonicalize(root)
-            .map_err(|err| format!("hwped_bad_request: workspaceRoot not readable: {err}"))?;
+            .map_err(|err| format!("hwped_bad_request: workspaceRoot not readable ({:?}); check the selected workspace directory and permissions, then retry", err.kind()))?;
         let joined = canonical_root.join(candidate);
         // Containment is lexical (crate::paths::ensure_within, SCAN-03).
         // canonicalize() here would follow symlinks, so a deliberate
@@ -570,22 +575,25 @@ fn stage_document(
         // documented inbox layout - would falsely read as an escape. `..`
         // traversal is still blocked, by lexical_normalize.
         ensure_within(&canonical_root, &joined).map_err(|_| {
-            format!("hwped_bad_request: document path escapes workspaceRoot: {path}")
+            "hwped_bad_request: document path escapes workspaceRoot; select a document inside the workspace and retry".to_string()
         })?;
         let resolved = lexical_normalize(&joined);
         if !resolved.exists() {
-            return Err(format!("hwped_bad_request: document not found: {path}"));
+            return Err("hwped_bad_request: document not found or unreadable; check document.path and its workspace permissions, then retry".to_string());
         }
         return Ok(resolved);
     }
     let Some(data_base64) = document.data_base64.as_deref() else {
-        return Err("hwped_bad_request: document requires path or dataBase64".to_string());
+        return Err("hwped_bad_request: document requires path or dataBase64; provide a workspace path or document bytes and retry".to_string());
     };
     let bytes = BASE64
         .decode(data_base64)
-        .map_err(|err| format!("hwped_bad_request: document.dataBase64 is not base64: {err}"))?;
+        .map_err(|_| "hwped_bad_request: document.dataBase64 is not base64 (invalid_data); reload the source bytes and retry".to_string())?;
     if bytes.is_empty() {
-        return Err("hwped_bad_request: document.dataBase64 is empty".to_string());
+        return Err(
+            "hwped_bad_request: document.dataBase64 is empty; reload the source bytes and retry"
+                .to_string(),
+        );
     }
     let file = dir.join(format!("in{}", sniff_extension(&document.name)));
     std::fs::write(&file, bytes).map_err(|err| stage_io_error("write document bytes", err))?;
@@ -595,7 +603,8 @@ fn stage_document(
 fn read_now(document: HwpedDocumentRef, workspace_root: Option<String>) -> Result<Value, String> {
     let bin = hwp_bin()?;
     let version = ensure_version(&bin)?;
-    let tmp = private_temp_dir(None, None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None, None)
+        .map_err(|err| stage_io_error("create private staging directory", err))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     read_staged(&bin, &version, &input)
 }
@@ -809,7 +818,7 @@ fn read_render_layouts(file: &Path) -> Result<Option<BTreeMap<u32, HwpedPageLayo
     match std::fs::read(file) {
         Ok(bytes) => parse_render_layouts(&bytes).map(Some),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("hwp_stage_failed: could not read render layout metadata: {error}; check temporary storage permissions and render again")),
+        Err(error) => Err(stage_io_error("read render layout metadata", error)),
     }
 }
 
@@ -885,7 +894,8 @@ fn render_attempt(
     let prefix = format!("page.{format}");
     let numbered = "page-";
     let mut files: Vec<(u32, PathBuf)> = Vec::new();
-    let entries = std::fs::read_dir(dir).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let entries =
+        std::fs::read_dir(dir).map_err(|err| stage_io_error("list rendered pages", err))?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         if name == prefix {
@@ -954,7 +964,7 @@ fn render_attempt(
     }
     let mut images = Vec::new();
     for ((_, file), page) in files.iter().zip(page_numbers) {
-        let data = std::fs::read(file).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+        let data = std::fs::read(file).map_err(|err| stage_io_error("read rendered page", err))?;
         let size = if format == "png" {
             png_size(&data)
         } else {
@@ -986,15 +996,14 @@ fn render_with_layout_fallback(
 ) -> Result<(Vec<HwpedRenderPage>, Vec<HwpedRenderNote>), String> {
     // Each attempt has its own output directory: partially written pages or
     // layout files from a failed CLI pass must not leak into a successful retry.
-    let attempt = private_temp_dir(Some(dir), None).map_err(|error| {
-        format!("hwp_stage_failed: cannot create render attempt directory: {error}; check temporary storage permissions and free space, then retry")
-    })?;
+    let attempt = private_temp_dir(Some(dir), None)
+        .map_err(|error| stage_io_error("create render attempt directory", error))?;
     match render_attempt(bin, attempt.path(), input, format, pages, dpi, layout_mode) {
         Err(error)
             if layout_mode == LayoutMetadataMode::Optional && error.starts_with("hwp_failed:") =>
         {
             let retry = private_temp_dir(Some(dir), None).map_err(|cause| {
-                format!("hwp_stage_failed: cannot create image-only render retry directory: {cause}; check temporary storage permissions and free space, then retry")
+                stage_io_error("create image-only render retry directory", cause)
             })?;
             let (images, mut notes) = render_attempt(
                 bin,
@@ -1050,7 +1059,8 @@ fn render_now(
     if !valid_range {
         return Err(format!("hwped_bad_request: invalid page range: {pages}").into());
     }
-    let tmp = private_temp_dir(None, None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None, None)
+        .map_err(|err| stage_io_error("create private staging directory", err))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     match render_with_layout_fallback(
         &bin,
@@ -1423,7 +1433,8 @@ fn edit_now(
     if json_ops {
         require_feature_version(&version, "JSON edit ops")?;
     }
-    let tmp = private_temp_dir(None, None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None, None)
+        .map_err(|err| stage_io_error("create private staging directory", err))?;
     let stage_dir = edit_stage_dir(tmp.path())?;
     let stage = Path::new(&stage_dir);
     let input = stage_document(stage, &document, workspace_root.as_deref())?;
@@ -1439,12 +1450,11 @@ fn edit_now(
         EditOperations::Argv(argv) => args.extend(argv.into_iter().map(OsString::from)),
         EditOperations::Json(ops) => {
             let ops_file = stage.join("ops.json");
-            let bytes = serde_json::to_vec(&ops).map_err(|err| {
-                format!("hwp_stage_failed: could not encode edit operations JSON: {err}; check the operation payload and retry")
+            let bytes = serde_json::to_vec(&ops).map_err(|_| {
+                "hwp_stage_failed: cannot encode edit operations JSON (invalid_payload); check the operation payload and retry".to_string()
             })?;
-            std::fs::write(&ops_file, bytes).map_err(|err| {
-                format!("hwp_stage_failed: could not write the per-call edit operations file: {err}; check temporary storage permissions and free space, then retry")
-            })?;
+            std::fs::write(&ops_file, bytes)
+                .map_err(|err| stage_io_error("write per-call edit operations", err))?;
             args.extend([OsString::from("--ops"), ops_file.into_os_string()]);
         }
     }
@@ -1485,7 +1495,7 @@ fn edit_now(
         }
         return Err(message.into());
     }
-    let data = std::fs::read(&output).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let data = std::fs::read(&output).map_err(|err| stage_io_error("read edited document", err))?;
     Ok(HwpedEditResponse {
         name: document.name,
         data_base64: BASE64.encode(&data),
@@ -1554,10 +1564,11 @@ fn compose_now(spec: Value, name: String) -> Result<HwpedComposeResponse, String
     if name.trim().is_empty() {
         return Err("hwped_bad_request: compose requires a non-empty name".to_string());
     }
-    let tmp = private_temp_dir(None, None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None, None)
+        .map_err(|err| stage_io_error("create private staging directory", err))?;
     let spec_path = tmp.path().join("spec.json");
     std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap_or_default())
-        .map_err(|err| format!("hwp_stage_failed: {err}"))?;
+        .map_err(|err| stage_io_error("write composition spec", err))?;
     let out_name = safe_output_name(&name, ".hwpx");
     let out_path = tmp.path().join(&out_name);
     let stdout = run_hwp_ok(
@@ -1572,7 +1583,8 @@ fn compose_now(spec: Value, name: String) -> Result<HwpedComposeResponse, String
         None,
     )?;
     let report = serde_json::from_slice::<Value>(&stdout).ok();
-    let data = std::fs::read(&out_path).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let data =
+        std::fs::read(&out_path).map_err(|err| stage_io_error("read composed document", err))?;
     Ok(HwpedComposeResponse {
         name: out_name,
         data_base64: BASE64.encode(&data),
@@ -1586,7 +1598,8 @@ fn validate_now(
 ) -> Result<HwpedValidationReport, String> {
     let bin = hwp_bin()?;
     ensure_version(&bin)?;
-    let tmp = private_temp_dir(None, None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None, None)
+        .map_err(|err| stage_io_error("create private staging directory", err))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     // Exit 1 means "invalid" and still prints the JSON report.
     let run = run_hwp(

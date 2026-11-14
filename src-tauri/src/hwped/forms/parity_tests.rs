@@ -27,7 +27,8 @@ fn every_parser_matches_the_recorded_upstream_outputs() {
         if row["ok"] == true {
             let output = actual.unwrap_or_else(|error| panic!("{label}: refused at {}", error.0));
             assert_eq!(output, row["output"], "{label}");
-            // Same keys in the same order, not only equal maps.
+            // Both values are parsed maps: this checks normalized JSON
+            // serialization, not the upstream input key order.
             assert_eq!(output.to_string(), row["output"].to_string(), "{label}");
         } else {
             let error = actual.expect_err(&label);
