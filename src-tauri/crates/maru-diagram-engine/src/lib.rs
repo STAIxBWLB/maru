@@ -29,6 +29,12 @@ use sha2::{Digest, Sha256};
 pub mod architecture;
 mod common;
 pub mod dataflow;
+/// Floorplan document validity (`floorplan/architecture@1`). It is not part of
+/// the `validate_json` dispatch yet: that dispatcher's families are the E1
+/// differential corpus, which is checked against the pinned renderer oracle and
+/// has no Floorplan counterpart, so the apply-gate switch owns the dispatch
+/// (`maru#553` E5 T4). Its entry point is [`validate_floorplan_json`].
+pub mod floorplan;
 #[cfg(feature = "geometry")]
 pub mod geometry;
 #[cfg(feature = "geometry-corpus")]
@@ -256,6 +262,24 @@ fn make_report(
     diagram_type: Option<String>,
     diagnostics: Vec<Diagnostic>,
 ) -> ValidationReport {
+    let scope = format!(
+        "{}-document-validity",
+        diagram_type
+            .as_deref()
+            .filter(|kind| rules::DOCUMENT_TYPES.contains(kind))
+            .unwrap_or("document")
+    );
+    report_with_scope(input, diagram_type, scope, diagnostics)
+}
+
+/// Build the report envelope. `scope` names the gate that produced the verdict,
+/// which lets a family outside the E1 dispatch list keep its own receipt scope.
+fn report_with_scope(
+    input: &str,
+    diagram_type: Option<String>,
+    scope: String,
+    diagnostics: Vec<Diagnostic>,
+) -> ValidationReport {
     let ok = diagnostics.is_empty();
     ValidationReport {
         api_version: API_VERSION,
@@ -270,16 +294,7 @@ fn make_report(
             output_sha256: None,
             output_mime_type: None,
             gates: ReceiptGates {
-                schema: gate(
-                    if ok { "passed" } else { "failed" },
-                    &format!(
-                        "{}-document-validity",
-                        diagram_type
-                            .as_deref()
-                            .filter(|kind| rules::DOCUMENT_TYPES.contains(kind))
-                            .unwrap_or("document")
-                    ),
-                ),
+                schema: gate(if ok { "passed" } else { "failed" }, &scope),
                 artifact: gate("not-run", "none"),
                 browser: gate("not-run", "none"),
                 visual_review: gate("not-run", "manual"),
@@ -333,6 +348,36 @@ pub fn validate_json(input: &str) -> ValidationReport {
         )],
     };
     make_report(input, kind, diagnostics)
+}
+
+/// Validate a `floorplan/architecture@1` document as authored. The input is the
+/// upstream interchange JSON itself (`$schema`, `project`, `nodes`, …), not a
+/// `diagram_type` envelope. E5 T1 covers the document contract; layout and
+/// rendering are T2, and the apply gate calls this through T4.
+pub fn validate_floorplan_json(input: &str) -> ValidationReport {
+    let value: serde_json::Value = match serde_json::from_str(input) {
+        Ok(value) => value,
+        Err(error) => {
+            return report_with_scope(
+                input,
+                Some("floorplan".into()),
+                "floorplan-document-validity".into(),
+                vec![diagnostic(
+                    "document/json",
+                    "/",
+                    "floorplan-v1/json",
+                    format!("input is not valid JSON: {error}"),
+                    "repair the JSON syntax and retry",
+                )],
+            )
+        }
+    };
+    report_with_scope(
+        input,
+        Some("floorplan".into()),
+        "floorplan-document-validity".into(),
+        floorplan::validate(value),
+    )
 }
 
 /// Parse a receipt without claiming renderer parity. Archify-era
@@ -465,6 +510,7 @@ pub fn typescript_declarations() -> String {
     declarations.extend(sequence::declarations(&cfg));
     declarations.extend(dataflow::declarations(&cfg));
     declarations.extend(lifecycle::declarations(&cfg));
+    declarations.extend(floorplan::declarations(&cfg));
     #[cfg(feature = "geometry")]
     {
         declarations.extend(geometry::declarations(&cfg));
