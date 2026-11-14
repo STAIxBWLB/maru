@@ -265,17 +265,42 @@ enum Piece {
 /// `{a,b}` alternatives.
 struct Compiled {
     arms: Vec<Vec<Piece>>,
+    /// A class the application's `RegExp` constructor refuses (a descending
+    /// range such as `[z-a]`). There `floorplanGlobMatches` matches nothing, so
+    /// the whole pattern matches nothing here too.
+    invalid: bool,
 }
 
 /// How deep alternations may nest before a `{` is read literally. A map never
 /// nests two, and the cap keeps a hostile pattern off the stack.
 const MAX_BRACE_DEPTH: usize = 32;
 
+/// For each position, the index of the first `]` at or after it. Built in one
+/// backward pass, so finding a class closer is a lookup: an unmatched `[` run
+/// would otherwise rescan the rest of the pattern once per `[`.
+fn class_closers(chars: &[char]) -> Vec<Option<usize>> {
+    let mut closers = vec![None; chars.len() + 1];
+    for at in (0..chars.len()).rev() {
+        closers[at] = if chars[at] == ']' {
+            Some(at)
+        } else {
+            closers[at + 1]
+        };
+    }
+    closers
+}
+
+/// The closer of a class opened at `open`: the first `]` from `open + 2`, as
+/// `pattern.indexOf("]", i + 2)` finds it in the application.
+fn class_close(closers: &[Option<usize>], open: usize) -> Option<usize> {
+    closers.get(open + 2).copied().flatten()
+}
+
 /// Pair every `{` with its `}` in one pass, so the parser never has to search
 /// for a closer and never re-reads a suffix. Character classes and literal
 /// bracketed segments are skipped exactly as the parser reads them, which is
 /// what keeps a `}` inside `[}]` from closing an alternation.
-fn brace_pairs(chars: &[char]) -> Vec<Option<usize>> {
+fn brace_pairs(chars: &[char], closers: &[Option<usize>]) -> Vec<Option<usize>> {
     let mut pairs = vec![None; chars.len()];
     let mut open = Vec::new();
     let mut at = 0usize;
@@ -295,11 +320,8 @@ fn brace_pairs(chars: &[char]) -> Vec<Option<usize>> {
                     continue;
                 }
             }
-            match chars
-                .get(at + 2..)
-                .and_then(|rest| rest.iter().position(|item| *item == ']'))
-            {
-                Some(offset) => at += offset + 3,
+            match class_close(closers, at) {
+                Some(close) => at = close + 1,
                 None => at += 1,
             }
             continue;
@@ -321,22 +343,36 @@ fn brace_pairs(chars: &[char]) -> Vec<Option<usize>> {
 impl Compiled {
     fn new(pattern: &str) -> Self {
         let chars: Vec<char> = pattern.chars().collect();
-        let pairs = brace_pairs(&chars);
+        let closers = class_closers(&chars);
+        let pairs = brace_pairs(&chars, &closers);
+        let tables = Tables {
+            pairs: &pairs,
+            closers: &closers,
+        };
         let mut arms: Vec<Vec<Piece>> = vec![Vec::new()];
         let mut at = 0usize;
-        let mut top = parse_sequence(&chars, &pairs, &mut at, &mut arms, false, 0);
+        let mut top = parse_sequence(&chars, &tables, &mut at, &mut arms, false, 0);
         if !has_wildcard(pattern) {
             top.push(Piece::DirectoryTail);
         }
         arms[0] = top;
-        Self { arms }
+        let invalid = arms.iter().flatten().any(
+            |piece| matches!(piece, Piece::Class { body, .. } if class_has_descending_range(body)),
+        );
+        Self { arms, invalid }
     }
+}
+
+/// The one-pass lookups the parser reads instead of scanning the suffix.
+struct Tables<'a> {
+    pairs: &'a [Option<usize>],
+    closers: &'a [Option<usize>],
 }
 
 /// Parse one piece sequence. Inside an alternation it stops at `,` or `}`.
 fn parse_sequence(
     chars: &[char],
-    pairs: &[Option<usize>],
+    tables: &Tables<'_>,
     at: &mut usize,
     arms: &mut Vec<Vec<Piece>>,
     in_brace: bool,
@@ -388,7 +424,7 @@ fn parse_sequence(
                 // The closer comes from the one-pass pairing, so a brace is
                 // either an alternation or a literal and the suffix is never
                 // read twice.
-                match pairs[*at] {
+                match tables.pairs[*at] {
                     // Past the cap the whole span is copied literally, so an
                     // over-nested pattern reads as text without moving the rest
                     // of the parse.
@@ -399,10 +435,12 @@ fn parse_sequence(
                     Some(close) => {
                         let arms_before = arms.len();
                         *at += 1;
+                        // Every arm is parsed, including an empty last one after a
+                        // trailing `,`: `{a,}` is `(?:a|)` in the application.
                         let mut branches = Vec::new();
-                        while *at < close {
-                            branches.push(parse_sequence(chars, pairs, at, arms, true, depth + 1));
-                            if chars.get(*at) == Some(&',') {
+                        loop {
+                            branches.push(parse_sequence(chars, tables, at, arms, true, depth + 1));
+                            if *at < close && chars.get(*at) == Some(&',') {
                                 *at += 1;
                                 continue;
                             }
@@ -436,10 +474,7 @@ fn parse_sequence(
             }
             '[' => {
                 // A class runs to the next `]`; an unclosed `[` is literal.
-                let close = chars
-                    .get(*at + 2..)
-                    .and_then(|rest| rest.iter().position(|item| *item == ']'))
-                    .map(|offset| *at + 2 + offset);
+                let close = class_close(tables.closers, *at);
                 match close {
                     None => {
                         pieces.push(Piece::Literal('['));
@@ -463,6 +498,24 @@ fn parse_sequence(
         }
     }
     pieces
+}
+
+/// Whether a class body holds a range whose end precedes its start, which the
+/// application's `RegExp` constructor refuses. The ranges are read exactly as
+/// [`class_matches`] reads them.
+fn class_has_descending_range(body: &[char]) -> bool {
+    let mut at = 0;
+    while at < body.len() {
+        if at + 2 < body.len() && body[at + 1] == '-' {
+            if body[at] > body[at + 2] {
+                return true;
+            }
+            at += 3;
+            continue;
+        }
+        at += 1;
+    }
+    false
 }
 
 /// Whether one character is listed by a class body: a range (`a-z`) or any
@@ -511,6 +564,11 @@ impl Program {
             insts: Vec::new(),
             bodies: Vec::new(),
         };
+        // A pattern the application cannot compile matches nothing: a program
+        // with no `Match` instruction never accepts.
+        if compiled.invalid {
+            return program;
+        }
         emit_arm(&compiled.arms, 0, &mut program.insts, &mut program.bodies);
         program.insts.push(Inst::Match);
         program
@@ -620,30 +678,49 @@ impl Inst {
 /// of that many steps however many wildcards and alternatives the pattern holds.
 fn program_matches(program: &Program, text: &[char]) -> bool {
     let count = program.insts.len();
-    let mut active = vec![false; count];
-    close(program, &[0], &mut active);
+    // An invalid pattern compiles to no instructions and matches nothing.
+    if count == 0 {
+        return false;
+    }
+    // Sparse state sets: each step touches only the live states, and the
+    // generation stamp clears a set without walking every instruction, so a
+    // long literal pattern costs one pass, not pattern length times path length.
+    let mut seen = vec![0u32; count];
+    let mut generation = 1u32;
+    let mut active = Vec::new();
+    close(program, &[0], &mut seen, generation, &mut active);
     for ch in text {
-        let seeds: Vec<usize> = (0..count)
-            .filter(|pc| active[*pc] && program.insts[*pc].consumes(*ch, &program.bodies))
+        let seeds: Vec<usize> = active
+            .iter()
+            .filter(|pc| program.insts[**pc].consumes(*ch, &program.bodies))
             .map(|pc| pc + 1)
             .collect();
         if seeds.is_empty() {
             return false;
         }
-        close(program, &seeds, &mut active);
+        generation += 1;
+        close(program, &seeds, &mut seen, generation, &mut active);
     }
-    active[count - 1]
+    active.contains(&(count - 1))
 }
 
-/// Mark every instruction reachable from `seeds` without consuming a character.
-fn close(program: &Program, seeds: &[usize], active: &mut [bool]) {
-    active.fill(false);
+/// Collect every instruction reachable from `seeds` without consuming a
+/// character into `active`, marking each with `generation` in `seen`.
+fn close(
+    program: &Program,
+    seeds: &[usize],
+    seen: &mut [u32],
+    generation: u32,
+    active: &mut Vec<usize>,
+) {
+    active.clear();
     let mut pending: Vec<usize> = seeds.to_vec();
     while let Some(pc) = pending.pop() {
-        if active[pc] {
+        if seen[pc] == generation {
             continue;
         }
-        active[pc] = true;
+        seen[pc] = generation;
+        active.push(pc);
         match program.insts[pc] {
             Inst::Split(left, right) => {
                 pending.push(left);
@@ -1323,7 +1400,17 @@ mod tests {
         let stars = format!("{}b", "a*".repeat(30));
         let path = "a".repeat(60);
         let unclosed = format!("{}x", "{".repeat(30));
+        // An unmatched `[` run as long as the codec's size budget allows: each
+        // `[` must find (or miss) its closer by lookup, not by a suffix scan.
+        // This case is only a time budget. At 100k characters V8 refuses the
+        // application's regex ("Regular expression too large") and matches
+        // nothing, so parity is checked at 1,000, which TS verified matches.
+        let brackets = "[".repeat(100_000);
         let started = std::time::Instant::now();
+        assert!(!glob_matches(&brackets, "x"));
+        let _ = glob_matches(&brackets, &brackets);
+        let thousand = "[".repeat(1_000);
+        assert!(glob_matches(&thousand, &thousand));
         assert!(!glob_matches(&braces, "a/a/a"));
         assert!(!glob_matches(&stars, &path));
         assert!(glob_matches(&stars, &format!("{path}b")));
@@ -1464,6 +1551,18 @@ mod tests {
             ("a/**", "a", false),
             // A class is a wildcard, so it claims no directory of its own.
             ("app/[abc].ts", "app/[abc].ts/x", false),
+            // TS-verified (compileGlob run on these inputs): an empty arm is an
+            // arm, first, last or in between.
+            ("{a,}.ts", ".ts", true),
+            ("{a,}.ts", "a.ts", true),
+            ("{,a}.ts", ".ts", true),
+            ("{,a}.ts", "a.ts", true),
+            ("{a,,b}.ts", ".ts", true),
+            // TS-verified: a descending range makes `new RegExp` throw, so the
+            // whole pattern matches nothing; an ascending one is a range.
+            ("src/[z-a0].ts", "src/0.ts", false),
+            ("src/[z-a0].ts", "src/z.ts", false),
+            ("src/[a-z0].ts", "src/0.ts", true),
         ];
         for (pattern, path, expected) in cases {
             assert_eq!(
