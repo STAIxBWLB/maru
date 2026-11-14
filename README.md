@@ -320,7 +320,12 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   `.maru/task-completion/` retains the exact claim generation, source/artifact
   hashes, apply readback, reviewer verdict and consumed acceptance. Drift requires
   a new review. Restart repairs only effects already proven on disk; it never
-  replays an approval or provider call. The current identity boundary is the
+  replays an approval or provider call. If accepted Done bytes remain at the
+  original path before Archive publication, readback offers an explicit finish
+  action only after verifying the consumed approval and unchanged intent,
+  evidence and destination. It resumes that fixed move without another task
+  write, snapshot or confirmation; reading evidence does not move the note.
+  The current identity boundary is the
   effective CLI provider recorded by the backend, not a caller's actor/name or
   an attestation of a model account. Every provider used by the creator is
   excluded from independent review, including a new run under that provider.

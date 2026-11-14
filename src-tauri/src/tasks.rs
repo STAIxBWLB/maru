@@ -658,7 +658,7 @@ pub(crate) fn update_task_status_in_transaction_with_completion(
                 .map_err(|err| format!("Cannot update task status: {err}"))?;
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "native-e2e"))]
     if completion_permit.is_some() {
         crate::task_completion::fail_after_done_write(&work)?;
     }

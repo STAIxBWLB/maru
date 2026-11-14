@@ -515,6 +515,15 @@ fn completion_review_r5_restart_reconciles_done_bytes_before_archive_rename() {
     let done = fs::read(f.work.join(TASK)).unwrap();
     let snapshots = files(&f.work.join(".maru/versions"));
     let restarted = ApprovalState::default();
+    let view = serde_json::to_value(completion::view(&f.work, TASK).unwrap()).unwrap();
+    assert_eq!(view["resumeAcceptance"]["approvalId"], approval);
+    assert_eq!(view["resumeAcceptance"]["reviewRevision"], revision);
+    assert_eq!(
+        fs::read(f.work.join(TASK)).unwrap(),
+        done,
+        "readback must not publish Archive"
+    );
+    assert!(!f.work.join("tasks/archive/task.md").exists());
     let recovered =
         completion::finalize(&restarted, &f.work, &token, &approval, &revision).unwrap();
     assert!(recovered.duplicate);
@@ -588,4 +597,81 @@ fn completion_review_r5_occupied_archive_is_never_overwritten() {
         fs::read_to_string(target).unwrap(),
         "unrelated existing task"
     );
+}
+
+#[test]
+fn completion_review_r5_missing_consumed_audit_cannot_resume() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let done = fs::read(f.work.join(TASK)).unwrap();
+    fs::remove_file(crate::approval::audit_path(f.work.to_str().unwrap(), &approval).unwrap())
+        .unwrap();
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read(f.work.join(TASK)).unwrap(), done);
+    assert!(!f.work.join("tasks/archive/task.md").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn completion_review_r5_dangling_archive_link_is_occupied() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let target = f.work.join("tasks/archive/task.md");
+    fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink("missing.md", &target).unwrap();
+    let done = fs::read(f.work.join(TASK)).unwrap();
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read(f.work.join(TASK)).unwrap(), done);
+    assert_eq!(fs::read_link(&target).unwrap(), PathBuf::from("missing.md"));
+}
+
+#[test]
+fn completion_review_r5_retargeted_intent_cannot_reuse_consumed_audit() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let done = fs::read_to_string(f.work.join(TASK)).unwrap();
+    let target = f.work.join("tasks/archive/task.md");
+    fs::create_dir_all(target.parent().unwrap()).unwrap();
+    fs::write(&target, "unrelated task").unwrap();
+    let alternate = crate::tasks::prepare_task_completion(
+        &f.work,
+        &f.work.join("tasks"),
+        &f.work.join(TASK),
+        &done,
+    )
+    .unwrap()
+    .target;
+    let receipt = walkdir::WalkDir::new(f.work.join(".maru/task-completion/receipts"))
+        .into_iter()
+        .map(Result::unwrap)
+        .find(|entry| entry.file_type().is_file())
+        .unwrap()
+        .into_path();
+    let mut journal: serde_json::Value =
+        serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+    journal["acceptance"]["targetPath"] =
+        json!(alternate.strip_prefix(&f.work).unwrap().to_str().unwrap());
+    fs::write(receipt, serde_json::to_vec(&journal).unwrap()).unwrap();
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read_to_string(f.work.join(TASK)).unwrap(), done);
+    assert_eq!(fs::read_to_string(target).unwrap(), "unrelated task");
+    assert!(!alternate.exists());
 }

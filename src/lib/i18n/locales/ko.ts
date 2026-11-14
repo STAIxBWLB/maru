@@ -4279,6 +4279,7 @@ export const ko: Record<string, string> = {
   "tasks.completion.chooseProvider": "검토자 선택",
   "tasks.completion.review": "검토 시작",
   "tasks.completion.accept": "수락하고 완료 처리",
+  "tasks.completion.resume": "승인된 완료 마무리",
   "tasks.completion.accepted": "이 리비전을 수락했습니다.",
   "tasks.completion.reviewStarted": "검토를 시작했습니다. 완료하려면 사용자의 수락이 필요합니다.",
   "tasks.completion.evidence": "기록된 근거 확인",

@@ -2260,12 +2260,31 @@ fn recover_observed_terminal(
 #[cfg(test)]
 pub(crate) static AFTER_DONE_WRITE_FAILURE: std::sync::Mutex<Option<PathBuf>> =
     std::sync::Mutex::new(None);
-#[cfg(test)]
+#[cfg(any(test, feature = "native-e2e"))]
 pub(crate) fn fail_after_done_write(work: &Path) -> Result<(), String> {
-    let mut failure = AFTER_DONE_WRITE_FAILURE.lock().unwrap();
-    if failure.as_deref() == Some(work) {
-        *failure = None;
-        return Err("Completion Done bytes were written but archive publication was interrupted; refresh evidence to reconcile the recorded acceptance intent".into());
+    #[cfg(test)]
+    {
+        let mut failure = AFTER_DONE_WRITE_FAILURE.lock().unwrap();
+        if failure.as_deref() == Some(work) {
+            *failure = None;
+            return Err("Completion Done bytes were written but archive publication was interrupted; refresh evidence to reconcile the recorded acceptance intent".into());
+        }
+    }
+    // Only the native fixture can arm this one-shot seam. It is absent from
+    // production builds and cannot address any workspace outside its fake home.
+    #[cfg(feature = "native-e2e")]
+    if std::env::var("MARU_NATIVE_E2E_TASK_COMPLETION_FIXTURE").as_deref() == Ok("1") {
+        if let Some(home) = std::env::var_os("MARU_NATIVE_E2E_HOME") {
+            if let Some(root) = Path::new(&home).parent() {
+                if fs::canonicalize(root.join("workspace")).ok().as_deref() == Some(work) {
+                    match fs::remove_file(root.join("task-completion-interrupt-once")) {
+                        Ok(()) => return Err("Completion Done bytes were written but archive publication was interrupted; refresh evidence to reconcile the recorded acceptance intent".into()),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                        Err(error) => return Err(format!("Cannot consume native completion fixture interruption: {error}; repair the disposable fixture and rerun the native spec")),
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

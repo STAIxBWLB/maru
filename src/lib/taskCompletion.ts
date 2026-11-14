@@ -23,6 +23,7 @@ export interface TaskCompletionView {
   canReview: boolean;
   canAccept: boolean;
   acceptedCurrent: boolean;
+  resumeAcceptance?: { approvalId: string; reviewRevision: string } | null;
   blockedReason?: string | null;
 }
 

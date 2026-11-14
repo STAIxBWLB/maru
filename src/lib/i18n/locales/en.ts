@@ -4284,6 +4284,7 @@ export const en: Record<string, string> = {
   "tasks.completion.chooseProvider": "Choose a reviewer",
   "tasks.completion.review": "Start review",
   "tasks.completion.accept": "Accept and mark Done",
+  "tasks.completion.resume": "Finish accepted completion",
   "tasks.completion.accepted": "This revision was accepted.",
   "tasks.completion.reviewStarted": "Review started. Completion still requires your acceptance.",
   "tasks.completion.evidence": "Inspect recorded evidence",

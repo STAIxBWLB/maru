@@ -137,6 +137,16 @@ export function TaskCompletionSection({ workPath, taskPath, tasksRoot, onChanged
     });
   };
 
+  const resume = () => {
+    if (!view?.token || !view.resumeAcceptance || view.acceptedCurrent) return;
+    const { token, resumeAcceptance } = view;
+    void mutate(async (generation) => {
+      await finalizeTaskCompletion(workPath, token, resumeAcceptance.approvalId, resumeAcceptance.reviewRevision);
+      if (generation === epoch.current) setNotice(t("tasks.completion.accepted"));
+      return true;
+    });
+  };
+
   return (
     <section className="task-detail-section" aria-busy={loading || busy}>
       <h3>{t("tasks.completion.heading")}</h3>
@@ -194,6 +204,10 @@ export function TaskCompletionSection({ workPath, taskPath, tasksRoot, onChanged
             <Button size="sm" disabled={busy || !view.canAccept || view.acceptedCurrent}
               aria-describedby={view.blockedReason ? `${id}-blocked` : undefined}
               onClick={accept}>{t("tasks.completion.accept")}</Button>
+            {view.resumeAcceptance ? <Button type="button" size="sm"
+              disabled={busy || !view.token || view.acceptedCurrent}
+              aria-describedby={view.blockedReason ? `${id}-blocked` : undefined}
+              onClick={resume}>{t("tasks.completion.resume")}</Button> : null}
           </div>
           {view.receipt ? <details><summary>{t("tasks.completion.evidence")}</summary><pre className="approval-preview">{JSON.stringify(view.receipt, null, 2)}</pre></details> : null}
         </>

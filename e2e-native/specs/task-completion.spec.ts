@@ -316,7 +316,22 @@ describe("native task completion evidence", () => {
     assert.equal(await fs.readFile(file, "utf8"), beforeAcceptance, "cancelled acceptance finalized the task");
     await assert.rejects(fs.stat(archive), { code: "ENOENT" });
     await clickNamed(".task-detail-drawer", "^(수락하고 완료 처리|Accept and mark Done)$", "Prepare acceptance again");
+    await fs.writeFile(path.join(fixtureRootDir(), "task-completion-interrupt-once"), "fixture-only one-shot interruption");
     await clickNamed(".approval-dialog", "^(승인|Approve)$", "Fresh person acceptance");
+    await stage("Interrupted after Done bytes before Archive", async () => {
+      const pending = (await recordedReceipts())[0]?.receipt.acceptance;
+      return pending?.completed === false && /^status: done$/m.test(await fs.readFile(file, "utf8"));
+    });
+    await assert.rejects(fs.stat(archive), { code: "ENOENT" });
+    const callsBeforeResume = await providerCalls();
+    const snapshotsBeforeResume = (await fs.readdir(path.join(workspace, ".maru/versions"), { recursive: true })).sort();
+    await browser.reloadSession();
+    await openTask("^(완료|Done)$");
+    await assert.rejects(fs.stat(archive), { code: "ENOENT" }, "readback resumed a task move without the explicit action");
+    await clickNamed(".task-detail-drawer", "^(승인된 완료 마무리|Finish accepted completion)$", "Resume the already accepted Archive move");
+    assert.equal(await browser.execute(() => Boolean(document.querySelector(".approval-dialog"))), false, "resume prepared another approval instead of reconciling the consumed one");
+    assert.deepEqual(await providerCalls(), callsBeforeResume, "resume replayed a provider");
+    assert.deepEqual((await fs.readdir(path.join(workspace, ".maru/versions"), { recursive: true })).sort(), snapshotsBeforeResume, "resume wrote another snapshot");
     await stage("Archived accepted task", async () => {
       try { return /^status: done$/m.test(await fs.readFile(archive, "utf8")); }
       catch (failure) { if ((failure as NodeJS.ErrnoException).code === "ENOENT") return false; throw failure; }
