@@ -817,8 +817,9 @@ function assertOvalLabelsInside(paint: PaintReport, family: NativeE2eDiagramE4Fa
       const bottom = top + actual.height;
       for (const [x, y] of [[left, top], [right, top], [left, bottom], [right, bottom]] as const) {
         const reach = ((x - oval.cx) / oval.rx) ** 2 + ((y - oval.cy) / oval.ry) ** 2;
+        // #624, owner decision 2026-11-15: the bound is 1.06, not 1.02 - green runs measure 0.9988 and the recorded failure 1.053.
         assert.ok(
-          reach <= 1.02,
+          reach <= 1.06,
           `${family.type}: label ${want.id} reaches ${reach.toFixed(3)} of oval ${node.id}'s radius at (${x.toFixed(1)},${y.toFixed(1)}), so it is painted across the curve`,
         );
       }

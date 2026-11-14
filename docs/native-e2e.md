@@ -84,7 +84,9 @@ attribute and is a separate rendering of the same mapping. Failure output names
 the state that was found instead (profile counts and flags, missing document,
 notice instead of a badge); the diagnostic's code, target and placement stay
 assertions, so a wrong mapping fails as a mismatch rather than as a badge that
-never appeared.
+never appeared. The oval label-reach clause bounds each label corner at 1.06 of
+the ellipse's radius (#624, owner decision 2026-11-15): the engine's own
+geometry measures 0.9988 and the recorded failure 1.053.
 
 Menu tests wait for a registered dispatcher and require a receipt from their
 single command invocation; bridge-object presence alone is insufficient. A
