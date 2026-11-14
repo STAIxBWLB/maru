@@ -429,7 +429,38 @@ confirm and commits as one undo step through `planSemanticEdit`.
 schema summary and the selected source file paths, as for the other types;
 the candidate gets `$schema` if missing and is refused on local validation
 with the field named. Applying it into an existing dataset passes the engine
-first (see "Validation and the apply gate"). Scanning a repository belongs to #536.
+first (see "Validation and the apply gate").
+
+**Repository scan (#553 E5 T3).** File > Scan repository proposes a map from
+a folder in the open workspace through the native plugin command
+`scan_repository` (desktop only). The scan is read-only: it runs no process,
+uses no network and writes nothing. Its only filesystem scope is the root
+`DiagramHost::scan_root` resolves for the caller-named workspace, which in
+Maru must be a registered workspace (`vault_list::registered_workspace_root`);
+a picked folder outside it, a `..` path or a link out of it is refused with
+`diagram_scan_outside_workspace`. Links are never followed. The inventory is
+the git index when one lies inside the workspace (tracked regular files
+still on disk), otherwise a walk that applies `.gitignore` files (negation,
+anchored and directory-only rules, `**`). Bounds: 5,000 files (up to 20,000),
+24 folder levels (up to 64), 20 s, 64 MiB read, 1 MiB per parsed file (larger
+files are counted only), 400 nodes and 2,000 edges. A bound stops the scan
+with its cause and next step; no partial map is returned.
+
+Imports are read for TS/JS (`import`/`from`/`require`, relative specifiers
+with extension, `index` and `.js`-to-`.ts` resolution), Rust (`mod`, `use
+crate::`, `self::`, `super::`) and Python (absolute, relative and `from .
+import`). Files aggregate to folder nodes two levels deep (`web/src`); the
+parent chain is kept, so nesting survives. A cross-folder import becomes one
+`import` edge; same-folder imports are counted only. External package names
+go to the node's `packages`. Node kinds come from folder names
+(`tests` is `test`, `scripts` is `script`, everything unknown `library`).
+
+The proposal opens in the dialog with its counts. "Open as unsaved document"
+runs it through the same `parseFloorplanSpec` checks as an imported file
+(provenance `generated`, `sourcePath` the scanned folder) and opens it
+unsaved; saving is the ordinary Save. A proposal the checks refuse is not
+opened. Scanner tests use synthetic trees only.
+>>>>>>> a556082e (feat(diagram): propose a floorplan map from a read-only repository scan (#553))
 
 **Interchange.** `floorplan-json` imports `<name>.floorplan.json`, and a file
 named exactly `architecture.json` whose `$schema` is

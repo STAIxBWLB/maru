@@ -343,6 +343,26 @@ fn comparable_root(path: &str) -> PathBuf {
     raw.canonicalize().unwrap_or(raw)
 }
 
+/// The canonical root of a registered workspace, for read-only callers that
+/// must not reach a folder the user never opened in Maru (the diagram
+/// repository scan, issue #553). Read access is allowed for every registered
+/// workspace, including read-only and delegated ones.
+pub(crate) fn registered_workspace_root(workspace_path: &str) -> Result<PathBuf, String> {
+    let requested = PathBuf::from(workspace_path)
+        .canonicalize()
+        .map_err(|error| format!("Cannot open workspace directory: {error}"))?;
+    let registry = load_registry()?;
+    if registry
+        .workspaces
+        .iter()
+        .any(|workspace| comparable_root(&workspace.path) == requested)
+    {
+        Ok(requested)
+    } else {
+        Err("The folder is not an open Maru workspace".to_string())
+    }
+}
+
 fn longest_registered_owner<'a>(
     registry: &'a WorkspaceRegistry,
     target: &Path,

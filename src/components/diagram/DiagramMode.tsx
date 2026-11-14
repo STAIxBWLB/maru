@@ -142,6 +142,7 @@ import { RendersDialog } from "./modals/RendersDialog";
 import { rerenderDocument } from "../../lib/diagram/renders";
 import { ImportExportDialog } from "./modals/ImportExportDialog";
 import { GenerateDiagramDialog } from "./modals/GenerateDiagramDialog";
+import { ScanRepositoryDialog } from "./modals/ScanRepositoryDialog";
 import { MappingPreviewDialog } from "./modals/MappingPreviewDialog";
 import { MemoDialog } from "./modals/MemoDialog";
 import {
@@ -325,6 +326,7 @@ function DiagramShell({
   const [rendersOpen, setRendersOpen] = useState(false);
   const [ioDialog, setIoDialog] = useState<"import" | "export" | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [memoOpen, setMemoOpen] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -1656,6 +1658,7 @@ function DiagramShell({
           onExport: () => setIoDialog("export"),
           onTemplates: () => openGallery("apply"),
           onGenerate: () => setGenerateOpen(true),
+          onScanRepository: () => setScanOpen(true),
           onHistory: () => setHistoryOpen(true),
           onRenders: () => setRendersOpen(true),
           onImport: () => setIoDialog("import"),
@@ -1870,6 +1873,18 @@ function DiagramShell({
         onImportDoc={handleImportDoc}
         onClose={() => setGenerateOpen(false)}
       />
+      {scanOpen && (
+        <ScanRepositoryDialog
+          open
+          workspace={workPath}
+          dirty={dirty}
+          onOpenProposal={(next) => {
+            handleImportDoc(next);
+            setScanOpen(false);
+          }}
+          onClose={() => setScanOpen(false)}
+        />
+      )}
       <VersionHistoryDialog
         open={historyOpen}
         doc={store.getState().doc}
