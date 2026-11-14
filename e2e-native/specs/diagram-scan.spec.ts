@@ -53,7 +53,7 @@ describe("native repository scan", () => {
     await rail.waitForDisplayed({ timeout: 30_000 });
     await (await browser.$('.activity-rail button[aria-label="다이어그램"]')).click();
     await (await browser.$('[role="tab"]*=파일')).click();
-    await (await browser.$("button*=저장소 스캔")).click();
+    await (await browser.$("button*=리포지토리 스캔")).click();
     const dialog = await browser.$('[data-testid="diagram-scan-dialog"]');
     await dialog.waitForDisplayed({ timeout: 30_000 });
 
