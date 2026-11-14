@@ -70,7 +70,7 @@ export function TaskDetailDrawer({
   const runEpoch = useRef(0);
   const selectedTaskPath = entry?.relPath;
   useEffect(() => {
-    ++runEpoch.current;
+    runEpoch.current += 1;
     setPreparingRun(false);
     return () => { ++runEpoch.current; };
   }, [selectedTaskPath, workPath]);

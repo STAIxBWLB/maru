@@ -12,10 +12,12 @@ const api = vi.hoisted(() => ({
   skillsDispatchCompose: vi.fn(),
   skillsDispatchTerminal: vi.fn(),
   skillsRuntimeStatus: vi.fn(),
+  prepareMeetingSourceIntake: vi.fn(),
   setError: vi.fn(),
 }));
 vi.mock("../../lib/skills", () => api);
 vi.mock("../../lib/errorStore", () => ({ setError: api.setError }));
+vi.mock("../../lib/meetingSourceIntake", () => ({ prepareMeetingSourceIntake: api.prepareMeetingSourceIntake }));
 vi.mock("../../lib/i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("../ui/DialogSurface", () => ({
   DialogSurface: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -32,12 +34,13 @@ const skill: SkillRecord = {
 const taskExecution = { requestId: "request-fixture", taskPath: "tasks/active/task.md", sourceRevision: "source-fixture" };
 let root: Root;
 let container: HTMLDivElement;
+const openMeetingWorkbench = vi.fn();
 
-async function render(opted = true, origin?: string) {
+async function render(opted = true, origin?: string, selectedSkill = skill) {
   await act(async () => {
-    root.render(<ComposeDialog open skills={[skill]} defaultRuntime="codex"
-      seed={{ skill, cwd: "/fixture/work", prompt: "Produce the task's artifacts", metadata: opted ? { taskExecution, ...(origin ? { origin } : {}) } : undefined }}
-      onClose={vi.fn()} onTerminalDispatch={vi.fn()} />);
+    root.render(<ComposeDialog open skills={[selectedSkill]} defaultRuntime="codex"
+      seed={{ skill: selectedSkill, cwd: "/fixture/work", prompt: "Produce the task's artifacts", metadata: opted ? { taskExecution, ...(origin ? { origin } : {}) } : undefined }}
+      onClose={vi.fn()} onTerminalDispatch={vi.fn()} onOpenMeetingsWorkbench={openMeetingWorkbench} />);
   });
 }
 async function click(key: string) {
@@ -51,6 +54,7 @@ beforeEach(() => {
   api.skillsDispatchCompose.mockResolvedValue({ prompt: "Composed task directive" });
   api.skillsDispatchBackground.mockResolvedValue("background-run");
   api.agentRunStructuredLoop.mockResolvedValue("creator-run");
+  api.prepareMeetingSourceIntake.mockResolvedValue(null);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -113,5 +117,29 @@ describe("ComposeDialog opted task execution", () => {
     expect(metadata.origin).toBe("skillCompose");
     expect(metadata).not.toHaveProperty("taskExecution");
     expect(api.agentRunStructuredLoop).not.toHaveBeenCalled();
+  });
+
+  it("does not silently drop an opted task request when meeting-notes would open an untracked workbench", async () => {
+    await render(true, undefined, { ...skill, id: "meeting-notes", name: "meeting-notes" });
+    await click("meetings.sourceReview.intake");
+
+    expect(api.setError).toHaveBeenLastCalledWith("tasks.completion.meetingSourceUnsupported");
+    expect(api.prepareMeetingSourceIntake).not.toHaveBeenCalled();
+    expect(openMeetingWorkbench).not.toHaveBeenCalled();
+    expect(api.agentRunStructuredLoop).not.toHaveBeenCalled();
+    expect(api.skillsDispatchBackground).not.toHaveBeenCalled();
+    expect(api.skillsDispatchTerminal).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary meeting source intake on its existing workbench path", async () => {
+    await render(false, undefined, { ...skill, id: "meeting-notes", name: "meeting-notes" });
+    await click("meetings.sourceReview.intake");
+
+    expect(api.prepareMeetingSourceIntake).toHaveBeenCalledTimes(1);
+    expect(openMeetingWorkbench).toHaveBeenCalledTimes(1);
+    expect(api.agentRunStructuredLoop).not.toHaveBeenCalled();
+    expect(api.skillsDispatchBackground).not.toHaveBeenCalled();
+    expect(api.skillsDispatchTerminal).not.toHaveBeenCalled();
+    expect(api.setError).not.toHaveBeenCalledWith("tasks.completion.meetingSourceUnsupported");
   });
 });

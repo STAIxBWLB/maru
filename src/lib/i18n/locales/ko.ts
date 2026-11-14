@@ -4283,5 +4283,6 @@ export const ko: Record<string, string> = {
   "tasks.completion.reviewStarted": "검토를 시작했습니다. 완료하려면 사용자의 수락이 필요합니다.",
   "tasks.completion.evidence": "기록된 근거 확인",
   "tasks.completion.trackedModeRequired": "이 작업은 실행 추적이 필요합니다. 실행 권한과 완료 근거를 기록하려면 백그라운드 또는 구조화 모드를 선택하세요. 터미널 스킬 실행은 이 근거를 제공하지 않습니다.",
+  "tasks.completion.meetingSourceUnsupported": "회의 원문 교정 경로는 태스크 실행 추적을 기록하지 않습니다. 이 태스크의 완료 근거를 기록하려면 실행 추적을 지원하는 다른 스킬을 선택하세요.",
 
 };

@@ -54,7 +54,8 @@ export function TaskCompletionSection({ workPath, taskPath, onChanged, onConfirm
   }, [taskPath, workPath]);
 
   useEffect(() => {
-    const generation = ++epoch.current;
+    const generation = epoch.current + 1;
+    epoch.current = generation;
     operationBusy.current = false;
     setBusy(false);
     setLoading(true);

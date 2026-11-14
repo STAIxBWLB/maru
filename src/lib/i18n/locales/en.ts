@@ -4288,5 +4288,6 @@ export const en: Record<string, string> = {
   "tasks.completion.reviewStarted": "Review started. Completion still requires your acceptance.",
   "tasks.completion.evidence": "Inspect recorded evidence",
   "tasks.completion.trackedModeRequired": "This task requires a tracked execution. Select Background or Structured mode to record its claim and completion evidence; terminal skill runs cannot supply that evidence.",
+  "tasks.completion.meetingSourceUnsupported": "Meeting source review does not record tracked task execution. Select another execution skill for this task so its completion evidence can be recorded.",
 
 };

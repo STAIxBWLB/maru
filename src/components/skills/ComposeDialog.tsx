@@ -253,6 +253,10 @@ export function ComposeDialog({
     setBusy(true);
     setError(null);
     try {
+      if (seed?.metadata?.taskExecution && isMeetingNotes) {
+        setError(t("tasks.completion.meetingSourceUnsupported"));
+        return;
+      }
       if (seed?.metadata?.taskExecution && mode === "terminal") {
         setError(t("tasks.completion.trackedModeRequired"));
         return;
