@@ -808,7 +808,7 @@ function TaskList({
   );
 }
 
-function filtersForView(view: TasksFilterView) {
+export function filtersForView(view: TasksFilterView) {
   if (view === "scheduled") {
     return { statuses: ["active", "in-progress"] as const, due: "scheduled" as const };
   }
