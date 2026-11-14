@@ -50,6 +50,22 @@ async function providerCalls(): Promise<Array<{ provider: string; operation: str
   } catch (failure) { if ((failure as NodeJS.ErrnoException).code === "ENOENT") return []; throw failure; }
 }
 
+async function assertFixtureProviderResolution(): Promise<void> {
+  const raw = await browser.executeAsync((done: (value: string) => void) => {
+    const scope = window as unknown as { __TAURI_INTERNALS__: { invoke(command: string, args: unknown): Promise<unknown> } };
+    void Promise.all(["codex", "claude"].map((runtime) => scope.__TAURI_INTERNALS__.invoke("skills_runtime_status", { runtime, commandOverride: null })))
+      .then((statuses) => done(JSON.stringify({ statuses })), (failure: unknown) => done(JSON.stringify({ failure: String(failure) })));
+  });
+  const result = JSON.parse(raw) as { statuses?: Array<{ runtime: string; available: boolean; binaryPath: string | null }>; failure?: string };
+  assert.equal(result.failure, undefined, "fixture provider resolution failed before execution");
+  assert.equal(result.statuses?.length, 2);
+  for (const status of result.statuses ?? []) {
+    assert.equal(status.available, true, `${status.runtime} fixture is unavailable`);
+    assert.ok(status.binaryPath);
+    assert.equal(await fs.realpath(status.binaryPath), await fs.realpath(path.join(fixtureRootDir(), "task-completion-bin", status.runtime)), "refusing to launch an ambient provider");
+  }
+}
+
 async function clickNamed(scope: string, pattern: string, name: string): Promise<void> {
   await stage(name, () => browser.execute((selector: string, source: string) => {
     const expression = new RegExp(source);
@@ -183,6 +199,8 @@ describe("native task completion evidence", () => {
     assert.equal(await fs.readFile(file, "utf8"), requiredSource);
     await assert.rejects(fs.stat(archive), { code: "ENOENT" });
     assert.deepEqual(await providerCalls(), [], "opening or restarting the task launched a provider without an explicit Run");
+
+    await assertFixtureProviderResolution();
 
     await clickNamed(".task-detail-drawer", "^(이 태스크로 스킬 실행|Run skill on this)$", "Creator compose");
     await stage("Compose ready", () => browser.execute(() => Boolean(document.querySelector(".compose-dialog"))));

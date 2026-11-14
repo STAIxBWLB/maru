@@ -143,7 +143,7 @@ brew upgrade maru-cli
   ISOLATED commands run on awaited `spawn_blocking` workers and
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  395-command inventory, worker-boundary, and admission evidence are gated by
+  396-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 - Diagram's File > Renders keeps immutable engine HTML plus receipts in the
   workspace, verifies artifact hashes before exact-file grants, and uses an
@@ -547,8 +547,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (395 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 395
+# Phase 08 evidence closure gate alone (396 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 396
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -651,9 +651,9 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 395-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 395`).
-  The current source manifest records 388 app handlers
+  mutation-admission and processing-caller evidence against the 396-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 396`).
+  The current source manifest records 389 app handlers
   plus seven production plugin commands. Historical Phase 08 behavior evidence
   remains archival for retired entries; plugin invocation and compiled-capability
   MockRuntime results are recorded separately and do not certify native WebView transport.
@@ -1093,6 +1093,8 @@ Maru v1.1.0 intentionally does not include:
 Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 ### Change history
+
+- 2026-11-14: Completion evidence review found that protecting only lexical paths, or only metadata below the selected workspace, missed deliberate aliases into backend-owned records. The regression covers aliases into both the same workspace and another workspace.
 
 - 2026-11-14: Cleanup ownership reviews exposed the same symlink boundary at the skill and generation-root levels. Resolving either to an external destination could classify a user's shared entry as Maru-owned. The cleanup regressions distinguish home-path aliases above the generation root from links at or below it.
 
