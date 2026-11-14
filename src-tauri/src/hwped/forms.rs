@@ -225,7 +225,7 @@ fn discover(bin: &Path, input: &Path, work_dir: &str) -> Result<Value, String> {
 }
 
 fn work_dir() -> Result<(tempfile::TempDir, String), String> {
-    let tmp = super::private_temp_dir(None).map_err(|err| {
+    let tmp = super::private_temp_dir(None, None).map_err(|err| {
         format!(
             "hwp_stage_failed: could not create the private form binding directory ({}); check temporary storage permissions and free space, then retry",
             err.kind()

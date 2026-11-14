@@ -18,7 +18,8 @@ fn check_under_umask(test_name: &str, explicit_parent: bool) {
         if explicit_parent {
             std::fs::create_dir(&parent).unwrap();
         }
-        let directory = private_temp_dir(explicit_parent.then_some(parent.as_path())).unwrap();
+        let directory =
+            private_temp_dir(explicit_parent.then_some(parent.as_path()), None).unwrap();
         let expected_parent = if explicit_parent { &parent } else { &root };
         assert_eq!(
             std::fs::canonicalize(directory.path().parent().unwrap()).unwrap(),

@@ -199,9 +199,7 @@ pub fn template_fill_hwpx(
 }
 
 fn template_stage_dir(parent: &Path) -> std::io::Result<tempfile::TempDir> {
-    tempfile::Builder::new()
-        .prefix(".maru-template-fill-")
-        .tempdir_in(parent)
+    crate::hwped::private_temp_dir(Some(parent), Some(".maru-template-fill-"))
 }
 
 fn template_fill_hwpx_in_transaction(
