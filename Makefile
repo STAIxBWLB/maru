@@ -292,6 +292,9 @@ coverage: node_modules $(ICON_PATH) ## TS + Rust coverage reports, non-gating (T
 		echo "coverage: major version matches \`rustc --version --verbose\` (for example Homebrew llvm)."; \
 		exit 1; \
 	}
+# Same asset step as `pnpm test` (package.json `engine:assets`): Vitest
+# imports the gitignored src/lib/diagram/__generated__/ engine modules.
+	$(PNPM) engine:assets
 	$(NODE) scripts/run-vitest.mjs src scripts --exclude '**/check-command-isolation.test.mjs' --coverage --coverage.reporter=html --coverage.reporter=json-summary --coverage.reportsDirectory=coverage/ts
 	cd $(TAURI_DIR) && $(CARGO) llvm-cov --workspace --html --output-dir ../coverage/rust
 	cd $(TAURI_DIR) && $(CARGO) llvm-cov report --workspace --json --summary-only --output-path ../coverage/rust/coverage.json
