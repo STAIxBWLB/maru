@@ -1670,8 +1670,8 @@
         ],
         "workerProof": "Actual command same-task polling observes a distinct held worker, continued caller progress and mapped worker panic. Actual policy command waits on a competing alias writer, rejects stale revision, then releases admission. IPC refuses unknown actions and forged authority fields. Main identity checks are exercised on main, Sites, local child and a main-labelled child inside another window.",
         "platformScope": "Disposable workspace/home fixtures and Tauri MockRuntime only. This is not native WebView, provider/live execution, Korean IME or release acceptance evidence.",
-        "sourceCommit": "bbc4aa726d10ffbc83b28eb9c50e028664926960",
-        "logSha256": "9ee9c5c4b3855fe56e25b99a0853f21bb4472dea7af7638c1ee5126339714abf",
+        "sourceCommit": "c9070715a9a7eb2bed23bf983dc5debd15880f98",
+        "logSha256": "c98a86c68d64fd098c9656813fce7b40328556745b9dc1ecf2708c644871543b",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1679,11 +1679,11 @@
           },
           {
             "path": "src-tauri/src/task_completion.rs",
-            "sha256": "3c718f768955895b4d8b263949694b05552ec451d4eb9c642914ef5b70c55f4d"
+            "sha256": "c0e1a25d759ff5248493a483a237221e8878847a44999964e9e7f893df69db9a"
           },
           {
             "path": "src-tauri/src/task_completion_isolation_tests.rs",
-            "sha256": "ad46833cccb0c620895470034376018c9055f18c7b96947e6aed1f2cbd28ef58"
+            "sha256": "d83745938a5ec44e32cbb722f12db1bf134d770173b08f29904052fde89bd1de"
           },
           {
             "path": "src-tauri/src/task_execution_claims.rs",
@@ -1695,7 +1695,7 @@
           },
           {
             "path": "src-tauri/src/tasks.rs",
-            "sha256": "f1c8af33fa09b4916fefea42c0802fac291356b4ed68b28c973c257c2a26e9a6"
+            "sha256": "4ea9bcb63710ce64ad3ce2667f8940329a97982684cf9b4e0879057d4247ab5b"
           },
           {
             "path": "src-tauri/src/agent_host/proposal.rs",
@@ -1714,6 +1714,14 @@
             "sha256": "bcb2493b1a7cea83fcfa14037b75fedd0d213aaee600b3c20a2a50efc626956c"
           },
           {
+            "path": "src-tauri/src/drafts.rs",
+            "sha256": "6d10ab51372e30d06d9761d79f9f8435a8ec1c063e4f94cb155d3a0e2069c7e2"
+          },
+          {
+            "path": "src-tauri/src/today_lifecycle.rs",
+            "sha256": "a394fb3c1fe3208f2a559298186372319c050a543a168b9fcc26890ccd08cbf4"
+          },
+          {
             "path": "src-tauri/src/atomic_file.rs",
             "sha256": "8cb7d52f64e729be0724ba9abb48fa6ec6eca467141cbde2020dc39998e950d2"
           },
@@ -1727,7 +1735,7 @@
           },
           {
             "path": "src/lib/taskCompletion.ts",
-            "sha256": "34dd582559e66eea861eb8c0b6dd9b2e8cc30ea13782bd12ded238495c467ade"
+            "sha256": "36323ea3e146f68ebd0a12d076bd849ddad2aee2b88a1619c8084442970650a5"
           },
           {
             "path": "src/components/tasks/TaskCompletionSection.tsx",
@@ -1735,7 +1743,7 @@
           },
           {
             "path": "scripts/record-task-completion-isolation.mjs",
-            "sha256": "4b56c21aa84965e2a73b266763ba2fac38d46a399c1d8ff712a4733fb614db14"
+            "sha256": "ef6fe6ef796702d2d2cbd8b091dc32cb932b7a7d69de77265f83c06fb571515f"
           },
           {
             "path": "scripts/check-command-isolation.mjs",
