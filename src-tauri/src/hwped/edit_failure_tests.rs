@@ -97,7 +97,7 @@ fn a_failing_edit_reports_the_stage_dir_its_argv_carries() {
     let (fixture, binary) = failing_engine();
     let _env = BinEnv::set(&binary);
 
-    let error = edit_now(flattened_document(), None, Some(one_op()), None, None, None)
+    let error = edit_legacy_now(flattened_document(), None, Some(one_op()), None, None, None)
         .unwrap_err()
         .to_string();
 
@@ -192,7 +192,7 @@ fn released_hwp_prints_the_stage_dir_the_edit_reports() {
 
     // Bytes that are neither HWP nor HWPX: the engine names the staged input it
     // cannot open, which is the stage path this field exists to redact.
-    let error = edit_now(flattened_document(), None, Some(one_op()), None, None, None)
+    let error = edit_legacy_now(flattened_document(), None, Some(one_op()), None, None, None)
         .unwrap_err()
         .to_string();
 

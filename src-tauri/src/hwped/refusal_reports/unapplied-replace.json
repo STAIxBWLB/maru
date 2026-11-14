@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.1",
+  "contract": "hwp-edit-report-v1",
+  "output": "unapplied-replace.out.hwpx",
+  "dry_run": false,
+  "ops": [
+    {
+      "index": 0,
+      "op": "replace",
+      "status": "failed",
+      "pieces_touched": 0,
+      "changed": [],
+      "reason": "replace: no match"
+    }
+  ],
+  "applied_count": 0,
+  "failed_count": 1,
+  "refusal": {
+    "code": "unapplied_requests",
+    "values": {},
+    "message": "적용되지 않은 편집 요청이 있습니다"
+  }
+}

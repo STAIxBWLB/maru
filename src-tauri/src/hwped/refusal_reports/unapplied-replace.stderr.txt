@@ -1,0 +1,1 @@
+Error: 적용되지 않은 편집 요청이 있습니다: --replace "absent string"=>"y" (런 분절 교차 매칭은 미지원, --allow-partial로 일치한 요청만 적용 가능)

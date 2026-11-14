@@ -24,7 +24,7 @@ CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 | `hwped_read` | `hwp cat <in> --format markdown --with-segments`, then `hwp info <in> --json --body-stats` | CatEnvelope JSON, plus `bodyTables?`; opt-in `captureSource` adds `source: { dataBase64, revision }` from the same immutable copy |
 | `hwped_save` | Private candidate validation and re-read, guarded workspace replacement | `{ revision, sizeBytes, snapshotPath }` |
 | `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report [--layout-json <file>]` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }], notes?: [{ code, message }] }` |
-| `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial]` | `{ name, dataBase64 }` |
+| `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial] [--report <file>]` (`--report` on ahwp >= 1.6.3) | `{ name, dataBase64 }` |
 | `hwped_compose` | `hwp compose <spec.json> -o <out> --report` | `{ name, dataBase64, report? }` |
 | `hwped_validate` | `hwp validate <in> --json` (exit 1 = invalid, report still parsed) | `{ valid, errors }` |
 | `hwped_capabilities` | `hwp --version` (enforces >= 0.8.7, memoized) | `{ version, editable, formats, editOps?: "v1" }` |
@@ -118,6 +118,25 @@ Most errors remain prefixed strings (`cli_missing:`, `hwp_timeout:`,
 convention. Feature-version refusals from JSON edit or explicitly requested
 layout use the structured IPC error shape so callers can branch on the code;
 the message includes the detected version, required minimum, and upgrade action.
+
+**Refused edits (maru#620).** On ahwp >= 1.6.3, `hwped_edit` passes
+`--report <stage>/edit-report.json` on every call and reads the report before
+the stage dir is removed. A refused run (`hwp_failed:`) with a readable report
+rejects with the object hwp-editor's Tauri client reads: `{ code: "failed",
+message, report, engineVersion }`. `message` is the unchanged legacy string
+(including `[work dir <json>]`), so a client that ignores `report` classifies it
+as before. Before it leaves the host, the report's `output` becomes the caller's
+document name, and the stage dir becomes `<work dir>` in its diagnostics (op
+`reason`, refusal `message`, `values.detail`, issue messages). User-valued
+identifiers (anchors, style names, issue paths) stay exact. Engines below 1.6.3,
+a missing, oversized (> 4 MiB) or unparsable report, and non-refusal failures
+(spawn, timeout, output limit) keep the string error, and hwp-editor falls back
+to stderr classification. With @hwp-editor/core after hwp-editor#175 the editor
+then classifies by the refusal code (for example `unapplied_requests` to
+`unmatched_replace`, and `preservation_loss` with a font event to
+`font_type_info`). The current maru pin, core 1.4.0 (like the latest published
+1.4.2), reads only `code` and `message`, so the code-based message needs a core
+release that includes #175.
 
 ## Binary resolution
 

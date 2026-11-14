@@ -85,7 +85,7 @@ fn legacy_control_and_file_flags_are_rejected_before_any_document_or_cli_access(
             path: None,
             data_base64: None,
         };
-        let command_error = edit_now(
+        let command_error = edit_legacy_now(
             document,
             Some(serde_json::json!(argv)),
             None,

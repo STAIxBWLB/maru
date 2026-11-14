@@ -1,0 +1,6 @@
+Error: 출력 검증 실패 (대상: preservation-font.out.hwp)
+
+Caused by:
+    edit: 보존 불가 데이터 1건을 제거하거나 변경할 수 없어 출력을 게시하지 않습니다
+      - font_type_info_unrepresentable: 1 item(s)
+    해결: 글꼴 분류 정보의 HWP5 변환 매핑이 확인되지 않았습니다. 원본 정보를 보존하려면 .hwpx 형식을 유지하세요. 손실을 수용하려면 ahwp convert를 --strict 없이 실행하거나 MCP hwp_convert에 strict: false를 지정해 .hwpx 입력을 먼저 .hwp로 변환한 뒤, 변환된 파일로 ahwp edit 또는 MCP hwp_edit를 다시 실행하세요.
