@@ -225,7 +225,16 @@ fn discover(bin: &Path, input: &Path, work_dir: &str) -> Result<Value, String> {
 }
 
 fn work_dir() -> Result<(tempfile::TempDir, String), String> {
-    let tmp = tempfile::tempdir().map_err(|err| {
+    #[cfg(unix)]
+    let tmp = {
+        use std::os::unix::fs::PermissionsExt;
+        tempfile::Builder::new()
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir()
+    };
+    #[cfg(not(unix))]
+    let tmp = tempfile::tempdir();
+    let tmp = tmp.map_err(|err| {
         format!(
             "hwp_stage_failed: could not create the private form binding directory ({}); check temporary storage permissions and free space, then retry",
             err.kind()

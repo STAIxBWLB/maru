@@ -639,7 +639,7 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   registered production command carries final justified worker-boundary,
   mutation-admission and processing-caller evidence against the 395-command
   inventory (`node scripts/check-command-isolation.mjs --all --expected-count 395`).
-  The current source manifest records 386 app handlers
+  The current source manifest records 388 app handlers
   plus seven production plugin commands. Historical Phase 08 behavior evidence
   remains archival for retired entries; plugin invocation and compiled-capability
   MockRuntime results are recorded separately and do not certify native WebView transport.
