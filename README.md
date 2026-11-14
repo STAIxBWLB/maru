@@ -496,7 +496,7 @@ editing; unsupported or undecodable files are rejected without lossy conversion.
 Requirements:
 
 - Node.js 22 or newer
-- pnpm 9.15 or newer
+- pnpm 12.18 or newer
 - Rust MSRV 1.90.0; `rust-toolchain.toml` pins the repository verification
   toolchain and the `wasm32-unknown-unknown` target used by semantic diagrams
 - Platform libraries required by Tauri 2

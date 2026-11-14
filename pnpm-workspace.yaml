@@ -1,2 +1,20 @@
 packages:
   - "."
+
+# esbuild, edgedriver and geckodriver are the only dependencies with install
+# scripts. pnpm builds nothing that is not listed here, and an unlisted build
+# fails the install under strictDepBuilds rather than being skipped silently.
+allowBuilds:
+  esbuild: true
+  edgedriver: true
+  geckodriver: true
+
+strictDepBuilds: true
+
+# A version younger than a day is refused: most compromised releases are pulled
+# within an hour. Setting the value also makes strict mode the default, so
+# resolution fails instead of falling back to an older version. The @hwp-editor
+# packages are exempt because they are published and pinned by us.
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - "@hwp-editor/*"
