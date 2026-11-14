@@ -10,7 +10,9 @@
 //!   hwped_edit         hwp edit <in> -o <out> (--ops <json> | <opsArgv...>) [--verify] [--allow-partial]
 //!   hwped_compose      hwp compose <spec.json> -o <out> --report
 //!   hwped_validate     hwp validate <in> --json   (exit 1 still prints the report)
-//!   hwped_capabilities hwp --version (>= 0.8.7; JSON/layout require >= 0.20.0)
+//!   hwped_capabilities hwp --version (>= 0.8.7; JSON/layout require >= 0.20.0; formBindings >= 2.0.0)
+//!   hwped_discover_forms       ahwp slots <in> --forms --occurrences --json        (hwped/forms.rs)
+//!   hwped_apply_form_bindings  ahwp edit <in> -o <out> --ops <op> --verify [--dry-run]
 //!
 //! JSON edit arrays are staged per call; legacy clients can still send argv
 //! fragments (`opsToArgv`). This module owns no op grammar. Documents cross the bridge
@@ -21,9 +23,11 @@
 
 #[cfg(test)]
 use crate::atomic_file::PathTransactionLease;
+mod forms;
 mod persistence;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+pub use forms::{HwpedFormOptions, HwpedFormResult};
 pub use persistence::HwpedSaveResponse;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -180,6 +184,11 @@ pub struct HwpedValidationReport {
 pub struct HwpedCapabilities {
     #[serde(rename = "editOps", skip_serializing_if = "Option::is_none")]
     pub edit_ops: Option<&'static str>,
+    /// `"v1"` only on an engine that runs `hwped_discover_forms` and
+    /// `hwped_apply_form_bindings` (agent-hwp >= 2.0.0); the editor hides its
+    /// Form panel otherwise.
+    #[serde(rename = "formBindings", skip_serializing_if = "Option::is_none")]
+    pub form_bindings: Option<&'static str>,
     pub version: String,
     pub editable: bool,
     pub formats: Vec<String>,
@@ -1584,6 +1593,7 @@ fn capabilities_now() -> Result<HwpedCapabilities, String> {
     let version = ensure_version(&bin)?;
     Ok(HwpedCapabilities {
         edit_ops: supports_feature_version(&version).then_some("v1"),
+        form_bindings: forms::supports_form_bindings(&version).then_some("v1"),
         version,
         editable: true,
         formats: vec!["hwp".to_string(), "hwpx".to_string()],
@@ -1696,6 +1706,46 @@ pub async fn hwped_validate(
         #[cfg(test)]
         PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_validate");
         validate_now(document, workspace_root)
+    })
+    .await
+    .map_err(|err| format!("hwped_task_failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn hwped_discover_forms(
+    document: HwpedDocumentRef,
+    workspace_root: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_discover_forms");
+        forms::discover_now(document, workspace_root)
+    })
+    .await
+    .map_err(|err| format!("hwped_task_failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn hwped_apply_form_bindings(
+    document: HwpedDocumentRef,
+    workspace_root: Option<String>,
+    plan: Value,
+    values: Value,
+    options: Option<HwpedFormOptions>,
+) -> Result<HwpedFormResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(test)]
+        PathTransactionLease::test_stage(
+            &[std::env::temp_dir()],
+            "worker:hwped_apply_form_bindings",
+        );
+        forms::apply_now(
+            document,
+            workspace_root,
+            plan,
+            values,
+            options.unwrap_or_default(),
+        )
     })
     .await
     .map_err(|err| format!("hwped_task_failed: {err}"))?
@@ -2676,6 +2726,22 @@ echo "hwp 0.20.0"
             std::env::temp_dir(),
             "hwped_capabilities",
             hwped_capabilities(),
+        );
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_discover_forms",
+            hwped_discover_forms(doc_with_path("docs/a.hwpx"), Some("/tmp".to_string())),
+        );
+        boundary_hwped(
+            std::env::temp_dir(),
+            "hwped_apply_form_bindings",
+            hwped_apply_form_bindings(
+                doc_with_path("docs/a.hwpx"),
+                Some("/tmp".to_string()),
+                serde_json::json!({}),
+                serde_json::json!({}),
+                None,
+            ),
         );
     }
 
