@@ -1670,8 +1670,8 @@
         ],
         "workerProof": "Actual command same-task polling observes a distinct held worker, continued caller progress and mapped worker panic. Actual policy command waits on a competing alias writer, rejects stale revision, then releases admission. IPC refuses unknown actions and forged authority fields. Main identity checks are exercised on main, Sites, local child and a main-labelled child inside another window.",
         "platformScope": "Disposable workspace/home fixtures and Tauri MockRuntime only. This is not native WebView, provider/live execution, Korean IME or release acceptance evidence.",
-        "sourceCommit": "c9070715a9a7eb2bed23bf983dc5debd15880f98",
-        "logSha256": "c98a86c68d64fd098c9656813fce7b40328556745b9dc1ecf2708c644871543b",
+        "sourceCommit": "a623cc9641c8cf5118159cadbfc2ea8214c05ae9",
+        "logSha256": "1a4483a2b63ecb3d86de63aa95d450b712fdfb7750b8be0e8b2b228a51df210c",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1679,7 +1679,7 @@
           },
           {
             "path": "src-tauri/src/task_completion.rs",
-            "sha256": "c0e1a25d759ff5248493a483a237221e8878847a44999964e9e7f893df69db9a"
+            "sha256": "ec1ad54fc48fc1832a8451994e35189aba5507dc71a2c85e4408d08dcf36ada0"
           },
           {
             "path": "src-tauri/src/task_completion_isolation_tests.rs",
