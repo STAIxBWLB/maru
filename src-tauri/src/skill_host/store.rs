@@ -5331,12 +5331,39 @@ fn owned_builtin_entry_target(
     builtin: &Path,
     previous_workspace: Option<&Path>,
 ) -> bool {
+    // Entry links record the canonical skill path while the roots come from
+    // the home path, so compare both through their resolved ancestors (macOS
+    // `/var` -> `/private/var`, or any symlinked home component).
+    let resolved_target = resolved_through_existing_ancestor(target);
     let previous = previous_workspace.is_some_and(|root| {
-        host_fs::simplified(target) == host_fs::simplified(&root.join("skills").join(name))
+        resolved_target == resolved_through_existing_ancestor(&root.join("skills").join(name))
     });
     previous
-        || (host_fs::simplified(target).starts_with(host_fs::simplified(builtin))
+        || (resolved_target.starts_with(resolved_through_existing_ancestor(builtin))
             && !target.exists())
+}
+
+/// Canonicalize the deepest existing ancestor and re-append the rest, so a
+/// path whose tail was already removed still compares across aliases.
+fn resolved_through_existing_ancestor(path: &Path) -> PathBuf {
+    let path = host_fs::simplified(path);
+    let mut rest = Vec::new();
+    let mut current = path.as_path();
+    loop {
+        if let Ok(canonical) = current.canonicalize() {
+            return rest
+                .iter()
+                .rev()
+                .fold(canonical, |acc, part: &&std::ffi::OsStr| acc.join(part));
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                current = parent;
+            }
+            _ => return path.clone(),
+        }
+    }
 }
 
 fn remove_owned_builtin_entry(
@@ -9671,6 +9698,51 @@ mod tests {
                 host_fs::write_json_pretty(&manifest_path, &manifest).unwrap();
             }
             skills_rescan_source_impl(BUILTIN_SOURCE_ID.into(), ProgressReporter::noop()).unwrap();
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn owned_entry_target_matches_across_a_symlinked_home_ancestor() {
+            // macOS temp and home paths reach the same files through
+            // `/var` and `/private/var`; links record the resolved form.
+            let dir = TempDir::new().unwrap();
+            let real = dir.path().join("real");
+            fs::create_dir_all(real.join("skills/_builtin/skills")).unwrap();
+            let alias = dir.path().join("alias");
+            std::os::unix::fs::symlink(&real, &alias).unwrap();
+            let builtin = alias.join("skills/_builtin");
+            let resolved = real
+                .canonicalize()
+                .unwrap()
+                .join("skills/_builtin/skills/gone");
+            assert!(owned_builtin_entry_target(
+                &resolved, "gone", &builtin, None
+            ));
+            let previous = alias.join("skills/_bundles/old");
+            let resolved_previous = real
+                .canonicalize()
+                .unwrap()
+                .join("skills/_bundles/old/skills/gone");
+            assert!(owned_builtin_entry_target(
+                &resolved_previous,
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            // Still refuses a live target and a path outside the builtin root.
+            fs::create_dir_all(real.join("skills/_builtin/skills/live")).unwrap();
+            assert!(!owned_builtin_entry_target(
+                &real.join("skills/_builtin/skills/live"),
+                "live",
+                &builtin,
+                None
+            ));
+            assert!(!owned_builtin_entry_target(
+                &real.join("elsewhere/gone"),
+                "gone",
+                &builtin,
+                None
+            ));
         }
 
         #[test]
