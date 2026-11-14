@@ -35,6 +35,6 @@ describe("TasksPane interrupted completion visibility", () => {
       row("open", "active", "active"),
     ]);
     expect(filterTasksByQuery(entries, "", filtersForView("done")).map((entry) => entry.title))
-      .toEqual(["interrupted", "archived"]);
+      .toEqual(["archived", "interrupted"]);
   });
 });
