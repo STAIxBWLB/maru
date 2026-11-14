@@ -900,8 +900,8 @@
         "workerProof": "Actual-wrapper same-task polling proves off-thread progress and join-failure propagation. Competing alias saves and failed admission prove serialization and release; the original snapshot and stale/missing conflicts are checked on fixture files. src-tauri/src/hwped/persistence/tests.rs::hwped_save_holds_existing_registry_lease_and_observes_new_policy also proves existing-registry writer exclusion and post-admission policy refusal.",
         "platformScope": "Disposable fixture workspaces and fake engine processes only; these Rust checks do not establish native WebView, Korean IME or production acceptance.",
         "limits": "Admission serializes cooperating same-process writers. An external non-cooperating writer can still race the final revision check and rename; no cross-process compare-and-swap is claimed.",
-        "sourceCommit": "f224b86600e59f7afddd921c192d7ee692d15a78",
-        "logSha256": "e9864b19bfeaf275a1d4be58d6f8fd0e81d8f0802ee5dbd63f7487f523ae2dae",
+        "sourceCommit": "f9bfcfdaa864fa19ceebb0671c6e86f6a01e2800",
+        "logSha256": "72a1fe5517d1058ede67ea6b0cbb7b31c1b048f08244120634bb915f1da52d73",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -965,7 +965,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=2",
-          "passed": 116,
+          "passed": 117,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1005,8 +1005,8 @@
         "workerProof": "hwped::phase08_21::phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure holds the hwped_discover_forms future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.",
         "platformScope": "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
         "limits": "Containment covers the source path and the host-made artifact paths. Discovery, receipt and preview cross the bridge only after the ported upstream parsers (src-tauri/src/hwped/forms/wire.rs), checked against outputs recorded from hwp-editor's own functions; engine-side plan semantics are the engine's own contract.",
-        "sourceCommit": "f224b86600e59f7afddd921c192d7ee692d15a78",
-        "logSha256": "ba503e4671d00c0c851fa65493715e91bcaf2c8b12e19990d99e9623d5cdd39c",
+        "sourceCommit": "f9bfcfdaa864fa19ceebb0671c6e86f6a01e2800",
+        "logSha256": "ac2328e0bb6d64304b758cc71ec82fa8f4a82ae415be12df74f7ac5ab3dc944b",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1018,7 +1018,7 @@
           },
           {
             "path": "src-tauri/src/hwped/forms.rs",
-            "sha256": "8b5c1521eb0eef89d6031270af0992fd5cc5bc092ec2df165033be56220af315"
+            "sha256": "1bb8a38d23a20612cb9582c05374f72f1d9e79bcf3b83b6b9a50e72fe621eb70"
           },
           {
             "path": "src-tauri/src/hwped/forms/wire.rs",
@@ -1026,7 +1026,7 @@
           },
           {
             "path": "src-tauri/src/hwped/forms/tests.rs",
-            "sha256": "8528b76aacab5ad6c6f40b68a42b79fe9abdfbd124c85e94eea55e96702b9f3b"
+            "sha256": "f18eda28fc0f5800f7d980de67ff13fd8fae7fabfe3579a90c7540691dc31094"
           },
           {
             "path": "src/lib/hwped.ts",
@@ -1062,7 +1062,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=2",
-          "passed": 116,
+          "passed": 117,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1102,8 +1102,8 @@
         "workerProof": "hwped::phase08_21::phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure holds the hwped_apply_form_bindings future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.",
         "platformScope": "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
         "limits": "Containment covers the source path and the host-made artifact paths. Discovery, receipt and preview cross the bridge only after the ported upstream parsers (src-tauri/src/hwped/forms/wire.rs), checked against outputs recorded from hwp-editor's own functions; engine-side plan semantics are the engine's own contract.",
-        "sourceCommit": "f224b86600e59f7afddd921c192d7ee692d15a78",
-        "logSha256": "ba503e4671d00c0c851fa65493715e91bcaf2c8b12e19990d99e9623d5cdd39c",
+        "sourceCommit": "f9bfcfdaa864fa19ceebb0671c6e86f6a01e2800",
+        "logSha256": "ac2328e0bb6d64304b758cc71ec82fa8f4a82ae415be12df74f7ac5ab3dc944b",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1115,7 +1115,7 @@
           },
           {
             "path": "src-tauri/src/hwped/forms.rs",
-            "sha256": "8b5c1521eb0eef89d6031270af0992fd5cc5bc092ec2df165033be56220af315"
+            "sha256": "1bb8a38d23a20612cb9582c05374f72f1d9e79bcf3b83b6b9a50e72fe621eb70"
           },
           {
             "path": "src-tauri/src/hwped/forms/wire.rs",
@@ -1123,7 +1123,7 @@
           },
           {
             "path": "src-tauri/src/hwped/forms/tests.rs",
-            "sha256": "8528b76aacab5ad6c6f40b68a42b79fe9abdfbd124c85e94eea55e96702b9f3b"
+            "sha256": "f18eda28fc0f5800f7d980de67ff13fd8fae7fabfe3579a90c7540691dc31094"
           },
           {
             "path": "src/lib/hwped.ts",
