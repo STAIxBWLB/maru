@@ -62,6 +62,18 @@ const REFUSAL_REPORT_MIN_VERSION: (u64, u64, u64) = (1, 6, 3);
 /// A report is small JSON; anything larger is treated as missing.
 const EDIT_REPORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
+fn form_worker_error(error: tauri::Error) -> String {
+    format!("hwped_task_failed: {error}")
+}
+
+fn stage_io_error(_operation: &str, error: std::io::Error) -> String {
+    format!("hwp_stage_failed: {error}")
+}
+
+#[cfg(test)]
+#[path = "hwped/message_tests.rs"]
+mod message_tests;
+
 /// Create private HWP staging and render-attempt directories. Unix owner-only
 /// permissions are set in the builder before the directory is created.
 pub(crate) fn private_temp_dir(
@@ -576,7 +588,7 @@ fn stage_document(
         return Err("hwped_bad_request: document.dataBase64 is empty".to_string());
     }
     let file = dir.join(format!("in{}", sniff_extension(&document.name)));
-    std::fs::write(&file, bytes).map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    std::fs::write(&file, bytes).map_err(|err| stage_io_error("write document bytes", err))?;
     Ok(file)
 }
 
@@ -1334,7 +1346,7 @@ fn edit_stage_dir(dir: &Path) -> Result<String, String> {
     {
         std::fs::canonicalize(dir)
             .map(|path| path.to_string_lossy().into_owned())
-            .map_err(|err| format!("hwp_stage_failed: {err}"))
+            .map_err(|err| stage_io_error("resolve staging directory", err))
     }
 }
 
@@ -1747,7 +1759,7 @@ pub async fn hwped_discover_forms(
         forms::discover_now(document, workspace_root)
     })
     .await
-    .map_err(|err| format!("hwped_task_failed: {err}"))?
+    .map_err(form_worker_error)?
 }
 
 #[tauri::command]
@@ -1773,7 +1785,7 @@ pub async fn hwped_apply_form_bindings(
         )
     })
     .await
-    .map_err(|err| format!("hwped_task_failed: {err}"))?
+    .map_err(form_worker_error)?
 }
 
 #[tauri::command]
@@ -2182,6 +2194,10 @@ mod phase08_21 {
         // Each wrapper stages the same temp-root path. Hold the fixture lock
         // until the hooked worker joins and the hook is removed, otherwise a
         // parallel real fixture call can enter it after its receiver is gone.
+        let form_command = matches!(
+            command,
+            "hwped_discover_forms" | "hwped_apply_form_bindings"
+        );
         let _fixture_lock = super::PHASE08_21_ENV_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
@@ -2197,6 +2213,9 @@ mod phase08_21 {
                 .unwrap()
                 .recv_timeout(Duration::from_secs(5))
                 .unwrap();
+            if form_command {
+                panic!("fixture worker failure at /Users/form-fixture/private.hwpx");
+            }
             panic!("fixture worker failure");
         });
         run(async move {
@@ -2221,9 +2240,17 @@ mod phase08_21 {
             .await;
             assert_ne!(worker, caller);
             release_tx.send(()).unwrap();
-            assert!(
-                matches!(future.await, Err(error) if error.to_string().starts_with("hwped_task_failed:"))
-            );
+            let message = match future.await {
+                Err(error) => error.to_string(),
+                Ok(_) => panic!("the injected worker panic must fail the wrapper"),
+            };
+            assert!(message.starts_with("hwped_task_failed:"));
+            if form_command {
+                assert!(!message.contains("/Users/form-fixture/"), "{message}");
+                assert!(message.contains("worker_panicked"), "{message}");
+                assert!(message.contains("retry"), "{message}");
+                assert!(message.contains("check"), "{message}");
+            }
         });
     }
 
