@@ -107,6 +107,14 @@ impl Fixture {
         self.app.state()
     }
     fn creator(&self, request_id: &str, run_id: &str) -> TaskExecutionToken {
+        self.creator_with_exit(request_id, run_id, 0)
+    }
+    fn creator_with_exit(
+        &self,
+        request_id: &str,
+        run_id: &str,
+        exit_code: i32,
+    ) -> TaskExecutionToken {
         let source = fs::read_to_string(self.work.join(TASK)).unwrap();
         let metadata = json!({"actor":"human", "principal":"claude", "taskExecution": {
             "requestId":request_id,"taskPath":TASK,"sourceRevision":crate::document::revision_for(&source)
@@ -124,7 +132,8 @@ impl Fixture {
         let mut child = session
             .spawn_child(|| {
                 Command::new(crate::test_support::posix_shell())
-                    .args(["-c", "read line"])
+                    .args(["-c", "read line; exit $1", "completion-fixture"])
+                    .arg(exit_code.to_string())
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .spawn()
@@ -789,4 +798,47 @@ fn completion_review_r5_policy_scope_drift_cannot_resume() {
     .is_err());
     assert_eq!(fs::read(f.work.join(TASK)).unwrap(), done);
     assert!(!f.work.join("tasks/archive/task.md").exists());
+}
+
+#[test]
+fn completion_review_r6_nonzero_creator_keeps_accepted_publication_resumable() {
+    let f = Fixture::new();
+    let token = f.creator_with_exit("nonzero-request", CREATOR, 7);
+    f.apply(CREATOR);
+    f.review(&token, "review", CliProviderKind::Claude, true);
+    let (approval, revision) = f.approve(&token);
+    *completion::AFTER_DONE_WRITE_FAILURE.lock().unwrap() = Some(f.work.clone());
+    let error = completion::finalize(&f.state(), &f.work, &token, &approval, &revision)
+        .err()
+        .unwrap();
+    assert!(error
+        .message
+        .contains("archive publication was interrupted"));
+    let done = fs::read(f.work.join(TASK)).unwrap();
+    assert!(String::from_utf8(done.clone())
+        .unwrap()
+        .contains("status: done"));
+    let snapshots = files(&f.work.join(".maru/versions"));
+    let view = serde_json::to_value(completion::view(&f.work, TASK).unwrap()).unwrap();
+    assert_eq!(view["receipt"]["processSuccess"], false);
+    assert_eq!(view["resumeAcceptance"]["approvalId"], approval);
+    assert!(!f.work.join("tasks/archive/task.md").exists());
+    let resumed = completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision,
+    )
+    .unwrap();
+    assert!(resumed.duplicate);
+    let receipt = serde_json::to_value(resumed.receipt).unwrap();
+    assert_eq!(receipt["processSuccess"], false);
+    assert_eq!(receipt["acceptance"]["completed"], true);
+    assert_eq!(
+        fs::read(f.work.join("tasks/archive/task.md")).unwrap(),
+        done
+    );
+    assert!(!f.work.join(TASK).exists());
+    assert_eq!(files(&f.work.join(".maru/versions")), snapshots);
 }
