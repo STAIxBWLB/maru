@@ -182,6 +182,20 @@
       "module": "src-tauri/src/hwped.rs",
       "originalDisposition": "ISOLATED",
       "reason": "Issue #610: revision-checked HWPX overwrite with byte-exact recovery snapshots and shared lexical/physical path admission inside an awaited blocking worker."
+    },
+    {
+      "name": "hwped_discover_forms",
+      "owner": "08-21",
+      "module": "src-tauri/src/hwped.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #626: source-bound form binding through agent-hwp 2.0.0 in an awaited blocking worker with host-owned per-call artifacts."
+    },
+    {
+      "name": "hwped_apply_form_bindings",
+      "owner": "08-21",
+      "module": "src-tauri/src/hwped.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #626: source-bound form binding through agent-hwp 2.0.0 in an awaited blocking worker with host-owned per-call artifacts."
     }
   ]
 }

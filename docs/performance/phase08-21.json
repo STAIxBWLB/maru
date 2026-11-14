@@ -937,6 +937,184 @@
           }
         ]
       }
+    },
+    {
+      "name": "hwped_discover_forms",
+      "module": "src-tauri/src/hwped.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_discover_forms",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hwped.rs::hwped_discover_forms owns its request and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/hwped/forms.rs::discover_now; a JoinError becomes the display-only hwped_task_failed String.",
+        "src-tauri/src/hwped/forms.rs::discover_now gates on agent-hwp >= 2.0.0, stages the source through src-tauri/src/hwped.rs::stage_document (lexical workspace containment) into a private tempdir, and runs the bounded `ahwp slots --forms --occurrences --json` process through src-tauri/src/hwped.rs::run_hwp_feature_ok with the fixed 60s HWP_TIMEOUT."
+      ],
+      "workerBoundary": "src-tauri/src/hwped.rs::hwped_discover_forms awaits tauri::async_runtime::spawn_blocking before any filesystem access or process wait runs; owned values cross the await and every domain error String passes through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes hwped_discover_forms synchronously; src-tauri/src/hwped/forms.rs::discover_now stays private behind the spawn_blocking boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "hwped_discover_forms performs no filesystem mutation outside its private per-call tempdir: src-tauri/src/hwped/forms.rs::discover_now reads a workspace source in place and returns the discovery JSON over IPC, so no workspace mutation admission is required.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no workspace filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=4",
+          "passed": 92,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/hwped.ts"
+        ],
+        "payload": "src/lib/hwped.ts builds the @hwp-editor/core Tauri engine, whose discoverForms invokes hwped_discover_forms only after hwped_capabilities advertises formBindings v1.",
+        "terminalNoticeOwner": "The hwp-editor Form panel inside the hwped editor surface owns preview, apply and refusal display for its document.",
+        "classifier": "The client maps hwped_bad_request, hwp_version and hwp_failed prefixes to bad_request, version and failed; engine refusals surface as engine_refused without engine prose.",
+        "successRetention": "The panel keeps the discovery until the source changes.",
+        "failureReasons": "The document and pending preview are unchanged on failure; the panel shows the cause and next step.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "contractTests": [
+          "src-tauri/src/hwped/forms/tests.rs::capabilities_advertise_form_bindings_only_from_engine_2_0_0",
+          "src-tauri/src/hwped/forms/tests.rs::discovery_returns_the_engine_catalogue_and_removes_its_directory",
+          "src-tauri/src/hwped/forms/tests.rs::discovery_on_an_older_engine_is_refused_by_version",
+          "src-tauri/src/hwped/forms/tests.rs::a_dry_run_returns_receipt_and_preview_without_document_bytes",
+          "src-tauri/src/hwped/forms/tests.rs::an_apply_returns_same_format_bytes_and_one_exclusive_host_owned_op",
+          "src-tauri/src/hwped/forms/tests.rs::a_refused_plan_is_reported_by_class_without_engine_prose_or_paths",
+          "src-tauri/src/hwped/forms/tests.rs::growth_without_reflow_is_refused_before_the_edit_runs",
+          "src-tauri/src/hwped/forms/tests.rs::a_cross_format_request_is_refused_before_the_engine_runs",
+          "src-tauri/src/hwped/forms/tests.rs::caller_artifact_paths_and_non_literal_values_never_reach_the_engine",
+          "src-tauri/src/hwped/forms/tests.rs::a_workspace_document_path_keeps_the_json_edit_containment"
+        ],
+        "workerProof": "hwped::phase08_21::phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure holds the hwped_discover_forms future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.",
+        "platformScope": "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
+        "limits": "Containment covers the source path and the host-made artifact paths; engine-side semantics of the plan are the engine's own contract.",
+        "sourceCommit": "8049211c0feb4ed2a0e89b317fe1db4caa6c60ce",
+        "logSha256": "a1d819f261830624b5cb2f156d3b94952f06221858156efbcd1d0404ee35cc7e",
+        "sourceFiles": [
+          {
+            "path": "src-tauri/src/lib.rs",
+            "sha256": "9a452d5631a1750065e76942f56e0afa3c6045af27719cd726bb3841d1227d8b"
+          },
+          {
+            "path": "src-tauri/src/hwped.rs",
+            "sha256": "14c02cc5e713cd07a74fb21e51cda0326bc8d4d1d86628bd83eb7701ad5ed50a"
+          },
+          {
+            "path": "src-tauri/src/hwped/forms.rs",
+            "sha256": "c051c0f140512d8195c1367e0dc0afba7eb9c6094c4c158c3681a1aee48354e9"
+          },
+          {
+            "path": "src-tauri/src/hwped/forms/tests.rs",
+            "sha256": "ef719f25e7676043b80e79d96e2b0eafb6482fb4b7c48b817720617bb10e7cb5"
+          },
+          {
+            "path": "src/lib/hwped.ts",
+            "sha256": "221c01d116fada2e95c9a7e6c56ef738899ef68081315779f37e03e448c2ff38"
+          }
+        ]
+      }
+    },
+    {
+      "name": "hwped_apply_form_bindings",
+      "module": "src-tauri/src/hwped.rs",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_apply_form_bindings",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/hwped.rs::hwped_apply_form_bindings owns its request and awaits tauri::async_runtime::spawn_blocking calling src-tauri/src/hwped/forms.rs::apply_now; a JoinError becomes the display-only hwped_task_failed String.",
+        "src-tauri/src/hwped/forms.rs::apply_now refuses cross-format and malformed requests before the engine runs, stages the source through src-tauri/src/hwped.rs::stage_document, runs discovery for the reflow preflight, writes one exclusive apply_form_bindings op with host-made receipt and preview paths into the private tempdir, and runs the bounded `ahwp edit --verify [--dry-run]` through src-tauri/src/hwped.rs::run_hwp_feature_ok."
+      ],
+      "workerBoundary": "src-tauri/src/hwped.rs::hwped_apply_form_bindings awaits tauri::async_runtime::spawn_blocking before any filesystem access or process wait runs; owned values cross the await and every domain error String passes through unchanged.",
+      "syncCallers": [
+        "No Rust or CLI caller invokes hwped_apply_form_bindings synchronously; src-tauri/src/hwped/forms.rs::apply_now stays private behind the spawn_blocking boundary."
+      ],
+      "mutationKey": {
+        "readOnly": true,
+        "lexicalPaths": [],
+        "aliasPaths": [],
+        "sharedAdmissionEntry": "hwped_apply_form_bindings performs no filesystem mutation outside its private per-call tempdir: src-tauri/src/hwped/forms.rs::apply_now reads a workspace source in place and returns receipt, preview and (on apply) document bytes over IPC, so no workspace mutation admission is required.",
+        "postAdmissionPreconditions": [
+          "No mutation admission is required: the command performs no workspace filesystem mutation, so there is no transaction key to admit and nothing to release."
+        ],
+        "domainLockOrder": "No path admission exists; the command takes no domain lock, so there is no admission-before-domain-lock order to record."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=4",
+          "passed": 92,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/hwped.ts"
+        ],
+        "payload": "src/lib/hwped.ts builds the @hwp-editor/core Tauri engine, whose applyFormBindings invokes hwped_apply_form_bindings only after hwped_capabilities advertises formBindings v1.",
+        "terminalNoticeOwner": "The hwp-editor Form panel inside the hwped editor surface owns preview, apply and refusal display for its document.",
+        "classifier": "The client maps hwped_bad_request, hwp_version and hwp_failed prefixes to bad_request, version and failed; engine refusals surface as engine_refused without engine prose.",
+        "successRetention": "A dry run keeps the reviewed preview; an apply becomes one undoable editor transition.",
+        "failureReasons": "The document and pending preview are unchanged on failure; the panel shows the cause and next step.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure"
+        ],
+        "contractTests": [
+          "src-tauri/src/hwped/forms/tests.rs::capabilities_advertise_form_bindings_only_from_engine_2_0_0",
+          "src-tauri/src/hwped/forms/tests.rs::discovery_returns_the_engine_catalogue_and_removes_its_directory",
+          "src-tauri/src/hwped/forms/tests.rs::discovery_on_an_older_engine_is_refused_by_version",
+          "src-tauri/src/hwped/forms/tests.rs::a_dry_run_returns_receipt_and_preview_without_document_bytes",
+          "src-tauri/src/hwped/forms/tests.rs::an_apply_returns_same_format_bytes_and_one_exclusive_host_owned_op",
+          "src-tauri/src/hwped/forms/tests.rs::a_refused_plan_is_reported_by_class_without_engine_prose_or_paths",
+          "src-tauri/src/hwped/forms/tests.rs::growth_without_reflow_is_refused_before_the_edit_runs",
+          "src-tauri/src/hwped/forms/tests.rs::a_cross_format_request_is_refused_before_the_engine_runs",
+          "src-tauri/src/hwped/forms/tests.rs::caller_artifact_paths_and_non_literal_values_never_reach_the_engine",
+          "src-tauri/src/hwped/forms/tests.rs::a_workspace_document_path_keeps_the_json_edit_containment"
+        ],
+        "workerProof": "hwped::phase08_21::phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure holds the hwped_apply_form_bindings future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.",
+        "platformScope": "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
+        "limits": "Containment covers the source path and the host-made artifact paths; engine-side semantics of the plan are the engine's own contract.",
+        "sourceCommit": "8049211c0feb4ed2a0e89b317fe1db4caa6c60ce",
+        "logSha256": "a1d819f261830624b5cb2f156d3b94952f06221858156efbcd1d0404ee35cc7e",
+        "sourceFiles": [
+          {
+            "path": "src-tauri/src/lib.rs",
+            "sha256": "9a452d5631a1750065e76942f56e0afa3c6045af27719cd726bb3841d1227d8b"
+          },
+          {
+            "path": "src-tauri/src/hwped.rs",
+            "sha256": "14c02cc5e713cd07a74fb21e51cda0326bc8d4d1d86628bd83eb7701ad5ed50a"
+          },
+          {
+            "path": "src-tauri/src/hwped/forms.rs",
+            "sha256": "c051c0f140512d8195c1367e0dc0afba7eb9c6094c4c158c3681a1aee48354e9"
+          },
+          {
+            "path": "src-tauri/src/hwped/forms/tests.rs",
+            "sha256": "ef719f25e7676043b80e79d96e2b0eafb6482fb4b7c48b817720617bb10e7cb5"
+          },
+          {
+            "path": "src/lib/hwped.ts",
+            "sha256": "221c01d116fada2e95c9a7e6c56ef738899ef68081315779f37e03e448c2ff38"
+          }
+        ]
+      }
     }
   ]
 }
