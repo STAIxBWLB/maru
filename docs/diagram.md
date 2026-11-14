@@ -261,7 +261,8 @@ explicit detach remain local operations. When a selected member belongs to an
 existing engine-backed dataset, the inspector also requests SDK diagnostics
 asynchronously. This is read-only feedback: it does not delay loading the
 document, rewrite the stored spec or add history. Results from a previous
-dataset or spec are ignored; Floorplan keeps its local-only validation path.
+dataset or spec are ignored. Floorplan's inspector diagnostics stay local-only;
+its structural applies pass the engine gate (see "Floorplan").
 
 **Detach and delete.** "Detach to freeform..." drops the dataset and the
 member markers after a confirm listing what is lost (types, order,
@@ -356,27 +357,64 @@ input to placed geometry, so editing one cannot move a cell, and no flow overlay
 is drawn yet. Rendering goes through the E3 writer
 (`render_svg`, `render_and_store`), which paints the finished document, so a
 floorplan export uses the same request envelope as the other families and a map
-with no `diagram_type` is recognized by its own shape. `layout_json`'s dispatch
-stays with E5 T4. The whole-scene determinism corpus carries one Floorplan case
+with no `diagram_type` is recognized by its own shape. `layout_json` keeps its five-family
+dispatch; Floorplan has its own entry. The whole-scene determinism corpus carries one Floorplan case
 (`testdata/floorplan-scene.json`, a synthetic nested map), so the platform
 matrix hashes this family's geometry and both SVG themes beside the five
 `diagram_type` families.
 
-**Validation and the apply gate (temporary exception).** The engine validates a
-Floorplan document (`validate_floorplan_json` in
-`maru-diagram-engine/src/floorplan.rs`, `#553` E5 T1) and lays it out and renders
-it (E5 T2, above), but the apply gate still runs the local floor before the
-engine call is switched on (E5 T4). Until then `validateFloorplanSpec` is the
-whole gate for import, generation and every structural apply
-(`validateSemanticDraft` in `semanticApply.ts` skips the engine call for
-floorplan only): required `project.name`, node `id`/`label`/`kind` with the
-11 kinds, unique ids, parents that exist and do not cycle
-(`diagram.semantic.parentCycle`), edge endpoints and kinds, flows with at
-least two steps (`diagram.semantic.flowTooShort`) whose refs exist, and tour
-refs. A ref is a node id or a file path: it contains `/`, or is dotted with a
-first segment that is not a node id (`app.py`); `api.ghost` under an existing
-`api` is dangling. Every problem names its field. The five Archify types keep
-the pinned-engine gate unchanged. #553 E5 T4 removes this exception.
+**Validation and the apply gate (`#553` E5 T4).** Every structural apply on a
+Floorplan dataset passes the engine before it commits, like the five
+`diagram_type` families. `validateSemanticDraft` in `semanticApply.ts` has no
+Floorplan exception: `validateCandidate("floorplan", spec)` in `engine.ts` runs
+the local floor (`validateFloorplanSpec`, which names the field), then the
+engine's own Floorplan entry `layout_floorplan_json`. That entry runs the
+document rules (`validate_floorplan_json` in `maru-diagram-engine/src/floorplan.rs`,
+E5 T1) and lays the map out (E5 T2), so a map the engine cannot lay out never
+commits. The receipt must name the exact submitted source. A Floorplan document
+carries no `diagram_type`, so it never goes through `validate_diagram_json` or
+`layout_json`, and a spec with a `diagram_type` envelope is refused as not a
+Floorplan document. Engine refusals reach the user as
+`diagram.semantic.engineRejected` with the engine's cause and fix, for example
+`floorplan/nesting-depth` (past 64 levels), `floorplan/node-count` and
+`floorplan/edge-count` (size caps), and `floorplan/parent-cycle`. A refusal, an
+unavailable engine or a document change during validation leaves both the
+document and undo history untouched, as for every family (§Semantic editing).
+
+The local floor checks: required `project.name`, node `id`/`label`/`kind` with
+the 11 kinds, unique ids, parents that exist and do not cycle
+(`diagram.semantic.parentCycle`), edge endpoints and kinds, flows with at least
+two steps (`diagram.semantic.flowTooShort`) whose refs exist, and tour refs. A
+ref is a node id or a file path: it contains `/`, or is dotted with a first
+segment that is not a node id (`app.py`); `api.ghost` under an existing `api` is
+dangling. Every problem names its field.
+
+Which paths reach the engine:
+
+| Path | Floorplan check |
+|---|---|
+| Inspector and structure-editor applies (`applyValidatedSemanticEdit`) | local floor, then engine, before the commit |
+| Deleting semantic members: keyboard Delete, the Edit ribbon, the inspector's Remove (`deleteSelection`) | cascade preview, then engine (`validateSemanticDraft`), before the commit |
+| Scoped regeneration apply in the Generate dialog (`applyValidatedProposal`) | local floor while generating, then engine before the commit |
+| "Apply as new" in the Generate dialog (`handleApplyNew`) | local floor while generating, then engine before the document is installed |
+| Generation itself (`finishFloorplanJob`, until a candidate is ready) | local floor only |
+| Inspector read-only diagnostics for an existing dataset | local floor only |
+
+Generation produces a candidate but commits nothing, so both dialog applies
+admit it through `validateCandidate` first. "Apply as new" validates the
+candidate before it replaces the document. The scoped apply validates every
+Floorplan dataset its proposal upserts before `withSnapshot`. The stale check,
+the engine input and the identity checks after each await all use one captured
+snapshot: the memory revision is computed from that snapshot, and a document
+change while it is computed or while the engine runs is stale. "Apply as new"
+binds the same way: it captures the document and the dialog's apply generation
+at the click, and after the engine and the replace confirm it imports nothing if
+the dialog was closed or the document changed. Whether to confirm the replace is
+read at that point, not at the click. A refusal,
+an unavailable engine (the dialog shows its notice) or a receipt mismatch commits
+nothing to the document or the undo history. The read-only diagnostics stay local
+so that inspecting a map neither loads the engine nor rewrites the stored source
+(§Semantic editing).
 
 **Editing.** The inspector edits label (canvas title), summary, kind and
 parent (a node cannot move under its own descendants), and an edge's kind;
@@ -390,7 +428,8 @@ confirm and commits as one undo step through `planSemanticEdit`.
 **Generation.** The Generate dialog offers Floorplan. The prompt carries the
 schema summary and the selected source file paths, as for the other types;
 the candidate gets `$schema` if missing and is refused on local validation
-with the field named. Scanning a repository belongs to #536.
+with the field named. Applying it into an existing dataset passes the engine
+first (see "Validation and the apply gate"). Scanning a repository belongs to #536.
 
 **Interchange.** `floorplan-json` imports `<name>.floorplan.json`, and a file
 named exactly `architecture.json` whose `$schema` is

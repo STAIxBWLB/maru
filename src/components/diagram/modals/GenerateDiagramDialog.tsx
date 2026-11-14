@@ -28,7 +28,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { diagramRevision } from "../../../lib/diagram";
-import { withSnapshot } from "../../../lib/diagram/actions";
 import { isEngineUnavailable } from "../../../lib/diagram/engine";
 import {
   createGenerationJob,
@@ -40,7 +39,8 @@ import {
 import { createGenerationHost } from "../../../lib/diagram/generationHost";
 import { mermaidSemanticType, mermaidToDocDetailed } from "../../../lib/diagram/mermaid";
 import { serializeDoc } from "../../../lib/diagram/persistence";
-import { diffProposal, isBlockingDiagnostic, prepareProposalApply } from "../../../lib/diagram/proposal";
+import { diffProposal, isBlockingDiagnostic } from "../../../lib/diagram/proposal";
+import { applyValidatedProposal, validateSemanticDraft, type SemanticValidationHost } from "../../../lib/diagram/semanticApply";
 import { SEMANTIC_DIAGRAM_TYPES, type SemanticDiagramType } from "../../../lib/diagram/reportTypes";
 import {
   SEMANTIC_TYPES,
@@ -53,7 +53,7 @@ import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { useTranslation, type Locale } from "../../../lib/i18n";
 import { useShellSettings } from "../../../lib/shellSettingsStore";
-import { useDiagramCoalescer, useDiagramStore, useDiagramHostOverride } from "../DiagramStoreContext";
+import { useDiagramCoalescer, useDiagramStore, useDiagramHostOverride, useDiagramValidationHost } from "../DiagramStoreContext";
 
 export interface GenerateDiagramDialogProps {
   open: boolean;
@@ -125,6 +125,7 @@ export function GenerateDiagramDialog({
 
   const cancelledRef = useRef(false);
   const sharedHostOverride = useDiagramHostOverride();
+  const validationHost = useDiagramValidationHost();
   const hostRef = useRef<(GenerationHost & { cancel?: () => void }) | null>(null);
 
   // Clear transient run state whenever the dialog opens; keep the form so a
@@ -148,7 +149,17 @@ export function GenerateDiagramDialog({
     hostRef.current?.cancel?.();
   };
 
+  // An apply-as-new that awaits the engine or a confirm must not land after the
+  // dialog closed or the document moved (T120-R5): closing and unmounting bump
+  // this generation, and `dirty` is read when the import would happen.
+  const applyGenerationRef = useRef(0);
+  const dirtyRef = useRef(dirty);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  useEffect(() => () => { applyGenerationRef.current += 1; }, []);
+  useEffect(() => { if (!open) applyGenerationRef.current += 1; }, [open]);
+
   const handleClose = () => {
+    applyGenerationRef.current += 1;
     if (busy) cancelRun();
     onClose();
   };
@@ -226,21 +237,57 @@ export function GenerateDiagramDialog({
 
   const applyDisabled = !candidate || !proposal || blockingDiagnostics.length > 0 || applying;
 
+  /** The run's engine host; an unavailable engine also raises the dialog notice. */
+  const guardedValidationHost = (): SemanticValidationHost => {
+    const host = hostRef.current ?? hostOverride ?? sharedHostOverride ?? validationHost;
+    return {
+      validateCandidate: async (type, spec) => {
+        try {
+          return await host.validateCandidate(type, spec);
+        } catch (error) {
+          if (isEngineUnavailable(error)) setEngineUnavailable(true);
+          throw error;
+        }
+      },
+    };
+  };
+
   const handleApplyNew = async () => {
     if (!candidate || applying) return;
-    if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
-    onImportDoc(projectSemanticDocument(candidate).doc);
-    onClose();
+    const generation = applyGenerationRef.current;
+    const startDoc = store.getState().doc;
+    const superseded = () => applyGenerationRef.current !== generation || store.getState().doc !== startDoc;
+    setApplying(true);
+    try {
+      // Generation keeps the local floor for Floorplan, so installing the
+      // candidate as a new document passes the engine first (#553 E5 T4).
+      if (candidate.diagramType === "floorplan") {
+        const draft = projectSemanticDocument(candidate).doc;
+        const diagnostics = await validateSemanticDraft(draft, [candidate.id], guardedValidationHost());
+        if (superseded()) return;
+        if (diagnostics.length > 0) {
+          setApplyMessage({ kind: "invalid", diagnostics });
+          return;
+        }
+      }
+      if (dirtyRef.current && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
+      if (superseded()) return;
+      onImportDoc(projectSemanticDocument(candidate).doc);
+      onClose();
+    } finally {
+      setApplying(false);
+    }
   };
 
   const handleApplyScoped = async () => {
     if (!job || !proposal) return;
     setApplying(true);
     try {
-      const state = store.getState();
-      const currentRevision =
-        job.meta.baseMemoryRevision === "" ? "" : await diagramRevision(serializeDoc(state.doc));
-      const outcome = prepareProposalApply(state, proposal, currentRevision);
+      const revisionOf = (doc: DiagramDoc) =>
+        job.meta.baseMemoryRevision === "" ? "" : diagramRevision(serializeDoc(doc));
+      // Floorplan candidates were validated locally while generating; this
+      // admits them through the engine before the commit (#553 E5 T4).
+      const outcome = await applyValidatedProposal(store, proposal, revisionOf, guardedValidationHost(), coalescer);
       if (outcome.status === "stale") {
         setJob((current) => (current ? markStaleIfBaseChanged(current, outcome.currentRevision) : current));
         setApplyMessage({ kind: "stale" });
@@ -250,7 +297,6 @@ export function GenerateDiagramDialog({
         setApplyMessage({ kind: "invalid", diagnostics: outcome.diagnostics });
         return;
       }
-      store.setState(withSnapshot(outcome.transformer, coalescer));
       onClose();
     } finally {
       setApplying(false);
@@ -516,7 +562,7 @@ export function GenerateDiagramDialog({
           ) : null}
 
           <div className="maru-diagram-ie-actions">
-            <button type="button" onClick={handleClose}>
+            <button type="button" onClick={handleClose} data-testid="gen-close">
               {t("diagram.generate.close")}
             </button>
             {mermaid.trim().length > 0 ? (

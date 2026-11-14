@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { defaultCoalescer, undo, withSnapshot } from "./actions";
 import { FLOORPLAN_FIXTURE } from "./__fixtures__/floorplan";
@@ -11,10 +11,11 @@ import { deserializeDoc, serializeDoc } from "./persistence";
 import { prepareProposalApply } from "./proposal";
 import { validateSemanticSpec, type SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDataset, projectSemanticDocument, resolveSemanticMember, semanticLosses, writeThroughText } from "./semantic";
-import { applyValidatedSemanticEdit, validateSemanticDraft } from "./semanticApply";
+import { applyValidatedProposal, applyValidatedSemanticEdit, validateSemanticDraft } from "./semanticApply";
 import { addSemanticEntry, planSemanticEdit, removeSemanticEntries, setSpecField } from "./semanticEdit";
 import { createDiagramStore } from "./state";
 import { createEmptyDoc, createInitialEphemeral } from "./types";
+import { pinnedEngineHost as engineHost } from "./__fixtures__/engineHost";
 
 const fixture = () => structuredClone(FLOORPLAN_FIXTURE);
 const nodeIndex = (spec: Record<string, unknown>, id: string) =>
@@ -27,7 +28,7 @@ function storeOf(spec = fixture()) {
 const specOf = (store: ReturnType<typeof storeOf>) =>
   (store.getState().doc.datasets!.find((d) => d.id === "fp") as SemanticSpecDataset).spec;
 
-/** Engine host that must never be called for floorplan. */
+/** Generation keeps the local floor for floorplan candidates; this host must not be reached there. */
 const refusingHost = {
   validateCandidate: async () => {
     throw new Error("engine must not be called for floorplan");
@@ -134,7 +135,7 @@ describe("floorplan structural edge cases", () => {
     ] };
     const store = storeOf(spec);
     expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(["a", "b"]);
-    const out = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "b"), refusingHost);
+    const out = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "b"), engineHost);
     expect(out.status).toBe("applied");
     const dataset = store.getState().doc.datasets![0] as SemanticSpecDataset;
     expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(projectSemanticDataset(dataset).nodes.map((n) => n.id));
@@ -166,6 +167,96 @@ describe("floorplan structural edge cases", () => {
     expect(next.doc.nodes.map((n) => n.id)).toEqual(["b", "a"]);
     const dataset = next.doc.datasets![0] as SemanticSpecDataset;
     expect(next.doc.nodes.map((n) => n.id)).toEqual(projectSemanticDataset(dataset).nodes.map((n) => n.id));
+  });
+
+  describe("scoped regeneration apply passes the engine (#553 E5 T4, T120-R1)", () => {
+    const chain = (levels: number) => ({
+      $schema: "floorplan/architecture@1",
+      project: { name: "Chain" },
+      nodes: Array.from({ length: levels }, (_, index) => ({
+        id: `n${index}`, label: `Level ${index}`, kind: "feature", ...(index > 0 ? { parent: `n${index - 1}` } : {}),
+      })),
+      edges: [],
+    });
+    async function regenerated(baseSpec: Record<string, unknown>, output: Record<string, unknown>) {
+      const store = storeOf(baseSpec);
+      const job = createGenerationJob({
+        id: "regen",
+        diagramType: "floorplan",
+        prompt: { requirements: "regroup", locale: "en" },
+        doc: store.getState().doc,
+        baseMemoryRevision: "",
+        target: { datasetId: "fp", spec: baseSpec },
+        scope: new Set(store.getState().doc.nodes.map((n) => n.id)),
+      });
+      // Generation keeps the local floor: the host is never asked here.
+      const done = await runGenerationJob(job, { runAgent: async () => JSON.stringify(output), validateCandidate: refusingHost.validateCandidate });
+      expect(done.state).toBe("ready");
+      return { store, proposal: done.proposal! };
+    }
+
+    it("commits an engine-approved regeneration as one undo step", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(3));
+      const validateCandidate = vi.fn(engineHost.validateCandidate);
+      const outcome = await applyValidatedProposal(store, proposal, () => "", { validateCandidate });
+      expect(outcome.status).toBe("applied");
+      expect(validateCandidate).toHaveBeenCalledWith("floorplan", expect.anything());
+      expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    });
+
+    it("refuses a regeneration the engine rejects, with no doc or history commit", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(66));
+      const before = store.getState().doc;
+      const outcome = await applyValidatedProposal(store, proposal, () => "", engineHost);
+      expect(outcome.status).toBe("invalid");
+      if (outcome.status !== "invalid") return;
+      expect(outcome.diagnostics[0]?.key).toBe("diagram.semantic.engineRejected");
+      expect(String(outcome.diagnostics[0]?.params?.message)).toContain("floorplan/nesting-depth");
+      expect(store.getState().doc).toBe(before);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    });
+
+    it("fails closed on an unavailable engine, a receipt mismatch and a document change during validation", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(3));
+      const before = store.getState().doc;
+      const unavailable = await applyValidatedProposal(store, proposal, () => "", { validateCandidate: async () => { throw new Error("engine unavailable"); } });
+      expect(unavailable).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.engineValidationFailed" }] });
+      const mismatch = await applyValidatedProposal(store, proposal, () => "", { validateCandidate: async () => { throw new Error("The engine receipt does not match the submitted semantic spec"); } });
+      expect(mismatch.status).toBe("invalid");
+      expect(store.getState().doc).toBe(before);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+
+      let settle!: (value: { ok: boolean; errors: string[]; warnings: string[] }) => void;
+      const pending = applyValidatedProposal(store, proposal, () => "", { validateCandidate: () => new Promise((resolve) => { settle = resolve; }) });
+      await vi.waitFor(() => expect(settle).toBeTypeOf("function"));
+      store.setState((state) => ({ ...state, doc: { ...state.doc, docTitle: "Changed during validation" } }));
+      const changed = store.getState().doc;
+      settle({ ok: true, errors: [], warnings: [] });
+      expect(await pending).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] });
+      expect(store.getState().doc).toBe(changed);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    });
+
+    it("binds the revision, validation and identity check to one snapshot (T120-R4)", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(3));
+      const validateCandidate = vi.fn(engineHost.validateCandidate);
+      let release!: (revision: string) => void;
+      const revisedDocs: unknown[] = [];
+      const pending = applyValidatedProposal(store, proposal, (doc) => {
+        revisedDocs.push(doc);
+        return new Promise<string>((resolve) => { release = resolve; });
+      }, { validateCandidate });
+      const captured = store.getState().doc;
+      // The document moves while its revision is still being computed.
+      store.setState((state) => ({ ...state, doc: { ...state.doc, docTitle: "Newer edit" } }));
+      const newer = store.getState().doc;
+      release("");
+      expect(await pending).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] });
+      expect(revisedDocs).toEqual([captured]);
+      expect(validateCandidate).not.toHaveBeenCalled();
+      expect(store.getState().doc).toBe(newer);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    });
   });
 
   it("handles a __proto__ node id without turning ids into objects", () => {
@@ -226,9 +317,9 @@ describe("floorplan edge identity", () => {
   it("changing an edge kind from event to http clears the dash", async () => {
     const store = storeOf(withEdges());
     expect(store.getState().doc.edges[0]!.dash).toBe("dashed");
-    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "http"), refusingHost)).status).toBe("applied");
+    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "http"), engineHost)).status).toBe("applied");
     expect(store.getState().doc.edges[0]!.dash).toBe("solid");
-    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "queue"), refusingHost)).status).toBe("applied");
+    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "queue"), engineHost)).status).toBe("applied");
     expect(store.getState().doc.edges[0]!.dash).toBe("dashed");
   });
 });
@@ -331,13 +422,13 @@ describe("floorplan projection", () => {
 });
 
 describe("floorplan editing (AC2)", () => {
-  it("edits kind and parent as one undo step each, through the local gate only", async () => {
+  it("edits kind and parent as one undo step each, through the engine gate", async () => {
     const store = storeOf();
     const before = JSON.stringify(store.getState().doc);
     const index = nodeIndex(specOf(store), "ahub.cli");
-    const kind = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "kind", "script"), refusingHost);
+    const kind = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "kind", "script"), engineHost);
     expect(kind.status).toBe("applied");
-    const moved = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "parent", "amem"), refusingHost);
+    const moved = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "parent", "amem"), engineHost);
     expect(moved.status).toBe("applied");
     const doc = store.getState().doc;
     const amem = doc.nodes.find((n) => n.id === "amem")!;
@@ -352,7 +443,7 @@ describe("floorplan editing (AC2)", () => {
   it("refuses a parent cycle without committing", async () => {
     const store = storeOf();
     const before = store.getState().doc;
-    const outcome = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "ahub.hub.tasks"), refusingHost);
+    const outcome = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "ahub.hub.tasks"), engineHost);
     expect(outcome.status).toBe("invalid");
     if (outcome.status === "invalid") expect(outcome.diagnostics.map((d) => d.key)).toContain("diagram.semantic.parentCycle");
     expect(store.getState().doc).toBe(before);
@@ -362,10 +453,10 @@ describe("floorplan editing (AC2)", () => {
   it("adds a nested node and an id-less edge", async () => {
     const store = storeOf();
     const add = await applyValidatedSemanticEdit(store, "fp",
-      addSemanticEntry("floorplan", "nodes", { id: "ahub.hub.audit", label: "Audit", kind: "feature", parent: "ahub.hub" }), refusingHost);
+      addSemanticEntry("floorplan", "nodes", { id: "ahub.hub.audit", label: "Audit", kind: "feature", parent: "ahub.hub" }), engineHost);
     expect(add.status).toBe("applied");
     const edge = await applyValidatedSemanticEdit(store, "fp",
-      addSemanticEntry("floorplan", "edges", { from: "ahub.hub.audit", to: "github", kind: "http" }), refusingHost);
+      addSemanticEntry("floorplan", "edges", { from: "ahub.hub.audit", to: "github", kind: "http" }), engineHost);
     expect(edge.status).toBe("applied");
     const spec = specOf(store);
     expect((spec.edges as Record<string, unknown>[]).at(-1)).toEqual({ from: "ahub.hub.audit", to: "github", kind: "http" });
@@ -413,7 +504,7 @@ describe("floorplan editing (AC2)", () => {
     expect(JSON.stringify(store.getState().doc)).toBe(before);
     if (plan.status !== "applied") return;
     const draft = plan.transformer(store.getState()).doc;
-    expect(await validateSemanticDraft(draft, ["fp"], refusingHost)).toEqual([]);
+    expect(await validateSemanticDraft(draft, ["fp"], engineHost)).toEqual([]);
     store.setState(withSnapshot(plan.transformer, defaultCoalescer()));
     expect(store.getState().doc.nodes.some((n) => n.id.startsWith("ahub"))).toBe(false);
     expect(store.getState().ephemeral.history.past).toHaveLength(1);

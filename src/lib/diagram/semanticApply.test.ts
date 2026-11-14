@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { FLOORPLAN_FIXTURE } from "./__fixtures__/floorplan";
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { undo } from "./actions";
 import { archifySpecToDataset } from "./archifyCodec";
+import { floorplanSpecToDataset } from "./floorplanCodec";
 import { pinnedEngineHost as engineHost } from "./__fixtures__/engineHost";
 import type { SemanticDiagramType, SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDocument } from "./semantic";
@@ -122,6 +124,116 @@ describe("engine admission before semantic apply", () => {
     let settle!: (value: { ok: boolean; errors: string[]; warnings: string[] }) => void;
     const validateCandidate = vi.fn(() => new Promise<{ ok: boolean; errors: string[]; warnings: string[] }>((resolve) => { settle = resolve; }));
     const pending = applyValidatedSemanticEdit(store, "ds", transform, { validateCandidate });
+    store.setState((state) => ({ ...state, doc: { ...state.doc, docTitle: "Changed during validation" } }));
+    const changed = store.getState().doc;
+    settle({ ok: true, errors: [], warnings: [] });
+    expect(await pending).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] });
+    expect(store.getState().doc).toBe(changed);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+  });
+});
+
+/** A parent chain `levels` deep; 65 is the deepest a Floorplan map may nest. */
+function floorplanChain(levels: number): Record<string, unknown> {
+  const nodes = Array.from({ length: levels }, (_, index) => ({
+    id: `n${index}`,
+    label: `Level ${index}`,
+    kind: "feature",
+    ...(index > 0 ? { parent: `n${index - 1}` } : {}),
+  }));
+  return { $schema: "floorplan/architecture@1", project: { name: "Nesting chain" }, nodes, edges: [] };
+}
+
+describe("floorplan edits pass the engine before they commit (#553 E5 T4)", () => {
+  function floorplanStore(spec: Record<string, unknown> = structuredClone(FLOORPLAN_FIXTURE)) {
+    const dataset = floorplanSpecToDataset(spec, { id: "ds" }).dataset;
+    return { store: createDiagramStore({ doc: projectSemanticDocument(dataset).doc, ephemeral: createInitialEphemeral() }) };
+  }
+  it("sends a floorplan edit to the engine gate instead of a local-only check", async () => {
+    const { store } = floorplanStore();
+    const validateCandidate = vi.fn(engineHost.validateCandidate);
+    const result = await applyValidatedSemanticEdit(
+      store,
+      "ds",
+      addSemanticEntry("floorplan", "nodes", { id: "probe", label: "Probe", kind: "library" }),
+      { validateCandidate },
+    );
+    expect(result.status).toBe("applied");
+    expect(validateCandidate).toHaveBeenCalledTimes(1);
+    expect(validateCandidate.mock.calls[0]?.[0]).toBe("floorplan");
+    expect(store.getState().ephemeral.history.past).toHaveLength(1);
+  });
+
+  it("commits an engine-approved floorplan edit as one undo step", async () => {
+    const { store } = floorplanStore();
+    const before = store.getState().doc;
+    const result = await applyValidatedSemanticEdit(
+      store,
+      "ds",
+      addSemanticEntry("floorplan", "nodes", { id: "probe", label: "Probe", kind: "library" }),
+      engineHost,
+    );
+    expect(result.status).toBe("applied");
+    store.setState(undo());
+    expect(store.getState().doc).toEqual(before);
+  });
+
+  it("refuses an edit only the engine catches, naming cause and next step, with no doc or history commit", async () => {
+    // The local floor has no nesting limit, so a 66th level reaches the engine,
+    // whose floorplan/nesting-depth rule refuses it.
+    const { store } = floorplanStore(floorplanChain(65));
+    const before = store.getState().doc;
+    const result = await applyValidatedSemanticEdit(
+      store,
+      "ds",
+      addSemanticEntry("floorplan", "nodes", { id: "n65", label: "Too deep", kind: "feature", parent: "n64" }),
+      engineHost,
+    );
+    expect(result.status).toBe("invalid");
+    if (result.status !== "invalid") throw new Error("Expected engine refusal");
+    const [diagnostic] = result.diagnostics;
+    expect(diagnostic?.key).toBe("diagram.semantic.engineRejected");
+    const message = String(diagnostic?.params?.message);
+    expect(message).toContain("floorplan/nesting-depth");
+    expect(message).toMatch(/64 levels/);
+    expect(message).toMatch(/flatten the deepest frames/);
+    expect(store.getState().doc).toBe(before);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("keeps the local floor's field-named refusal ahead of the engine call", async () => {
+    const { store } = floorplanStore();
+    const before = store.getState().doc;
+    const validateCandidate = vi.fn(engineHost.validateCandidate);
+    const result = await applyValidatedSemanticEdit(
+      store,
+      "ds",
+      addSemanticEntry("floorplan", "nodes", { id: "bad", label: "Bad kind", kind: "not-a-kind" }),
+      { validateCandidate },
+    );
+    expect(result.status).toBe("invalid");
+    if (result.status !== "invalid") throw new Error("Expected refusal");
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ key: "diagram.validation.specMeta", params: expect.objectContaining({ field: expect.stringMatching(/\.kind$/) }) }));
+    expect(validateCandidate).not.toHaveBeenCalled();
+    expect(store.getState().doc).toBe(before);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+  });
+
+  it("fails closed for floorplan when the engine is unavailable or the document changes during validation", async () => {
+    const { store } = floorplanStore();
+    const before = store.getState().doc;
+    const transform = addSemanticEntry("floorplan", "nodes", { id: "probe", label: "Probe", kind: "library" });
+    const failed = await applyValidatedSemanticEdit(store, "ds", transform, {
+      validateCandidate: async () => { throw new Error("engine unavailable"); },
+    });
+    expect(failed).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.engineValidationFailed" }] });
+    expect(store.getState().doc).toBe(before);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+
+    let settle!: (value: { ok: boolean; errors: string[]; warnings: string[] }) => void;
+    const pending = applyValidatedSemanticEdit(store, "ds", transform, {
+      validateCandidate: () => new Promise((resolve) => { settle = resolve; }),
+    });
     store.setState((state) => ({ ...state, doc: { ...state.doc, docTitle: "Changed during validation" } }));
     const changed = store.getState().doc;
     settle({ ok: true, errors: [], warnings: [] });

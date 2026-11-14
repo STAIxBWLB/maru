@@ -67,6 +67,15 @@ export interface NativeE2eDiagramStaticExportResult {
     applied: boolean;
     historyAfterApply: number;
     undoRestoredDocument: boolean;
+    /** #553 E5 T4: a Floorplan apply and refusal through the real engine. */
+    floorplan: {
+      applied: boolean;
+      historyAfterApply: number;
+      refused: boolean;
+      unchangedAfterRefusal: boolean;
+      historyAfterRefusal: number;
+      refusalMessage: string;
+    };
   };
 }
 
@@ -556,6 +565,7 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           { validateEngineCandidate, renderEngineCandidate },
           { exportVerifiedSemanticArtifact },
           { diagramExportBlobToPath },
+          { floorplanSpecToDataset },
         ] = await Promise.all([
           import("./diagram/types"),
           import("./diagram/archifyCodec"),
@@ -568,6 +578,7 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           import("./diagram/engine"),
           import("./diagram/verifiedExport"),
           import("./diagram"),
+          import("./diagram/floorplanCodec"),
         ]);
 
         const workflowSpec = {
@@ -610,6 +621,36 @@ function bridgeNamespace(): MaruNativeE2eBridge {
           applied: applied.status === "applied",
           historyAfterApply,
           undoRestoredDocument: JSON.stringify(lifecycleStore.getState().doc) === JSON.stringify(beforeApply),
+          floorplan: await (async () => {
+            // Synthetic maps: a small nested one for the accepted edit, and a
+            // 65-level chain whose 66th level only the engine refuses.
+            const engineHost = { validateCandidate: (type: string, spec: unknown) => validateEngineCandidate(type, spec) };
+            const chain = (levels: number) => ({
+              $schema: "floorplan/architecture@1",
+              project: { name: "네이티브 중첩 Native nesting" },
+              nodes: Array.from({ length: levels }, (_, index) => ({
+                id: `n${index}`, label: `Level ${index}`, kind: "feature", ...(index > 0 ? { parent: `n${index - 1}` } : {}),
+              })),
+              edges: [],
+            });
+            const accepted = floorplanSpecToDataset(chain(3), { id: "native-floorplan-apply" }).dataset;
+            const acceptedStore = createDiagramStore({ doc: projectSemanticDocument(accepted).doc, ephemeral: createInitialEphemeral() });
+            const apply = await applyValidatedSemanticEdit(acceptedStore, accepted.id,
+              addSemanticEntry("floorplan", "nodes", { id: "n3", label: "웹 UI", kind: "ui", parent: "n2" }), engineHost);
+            const deep = floorplanSpecToDataset(chain(65), { id: "native-floorplan-refusal" }).dataset;
+            const deepStore = createDiagramStore({ doc: projectSemanticDocument(deep).doc, ephemeral: createInitialEphemeral() });
+            const beforeDeep = deepStore.getState().doc;
+            const refusal = await applyValidatedSemanticEdit(deepStore, deep.id,
+              addSemanticEntry("floorplan", "nodes", { id: "n65", label: "Too deep", kind: "feature", parent: "n64" }), engineHost);
+            return {
+              applied: apply.status === "applied",
+              historyAfterApply: acceptedStore.getState().ephemeral.history.past.length,
+              refused: refusal.status === "invalid",
+              unchangedAfterRefusal: deepStore.getState().doc === beforeDeep,
+              historyAfterRefusal: deepStore.getState().ephemeral.history.past.length,
+              refusalMessage: refusal.status === "invalid" ? refusal.diagnostics.map((item) => String(item.params?.message ?? item.key)).join(" | ") : "",
+            };
+          })(),
         };
 
         const nativeSpec = structuredClone(SEMANTIC_FIXTURES.architecture);

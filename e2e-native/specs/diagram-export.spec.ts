@@ -26,6 +26,14 @@ interface DiagramStaticExportResult {
     applied: boolean;
     historyAfterApply: number;
     undoRestoredDocument: boolean;
+    floorplan: {
+      applied: boolean;
+      historyAfterApply: number;
+      refused: boolean;
+      unchangedAfterRefusal: boolean;
+      historyAfterRefusal: number;
+      refusalMessage: string;
+    };
   };
 }
 
@@ -159,6 +167,15 @@ describe("native diagram engine apply and export", () => {
     assert.equal(result.applyProbe.applied, true, "engine-approved edit must apply");
     assert.equal(result.applyProbe.historyAfterApply, 1, "approved edit must create one undo step");
     assert.equal(result.applyProbe.undoRestoredDocument, true, "undo must restore the exact source document");
+    // #553 E5 T4: Floorplan edits pass the same engine gate in WKWebView.
+    const floorplan = result.applyProbe.floorplan;
+    assert.equal(floorplan.applied, true, "an engine-approved floorplan edit must apply");
+    assert.equal(floorplan.historyAfterApply, 1, "the floorplan edit must create one undo step");
+    assert.equal(floorplan.refused, true, "the engine must refuse a 66th nesting level");
+    assert.equal(floorplan.unchangedAfterRefusal, true, "a refused floorplan edit must leave the document unchanged");
+    assert.equal(floorplan.historyAfterRefusal, 0, "a refused floorplan edit must not create a history entry");
+    assert.match(floorplan.refusalMessage, /floorplan\/nesting-depth/);
+    assert.match(floorplan.refusalMessage, /flatten the deepest frames/, "the refusal must name the next step");
 
     assert.match(svg, /<svg\b/);
     assert.match(svg, /role="img"/);

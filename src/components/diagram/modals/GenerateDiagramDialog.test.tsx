@@ -11,6 +11,7 @@ import { EngineUnavailableError } from "../../../lib/diagram/engine";
 import type { GenerationHost } from "../../../lib/diagram/generation";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
+import { floorplanSpecToDataset } from "../../../lib/diagram/floorplanCodec";
 import { isSemanticSpecDataset, type SemanticSpecDataset } from "../../../lib/diagram/reportTypes";
 import { projectSemanticDocument } from "../../../lib/diagram/semantic";
 import type { DiagramStore } from "../../../lib/diagram/state";
@@ -380,6 +381,138 @@ describe("GenerateDiagramDialog", () => {
     expect(applied.nodes.find((n) => n.id === "web")?.title).toBe("Web");
     expect((applied.datasets ?? []).some(isSemanticSpecDataset)).toBe(true);
     expect(harness.onClose).toHaveBeenCalled();
+  });
+
+  describe("floorplan scoped apply passes the engine (#553 E5 T4)", () => {
+    const base = { $schema: "floorplan/architecture@1", project: { name: "Map" }, nodes: [
+      { id: "a", label: "A", kind: "service" },
+      { id: "b", label: "B", kind: "service" },
+    ], edges: [] };
+    const regenerated = { ...base, nodes: [...base.nodes, { id: "c", label: "C", kind: "library", parent: "a" }] };
+    const floorplanDoc = () => projectSemanticDocument(floorplanSpecToDataset(base, { id: "fp" }).dataset).doc;
+
+    async function regenerateFloorplan(validateCandidate: GenerationHost["validateCandidate"]) {
+      const host = stubHost({ runAgent: vi.fn(async () => JSON.stringify(regenerated)), validateCandidate: vi.fn(validateCandidate) });
+      const doc = floorplanDoc();
+      harness = renderDialog({ doc, selection: doc.nodes.map((item) => item.id), host });
+      await runGeneration();
+      await vi.waitFor(() => expect(query('[data-testid="gen-apply-scoped"]')).not.toBeNull());
+      // Generation keeps the local floor for floorplan: the engine is not asked yet.
+      expect(host.validateCandidate).not.toHaveBeenCalled();
+      withSnapshotSpy.mockClear();
+      return host;
+    }
+
+    it("refuses an engine-rejected regeneration without a commit", async () => {
+      const host = await regenerateFloorplan(async () => ({ ok: false, errors: ["node nests too deep; flatten the deepest frames"], warnings: [] }));
+      const before = probe!.getState().doc;
+      await click(query('[data-testid="gen-apply-scoped"]')!);
+      await vi.waitFor(() => expect(query('[data-testid="gen-apply-diagnostics"]')).not.toBeNull());
+      expect(host.validateCandidate).toHaveBeenCalledWith("floorplan", expect.anything());
+      expect(withSnapshotSpy).not.toHaveBeenCalled();
+      expect(probe!.getState().doc).toBe(before);
+      expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+      expect(harness!.onClose).not.toHaveBeenCalled();
+    });
+
+    it("refuses on an unavailable engine and shows the unavailable notice", async () => {
+      await regenerateFloorplan(async () => { throw new EngineUnavailableError("The diagram geometry engine is unavailable."); });
+      const before = probe!.getState().doc;
+      await click(query('[data-testid="gen-apply-scoped"]')!);
+      await vi.waitFor(() => expect(query('[data-testid="gen-engine-unavailable"]')).not.toBeNull());
+      expect(withSnapshotSpy).not.toHaveBeenCalled();
+      expect(probe!.getState().doc).toBe(before);
+      expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+      expect(harness!.onClose).not.toHaveBeenCalled();
+    });
+
+    it("commits an engine-approved regeneration once", async () => {
+      await regenerateFloorplan(async () => ({ ok: true, errors: [], warnings: [] }));
+      await click(query('[data-testid="gen-apply-scoped"]')!);
+      await vi.waitFor(() => expect(harness!.onClose).toHaveBeenCalled());
+      expect(withSnapshotSpy).toHaveBeenCalledTimes(1);
+      expect(probe!.getState().doc.nodes.some((item) => item.id.endsWith(":m2") || item.title === "C")).toBe(true);
+    });
+
+    describe("apply as new (T120-R3)", () => {
+      async function generateNewFloorplan(validateCandidate: GenerationHost["validateCandidate"]) {
+        const host = stubHost({ runAgent: vi.fn(async () => JSON.stringify(regenerated)), validateCandidate: vi.fn(validateCandidate) });
+        harness = renderDialog({ host });
+        const typeSelect = query<HTMLSelectElement>('[data-testid="gen-type-select"]')!;
+        await act(async () => {
+          typeSelect.value = "floorplan";
+          typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await runGeneration();
+        await vi.waitFor(() => expect(query('[data-testid="gen-apply-new"]')).not.toBeNull());
+        expect(host.validateCandidate).not.toHaveBeenCalled();
+        return host;
+      }
+
+      it("refuses an engine-only rejection, keeping the document and the dialog", async () => {
+        const host = await generateNewFloorplan(async () => ({ ok: false, errors: ["node nests too deep; flatten the deepest frames"], warnings: [] }));
+        const before = probe!.getState().doc;
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(query('[data-testid="gen-apply-diagnostics"]')).not.toBeNull());
+        expect(host.validateCandidate).toHaveBeenCalledWith("floorplan", expect.anything());
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).not.toHaveBeenCalled();
+        expect(probe!.getState().doc).toBe(before);
+      });
+
+      it("refuses on an unavailable engine and shows the notice", async () => {
+        await generateNewFloorplan(async () => { throw new EngineUnavailableError("The diagram geometry engine is unavailable."); });
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(query('[data-testid="gen-engine-unavailable"]')).not.toBeNull());
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).not.toHaveBeenCalled();
+      });
+
+      it("installs an engine-approved candidate", async () => {
+        const host = await generateNewFloorplan(async () => ({ ok: true, errors: [], warnings: [] }));
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(harness!.onClose).toHaveBeenCalled());
+        expect(host.validateCandidate).toHaveBeenCalledTimes(1);
+        expect(harness!.onImportDoc).toHaveBeenCalledTimes(1);
+      });
+
+      /** Hold the engine answer until the test releases it. */
+      async function generateWithHeldValidation() {
+        let release!: () => void;
+        const host = await generateNewFloorplan(() => new Promise((resolve) => {
+          release = () => resolve({ ok: true, errors: [], warnings: [] });
+        }));
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(host.validateCandidate).toHaveBeenCalled());
+        return () => act(async () => { release(); });
+      }
+
+      it("drops a pending apply when the dialog closes during validation (T120-R5)", async () => {
+        const release = await generateWithHeldValidation();
+        const before = probe!.getState().doc;
+        await click(query('[data-testid="gen-close"]')!);
+        expect(harness!.onClose).toHaveBeenCalledTimes(1);
+        await release();
+        await act(async () => { await Promise.resolve(); });
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).toHaveBeenCalledTimes(1);
+        expect(probe!.getState().doc).toBe(before);
+        expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+      });
+
+      it("drops a pending apply when the document changes during validation (T120-R5)", async () => {
+        const release = await generateWithHeldValidation();
+        act(() => {
+          probe!.setState((current) => ({ ...current, doc: { ...current.doc, docTitle: "Edited while validating" } }));
+        });
+        const edited = probe!.getState().doc;
+        await release();
+        await act(async () => { await Promise.resolve(); });
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).not.toHaveBeenCalled();
+        expect(probe!.getState().doc).toBe(edited);
+      });
+    });
   });
 
   it("shows the stale state when the document moved after generation", async () => {

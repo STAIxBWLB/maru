@@ -12,6 +12,7 @@ type WasmBindings = {
   default(options: { module_or_path: Uint8Array }): Promise<unknown>;
   validate_diagram_json?: (input: string) => string;
   layout_json?: (input: string) => string;
+  layout_floorplan_json?: (input: string) => string;
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -63,17 +64,22 @@ async function loadFixtureEngine(): Promise<ReturnType<typeof createProductDiagr
         loadBindings("engine-e0"),
         loadBindings("engine-geometry"),
       ]);
-      if (typeof validation.validate_diagram_json !== "function" || typeof geometry.layout_json !== "function") {
+      if (typeof validation.validate_diagram_json !== "function" || typeof geometry.layout_json !== "function"
+          || typeof geometry.layout_floorplan_json !== "function") {
         throw new Error("Generated diagram WASM exports are incomplete; run node scripts/diagram-engine-e0.mjs wasm and retry.");
       }
       const validate = validation.validate_diagram_json;
       const layout = geometry.layout_json;
+      const layoutFloorplan = geometry.layout_floorplan_json;
       return createProductDiagramEngine({
         async validate(input: string): Promise<ValidationReport> {
           return parseReport<ValidationReport>(validate(input), "E1 validation");
         },
         layout(request: LayoutRequest): GeometryReport {
           return parseReport<GeometryReport>(layout(JSON.stringify(request)), "geometry layout");
+        },
+        layoutFloorplan(request: LayoutRequest): GeometryReport {
+          return parseReport<GeometryReport>(layoutFloorplan(JSON.stringify(request)), "floorplan layout");
         },
         async render() {
           throw new Error("Rendering is outside the semantic admission fixture; use the native artifact adapter tests.");
