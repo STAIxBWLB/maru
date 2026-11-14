@@ -263,13 +263,23 @@ describe("native IME sub-spike — rich editor contenteditable", () => {
 
     // Radix Tabs activates a trigger on mousedown, not click (observed: a
     // plain .click() left data-state on the source tab), so the mode switch
-    // dispatches the mouse sequence.
-    const richReady = await browser.executeAsync(
-      (timeout: number, done: (ok: boolean) => void) => {
+    // dispatches the mouse sequence. The surface mounts with an empty document
+    // and fills it from the markdown import `RichMarkdownEditor` runs after
+    // `tryParseMarkdownToBlocks` resolves, so the contenteditable appearing is
+    // not the document appearing: the hosted run on 11-10 read the surface in
+    // that gap and got "" (the read is the next command, not the next frame).
+    // Readiness is the imported document, tested as "the surface carries text"
+    // rather than the word the assertion below looks for, so the assertion
+    // cannot be satisfied by the wait itself.
+    const richState = (await browser.executeAsync(
+      (timeout: number, done: (state: "ready" | "no-editor" | "no-document") => void) => {
         const deadline = Date.now() + timeout;
         const tick = () => {
-          if (document.querySelector('.rich-editor-surface [contenteditable="true"]')) {
-            done(true);
+          const surface = document.querySelector<HTMLElement>(
+            '.rich-editor-surface [contenteditable="true"]',
+          );
+          if (surface && (surface.textContent ?? "").trim().length > 0) {
+            done("ready");
             return;
           }
           const triggers = Array.from(
@@ -288,7 +298,7 @@ describe("native IME sub-spike — rich editor contenteditable", () => {
             rich.click();
           }
           if (Date.now() > deadline) {
-            done(false);
+            done(surface ? "no-document" : "no-editor");
             return;
           }
           setTimeout(tick, 250);
@@ -296,8 +306,9 @@ describe("native IME sub-spike — rich editor contenteditable", () => {
         tick();
       },
       POLL_TIMEOUT_MS,
-    );
-    assert.ok(richReady, "the rich editor contenteditable never appeared");
+    )) as "ready" | "no-editor" | "no-document";
+    assert.notEqual(richState, "no-editor", "the rich editor contenteditable never appeared");
+    assert.equal(richState, "ready", "the rich editor mounted but never rendered the seeded document");
   }
 
   async function readEditorText(): Promise<string> {

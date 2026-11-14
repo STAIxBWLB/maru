@@ -1219,19 +1219,56 @@ describe("native engine canvas (T4)", () => {
     // The refusing document is the only one whose layout the engine refuses,
     // so the canvas settles on `refused` rather than a stale scene.
     await openDocument(refusal.documentTitle, { specSha256: refusal.specSha256 });
-    // The diagnostic layer is a lazy chunk behind Suspense, so `refused` can be
-    // on the canvas a frame before the badge is. Wait for either the badge or
-    // the notice; the assertions below still decide which one is right.
-    await browser.waitUntil(async () => browser.execute(() =>
-      Boolean(document.querySelector(".maru-diagram-canvas [data-canvas-diagnostic], [data-canvas-diagnostic-notice]"))), {
-      timeout: 10_000,
-      interval: 100,
-      timeoutMsg: "the refused canvas drew neither a diagnostic badge nor the canvas notice within 10 s",
-    });
+    // The diagnostic layer is a lazy chunk behind Suspense, and the canvas
+    // notice shares its `data-canvas-diagnostic` attribute with the badge, so
+    // "something diagnostic rendered" is not the state the assertions below
+    // read. The hosted run on 11-12 read the canvas at `refused` with the right
+    // spec hash and found neither a badge nor a notice, and the read after a
+    // notice appears can still find none, because the two are separate
+    // renderings of the same mapping. What this waits for is that the layer
+    // finished mapping the settled document and drew an anchored badge - not
+    // that it drew this diagnostic: a wait keyed on the expected code, target
+    // and placement would poll a wrong mapping until it timed out and then
+    // report a missing badge, which is the mismatch the assertions below exist
+    // to catch. So any anchored badge ends the wait, and they check which one
+    // it is.
+    const rendered = (await browser.executeAsync(
+      (
+        timeout: number,
+        done: (state: "badge" | "notice" | "nothing") => void,
+      ) => {
+        const deadline = Date.now() + timeout;
+        const tick = () => {
+          const canvas = document.querySelector(".maru-diagram-canvas");
+          const badges = [...(canvas?.querySelectorAll("[data-canvas-diagnostic][data-target-id]") ?? [])];
+          if (badges.length > 0) {
+            done("badge");
+            return;
+          }
+          if (Date.now() > deadline) {
+            const notice = document.querySelectorAll("[data-canvas-diagnostic-notice]").length;
+            done(notice > 0 ? "notice" : "nothing");
+            return;
+          }
+          setTimeout(tick, 100);
+        };
+        tick();
+      },
+      10_000,
+    )) as "badge" | "notice" | "nothing";
+    assert.equal(
+      rendered,
+      "badge",
+      rendered === "notice"
+        ? "the refused canvas rendered its diagnostics in the canvas notice instead of anchoring a badge"
+        : "the refused canvas drew no diagnostic badge within 10 s",
+    );
     const state = await browser.execute(() => {
       const canvas = document.querySelector(".maru-diagram-canvas");
       if (!canvas) return null;
-      const badge = canvas.querySelector<SVGGElement>("[data-canvas-diagnostic]");
+      // The notice's own rows carry `data-canvas-diagnostic` as well; only the
+      // badge carries the anchor attributes this read is about.
+      const badge = canvas.querySelector<SVGGElement>("[data-canvas-diagnostic][data-target-id]");
       const target = badge
         ? canvas.querySelector<SVGGElement>(`[data-node-id="${badge.getAttribute("data-target-id") ?? ""}"]`)
         : null;
@@ -1296,7 +1333,7 @@ describe("native engine canvas (T4)", () => {
     // sees.
     const collision = await browser.execute((options: { targetId: string; frames: string[]; headerBand: number }) => {
       const canvas = document.querySelector(".maru-diagram-canvas");
-      const badge = canvas?.querySelector<SVGGElement>("[data-canvas-diagnostic]");
+      const badge = canvas?.querySelector<SVGGElement>("[data-canvas-diagnostic][data-target-id]");
       if (!canvas || !badge) return null;
       const shared = (a: DOMRect, b: DOMRect) => {
         const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
