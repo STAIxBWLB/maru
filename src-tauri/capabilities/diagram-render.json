@@ -5,6 +5,7 @@
   "webviews": ["main"],
   "permissions": [
     "maru-diagram:allow-validate",
+    "maru-diagram:allow-scan-repository",
     "maru-diagram:allow-render-png",
     "maru-diagram:allow-render-svg",
     "maru-diagram:allow-render-and-store",

@@ -30,6 +30,18 @@ impl<R: Runtime> DiagramHost for EngineHost<R> {
             "use the render-store host operation with its workspace argument",
         ))
     }
+
+    /// A scan may read only a workspace registered in Maru; the scanner itself
+    /// confines the picked folder to this root.
+    fn scan_root(&self, workspace: &str) -> Result<PathBuf, HostError> {
+        crate::vault_list::registered_workspace_root(workspace).map_err(|error| {
+            HostError::new(
+                "diagram_scan_workspace_refused",
+                error,
+                "open the folder as a Maru workspace, then scan a folder inside it",
+            )
+        })
+    }
 }
 
 impl<R: Runtime> RenderStoreHost for EngineHost<R> {

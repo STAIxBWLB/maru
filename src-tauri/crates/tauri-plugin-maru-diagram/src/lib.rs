@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{plugin::TauriPlugin, Manager, Runtime};
 
+pub mod scan;
+pub use scan::{ScanReport, ScanStats};
+
 #[cfg(feature = "render-store")]
 pub mod render_store;
 #[cfg(feature = "render-store")]
@@ -106,6 +109,18 @@ pub trait DiagramHost: Send + Sync + 'static {
     fn workspace_root(&self) -> Result<PathBuf, HostError>;
     /// Authorize one workspace-relative write before a future store command.
     fn ensure_write(&self, relative_path: &Path, action: WriteAction) -> Result<(), HostError>;
+    /// Resolve the caller-named workspace to the root a read-only repository
+    /// scan may read. The host decides which workspaces are open; the scanner
+    /// reads nothing outside the returned root. The default refuses, so a host
+    /// without scan support never exposes the filesystem.
+    fn scan_root(&self, workspace: &str) -> Result<PathBuf, HostError> {
+        let _ = workspace;
+        Err(HostError::new(
+            "diagram_scan_unavailable",
+            "this host does not provide repository scans",
+            "open the workspace in the Maru desktop app and scan again",
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -386,6 +401,7 @@ impl Builder {
         #[cfg(all(feature = "png", feature = "outline", feature = "render-store"))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
+            commands::scan_repository,
             commands::render_png,
             commands::render_svg,
             commands::diagram_list_renders,
@@ -396,12 +412,14 @@ impl Builder {
         #[cfg(all(feature = "png", feature = "outline", not(feature = "render-store")))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
+            commands::scan_repository,
             commands::render_png,
             commands::render_svg
         ]);
         #[cfg(all(feature = "png", not(feature = "outline"), feature = "render-store"))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
+            commands::scan_repository,
             commands::render_png,
             commands::diagram_list_renders,
             commands::diagram_prepare_render_view,
@@ -415,11 +433,13 @@ impl Builder {
         ))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
+            commands::scan_repository,
             commands::render_png
         ]);
         #[cfg(all(not(feature = "png"), feature = "outline", feature = "render-store"))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
+            commands::scan_repository,
             commands::render_svg,
             commands::diagram_list_renders,
             commands::diagram_prepare_render_view,
@@ -433,6 +453,7 @@ impl Builder {
         ))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
+            commands::scan_repository,
             commands::render_svg
         ]);
         #[cfg(all(
@@ -442,6 +463,7 @@ impl Builder {
         ))]
         let builder = builder.invoke_handler(tauri::generate_handler![
             commands::validate,
+            commands::scan_repository,
             commands::diagram_list_renders,
             commands::diagram_prepare_render_view,
             commands::diagram_delete_render,
@@ -452,7 +474,10 @@ impl Builder {
             not(feature = "outline"),
             not(feature = "render-store")
         ))]
-        let builder = builder.invoke_handler(tauri::generate_handler![commands::validate]);
+        let builder = builder.invoke_handler(tauri::generate_handler![
+            commands::validate,
+            commands::scan_repository
+        ]);
         builder
             .setup(move |app, _api| {
                 app.manage(state.clone());
@@ -754,6 +779,46 @@ mod commands {
         }
         Ok(report)
     }
+    /// Propose a floorplan map from a folder inside the caller-named
+    /// workspace. Read-only: nothing is written, no process runs and no
+    /// network is used; the host resolves the only root the scan may read.
+    #[tauri::command]
+    pub async fn scan_repository(
+        state: tauri::State<'_, PluginState>,
+        workspace: String,
+        path: String,
+        max_files: Option<usize>,
+        max_depth: Option<u8>,
+    ) -> Result<ScanReport, IpcError> {
+        let host = Arc::clone(&state.host);
+        tauri::async_runtime::spawn_blocking(move || {
+            let limits = scan::ScanLimits::new(max_files, max_depth).map_err(scan_error)?;
+            let root = host.scan_root(&workspace).map_err(|error| IpcError {
+                code: error.code,
+                message: error.message,
+                next_step: error.next_step,
+                diagnostics: Vec::new(),
+            })?;
+            scan::scan(&root, &path, limits).map_err(scan_error)
+        })
+        .await
+        .map_err(|cause| IpcError {
+            code: "diagram_scan_worker_failed".into(),
+            message: format!("repository scan worker failed: {cause}"),
+            next_step: "scan again; if it repeats, restart Maru".into(),
+            diagnostics: Vec::new(),
+        })?
+    }
+
+    fn scan_error(error: scan::ScanError) -> IpcError {
+        IpcError {
+            code: error.code,
+            message: error.message,
+            next_step: error.next_step,
+            diagnostics: Vec::new(),
+        }
+    }
+
     #[tauri::command]
     pub async fn validate(
         _state: tauri::State<'_, PluginState>,
