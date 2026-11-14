@@ -248,13 +248,9 @@ pub(crate) fn load_registry() -> Result<WorkspaceRegistry, String> {
     load_registry_at(&workspace_registry_path()?, &legacy_vault_list_path()?)
 }
 
-/// Authorization for read-only source capture must not publish a legacy
-/// registry migration. Reuse the same normalization, ownership and policy rules.
-pub(crate) fn assert_document_write_readonly(
-    caller_root: &str,
-    target: &Path,
-    action: WorkspaceWriteAction,
-) -> Result<(), String> {
+/// The registry as `load_registry` sees it, without publishing a legacy
+/// `vaults.json` migration: read paths must never write the registry.
+fn load_registry_readonly() -> Result<WorkspaceRegistry, String> {
     let mut registry: WorkspaceRegistry = match fs::read_to_string(workspace_registry_path()?) {
         Ok(content) => serde_json::from_str(&content)
             .map_err(|error| format!("Failed to parse workspace list: {error}"))?,
@@ -264,6 +260,17 @@ pub(crate) fn assert_document_write_readonly(
         Err(error) => return Err(format!("Failed to read workspace list: {error}")),
     };
     normalize_registry(&mut registry);
+    Ok(registry)
+}
+
+/// Authorization for read-only source capture must not publish a legacy
+/// registry migration. Reuse the same normalization, ownership and policy rules.
+pub(crate) fn assert_document_write_readonly(
+    caller_root: &str,
+    target: &Path,
+    action: WorkspaceWriteAction,
+) -> Result<(), String> {
+    let registry = load_registry_readonly()?;
     assert_document_owner_in_registry(&registry, caller_root, target)?;
     assert_maru_can_write_in_registry(&registry, caller_root, action)
 }
@@ -351,7 +358,9 @@ pub(crate) fn registered_workspace_root(workspace_path: &str) -> Result<PathBuf,
     let requested = PathBuf::from(workspace_path)
         .canonicalize()
         .map_err(|error| format!("Cannot open workspace directory: {error}"))?;
-    let registry = load_registry()?;
+    // Read-only: like assert_document_write_readonly, never publish a legacy
+    // registry migration from a read path.
+    let registry = load_registry_readonly()?;
     if registry
         .workspaces
         .iter()

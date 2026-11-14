@@ -45,6 +45,9 @@ describe("native repository scan", () => {
     await fs.writeFile(path.join(outside, "a.ts"), "");
     const diagramsBefore = await fs.readdir(path.join(workspace, "diagrams")).catch(() => [] as string[]);
     const before = await listing(repo);
+    // Everything Maru keeps per workspace (snapshot history, workspace state and
+    // settings) lives under .maru; opening a proposal must change none of it.
+    const maruDir = path.join(workspace, ".maru");
 
     const rail = await browser.$('.activity-rail button[aria-label="다이어그램"]');
     await rail.waitForDisplayed({ timeout: 30_000 });
@@ -81,11 +84,19 @@ describe("native repository scan", () => {
     assert.match(summaryText, /파일 6개/, `Unexpected file count: ${summaryText}`);
     assert.deepEqual(await listing(repo), before, "The scan changed the scanned tree; the scanner must stay read-only");
 
-    // Opening the proposal is not saving it.
+    // Opening the proposal is not saving it. The .maru baseline is taken here,
+    // after the scan and with the dialog still open, so only writes caused by
+    // opening the proposal can change it.
+    await browser.pause(3_000);
+    const maruBefore = await listing(maruDir).catch(() => [] as string[]);
     await (await browser.$('[data-testid="diagram-scan-open"]')).click();
     await dialog.waitForDisplayed({ reverse: true, timeout: 30_000 });
+    // Wait past the 2.5 s auto-snapshot debounce: no history snapshot, settings
+    // or workspace-state write may follow the opened proposal before Save.
+    await browser.pause(4_000);
     const diagramsAfter = await fs.readdir(path.join(workspace, "diagrams")).catch(() => [] as string[]);
     assert.deepEqual(diagramsAfter.sort(), diagramsBefore.sort(), "Opening the proposal wrote a document; saving must stay the user's step");
+    assert.deepEqual(await listing(maruDir).catch(() => [] as string[]), maruBefore, "Opening the proposal wrote under .maru (history or settings); nothing may be written before Save");
     assert.deepEqual(await listing(repo), before);
   }).timeout(180_000);
 });

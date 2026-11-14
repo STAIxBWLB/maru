@@ -4,6 +4,7 @@ use super::*;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 fn write(root: &Path, relative: &str, body: &str) {
     let path = root.join(relative);
@@ -392,13 +393,20 @@ fn the_git_index_lists_tracked_regular_files_only() {
         (0o120000, "link"),
         (0o160000, "submodule"),
     ]);
+    let later = Instant::now() + Duration::from_secs(60);
     assert_eq!(
-        parse_index(&bytes).unwrap(),
+        parse_index(&bytes, later).unwrap().unwrap(),
         ["a/one.ts".to_string(), "bin/run.py".to_string()]
     );
-    assert!(parse_index(b"DIRC\0\0\0\x09\0\0\0\0").is_none());
-    assert!(parse_index(&index_v2(&[(0o100644, "../escape")])).is_none());
-    assert!(parse_index(&bytes[..bytes.len() / 2]).is_none());
+    assert!(parse_index(b"DIRC\0\0\0\x09\0\0\0\0", later)
+        .unwrap()
+        .is_none());
+    assert!(parse_index(&index_v2(&[(0o100644, "../escape")]), later)
+        .unwrap()
+        .is_none());
+    assert!(parse_index(&bytes[..bytes.len() / 2], later)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -557,4 +565,126 @@ fn the_native_spec_tree_has_its_recorded_counts() {
         (report.stats.nodes, report.stats.edges, report.stats.files),
         (5, 1, 6)
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_tracked_path_under_a_folder_now_linked_out_is_never_read() {
+    let outer = tempdir();
+    let root = outer.path().join("workspace");
+    write(&root, "src/a.ts", "import x from '../vendor/x';\n");
+    write(
+        outer.path(),
+        "secret/x.ts",
+        "import leak from 'outside-only-package';\n",
+    );
+    std::os::unix::fs::symlink(outer.path().join("secret"), root.join("vendor")).unwrap();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::write(
+        root.join(".git/index"),
+        index_v2(&[(0o100644, "src/a.ts"), (0o100644, "vendor/x.ts")]),
+    )
+    .unwrap();
+    let report = scan(&root, ".", limits()).unwrap();
+    assert_eq!(report.stats.inventory, Inventory::GitIndex);
+    assert_eq!(
+        report.stats.files, 1,
+        "the linked folder's file is left out"
+    );
+    let text = report.document.to_string();
+    assert!(!text.contains("outside-only-package"), "{text}");
+    assert!(!text.contains("vendor"), "{text}");
+    // The read-time check holds on its own, even for a path the inventory kept.
+    assert!(!regular_file_without_links(&root, "vendor/x.ts"));
+    assert!(regular_file_without_links(&root, "src/a.ts"));
+}
+
+/// A version 4 index whose paths grow: each entry strips the last character
+/// (`x`) of the previous path and appends `a/x`, so `a/x`, `a/a/x`, ... are
+/// all valid paths, each two bytes longer than the last.
+fn index_v4_growing(count: usize) -> Vec<u8> {
+    let mut bytes = b"DIRC".to_vec();
+    bytes.extend_from_slice(&4u32.to_be_bytes());
+    bytes.extend_from_slice(&(count as u32).to_be_bytes());
+    for index in 0..count {
+        bytes.extend_from_slice(&[0u8; 24]);
+        bytes.extend_from_slice(&0o100644u32.to_be_bytes());
+        bytes.extend_from_slice(&[0u8; 32]);
+        bytes.extend_from_slice(&0x0fffu16.to_be_bytes());
+        bytes.push(u8::from(index > 0)); // strip the previous trailing `x`
+        bytes.extend_from_slice(b"a/x");
+        bytes.push(0);
+    }
+    bytes
+}
+
+#[test]
+fn v4_prefix_expansion_is_bounded_before_paths_are_kept() {
+    // Each entry is ~70 bytes but rebuilds a path two bytes longer than the
+    // last: without a budget, a few MiB of index expands to gigabytes. A small
+    // growing index still parses, which proves the format is read correctly.
+    let small = parse_index(
+        &index_v4_growing(3),
+        Instant::now() + Duration::from_secs(60),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(small, ["a/x", "a/a/x", "a/a/a/x"]);
+    let bytes = index_v4_growing(20_000);
+    let started = Instant::now();
+    let error = parse_index(&bytes, Instant::now() + Duration::from_secs(60)).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_index_too_large");
+    assert!(!error.next_step.is_empty());
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn a_very_wide_ignored_folder_stops_at_the_entry_budget() {
+    let dir = tempdir();
+    write(dir.path(), ".gitignore", "gen/\n*.tmp\n");
+    // Ignored files still count as read entries; kept ones never exceed the cap.
+    for index in 0..300 {
+        write(dir.path(), &format!("wide/{index}.tmp"), "");
+    }
+    write(dir.path(), "wide/keep.ts", "");
+    let report = scan(dir.path(), ".", ScanLimits::new(Some(5), None).unwrap()).unwrap();
+    assert_eq!(report.stats.files, 2, ".gitignore and keep.ts");
+    // The file limit applies while the folder is read, before any sort.
+    for index in 0..20 {
+        write(dir.path(), &format!("many/{index}.ts"), "");
+    }
+    let error = scan(dir.path(), ".", ScanLimits::new(Some(10), None).unwrap()).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_too_many_files");
+}
+
+#[test]
+fn a_long_rust_use_path_resolves_in_bounded_time() {
+    let files: BTreeSet<String> = ["c/Cargo.toml", "c/src/lib.rs", "c/src/a.rs"]
+        .iter()
+        .map(|path| path.to_string())
+        .collect();
+    let line = format!("use crate::{}x;\n", "a::".repeat(50_000));
+    let text = line.repeat(20);
+    let started = Instant::now();
+    let mut refs = Refs::default();
+    rust_refs("c/src/lib.rs", &text, &files, &mut refs);
+    assert_eq!(
+        refs.files.iter().cloned().collect::<Vec<_>>(),
+        ["c/src/a.rs"]
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_scan_that_overruns_its_budget_is_refused_not_returned() {
+    let dir = tempdir();
+    write(dir.path(), "a.ts", "");
+    let mut tight = limits();
+    tight.time_budget = Duration::from_nanos(1);
+    let error = scan(dir.path(), ".", tight).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_timeout");
 }

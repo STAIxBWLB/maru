@@ -353,6 +353,9 @@ function DiagramShell({
   const focusMode = useDiagram((s) => s.ephemeral.ui.focusMode);
   const [panels, setPanels] = useState<PersistedPanelState>(() => readPanelState());
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  /** True while the open document is a repository-scan proposal that has never
+   *  been saved: no snapshot, settings or other write happens until Save. */
+  const unsavedProposalRef = useRef(false);
 
   /**
    * Replace the document. The viewport is not saved, and a nested Floorplan
@@ -361,6 +364,9 @@ function DiagramShell({
    */
   const openDoc = useCallback(
     (next: Parameters<typeof replaceDoc>[0]) => {
+      // Any document opened here is an ordinary one; a scan proposal marks
+      // itself again right after this call.
+      unsavedProposalRef.current = false;
       resetCanvasGeometry();
       store.setState(replaceDoc(next));
       if ((next.datasets ?? []).some((dataset) => dataset.kind === "semanticSpec" && dataset.diagramType === "floorplan")) {
@@ -452,7 +458,9 @@ function DiagramShell({
 
   const docUpdatedAt = doc.updatedAt;
   useEffect(() => {
-    if (dirty) snapshotSchedRef.current?.markDirty();
+    // A scan proposal writes nothing before its first explicit Save, auto-
+    // snapshots included (issue #553).
+    if (dirty && !unsavedProposalRef.current) snapshotSchedRef.current?.markDirty();
   }, [dirty, docUpdatedAt]);
 
   const reportError = useCallback((message: string | null) => setError(message), []);
@@ -623,6 +631,7 @@ function DiagramShell({
               : t(getPattern(patternId)?.labelKey ?? ""),
         });
         resetCanvasGeometry();
+        unsavedProposalRef.current = false;
         store.setState(replaceDoc(next));
         setActiveName(null);
         setLastSavedBody(null);
@@ -969,6 +978,22 @@ function DiagramShell({
     [openDoc, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody],
   );
 
+  /** Open a scan proposal unsaved without writing anything: no settings write
+   *  and no snapshot until the user saves it (issue #553, review-then-save). */
+  const handleOpenProposal = useCallback(
+    (next: Parameters<typeof replaceDoc>[0]) => {
+      snapshotSchedRef.current?.markClean();
+      openDoc(next);
+      unsavedProposalRef.current = true;
+      setActiveName(null);
+      setLastSavedBody(null);
+      setDiagramSession({ fileRevision: null }, sessionKey);
+      setIoDialog(null);
+      reportError(null);
+    },
+    [openDoc, reportError, sessionKey, setActiveName, setLastSavedBody],
+  );
+
   const refreshList = useCallback(async () => {
     if (!workPath) return;
     try {
@@ -1091,6 +1116,7 @@ function DiagramShell({
         }, sessionKey);
         // A successful manual save satisfies the pending auto-snapshot.
         snapshotSchedRef.current?.markClean();
+        unsavedProposalRef.current = false;
         await persistLastDocument(name);
       } catch (err) {
         if (err instanceof IpcError && err.code === "document_conflict") {
@@ -1130,6 +1156,7 @@ function DiagramShell({
   const handleNew = useCallback(() => {
     const fresh = createEmptyDoc(createDiagramId());
     resetCanvasGeometry();
+    unsavedProposalRef.current = false;
     store.setState(replaceDoc(fresh));
     setActiveName(null);
     setLastSavedBody(null);
@@ -1879,7 +1906,7 @@ function DiagramShell({
           workspace={workPath}
           dirty={dirty}
           onOpenProposal={(next) => {
-            handleImportDoc(next);
+            handleOpenProposal(next);
             setScanOpen(false);
           }}
           onClose={() => setScanOpen(false)}
