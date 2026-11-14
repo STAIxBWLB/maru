@@ -12,7 +12,7 @@ use crate::task_execution_claims::{
     self as claims, TaskExecutionClaim, TaskExecutionLifecycle, TaskExecutionToken,
     TaskMutationGuard,
 };
-use crate::tasks::{TaskBucket, TaskNoteRow, TaskStatus};
+use crate::tasks::{TaskNoteRow, TaskStatus};
 use crate::vault::{normalize_existing_dir, resolve_inside_vault};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

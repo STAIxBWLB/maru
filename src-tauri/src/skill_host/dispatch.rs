@@ -907,9 +907,10 @@ fn spawn_background<R: tauri::Runtime>(
     let writes = match writes {
         Some(writes) => writes,
         None => {
-            return Err(spawned
-                .err()
-                .expect("a failed admission has no dispatch writes"))
+            return match spawned {
+                Err(error) => Err(error),
+                Ok(_) => unreachable!("a failed admission has no dispatch writes"),
+            };
         }
     };
     let mut child = match spawned {
