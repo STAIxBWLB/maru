@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { applyRegistrationAdditions, checkPluginEvidence, createCurrentRegistrationManifest, filterHistoricalRegistrations, maskRust, parseArgs } from "./check-command-isolation.mjs";
 
 import { HWPED_SAVE_CASES, parseHwpedSaveBehavior } from "./record-hwped-save-isolation.mjs";
+import { HWPED_FORM_BOUNDARY_CASE, HWPED_FORM_CASES, parseHwpedFormBehavior } from "./record-hwped-form-isolation.mjs";
 
 const CHECKER = fileURLToPath(new URL("./check-command-isolation.mjs", import.meta.url));
 const PHASE = ".planning/milestones/v1.1-phases/08-main-thread-responsiveness";
@@ -657,4 +658,20 @@ test("HWPX save recorder requires every actual passing case and complete non-ski
     log + log,
     log.slice(0, log.indexOf("test result:")),
   ]) assert.throws(() => parseHwpedSaveBehavior(invalid), /Expected one complete|behavioral evidence|Missing unique/);
+});
+
+test("form binding recorder requires the worker-boundary case and every contract case", () => {
+  const log = [`test hwped::phase08_21::${HWPED_FORM_BOUNDARY_CASE} ... ok`,
+    ...HWPED_FORM_CASES.map((name) => `test hwped::forms::tests::${name} ... ok`)].join("\n")
+    + "\ntest result: ok. 92 passed; 0 failed; 5 ignored; 0 measured; 50 filtered out; finished in 0.01s\n";
+  assert.deepEqual(parseHwpedFormBehavior(log), { passed: 92, failed: 0, ignored: 0, exitCode: 0 });
+  for (const invalid of [
+    log.replace(HWPED_FORM_CASES[0], "invented_case"),
+    log.replace(HWPED_FORM_BOUNDARY_CASE, "invented_case"),
+    log.replace("92 passed", "3 passed"),
+    log.replace("0 failed", "1 failed"),
+    log.replace("test result: ok.", "test result: FAILED."),
+    log + log,
+    log.slice(0, log.indexOf("test result:")),
+  ]) assert.throws(() => parseHwpedFormBehavior(invalid), /Expected one complete|form evidence|Missing unique/);
 });
