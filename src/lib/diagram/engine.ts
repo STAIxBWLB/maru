@@ -176,6 +176,36 @@ function checkReceiptSource(receipt: EngineReceipt, expectedSha: string): void {
   if (receipt.engine.id !== "maru-diagram-engine" || !receipt.engine.version || !receipt.engine.revision) {
     throw new Error("The engine receipt has an unsupported engine identity; update Maru and retry.");
   }
+  checkReceiptEnvelope(receipt);
+}
+
+/** The receipt contract version `maru-diagram-engine` emits (`EngineReceipt.schema_version`). */
+const RECEIPT_SCHEMA_VERSION = 1;
+const RECEIPT_GATE_STATUSES: ReadonlySet<string> = new Set(["passed", "failed", "not-run"]);
+const RECEIPT_GATES = ["schema", "artifact", "browser", "visualReview"] as const;
+
+/**
+ * The mandatory envelope of an engine receipt (`ReceiptGates` in the engine
+ * crate): a supported schemaVersion and four gates, each with a known status
+ * and a scope. A report whose hash matches but whose envelope does not is not
+ * proof of validation, so admission fails closed.
+ */
+function checkReceiptEnvelope(receipt: EngineReceipt): void {
+  const raw = receipt as unknown as Record<string, unknown>;
+  if (raw.schemaVersion !== RECEIPT_SCHEMA_VERSION) {
+    throw new Error(`The engine receipt has unsupported schemaVersion ${JSON.stringify(raw.schemaVersion ?? null)} (expected ${RECEIPT_SCHEMA_VERSION}); update Maru so the app and engine match, then retry.`);
+  }
+  const gates = raw.gates;
+  if (!record(gates)) {
+    throw new Error("The engine receipt has no gates record; update Maru so the app and engine match, then retry.");
+  }
+  for (const name of RECEIPT_GATES) {
+    const gate = gates[name];
+    if (!record(gate) || typeof gate.status !== "string" || !RECEIPT_GATE_STATUSES.has(gate.status)
+        || typeof gate.scope !== "string" || gate.scope.length === 0) {
+      throw new Error(`The engine receipt gate "${name}" is missing or malformed; update Maru so the app and engine match, then retry.`);
+    }
+  }
 }
 
 function candidateFailure(

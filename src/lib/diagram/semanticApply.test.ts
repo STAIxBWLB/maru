@@ -242,3 +242,37 @@ describe("floorplan edits pass the engine before they commit (#553 E5 T4)", () =
     expect(store.getState().ephemeral.history.past).toHaveLength(0);
   });
 });
+
+describe("a malformed engine receipt envelope blocks the commit (#137)", () => {
+  it("leaves the document and history unchanged when the receipt carries an unsupported schemaVersion", async () => {
+    const { store } = storeOf("lifecycle");
+    const before = store.getState().doc;
+    // The real pinned engine, but its layout receipt is re-stamped with an
+    // envelope the app does not support: the hash still matches the source.
+    const forged = {
+      validateCandidate: async (type: string, spec: unknown) => {
+        const { createProductDiagramEngine } = await import("./engine");
+        const real = await engineHost.validateCandidate(type, spec);
+        const receipt = { ...real.receipt!, schemaVersion: 2 } as typeof real.receipt;
+        const engine = createProductDiagramEngine({
+          validate: async () => ({ apiVersion: 1, ok: true, diagnostics: [], receipt: { ...real.receipt!, inputSpecSha256: real.candidateSha256! } }),
+          layout: async () => ({ apiVersion: 1, ok: true, diagnostics: [], geometry: null, receipt: receipt! }),
+          render: async () => { throw new Error("render is not expected"); },
+        });
+        return engine.validateCandidate(type, spec);
+      },
+    };
+    const result = await applyValidatedSemanticEdit(
+      store,
+      "ds",
+      addSemanticEntry("lifecycle", "states", { type: "active", label: "Extra", lane: "main", col: 3 }),
+      forged,
+    );
+    expect(result.status).toBe("invalid");
+    if (result.status !== "invalid") throw new Error("Expected refusal");
+    expect(result.diagnostics[0]?.key).toBe("diagram.semantic.engineValidationFailed");
+    expect(String(result.diagnostics[0]?.params?.message)).toMatch(/unsupported schemaVersion 2.*update Maru/);
+    expect(store.getState().doc).toBe(before);
+    expect(store.getState().ephemeral.history.past).toHaveLength(0);
+  });
+});
