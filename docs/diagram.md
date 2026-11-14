@@ -438,13 +438,20 @@ uses no network and writes nothing. Its only filesystem scope is the root
 `DiagramHost::scan_root` resolves for the caller-named workspace, which in
 Maru must be a registered workspace (`vault_list::registered_workspace_root`);
 a picked folder outside it, a `..` path or a link out of it is refused with
-`diagram_scan_outside_workspace`. Links are never followed. The inventory is
-the git index when one lies inside the workspace (tracked regular files
-still on disk), otherwise a walk that applies `.gitignore` files (negation,
-anchored and directory-only rules, `**`). Bounds: 5,000 files (up to 20,000),
-24 folder levels (up to 64), 20 s, 64 MiB read, 1 MiB per parsed file (larger
-files are counted only), 400 nodes and 2,000 edges. A bound stops the scan
-with its cause and next step; no partial map is returned.
+`diagram_scan_outside_workspace`. Links are never followed. On unix every read,
+listing and folder open is resolved from a handle on that root (`openat` with
+`O_NOFOLLOW` on each component), so a folder replaced by a link between the
+check and the read becomes a refused open instead of a read outside the
+workspace. On other platforms the components are checked with
+`symlink_metadata` and then opened by path, so a folder swapped in that window
+can still be followed; the pre-existing link, the root and the leaf are still
+refused. The inventory is the git index when one lies inside the workspace
+(tracked regular files still on disk), otherwise a walk that applies
+`.gitignore` files (negation, anchored and directory-only rules, `**`).
+Bounds: 5,000 files (up to 20,000), 24 folder levels (up to 64), 20 s, 64 MiB
+read, 1 MiB per parsed file (larger files are counted only), 400 nodes and
+2,000 edges. A bound stops the scan with its cause and next step; no partial
+map is returned.
 Git index paths containing backslashes, colons or NUL are rejected on every
 platform. Ignore lines over 4 KiB are skipped; shorter patterns use a bounded
 matcher that checks the scan deadline. Index, ignore and source reads share

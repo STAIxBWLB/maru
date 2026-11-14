@@ -387,8 +387,10 @@ fn the_edge_bound_stops_before_reading_the_remaining_sources() {
         write(dir.path(), file, &text);
     }
     let mut budget = open_budget();
+    let anchor = RootAnchor::open(dir.path()).unwrap();
     let error = propose(
-        dir.path(),
+        &anchor,
+        "",
         "bounded edges",
         &files,
         Inventory::Filesystem,
@@ -491,6 +493,7 @@ fn windows_index_paths_are_refused_on_every_platform() {
         );
     }
     let dir = tempdir();
+    let anchor = RootAnchor::open(dir.path()).unwrap();
     for path in [
         "",
         ".",
@@ -502,10 +505,10 @@ fn windows_index_paths_are_refused_on_every_platform() {
         r"C:\outside\leak.ts",
     ] {
         assert!(!plain_relative_path(path), "{path}");
-        assert!(!regular_file_without_links(dir.path(), path), "{path}");
+        assert!(!anchor.is_regular_file(path), "{path}");
     }
     write(dir.path(), "src/a.ts", "");
-    assert!(regular_file_without_links(dir.path(), "src/a.ts"));
+    assert!(anchor.is_regular_file("src/a.ts"));
 }
 
 #[test]
@@ -586,9 +589,10 @@ fn index_and_ignore_reads_share_the_remaining_budget() {
         entries: 0,
         files: Vec::new(),
     };
+    let anchor = RootAnchor::open(dir.path()).unwrap();
     state.budget.bytes = MAX_TOTAL_BYTES - 3;
     assert_eq!(
-        git_index_files(dir.path(), dir.path(), &mut state)
+        git_index_files(&anchor, dir.path(), dir.path(), &mut state)
             .unwrap_err()
             .code,
         "diagram_scan_too_much_data"
@@ -597,9 +601,10 @@ fn index_and_ignore_reads_share_the_remaining_budget() {
 
     fs::remove_dir_all(dir.path().join(".git")).unwrap();
     write(dir.path(), ".gitignore", "*.log\n");
+    let scan_dir = anchor.open_dir("").unwrap();
     state.budget.bytes = MAX_TOTAL_BYTES - 3;
     assert_eq!(
-        walk(dir.path(), "", &[], &mut state, 0).unwrap_err().code,
+        walk(&scan_dir, &[], &mut state, 0).unwrap_err().code,
         "diagram_scan_too_much_data"
     );
     assert_eq!(state.budget.bytes, MAX_TOTAL_BYTES + 1);
@@ -823,8 +828,9 @@ fn a_tracked_path_under_a_folder_now_linked_out_is_never_read() {
     assert!(!text.contains("outside-only-package"), "{text}");
     assert!(!text.contains("vendor"), "{text}");
     // The read-time check holds on its own, even for a path the inventory kept.
-    assert!(!regular_file_without_links(&root, "vendor/x.ts"));
-    assert!(regular_file_without_links(&root, "src/a.ts"));
+    let anchor = RootAnchor::open(&root).unwrap();
+    assert!(!anchor.is_regular_file("vendor/x.ts"));
+    assert!(anchor.is_regular_file("src/a.ts"));
 }
 
 /// A version 4 index whose paths grow: each entry strips the last character
@@ -947,8 +953,112 @@ fn a_leaf_replaced_by_a_link_after_the_inventory_is_not_read() {
         "secret.ts",
         "import leak from 'outside-only-package';\n",
     );
-    // The no-follow open refuses a leaf link even if the path check raced.
+    // The anchored open refuses a leaf link even if the path check raced.
     std::os::unix::fs::symlink(outer.path().join("secret.ts"), root.join("src/b.ts")).unwrap();
-    assert!(open_regular_no_follow(&root.join("src/b.ts")).is_none());
-    assert!(open_regular_no_follow(&root.join("src/a.ts")).is_some());
+    let anchor = RootAnchor::open(&root).unwrap();
+    assert!(anchor.open_file("src/b.ts").is_none());
+    assert!(anchor.open_file("src/a.ts").is_some());
+}
+
+/// The root itself is swapped for a link to an outside folder after the scan
+/// opened its handle. A read that went back to the pathname would return the
+/// outside file, so this asserts both halves: the swap really happened, and the
+/// anchored read still refuses.
+#[cfg(unix)]
+#[test]
+fn a_root_replaced_by_a_link_after_the_anchor_is_opened_is_not_read() {
+    let outer = tempdir();
+    let root = outer.path().join("workspace");
+    write(&root, "src/a.ts", "export const answer = 42;\n");
+    let outside = outer.path().join("outside");
+    write(
+        &outside,
+        "src/a.ts",
+        "import leak from 'outside-only-package';\n",
+    );
+
+    let anchor = RootAnchor::open(&root).unwrap();
+
+    fs::remove_dir_all(&root).unwrap();
+    std::os::unix::fs::symlink(&outside, &root).unwrap();
+    // The pathname now reaches the outside file: the swap is real, so a
+    // path-based read would have leaked it.
+    assert!(
+        fs::read_to_string(root.join("src/a.ts"))
+            .unwrap()
+            .contains("outside-only-package"),
+        "the fixture did not swap the root for a link"
+    );
+
+    assert!(anchor.open_file("src/a.ts").is_none());
+    let mut budget = open_budget();
+    assert!(
+        matches!(
+            anchor
+                .read_bounded("src/a.ts", MAX_SOURCE_BYTES, &mut budget)
+                .unwrap(),
+            BoundedRead::Unreadable
+        ),
+        "a file under a replaced root must not be read"
+    );
+    assert!(!anchor.is_regular_file("src/a.ts"));
+}
+
+/// A folder on the way to a file is swapped for an outside link after the scan
+/// listed it. The walk must not follow it, and the scan must return no outside
+/// content either way.
+#[cfg(unix)]
+#[test]
+fn an_intermediate_folder_replaced_by_a_link_after_it_was_listed_is_not_followed() {
+    let outer = tempdir();
+    let root = outer.path().join("workspace");
+    write(&root, "src/a.ts", "export const answer = 42;\n");
+    let outside = outer.path().join("outside");
+    write(
+        &outside,
+        "a.ts",
+        "import leak from 'outside-only-package';\n",
+    );
+
+    let anchor = RootAnchor::open(&root).unwrap();
+    let scan_dir = anchor.open_scan_root("").unwrap();
+    assert!(
+        scan_dir
+            .entries()
+            .unwrap()
+            .iter()
+            .any(|(name, kind)| name == "src" && *kind == EntryKind::Dir),
+        "the fixture did not list src as a folder before the swap"
+    );
+
+    // The swap lands exactly between the listing above and the open the walk
+    // performs next.
+    fs::remove_dir_all(root.join("src")).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("src")).unwrap();
+    assert!(
+        fs::read_to_string(root.join("src/a.ts"))
+            .unwrap()
+            .contains("outside-only-package"),
+        "the fixture did not swap the folder for a link"
+    );
+
+    assert!(
+        scan_dir.child("src").is_none(),
+        "the walk must not open a folder that became a link"
+    );
+    assert!(anchor.open_file("src/a.ts").is_none());
+
+    // The scan over the swapped tree refuses the link and proposes nothing
+    // from outside, whichever path it takes.
+    let report = scan(&root, "", limits());
+    match report {
+        Ok(report) => {
+            let text = report.document.to_string();
+            assert!(!text.contains("outside-only-package"), "{text}");
+        }
+        Err(error) => assert!(
+            error.code.starts_with("diagram_scan_"),
+            "unexpected refusal: {error:?}"
+        ),
+    }
 }
