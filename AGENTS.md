@@ -11,7 +11,7 @@ code. When a project rule changes, change `README.md`, not this file.
 
 ## Commands
 
-- Install: `make install` (pnpm 9.15.0, Node >= 22; generates icons)
+- Install: `make install` (pnpm 12.18.0, Node >= 22; generates icons)
 - Dev: `pnpm dev` (Vite on 127.0.0.1:5307), `pnpm tauri:dev` (real app)
 - Build: `pnpm build` (typecheck + frontend), `pnpm tauri:build`
 - Bare `make` prints the full target list.
