@@ -433,6 +433,49 @@ describe("GenerateDiagramDialog", () => {
       expect(withSnapshotSpy).toHaveBeenCalledTimes(1);
       expect(probe!.getState().doc.nodes.some((item) => item.id.endsWith(":m2") || item.title === "C")).toBe(true);
     });
+
+    describe("apply as new (T120-R3)", () => {
+      async function generateNewFloorplan(validateCandidate: GenerationHost["validateCandidate"]) {
+        const host = stubHost({ runAgent: vi.fn(async () => JSON.stringify(regenerated)), validateCandidate: vi.fn(validateCandidate) });
+        harness = renderDialog({ host });
+        const typeSelect = query<HTMLSelectElement>('[data-testid="gen-type-select"]')!;
+        await act(async () => {
+          typeSelect.value = "floorplan";
+          typeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await runGeneration();
+        await vi.waitFor(() => expect(query('[data-testid="gen-apply-new"]')).not.toBeNull());
+        expect(host.validateCandidate).not.toHaveBeenCalled();
+        return host;
+      }
+
+      it("refuses an engine-only rejection, keeping the document and the dialog", async () => {
+        const host = await generateNewFloorplan(async () => ({ ok: false, errors: ["node nests too deep; flatten the deepest frames"], warnings: [] }));
+        const before = probe!.getState().doc;
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(query('[data-testid="gen-apply-diagnostics"]')).not.toBeNull());
+        expect(host.validateCandidate).toHaveBeenCalledWith("floorplan", expect.anything());
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).not.toHaveBeenCalled();
+        expect(probe!.getState().doc).toBe(before);
+      });
+
+      it("refuses on an unavailable engine and shows the notice", async () => {
+        await generateNewFloorplan(async () => { throw new EngineUnavailableError("The diagram geometry engine is unavailable."); });
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(query('[data-testid="gen-engine-unavailable"]')).not.toBeNull());
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).not.toHaveBeenCalled();
+      });
+
+      it("installs an engine-approved candidate", async () => {
+        const host = await generateNewFloorplan(async () => ({ ok: true, errors: [], warnings: [] }));
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(harness!.onClose).toHaveBeenCalled());
+        expect(host.validateCandidate).toHaveBeenCalledTimes(1);
+        expect(harness!.onImportDoc).toHaveBeenCalledTimes(1);
+      });
+    });
   });
 
   it("shows the stale state when the document moved after generation", async () => {

@@ -198,7 +198,7 @@ describe("floorplan structural edge cases", () => {
     it("commits an engine-approved regeneration as one undo step", async () => {
       const { store, proposal } = await regenerated(chain(2), chain(3));
       const validateCandidate = vi.fn(engineHost.validateCandidate);
-      const outcome = await applyValidatedProposal(store, proposal, "", { validateCandidate });
+      const outcome = await applyValidatedProposal(store, proposal, () => "", { validateCandidate });
       expect(outcome.status).toBe("applied");
       expect(validateCandidate).toHaveBeenCalledWith("floorplan", expect.anything());
       expect(store.getState().ephemeral.history.past).toHaveLength(1);
@@ -207,7 +207,7 @@ describe("floorplan structural edge cases", () => {
     it("refuses a regeneration the engine rejects, with no doc or history commit", async () => {
       const { store, proposal } = await regenerated(chain(2), chain(66));
       const before = store.getState().doc;
-      const outcome = await applyValidatedProposal(store, proposal, "", engineHost);
+      const outcome = await applyValidatedProposal(store, proposal, () => "", engineHost);
       expect(outcome.status).toBe("invalid");
       if (outcome.status !== "invalid") return;
       expect(outcome.diagnostics[0]?.key).toBe("diagram.semantic.engineRejected");
@@ -219,20 +219,42 @@ describe("floorplan structural edge cases", () => {
     it("fails closed on an unavailable engine, a receipt mismatch and a document change during validation", async () => {
       const { store, proposal } = await regenerated(chain(2), chain(3));
       const before = store.getState().doc;
-      const unavailable = await applyValidatedProposal(store, proposal, "", { validateCandidate: async () => { throw new Error("engine unavailable"); } });
+      const unavailable = await applyValidatedProposal(store, proposal, () => "", { validateCandidate: async () => { throw new Error("engine unavailable"); } });
       expect(unavailable).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.engineValidationFailed" }] });
-      const mismatch = await applyValidatedProposal(store, proposal, "", { validateCandidate: async () => { throw new Error("The engine receipt does not match the submitted semantic spec"); } });
+      const mismatch = await applyValidatedProposal(store, proposal, () => "", { validateCandidate: async () => { throw new Error("The engine receipt does not match the submitted semantic spec"); } });
       expect(mismatch.status).toBe("invalid");
       expect(store.getState().doc).toBe(before);
       expect(store.getState().ephemeral.history.past).toHaveLength(0);
 
       let settle!: (value: { ok: boolean; errors: string[]; warnings: string[] }) => void;
-      const pending = applyValidatedProposal(store, proposal, "", { validateCandidate: () => new Promise((resolve) => { settle = resolve; }) });
+      const pending = applyValidatedProposal(store, proposal, () => "", { validateCandidate: () => new Promise((resolve) => { settle = resolve; }) });
+      await vi.waitFor(() => expect(settle).toBeTypeOf("function"));
       store.setState((state) => ({ ...state, doc: { ...state.doc, docTitle: "Changed during validation" } }));
       const changed = store.getState().doc;
       settle({ ok: true, errors: [], warnings: [] });
       expect(await pending).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] });
       expect(store.getState().doc).toBe(changed);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    });
+
+    it("binds the revision, validation and identity check to one snapshot (T120-R4)", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(3));
+      const validateCandidate = vi.fn(engineHost.validateCandidate);
+      let release!: (revision: string) => void;
+      const revisedDocs: unknown[] = [];
+      const pending = applyValidatedProposal(store, proposal, (doc) => {
+        revisedDocs.push(doc);
+        return new Promise<string>((resolve) => { release = resolve; });
+      }, { validateCandidate });
+      const captured = store.getState().doc;
+      // The document moves while its revision is still being computed.
+      store.setState((state) => ({ ...state, doc: { ...state.doc, docTitle: "Newer edit" } }));
+      const newer = store.getState().doc;
+      release("");
+      expect(await pending).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] });
+      expect(revisedDocs).toEqual([captured]);
+      expect(validateCandidate).not.toHaveBeenCalled();
+      expect(store.getState().doc).toBe(newer);
       expect(store.getState().ephemeral.history.past).toHaveLength(0);
     });
   });

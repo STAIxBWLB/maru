@@ -40,7 +40,7 @@ import { createGenerationHost } from "../../../lib/diagram/generationHost";
 import { mermaidSemanticType, mermaidToDocDetailed } from "../../../lib/diagram/mermaid";
 import { serializeDoc } from "../../../lib/diagram/persistence";
 import { diffProposal, isBlockingDiagnostic } from "../../../lib/diagram/proposal";
-import { applyValidatedProposal } from "../../../lib/diagram/semanticApply";
+import { applyValidatedProposal, validateSemanticDraft, type SemanticValidationHost } from "../../../lib/diagram/semanticApply";
 import { SEMANTIC_DIAGRAM_TYPES, type SemanticDiagramType } from "../../../lib/diagram/reportTypes";
 import {
   SEMANTIC_TYPES,
@@ -227,33 +227,52 @@ export function GenerateDiagramDialog({
 
   const applyDisabled = !candidate || !proposal || blockingDiagnostics.length > 0 || applying;
 
+  /** The run's engine host; an unavailable engine also raises the dialog notice. */
+  const guardedValidationHost = (): SemanticValidationHost => {
+    const host = hostRef.current ?? hostOverride ?? sharedHostOverride ?? validationHost;
+    return {
+      validateCandidate: async (type, spec) => {
+        try {
+          return await host.validateCandidate(type, spec);
+        } catch (error) {
+          if (isEngineUnavailable(error)) setEngineUnavailable(true);
+          throw error;
+        }
+      },
+    };
+  };
+
   const handleApplyNew = async () => {
     if (!candidate || applying) return;
-    if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
-    onImportDoc(projectSemanticDocument(candidate).doc);
-    onClose();
+    setApplying(true);
+    try {
+      // Generation keeps the local floor for Floorplan, so installing the
+      // candidate as a new document passes the engine first (#553 E5 T4).
+      if (candidate.diagramType === "floorplan") {
+        const draft = projectSemanticDocument(candidate).doc;
+        const diagnostics = await validateSemanticDraft(draft, [candidate.id], guardedValidationHost());
+        if (diagnostics.length > 0) {
+          setApplyMessage({ kind: "invalid", diagnostics });
+          return;
+        }
+      }
+      if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
+      onImportDoc(projectSemanticDocument(candidate).doc);
+      onClose();
+    } finally {
+      setApplying(false);
+    }
   };
 
   const handleApplyScoped = async () => {
     if (!job || !proposal) return;
     setApplying(true);
     try {
-      const state = store.getState();
-      const currentRevision =
-        job.meta.baseMemoryRevision === "" ? "" : await diagramRevision(serializeDoc(state.doc));
+      const revisionOf = (doc: DiagramDoc) =>
+        job.meta.baseMemoryRevision === "" ? "" : diagramRevision(serializeDoc(doc));
       // Floorplan candidates were validated locally while generating; this
       // admits them through the engine before the commit (#553 E5 T4).
-      const host = hostRef.current ?? hostOverride ?? sharedHostOverride ?? validationHost;
-      const outcome = await applyValidatedProposal(store, proposal, currentRevision, {
-        validateCandidate: async (type, spec) => {
-          try {
-            return await host.validateCandidate(type, spec);
-          } catch (error) {
-            if (isEngineUnavailable(error)) setEngineUnavailable(true);
-            throw error;
-          }
-        },
-      }, coalescer);
+      const outcome = await applyValidatedProposal(store, proposal, revisionOf, guardedValidationHost(), coalescer);
       if (outcome.status === "stale") {
         setJob((current) => (current ? markStaleIfBaseChanged(current, outcome.currentRevision) : current));
         setApplyMessage({ kind: "stale" });

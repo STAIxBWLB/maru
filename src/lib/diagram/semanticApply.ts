@@ -57,15 +57,22 @@ export async function applyValidatedSemanticEdit(
  * engine here before the commit (`maru#553` E5 T4). The other families were
  * already admitted by the engine while generating. A refusal, an unavailable
  * engine or a document change during validation commits nothing.
+ *
+ * `revisionOf` computes the memory revision of the very snapshot this apply
+ * gates and validates, so the stale check, the engine input and the
+ * post-validation identity check all bind to one document. A change while the
+ * revision is computed is stale too.
  */
 export async function applyValidatedProposal(
   store: DiagramStore,
   proposal: Proposal,
-  currentMemoryRevision: string,
+  revisionOf: (doc: DiagramDoc) => Promise<string> | string,
   host: SemanticValidationHost,
   coalescer: Coalescer = defaultCoalescer(),
 ): Promise<ProposalApplyOutcome> {
   const before = store.getState();
+  const currentMemoryRevision = await revisionOf(before.doc);
+  if (store.getState().doc !== before.doc) return { status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] };
   const outcome = prepareProposalApply(before, proposal, currentMemoryRevision);
   if (outcome.status !== "applied") return outcome;
   const floorplanIds = proposal.ops.flatMap((op) =>

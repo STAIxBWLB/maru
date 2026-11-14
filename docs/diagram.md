@@ -395,12 +395,17 @@ Which paths reach the engine:
 |---|---|
 | Inspector and structure-editor applies (`applyValidatedSemanticEdit`) | local floor, then engine, before the commit |
 | Scoped regeneration apply in the Generate dialog (`applyValidatedProposal`) | local floor while generating, then engine before the commit |
+| "Apply as new" in the Generate dialog (`handleApplyNew`) | local floor while generating, then engine before the document is installed |
 | Generation itself (`finishFloorplanJob`, until a candidate is ready) | local floor only |
 | Inspector read-only diagnostics for an existing dataset | local floor only |
 
-Generation produces a candidate but commits nothing, so the scoped apply admits
-every Floorplan dataset its proposal upserts through `validateCandidate` before
-`withSnapshot`, then rechecks the document identity after the await. A refusal,
+Generation produces a candidate but commits nothing, so both dialog applies
+admit it through `validateCandidate` first. "Apply as new" validates the
+candidate before it replaces the document. The scoped apply validates every
+Floorplan dataset its proposal upserts before `withSnapshot`. The stale check,
+the engine input and the identity checks after each await all use one captured
+snapshot: the memory revision is computed from that snapshot, and a document
+change while it is computed or while the engine runs is stale. A refusal,
 an unavailable engine (the dialog shows its notice) or a receipt mismatch commits
 nothing to the document or the undo history. The read-only diagnostics stay local
 so that inspecting a map neither loads the engine nor rewrites the stored source
