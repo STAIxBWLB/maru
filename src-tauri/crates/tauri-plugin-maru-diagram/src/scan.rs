@@ -20,6 +20,9 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use rustix::fs::{openat, AtFlags, FileType, Mode, OFlags};
+
 pub const DEFAULT_MAX_FILES: usize = 5_000;
 pub const MAX_FILES_LIMIT: usize = 20_000;
 pub const DEFAULT_MAX_DEPTH: u8 = 24;
@@ -143,15 +146,34 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
             "reopen the workspace in Maru and scan again",
         )
     })?;
+    // Opened once, after the canonicalize above proved the root is the folder
+    // the host authorized. Every read below is resolved from this handle, not
+    // from that path, so replacing the root or a folder under it with a link
+    // during the scan cannot redirect a read outside the workspace.
+    let anchor = RootAnchor::open(&root)?;
     let scan_root = resolve_picked(&root, picked)?;
     let relative_path = relative_string(&root, &scan_root);
+    let Some(scan_dir) = anchor.open_scan_root(&relative_path) else {
+        return Err(ScanError::new(
+            "diagram_scan_path_missing",
+            format!(
+                "the picked folder cannot be opened: {}",
+                if relative_path.is_empty() {
+                    "the workspace root"
+                } else {
+                    relative_path.as_str()
+                }
+            ),
+            "pick an existing folder inside the workspace",
+        ));
+    };
     let mut state = Walk {
         limits,
         budget,
         entries: 0,
         files: Vec::new(),
     };
-    let inventory = match git_index_files(&root, &scan_root, &mut state)? {
+    let inventory = match git_index_files(&anchor, &root, &scan_root, &mut state)? {
         Some(files) => {
             for file in files {
                 state.push(file)?;
@@ -159,7 +181,7 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
             Inventory::GitIndex
         }
         None => {
-            walk(&scan_root, "", &[], &mut state, 0)?;
+            walk(&scan_dir, &[], &mut state, 0)?;
             Inventory::Filesystem
         }
     };
@@ -176,7 +198,14 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
         .filter(|name| !name.is_empty())
         .unwrap_or("repository")
         .to_string();
-    let (document, stats) = propose(&scan_root, &name, &files, inventory, &mut budget)?;
+    let (document, stats) = propose(
+        &anchor,
+        &relative_path,
+        &name,
+        &files,
+        inventory,
+        &mut budget,
+    )?;
     // A scan that ran past its budget is refused, never returned late.
     budget.check_time()?;
     Ok(ScanReport {
@@ -302,29 +331,6 @@ fn resolve_picked(root: &Path, picked: &str) -> Result<PathBuf, ScanError> {
     Ok(canonical)
 }
 
-/// Whether `relative` (a `/`-separated path under `base`) reaches a regular
-/// file with no symbolic link on the way. Every folder on the path and the
-/// file itself are checked without following links, so a tracked path whose
-/// folder was later replaced by a link out of the workspace is never read.
-fn regular_file_without_links(base: &Path, relative: &str) -> bool {
-    if !plain_relative_path(relative) {
-        return false;
-    }
-    let mut current = base.to_path_buf();
-    let mut parts = relative.split('/').peekable();
-    while let Some(part) = parts.next() {
-        current.push(part);
-        let Ok(meta) = fs::symlink_metadata(&current) else {
-            return false;
-        };
-        let last = parts.peek().is_none();
-        if meta.file_type().is_symlink() || (last && !meta.is_file()) || (!last && !meta.is_dir()) {
-            return false;
-        }
-    }
-    true
-}
-
 /// Git names use `/` on every platform. Reject Windows separators/prefixes
 /// even on Unix, and never let a pushed component reset or traverse the root.
 fn plain_relative_path(relative: &str) -> bool {
@@ -336,22 +342,383 @@ fn plain_relative_path(relative: &str) -> bool {
         })
 }
 
-/// Open a file for reading without following a symbolic link at the leaf.
-fn open_regular_no_follow(path: &Path) -> Option<fs::File> {
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc_o_nofollow() | libc_o_nonblock());
-    }
+/// The authorized workspace root, held open for the whole scan.
+///
+/// [`resolve_picked`] canonicalizes once, which proves the picked folder lay
+/// inside the root at that moment. A read that goes back to a pathname
+/// afterwards can be redirected: a concurrent process with write access to the
+/// workspace replaces the root, or a folder on the way to a file, with a
+/// symbolic link, and the read that follows leaves the workspace. So every
+/// read here is resolved from this handle one component at a time with
+/// `O_NOFOLLOW`, and a folder is listed through a handle as well, which makes
+/// the same replacement a refused open rather than a followed link.
+///
+/// Without `openat` the scan keeps its `symlink_metadata` checks: a link at the
+/// root or at the leaf is still refused, but a folder swapped between the check
+/// and the read that follows it is not, so that platform's protection stops at
+/// the leaf.
+struct RootAnchor {
+    /// Only the pathname fallback needs the root back; the Unix reads resolve
+    /// everything from the handle.
     #[cfg(not(unix))]
-    {
-        if !fs::symlink_metadata(path).ok()?.is_file() {
-            return None;
+    root: PathBuf,
+    #[cfg(unix)]
+    handle: fs::File,
+}
+
+impl RootAnchor {
+    /// Open `root`, which the caller has already canonicalized.
+    fn open(root: &Path) -> Result<Self, ScanError> {
+        let unavailable = |error: std::io::Error| {
+            ScanError::new(
+                "diagram_scan_workspace_unavailable",
+                format!("the workspace root cannot be opened: {error}"),
+                "reopen the workspace in Maru and scan again",
+            )
+        };
+        #[cfg(unix)]
+        {
+            let handle = open_at(
+                None,
+                root,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            )
+            .ok_or_else(|| unavailable(std::io::Error::from(std::io::ErrorKind::NotFound)))?;
+            Ok(Self { handle })
+        }
+        #[cfg(not(unix))]
+        {
+            let meta = fs::symlink_metadata(root).map_err(unavailable)?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(unavailable(std::io::Error::from(
+                    std::io::ErrorKind::NotADirectory,
+                )));
+            }
+            Ok(Self {
+                root: root.to_path_buf(),
+            })
         }
     }
-    options.open(path).ok()
+
+    /// Open a folder under the root for listing, refusing a symbolic link at
+    /// every component. `""` is the root itself.
+    fn open_dir(&self, relative: &str) -> Option<ScanDir> {
+        if !relative.is_empty() && !plain_relative_path(relative) {
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            let mut current = self.handle.try_clone().ok()?;
+            for part in relative.split('/').filter(|part| !part.is_empty()) {
+                current = open_at(
+                    Some(&current),
+                    Path::new(part),
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                )?;
+            }
+            Some(ScanDir {
+                relative: relative.to_string(),
+                handle: current,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let path = self.root.join(relative);
+            let meta = fs::symlink_metadata(&path).ok()?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return None;
+            }
+            Some(ScanDir {
+                relative: relative.to_string(),
+                path,
+            })
+        }
+    }
+
+    /// The folder being scanned. Its report paths are relative to that folder,
+    /// not to the workspace root, so the resolved handle keeps the root-relative
+    /// base only for resolution and drops it for the walk.
+    fn open_scan_root(&self, relative: &str) -> Option<ScanDir> {
+        let mut dir = self.open_dir(relative)?;
+        dir.relative.clear();
+        Some(dir)
+    }
+
+    /// Whether `relative` exists and is a folder, never following a link at
+    /// its last component: `None` when nothing is there.
+    fn lstat_kind(&self, relative: &str) -> Option<bool> {
+        let (parent, name) = match relative.rsplit_once('/') {
+            Some((parent, name)) => (parent, name),
+            None => ("", relative),
+        };
+        if name.is_empty() || !plain_relative_path(name) {
+            return None;
+        }
+        let dir = self.open_dir(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsFd;
+            let stat =
+                rustix::fs::statat(dir.handle.as_fd(), name, AtFlags::SYMLINK_NOFOLLOW).ok()?;
+            Some(FileType::from_raw_mode(stat.st_mode).is_dir())
+        }
+        #[cfg(not(unix))]
+        {
+            let meta = fs::symlink_metadata(dir.path.join(name)).ok()?;
+            Some(meta.is_dir())
+        }
+    }
+
+    /// Open a file under the root, refusing a symbolic link at every component
+    /// and a leaf that is not a regular file.
+    fn open_file(&self, relative: &str) -> Option<fs::File> {
+        if !plain_relative_path(relative) {
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            let mut current = self.handle.try_clone().ok()?;
+            let mut parts = relative.split('/').peekable();
+            while let Some(part) = parts.next() {
+                let flags = if parts.peek().is_none() {
+                    // `O_NONBLOCK` so a FIFO cannot block before the handle is
+                    // checked for regular-file type.
+                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC
+                } else {
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
+                };
+                current = open_at(Some(&current), Path::new(part), flags)?;
+            }
+            Some(current)
+        }
+        #[cfg(not(unix))]
+        {
+            let mut current = self.root.clone();
+            let mut parts = relative.split('/').peekable();
+            while let Some(part) = parts.next() {
+                current.push(part);
+                let meta = fs::symlink_metadata(&current).ok()?;
+                let last = parts.peek().is_none();
+                if meta.file_type().is_symlink()
+                    || (last && !meta.is_file())
+                    || (!last && !meta.is_dir())
+                {
+                    return None;
+                }
+            }
+            fs::File::open(current).ok()
+        }
+    }
+
+    /// Whether `relative` reaches a regular file with no symbolic link on the
+    /// way. The answer comes from the anchored open itself, so a later read
+    /// cannot disagree with it.
+    fn is_regular_file(&self, relative: &str) -> bool {
+        match self.open_file(relative) {
+            Some(handle) => handle
+                .metadata()
+                .map(|meta| meta.is_file())
+                .unwrap_or(false),
+            None => false,
+        }
+    }
+
+    /// Read a file under the root under the same byte bound and budget as the
+    /// rest of the scan.
+    fn read_bounded(
+        &self,
+        relative: &str,
+        cap: u64,
+        budget: &mut Budget,
+    ) -> Result<BoundedRead, ScanError> {
+        let Some(handle) = self.open_file(relative) else {
+            return Ok(BoundedRead::Unreadable);
+        };
+        read_bounded_from(handle, cap, budget)
+    }
+}
+
+/// One folder of the scan, held open for listing.
+///
+/// Entries are read from the handle and a child folder is opened from it, so a
+/// folder replaced after it was opened cannot change what the scan lists.
+/// Without `openat` the path is kept and listing goes by pathname, which is the
+/// platform gap documented on [`RootAnchor`].
+struct ScanDir {
+    /// `/`-separated path from the workspace root (`""` for the root itself).
+    relative: String,
+    #[cfg(unix)]
+    handle: fs::File,
+    #[cfg(not(unix))]
+    path: PathBuf,
+}
+
+impl ScanDir {
+    fn relative(&self) -> &str {
+        &self.relative
+    }
+
+    /// This folder's entries as `(name, kind)`, in no particular order.
+    fn entries(&self) -> std::io::Result<Vec<(String, EntryKind)>> {
+        #[cfg(unix)]
+        {
+            list_dir(&self.handle)
+        }
+        #[cfg(not(unix))]
+        {
+            list_dir(&self.path)
+        }
+    }
+
+    /// The child folder `name`, opened from this folder's handle.
+    fn child(&self, name: &str) -> Option<ScanDir> {
+        let relative = join(&self.relative, name);
+        #[cfg(unix)]
+        {
+            let handle = open_at(
+                Some(&self.handle),
+                Path::new(name),
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            )?;
+            Some(ScanDir { relative, handle })
+        }
+        #[cfg(not(unix))]
+        {
+            let path = self.path.join(name);
+            let meta = fs::symlink_metadata(&path).ok()?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return None;
+            }
+            Some(ScanDir { relative, path })
+        }
+    }
+
+    /// Read `name` from this folder under the scan's byte bound and budget.
+    fn read_bounded(
+        &self,
+        name: &str,
+        cap: u64,
+        budget: &mut Budget,
+    ) -> Result<BoundedRead, ScanError> {
+        let Some(handle) = self.open_file(name) else {
+            return Ok(BoundedRead::Unreadable);
+        };
+        read_bounded_from(handle, cap, budget)
+    }
+
+    fn open_file(&self, name: &str) -> Option<fs::File> {
+        #[cfg(unix)]
+        {
+            open_at(
+                Some(&self.handle),
+                Path::new(name),
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let path = self.path.join(name);
+            let meta = fs::symlink_metadata(&path).ok()?;
+            if meta.file_type().is_symlink() || !meta.is_file() {
+                return None;
+            }
+            fs::File::open(path).ok()
+        }
+    }
+}
+
+/// `O_NOFOLLOW` for the root open: the root is already canonical, so a link
+/// here means it was replaced after that check.
+#[cfg(unix)]
+fn open_at(dir: Option<&fs::File>, path: &Path, flags: OFlags) -> Option<fs::File> {
+    use std::os::fd::AsFd;
+    let fd = match dir {
+        Some(dir) => openat(dir.as_fd(), path, flags, Mode::empty()),
+        None => openat(rustix::fs::CWD, path, flags, Mode::empty()),
+    };
+    fd.ok().map(fs::File::from)
+}
+
+/// What a listed entry is. A link, a FIFO, a socket or a device is `Skip`: the
+/// walk neither lists nor reads it, which is what keeps the scan inside the
+/// workspace without a second metadata check.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EntryKind {
+    Dir,
+    File,
+    Skip,
+}
+
+/// One directory's entries, read through an open handle. `d_type` is a hint, so
+/// an entry whose type the filesystem does not report is resolved with
+/// `openat` instead of being dropped.
+#[cfg(unix)]
+fn list_dir(handle: &fs::File) -> std::io::Result<Vec<(String, EntryKind)>> {
+    use std::os::fd::AsFd;
+    let mut entries = Vec::new();
+    for entry in rustix::fs::Dir::read_from(handle.as_fd())? {
+        let entry = entry?;
+        let name = match std::str::from_utf8(entry.file_name().to_bytes()) {
+            Ok(name) => name,
+            Err(_) => continue,
+        };
+        // A handle-based listing yields the raw `.` and `..` entries that
+        // `read_dir` filters out, and neither may become a child of the walk.
+        if name == "." || name == ".." {
+            continue;
+        }
+        let kind = entry.file_type();
+        let kind = if kind.is_dir() {
+            EntryKind::Dir
+        } else if kind.is_file() {
+            EntryKind::File
+        } else if kind.is_symlink() {
+            EntryKind::Skip
+        } else {
+            match open_at(
+                Some(handle),
+                Path::new(name),
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            ) {
+                Some(_) => EntryKind::Dir,
+                None => match open_at(
+                    Some(handle),
+                    Path::new(name),
+                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                ) {
+                    Some(handle) if handle.metadata().map(|m| m.is_file()).unwrap_or(false) => {
+                        EntryKind::File
+                    }
+                    _ => EntryKind::Skip,
+                },
+            }
+        };
+        entries.push((name.to_string(), kind));
+    }
+    Ok(entries)
+}
+
+#[cfg(not(unix))]
+fn list_dir(path: &Path) -> std::io::Result<Vec<(String, EntryKind)>> {
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let kind = if kind.is_dir() {
+            EntryKind::Dir
+        } else if kind.is_file() {
+            EntryKind::File
+        } else {
+            EntryKind::Skip
+        };
+        entries.push((name, kind));
+    }
+    Ok(entries)
 }
 
 #[derive(Debug)]
@@ -384,16 +751,13 @@ fn read_bounded(
     }
 }
 
-/// Size checks and reads use the same no-follow handle. An already oversized
+/// Size checks and the read use the same no-follow handle. An already oversized
 /// file is skipped without reading; subsequent growth is bounded by take().
-fn read_regular_bounded(
-    path: &Path,
+fn read_bounded_from(
+    handle: fs::File,
     cap: u64,
     budget: &mut Budget,
 ) -> Result<BoundedRead, ScanError> {
-    let Some(handle) = open_regular_no_follow(path) else {
-        return Ok(BoundedRead::Unreadable);
-    };
     let Ok(meta) = handle.metadata() else {
         return Ok(BoundedRead::Unreadable);
     };
@@ -404,34 +768,6 @@ fn read_regular_bounded(
         return Ok(BoundedRead::TooLarge);
     }
     read_bounded(handle, cap, budget)
-}
-
-/// `O_NOFOLLOW` without a libc dependency: the value is fixed per platform.
-#[cfg(unix)]
-fn libc_o_nofollow() -> i32 {
-    if cfg!(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd"
-    )) {
-        0x0100
-    } else {
-        0o400000
-    }
-}
-
-/// A FIFO must not block before its handle can be checked for regular-file type.
-#[cfg(unix)]
-fn libc_o_nonblock() -> i32 {
-    if cfg!(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd"
-    )) {
-        0x0004
-    } else {
-        0o4000
-    }
 }
 
 fn relative_string(base: &Path, path: &Path) -> String {
@@ -454,51 +790,61 @@ fn relative_string(base: &Path, path: &Path) -> String {
 /// outside the workspace (a linked worktree, for example) is walked instead,
 /// because the scanner reads nothing outside the root the host resolved.
 fn git_index_files(
+    anchor: &RootAnchor,
     root: &Path,
     scan_root: &Path,
     state: &mut Walk,
 ) -> Result<Option<Vec<String>>, ScanError> {
+    let scan_relative = relative_string(root, scan_root);
     let mut repo = Some(scan_root);
     while let Some(dir) = repo {
         if !dir.starts_with(root) {
             return Ok(None);
         }
-        let dot_git = dir.join(".git");
-        if let Ok(meta) = fs::symlink_metadata(&dot_git) {
-            if !meta.is_dir() {
-                return Ok(None);
-            }
-            let index = dot_git.join("index");
-            let BoundedRead::Bytes(bytes) =
-                read_regular_bounded(&index, MAX_INDEX_BYTES, &mut state.budget)?
-            else {
-                return Ok(None);
-            };
-            let Some(entries) = parse_index(&bytes, state.budget.deadline)? else {
-                return Ok(None);
-            };
-            let prefix = relative_string(dir, scan_root);
-            let mut files = Vec::new();
-            for entry in entries {
-                let rest = if prefix.is_empty() {
-                    entry.as_str()
-                } else if let Some(rest) = entry
-                    .strip_prefix(prefix.as_str())
-                    .and_then(|rest| rest.strip_prefix('/'))
-                {
-                    rest
-                } else {
-                    continue;
+        let dot_git = join(&relative_string(root, dir), ".git");
+        // `.git` is classified without following a link, and the index is read
+        // through the anchor, so a `.git` replaced after this check cannot
+        // serve an index from outside the workspace.
+        match anchor.lstat_kind(&dot_git) {
+            // No `.git` here: an enclosing repository may still hold the index.
+            None => {}
+            // A file or a link, as in a linked worktree: walk instead.
+            Some(false) => return Ok(None),
+            Some(true) => {
+                let BoundedRead::Bytes(bytes) = anchor.read_bounded(
+                    &join(&dot_git, "index"),
+                    MAX_INDEX_BYTES,
+                    &mut state.budget,
+                )?
+                else {
+                    return Ok(None);
                 };
-                // A tracked path that is now missing, a directory, a link or
-                // under a linked folder is left out: the map describes what is
-                // on disk inside the workspace, and nothing is read through a link.
-                if regular_file_without_links(scan_root, rest) {
-                    files.push(rest.to_string());
+                let Some(entries) = parse_index(&bytes, state.budget.deadline)? else {
+                    return Ok(None);
+                };
+                let prefix = relative_string(dir, scan_root);
+                let mut files = Vec::new();
+                for entry in entries {
+                    let rest = if prefix.is_empty() {
+                        entry.as_str()
+                    } else if let Some(rest) = entry
+                        .strip_prefix(prefix.as_str())
+                        .and_then(|rest| rest.strip_prefix('/'))
+                    {
+                        rest
+                    } else {
+                        continue;
+                    };
+                    // A tracked path that is now missing, a directory, a link or
+                    // under a linked folder is left out: the map describes what is
+                    // on disk inside the workspace, and nothing is read through a link.
+                    if anchor.is_regular_file(&join(&scan_relative, rest)) {
+                        files.push(rest.to_string());
+                    }
+                    state.budget.check_time()?;
                 }
-                state.budget.check_time()?;
+                return Ok(Some(files));
             }
-            return Ok(Some(files));
         }
         repo = dir.parent();
     }
@@ -877,32 +1223,31 @@ fn glob_match_with_budget(
 }
 
 fn walk(
-    dir: &Path,
-    relative: &str,
+    dir: &ScanDir,
     inherited: &[IgnoreRule],
     state: &mut Walk,
     depth: usize,
 ) -> Result<(), ScanError> {
     state.budget.check_time()?;
     let mut rules = inherited.to_vec();
-    let gitignore = dir.join(".gitignore");
+    let relative = dir.relative().to_string();
     if let BoundedRead::Bytes(bytes) =
-        read_regular_bounded(&gitignore, MAX_SOURCE_BYTES, &mut state.budget)?
+        dir.read_bounded(".gitignore", MAX_SOURCE_BYTES, &mut state.budget)?
     {
         if let Ok(text) = std::str::from_utf8(&bytes) {
-            rules.extend(parse_gitignore(relative, text));
+            rules.extend(parse_gitignore(&relative, text));
         }
     }
-    let entries = fs::read_dir(dir).map_err(|error| {
+    let entries = dir.entries().map_err(|error| {
         ScanError::new(
             "diagram_scan_read_failed",
-            format!("cannot list {}: {error}", display(relative)),
+            format!("cannot list {}: {error}", display(&relative)),
             "check the folder's permissions and scan again",
         )
     })?;
     let mut children: Vec<(String, bool)> = Vec::new();
     let mut kept_files = 0usize;
-    for entry in entries {
+    for (name, kind) in entries {
         // The entry and time budgets apply while reading, so one very wide
         // folder (generated output, a vendored tree) cannot outrun them.
         state.entries += 1;
@@ -911,7 +1256,7 @@ fn walk(
                 "diagram_scan_too_many_entries",
                 format!(
                     "the scan read more than {MAX_DIR_ENTRIES} folder entries (stopped in {})",
-                    display(relative)
+                    display(&relative)
                 ),
                 "pick a smaller subfolder, or list generated folders in .gitignore, and scan again",
             ));
@@ -919,30 +1264,17 @@ fn walk(
         if state.entries.is_multiple_of(256) {
             state.budget.check_time()?;
         }
-        let entry = entry.map_err(|error| {
-            ScanError::new(
-                "diagram_scan_read_failed",
-                format!("cannot list {}: {error}", display(relative)),
-                "check the folder's permissions and scan again",
-            )
-        })?;
-        // `file_type` does not follow links, so a link is neither a file nor a
-        // folder here and is skipped: the walk cannot leave the workspace.
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let is_dir = if kind.is_dir() && name != ".git" {
-            true
-        } else if kind.is_file() {
-            false
-        } else {
-            continue;
+        // A link, a FIFO or any other non-file is skipped by the listing, and
+        // `.git` is never walked into: the walk cannot leave the workspace and
+        // never reads repository metadata as source.
+        let is_dir = match kind {
+            EntryKind::Dir if name == ".git" => continue,
+            EntryKind::Dir => true,
+            EntryKind::File => false,
+            EntryKind::Skip => continue,
         };
         // Ignored entries are dropped as they are read, never kept or sorted.
-        if ignored_with_budget(&rules, &join(relative, &name), is_dir, &state.budget)? {
+        if ignored_with_budget(&rules, &join(&relative, &name), is_dir, &state.budget)? {
             continue;
         }
         if !is_dir {
@@ -964,7 +1296,7 @@ fn walk(
     }
     children.sort();
     for (name, is_dir) in children {
-        let path = join(relative, &name);
+        let path = join(&relative, &name);
         if is_dir {
             if depth + 1 >= usize::from(state.limits.max_depth) {
                 return Err(ScanError::new(
@@ -978,7 +1310,12 @@ fn walk(
                     ),
                 ));
             }
-            walk(&dir.join(&name), &path, &rules, state, depth + 1)?;
+            let Some(child) = dir.child(&name) else {
+                // The folder was replaced with a link, or removed, after it was
+                // listed: it is skipped instead of being read through.
+                continue;
+            };
+            walk(&child, &rules, state, depth + 1)?;
         } else {
             state.push(path)?;
         }
@@ -1559,7 +1896,8 @@ fn group_of(file: &str) -> String {
 }
 
 fn propose(
-    scan_root: &Path,
+    anchor: &RootAnchor,
+    root_relative: &str,
     name: &str,
     files: &[String],
     inventory: Inventory,
@@ -1640,19 +1978,17 @@ fn propose(
         {
             entrypoints.push(file.clone());
         }
-        // Checked again right before reading, folders included, so a link that
-        // replaced a folder after the inventory is never read through.
-        if !regular_file_without_links(scan_root, file) {
-            continue;
-        }
-        let bytes = match read_regular_bounded(&scan_root.join(file), MAX_SOURCE_BYTES, budget)? {
-            BoundedRead::Bytes(bytes) => bytes,
-            BoundedRead::TooLarge => {
-                skipped_large += 1;
-                continue;
-            }
-            BoundedRead::Unreadable => continue,
-        };
+        // Resolved from the root handle for this read, so a folder replaced by
+        // a link after the inventory is skipped rather than read through.
+        let bytes =
+            match anchor.read_bounded(&join(root_relative, file), MAX_SOURCE_BYTES, budget)? {
+                BoundedRead::Bytes(bytes) => bytes,
+                BoundedRead::TooLarge => {
+                    skipped_large += 1;
+                    continue;
+                }
+                BoundedRead::Unreadable => continue,
+            };
         let text = String::from_utf8_lossy(&bytes);
         let mut refs = Refs::default();
         match lang {
