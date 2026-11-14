@@ -83,7 +83,9 @@ function row(name, sourceCommit, log, result, root) {
     },
     evidence: {
       behaviorCases: [HWPED_FORM_BOUNDARY_CASE],
-      contractCases: HWPED_FORM_CASES.map((test) => `src-tauri/src/hwped/forms/tests.rs::${test}`),
+      // Named outside a `*Cases` key: the gate resolves those against the
+      // registered module only, and these live in hwped/forms/tests.rs.
+      contractTests: HWPED_FORM_CASES.map((test) => `src-tauri/src/hwped/forms/tests.rs::${test}`),
       workerProof: `hwped::phase08_21::${HWPED_FORM_BOUNDARY_CASE} holds the ${name} future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.`,
       platformScope: "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
       limits: "Containment covers the source path and the host-made artifact paths; engine-side semantics of the plan are the engine's own contract.",
