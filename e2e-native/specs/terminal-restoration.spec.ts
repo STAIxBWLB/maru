@@ -25,20 +25,41 @@ function persistedSessions(profile: string | null): number {
  *  shell sessions). Wait for a profile that records at least `minSessions`
  *  entries and has stopped changing across that debounce, instead of pinning a
  *  count: the restored split plus the auto-launched pane does not always persist
- *  the same number of tabs. */
-async function waitForPersistedProfile(minSessions: number): Promise<string | null> {
-  return (await browser.executeAsync(
-    (wanted: number, timeout: number, done: (value: string | null) => void) => {
+ *  the same number of tabs.
+ *
+ *  A timeout is a failure, not a value. Returning the stale profile would let
+ *  the restart below compare that profile with itself and pass with the split
+ *  never persisted (reproduced: 20 s with two sessions requested and zero
+ *  recorded still passed). The failure names counts and flags only - never
+ *  titles, paths or terminal contents. */
+type PersistedProfile =
+  | { ready: true; profile: string; sessions: number }
+  | { ready: false; sessions: number; present: boolean; parseable: boolean; stable: boolean; waitedMs: number };
+
+async function waitForPersistedProfile(minSessions: number): Promise<string> {
+  const settled = 500;
+  const result: PersistedProfile | undefined = await browser.executeAsync(
+    (
+      wanted: number,
+      settle: number,
+      timeout: number,
+      done: (value?: PersistedProfile) => void,
+    ) => {
       const key = "maru:terminal:v1";
       // TerminalPanel's persist effect restarts this window on every state change.
-      const settled = 500;
-      const deadline = Date.now() + timeout;
-      const sessions = (raw: string | null): number => {
+      const startedAt = Date.now();
+      const deadline = startedAt + timeout;
+      const describe = (raw: string | null) => {
+        if (raw === null) return { present: false, parseable: false, sessions: 0 };
         try {
-          const parsed = JSON.parse(raw ?? "null") as { sessions?: unknown } | null;
-          return Array.isArray(parsed?.sessions) ? parsed.sessions.length : 0;
+          const parsed = JSON.parse(raw) as { sessions?: unknown } | null;
+          return {
+            present: true,
+            parseable: true,
+            sessions: Array.isArray(parsed?.sessions) ? parsed.sessions.length : 0,
+          };
         } catch {
-          return 0;
+          return { present: true, parseable: false, sessions: 0 };
         }
       };
       let last = window.localStorage.getItem(key);
@@ -50,12 +71,21 @@ async function waitForPersistedProfile(minSessions: number): Promise<string | nu
           last = current;
           changedAt = now;
         }
-        if (sessions(last) >= wanted && now - changedAt >= settled) {
-          done(last);
+        const info = describe(last);
+        const stable = now - changedAt >= settle;
+        if (info.sessions >= wanted && stable) {
+          done({ ready: true, profile: last ?? "", sessions: info.sessions });
           return;
         }
         if (now >= deadline) {
-          done(last);
+          done({
+            ready: false,
+            sessions: info.sessions,
+            present: info.present,
+            parseable: info.parseable,
+            stable,
+            waitedMs: now - startedAt,
+          });
           return;
         }
         setTimeout(tick, 50);
@@ -63,8 +93,20 @@ async function waitForPersistedProfile(minSessions: number): Promise<string | nu
       tick();
     },
     minSessions,
+    settled,
     POLL_TIMEOUT_MS,
-  )) as string | null;
+  );
+  if (!result) {
+    assert.fail(`the terminal profile reader never answered within ${POLL_TIMEOUT_MS} ms`);
+  }
+  if (!result.ready) {
+    assert.fail(
+      `the terminal profile never recorded ${minSessions} shell sessions within ${POLL_TIMEOUT_MS} ms `
+        + `(sessions=${result.sessions} present=${result.present} parseable=${result.parseable} `
+        + `stable=${result.stable} waitedMs=${result.waitedMs})`,
+    );
+  }
+  return result.profile;
 }
 
 describe("native restored terminal topology", () => {
@@ -79,7 +121,12 @@ describe("native restored terminal topology", () => {
     const splitReady = await waitForShellSplitReady(firstId);
     assert.ok(splitReady, "both real split PTYs must be ready before restart");
     const saved = await waitForPersistedProfile(beforeSplit + 1);
-    assert.ok(saved, "terminal metadata must be persisted for the restored-state regression");
+    // The helper only returns a profile that reached this count and settled, so
+    // this restates the floor the restart below is compared against.
+    assert.ok(
+      persistedSessions(saved) >= beforeSplit + 1,
+      "the settled terminal profile lost the split's session before the restart",
+    );
     await browser.reloadSession();
     await verifyNativeProfileIsolation("retained");
     const restored = await browser.execute(() => window.localStorage.getItem("maru:terminal:v1"));

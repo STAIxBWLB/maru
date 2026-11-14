@@ -72,13 +72,19 @@ Three readiness conditions carry those same rules past the #388 follow-up.
 `terminal-restoration.spec.ts` waits for a `maru:terminal:v1` profile that
 records one more session than the settled pre-split profile and has stopped
 changing across the panel's 400 ms write debounce, because the restart compares
-the profile the split produced with the one the relaunched app rewrites.
+the profile the split produced with the one the relaunched app rewrites. A
+profile that never reaches that count fails before the restart, with its session
+count, present/parseable and settled flags and the elapsed time - never with the
+profile text - so a stale profile is not compared with itself.
 `ime.spec.ts` waits for the rich editor's mounted surface to carry imported
 text, not merely for its contenteditable. `diagram-engine-e4.spec.ts` waits for
-the anchored badge of the fixture's own refusal diagnostic, since the canvas
-notice carries the same attribute and is a separate rendering of the same
-mapping. Failure output names the state that was found instead (profile kinds,
-missing document, notice versus anchored badge).
+the diagnostic layer to draw an anchored badge for the settled document,
+whichever diagnostic it names, since the canvas notice carries the same
+attribute and is a separate rendering of the same mapping. Failure output names
+the state that was found instead (profile counts and flags, missing document,
+notice instead of a badge); the diagnostic's code, target and placement stay
+assertions, so a wrong mapping fails as a mismatch rather than as a badge that
+never appeared.
 
 Menu tests wait for a registered dispatcher and require a receipt from their
 single command invocation; bridge-object presence alone is insufficient. A
