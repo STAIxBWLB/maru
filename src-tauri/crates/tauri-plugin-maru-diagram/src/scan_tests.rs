@@ -586,6 +586,7 @@ fn index_and_ignore_reads_share_the_remaining_budget() {
     let mut state = Walk {
         limits: limits(),
         budget: open_budget(),
+        entry_cap: MAX_DIR_ENTRIES,
         entries: 0,
         files: Vec::new(),
     };
@@ -892,6 +893,47 @@ fn a_very_wide_ignored_folder_stops_at_the_entry_budget() {
 }
 
 #[test]
+fn a_wide_folder_is_refused_while_it_is_still_being_listed() {
+    let dir = tempdir();
+    for index in 0..40 {
+        write(dir.path(), &format!("{index:02}.ts"), "");
+    }
+    let anchor = RootAnchor::open(dir.path()).unwrap();
+    let scan_dir = anchor.open_dir("").unwrap();
+    let cap = 8;
+    let mut state = Walk {
+        limits: limits(),
+        budget: open_budget(),
+        entry_cap: cap,
+        entries: 0,
+        files: Vec::new(),
+    };
+    entry_probe::reset();
+    let error = walk(&scan_dir, &[], &mut state, 0).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_too_many_entries");
+    assert!(
+        error
+            .message
+            .contains(&format!("more than {cap} folder entries")),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        state.entries,
+        cap + 1,
+        "the walk stops at the first entry past the cap"
+    );
+    // The listing is drained lazily: a folder is read entry by entry, so the
+    // refusal costs one entry past the cap rather than all 40. Reading the
+    // folder into a Vec first makes this assertion read 40.
+    assert_eq!(
+        entry_probe::yielded(),
+        cap + 1,
+        "the listing must stop at the cap instead of enumerating the whole folder"
+    );
+}
+
+#[test]
 fn a_long_rust_use_path_resolves_in_bounded_time() {
     let files: BTreeSet<String> = ["c/Cargo.toml", "c/src/lib.rs", "c/src/a.rs"]
         .iter()
@@ -1022,10 +1064,21 @@ fn an_intermediate_folder_replaced_by_a_link_after_it_was_listed_is_not_followed
 
     let anchor = RootAnchor::open(&root).unwrap();
     let scan_dir = anchor.open_scan_root("").unwrap();
+    let mut listed: Vec<(String, EntryKind)> = Vec::new();
+    scan_dir
+        .for_each_entry(
+            || Ok(()),
+            |name, kind| {
+                listed.push((
+                    name.to_string(),
+                    kind.unwrap_or_else(|| scan_dir.classify(name)),
+                ));
+                Ok(())
+            },
+        )
+        .unwrap();
     assert!(
-        scan_dir
-            .entries()
-            .unwrap()
+        listed
             .iter()
             .any(|(name, kind)| name == "src" && *kind == EntryKind::Dir),
         "the fixture did not list src as a folder before the swap"
@@ -1061,4 +1114,12 @@ fn an_intermediate_folder_replaced_by_a_link_after_it_was_listed_is_not_followed
             "unexpected refusal: {error:?}"
         ),
     }
+    // The same swap with the folder itself picked: the canonicalize in
+    // `resolve_picked` already settles this one, so it refuses rather than
+    // leaving the workspace through the link.
+    let picked = scan(&root, "src", limits()).unwrap_err();
+    assert!(
+        picked.code.starts_with("diagram_scan_"),
+        "unexpected refusal: {picked:?}"
+    );
 }

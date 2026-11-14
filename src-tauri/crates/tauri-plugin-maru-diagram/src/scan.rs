@@ -170,6 +170,7 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
     let mut state = Walk {
         limits,
         budget,
+        entry_cap: MAX_DIR_ENTRIES,
         entries: 0,
         files: Vec::new(),
     };
@@ -254,6 +255,10 @@ impl Budget {
 struct Walk {
     limits: ScanLimits,
     budget: Budget,
+    /// Directory entries the walk may read, [`MAX_DIR_ENTRIES`] in a scan. A
+    /// regression lowers it so the bound can be proved on a folder small enough
+    /// to build in a test.
+    entry_cap: usize,
     /// Directory entries read so far, ignored ones included.
     entries: usize,
     /// Paths relative to the scanned folder, `/`-separated.
@@ -558,16 +563,110 @@ impl ScanDir {
         &self.relative
     }
 
-    /// This folder's entries as `(name, kind)`, in no particular order.
-    fn entries(&self) -> std::io::Result<Vec<(String, EntryKind)>> {
+    /// This folder's entries one at a time, in no particular order.
+    ///
+    /// `admit` runs before the entry's type is resolved through the handle and
+    /// before anything about the entry is kept, so the walk's bounds stop a very
+    /// wide folder while it is still being listed. Draining the folder first and
+    /// counting afterwards would let one generated or vendored tree cost
+    /// unbounded memory and enumeration time before the cap could fire.
+    ///
+    /// `visit` receives the entry's name and, when `d_type` already settled it,
+    /// the kind; `None` leaves the type to [`ScanDir::classify`].
+    fn for_each_entry<A, V>(&self, mut admit: A, mut visit: V) -> Result<(), ScanError>
+    where
+        A: FnMut() -> Result<(), ScanError>,
+        V: FnMut(&str, Option<EntryKind>) -> Result<(), ScanError>,
+    {
         #[cfg(unix)]
         {
-            list_dir(&self.handle)
+            use std::os::fd::AsFd;
+            let listed = rustix::fs::Dir::read_from(self.handle.as_fd())
+                .map_err(|error| self.list_error(error))?;
+            for entry in listed {
+                let entry = entry.map_err(|error| self.list_error(error))?;
+                let name = match std::str::from_utf8(entry.file_name().to_bytes()) {
+                    Ok(name) => name,
+                    Err(_) => continue,
+                };
+                // A handle-based listing yields the raw `.` and `..` entries
+                // that `read_dir` filters out, and neither may become a child of
+                // the walk.
+                if name == "." || name == ".." {
+                    continue;
+                }
+                #[cfg(test)]
+                entry_probe::yielded_one();
+                admit()?;
+                visit(name, entry_kind(entry.file_type()))?;
+            }
         }
         #[cfg(not(unix))]
         {
-            list_dir(&self.path)
+            let listed = fs::read_dir(&self.path).map_err(|error| self.list_error(error))?;
+            for entry in listed {
+                let entry = entry.map_err(|error| self.list_error(error))?;
+                let Ok(name) = entry.file_name().into_string() else {
+                    continue;
+                };
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                #[cfg(test)]
+                entry_probe::yielded_one();
+                admit()?;
+                let kind = if kind.is_dir() {
+                    EntryKind::Dir
+                } else if kind.is_file() {
+                    EntryKind::File
+                } else {
+                    EntryKind::Skip
+                };
+                visit(&name, Some(kind))?;
+            }
         }
+        Ok(())
+    }
+
+    /// Resolve an entry whose type the filesystem did not report, through this
+    /// folder's handle, exactly as the listing did before it: a link is never
+    /// followed and anything that is neither a folder nor a regular file is
+    /// skipped.
+    fn classify(&self, name: &str) -> EntryKind {
+        #[cfg(unix)]
+        {
+            if self.child(name).is_some() {
+                return EntryKind::Dir;
+            }
+            match self.open_file(name) {
+                Some(handle)
+                    if handle
+                        .metadata()
+                        .map(|meta| meta.is_file())
+                        .unwrap_or(false) =>
+                {
+                    EntryKind::File
+                }
+                _ => EntryKind::Skip,
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            match fs::symlink_metadata(self.path.join(name)) {
+                Ok(meta) if meta.is_dir() => EntryKind::Dir,
+                Ok(meta) if meta.is_file() => EntryKind::File,
+                _ => EntryKind::Skip,
+            }
+        }
+    }
+
+    fn list_error(&self, error: impl Into<std::io::Error>) -> ScanError {
+        let error = error.into();
+        ScanError::new(
+            "diagram_scan_read_failed",
+            format!("cannot list {}: {error}", display(&self.relative)),
+            "check the folder's permissions and scan again",
+        )
     }
 
     /// The child folder `name`, opened from this folder's handle.
@@ -649,76 +748,44 @@ enum EntryKind {
     Skip,
 }
 
-/// One directory's entries, read through an open handle. `d_type` is a hint, so
-/// an entry whose type the filesystem does not report is resolved with
-/// `openat` instead of being dropped.
+/// The entry's kind when `d_type` already settled it. `None` means the
+/// filesystem reported no type, and [`ScanDir::classify`] resolves it through
+/// the folder's handle instead of dropping the entry.
 #[cfg(unix)]
-fn list_dir(handle: &fs::File) -> std::io::Result<Vec<(String, EntryKind)>> {
-    use std::os::fd::AsFd;
-    let mut entries = Vec::new();
-    for entry in rustix::fs::Dir::read_from(handle.as_fd())? {
-        let entry = entry?;
-        let name = match std::str::from_utf8(entry.file_name().to_bytes()) {
-            Ok(name) => name,
-            Err(_) => continue,
-        };
-        // A handle-based listing yields the raw `.` and `..` entries that
-        // `read_dir` filters out, and neither may become a child of the walk.
-        if name == "." || name == ".." {
-            continue;
-        }
-        let kind = entry.file_type();
-        let kind = if kind.is_dir() {
-            EntryKind::Dir
-        } else if kind.is_file() {
-            EntryKind::File
-        } else if kind.is_symlink() {
-            EntryKind::Skip
-        } else {
-            match open_at(
-                Some(handle),
-                Path::new(name),
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            ) {
-                Some(_) => EntryKind::Dir,
-                None => match open_at(
-                    Some(handle),
-                    Path::new(name),
-                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-                ) {
-                    Some(handle) if handle.metadata().map(|m| m.is_file()).unwrap_or(false) => {
-                        EntryKind::File
-                    }
-                    _ => EntryKind::Skip,
-                },
-            }
-        };
-        entries.push((name.to_string(), kind));
+fn entry_kind(kind: rustix::fs::FileType) -> Option<EntryKind> {
+    if kind.is_dir() {
+        Some(EntryKind::Dir)
+    } else if kind.is_file() {
+        Some(EntryKind::File)
+    } else if kind.is_symlink() {
+        Some(EntryKind::Skip)
+    } else {
+        None
     }
-    Ok(entries)
 }
 
-#[cfg(not(unix))]
-fn list_dir(path: &Path) -> std::io::Result<Vec<(String, EntryKind)>> {
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        let kind = if kind.is_dir() {
-            EntryKind::Dir
-        } else if kind.is_file() {
-            EntryKind::File
-        } else {
-            EntryKind::Skip
-        };
-        entries.push((name, kind));
+/// Entries a listing handed to the walk, so a regression can prove a very wide
+/// folder is refused while it is listed rather than after it has been read into
+/// memory. Thread-local: parallel tests never see each other's counts.
+#[cfg(test)]
+mod entry_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static YIELDED: Cell<usize> = const { Cell::new(0) };
     }
-    Ok(entries)
+
+    pub(super) fn yielded_one() {
+        YIELDED.with(|count| count.set(count.get() + 1));
+    }
+
+    pub(super) fn yielded() -> usize {
+        YIELDED.with(Cell::get)
+    }
+
+    pub(super) fn reset() {
+        YIELDED.with(|count| count.set(0));
+    }
 }
 
 #[derive(Debug)]
@@ -1238,62 +1305,68 @@ fn walk(
             rules.extend(parse_gitignore(&relative, text));
         }
     }
-    let entries = dir.entries().map_err(|error| {
-        ScanError::new(
-            "diagram_scan_read_failed",
-            format!("cannot list {}: {error}", display(&relative)),
-            "check the folder's permissions and scan again",
-        )
-    })?;
     let mut children: Vec<(String, bool)> = Vec::new();
     let mut kept_files = 0usize;
-    for (name, kind) in entries {
+    let files_before = state.files.len();
+    let max_files = state.limits.max_files;
+    let entry_cap = state.entry_cap;
+    let mut read = state.entries;
+    let listed = dir.for_each_entry(
         // The entry and time budgets apply while reading, so one very wide
-        // folder (generated output, a vendored tree) cannot outrun them.
-        state.entries += 1;
-        if state.entries > MAX_DIR_ENTRIES {
-            return Err(ScanError::new(
-                "diagram_scan_too_many_entries",
-                format!(
-                    "the scan read more than {MAX_DIR_ENTRIES} folder entries (stopped in {})",
-                    display(&relative)
-                ),
-                "pick a smaller subfolder, or list generated folders in .gitignore, and scan again",
-            ));
-        }
-        if state.entries.is_multiple_of(256) {
-            state.budget.check_time()?;
-        }
-        // A link, a FIFO or any other non-file is skipped by the listing, and
-        // `.git` is never walked into: the walk cannot leave the workspace and
-        // never reads repository metadata as source.
-        let is_dir = match kind {
-            EntryKind::Dir if name == ".git" => continue,
-            EntryKind::Dir => true,
-            EntryKind::File => false,
-            EntryKind::Skip => continue,
-        };
-        // Ignored entries are dropped as they are read, never kept or sorted.
-        if ignored_with_budget(&rules, &join(&relative, &name), is_dir, &state.budget)? {
-            continue;
-        }
-        if !is_dir {
-            kept_files += 1;
-            if state.files.len() + kept_files > state.limits.max_files {
+        // folder (generated output, a vendored tree) cannot outrun them. The
+        // check runs before the entry's type is resolved and before anything
+        // about it is kept.
+        || {
+            read += 1;
+            if read > entry_cap {
                 return Err(ScanError::new(
-                    "diagram_scan_too_many_files",
+                    "diagram_scan_too_many_entries",
                     format!(
-                        "the folder holds more than {} files",
-                        state.limits.max_files
+                        "the scan read more than {entry_cap} folder entries (stopped in {})",
+                        display(&relative)
                     ),
-                    format!(
-                        "pick a smaller subfolder, or raise maxFiles (up to {MAX_FILES_LIMIT})"
-                    ),
+                    "pick a smaller subfolder, or list generated folders in .gitignore, and scan again",
                 ));
             }
-        }
-        children.push((name, is_dir));
-    }
+            if read.is_multiple_of(256) {
+                state.budget.check_time()?;
+            }
+            Ok(())
+        },
+        |name: &str, kind: Option<EntryKind>| {
+            // A link, a FIFO or any other non-file is skipped by the listing,
+            // and `.git` is never walked into: the walk cannot leave the
+            // workspace and never reads repository metadata as source.
+            let is_dir = match kind.unwrap_or_else(|| dir.classify(name)) {
+                EntryKind::Dir if name == ".git" => return Ok(()),
+                EntryKind::Dir => true,
+                EntryKind::File => false,
+                EntryKind::Skip => return Ok(()),
+            };
+            // Ignored entries are dropped as they are read, never kept or sorted.
+            if ignored_with_budget(&rules, &join(&relative, name), is_dir, &state.budget)? {
+                return Ok(());
+            }
+            if !is_dir {
+                kept_files += 1;
+                if files_before + kept_files > max_files {
+                    return Err(ScanError::new(
+                        "diagram_scan_too_many_files",
+                        format!("the folder holds more than {max_files} files"),
+                        format!(
+                            "pick a smaller subfolder, or raise maxFiles (up to {MAX_FILES_LIMIT})"
+                        ),
+                    ));
+                }
+            }
+            children.push((name.to_string(), is_dir));
+            Ok(())
+        },
+    );
+    // The count is recorded even when the listing above stopped at the cap, so
+    // the refusal and the counter a regression reads agree.
+    state.entries = read;
+    listed?;
     children.sort();
     for (name, is_dir) in children {
         let path = join(&relative, &name);
