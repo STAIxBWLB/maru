@@ -84,6 +84,22 @@ export type LifecycleState = { id: string, type: string, label: string, sublabel
 
 export type LifecycleTransition = { id?: string | null, from: string, to: string, label?: string | null, note?: string | null, variant?: string | null, route?: string | null, fromSide?: string | null, toSide?: string | null, channelX?: number | null, channelY?: number | null, cornerRadius?: number | null, labelAt?: [number, number] | null, labelDx?: number | null, labelDy?: number | null, labelSegment?: number | null, via?: Array<[number, number]> | null, width?: number | null, };
 
+export type FloorplanSpec = { $schema?: string | null, project: FloorplanProject, nodes: Array<FloorplanNode>, edges?: Array<FloorplanEdge> | null, annotations?: Array<FloorplanAnnotation> | null, flows?: Array<FloorplanFlow> | null, tour?: Array<FloorplanTourStop> | null, audience?: string | null, include?: Array<string> | null, ignore?: Array<string> | null, };
+
+export type FloorplanProject = { name: string, summary?: string | null, entrypoints?: Array<string> | null, };
+
+export type FloorplanNode = { id: string, label: string, kind: string, parent?: string | null, summary?: string | null, details?: string | null, paths?: Array<string> | null, exclude?: Array<string> | null, packages?: Array<string> | null, hosts?: Array<string> | null, tags?: Array<string> | null, };
+
+export type FloorplanEdge = { from: string, to: string, kind?: string | null, label?: string | null, description?: string | null, };
+
+export type FloorplanAnnotation = { path: string, note?: string | null, tags?: Array<string> | null, };
+
+export type FloorplanFlow = { id: string, title: string, description?: string | null, steps: Array<FloorplanFlowStep>, };
+
+export type FloorplanFlowStep = { node: string, note?: string | null, };
+
+export type FloorplanTourStop = { node: string, title?: string | null, note?: string | null, };
+
 export type GeometryTargetKind = "node" | "container";
 
 export type GeometryPositionSource = "plannedPin" | "authoredPosition" | "automatic";
