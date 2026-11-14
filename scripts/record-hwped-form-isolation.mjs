@@ -31,7 +31,7 @@ export const HWPED_FORM_CASES = [
   "a_successful_edit_without_its_document_names_the_missing_product",
   "a_plan_or_value_upstream_refuses_is_refused_by_its_path",
 ];
-export const HWPED_FORM_CHECK = "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=4";
+export const HWPED_FORM_CHECK = "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=2";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 function insist(condition, message) { if (!condition) throw new Error(message); }
 

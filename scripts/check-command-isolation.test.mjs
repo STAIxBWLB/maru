@@ -276,8 +276,8 @@ test("Rust mask preserves offsets and ignores nested comments, raw strings and l
 });
 test("CLI rejects missing/mixed/unknown modes and invalid counts", () => {
   for (const args of [[], ["--all", "--plan", "04"], ["--plan"], ["--plan", "29"], ["--integration", "07"], ["--all", "--expected-count", "0"], ["--refresh-current-manifest", "--all"], ["--wat"]]) assert.throws(() => parseArgs(args));
-  assert.deepEqual(parseArgs(["--plan", "4"]), { plan: "04", expectedCount: 393 });
-  assert.deepEqual(parseArgs(["--refresh-current-manifest"]), { expectedCount: 393, refreshCurrentManifest: true });
+  assert.deepEqual(parseArgs(["--plan", "4"]), { plan: "04", expectedCount: 395 });
+  assert.deepEqual(parseArgs(["--refresh-current-manifest"]), { expectedCount: 395, refreshCurrentManifest: true });
 });
 
 test("read-only evidence permits explicitly empty write sets", (t) => {
