@@ -149,7 +149,17 @@ export function GenerateDiagramDialog({
     hostRef.current?.cancel?.();
   };
 
+  // An apply-as-new that awaits the engine or a confirm must not land after the
+  // dialog closed or the document moved (T120-R5): closing and unmounting bump
+  // this generation, and `dirty` is read when the import would happen.
+  const applyGenerationRef = useRef(0);
+  const dirtyRef = useRef(dirty);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  useEffect(() => () => { applyGenerationRef.current += 1; }, []);
+  useEffect(() => { if (!open) applyGenerationRef.current += 1; }, [open]);
+
   const handleClose = () => {
+    applyGenerationRef.current += 1;
     if (busy) cancelRun();
     onClose();
   };
@@ -244,6 +254,9 @@ export function GenerateDiagramDialog({
 
   const handleApplyNew = async () => {
     if (!candidate || applying) return;
+    const generation = applyGenerationRef.current;
+    const startDoc = store.getState().doc;
+    const superseded = () => applyGenerationRef.current !== generation || store.getState().doc !== startDoc;
     setApplying(true);
     try {
       // Generation keeps the local floor for Floorplan, so installing the
@@ -251,12 +264,14 @@ export function GenerateDiagramDialog({
       if (candidate.diagramType === "floorplan") {
         const draft = projectSemanticDocument(candidate).doc;
         const diagnostics = await validateSemanticDraft(draft, [candidate.id], guardedValidationHost());
+        if (superseded()) return;
         if (diagnostics.length > 0) {
           setApplyMessage({ kind: "invalid", diagnostics });
           return;
         }
       }
-      if (dirty && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
+      if (dirtyRef.current && !(await confirmDialog(t("diagram.dialog.ie.confirmReplace")))) return;
+      if (superseded()) return;
       onImportDoc(projectSemanticDocument(candidate).doc);
       onClose();
     } finally {
@@ -547,7 +562,7 @@ export function GenerateDiagramDialog({
           ) : null}
 
           <div className="maru-diagram-ie-actions">
-            <button type="button" onClick={handleClose}>
+            <button type="button" onClick={handleClose} data-testid="gen-close">
               {t("diagram.generate.close")}
             </button>
             {mermaid.trim().length > 0 ? (

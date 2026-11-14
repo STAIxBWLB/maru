@@ -394,6 +394,7 @@ Which paths reach the engine:
 | Path | Floorplan check |
 |---|---|
 | Inspector and structure-editor applies (`applyValidatedSemanticEdit`) | local floor, then engine, before the commit |
+| Deleting semantic members: keyboard Delete, the Edit ribbon, the inspector's Remove (`deleteSelection`) | cascade preview, then engine (`validateSemanticDraft`), before the commit |
 | Scoped regeneration apply in the Generate dialog (`applyValidatedProposal`) | local floor while generating, then engine before the commit |
 | "Apply as new" in the Generate dialog (`handleApplyNew`) | local floor while generating, then engine before the document is installed |
 | Generation itself (`finishFloorplanJob`, until a candidate is ready) | local floor only |
@@ -405,7 +406,11 @@ candidate before it replaces the document. The scoped apply validates every
 Floorplan dataset its proposal upserts before `withSnapshot`. The stale check,
 the engine input and the identity checks after each await all use one captured
 snapshot: the memory revision is computed from that snapshot, and a document
-change while it is computed or while the engine runs is stale. A refusal,
+change while it is computed or while the engine runs is stale. "Apply as new"
+binds the same way: it captures the document and the dialog's apply generation
+at the click, and after the engine and the replace confirm it imports nothing if
+the dialog was closed or the document changed. Whether to confirm the replace is
+read at that point, not at the click. A refusal,
 an unavailable engine (the dialog shows its notice) or a receipt mismatch commits
 nothing to the document or the undo history. The read-only diagnostics stay local
 so that inspecting a map neither loads the engine nor rewrites the stored source

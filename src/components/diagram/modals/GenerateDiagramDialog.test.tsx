@@ -475,6 +475,43 @@ describe("GenerateDiagramDialog", () => {
         expect(host.validateCandidate).toHaveBeenCalledTimes(1);
         expect(harness!.onImportDoc).toHaveBeenCalledTimes(1);
       });
+
+      /** Hold the engine answer until the test releases it. */
+      async function generateWithHeldValidation() {
+        let release!: () => void;
+        const host = await generateNewFloorplan(() => new Promise((resolve) => {
+          release = () => resolve({ ok: true, errors: [], warnings: [] });
+        }));
+        await click(query('[data-testid="gen-apply-new"]')!);
+        await vi.waitFor(() => expect(host.validateCandidate).toHaveBeenCalled());
+        return () => act(async () => { release(); });
+      }
+
+      it("drops a pending apply when the dialog closes during validation (T120-R5)", async () => {
+        const release = await generateWithHeldValidation();
+        const before = probe!.getState().doc;
+        await click(query('[data-testid="gen-close"]')!);
+        expect(harness!.onClose).toHaveBeenCalledTimes(1);
+        await release();
+        await act(async () => { await Promise.resolve(); });
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).toHaveBeenCalledTimes(1);
+        expect(probe!.getState().doc).toBe(before);
+        expect(probe!.getState().ephemeral.history.past).toHaveLength(0);
+      });
+
+      it("drops a pending apply when the document changes during validation (T120-R5)", async () => {
+        const release = await generateWithHeldValidation();
+        act(() => {
+          probe!.setState((current) => ({ ...current, doc: { ...current.doc, docTitle: "Edited while validating" } }));
+        });
+        const edited = probe!.getState().doc;
+        await release();
+        await act(async () => { await Promise.resolve(); });
+        expect(harness!.onImportDoc).not.toHaveBeenCalled();
+        expect(harness!.onClose).not.toHaveBeenCalled();
+        expect(probe!.getState().doc).toBe(edited);
+      });
     });
   });
 
