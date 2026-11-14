@@ -27,7 +27,9 @@ CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 | `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial] [--report <file>]` (`--report` on ahwp >= 1.6.3) | `{ name, dataBase64 }` |
 | `hwped_compose` | `hwp compose <spec.json> -o <out> --report` | `{ name, dataBase64, report? }` |
 | `hwped_validate` | `hwp validate <in> --json` (exit 1 = invalid, report still parsed) | `{ valid, errors }` |
-| `hwped_capabilities` | `hwp --version` (enforces >= 0.8.7, memoized) | `{ version, editable, formats, editOps?: "v1" }` |
+| `hwped_capabilities` | `hwp --version` (enforces >= 0.8.7, memoized) | `{ version, editable, formats, editOps?: "v1", formBindings?: "v1" }` |
+| `hwped_discover_forms` | `ahwp slots <in> --forms --occurrences --json` (>= 2.0.0) | form-discovery-v1 JSON |
+| `hwped_apply_form_bindings` | `ahwp edit <in> -o <out> --ops <one apply_form_bindings op> --verify [--dry-run]` (>= 2.0.0, never `--report`) | `{ receipt, preview, name?, dataBase64? }`; a dry run has `published: false` and no bytes |
 
 Documents cross the bridge as `HwpedDocumentRef`: a workspace `path`
 (relative paths are resolved against `workspaceRoot` with an escape guard)
@@ -105,6 +107,26 @@ whose selected engine changed without changing the shim's path or mtime.
 `hwped_capabilities` always reports the detected version and base editing
 availability. It includes `editOps: "v1"` only when the detected binary meets
 the 0.20.0 feature floor; older accepted binaries omit that capability.
+
+It includes `formBindings: "v1"` only on agent-hwp >= 2.0.0, where both form
+commands run; the editor hides its Form panel otherwise (maru#626, hwp-editor
+`docs/integration-maru.md` §Source-bound forms). `hwped_apply_form_bindings`
+makes the receipt and preview paths itself, in a private per-call directory
+removed after the call, and stages one exclusive op: the caller cannot name an
+artifact path or add other edits. The output keeps the source format, checked by
+name before the engine runs and by magic bytes once staged. A target without
+reflow permission may not grow past its original UTF-16 length
+(`growth_without_reflow`). An engine refusal comes back as `engine_refused`
+without engine prose, because 2.0.0 emits no structured report for this op.
+The plan, values, discovery, receipt and preview go through a port of
+hwp-editor's own parsers (`src-tauri/src/hwped/forms/wire.rs`): the host refuses
+what they refuse and returns only the fields they return, with the preview's
+`native_warnings` emptied because native diagnostics may name local paths.
+`forms/parity.json` holds upstream outputs recorded by
+`scripts/record-hwped-form-parity.mjs`, real ahwp 2.0.0 output included, and is
+regenerated from upstream, never by hand. Receipt, preview and document reads are
+capped at 32 MiB through one handle.
+Evidence is recorded with `scripts/record-hwped-form-isolation.mjs`.
 
 The Rust channel and capability are the first half of
 [#563](https://github.com/STAIxBWLB/maru/issues/563); the second half is the

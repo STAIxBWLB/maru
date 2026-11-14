@@ -731,6 +731,12 @@
     },
     {
       "surface": "app",
+      "name": "hwped_apply_form_bindings",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_apply_form_bindings",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
       "name": "hwped_capabilities",
       "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_capabilities",
       "sourcePath": "src-tauri/src/hwped.rs"
@@ -739,6 +745,12 @@
       "surface": "app",
       "name": "hwped_compose",
       "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_compose",
+      "sourcePath": "src-tauri/src/hwped.rs"
+    },
+    {
+      "surface": "app",
+      "name": "hwped_discover_forms",
+      "registrationPath": "src-tauri/src/lib.rs::hwped::hwped_discover_forms",
       "sourcePath": "src-tauri/src/hwped.rs"
     },
     {
@@ -2363,14 +2375,14 @@
     }
   ],
   "counts": {
-    "app": 386,
+    "app": 388,
     "plugin": 7,
-    "total": 393
+    "total": 395
   },
   "sourceFiles": [
     {
       "path": "scripts/check-command-isolation.mjs",
-      "sha256": "c56af79c150bd2d30b099996f40af604020218a435a99c5e120fed21d4a7d14a"
+      "sha256": "ce7d1fe35c7093f2ca5b741aa9685de024fff0f6ea4a8dc3c1e882385ffee970"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -2522,7 +2534,7 @@
     },
     {
       "path": "src-tauri/src/hwped.rs",
-      "sha256": "72e742e41c5eaf348a811f3a6befbc8c38a7f3807862158657396d96dc02f0a7"
+      "sha256": "27b049b59de8abe9a8401ae01c38a3c0feb3fad0462b4ebf656df07339306c73"
     },
     {
       "path": "src-tauri/src/inbox.rs",
@@ -2562,7 +2574,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "e051e72c0f9b2aa72571b1bbf9b1126090424b1a47ba0b8ad76f1ad90cc6ae37"
+      "sha256": "9a452d5631a1750065e76942f56e0afa3c6045af27719cd726bb3841d1227d8b"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2741,5 +2753,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "0440065ab6690f7338f2d8a671fa9562de888488"
+  "sourceCommit": "f9bfcfdaa864fa19ceebb0671c6e86f6a01e2800"
 }
