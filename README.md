@@ -325,6 +325,8 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   action only after verifying the consumed approval and unchanged intent,
   evidence and destination. It resumes that fixed move without another task
   write, snapshot or confirmation; reading evidence does not move the note.
+  Admission and recovery use the same complete-apply and current-review
+  eligibility; a finished creator's exit result remains in the receipt.
   The current identity boundary is the
   effective CLI provider recorded by the backend, not a caller's actor/name or
   an attestation of a model account. Every provider used by the creator is

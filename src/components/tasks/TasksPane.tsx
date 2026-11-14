@@ -54,6 +54,7 @@ import {
   resolveTaskEntryProjects,
   selectVisibleTask,
   type TaskEntry,
+  type TaskFilters,
   type TaskPriority,
 } from "../../lib/tasks";
 import type {
@@ -179,22 +180,18 @@ export function TasksPane({
     [projectCatalog, rows],
   );
   const visibleEntries = useMemo(() => {
-    const titleMatches = filterTasksByQuery(entries, query, {
-      ...filtersForView(view),
+    const filters = {
       projects: projectFilter === "all" ? [] : [projectFilter],
       priorities: priorityFilter === "all" ? [] : [priorityFilter],
       today,
-    });
+    };
+    const titleMatches = filterTaskEntriesForView(entries, query, view, filters);
     if (bodyHits.size === 0) return titleMatches;
-    const bodyMatched = filterTasksByQuery(
+    const bodyMatched = filterTaskEntriesForView(
       entries.filter((entry) => bodyHits.has(entry.relPath)),
       "",
-      {
-        ...filtersForView(view),
-        projects: projectFilter === "all" ? [] : [projectFilter],
-        priorities: priorityFilter === "all" ? [] : [priorityFilter],
-        today,
-      },
+      view,
+      filters,
     );
     return mergeTaskEntries(titleMatches, bodyMatched);
   }, [entries, projectFilter, priorityFilter, query, today, view, bodyHits]);
@@ -818,9 +815,29 @@ export function filtersForView(view: TasksFilterView) {
   if (view === "backlog") {
     return { statuses: ["backlog"] as const, buckets: ["backlog"] as const };
   }
-  // An interrupted accepted publication can leave Done bytes in Active.
-  // Keep terminal status counts and the recovery list consistent.
-  return { statuses: ["done", "cancelled"] as const };
+  return { statuses: ["done", "cancelled"] as const, buckets: ["archive"] as const };
+}
+
+export function filterTaskEntriesForView(
+  entries: TaskEntry[],
+  query: string,
+  view: TasksFilterView,
+  filters: Pick<TaskFilters, "projects" | "priorities" | "today"> = {},
+): TaskEntry[] {
+  const ordinary = filterTasksByQuery(entries, query, { ...filters, ...filtersForView(view) });
+  if (view !== "done") return ordinary;
+  // An interrupted accepted publication can leave Done bytes outside Archive.
+  // Only policy-bearing tasks need that visibility exception. This read-only
+  // candidate check supplies no resume authority; the backend verifies it.
+  const candidates = entries.filter((entry) =>
+    entry.status === "done"
+    && entry.bucket !== "archive"
+    && entry.frontmatter.maruCompletionRequired === true
+    && typeof entry.taskId === "string" && entry.taskId.trim().length > 0
+    && typeof entry.frontmatter.maruCompletionPolicyRevision === "string"
+    && entry.frontmatter.maruCompletionPolicyRevision.trim().length > 0);
+  const pending = filterTasksByQuery(candidates, query, { ...filters, statuses: ["done"] });
+  return mergeTaskEntries(ordinary, pending);
 }
 
 function displayViewLabel(mode: TasksDisplayView): string {

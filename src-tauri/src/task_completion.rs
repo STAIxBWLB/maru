@@ -2148,7 +2148,6 @@ fn can_resume_archive(ctx: &Context<'_>, r: &TaskCompletionReceipt) -> Result<bo
         || a.target_path == a.binding.task_path
         || a.before_revision != a.binding.source_revision
         || !r.process_finished
-        || !r.process_success
         || !r
             .apply
             .as_ref()

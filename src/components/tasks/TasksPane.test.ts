@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { filterTasksByQuery, rowsToTaskEntries } from "../../lib/tasks";
+import { rowsToTaskEntries } from "../../lib/tasks";
 import type { TaskNoteRow } from "../../lib/types";
-import { canSwitchTaskDetails, filtersForView } from "./TasksPane";
+import { canSwitchTaskDetails, filtersForView, filterTaskEntriesForView } from "./TasksPane";
 
 describe("TasksPane detail selection guard", () => {
   it("switches immediately when the detail drawer is clean", async () => {
@@ -45,7 +45,7 @@ describe("TasksPane interrupted completion visibility", () => {
       row("interrupted", "active", "done", pendingFields), row("archived", "archive", "done"),
       row("open", "active", "active"),
     ]);
-    expect(filterTasksByQuery(entries, "", filtersForView("done")).map((entry) => entry.title))
+    expect(filterTaskEntriesForView(entries, "", "done").map((entry) => entry.title))
       .toEqual(["archived", "interrupted"]);
   });
 
@@ -62,7 +62,7 @@ describe("TasksPane interrupted completion visibility", () => {
       row("archived-cancelled", "archive", "cancelled"),
     ]);
 
-    expect(filterTasksByQuery(entries, "", filtersForView("done")).map((entry) => entry.title))
+    expect(filterTaskEntriesForView(entries, "", "done").map((entry) => entry.title))
       .toEqual(["archived-cancelled", "archived-done", "interrupted"]);
   });
 
@@ -78,7 +78,25 @@ describe("TasksPane interrupted completion visibility", () => {
       row("archived", "archive", "done"),
     ]);
 
-    expect(filterTasksByQuery(entries, "", filtersForView("done")).map((entry) => entry.title))
+    expect(filterTaskEntriesForView(entries, "", "done").map((entry) => entry.title))
       .toEqual(["archived", "interrupted"]);
+  });
+
+  it("retains the ordinary Archive-only terminal filter", () => {
+    expect(filtersForView("done")).toEqual({ statuses: ["done", "cancelled"], buckets: ["archive"] });
+  });
+
+  it("applies text, project and priority filters to the interrupted exception too", () => {
+    const entries = rowsToTaskEntries([
+      row("archived matching", "archive", "done", { project: "alpha", priority: "high" }),
+      row("interrupted matching", "active", "done", { ...pendingFields, project: "alpha", priority: "high" }),
+      row("wrong project matching", "active", "done", { ...pendingFields, project: "beta", priority: "high" }),
+      row("wrong priority matching", "active", "done", { ...pendingFields, project: "alpha", priority: "low" }),
+      row("unrelated", "active", "done", { ...pendingFields, project: "alpha", priority: "high" }),
+    ]);
+
+    expect(filterTaskEntriesForView(entries, "matching", "done", {
+      projects: ["alpha"], priorities: ["high"],
+    }).map((entry) => entry.title)).toEqual(["archived matching", "interrupted matching"]);
   });
 });
