@@ -5336,6 +5336,11 @@ fn owned_builtin_entry_target(
     // `/var` -> `/private/var`, or any symlinked home component).
     // Only the parent side is resolved: following the final component could
     // walk a skill-level link out of the bundle and claim a user's directory.
+    // Maru records absolute targets. A relative one resolves against the
+    // entry's directory, not the process CWD, so it is never treated as owned.
+    if target.is_relative() {
+        return false;
+    }
     let resolved_target = resolved_parent(target);
     let previous = previous_workspace.is_some_and(|root| {
         resolved_target
@@ -9757,6 +9762,36 @@ mod tests {
                 &builtin,
                 None
             ));
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn relative_entry_target_is_never_treated_as_builtin_owned() {
+            // Root the fixture under the process CWD so the relative target
+            // really resolves into builtin there, the case the bug misread.
+            let cwd = std::env::current_dir().unwrap();
+            let dir = tempfile::Builder::new()
+                .prefix(".maru-relative-entry-")
+                .tempdir_in(&cwd)
+                .unwrap();
+            let name = dir.path().file_name().unwrap();
+            let builtin = dir.path().join(".maru/skills/_builtin");
+            fs::create_dir_all(builtin.join("skills")).unwrap();
+            let entry = dir.path().join(".maru/skills/gone");
+            let relative = Path::new(name).join(".maru/skills/_builtin/skills/gone");
+            std::os::unix::fs::symlink(&relative, &entry).unwrap();
+            let previous = dir.path().join(".maru/skills/_bundles/old");
+            assert!(!owned_builtin_entry_target(
+                &relative, "gone", &builtin, None
+            ));
+            assert!(!owned_builtin_entry_target(
+                Path::new("../_bundles/old/skills/gone"),
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            remove_owned_builtin_entry(&entry, "gone", &builtin, Some(&previous)).unwrap();
+            assert_eq!(host_fs::read_link_target(&entry), Some(relative));
         }
 
         #[test]
