@@ -965,7 +965,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=4",
-          "passed": 92,
+          "passed": 98,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -996,13 +996,17 @@
           "src-tauri/src/hwped/forms/tests.rs::growth_without_reflow_is_refused_before_the_edit_runs",
           "src-tauri/src/hwped/forms/tests.rs::a_cross_format_request_is_refused_before_the_engine_runs",
           "src-tauri/src/hwped/forms/tests.rs::caller_artifact_paths_and_non_literal_values_never_reach_the_engine",
-          "src-tauri/src/hwped/forms/tests.rs::a_workspace_document_path_keeps_the_json_edit_containment"
+          "src-tauri/src/hwped/forms/tests.rs::a_workspace_document_path_keeps_the_json_edit_containment",
+          "src-tauri/src/hwped/forms/tests.rs::artifacts_cross_the_bridge_reduced_to_the_v1_contract",
+          "src-tauri/src/hwped/forms/tests.rs::an_oversized_artifact_is_refused_by_size_without_its_path",
+          "src-tauri/src/hwped/forms/tests.rs::a_successful_edit_without_its_document_names_the_missing_product",
+          "src-tauri/src/hwped/forms/tests.rs::a_plan_or_value_upstream_refuses_is_refused_by_its_path"
         ],
         "workerProof": "hwped::phase08_21::phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure holds the hwped_discover_forms future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.",
         "platformScope": "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
-        "limits": "Containment covers the source path and the host-made artifact paths; engine-side semantics of the plan are the engine's own contract.",
-        "sourceCommit": "8049211c0feb4ed2a0e89b317fe1db4caa6c60ce",
-        "logSha256": "a1d819f261830624b5cb2f156d3b94952f06221858156efbcd1d0404ee35cc7e",
+        "limits": "Containment covers the source path and the host-made artifact paths. Discovery, receipt and preview cross the bridge only after the ported upstream parsers (src-tauri/src/hwped/forms/wire.rs), checked against outputs recorded from hwp-editor's own functions; engine-side plan semantics are the engine's own contract.",
+        "sourceCommit": "88837eb0026c402a390b23cb11d5a848eab5da3c",
+        "logSha256": "60b7984956c336685e9ee07d57f5602d5cec50f120970da90cfec349f944cf76",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1014,11 +1018,15 @@
           },
           {
             "path": "src-tauri/src/hwped/forms.rs",
-            "sha256": "c051c0f140512d8195c1367e0dc0afba7eb9c6094c4c158c3681a1aee48354e9"
+            "sha256": "8b5c1521eb0eef89d6031270af0992fd5cc5bc092ec2df165033be56220af315"
+          },
+          {
+            "path": "src-tauri/src/hwped/forms/wire.rs",
+            "sha256": "156fa9538087111fa124cd5a90f239e350759b44ed296a99d387e7d4c3b925d6"
           },
           {
             "path": "src-tauri/src/hwped/forms/tests.rs",
-            "sha256": "ef719f25e7676043b80e79d96e2b0eafb6482fb4b7c48b817720617bb10e7cb5"
+            "sha256": "8528b76aacab5ad6c6f40b68a42b79fe9abdfbd124c85e94eea55e96702b9f3b"
           },
           {
             "path": "src/lib/hwped.ts",
@@ -1054,7 +1062,7 @@
       "tests": [
         {
           "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib hwped -- --test-threads=4",
-          "passed": 92,
+          "passed": 98,
           "failed": 0,
           "ignored": 0,
           "exitCode": 0
@@ -1085,13 +1093,17 @@
           "src-tauri/src/hwped/forms/tests.rs::growth_without_reflow_is_refused_before_the_edit_runs",
           "src-tauri/src/hwped/forms/tests.rs::a_cross_format_request_is_refused_before_the_engine_runs",
           "src-tauri/src/hwped/forms/tests.rs::caller_artifact_paths_and_non_literal_values_never_reach_the_engine",
-          "src-tauri/src/hwped/forms/tests.rs::a_workspace_document_path_keeps_the_json_edit_containment"
+          "src-tauri/src/hwped/forms/tests.rs::a_workspace_document_path_keeps_the_json_edit_containment",
+          "src-tauri/src/hwped/forms/tests.rs::artifacts_cross_the_bridge_reduced_to_the_v1_contract",
+          "src-tauri/src/hwped/forms/tests.rs::an_oversized_artifact_is_refused_by_size_without_its_path",
+          "src-tauri/src/hwped/forms/tests.rs::a_successful_edit_without_its_document_names_the_missing_product",
+          "src-tauri/src/hwped/forms/tests.rs::a_plan_or_value_upstream_refuses_is_refused_by_its_path"
         ],
         "workerProof": "hwped::phase08_21::phase08_21_hwped_each_wrapper_yields_same_poll_and_maps_join_failure holds the hwped_apply_form_bindings future at spawn_blocking worker entry through the test-only worker-stage hook, polls it on the same task while a distinct worker thread stays blocked, and maps the panicked worker to hwped_task_failed.",
         "platformScope": "Fake agent-hwp shell engines and disposable tempdirs only; the opt-in released_engine_discovers_previews_applies_and_refuses_a_stale_plan case runs the real engine and is not part of this hermetic record. No native WebView acceptance is claimed.",
-        "limits": "Containment covers the source path and the host-made artifact paths; engine-side semantics of the plan are the engine's own contract.",
-        "sourceCommit": "8049211c0feb4ed2a0e89b317fe1db4caa6c60ce",
-        "logSha256": "a1d819f261830624b5cb2f156d3b94952f06221858156efbcd1d0404ee35cc7e",
+        "limits": "Containment covers the source path and the host-made artifact paths. Discovery, receipt and preview cross the bridge only after the ported upstream parsers (src-tauri/src/hwped/forms/wire.rs), checked against outputs recorded from hwp-editor's own functions; engine-side plan semantics are the engine's own contract.",
+        "sourceCommit": "88837eb0026c402a390b23cb11d5a848eab5da3c",
+        "logSha256": "60b7984956c336685e9ee07d57f5602d5cec50f120970da90cfec349f944cf76",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1103,11 +1115,15 @@
           },
           {
             "path": "src-tauri/src/hwped/forms.rs",
-            "sha256": "c051c0f140512d8195c1367e0dc0afba7eb9c6094c4c158c3681a1aee48354e9"
+            "sha256": "8b5c1521eb0eef89d6031270af0992fd5cc5bc092ec2df165033be56220af315"
+          },
+          {
+            "path": "src-tauri/src/hwped/forms/wire.rs",
+            "sha256": "156fa9538087111fa124cd5a90f239e350759b44ed296a99d387e7d4c3b925d6"
           },
           {
             "path": "src-tauri/src/hwped/forms/tests.rs",
-            "sha256": "ef719f25e7676043b80e79d96e2b0eafb6482fb4b7c48b817720617bb10e7cb5"
+            "sha256": "8528b76aacab5ad6c6f40b68a42b79fe9abdfbd124c85e94eea55e96702b9f3b"
           },
           {
             "path": "src/lib/hwped.ts",
