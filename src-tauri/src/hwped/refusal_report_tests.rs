@@ -105,7 +105,8 @@ fn replace_argv() -> Value {
     serde_json::json!(["--replace", "absent string=>y"])
 }
 
-/// The edit as hwp-editor after #175 sends it: `report: true`.
+/// The edit as a client that reads refused edit reports sends it:
+/// `structuredRefusal: true`.
 fn refused_edit(document: HwpedDocumentRef) -> Result<HwpedEditResponse, HwpedBridgeError> {
     edit_now(
         document,
@@ -244,7 +245,11 @@ fn staging_paths_are_removed_from_report_diagnostics() {
     );
     // User-valued identifiers are data, not diagnostics: they stay exact.
     let style = op["refusal"]["values"]["style"].as_str().unwrap();
-    assert!(style.ends_with("-is-a-style-name") && !style.starts_with("<work dir>"));
+    assert!(
+        style.ends_with("-is-a-style-name")
+            && !style.starts_with("<work dir>")
+            && !style.starts_with("<path>")
+    );
     assert!(!report["refusal"]["values"]["issues"][0]["path"][0]
         .as_str()
         .unwrap()
@@ -331,9 +336,10 @@ fn record_the_wire_rejections_for_the_client_check() {
 }
 
 #[test]
-fn a_client_that_did_not_ask_for_the_report_keeps_the_string_error() {
-    // @hwp-editor/core before #175 (maru pins 1.4.0) never sends `report`, and
-    // reads an object rejection's code without its string classifier.
+fn a_client_that_did_not_signal_structured_refusals_keeps_the_string_error() {
+    // Released core (maru pins 1.4.0) sends `report: true` for preset batches
+    // and block inserts but never `structuredRefusal`; its object branch skips
+    // the string classifier, so it must keep getting the string.
     let (fixture, binary) = engine(
         "2.0.0",
         Edit::Refuse {
@@ -351,4 +357,79 @@ fn a_client_that_did_not_ask_for_the_report_keeps_the_string_error() {
     // The report is still requested on every call (the read is gated, not the flag).
     let invocations = std::fs::read_to_string(fixture.path().join("invocations")).unwrap();
     assert!(invocations.contains(" --report "), "{invocations}");
+}
+
+#[test]
+fn home_and_windows_paths_anywhere_in_the_report_are_redacted() {
+    let report = serde_json::json!({
+        "schema_version": "1.1",
+        "contract": "hwp-edit-report-v1",
+        "output": "/Users/someone/out.hwpx",
+        "dry_run": false,
+        "ops": [{
+            "index": 0, "op": "insert_image", "status": "failed", "pieces_touched": 0,
+            "changed": [], "reason": r"cannot read C:\Users\someone\Pictures\a.png",
+            "refusal": {"code": "unclassified", "values": {},
+                "message": "cannot read /Users/someone/workspace/image.png"}
+        }],
+        "applied_count": 0,
+        "failed_count": 1,
+        "future_field": {"nested": ["see /home/someone/notes.txt", r"\\server\share\x.json"]},
+        "refusal": {"code": "add_table.anchor_not_found",
+            "values": {"anchor": "/Users/someone/typed anchor"},
+            "message": "anchor missing; input was /var/folders/zz/doc.hwpx"}
+    })
+    .to_string();
+    let (_fixture, binary) = engine(
+        "2.0.0",
+        Edit::Refuse {
+            report: &report,
+            stderr: "Error: refused",
+        },
+    );
+    let _env = BinEnv::set(&binary);
+    let report = refused(refused_edit(document()).unwrap_err()).report;
+    let text = report.to_string();
+    for leaked in [
+        "/Users/someone/workspace",
+        r"Pictures",
+        "/home/someone",
+        "server",
+        "/var/folders",
+    ] {
+        assert!(!text.contains(leaked), "{leaked} leaked: {text}");
+    }
+    assert_eq!(report["output"], "보고서.hwpx");
+    assert_eq!(report["ops"][0]["refusal"]["message"], "cannot read <path>");
+    assert_eq!(report["ops"][0]["reason"], "cannot read <path>");
+    assert_eq!(report["future_field"]["nested"][0], "see <path>");
+    assert_eq!(
+        report["refusal"]["message"],
+        "anchor missing; input was <path>"
+    );
+    // The typed anchor is an identifier and stays exact, even if path-shaped.
+    assert_eq!(
+        report["refusal"]["values"]["anchor"],
+        "/Users/someone/typed anchor"
+    );
+}
+
+#[test]
+fn an_oversized_report_keeps_the_string_error() {
+    let big = format!(
+        "{{\"schema_version\":\"1.1\",\"pad\":\"{}\"}}",
+        "x".repeat((EDIT_REPORT_MAX_BYTES as usize) + 16)
+    );
+    let (_fixture, binary) = engine(
+        "2.0.0",
+        Edit::Refuse {
+            report: &big,
+            stderr: UNAPPLIED_STDERR,
+        },
+    );
+    let _env = BinEnv::set(&binary);
+    assert!(matches!(
+        refused_edit(document()).unwrap_err(),
+        HwpedBridgeError::Legacy(_)
+    ));
 }

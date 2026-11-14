@@ -121,22 +121,34 @@ the message includes the detected version, required minimum, and upgrade action.
 
 **Refused edits (maru#620).** On ahwp >= 1.6.3, `hwped_edit` passes
 `--report <stage>/edit-report.json` on every call and reads the report before
-the stage dir is removed. A refused run (`hwp_failed:`) with a readable report
-rejects with the object hwp-editor's Tauri client reads: `{ code: "failed",
-message, report, engineVersion }`. `message` is the unchanged legacy string
-(including `[work dir <json>]`), so a client that ignores `report` classifies it
-as before. Before it leaves the host, the report's `output` becomes the caller's
-document name, and the stage dir becomes `<work dir>` in its diagnostics (op
-`reason`, refusal `message`, `values.detail`, issue messages). User-valued
-identifiers (anchors, style names, issue paths) stay exact. Engines below 1.6.3,
-a missing, oversized (> 4 MiB) or unparsable report, and non-refusal failures
-(spawn, timeout, output limit) keep the string error, and hwp-editor falls back
-to stderr classification. With @hwp-editor/core after hwp-editor#175 the editor
-then classifies by the refusal code (for example `unapplied_requests` to
-`unmatched_replace`, and `preservation_loss` with a font event to
-`font_type_info`). The current maru pin, core 1.4.0 (like the latest published
-1.4.2), reads only `code` and `message`, so the code-based message needs a core
-release that includes #175.
+the stage dir is removed. The version parser takes plain `X.Y.Z` only, so a
+prerelease or build-tagged engine (`1.6.3-rc.1`, `1.6.3+build`) gets no
+`--report` and keeps the string error.
+
+A refused run (`hwp_failed:`) with a readable report rejects with the object
+hwp-editor's Tauri client reads, `{ code: "failed", message, report,
+engineVersion }`, **only when the call carries `structuredRefusal: true`**.
+That argument is the client's capability signal that it reads refused edit
+reports. It is deliberately not `report: true`: released @hwp-editor/core 1.4.x
+already sends `report` for preset batches and block inserts, and its object
+branch skips the string classifier, so keying on `report` would cost today's
+client its localised refusal classification. hwp-editor's Tauri client must
+send `structuredRefusal: true` on edits for this path to apply; until it does,
+maru keeps the string error. `message` is always the unchanged legacy string
+(including `[work dir <json>]`).
+
+Before it leaves the host, the report is sanitized as hwp-editor's server does:
+`output` becomes the caller's document name, and every other string, at any
+depth and in unknown fields too, has the stage dir replaced with `<work dir>`
+and any absolute path (POSIX, Windows drive, UNC, `file://`) replaced with
+`<path>` (`src-tauri/src/hwped/report_paths.rs`, held to upstream
+`withoutPaths` by a recorded parity test). Strings under identifier keys
+(`anchor`, `style`, an issue's `path`) are user-valued and stay exact. The
+report is read through one no-follow handle capped at 4 MiB.
+
+Engines below 1.6.3, a missing, oversized or unparsable report, non-refusal
+failures (spawn, timeout, output limit) and calls without `structuredRefusal`
+keep the string error, and hwp-editor falls back to stderr classification.
 
 ## Binary resolution
 

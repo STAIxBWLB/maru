@@ -1279,6 +1279,9 @@ mod json_ops_tests;
 #[path = "hwped/edit_failure_tests.rs"]
 mod edit_failure_tests;
 
+#[path = "hwped/report_paths.rs"]
+mod report_paths;
+
 #[cfg(all(test, unix))]
 #[path = "hwped/refusal_report_tests.rs"]
 mod refusal_report_tests;
@@ -1302,10 +1305,11 @@ fn edit_stage_dir(dir: &Path) -> Result<String, String> {
 }
 
 /// One `hwped_edit` request. `structured_refusal` is the client's
-/// `report: true`: hwp-editor's Tauri client sends it once it reads refused edit
-/// reports (after hwp-editor#175). Older clients never send it, and an object
-/// rejection would bypass their string classifier, so they keep the string
-/// error (maru#620).
+/// `structuredRefusal: true`, a capability signal only a client that reads
+/// refused edit reports sends. It is not `report: true`: released core (1.4.x)
+/// already sends that for preset batches and block inserts, and its object
+/// branch skips the string classifier, so keying on it would cost today's
+/// client its refusal classification (maru#620).
 #[derive(Default)]
 struct EditRequest {
     ops_argv: Option<Value>,
@@ -1446,68 +1450,62 @@ fn edit_now(
 /// when it is absent, oversized or not a JSON object (the caller then keeps the
 /// legacy string, and hwp-editor falls back to stderr classification).
 fn read_refusal_report(path: &Path, name: &str, stage_dir: &str) -> Option<Value> {
-    let metadata = std::fs::symlink_metadata(path).ok()?;
-    if !metadata.is_file() || metadata.len() > EDIT_REPORT_MAX_BYTES {
+    use std::io::Read;
+    // One handle for the type check and a bounded read: a link at the leaf is
+    // refused, and a file larger than the cap is treated as missing.
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NOFOLLOW: 0x0100 on macOS/BSD, 0o400000 on Linux.
+        let no_follow = if cfg!(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd"
+        )) {
+            0x0100
+        } else {
+            0o400000
+        };
+        options.custom_flags(no_follow);
+    }
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(path)
+        .ok()?
+        .file_type()
+        .is_symlink()
+    {
         return None;
     }
-    let report: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let file = options.open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(EDIT_REPORT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > EDIT_REPORT_MAX_BYTES {
+        return None;
+    }
+    let report: Value = serde_json::from_slice(&bytes).ok()?;
     report
         .is_object()
         .then(|| sanitize_edit_report(report, name, stage_dir))
 }
 
-/// Remove staging paths before a report leaves the host, as hwp-editor's server
-/// does: `output` becomes the caller's document name, and the stage dir is
-/// replaced with `<work dir>` in every diagnostic string (op `reason`, refusal
-/// `message`, `values.detail` and issue messages). Other values, typed user
-/// anchors, style names and issue paths included, stay exact: they are
-/// identifiers, not filesystem diagnostics.
+/// Remove paths before a report leaves the host, as hwp-editor's server does:
+/// `output` becomes the caller's document name, and every other string, at any
+/// depth and in unknown fields too, has the stage dir replaced with
+/// `<work dir>` and any absolute path, POSIX or Windows, with `<path>`. Strings
+/// under identifier keys (`anchor`, `style`, an issue's `path`) are user-valued
+/// identifiers and stay exact.
 pub(crate) fn sanitize_edit_report(mut report: Value, name: &str, stage_dir: &str) -> Value {
-    fn scrub(value: &mut Value, stage_dir: &str) {
-        if let Value::String(text) = value {
-            if !stage_dir.is_empty() && text.contains(stage_dir) {
-                *text = text.replace(stage_dir, "<work dir>");
-            }
-        }
-    }
-    fn scrub_refusal(refusal: &mut Value, stage_dir: &str) {
-        let Some(refusal) = refusal.as_object_mut() else {
-            return;
-        };
-        if let Some(message) = refusal.get_mut("message") {
-            scrub(message, stage_dir);
-        }
-        if let Some(values) = refusal.get_mut("values").and_then(Value::as_object_mut) {
-            if let Some(detail) = values.get_mut("detail") {
-                scrub(detail, stage_dir);
-            }
-            if let Some(issues) = values.get_mut("issues").and_then(Value::as_array_mut) {
-                for issue in issues {
-                    if let Some(message) = issue.get_mut("message") {
-                        scrub(message, stage_dir);
-                    }
-                }
-            }
-        }
-    }
+    report_paths::redact_value(&mut report, stage_dir);
     if let Some(object) = report.as_object_mut() {
         if object.contains_key("output") {
             object.insert("output".to_string(), Value::String(name.to_string()));
-        }
-        if let Some(refusal) = object.get_mut("refusal") {
-            scrub_refusal(refusal, stage_dir);
-        }
-        if let Some(ops) = object.get_mut("ops").and_then(Value::as_array_mut) {
-            for op in ops {
-                if let Some(op) = op.as_object_mut() {
-                    if let Some(reason) = op.get_mut("reason") {
-                        scrub(reason, stage_dir);
-                    }
-                    if let Some(refusal) = op.get_mut("refusal") {
-                        scrub_refusal(refusal, stage_dir);
-                    }
-                }
-            }
         }
     }
     report
@@ -1665,7 +1663,7 @@ pub async fn hwped_edit(
     ops: HwpedEditArgument,
     verify: Option<bool>,
     allow_partial: Option<bool>,
-    report: Option<bool>,
+    structured_refusal: Option<bool>,
     workspace_root: Option<String>,
 ) -> Result<HwpedEditResponse, HwpedBridgeError> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1678,7 +1676,7 @@ pub async fn hwped_edit(
                 ops: ops.0,
                 verify,
                 allow_partial,
-                structured_refusal: report == Some(true),
+                structured_refusal: structured_refusal == Some(true),
             },
             workspace_root,
         )
