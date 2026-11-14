@@ -16,6 +16,55 @@ const OCCB: &str = "occ-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 const HWPX: &[u8] = b"PK\x03\x04hwpx form";
 const HWP: &[u8] = b"\xD0\xCF\x11\xE0hwp form";
 
+#[cfg(unix)]
+#[test]
+fn form_work_dir_is_private_under_umask_022() {
+    use std::os::unix::fs::PermissionsExt;
+    const CHILD: &str = "MARU_HWPED_PRIVATE_DIR_TEST_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok("1") {
+        let (directory, _) = work_dir().unwrap();
+        let mode = std::fs::metadata(directory.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o700,
+            "create form staging with explicit owner-only permissions under umask 022"
+        );
+        println!("FORM_PRIVATE_MODE_CHILD mode={mode:o}");
+        return;
+    }
+    // umask is process-global: set it only in a child, never in the parallel
+    // parent harness. Keep the child's temp parent alive and fixture-owned.
+    let parent = tempfile::tempdir().unwrap();
+    let output = std::process::Command::new(crate::test_support::posix_shell())
+        .args(["-c", "umask 022; exec \"$@\"", "form-private-mode-test"])
+        .arg(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "hwped::forms::tests::form_work_dir_is_private_under_umask_022",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, "1")
+        .env("TMPDIR", parent.path())
+        .env("TMP", parent.path())
+        .env("TEMP", parent.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "umask child failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("FORM_PRIVATE_MODE_CHILD mode=700"),
+        "the child must execute the exact permission check"
+    );
+}
+
 struct Engine {
     dir: tempfile::TempDir,
     _lock: std::sync::MutexGuard<'static, ()>,
