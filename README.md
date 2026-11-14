@@ -1114,6 +1114,8 @@ Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 - 2026-11-14: Completion evidence review found that lexical checks missed aliases into backend records, including another workspace. Separate status/path checks also disagreed with Tasks whitespace, Archive defaults, Markdown case and bucket interpretation, while creation/promotion missed the gate. The guard now shares the Tasks read model and explicit task scope; regressions cover those entry points before effects.
 
+- 2026-11-14: Repeated HWP staging reviews found that default temporary-directory creation becomes 0755 under umask 022. Shared capture, edit, render, compose, validation, save-candidate and form staging now applies Unix 0700 before creation. The isolated child tests cover both system-temp and explicit-parent directories without changing the parallel harness's umask.
+
 - 2026-11-14: Cleanup ownership reviews exposed the same symlink boundary at the skill and generation-root levels. Resolving either to an external destination could classify a user's shared entry as Maru-owned. The cleanup regressions distinguish home-path aliases above the generation root from links at or below it.
 
 ## License
