@@ -34,6 +34,8 @@ pub const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
 /// small index name very long paths), and the cap per path.
 pub const MAX_INDEX_PATH_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PATH_BYTES: usize = 4096;
+/// Ignore malformed or generated ignore lines before allocating/matching them.
+pub const MAX_IGNORE_PATTERN_BYTES: usize = 4096;
 /// Directory entries a walk may read, ignored ones included, so a very wide
 /// generated folder stops the scan instead of being listed in full.
 pub const MAX_DIR_ENTRIES: usize = 200_000;
@@ -305,12 +307,12 @@ fn resolve_picked(root: &Path, picked: &str) -> Result<PathBuf, ScanError> {
 /// file itself are checked without following links, so a tracked path whose
 /// folder was later replaced by a link out of the workspace is never read.
 fn regular_file_without_links(base: &Path, relative: &str) -> bool {
+    if !plain_relative_path(relative) {
+        return false;
+    }
     let mut current = base.to_path_buf();
     let mut parts = relative.split('/').peekable();
     while let Some(part) = parts.next() {
-        if part.is_empty() || part == "." || part == ".." {
-            return false;
-        }
         current.push(part);
         let Ok(meta) = fs::symlink_metadata(&current) else {
             return false;
@@ -321,6 +323,17 @@ fn regular_file_without_links(base: &Path, relative: &str) -> bool {
         }
     }
     true
+}
+
+/// Git names use `/` on every platform. Reject Windows separators/prefixes
+/// even on Unix, and never let a pushed component reset or traverse the root.
+fn plain_relative_path(relative: &str) -> bool {
+    !relative.is_empty()
+        && !relative.contains(['\\', ':', '\0'])
+        && relative.split('/').all(|part| {
+            let mut components = Path::new(part).components();
+            matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+        })
 }
 
 /// Open a file for reading without following a symbolic link at the leaf.
@@ -339,6 +352,58 @@ fn open_regular_no_follow(path: &Path) -> Option<fs::File> {
         }
     }
     options.open(path).ok()
+}
+
+#[derive(Debug)]
+enum BoundedRead {
+    Bytes(Vec<u8>),
+    TooLarge,
+    Unreadable,
+}
+
+/// Always charge consumed bytes, including partial I/O failures and the one
+/// sentinel byte used to detect a growing file or an exhausted shared budget.
+fn read_bounded(
+    reader: impl std::io::Read,
+    cap: u64,
+    budget: &mut Budget,
+) -> Result<BoundedRead, ScanError> {
+    budget.check_time()?;
+    let limit = cap.min(MAX_TOTAL_BYTES.saturating_sub(budget.bytes));
+    let mut bytes = Vec::new();
+    let result =
+        std::io::Read::read_to_end(&mut std::io::Read::take(reader, limit + 1), &mut bytes);
+    budget.charge(bytes.len() as u64)?;
+    budget.check_time()?;
+    if bytes.len() as u64 > cap {
+        Ok(BoundedRead::TooLarge)
+    } else if result.is_err() {
+        Ok(BoundedRead::Unreadable)
+    } else {
+        Ok(BoundedRead::Bytes(bytes))
+    }
+}
+
+/// Size checks and reads use the same no-follow handle. An already oversized
+/// file is skipped without reading; subsequent growth is bounded by take().
+fn read_regular_bounded(
+    path: &Path,
+    cap: u64,
+    budget: &mut Budget,
+) -> Result<BoundedRead, ScanError> {
+    let Some(handle) = open_regular_no_follow(path) else {
+        return Ok(BoundedRead::Unreadable);
+    };
+    let Ok(meta) = handle.metadata() else {
+        return Ok(BoundedRead::Unreadable);
+    };
+    if !meta.is_file() {
+        return Ok(BoundedRead::Unreadable);
+    }
+    if meta.len() > cap {
+        return Ok(BoundedRead::TooLarge);
+    }
+    read_bounded(handle, cap, budget)
 }
 
 /// `O_NOFOLLOW` without a libc dependency: the value is fixed per platform.
@@ -390,14 +455,9 @@ fn git_index_files(
                 return Ok(None);
             }
             let index = dot_git.join("index");
-            let Ok(meta) = fs::symlink_metadata(&index) else {
-                return Ok(None);
-            };
-            if !meta.is_file() || meta.len() > MAX_INDEX_BYTES {
-                return Ok(None);
-            }
-            state.budget.charge(meta.len())?;
-            let Ok(bytes) = fs::read(&index) else {
+            let BoundedRead::Bytes(bytes) =
+                read_regular_bounded(&index, MAX_INDEX_BYTES, &mut state.budget)?
+            else {
                 return Ok(None);
             };
             let Some(entries) = parse_index(&bytes, state.budget.deadline)? else {
@@ -537,12 +597,7 @@ fn parse_index_with(
             continue;
         }
         let text = need!(String::from_utf8(path).ok());
-        if text.is_empty()
-            || text.starts_with('/')
-            || text
-                .split('/')
-                .any(|part| part.is_empty() || part == "." || part == "..")
-        {
+        if !plain_relative_path(&text) {
             return Ok(None);
         }
         paths.push(text);
@@ -582,6 +637,9 @@ struct IgnoreRule {
 fn parse_gitignore(base: &str, text: &str) -> Vec<IgnoreRule> {
     let mut rules = Vec::new();
     for line in text.lines() {
+        if line.len() > MAX_IGNORE_PATTERN_BYTES {
+            continue;
+        }
         let mut line = line.trim_end_matches('\r');
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -614,9 +672,21 @@ fn parse_gitignore(base: &str, text: &str) -> Vec<IgnoreRule> {
 
 /// Whether `path` (relative to the scanned folder) is ignored: the last rule
 /// that matches decides, as in git.
+#[cfg(test)]
 fn ignored(rules: &[IgnoreRule], path: &str, is_dir: bool) -> bool {
+    ignored_with_budget(rules, path, is_dir, &test_match_budget()).unwrap()
+}
+
+fn ignored_with_budget(
+    rules: &[IgnoreRule],
+    path: &str,
+    is_dir: bool,
+    budget: &Budget,
+) -> Result<bool, ScanError> {
+    budget.check_time()?;
     let mut verdict = false;
     for rule in rules {
+        budget.check_time()?;
         if rule.directory_only && !is_dir {
             continue;
         }
@@ -636,17 +706,35 @@ fn ignored(rules: &[IgnoreRule], path: &str, is_dir: bool) -> bool {
             local.rsplit('/').next().unwrap_or(local)
         };
         let text: Vec<char> = subject.chars().collect();
-        if glob_match(&rule.pattern, &text) {
+        if glob_match_with_budget(&rule.pattern, &text, budget)? {
             verdict = !rule.negated;
         }
     }
-    verdict
+    Ok(verdict)
+}
+
+#[cfg(test)]
+fn test_match_budget() -> Budget {
+    Budget {
+        deadline: Instant::now() + SCAN_TIME_BUDGET,
+        bytes: 0,
+    }
 }
 
 /// Gitignore glob: `*` and `?` stay inside one segment, `**` crosses them and
 /// `[...]` is a class. Dynamic programming over pattern and text, so no
 /// pattern can cost more than their product.
+#[cfg(test)]
 pub(crate) fn glob_match(pattern: &[char], text: &[char]) -> bool {
+    glob_match_with_budget(pattern, text, &test_match_budget()).unwrap()
+}
+
+fn glob_match_with_budget(
+    pattern: &[char],
+    text: &[char],
+    budget: &Budget,
+) -> Result<bool, ScanError> {
+    budget.check_time()?;
     #[derive(Clone, Copy)]
     enum Token {
         Char(char),
@@ -655,9 +743,24 @@ pub(crate) fn glob_match(pattern: &[char], text: &[char]) -> bool {
         Globstar,
         Class(usize, usize, bool),
     }
+    // One reverse pass replaces repeated suffix searches for an unmatched `[`.
+    let mut class_closers = vec![None; pattern.len()];
+    let mut closer = None;
+    for index in (0..pattern.len()).rev() {
+        if index.is_multiple_of(1024) {
+            budget.check_time()?;
+        }
+        class_closers[index] = closer;
+        if pattern[index] == ']' {
+            closer = Some(index);
+        }
+    }
     let mut tokens = Vec::new();
     let mut at = 0;
     while at < pattern.len() {
+        if at.is_multiple_of(1024) {
+            budget.check_time()?;
+        }
         match pattern[at] {
             '*' if pattern.get(at + 1) == Some(&'*') => {
                 tokens.push(Token::Globstar);
@@ -675,9 +778,8 @@ pub(crate) fn glob_match(pattern: &[char], text: &[char]) -> bool {
                 tokens.push(Token::Any);
                 at += 1;
             }
-            '[' => match pattern[at + 1..].iter().position(|ch| *ch == ']') {
-                Some(offset) if offset > 0 => {
-                    let close = at + 1 + offset;
+            '[' => match class_closers[at] {
+                Some(close) if close > at + 1 => {
                     let negated = matches!(pattern[at + 1], '!' | '^');
                     let start = at + 1 + usize::from(negated);
                     tokens.push(Token::Class(start, close, negated));
@@ -720,11 +822,15 @@ pub(crate) fn glob_match(pattern: &[char], text: &[char]) -> bool {
     let mut reach = vec![false; text.len() + 1];
     reach[0] = true;
     for token in tokens {
+        budget.check_time()?;
         let mut next = vec![false; text.len() + 1];
         match token {
             Token::Star | Token::Globstar => {
                 let crosses = matches!(token, Token::Globstar);
                 for j in 0..=text.len() {
+                    if j.is_multiple_of(1024) {
+                        budget.check_time()?;
+                    }
                     // Either the run starts here, or it extends the run that
                     // reached the previous character.
                     next[j] = reach[j] || (j > 0 && next[j - 1] && (crosses || text[j - 1] != '/'));
@@ -732,6 +838,9 @@ pub(crate) fn glob_match(pattern: &[char], text: &[char]) -> bool {
             }
             _ => {
                 for j in 1..=text.len() {
+                    if j.is_multiple_of(1024) {
+                        budget.check_time()?;
+                    }
                     if !reach[j - 1] {
                         continue;
                     }
@@ -749,7 +858,8 @@ pub(crate) fn glob_match(pattern: &[char], text: &[char]) -> bool {
         }
         reach = next;
     }
-    reach[text.len()]
+    budget.check_time()?;
+    Ok(reach[text.len()])
 }
 
 fn walk(
@@ -762,12 +872,11 @@ fn walk(
     state.budget.check_time()?;
     let mut rules = inherited.to_vec();
     let gitignore = dir.join(".gitignore");
-    if let Ok(meta) = fs::symlink_metadata(&gitignore) {
-        if meta.is_file() && meta.len() <= MAX_SOURCE_BYTES {
-            state.budget.charge(meta.len())?;
-            if let Ok(text) = fs::read_to_string(&gitignore) {
-                rules.extend(parse_gitignore(relative, &text));
-            }
+    if let BoundedRead::Bytes(bytes) =
+        read_regular_bounded(&gitignore, MAX_SOURCE_BYTES, &mut state.budget)?
+    {
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            rules.extend(parse_gitignore(relative, text));
         }
     }
     let entries = fs::read_dir(dir).map_err(|error| {
@@ -819,7 +928,7 @@ fn walk(
             continue;
         };
         // Ignored entries are dropped as they are read, never kept or sorted.
-        if ignored(&rules, &join(relative, &name), is_dir) {
+        if ignored_with_budget(&rules, &join(relative, &name), is_dir, &state.budget)? {
             continue;
         }
         if !is_dir {
@@ -1522,38 +1631,14 @@ fn propose(
         if !regular_file_without_links(scan_root, file) {
             continue;
         }
-        // One open handle for the size check and the read: the leaf cannot be
-        // swapped for a link between them (O_NOFOLLOW), and a file that grows
-        // mid-scan is read only up to the cap.
-        let Some(file_handle) = open_regular_no_follow(&scan_root.join(file)) else {
-            continue;
+        let bytes = match read_regular_bounded(&scan_root.join(file), MAX_SOURCE_BYTES, budget)? {
+            BoundedRead::Bytes(bytes) => bytes,
+            BoundedRead::TooLarge => {
+                skipped_large += 1;
+                continue;
+            }
+            BoundedRead::Unreadable => continue,
         };
-        let Ok(meta) = file_handle.metadata() else {
-            continue;
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        if meta.len() > MAX_SOURCE_BYTES {
-            skipped_large += 1;
-            continue;
-        }
-        budget.charge(meta.len())?;
-        let mut bytes = Vec::new();
-        if std::io::Read::read_to_end(
-            &mut std::io::Read::take(&file_handle, MAX_SOURCE_BYTES + 1),
-            &mut bytes,
-        )
-        .is_err()
-        {
-            continue;
-        }
-        if bytes.len() as u64 > MAX_SOURCE_BYTES {
-            skipped_large += 1;
-            continue;
-        }
-        // Charge what was actually read beyond the metadata size.
-        budget.charge((bytes.len() as u64).saturating_sub(meta.len()))?;
         let text = String::from_utf8_lossy(&bytes);
         let mut refs = Refs::default();
         match lang {

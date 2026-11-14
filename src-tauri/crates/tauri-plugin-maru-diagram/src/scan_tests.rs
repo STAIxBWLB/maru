@@ -418,6 +418,136 @@ fn the_git_index_lists_tracked_regular_files_only() {
 }
 
 #[test]
+fn windows_index_paths_are_refused_on_every_platform() {
+    let later = Instant::now() + Duration::from_secs(60);
+    for path in [
+        r"..\outside\leak.ts",
+        r"C:\outside\leak.ts",
+        "C:/outside/leak.ts",
+    ] {
+        assert!(
+            parse_index(&index_v2(&[(0o100644, path)]), later)
+                .unwrap()
+                .is_none(),
+            "unsafe index path: {path}"
+        );
+    }
+    let dir = tempdir();
+    for path in [
+        "",
+        ".",
+        "../escape",
+        "src//a.ts",
+        "src/a.ts/",
+        "src/a\0.ts",
+        r"..\outside\leak.ts",
+        r"C:\outside\leak.ts",
+    ] {
+        assert!(!plain_relative_path(path), "{path}");
+        assert!(!regular_file_without_links(dir.path(), path), "{path}");
+    }
+    write(dir.path(), "src/a.ts", "");
+    assert!(regular_file_without_links(dir.path(), "src/a.ts"));
+}
+
+#[test]
+fn overlong_ignore_lines_are_skipped_before_glob_tokenization() {
+    let text = format!("{}\n*.log\n", "[".repeat(MAX_SOURCE_BYTES as usize));
+    let rules = parse_gitignore("", &text);
+    assert_eq!(rules.len(), 1);
+    assert!(ignored(&rules, "debug.log", false));
+    assert!(!ignored(&rules, "main.ts", false));
+    assert_eq!(
+        parse_gitignore("", &"a".repeat(MAX_IGNORE_PATTERN_BYTES)).len(),
+        1
+    );
+    assert!(parse_gitignore("", &"a".repeat(MAX_IGNORE_PATTERN_BYTES + 1)).is_empty());
+}
+
+#[test]
+fn bounded_reads_charge_growth_and_partial_errors_before_skipping() {
+    let mut budget = open_budget();
+    // Simulate growth after the metadata check, without a timing-dependent race.
+    let mut growing = std::io::Cursor::new(vec![b'x'; 100]);
+    assert!(matches!(
+        read_bounded(&mut growing, 8, &mut budget).unwrap(),
+        BoundedRead::TooLarge
+    ));
+    assert_eq!(growing.position(), 9);
+    assert_eq!(budget.bytes, 9);
+
+    struct FailsAfterPrefix(bool);
+    impl std::io::Read for FailsAfterPrefix {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            if self.0 {
+                return Err(std::io::Error::other("injected read failure"));
+            }
+            self.0 = true;
+            output[..3].copy_from_slice(b"abc");
+            Ok(3)
+        }
+    }
+    assert!(matches!(
+        read_bounded(FailsAfterPrefix(false), 100, &mut budget).unwrap(),
+        BoundedRead::Unreadable
+    ));
+    assert_eq!(
+        budget.bytes, 12,
+        "partial failed reads still consume the shared budget"
+    );
+}
+
+#[test]
+fn bounded_reads_use_the_remaining_shared_budget() {
+    let mut budget = open_budget();
+    budget.bytes = MAX_TOTAL_BYTES - 3;
+    let mut reader = std::io::Cursor::new(vec![b'x'; 100]);
+    let error = read_bounded(&mut reader, MAX_SOURCE_BYTES, &mut budget).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_too_much_data");
+    assert_eq!(
+        reader.position(),
+        4,
+        "only remaining bytes and one sentinel are read"
+    );
+    assert_eq!(budget.bytes, MAX_TOTAL_BYTES + 1);
+}
+
+#[test]
+fn index_and_ignore_reads_share_the_remaining_budget() {
+    let dir = tempdir();
+    write(dir.path(), "src/a.ts", "");
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    fs::write(
+        dir.path().join(".git/index"),
+        index_v2(&[(0o100644, "src/a.ts")]),
+    )
+    .unwrap();
+    let mut state = Walk {
+        limits: limits(),
+        budget: open_budget(),
+        entries: 0,
+        files: Vec::new(),
+    };
+    state.budget.bytes = MAX_TOTAL_BYTES - 3;
+    assert_eq!(
+        git_index_files(dir.path(), dir.path(), &mut state)
+            .unwrap_err()
+            .code,
+        "diagram_scan_too_much_data"
+    );
+    assert_eq!(state.budget.bytes, MAX_TOTAL_BYTES + 1);
+
+    fs::remove_dir_all(dir.path().join(".git")).unwrap();
+    write(dir.path(), ".gitignore", "*.log\n");
+    state.budget.bytes = MAX_TOTAL_BYTES - 3;
+    assert_eq!(
+        walk(dir.path(), "", &[], &mut state, 0).unwrap_err().code,
+        "diagram_scan_too_much_data"
+    );
+    assert_eq!(state.budget.bytes, MAX_TOTAL_BYTES + 1);
+}
+
+#[test]
 fn a_git_index_inside_the_workspace_is_the_inventory() {
     let dir = tempdir();
     let root = dir.path();
@@ -502,6 +632,34 @@ fn a_pathological_ignore_pattern_stays_within_its_budget() {
     let started = std::time::Instant::now();
     assert!(!glob_match(&pattern, &text));
     assert!(started.elapsed() < Duration::from_secs(1));
+
+    // Call the matcher directly too: its tokenizer stays linear even without
+    // the parser's 4 KiB per-line guard.
+    let pattern: Vec<char> = "[".repeat(100_000).chars().collect();
+    let started = Instant::now();
+    assert!(!glob_match(&pattern, &[]));
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn ignore_matching_stops_at_the_scan_deadline() {
+    let expired = Budget {
+        deadline: Instant::now(),
+        bytes: 0,
+    };
+    let rules = parse_gitignore("", "*.log");
+    assert_eq!(
+        ignored_with_budget(&rules, "debug.log", false, &expired)
+            .unwrap_err()
+            .code,
+        "diagram_scan_timeout"
+    );
+    assert_eq!(
+        glob_match_with_budget(&['*'], &['a'], &expired)
+            .unwrap_err()
+            .code,
+        "diagram_scan_timeout"
+    );
 }
 
 #[test]

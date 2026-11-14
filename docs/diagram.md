@@ -445,6 +445,10 @@ anchored and directory-only rules, `**`). Bounds: 5,000 files (up to 20,000),
 24 folder levels (up to 64), 20 s, 64 MiB read, 1 MiB per parsed file (larger
 files are counted only), 400 nodes and 2,000 edges. A bound stops the scan
 with its cause and next step; no partial map is returned.
+Git index paths containing backslashes, colons or NUL are rejected on every
+platform. Ignore lines over 4 KiB are skipped; shorter patterns use a bounded
+matcher that checks the scan deadline. Index, ignore and source reads share
+the byte budget, including bytes consumed before an oversized or failed read.
 
 Imports are read for TS/JS (`import`/`from`/`require`, relative specifiers
 with extension, `index` and `.js`-to-`.ts` resolution), Rust (`mod`, `use
