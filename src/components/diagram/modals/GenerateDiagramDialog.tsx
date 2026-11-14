@@ -28,7 +28,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { confirmDialog } from "../../../lib/confirmDialog";
 import { diagramRevision } from "../../../lib/diagram";
-import { withSnapshot } from "../../../lib/diagram/actions";
 import { isEngineUnavailable } from "../../../lib/diagram/engine";
 import {
   createGenerationJob,
@@ -40,7 +39,8 @@ import {
 import { createGenerationHost } from "../../../lib/diagram/generationHost";
 import { mermaidSemanticType, mermaidToDocDetailed } from "../../../lib/diagram/mermaid";
 import { serializeDoc } from "../../../lib/diagram/persistence";
-import { diffProposal, isBlockingDiagnostic, prepareProposalApply } from "../../../lib/diagram/proposal";
+import { diffProposal, isBlockingDiagnostic } from "../../../lib/diagram/proposal";
+import { applyValidatedProposal } from "../../../lib/diagram/semanticApply";
 import { SEMANTIC_DIAGRAM_TYPES, type SemanticDiagramType } from "../../../lib/diagram/reportTypes";
 import {
   SEMANTIC_TYPES,
@@ -53,7 +53,7 @@ import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import type { ValidationDiagnostic } from "../../../lib/diagram/validation";
 import { useTranslation, type Locale } from "../../../lib/i18n";
 import { useShellSettings } from "../../../lib/shellSettingsStore";
-import { useDiagramCoalescer, useDiagramStore, useDiagramHostOverride } from "../DiagramStoreContext";
+import { useDiagramCoalescer, useDiagramStore, useDiagramHostOverride, useDiagramValidationHost } from "../DiagramStoreContext";
 
 export interface GenerateDiagramDialogProps {
   open: boolean;
@@ -125,6 +125,7 @@ export function GenerateDiagramDialog({
 
   const cancelledRef = useRef(false);
   const sharedHostOverride = useDiagramHostOverride();
+  const validationHost = useDiagramValidationHost();
   const hostRef = useRef<(GenerationHost & { cancel?: () => void }) | null>(null);
 
   // Clear transient run state whenever the dialog opens; keep the form so a
@@ -240,7 +241,19 @@ export function GenerateDiagramDialog({
       const state = store.getState();
       const currentRevision =
         job.meta.baseMemoryRevision === "" ? "" : await diagramRevision(serializeDoc(state.doc));
-      const outcome = prepareProposalApply(state, proposal, currentRevision);
+      // Floorplan candidates were validated locally while generating; this
+      // admits them through the engine before the commit (#553 E5 T4).
+      const host = hostRef.current ?? hostOverride ?? sharedHostOverride ?? validationHost;
+      const outcome = await applyValidatedProposal(store, proposal, currentRevision, {
+        validateCandidate: async (type, spec) => {
+          try {
+            return await host.validateCandidate(type, spec);
+          } catch (error) {
+            if (isEngineUnavailable(error)) setEngineUnavailable(true);
+            throw error;
+          }
+        },
+      }, coalescer);
       if (outcome.status === "stale") {
         setJob((current) => (current ? markStaleIfBaseChanged(current, outcome.currentRevision) : current));
         setApplyMessage({ kind: "stale" });
@@ -250,7 +263,6 @@ export function GenerateDiagramDialog({
         setApplyMessage({ kind: "invalid", diagnostics: outcome.diagnostics });
         return;
       }
-      store.setState(withSnapshot(outcome.transformer, coalescer));
       onClose();
     } finally {
       setApplying(false);

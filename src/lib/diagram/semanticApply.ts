@@ -1,6 +1,8 @@
 /** Apply-time engine admission. Preview/projection stays pure and synchronous. */
 import { defaultCoalescer, withSnapshot } from "./actions";
+import type { Coalescer } from "./history";
 import type { GenerationHost } from "./generation";
+import { prepareProposalApply, type Proposal, type ProposalApplyOutcome } from "./proposal";
 import { semanticDatasetsOf } from "./semantic";
 import { planSemanticEdit, type SemanticEditOutcome, type SpecTransform } from "./semanticEdit";
 import type { DiagramStore } from "./state";
@@ -47,4 +49,32 @@ export async function applyValidatedSemanticEdit(
   if (diagnostics.length > 0) return { status: "invalid", diagnostics };
   store.setState(withSnapshot(plan.transformer, defaultCoalescer()));
   return plan;
+}
+
+/**
+ * Scoped proposal apply (Generate dialog). Generation validates Floorplan
+ * candidates locally, so every Floorplan dataset a proposal upserts passes the
+ * engine here before the commit (`maru#553` E5 T4). The other families were
+ * already admitted by the engine while generating. A refusal, an unavailable
+ * engine or a document change during validation commits nothing.
+ */
+export async function applyValidatedProposal(
+  store: DiagramStore,
+  proposal: Proposal,
+  currentMemoryRevision: string,
+  host: SemanticValidationHost,
+  coalescer: Coalescer = defaultCoalescer(),
+): Promise<ProposalApplyOutcome> {
+  const before = store.getState();
+  const outcome = prepareProposalApply(before, proposal, currentMemoryRevision);
+  if (outcome.status !== "applied") return outcome;
+  const floorplanIds = proposal.ops.flatMap((op) =>
+    op.kind === "upsertSemanticDataset" && op.dataset.diagramType === "floorplan" ? [op.dataset.id] : []);
+  if (floorplanIds.length > 0) {
+    const diagnostics = await validateSemanticDraft(outcome.transformer(before).doc, floorplanIds, host);
+    if (store.getState().doc !== before.doc) return { status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] };
+    if (diagnostics.length > 0) return { status: "invalid", diagnostics };
+  }
+  store.setState(withSnapshot(outcome.transformer, coalescer));
+  return outcome;
 }

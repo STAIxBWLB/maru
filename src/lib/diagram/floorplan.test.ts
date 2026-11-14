@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { defaultCoalescer, undo, withSnapshot } from "./actions";
 import { FLOORPLAN_FIXTURE } from "./__fixtures__/floorplan";
@@ -11,7 +11,7 @@ import { deserializeDoc, serializeDoc } from "./persistence";
 import { prepareProposalApply } from "./proposal";
 import { validateSemanticSpec, type SemanticSpecDataset } from "./reportTypes";
 import { projectSemanticDataset, projectSemanticDocument, resolveSemanticMember, semanticLosses, writeThroughText } from "./semantic";
-import { applyValidatedSemanticEdit, validateSemanticDraft } from "./semanticApply";
+import { applyValidatedProposal, applyValidatedSemanticEdit, validateSemanticDraft } from "./semanticApply";
 import { addSemanticEntry, planSemanticEdit, removeSemanticEntries, setSpecField } from "./semanticEdit";
 import { createDiagramStore } from "./state";
 import { createEmptyDoc, createInitialEphemeral } from "./types";
@@ -167,6 +167,74 @@ describe("floorplan structural edge cases", () => {
     expect(next.doc.nodes.map((n) => n.id)).toEqual(["b", "a"]);
     const dataset = next.doc.datasets![0] as SemanticSpecDataset;
     expect(next.doc.nodes.map((n) => n.id)).toEqual(projectSemanticDataset(dataset).nodes.map((n) => n.id));
+  });
+
+  describe("scoped regeneration apply passes the engine (#553 E5 T4, T120-R1)", () => {
+    const chain = (levels: number) => ({
+      $schema: "floorplan/architecture@1",
+      project: { name: "Chain" },
+      nodes: Array.from({ length: levels }, (_, index) => ({
+        id: `n${index}`, label: `Level ${index}`, kind: "feature", ...(index > 0 ? { parent: `n${index - 1}` } : {}),
+      })),
+      edges: [],
+    });
+    async function regenerated(baseSpec: Record<string, unknown>, output: Record<string, unknown>) {
+      const store = storeOf(baseSpec);
+      const job = createGenerationJob({
+        id: "regen",
+        diagramType: "floorplan",
+        prompt: { requirements: "regroup", locale: "en" },
+        doc: store.getState().doc,
+        baseMemoryRevision: "",
+        target: { datasetId: "fp", spec: baseSpec },
+        scope: new Set(store.getState().doc.nodes.map((n) => n.id)),
+      });
+      // Generation keeps the local floor: the host is never asked here.
+      const done = await runGenerationJob(job, { runAgent: async () => JSON.stringify(output), validateCandidate: refusingHost.validateCandidate });
+      expect(done.state).toBe("ready");
+      return { store, proposal: done.proposal! };
+    }
+
+    it("commits an engine-approved regeneration as one undo step", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(3));
+      const validateCandidate = vi.fn(engineHost.validateCandidate);
+      const outcome = await applyValidatedProposal(store, proposal, "", { validateCandidate });
+      expect(outcome.status).toBe("applied");
+      expect(validateCandidate).toHaveBeenCalledWith("floorplan", expect.anything());
+      expect(store.getState().ephemeral.history.past).toHaveLength(1);
+    });
+
+    it("refuses a regeneration the engine rejects, with no doc or history commit", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(66));
+      const before = store.getState().doc;
+      const outcome = await applyValidatedProposal(store, proposal, "", engineHost);
+      expect(outcome.status).toBe("invalid");
+      if (outcome.status !== "invalid") return;
+      expect(outcome.diagnostics[0]?.key).toBe("diagram.semantic.engineRejected");
+      expect(String(outcome.diagnostics[0]?.params?.message)).toContain("floorplan/nesting-depth");
+      expect(store.getState().doc).toBe(before);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    });
+
+    it("fails closed on an unavailable engine, a receipt mismatch and a document change during validation", async () => {
+      const { store, proposal } = await regenerated(chain(2), chain(3));
+      const before = store.getState().doc;
+      const unavailable = await applyValidatedProposal(store, proposal, "", { validateCandidate: async () => { throw new Error("engine unavailable"); } });
+      expect(unavailable).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.engineValidationFailed" }] });
+      const mismatch = await applyValidatedProposal(store, proposal, "", { validateCandidate: async () => { throw new Error("The engine receipt does not match the submitted semantic spec"); } });
+      expect(mismatch.status).toBe("invalid");
+      expect(store.getState().doc).toBe(before);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+
+      let settle!: (value: { ok: boolean; errors: string[]; warnings: string[] }) => void;
+      const pending = applyValidatedProposal(store, proposal, "", { validateCandidate: () => new Promise((resolve) => { settle = resolve; }) });
+      store.setState((state) => ({ ...state, doc: { ...state.doc, docTitle: "Changed during validation" } }));
+      const changed = store.getState().doc;
+      settle({ ok: true, errors: [], warnings: [] });
+      expect(await pending).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.editStale" }] });
+      expect(store.getState().doc).toBe(changed);
+      expect(store.getState().ephemeral.history.past).toHaveLength(0);
+    });
   });
 
   it("handles a __proto__ node id without turning ids into objects", () => {

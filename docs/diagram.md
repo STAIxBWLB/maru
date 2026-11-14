@@ -389,10 +389,22 @@ ref is a node id or a file path: it contains `/`, or is dotted with a first
 segment that is not a node id (`app.py`); `api.ghost` under an existing `api` is
 dangling. Every problem names its field.
 
-Two paths keep the local floor only. Generation of a Floorplan candidate still
-validates locally, with the field named. The inspector's read-only diagnostics
-for an existing dataset stay local-only, so inspecting a map neither loads the
-engine nor rewrites the stored source (§Semantic editing).
+Which paths reach the engine:
+
+| Path | Floorplan check |
+|---|---|
+| Inspector and structure-editor applies (`applyValidatedSemanticEdit`) | local floor, then engine, before the commit |
+| Scoped regeneration apply in the Generate dialog (`applyValidatedProposal`) | local floor while generating, then engine before the commit |
+| Generation itself (`finishFloorplanJob`, until a candidate is ready) | local floor only |
+| Inspector read-only diagnostics for an existing dataset | local floor only |
+
+Generation produces a candidate but commits nothing, so the scoped apply admits
+every Floorplan dataset its proposal upserts through `validateCandidate` before
+`withSnapshot`, then rechecks the document identity after the await. A refusal,
+an unavailable engine (the dialog shows its notice) or a receipt mismatch commits
+nothing to the document or the undo history. The read-only diagnostics stay local
+so that inspecting a map neither loads the engine nor rewrites the stored source
+(§Semantic editing).
 
 **Editing.** The inspector edits label (canvas title), summary, kind and
 parent (a node cannot move under its own descendants), and an edge's kind;
@@ -406,7 +418,8 @@ confirm and commits as one undo step through `planSemanticEdit`.
 **Generation.** The Generate dialog offers Floorplan. The prompt carries the
 schema summary and the selected source file paths, as for the other types;
 the candidate gets `$schema` if missing and is refused on local validation
-with the field named. Scanning a repository belongs to #536.
+with the field named. Applying it into an existing dataset passes the engine
+first (see "Validation and the apply gate"). Scanning a repository belongs to #536.
 
 **Interchange.** `floorplan-json` imports `<name>.floorplan.json`, and a file
 named exactly `architecture.json` whose `$schema` is
