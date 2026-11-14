@@ -343,11 +343,11 @@ fn open_regular_no_follow(path: &Path) -> Option<fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc_o_nofollow());
+        options.custom_flags(libc_o_nofollow() | libc_o_nonblock());
     }
     #[cfg(not(unix))]
     {
-        if fs::symlink_metadata(path).ok()?.file_type().is_symlink() {
+        if !fs::symlink_metadata(path).ok()?.is_file() {
             return None;
         }
     }
@@ -417,6 +417,20 @@ fn libc_o_nofollow() -> i32 {
         0x0100
     } else {
         0o400000
+    }
+}
+
+/// A FIFO must not block before its handle can be checked for regular-file type.
+#[cfg(unix)]
+fn libc_o_nonblock() -> i32 {
+    if cfg!(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd"
+    )) {
+        0x0004
+    } else {
+        0o4000
     }
 }
 
@@ -1661,6 +1675,13 @@ fn propose(
             let to = group_of(&target);
             if to != from {
                 *edges.entry((from.clone(), to)).or_default() += 1;
+                if edges.len() > MAX_EDGES {
+                    return Err(ScanError::new(
+                        "diagram_scan_too_many_edges",
+                        format!("the map would hold more than {MAX_EDGES} import links"),
+                        "pick a smaller subfolder and scan again",
+                    ));
+                }
             }
         }
         if !refs.packages.is_empty() {
@@ -1668,13 +1689,6 @@ fn propose(
         }
     }
     budget.check_time()?;
-    if edges.len() > MAX_EDGES {
-        return Err(ScanError::new(
-            "diagram_scan_too_many_edges",
-            format!("the map would hold more than {MAX_EDGES} import links"),
-            "pick a smaller subfolder and scan again",
-        ));
-    }
 
     let nodes: Vec<Value> = groups
         .iter()

@@ -344,6 +344,64 @@ fn the_time_bound_stops_the_scan_with_its_cause() {
     assert!(!error.next_step.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn fifo_metadata_files_never_block_the_scan() {
+    for relative in [".gitignore", ".git/index"] {
+        let dir = tempdir();
+        write(dir.path(), "main.ts", "export const answer = 42;");
+        let fifo = dir.path().join(relative);
+        fs::create_dir_all(fifo.parent().unwrap()).unwrap();
+        assert!(std::process::Command::new("/usr/bin/mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let root = dir.path().to_path_buf();
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(scan(&root, ".", limits()));
+        });
+        let result = receive
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap_or_else(|_| panic!("scan blocked while opening FIFO {relative}"));
+        assert!(result.is_ok(), "{relative}: {result:?}");
+    }
+}
+
+#[test]
+fn the_edge_bound_stops_before_reading_the_remaining_sources() {
+    let dir = tempdir();
+    let files = (0..46)
+        .map(|n| format!("module{n:02}/main.ts"))
+        .collect::<Vec<_>>();
+    let mut total = 0;
+    for (index, file) in files.iter().enumerate() {
+        let text = files
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != index)
+            .map(|(_, target)| format!("import '../{target}';\n"))
+            .collect::<String>();
+        total += text.len() as u64;
+        write(dir.path(), file, &text);
+    }
+    let mut budget = open_budget();
+    let error = propose(
+        dir.path(),
+        "bounded edges",
+        &files,
+        Inventory::Filesystem,
+        &mut budget,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "diagram_scan_too_many_edges");
+    assert!(
+        budget.bytes < total,
+        "edge refusal must precede the remaining source reads"
+    );
+}
+
 #[test]
 fn out_of_range_limits_are_refused() {
     for (files, depth) in [
