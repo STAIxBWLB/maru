@@ -57,7 +57,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 - **Iframe source checks (2026-11-05)**: when changing `scripts/check-main-iframes.mjs`, preserve lexical binding, non-call factory-reference and file-discovery regressions in its test file.
 
 - **Sites session state (2026-11-05)**: when changing Sites lifecycle, keep webview open results and page-load progress in `src/lib/siteView.ts` across `SitesPane` unmounts, and test unmount/remount ordering.
-- **Post-activation cleanup (2026-11-04)**: before changing housekeeping after bundle activation, read `README.md` §Release Process and preserve its registry-save boundary.
+- **Post-activation cleanup (2026-11-14)**: before changing housekeeping after bundle activation, read `README.md` §Release Process and preserve its registry-save boundary. In `src-tauri/src/skill_host/store.rs` ownership checks, reject relative targets and keep the previous generation root plus `skills/<name>` literal; resolve only ancestors above that root. Preserve the aliased-home, relative-target and external-link cleanup regressions.
 
 - **Error propagation (2026-11-04)**: before adding or changing `?` / `map_err` paths,
   read `REVIEW.md` §Passes, Error messages. Recheck propagated filesystem failures

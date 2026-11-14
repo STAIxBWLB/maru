@@ -5334,20 +5334,17 @@ fn owned_builtin_entry_target(
     // Entry links record the canonical skill path while the roots come from
     // the home path, so compare both through their resolved ancestors (macOS
     // `/var` -> `/private/var`, or any symlinked home component).
-    // Only the parent side is resolved: following the final component could
-    // walk a skill-level link out of the bundle and claim a user's directory.
+    // Keep the previous generation root and skills/<name> literal; only its
+    // ancestors may resolve. Following that root or a skill-level link could
+    // claim a user's external directory. The target's final component stays literal too.
     // Maru records absolute targets. A relative one resolves against the
     // entry's directory, not the process CWD, so it is never treated as owned.
     if target.is_relative() {
         return false;
     }
     let resolved_target = resolved_parent(target);
-    let previous = previous_workspace.is_some_and(|root| {
-        resolved_target
-            == resolved_through_existing_ancestor(root)
-                .join("skills")
-                .join(name)
-    });
+    let previous = previous_workspace
+        .is_some_and(|root| resolved_target == resolved_parent(root).join("skills").join(name));
     previous
         || (resolved_target.starts_with(resolved_through_existing_ancestor(builtin))
             && !target.exists())
@@ -9792,6 +9789,36 @@ mod tests {
             ));
             remove_owned_builtin_entry(&entry, "gone", &builtin, Some(&previous)).unwrap();
             assert_eq!(host_fs::read_link_target(&entry), Some(relative));
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn previous_generation_root_symlink_does_not_claim_external_entry() {
+            let dir = TempDir::new().unwrap();
+            let external = dir.path().join("user/external-generation");
+            let external_skill = external.join("skills/gone");
+            fs::create_dir_all(&external_skill).unwrap();
+            fs::write(external_skill.join("keep"), "user content").unwrap();
+            let previous = dir.path().join(".maru/skills/_workspaces/old");
+            fs::create_dir_all(previous.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&external, &previous).unwrap();
+            let builtin = dir.path().join(".maru/skills/_builtin");
+            fs::create_dir_all(&builtin).unwrap();
+            let target = external_skill.canonicalize().unwrap();
+            let entry = dir.path().join(".maru/skills/gone");
+            std::os::unix::fs::symlink(&target, &entry).unwrap();
+
+            let owned = owned_builtin_entry_target(&target, "gone", &builtin, Some(&previous));
+            remove_owned_builtin_entry(&entry, "gone", &builtin, Some(&previous)).unwrap();
+            assert_eq!(host_fs::read_link_target(&entry), Some(target));
+            assert!(
+                !owned,
+                "a swapped generation root must not claim its external destination"
+            );
+            assert_eq!(
+                fs::read_to_string(external_skill.join("keep")).unwrap(),
+                "user content"
+            );
         }
 
         #[test]
