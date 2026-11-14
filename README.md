@@ -1116,6 +1116,7 @@ Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 - 2026-11-14: Repeated HWP staging reviews found that default temporary-directory creation becomes 0755 under umask 022. Shared capture, edit, render, compose, validation, save-candidate and form staging now applies Unix 0700 before creation. The isolated child tests cover both system-temp and explicit-parent directories without changing the parallel harness's umask.
 
+- 2026-11-14: Scanner review found the same bound gap in Rust imports, Python imports and ignore tokenization: a final timeout check could reject late success without stopping expensive work. Index paths also needed Windows separator checks on every platform. The scanner instruction records this shared invariant.
 - 2026-11-14: Cleanup ownership reviews exposed the same symlink boundary at the skill and generation-root levels. Resolving either to an external destination could classify a user's shared entry as Maru-owned. The cleanup regressions distinguish home-path aliases above the generation root from links at or below it.
 
 ## License

@@ -464,7 +464,6 @@ runs it through the same `parseFloorplanSpec` checks as an imported file
 (provenance `generated`, `sourcePath` the scanned folder) and opens it
 unsaved; saving is the ordinary Save. A proposal the checks refuse is not
 opened. Scanner tests use synthetic trees only.
->>>>>>> a556082e (feat(diagram): propose a floorplan map from a read-only repository scan (#553))
 
 **Interchange.** `floorplan-json` imports `<name>.floorplan.json`, and a file
 named exactly `architecture.json` whose `$schema` is

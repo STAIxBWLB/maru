@@ -57,6 +57,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 ## Things the agent gets wrong
 
 - **Task completion guards (2026-11-14)**: reuse Tasks status, bucket and Markdown helpers with the configured/recorded root. Check creation, promotion, planned status-writer moves and format exits before effects; do not let a suffix change detach policy. Restrict completion approval grants to native main webview/window labels too. Preserve UI-only policy and reject backend-evidence aliases; retain boundary, scope, restart and one-effect regressions.
+- **Repository scan bounds (2026-11-14)**: when changing `scan.rs`, keep path checks portable across shipped platforms and enforce budgets inside parsers, matchers, import resolution and reads. Preserve malformed-input, deadline and actual-byte accounting regressions; a final deadline check alone is insufficient.
 
 - **HWP staging privacy (2026-11-14)**: create production document-staging and render-attempt directories through `src-tauri/src/hwped.rs::private_temp_dir`. Preserve the child-process umask-022 tests; do not change process-global umask in parallel tests.
 
