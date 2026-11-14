@@ -647,6 +647,12 @@ pub(crate) fn update_task_status_in_transaction_with_completion(
     if expected_target.is_some_and(|expected| expected != target) {
         return Err("task_completion_conflict: archive target changed; refresh the task and confirm the new target".into());
     }
+    if target
+        .parent()
+        .is_some_and(|parent| parent.exists() && !parent.is_dir())
+    {
+        return Err("Cannot create task target: the Archive parent is not a directory; move that entry aside and retry the task transition".into());
+    }
     // A precompleted Active note still needs authority for the Archive move.
     // Sealed receipt finalization has its own evidence checks; Cancelled is
     // deliberately separate from completion and keeps its ordinary behavior.
