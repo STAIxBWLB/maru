@@ -442,16 +442,22 @@ a picked folder outside it, a `..` path or a link out of it is refused with
 as the canonical path that host resolved, never canonicalized again: a second
 canonicalize follows links, so a component swapped for one would be adopted,
 while opening the path component by component from `/` with `O_NOFOLLOW`
-refuses it with `diagram_scan_workspace_unavailable`. On unix every read,
-listing and folder open is resolved from a handle on that root (`openat` with
-`O_NOFOLLOW` on each component), so a folder replaced by a link between the
-check and the read becomes a refused open instead of a read outside the
-workspace. On other platforms the components are checked with
-`symlink_metadata` and then opened by path, so a folder swapped in that window
-can still be followed; the pre-existing link, the root and the leaf are still
-refused. The inventory is the git index when one lies inside the workspace
-(tracked regular files still on disk), otherwise a walk that applies
-`.gitignore` files (negation, anchored and directory-only rules, `**`).
+refuses it with `diagram_scan_workspace_unavailable`. The folders above the root
+are opened search-only (`O_PATH` on Linux, `O_SEARCH` on macOS), because
+reaching a workspace needs search permission on them and not read; a folder that
+cannot be searched is refused as that permission problem, and the refusal names
+the failing component by its position in the path instead of printing the whole
+path, while a component that became a link is refused as a root that changed
+while the scan was starting. On unix every read, listing and folder open is
+resolved from a handle on that root (`openat` with `O_NOFOLLOW` on each
+component), so a folder replaced by a link between the check and the read
+becomes a refused open instead of a read outside the workspace. On other
+platforms the components are checked with `symlink_metadata` and then opened by
+path, so a folder swapped in that window can still be followed; the
+pre-existing link, the root and the leaf are still refused. The inventory is
+the git index when one lies inside the workspace (tracked regular files still
+on disk), otherwise a walk that applies `.gitignore` files (negation, anchored
+and directory-only rules, `**`).
 Bounds: 5,000 files (up to 20,000), 24 folder levels (up to 64), 20 s, 64 MiB
 read, 1 MiB per parsed file (larger files are counted only), 400 nodes and
 2,000 edges. A bound stops the scan with its cause and next step; no partial

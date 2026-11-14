@@ -6,6 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 fn write(root: &Path, relative: &str, body: &str) {
     let path = root.join(relative);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1043,6 +1046,132 @@ fn a_root_path_that_traverses_a_link_is_not_adopted() {
         error.message.contains("is now a link or not a folder"),
         "{}",
         error.message
+    );
+}
+
+/// A temp folder whose mode is put back on drop, so the scratch tree can still
+/// be listed and removed after a test made it unreadable.
+struct RestoreMode(PathBuf);
+
+impl Drop for RestoreMode {
+    fn drop(&mut self) {
+        // Only while it is still that folder: once the test swapped it for a
+        // link, following the path would change the mode of the link's target.
+        let is_dir = fs::symlink_metadata(&self.0)
+            .map(|meta| meta.is_dir())
+            .unwrap_or(false);
+        if is_dir {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+}
+
+/// An ancestor above the workspace that can be searched but not read. Reaching
+/// a workspace needs search (`x`) on the folders above it and never read, so the
+/// scan reaches this one and still refuses a link swapped in at that component.
+/// Opening every component for reading refused the whole workspace with EACCES.
+#[test]
+#[cfg(unix)]
+fn a_workspace_under_a_search_only_ancestor_is_scanned() {
+    let dir = tempdir();
+    let ancestor = dir.path().join("ancestor");
+    let root = ancestor.join("ws");
+    write(&root, "src/a.ts", "export const a = 1;\n");
+    // 0311: the owner may write and search the folder, not list it.
+    fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o311)).unwrap();
+    let restore = RestoreMode(ancestor.clone());
+
+    // An account that can read the folder anyway (root, or a filesystem that
+    // ignores the mode) cannot exercise the search-only descent, so say that
+    // rather than assert on a permission this process does not have to obey.
+    if fs::File::open(&ancestor).is_ok() {
+        eprintln!(
+            "skipped: this process can read the 0311 ancestor, so only a search-only open would descend"
+        );
+        return;
+    }
+
+    let report = scan(&root, ".", limits()).unwrap();
+    assert_eq!(
+        report.stats.files, 1,
+        "a searchable ancestor must not hide the workspace"
+    );
+
+    // The component is still no-follow: the same ancestor swapped for an outside
+    // link is refused, and nothing outside the workspace is read.
+    let outside = dir.path().join("outside");
+    write(&outside, "ws/secret/leak.ts", "export const leak = 1;\n");
+    drop(restore);
+    fs::remove_dir_all(&ancestor).unwrap();
+    std::os::unix::fs::symlink(&outside, &ancestor).unwrap();
+    assert!(
+        fs::read_to_string(ancestor.join("ws/secret/leak.ts"))
+            .unwrap()
+            .contains("leak"),
+        "the fixture did not swap the ancestor for the outside folder"
+    );
+
+    let error = scan(&root, ".", limits()).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_workspace_unavailable");
+    assert!(
+        error.message.contains("is now a link or not a folder"),
+        "{}",
+        error.message
+    );
+    // The refusal names the component that failed, not the whole path: the
+    // canonical path would carry the account name and every ancestor into the
+    // message.
+    assert!(
+        !error.message.contains(&*root.to_string_lossy()),
+        "the refusal printed the whole root path: {}",
+        error.message
+    );
+    assert!(
+        error.message.contains("(ancestor)"),
+        "the refusal did not name the failing component: {}",
+        error.message
+    );
+}
+
+/// The other half of that refusal, for a folder that really cannot be searched:
+/// the cause is the permission and the next step is the permission to grant, not
+/// a root that changed and a workspace to reopen.
+#[test]
+#[cfg(unix)]
+fn an_ancestor_that_cannot_be_searched_is_refused_with_its_permission() {
+    let dir = tempdir();
+    let ancestor = dir.path().join("ancestor");
+    let middle = ancestor.join("middle");
+    let root = middle.join("ws");
+    write(&root, "src/a.ts", "export const a = 1;\n");
+    // 0400: readable and not searchable. The failing component is the one below
+    // the ancestor - `middle` where the ancestor is opened without asking for
+    // search permission, `ancestor` where the open needs it - so the fixture has
+    // a level under the ancestor to fail on either way.
+    fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o400)).unwrap();
+    let restore = RestoreMode(ancestor.clone());
+
+    // The search bit only decides this while the read bit lets the fixture set
+    // it up and see the failure.
+    if fs::File::open(&ancestor).is_err() {
+        eprintln!("skipped: this process cannot read the 0400 ancestor either");
+        return;
+    }
+
+    let error = scan(&root, ".", limits()).unwrap_err();
+    drop(restore);
+    assert_eq!(error.code, "diagram_scan_workspace_unavailable");
+    assert!(
+        error
+            .message
+            .contains("a folder above the workspace cannot be searched"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.next_step.contains("search permission"),
+        "{}",
+        error.next_step
     );
 }
 

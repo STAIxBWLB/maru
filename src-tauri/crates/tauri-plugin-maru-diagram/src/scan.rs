@@ -22,6 +22,8 @@ use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 use rustix::fs::{openat, AtFlags, FileType, Mode, OFlags};
+#[cfg(unix)]
+use rustix::io::Errno;
 
 pub const DEFAULT_MAX_FILES: usize = 5_000;
 pub const MAX_FILES_LIMIT: usize = 20_000;
@@ -368,27 +370,103 @@ struct RootAnchor {
     handle: fs::File,
 }
 
+/// The open flags for a folder above the root: enough for it to be the `dirfd`
+/// of the next `openat`, and needing no read permission on the folder itself.
+///
+/// Reaching a workspace needs search (`x`) on the folders above it and never
+/// read, so an ancestor at mode 0711 - or at 0311 for its owner - is a workspace
+/// the scan must still reach, while `O_RDONLY` on that folder is `EACCES`.
+/// `O_PATH` asks for no permission at all and is still a valid `dirfd` for the
+/// next `openat`, which is all the descent needs.
+#[cfg(all(unix, any(target_os = "linux", target_os = "android")))]
+fn search_only_flags() -> OFlags {
+    OFlags::PATH
+}
+
+/// Darwin's search-only directory open. `O_SEARCH` is `O_EXEC|O_DIRECTORY` and
+/// rustix does not bind either flag, so the ABI value from `<sys/fcntl.h>` is
+/// spelled here; the caller adds `O_DIRECTORY`. Measured on macOS: a folder at
+/// mode 0311 opens this way and `openat` through that handle descends into it,
+/// while `O_RDONLY` on the same folder is `EACCES`, and `O_NOFOLLOW` on a link
+/// is `ENOTDIR`.
+#[cfg(all(unix, any(target_os = "macos", target_os = "ios")))]
+fn search_only_flags() -> OFlags {
+    const O_EXEC: u32 = 0x4000_0000;
+    OFlags::from_bits_retain(O_EXEC)
+}
+
+/// No search-only open on this platform, so an ancestor is opened for reading as
+/// it always was and one that grants no read permission is refused with its
+/// cause and the permission to grant.
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))
+))]
+fn search_only_flags() -> OFlags {
+    OFlags::RDONLY
+}
+
+/// The refusal for one component of the root path.
+///
+/// The component is named by position and text, never by the whole canonical
+/// path: that path carries the account and ancestor names into a message the
+/// person reads, and the failing component is what they have to look at. The
+/// errno decides the cause, because a folder that cannot be searched is a
+/// permission problem with a permission fix, while a component that became a
+/// link is the root changing under the scan.
+#[cfg(unix)]
+fn component_refusal(
+    errno: Errno,
+    name: &std::ffi::OsStr,
+    position: usize,
+    total: usize,
+) -> ScanError {
+    let component = format!(
+        "component {position} of {total} in the workspace root's path ({})",
+        name.to_string_lossy()
+    );
+    let permission = errno == Errno::ACCESS || errno == Errno::PERM;
+    if permission && position == total {
+        ScanError::new(
+            "diagram_scan_workspace_unavailable",
+            format!(
+                "the workspace root cannot be opened: {component} grants no read permission to the account that runs Maru"
+            ),
+            "give that account read and search permission on the workspace folder, then reopen the workspace",
+        )
+    } else if permission {
+        ScanError::new(
+            "diagram_scan_workspace_unavailable",
+            format!(
+                "a folder above the workspace cannot be searched: {component} grants no search permission"
+            ),
+            "give the account that runs Maru search permission on that folder, then scan again",
+        )
+    } else if errno == Errno::LOOP || errno == Errno::NOTDIR {
+        ScanError::new(
+            "diagram_scan_workspace_unavailable",
+            format!(
+                "the workspace root changed while the scan was starting: {component} is now a link or not a folder"
+            ),
+            "reopen the workspace in Maru and scan again",
+        )
+    } else {
+        ScanError::new(
+            "diagram_scan_workspace_unavailable",
+            format!("the workspace root cannot be opened: {component} failed ({errno})"),
+            "reopen the workspace in Maru and scan again",
+        )
+    }
+}
+
 impl RootAnchor {
     /// Open `root`, which is the canonical path the host resolved.
     fn open(root: &Path) -> Result<Self, ScanError> {
-        let unavailable = |error: std::io::Error| {
-            ScanError::new(
-                "diagram_scan_workspace_unavailable",
-                format!("the workspace root cannot be opened: {error}"),
-                "reopen the workspace in Maru and scan again",
-            )
-        };
-        #[cfg(unix)]
-        let changed = |part: &Path| {
-            ScanError::new(
-                "diagram_scan_workspace_unavailable",
-                format!(
-                    "the workspace root changed while the scan was starting: {} is now a link or not a folder",
-                    part.display()
-                ),
-                "reopen the workspace in Maru and scan again",
-            )
-        };
         #[cfg(unix)]
         {
             // A canonical path contains no link, so walking it from `/` with
@@ -407,32 +485,84 @@ impl RootAnchor {
                     "reopen the workspace in Maru and scan again",
                 ));
             }
-            let mut current = open_at(
+            let total = root
+                .components()
+                .filter(|component| matches!(component, Component::Normal(_)))
+                .count();
+            let mut position = 0;
+            let mut current = open_component(
                 None,
                 Path::new("/"),
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+                search_only_flags() | OFlags::DIRECTORY | OFlags::CLOEXEC,
             )
-            .ok_or_else(|| unavailable(std::io::Error::from(std::io::ErrorKind::NotFound)))?;
+            .map_err(|errno| {
+                ScanError::new(
+                    "diagram_scan_workspace_unavailable",
+                    format!(
+                        "the workspace root cannot be opened: the filesystem root failed ({errno})"
+                    ),
+                    "reopen the workspace in Maru and scan again",
+                )
+            })?;
             for component in root.components() {
                 match component {
                     Component::RootDir | Component::CurDir => continue,
                     Component::Normal(name) => {
-                        current = open_at(
+                        position += 1;
+                        // Reaching a folder needs search permission on the
+                        // folders above it and nothing more, so an ancestor is
+                        // opened search-only. Only the root itself is opened for
+                        // reading, which it has to be to be listed.
+                        let base = if position == total {
+                            OFlags::RDONLY
+                        } else {
+                            search_only_flags()
+                        };
+                        let opened = open_component(
                             Some(&current),
                             Path::new(name),
-                            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                            base | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
                         )
-                        .ok_or_else(|| changed(root))?;
+                        .map_err(|errno| component_refusal(errno, name, position, total))?;
+                        // `O_PATH|O_NOFOLLOW` describes the link itself rather
+                        // than failing, so the component is confirmed to be a
+                        // folder instead of trusting the flags to refuse it.
+                        let is_dir = opened
+                            .metadata()
+                            .map_err(|error| {
+                                let errno = Errno::from_io_error(&error).unwrap_or(Errno::INVAL);
+                                component_refusal(errno, name, position, total)
+                            })?
+                            .is_dir();
+                        if !is_dir {
+                            return Err(component_refusal(Errno::NOTDIR, name, position, total));
+                        }
+                        current = opened;
                     }
                     // `..` and a prefix never appear in a canonical path, so a
                     // root that carries one is not the path the host resolved.
-                    _ => return Err(changed(root)),
+                    other => {
+                        position += 1;
+                        return Err(component_refusal(
+                            Errno::NOTDIR,
+                            other.as_os_str(),
+                            position,
+                            total,
+                        ));
+                    }
                 }
             }
             Ok(Self { handle: current })
         }
         #[cfg(not(unix))]
         {
+            let unavailable = |error: std::io::Error| {
+                ScanError::new(
+                    "diagram_scan_workspace_unavailable",
+                    format!("the workspace root cannot be opened: {error}"),
+                    "reopen the workspace in Maru and scan again",
+                )
+            };
             let meta = fs::symlink_metadata(root).map_err(unavailable)?;
             if meta.file_type().is_symlink() || !meta.is_dir() {
                 return Err(unavailable(std::io::Error::from(
@@ -776,12 +906,20 @@ impl ScanDir {
 /// here means it was replaced after that check.
 #[cfg(unix)]
 fn open_at(dir: Option<&fs::File>, path: &Path, flags: OFlags) -> Option<fs::File> {
+    open_component(dir, path, flags).ok()
+}
+
+/// [`open_at`] keeping the errno, for the caller that has to tell a folder it
+/// may not search from a path that changed under it: the two refusals carry
+/// different causes and different next steps.
+#[cfg(unix)]
+fn open_component(dir: Option<&fs::File>, path: &Path, flags: OFlags) -> Result<fs::File, Errno> {
     use std::os::fd::AsFd;
     let fd = match dir {
         Some(dir) => openat(dir.as_fd(), path, flags, Mode::empty()),
         None => openat(rustix::fs::CWD, path, flags, Mode::empty()),
     };
-    fd.ok().map(fs::File::from)
+    fd.map(fs::File::from)
 }
 
 /// What a listed entry is. A link, a FIFO, a socket or a device is `Skip`: the
