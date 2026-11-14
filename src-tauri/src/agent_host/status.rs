@@ -713,17 +713,17 @@ fn claude_oauth_token() -> Option<String> {
         .filter(|token| !token.is_empty())
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "native-e2e")))]
 fn claude_credentials_json() -> Option<String> {
     keychain_claude_credentials().or_else(|| home_file(&[".claude", ".credentials.json"]))
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "native-e2e"))]
 fn claude_credentials_json() -> Option<String> {
     home_file(&[".claude", ".credentials.json"])
 }
 
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(all(target_os = "macos", not(any(test, feature = "native-e2e"))))]
 fn keychain_claude_credentials() -> Option<String> {
     let output = run_cli(
         Path::new("/usr/bin/security"),
@@ -741,7 +741,7 @@ fn keychain_claude_credentials() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-#[cfg(all(not(target_os = "macos"), not(test)))]
+#[cfg(all(not(target_os = "macos"), not(any(test, feature = "native-e2e"))))]
 fn keychain_claude_credentials() -> Option<String> {
     None
 }
@@ -763,15 +763,24 @@ pub(crate) fn kimi_credentials_valid() -> bool {
         .unwrap_or(false)
 }
 
-/// Credential stores resolve from the real home directory. Tests re-point
-/// MARU_TEST_HOME so unit fixtures never read the developer's Keychain-backed
-/// or home-directory credentials.
-#[cfg(not(test))]
+/// Native fixtures never fall back to an ambient home or macOS Keychain.
+#[cfg(any(feature = "native-e2e", test))]
+fn native_credentials_home(value: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    crate::paths::resolve_native_e2e_dir(crate::paths::NATIVE_E2E_HOME_VAR, value).ok()
+}
+
+#[cfg(feature = "native-e2e")]
+fn credentials_home() -> Option<PathBuf> {
+    native_credentials_home(std::env::var_os(crate::paths::NATIVE_E2E_HOME_VAR).as_deref())
+}
+
+/// Production credential stores retain the normal home/Keychain resolution.
+#[cfg(all(not(test), not(feature = "native-e2e")))]
 fn credentials_home() -> Option<PathBuf> {
     dirs::home_dir()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-e2e")))]
 fn credentials_home() -> Option<PathBuf> {
     std::env::var_os("MARU_TEST_HOME")
         .map(PathBuf::from)
@@ -933,6 +942,23 @@ fn unix_to_rfc3339(secs: i64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_credential_home_requires_an_explicit_absolute_fixture_root() {
+        use std::ffi::OsStr;
+
+        assert_eq!(native_credentials_home(None), None);
+        assert_eq!(native_credentials_home(Some(OsStr::new(""))), None);
+        assert_eq!(
+            native_credentials_home(Some(OsStr::new("relative-fixture-home"))),
+            None
+        );
+        let fixture = tempfile::tempdir().unwrap();
+        assert_eq!(
+            native_credentials_home(Some(fixture.path().as_os_str())),
+            Some(fixture.path().to_path_buf())
+        );
+    }
 
     fn unsigned_jwt(payload: &str) -> String {
         let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;

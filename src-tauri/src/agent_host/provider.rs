@@ -571,6 +571,12 @@ impl ProviderAdapter for CliProviderAdapter {
         // carrying both the answer and its usage. The resolution decides which
         // CLI runs, so it decides the flags; other providers stay plain.
         let json_usage = apply_requested_usage_flags(&mut cmd, self.provider, resolution.as_ref());
+        if let Some(session) = &self.task_execution {
+            session.record_provider(CliProviderKind::parse(effective_provider_id(
+                self.provider.id(),
+                resolution.as_ref(),
+            ))?)?;
+        }
         cmd.current_dir(&request.cwd)
             .stdin(if stdin_payload.is_some() {
                 Stdio::piped()

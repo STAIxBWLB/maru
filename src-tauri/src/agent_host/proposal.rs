@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -279,7 +279,12 @@ pub fn agent_apply_skill_proposal<R: tauri::Runtime>(
     let id = approval_id
         .as_deref()
         .ok_or("approval_required: agent.proposal.apply")?;
+    let mut completion = crate::task_completion::guard_apply(Path::new(&cwd), run_id.as_deref())
+        .map_err(|e| e.message)?;
     let mut paths = apply_write_set(&cwd, &proposal, run_id.as_deref())?;
+    if let Some(guard) = &completion {
+        paths.extend(guard.paths());
+    }
     paths.push(crate::approval::audit_path(&cwd, id)?);
     paths.push(crate::vault_list::workspace_registry_path()?);
     paths.push(crate::vault_list::legacy_vault_list_path()?);
@@ -293,8 +298,16 @@ pub fn agent_apply_skill_proposal<R: tauri::Runtime>(
                 run_id: run_id.clone(),
             })?;
             let id = approvals.consume_bound(Some(id), &binding, lease)?;
-            let outcome =
+            if let Some(guard) = &mut completion {
+                guard.begin(lease, &proposal).map_err(|e| e.message)?;
+            }
+            let mut outcome =
                 apply_skill_proposal_in_transaction(&cwd, &proposal, run_id.as_deref(), lease);
+            if let Some(guard) = &mut completion {
+                if let Err(error) = guard.finish(lease, &proposal, &outcome) {
+                    outcome = Err(format!("task_completion_outcome_uncertain: artifact effects may be committed; {}; refresh evidence before any retry", error.message));
+                }
+            }
             let detail = match &outcome {
                 Ok(report) => serde_json::to_string(report).map_err(|e| e.to_string())?,
                 Err(error) => format!("failed_or_partial: {error}"),
@@ -544,10 +557,24 @@ pub fn apply_skill_proposal(
     run_id: Option<&str>,
 ) -> Result<ProposalApplyReport, String> {
     proposal.validate()?;
-    with_path_transactions(
-        PathTransactionRequest::new(apply_write_set(cwd, proposal, run_id)?)?,
-        |lease| apply_skill_proposal_in_transaction(cwd, proposal, run_id, lease),
-    )
+    let mut completion =
+        crate::task_completion::guard_apply(Path::new(cwd), run_id).map_err(|e| e.message)?;
+    let mut paths = apply_write_set(cwd, proposal, run_id)?;
+    if let Some(guard) = &completion {
+        paths.extend(guard.paths());
+    }
+    with_path_transactions(PathTransactionRequest::new(paths)?, |lease| {
+        if let Some(guard) = &mut completion {
+            guard.begin(lease, proposal).map_err(|e| e.message)?;
+        }
+        let mut outcome = apply_skill_proposal_in_transaction(cwd, proposal, run_id, lease);
+        if let Some(guard) = &mut completion {
+            if let Err(error) = guard.finish(lease, proposal, &outcome) {
+                outcome=Err(format!("task_completion_outcome_uncertain: {}; inspect artifact readback before retrying", error.message));
+            }
+        }
+        outcome
+    })
 }
 
 fn apply_skill_proposal_in_transaction(

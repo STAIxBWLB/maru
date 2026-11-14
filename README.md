@@ -143,7 +143,7 @@ brew upgrade maru-cli
   ISOLATED commands run on awaited `spawn_blocking` workers and
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  395-command inventory, worker-boundary, and admission evidence are gated by
+  396-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 - Diagram's File > Renders keeps immutable engine HTML plus receipts in the
   workspace, verifies artifact hashes before exact-file grants, and uses an
@@ -311,6 +311,38 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   retain the ID, and renamed files are resolved by that ID. Source changes and terminal/archived
   tasks prevent result adoption. Recovery holds live or unverified native owners
   for review, never elapsed-time takeover.
+  Task details can additionally require completion evidence (#429). Only the
+  person's main app window changes `maruCompletionRequired` and its policy
+  revision through managed frontmatter. An opted task uses Background or
+  Structured execution, explicitly applies its artifact proposal, then requests
+  an independent review and a fresh person confirmation before Done/Archive.
+  Review never finalizes automatically, and acceptance cannot be remembered.
+  `.maru/task-completion/` retains the exact claim generation, source/artifact
+  hashes, apply readback, reviewer verdict and consumed acceptance. Drift requires
+  a new review. Restart repairs only effects already proven on disk; it never
+  replays an approval or provider call. If accepted Done bytes remain at the
+  original path before Archive publication, readback offers an explicit finish
+  action only after verifying the consumed approval and unchanged intent,
+  evidence and destination. It resumes that fixed move without another task
+  write, snapshot or confirmation; reading evidence does not move the note.
+  Admission and recovery use the same complete-apply and current-review
+  eligibility; a finished creator's exit result remains in the receipt.
+  The current identity boundary is the
+  effective CLI provider recorded by the backend, not a caller's actor/name or
+  an attestation of a model account. Every provider used by the creator is
+  excluded from independent review, including a new run under that provider.
+  Tasks without this requirement retain ordinary manual Done behavior.
+  Policy scope retains its recorded/claim tasks root, otherwise `tasks`; the
+  opt-in operation accepts `tasksRoot` for an explicit custom root. Guards use
+  the Tasks parser and bucket defaults, including Markdown case and physical
+  aliases. Disable the requirement before moving a bound task out of its task
+  buckets. A private append-only scope index is published before policy effects;
+  directory moves unrelated to task scopes or staying in a bucket avoid a tree
+  scan, while affected moves check opted-in notes before moving any sibling.
+  A Markdown format exit cannot detach reserved policy or a known policy
+  identity. Completion approval decisions also require the native main webview
+  and window; ordinary approval kinds retain their existing window behavior.
+  The Tasks UI forwards its configured root to policy and tracked execution.
   Ordinary invocations and task mutations do not create task identities, claim
   layouts or locks. Only existing opt-in claims take a task lock before the
   mutation path lease. Request IDs are scoped to each task, not the workspace.
@@ -533,8 +565,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (395 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 395
+# Phase 08 evidence closure gate alone (396 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 396
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -637,9 +669,9 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 395-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 395`).
-  The current source manifest records 388 app handlers
+  mutation-admission and processing-caller evidence against the 396-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 396`).
+  The current source manifest records 389 app handlers
   plus seven production plugin commands. Historical Phase 08 behavior evidence
   remains archival for retired entries; plugin invocation and compiled-capability
   MockRuntime results are recorded separately and do not certify native WebView transport.
@@ -1079,6 +1111,8 @@ Maru v1.1.0 intentionally does not include:
 Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 ### Change history
+
+- 2026-11-14: Completion evidence review found that lexical checks missed aliases into backend records, including another workspace. Separate status/path checks also disagreed with Tasks whitespace, Archive defaults, Markdown case and bucket interpretation, while creation/promotion missed the gate. The guard now shares the Tasks read model and explicit task scope; regressions cover those entry points before effects.
 
 - 2026-11-14: Cleanup ownership reviews exposed the same symlink boundary at the skill and generation-root levels. Resolving either to an external destination could classify a user's shared entry as Maru-owned. The cleanup regressions distinguish home-path aliases above the generation root from links at or below it.
 

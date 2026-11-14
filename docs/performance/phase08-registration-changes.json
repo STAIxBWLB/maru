@@ -196,6 +196,13 @@
       "module": "src-tauri/src/hwped.rs",
       "originalDisposition": "ISOLATED",
       "reason": "Issue #626: source-bound form binding through agent-hwp 2.0.0 in an awaited blocking worker with host-owned per-call artifacts."
+    },
+    {
+      "name": "task_completion",
+      "owner": "08-09",
+      "module": "src-tauri/src/task_completion.rs",
+      "originalDisposition": "ISOLATED",
+      "reason": "Issue #429: main-window-only completion policy, reviewed evidence and fresh acceptance run in an awaited worker with revision-bound shared admission."
     }
   ]
 }

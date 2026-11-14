@@ -192,6 +192,9 @@ export function TasksRunsPanel({
     try {
       if (proposal) {
         await agentApplySkillProposal({ cwd: workPath, proposal, approvalId, runId: bundle.runId });
+        // Completion evidence is durable backend state. A successful apply
+        // refreshes its view; it does not mark the task accepted locally.
+        window.dispatchEvent(new Event("maru-task-completion-changed"));
       }
       if (selectedFollowupItems.length > 0) {
         await dispatchSelectedTaskFollowups({

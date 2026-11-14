@@ -96,6 +96,94 @@ fn assert_files_mutation_allowed(vault: &Path, action: WorkspaceWriteAction) -> 
     Ok(())
 }
 
+fn guard_completion_namespace(vault: &Path, path: &Path) -> Result<(), String> {
+    crate::task_completion::guard_managed_task_write(vault, path, None, None)
+        .map_err(|error| error.to_string())
+}
+
+fn completion_markdown_content(path: &Path) -> Result<Option<String>, String> {
+    if !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+    {
+        return Ok(None);
+    }
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "Cannot read Markdown before copying: {error}; check file permissions and retry"
+        )),
+    }
+}
+
+fn guard_completion_rename(vault: &Path, source: &Path, target: &Path) -> Result<(), String> {
+    guard_completion_namespace(vault, source)?;
+    guard_completion_namespace(vault, target)?;
+    crate::task_completion::guard_managed_task_move(vault, source, target)
+        .map_err(|error| error.to_string())?;
+    let markdown = |path: &Path| {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+    };
+    // A text file cannot acquire reserved task policy by changing its suffix
+    // to Markdown. An ordinary Markdown rename keeps the same authored policy.
+    if markdown(target) && !markdown(source) {
+        let metadata = fs::symlink_metadata(source).map_err(|error| {
+            format!("Cannot inspect rename source: {error}; refresh Files and retry")
+        })?;
+        if metadata.is_file() {
+            let after = fs::read_to_string(source).map_err(|error| {
+                format!(
+                    "Cannot read new Markdown source: {error}; check file permissions and retry"
+                )
+            })?;
+            let before = completion_markdown_content(target)?;
+            crate::task_completion::guard_managed_task_write(
+                vault,
+                target,
+                before.as_deref(),
+                Some(&after),
+            )
+            .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Inspect a copy before it creates even its first directory. A directory
+/// copied through Files must not smuggle reserved task policy into its notes.
+fn guard_completion_copy(vault: &Path, source: &Path, target: &Path) -> Result<(), String> {
+    for entry in WalkDir::new(source).follow_links(false) {
+        let entry = entry.map_err(|error| {
+            format!("Cannot inspect copy source: {error}; check the source folder and retry")
+        })?;
+        let relative = entry.path().strip_prefix(source).map_err(|error| {
+            format!("Cannot resolve copy source: {error}; choose the source again")
+        })?;
+        let destination = if relative.as_os_str().is_empty() {
+            target.to_path_buf()
+        } else {
+            target.join(relative)
+        };
+        guard_completion_namespace(vault, &destination)?;
+        if entry.file_type().is_file() {
+            let before = completion_markdown_content(&destination)?;
+            let after = completion_markdown_content(entry.path())?;
+            crate::task_completion::guard_managed_task_write(
+                vault,
+                &destination,
+                before.as_deref(),
+                after.as_deref(),
+            )
+            .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceMutationOutcome {
@@ -253,6 +341,7 @@ pub(crate) fn create_workspace_directory_in_transaction(
     if path_entry_exists(&target) {
         return Err(format!("An item named {name} already exists"));
     }
+    guard_completion_namespace(&vault, &target)?;
     lease.before_effect()?;
     fs::create_dir(&target).map_err(|err| format!("Cannot create directory: {err}"))?;
     Ok(success_outcome(None, Some(&target)))
@@ -343,6 +432,7 @@ pub(crate) fn rename_workspace_entry_in_transaction(
     if path_entry_exists(&target) && !is_same_entry(&source, &target) {
         return Err(format!("An item named {new_name} already exists"));
     }
+    guard_completion_rename(&vault, &source, &target)?;
     lease.before_effect()?;
     journaled_rename(&vault, &source, &target)?;
     if let Err(err) = rekey_document_states(&vault, &source, &target) {
@@ -413,7 +503,9 @@ pub(crate) fn duplicate_workspace_entries_in_transaction(
                 let parent = source.parent().unwrap_or(&vault);
                 let name = entry_name(&source).unwrap_or_else(|_| raw_source.clone());
                 let target = unique_path(parent.join(&name));
-                match copy_entry(&source, &target) {
+                match guard_completion_copy(&vault, &source, &target)
+                    .and_then(|()| copy_entry(&source, &target))
+                {
                     Ok(()) => success_outcome(Some(&source), Some(&target)),
                     Err(err) => error_outcome(Some(&source), name, err),
                 }
@@ -516,8 +608,12 @@ pub(crate) fn paste_workspace_entries_in_transaction(
                     )
                 } else {
                     let result = match operation {
-                        FileQueueOperation::Copy => copy_entry(&source, &target),
-                        FileQueueOperation::Move => move_entry(&vault, &source, &target),
+                        FileQueueOperation::Copy => guard_completion_copy(&vault, &source, &target)
+                            .and_then(|()| copy_entry(&source, &target)),
+                        FileQueueOperation::Move => {
+                            guard_completion_rename(&vault, &source, &target)
+                                .and_then(|()| move_entry(&vault, &source, &target))
+                        }
                     };
                     match result {
                         Ok(()) => success_outcome(Some(&source), Some(&target)),
@@ -612,7 +708,9 @@ where
                         "promoted draft target - relink or discard the draft first".to_string(),
                     )
                 } else {
-                    match trasher(&target) {
+                    match guard_completion_namespace(&vault, &target)
+                        .and_then(|()| trasher(&target))
+                    {
                         Ok(()) => WorkspaceMutationOutcome {
                             source_path: Some(target.to_string_lossy().to_string()),
                             target_path: None,
@@ -750,6 +848,11 @@ pub(crate) fn apply_file_queue_in_transaction(
             .to_string();
         let target_path = unique_path(target_dir.join(&file_name));
         reject_target_inside_source(&source_path, &target_path, item.source_kind)?;
+        if item.operation == FileQueueOperation::Move && source_path.starts_with(&vault) {
+            guard_completion_rename(&vault, &source_path, &target_path)?;
+        } else {
+            guard_completion_copy(&vault, &source_path, &target_path)?;
+        }
         fs::create_dir_all(&target_dir)
             .map_err(|err| format!("Cannot create target directory: {err}"))?;
         if !target_dir.is_dir() {
@@ -1351,6 +1454,8 @@ fn recover_rename_transactions(vault: &Path, lease: &PathTransactionLease) -> Re
         {
             continue;
         }
+        guard_completion_namespace(vault, &source)?;
+        guard_completion_namespace(vault, &target)?;
         lease.ensure_covered(vec![
             source.clone(),
             target.clone(),
@@ -1359,6 +1464,7 @@ fn recover_rename_transactions(vault: &Path, lease: &PathTransactionLease) -> Re
         let source_exists = path_entry_exists(&source);
         let target_exists = path_entry_exists(&target);
         if source_exists && !target_exists {
+            guard_completion_rename(vault, &source, &target)?;
             if fs::rename(&source, &target).is_ok() {
                 if let Err(error) = rekey_document_states(vault, &source, &target) {
                     fs::rename(&target, &source).map_err(|rollback| {

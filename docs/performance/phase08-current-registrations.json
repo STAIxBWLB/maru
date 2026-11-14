@@ -1997,6 +1997,12 @@
     },
     {
       "surface": "app",
+      "name": "task_completion",
+      "registrationPath": "src-tauri/src/lib.rs::task_completion::task_completion",
+      "sourcePath": "src-tauri/src/task_completion.rs"
+    },
+    {
+      "surface": "app",
       "name": "task_integrations_drain",
       "registrationPath": "src-tauri/src/lib.rs::today_outbox::ipc::task_integrations_drain",
       "sourcePath": "src-tauri/src/today_outbox.rs"
@@ -2375,14 +2381,14 @@
     }
   ],
   "counts": {
-    "app": 388,
+    "app": 389,
     "plugin": 7,
-    "total": 395
+    "total": 396
   },
   "sourceFiles": [
     {
       "path": "scripts/check-command-isolation.mjs",
-      "sha256": "ce7d1fe35c7093f2ca5b741aa9685de024fff0f6ea4a8dc3c1e882385ffee970"
+      "sha256": "c6dc553aa04e15d585827ce9f287f34b837333033cf0e38fa8eb1558b75cb862"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -2422,15 +2428,15 @@
     },
     {
       "path": "src-tauri/src/agent_host/proposal.rs",
-      "sha256": "5c8fc9fe1a2795f1ee2787bc83718b0307ff2619d868e9b2c08364f1f5d3cc57"
+      "sha256": "b551acdd67a754e469a92c9d8ffcf763eb1062705404cb65149ec80358facbc8"
     },
     {
       "path": "src-tauri/src/agent_host/status.rs",
-      "sha256": "e0984f35830339321d0a55acef26cbb27d42e5e39a51ed10ec26c798be950484"
+      "sha256": "161f6326ed3d4a17279a3e254994b274674a6e3945f1a2aadd46419d6f4d74ea"
     },
     {
       "path": "src-tauri/src/agent_host/structured_loop.rs",
-      "sha256": "67a36481baa39358ad8bbcbd0d58ffb8fb849a715c85597563bdc86efdca72e8"
+      "sha256": "1f281d66361363f0f53844a4b5a044fdd2bd205857cfdfaf76bb52ceaac66a36"
     },
     {
       "path": "src-tauri/src/agents.rs",
@@ -2438,11 +2444,11 @@
     },
     {
       "path": "src-tauri/src/ai_router.rs",
-      "sha256": "cf092afd16fd19563417862d993095f62e5f890f9f52c3653c47c6e23c2a9bc4"
+      "sha256": "79ba519f60d6b378a45044a60ea41c09f32af7e0cebc0acdab88766b48583e50"
     },
     {
       "path": "src-tauri/src/approval.rs",
-      "sha256": "fd5a11f585f0653d06a3c13efcb261b01ab6775453d019b7c75c76e75182493c"
+      "sha256": "dda1e6bd885aef980788adc8ad4ecabd6c0708ae6cc529057b4c1701cb677c4d"
     },
     {
       "path": "src-tauri/src/binary_viewer.rs",
@@ -2470,7 +2476,7 @@
     },
     {
       "path": "src-tauri/src/document.rs",
-      "sha256": "e09c2746176f377cf9e2063346d6b817ee9d4674a3de191a98c2536c45c8aae6"
+      "sha256": "bcb2493b1a7cea83fcfa14037b75fedd0d213aaee600b3c20a2a50efc626956c"
     },
     {
       "path": "src-tauri/src/dot_sync.rs",
@@ -2478,7 +2484,7 @@
     },
     {
       "path": "src-tauri/src/drafts.rs",
-      "sha256": "1db6b4e9eedae94b78917f42e3a1cefe3576fbe0da1d04e7915a724d41ff29de"
+      "sha256": "6d10ab51372e30d06d9761d79f9f8435a8ec1c063e4f94cb155d3a0e2069c7e2"
     },
     {
       "path": "src-tauri/src/e2e_flow.rs",
@@ -2574,7 +2580,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "9a452d5631a1750065e76942f56e0afa3c6045af27719cd726bb3841d1227d8b"
+      "sha256": "0e213a9ac0cc633b3f323d0dd3696307dd73eb8581d5151c4b92af2a1da83aaa"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2646,7 +2652,7 @@
     },
     {
       "path": "src-tauri/src/skill_host/dispatch.rs",
-      "sha256": "e11720c3be2799c8d454af0bd54d640b05c6440d8869c6016eecf818b950b5b7"
+      "sha256": "851bf0081c6a5462c1035f4d1fac3672ed676db4c1e991e946b7cf32e08b55fb"
     },
     {
       "path": "src-tauri/src/skill_host/env.rs",
@@ -2665,8 +2671,12 @@
       "sha256": "7b3f1a15d4784a33891f49f153ac500e6dcc54a013886c1c9ea313a2137385bf"
     },
     {
+      "path": "src-tauri/src/task_completion.rs",
+      "sha256": "52b3890bad37d4753ede8fe57cc9385f7ed01351761ab9bea6941907088141a0"
+    },
+    {
       "path": "src-tauri/src/tasks.rs",
-      "sha256": "da07ced1b6da1969551d13aa9c2081ff85445bd9d61d35cf42d8e8cc554964b9"
+      "sha256": "0158622f02029615504ffd348c14ca9442fff75abbcff7488e237d7c36ddf07c"
     },
     {
       "path": "src-tauri/src/telegram_config.rs",
@@ -2702,7 +2712,7 @@
     },
     {
       "path": "src-tauri/src/today_lifecycle.rs",
-      "sha256": "fabafc0d0a73f5b3e61c61a7e22434b0f8ac9767bdc50957a4b7875450c5abcb"
+      "sha256": "a394fb3c1fe3208f2a559298186372319c050a543a168b9fcc26890ccd08cbf4"
     },
     {
       "path": "src-tauri/src/today_notify.rs",
@@ -2746,12 +2756,12 @@
     },
     {
       "path": "src-tauri/src/workspace_files.rs",
-      "sha256": "62497b4c7554e1d30e008d729ac2a0091fd76f4c7fa43fe25deb798c2e42483e"
+      "sha256": "afb494f4b040c39f18d7b86e6459431456fecc325bab02c41665cbf0ab0b637e"
     },
     {
       "path": "src-tauri/tauri.conf.json",
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "f9bfcfdaa864fa19ceebb0671c6e86f6a01e2800"
+  "sourceCommit": "0fe8c3d4669160ff7e4ce9d9a77ab9f4b750f48f"
 }

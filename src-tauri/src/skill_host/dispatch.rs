@@ -267,80 +267,102 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
     } else {
         context.unwrap_or_default()
     };
-    let composition = compose(skill_id, prompt, cwd, context)?;
-    let runtime = normalize_runtime(&runtime)?;
     let invocation_id = format!("ai-{}", Uuid::new_v4());
-    let add_dirs = add_dirs(&composition);
-    let env = composition.extra_env.clone();
-    let source_review = composition.skill_name == "meeting-source-review";
-    let approved_execution = metadata_bool(&metadata, "approvedExecution");
-    if (source_review || reviewed_version.is_some()) && approved_execution {
-        return Err("meeting_source_review_approved_execution_forbidden".to_string());
-    }
-    // Source review is intrinsically suggestion-only. Keep this guard in Rust
-    // so a customized agent, retry payload, or runtime fallback cannot widen
-    // its permissions.
-    let permission_mode = if source_review || reviewed_version.is_some() {
-        "plan".to_string()
-    } else {
-        requested_permission_mode
-    };
-    if let Some(object) = metadata.as_mut().and_then(JsonValue::as_object_mut) {
-        object.insert(
-            "permissionMode".into(),
-            JsonValue::String(permission_mode.clone()),
-        );
-    }
-    let composition = DispatchComposition {
-        prompt: append_background_contract(&composition.prompt, approved_execution, source_review),
-        ..composition
-    };
-    let mut run_request =
-        build_agent_run_request(&composition, &runtime, "background", metadata.clone())?;
-    let completion_request = CompletionRequest {
-        schema_version: COMPLETION_REQUEST_SCHEMA_VERSION.to_string(),
-        provider: runtime.clone(),
-        prompt: composition.prompt.clone(),
-        cwd: composition.cwd.clone(),
-        mode: "background".to_string(),
-        metadata: metadata.clone(),
-    };
-    let provider = CliProviderKind::parse(&runtime)?;
-    let (mut cmd, stdin_payload, resolution) =
-        crate::agent_host::provider::build_cli_command_with_session(
-            provider,
-            &completion_request,
-            &add_dirs,
-            command_override.as_deref(),
-            &permission_mode,
-            composition.bundle_session.as_ref(),
-        )?;
-    if let Some(resolution) = &resolution {
-        if ["HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]
-            .iter()
-            .any(|key| env.contains_key(*key))
+    let task_execution =
+        if crate::agent_host::contracts::TaskExecutionRequest::from_metadata(metadata.as_ref())?
+            .is_some()
         {
-            return Err("adaptive_policy_environment_override_forbidden".into());
-        }
-        run_request.runtime_provider = resolution.agent.clone();
-        let effective_permission = if permission_mode == "plan" {
-            "plan"
+            let work = resolve_cwd(cwd.as_deref(), &context)?;
+            crate::task_execution_runtime::TaskExecutionSession::admit(
+                &work.to_string_lossy(),
+                metadata.as_ref(),
+                &invocation_id,
+            )?
         } else {
-            "auto-review"
+            None
         };
-        let object = metadata.get_or_insert_with(|| serde_json::json!({}));
-        if let Some(object) = object.as_object_mut() {
-            object.insert(
-                "adaptivePolicyResolution".into(),
-                serde_json::to_value(resolution).map_err(|e| e.to_string())?,
-            );
-            object.insert("runtime".into(), serde_json::json!(resolution.agent));
+    if let Some((session, true)) = &task_execution {
+        return Ok(session.token.run_id.clone());
+    }
+    let task_execution = task_execution.map(|(session, _)| session);
+    let result = (|| {
+        let composition = compose(skill_id, prompt, cwd, context)?;
+        let runtime = normalize_runtime(&runtime)?;
+        let add_dirs = add_dirs(&composition);
+        let env = composition.extra_env.clone();
+        let source_review = composition.skill_name == "meeting-source-review";
+        let approved_execution = metadata_bool(&metadata, "approvedExecution");
+        if (source_review || reviewed_version.is_some()) && approved_execution {
+            return Err("meeting_source_review_approved_execution_forbidden".to_string());
+        }
+        // Source review is intrinsically suggestion-only. Keep this guard in Rust
+        // so a customized agent, retry payload, or runtime fallback cannot widen
+        // its permissions.
+        let permission_mode = if source_review || reviewed_version.is_some() {
+            "plan".to_string()
+        } else {
+            requested_permission_mode
+        };
+        if let Some(object) = metadata.as_mut().and_then(JsonValue::as_object_mut) {
             object.insert(
                 "permissionMode".into(),
-                serde_json::json!(effective_permission),
+                JsonValue::String(permission_mode.clone()),
             );
         }
-        let _ = app.emit("ai://runtime", serde_json::json!({
+        let composition = DispatchComposition {
+            prompt: append_background_contract(
+                &composition.prompt,
+                approved_execution,
+                source_review,
+            ),
+            ..composition
+        };
+        let mut run_request =
+            build_agent_run_request(&composition, &runtime, "background", metadata.clone())?;
+        let completion_request = CompletionRequest {
+            schema_version: COMPLETION_REQUEST_SCHEMA_VERSION.to_string(),
+            provider: runtime.clone(),
+            prompt: composition.prompt.clone(),
+            cwd: composition.cwd.clone(),
+            mode: "background".to_string(),
+            metadata: metadata.clone(),
+        };
+        let provider = CliProviderKind::parse(&runtime)?;
+        let (mut cmd, stdin_payload, resolution) =
+            crate::agent_host::provider::build_cli_command_with_session(
+                provider,
+                &completion_request,
+                &add_dirs,
+                command_override.as_deref(),
+                &permission_mode,
+                composition.bundle_session.as_ref(),
+            )?;
+        if let Some(resolution) = &resolution {
+            if ["HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]
+                .iter()
+                .any(|key| env.contains_key(*key))
+            {
+                return Err("adaptive_policy_environment_override_forbidden".into());
+            }
+            run_request.runtime_provider = resolution.agent.clone();
+            let effective_permission = if permission_mode == "plan" {
+                "plan"
+            } else {
+                "auto-review"
+            };
+            let object = metadata.get_or_insert_with(|| serde_json::json!({}));
+            if let Some(object) = object.as_object_mut() {
+                object.insert(
+                    "adaptivePolicyResolution".into(),
+                    serde_json::to_value(resolution).map_err(|e| e.to_string())?,
+                );
+                object.insert("runtime".into(), serde_json::json!(resolution.agent));
+                object.insert(
+                    "permissionMode".into(),
+                    serde_json::json!(effective_permission),
+                );
+            }
+            let _ = app.emit("ai://runtime", serde_json::json!({
             "invocationId": invocation_id, "runtime": resolution.agent,
             "model": resolution.model, "effort": resolution.effort,
             "permissionMode": effective_permission, "policyRevision": resolution.policy_revision,
@@ -348,54 +370,78 @@ pub(crate) fn skills_dispatch_background_with_parents<R: tauri::Runtime>(
                 "knowledgeScope": resolution.knowledge_scope(),
             "continuity": "transcript-replay"
         }));
+        }
+        // The effective provider decides the output format, not the requested one:
+        // an adaptive-policy resolution can reroute the run, and Maru must ask for
+        // machine-readable output from the CLI that actually runs. The flags live in
+        // `provider.rs` so this slice and slice 1 cannot drift apart.
+        let usage_provider = resolution
+            .as_ref()
+            .map(|resolution| resolution.agent.clone())
+            .unwrap_or_else(|| provider.id().to_string());
+        // Retry keeps the original execution request; mission recovery receives
+        // the backend-issued token instead. Never replace metadata.origin.
+        let retry_metadata = metadata.clone();
+        if let Some(session) = &task_execution {
+            session.record_provider(CliProviderKind::parse(&usage_provider)?)?;
+            let object = metadata.as_mut().and_then(JsonValue::as_object_mut)
+            .ok_or("task_execution_metadata_invalid: the execution request is not an object; refresh the task and retry")?;
+            object.insert("taskExecution".into(), session.metadata());
+            object.insert(
+                "workspacePath".into(),
+                serde_json::json!(session.workspace()),
+            );
+        }
+        run_request.metadata = metadata.clone();
+        let output =
+            match apply_usage_output_flags(&mut cmd, &usage_provider, UsageOutputMode::Stream) {
+                Some(_) => BackgroundOutput::ClaudeStream,
+                None => BackgroundOutput::Plain,
+            };
+        let retry_payload = serde_json::json!({
+            "skillId": original_skill_id,
+            "runtime": runtime,
+            "prompt": original_prompt,
+            "cwd": composition.cwd,
+            "context": composition.context,
+            "commandOverride": command_override,
+            "permissionMode": permission_mode,
+            "metadata": retry_metadata,
+        });
+        spawn_background(
+            app,
+            invocation_id,
+            cmd,
+            composition.cwd,
+            env,
+            stdin_payload,
+            BackgroundRunInfo {
+                task_execution: task_execution.clone(),
+                metadata,
+                run_request,
+                retry_payload,
+                parents,
+                write_roots: if approved_execution {
+                    add_dirs.into_iter().map(PathBuf::from).collect()
+                } else {
+                    Vec::new()
+                },
+                usage: BackgroundUsage {
+                    provider: usage_provider,
+                    output,
+                },
+            },
+        )
+    })();
+    if result.is_err() {
+        if let Some(session) = &task_execution {
+            session.admission_failed();
+            if let Err(error) = session.finish(false, None) {
+                eprintln!("maru: failed background preparation requires review: {error}");
+            }
+        }
     }
-    run_request.metadata = metadata.clone();
-    // The effective provider decides the output format, not the requested one:
-    // an adaptive-policy resolution can reroute the run, and Maru must ask for
-    // machine-readable output from the CLI that actually runs. The flags live in
-    // `provider.rs` so this slice and slice 1 cannot drift apart.
-    let usage_provider = resolution
-        .as_ref()
-        .map(|resolution| resolution.agent.clone())
-        .unwrap_or_else(|| provider.id().to_string());
-    let output = match apply_usage_output_flags(&mut cmd, &usage_provider, UsageOutputMode::Stream)
-    {
-        Some(_) => BackgroundOutput::ClaudeStream,
-        None => BackgroundOutput::Plain,
-    };
-    let retry_payload = serde_json::json!({
-        "skillId": original_skill_id,
-        "runtime": runtime,
-        "prompt": original_prompt,
-        "cwd": composition.cwd,
-        "context": composition.context,
-        "commandOverride": command_override,
-        "permissionMode": permission_mode,
-        "metadata": metadata,
-    });
-    spawn_background(
-        app,
-        invocation_id,
-        cmd,
-        composition.cwd,
-        env,
-        stdin_payload,
-        BackgroundRunInfo {
-            metadata,
-            run_request,
-            retry_payload,
-            parents,
-            write_roots: if approved_execution {
-                add_dirs.into_iter().map(PathBuf::from).collect()
-            } else {
-                Vec::new()
-            },
-            usage: BackgroundUsage {
-                provider: usage_provider,
-                output,
-            },
-        },
-    )
+    result
 }
 
 pub(crate) fn compose(
@@ -579,6 +625,7 @@ fn normalize_runtime(runtime: &str) -> Result<String, String> {
 /// bundled to keep `spawn_background`'s argument count under clippy's
 /// threshold.
 struct BackgroundRunInfo {
+    task_execution: Option<crate::task_execution_runtime::TaskExecutionSession>,
     metadata: Option<JsonValue>,
     run_request: AgentRunRequest,
     retry_payload: JsonValue,
@@ -631,6 +678,22 @@ impl DispatchWrites {
         write_roots: Vec<PathBuf>,
         caller_parents: Vec<PathTransactionParent>,
     ) -> Result<Self, String> {
+        let approved = !write_roots.is_empty();
+        let mut context = Self::prepare(cwd, id, write_roots, caller_parents)?;
+        if approved {
+            let lease = context.request()?.acquire()?;
+            lease.before_effect()?;
+            context.owned = Some(Arc::new(lease));
+        }
+        Ok(context)
+    }
+
+    fn prepare(
+        cwd: &str,
+        id: &str,
+        write_roots: Vec<PathBuf>,
+        caller_parents: Vec<PathTransactionParent>,
+    ) -> Result<Self, String> {
         let mut paths = dispatch_mutation_paths(cwd, id)?;
         let mut parents = vec![
             PathTransactionParent::capture(Path::new(cwd))?,
@@ -639,9 +702,8 @@ impl DispatchWrites {
         for root in &write_roots {
             parents.push(PathTransactionParent::capture(root)?);
         }
-        let approved = !write_roots.is_empty();
         paths.extend(write_roots);
-        let mut context = Self {
+        let context = Self {
             event_path: run_events_path(cwd, id)?,
             mission_paths: mission_state::mission_mutation_paths(id)?,
             paths,
@@ -650,11 +712,6 @@ impl DispatchWrites {
             owned: None,
             serial: Arc::new(Mutex::new(())),
         };
-        if approved {
-            let lease = context.request()?.acquire()?;
-            lease.before_effect()?;
-            context.owned = Some(Arc::new(lease));
-        }
         Ok(context)
     }
 
@@ -717,7 +774,26 @@ impl DispatchWrites {
 
 struct DispatchChild {
     child: std::process::Child,
-    _writes: Arc<DispatchWrites>,
+    _writes: Option<Arc<DispatchWrites>>,
+    owned_task: Option<crate::task_execution_claims::OwnedTaskExecution>,
+    task_execution: Option<crate::task_execution_runtime::TaskExecutionSession>,
+    task_result_recorded: bool,
+}
+impl DispatchChild {
+    fn record_task_result(&mut self, success: bool, exit_code: Option<i32>) -> Result<(), String> {
+        let Some(session) = &self.task_execution else {
+            return Ok(());
+        };
+        if let Some(owned) = &mut self.owned_task {
+            self.task_result_recorded = true;
+            return owned.record_waited_result(self.child.id(), success, exit_code);
+        }
+        session.child_reaped(self.child.id())?;
+        // A failed result-use check must not be retried as a different terminal
+        // result by the unwind/early-return cleanup.
+        self.task_result_recorded = true;
+        session.finish(success, exit_code)
+    }
 }
 impl std::ops::Deref for DispatchChild {
     type Target = std::process::Child;
@@ -733,7 +809,11 @@ impl std::ops::DerefMut for DispatchChild {
 impl Drop for DispatchChild {
     fn drop(&mut self) {
         let _ = self.child.kill();
-        let _ = self.child.wait();
+        if self.child.wait().is_ok() && !self.task_result_recorded {
+            if let Err(error) = self.record_task_result(false, None) {
+                eprintln!("maru: background task cleanup requires review: {error}");
+            }
+        }
     }
 }
 
@@ -747,6 +827,7 @@ fn spawn_background<R: tauri::Runtime>(
     run_info: BackgroundRunInfo,
 ) -> Result<String, String> {
     let BackgroundRunInfo {
+        task_execution,
         metadata,
         run_request,
         retry_payload,
@@ -754,22 +835,12 @@ fn spawn_background<R: tauri::Runtime>(
         parents,
         usage,
     } = run_info;
-    let writes = Arc::new(DispatchWrites::new(
-        &cwd,
-        &invocation_id,
-        write_roots,
-        parents,
-    )?);
-    writes.event(
-        &cwd,
-        &invocation_id,
-        "run.started",
-        "maru.skill_host",
-        serde_json::json!({
-            "request": run_request,
-            "dispatch": retry_payload,
-        }),
-    )?;
+    let claimed_owned = task_execution.is_some() && !write_roots.is_empty();
+    let context = if claimed_owned {
+        DispatchWrites::prepare(&cwd, &invocation_id, write_roots, parents)?
+    } else {
+        DispatchWrites::new(&cwd, &invocation_id, write_roots, parents)?
+    };
     cmd.current_dir(&cwd)
         .stdin(if stdin_payload.is_some() {
             Stdio::piped()
@@ -782,13 +853,75 @@ fn spawn_background<R: tauri::Runtime>(
         cmd.env(key, value);
     }
     cmd.no_window();
-    let mut child = match cmd.spawn() {
+    let started = serde_json::json!({ "request": run_request, "dispatch": retry_payload });
+    let mut writes = None;
+    let mut owned_task = None;
+    let spawned = if claimed_owned {
+        let paths = context.paths.clone();
+        let mut pins = context.parents.clone();
+        pins.extend(context.caller_parents.iter().cloned());
+        // Acquire the task OS lock before the complete broad reservation, and
+        // keep both with the child. Callback writes reuse this exact lease.
+        let result = task_execution
+            .as_ref()
+            .expect("claimed execution")
+            .spawn_child_with_paths(
+                &paths,
+                &pins,
+                |lease| {
+                    let mut context = context;
+                    context.owned = Some(lease.clone());
+                    let context = Arc::new(context);
+                    writes = Some(context.clone());
+                    context.event(
+                        &cwd,
+                        &invocation_id,
+                        "run.started",
+                        "maru.skill_host",
+                        started,
+                    )
+                },
+                || cmd.spawn().map_err(|error| format_spawn_error(&error)),
+            );
+        result.map(|(child, owned)| {
+            owned_task = Some(owned);
+            child
+        })
+    } else {
+        let context = Arc::new(context);
+        context.event(
+            &cwd,
+            &invocation_id,
+            "run.started",
+            "maru.skill_host",
+            started,
+        )?;
+        writes = Some(context);
+        match &task_execution {
+            Some(session) => {
+                session.spawn_child(|| cmd.spawn().map_err(|error| format_spawn_error(&error)))
+            }
+            None => cmd.spawn().map_err(|error| format_spawn_error(&error)),
+        }
+    };
+    let writes = match writes {
+        Some(writes) => writes,
+        None => {
+            return match spawned {
+                Err(error) => Err(error),
+                Ok(_) => unreachable!("a failed admission has no dispatch writes"),
+            };
+        }
+    };
+    let mut child = match spawned {
         Ok(child) => DispatchChild {
             child,
-            _writes: writes.clone(),
+            _writes: Some(writes.clone()),
+            owned_task,
+            task_execution,
+            task_result_recorded: false,
         },
-        Err(err) => {
-            let message = format_spawn_error(&err);
+        Err(message) => {
             let _ = writes.event(
                 &cwd,
                 &invocation_id,
@@ -796,6 +929,15 @@ fn spawn_background<R: tauri::Runtime>(
                 "maru.skill_host",
                 serde_json::json!({ "error": message }),
             );
+            // Session lifecycle helpers may take the OS claim lock only after
+            // all aliases of the broad dispatch reservation have gone away.
+            drop(writes);
+            if let Some(session) = &task_execution {
+                session.admission_failed();
+                if let Err(error) = session.finish(false, None) {
+                    eprintln!("maru: failed background task spawn requires review: {error}");
+                }
+            }
             return Err(message);
         }
     };
@@ -857,16 +999,38 @@ fn spawn_background<R: tauri::Runtime>(
     let cwd_done = cwd.clone();
     thread::spawn(move || {
         let result = child.wait();
-        if result.is_err() {
+        let reaped = if result.is_err() {
             let _ = child.kill();
-            let _ = child.wait();
-        }
+            child.wait().is_ok()
+        } else {
+            true
+        };
         // The owned child transaction ends only after both callback streams.
         let streamed_usage = stdout_pump.join().unwrap_or_default();
         let _ = stderr_pump.join();
+        let execution_error = if reaped {
+            child
+                .record_task_result(
+                    result.as_ref().is_ok_and(|status| status.success()),
+                    result.as_ref().ok().and_then(|status| status.code()),
+                )
+                .err()
+        } else {
+            None
+        };
+        let mut done = None;
+        let deferred_result = if child.owned_task.is_some() && execution_error.is_none() && reaped {
+            Some((
+                result.as_ref().is_ok_and(|status| status.success()),
+                result.as_ref().ok().and_then(|status| status.code()),
+            ))
+        } else {
+            None
+        };
         match result {
             Ok(status) => {
-                let outcome = if status.success() { "ok" } else { "failed" };
+                let success = status.success() && execution_error.is_none();
+                let outcome = if success { "ok" } else { "failed" };
                 // One receipt per background dispatch: Compose runs, scheduled
                 // runs and each retry land here once, with its own run id. A
                 // provider without machine-readable usage records `unavailable`
@@ -889,11 +1053,13 @@ fn spawn_background<R: tauri::Runtime>(
                 write_usage_receipt(&receipt, &id_done, |kind, payload| {
                     writes.event(&cwd_done, &id_done, kind, "provider", payload)
                 });
-                if !status.success() {
-                    let raw_error = stderr_buffer
-                        .lock()
-                        .map(|buffer| buffer.clone())
-                        .unwrap_or_default();
+                if !success {
+                    let raw_error = execution_error.clone().unwrap_or_else(|| {
+                        stderr_buffer
+                            .lock()
+                            .map(|buffer| buffer.clone())
+                            .unwrap_or_default()
+                    });
                     // A failed run usually says why on stderr, but a Stop kills
                     // the CLI mid-stream and an error result can arrive with
                     // stderr empty: then the CLI's own error event is the reason
@@ -903,7 +1069,14 @@ fn spawn_background<R: tauri::Runtime>(
                     } else {
                         raw_error
                     };
-                    let error_kind = classify_runtime_error(&raw_error, "runtime_failed");
+                    let error_kind = classify_runtime_error(
+                        &raw_error,
+                        if execution_error.is_some() {
+                            "task_execution_conflict"
+                        } else {
+                            "runtime_failed"
+                        },
+                    );
                     let message = raw_error
                         .lines()
                         .next()
@@ -930,7 +1103,7 @@ fn spawn_background<R: tauri::Runtime>(
                         },
                     );
                 }
-                if status.success() {
+                if success {
                     if let Ok(raw) = stdout_buffer.lock().map(|buffer| buffer.clone()) {
                         if composition_skill_is_source_review(&run_request) {
                             if let Ok(review) =
@@ -962,7 +1135,7 @@ fn spawn_background<R: tauri::Runtime>(
                     "maru.skill_host",
                     serde_json::json!({
                         "exitCode": status.code(),
-                        "success": status.success(),
+                        "success": success,
                     }),
                 );
                 let _ = writes.transaction(|lease| {
@@ -970,18 +1143,15 @@ fn spawn_background<R: tauri::Runtime>(
                         &app_done,
                         &id_done,
                         status.code(),
-                        status.success(),
+                        success,
                         lease,
                     )
                 });
-                let _ = app_done.emit(
-                    "ai://done",
-                    AiDoneEvent {
-                        invocation_id: id_done,
-                        exit_code: status.code(),
-                        success: status.success(),
-                    },
-                );
+                done = Some(AiDoneEvent {
+                    invocation_id: id_done.clone(),
+                    exit_code: status.code(),
+                    success,
+                });
             }
             Err(err) => {
                 let _ = writes.event(
@@ -1002,12 +1172,39 @@ fn spawn_background<R: tauri::Runtime>(
                 let _ = app_done.emit(
                     "ai://error",
                     AiErrorEvent {
-                        invocation_id: id_done,
+                        invocation_id: id_done.clone(),
                         kind: "wait_failed".to_string(),
                         message: err.to_string(),
                     },
                 );
             }
+        }
+        // Streams and protected proposal/outcome writes are complete. Release
+        // the broad reservation and its OS identity guard before ordinary
+        // lifecycle APIs acquire their own complete transactions.
+        child._writes.take();
+        drop(writes);
+        drop(child.owned_task.take());
+        if let (Some(session), Some((success, exit_code))) =
+            (&child.task_execution, deferred_result)
+        {
+            if let Err(error) = session.finish(success, exit_code) {
+                mission_state::fail_mission(&app_done, &id_done, &error);
+                let _ = app_done.emit(
+                    "ai://error",
+                    AiErrorEvent {
+                        invocation_id: id_done.clone(),
+                        kind: "task_execution_conflict".into(),
+                        message: error,
+                    },
+                );
+                if let Some(done) = &mut done {
+                    done.success = false;
+                }
+            }
+        }
+        if let Some(done) = done {
+            let _ = app_done.emit("ai://done", done);
         }
     });
     Ok(invocation_id)
@@ -1726,6 +1923,10 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+#[cfg(all(test, unix))]
+#[path = "dispatch_task_execution_tests.rs"]
+mod task_execution_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2180,6 +2381,7 @@ mod phase08_04 {
             BTreeMap::new(),
             None,
             BackgroundRunInfo {
+                task_execution: None,
                 metadata: None,
                 run_request: build_agent_run_request(&composition, "claude", "background", None)
                     .unwrap(),

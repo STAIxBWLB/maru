@@ -54,6 +54,7 @@ import {
   resolveTaskEntryProjects,
   selectVisibleTask,
   type TaskEntry,
+  type TaskFilters,
   type TaskPriority,
 } from "../../lib/tasks";
 import type {
@@ -70,6 +71,7 @@ import { NaturalScheduleDialog } from "./NaturalScheduleDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { TaskDetailDrawer } from "./TaskDetailDrawer";
 import { TasksRunsPanel } from "./TasksRunsPanel";
+import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import { TasksSidebar, type TasksFilterView } from "./TasksSidebar";
 import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedTaskEvents } from "../../lib/calendar/fromEntries";
@@ -96,15 +98,11 @@ export interface TasksPaneProps {
     prompt?: string,
     cwd?: string | null,
     onDispatched?: () => void | Promise<void>,
+    metadata?: Record<string, unknown>,
   ) => void;
   onMissionStarted: (invocationId: string) => void;
   onStopMission: (id: string) => void;
-  onConfirmApproval: (input: {
-    kind: string;
-    summary: string;
-    target?: string | null;
-    payloadPreview?: string | null;
-  }) => Promise<string | null>;
+  onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
   layout?: Pick<
     LayoutSettings,
@@ -182,22 +180,18 @@ export function TasksPane({
     [projectCatalog, rows],
   );
   const visibleEntries = useMemo(() => {
-    const titleMatches = filterTasksByQuery(entries, query, {
-      ...filtersForView(view),
+    const filters = {
       projects: projectFilter === "all" ? [] : [projectFilter],
       priorities: priorityFilter === "all" ? [] : [priorityFilter],
       today,
-    });
+    };
+    const titleMatches = filterTaskEntriesForView(entries, query, view, filters);
     if (bodyHits.size === 0) return titleMatches;
-    const bodyMatched = filterTasksByQuery(
+    const bodyMatched = filterTaskEntriesForView(
       entries.filter((entry) => bodyHits.has(entry.relPath)),
       "",
-      {
-        ...filtersForView(view),
-        projects: projectFilter === "all" ? [] : [projectFilter],
-        priorities: priorityFilter === "all" ? [] : [priorityFilter],
-        today,
-      },
+      view,
+      filters,
     );
     return mergeTaskEntries(titleMatches, bodyMatched);
   }, [entries, projectFilter, priorityFilter, query, today, view, bodyHits]);
@@ -235,6 +229,7 @@ export function TasksPane({
     () => mergeTaskMissions(tasksMissions, localRuns),
     [tasksMissions, localRuns],
   );
+  const completionRefreshKey = `${selectedEntry?.modifiedAt ?? ""}:${processingMissions.map((mission) => `${mission.id}:${mission.status}`).join("|")}`;
   const progressCount = useMemo(
     () => mergedMissions.filter((mission) => mission.status === "running" || mission.status === "idle").length,
     [mergedMissions],
@@ -713,6 +708,8 @@ export function TasksPane({
             />
           </div>
           <TaskDetailDrawer
+            workPath={workPath}
+            tasksRoot={effectiveSettings.root}
             entry={selectedEntry}
             metadata={metadata}
             loading={metadataLoading}
@@ -724,6 +721,10 @@ export function TasksPane({
             onOpenSkillCompose={onOpenSkillCompose}
             onSaveDetails={updateDetails}
             onDirtyChange={setDetailDirty}
+            onCompletionChanged={() => { void load(); }}
+            onConfirmApproval={onConfirmApproval}
+            onMissionStarted={onMissionStarted}
+            completionRefreshKey={completionRefreshKey}
           />
         </>
       ) : null}
@@ -804,7 +805,7 @@ function TaskList({
   );
 }
 
-function filtersForView(view: TasksFilterView) {
+export function filtersForView(view: TasksFilterView) {
   if (view === "scheduled") {
     return { statuses: ["active", "in-progress"] as const, due: "scheduled" as const };
   }
@@ -815,6 +816,28 @@ function filtersForView(view: TasksFilterView) {
     return { statuses: ["backlog"] as const, buckets: ["backlog"] as const };
   }
   return { statuses: ["done", "cancelled"] as const, buckets: ["archive"] as const };
+}
+
+export function filterTaskEntriesForView(
+  entries: TaskEntry[],
+  query: string,
+  view: TasksFilterView,
+  filters: Pick<TaskFilters, "projects" | "priorities" | "today"> = {},
+): TaskEntry[] {
+  const ordinary = filterTasksByQuery(entries, query, { ...filters, ...filtersForView(view) });
+  if (view !== "done") return ordinary;
+  // An interrupted accepted publication can leave Done bytes outside Archive.
+  // Only policy-bearing tasks need that visibility exception. This read-only
+  // candidate check supplies no resume authority; the backend verifies it.
+  const candidates = entries.filter((entry) =>
+    entry.status === "done"
+    && entry.bucket !== "archive"
+    && entry.frontmatter.maruCompletionRequired === true
+    && typeof entry.taskId === "string" && entry.taskId.trim().length > 0
+    && typeof entry.frontmatter.maruCompletionPolicyRevision === "string"
+    && entry.frontmatter.maruCompletionPolicyRevision.trim().length > 0);
+  const pending = filterTasksByQuery(candidates, query, { ...filters, statuses: ["done"] });
+  return mergeTaskEntries(ordinary, pending);
 }
 
 function displayViewLabel(mode: TasksDisplayView): string {

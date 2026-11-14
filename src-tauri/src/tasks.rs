@@ -327,7 +327,6 @@ pub(crate) fn create_task_note_in_transaction(
     let work = normalize_existing_dir(&work_path)?;
     let tasks_root = resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?;
     let bucket_root = tasks_root.join(draft.bucket.as_str());
-    fs::create_dir_all(&bucket_root).map_err(|err| format!("Cannot create task bucket: {err}"))?;
     let slug = slugify(&draft.slug);
     let stem = if slug == "untitled" {
         let title_slug = slugify(&draft.title);
@@ -356,6 +355,9 @@ pub(crate) fn create_task_note_in_transaction(
         );
     }
     let content = serialize_task_note(&frontmatter, &draft.body)?;
+    crate::task_completion::guard_new_task_document(&work, &path, &content)
+        .map_err(|e| e.message)?;
+    fs::create_dir_all(&bucket_root).map_err(|err| format!("Cannot create task bucket: {err}"))?;
     fs::write(&path, content).map_err(|err| format!("Cannot write task note: {err}"))?;
     task_row_for_path(&work, &path, draft.bucket)
 }
@@ -411,6 +413,8 @@ pub(crate) fn prepare_capture_task_materialization(
         );
     }
     let content = serialize_task_note(&draft.frontmatter, &draft.body)?;
+    crate::task_completion::guard_new_task_document(work, &path, &content)
+        .map_err(|e| e.message)?;
     let rel_path = crate::vault::relative_slash_path(&path, work);
     let content_hash = revision_for(&content);
     let will_create = !path.exists();
@@ -474,10 +478,48 @@ pub(crate) fn materialize_capture_task_in_transaction(
         });
     }
 
+    crate::task_completion::guard_new_task_document(work, &prepared.path, &prepared.content)
+        .map_err(|e| e.message)?;
     write_atomic(&prepared.path, prepared.content.as_bytes())
         .map_err(|err| format!("Cannot write capture task note: {err}"))?;
     let row = task_row_for_path(work, &prepared.path, prepared.bucket)?;
     Ok(MaterializedTaskWrite { row, created: true })
+}
+
+pub(crate) struct TaskCompletionPlan {
+    pub updated: String,
+    pub target: PathBuf,
+}
+
+pub(crate) fn prepare_task_completion(
+    _work: &Path,
+    tasks_root: &Path,
+    path: &Path,
+    original: &str,
+) -> Result<TaskCompletionPlan, String> {
+    let updated = update_frontmatter_content(
+        original,
+        "status",
+        Some(FrontmatterValue::String("done".into())),
+    )?;
+    let bucket = bucket_from_task_path(tasks_root, path)?;
+    let target = if bucket == TaskBucket::Archive {
+        path.to_path_buf()
+    } else {
+        conflict_free_path(&target_path_for_bucket(
+            tasks_root,
+            path,
+            TaskBucket::Archive,
+        )?)
+    };
+    Ok(TaskCompletionPlan { updated, target })
+}
+pub(crate) fn completion_task_row(
+    work: &Path,
+    path: &Path,
+    tasks_root: &Path,
+) -> Result<TaskNoteRow, String> {
+    task_row_for_path(work, path, bucket_from_task_path(tasks_root, path)?)
 }
 
 pub fn update_task_status(
@@ -536,6 +578,20 @@ pub(crate) fn update_task_status_in_transaction(
     status: TaskStatus,
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
+    update_task_status_in_transaction_with_completion(
+        lease, work_path, rel_path, status, root, None, None,
+    )
+}
+
+pub(crate) fn update_task_status_in_transaction_with_completion(
+    lease: &PathTransactionLease,
+    work_path: String,
+    rel_path: String,
+    status: TaskStatus,
+    root: Option<String>,
+    completion_permit: Option<&crate::task_completion::CompletionWritePermit>,
+    expected_target: Option<&Path>,
+) -> Result<TaskNoteRow, String> {
     let work = normalize_existing_dir(&work_path)?;
     let paths = vec![
         resolve_inside_vault(&work_path, &rel_path)?,
@@ -567,9 +623,58 @@ pub(crate) fn update_task_status_in_transaction(
             WorkspaceWriteAction::RenameMove,
         )?;
     }
+    crate::task_completion::guard_managed_task_write_with_permit(
+        &work,
+        &path,
+        Some(&original),
+        Some(&updated),
+        completion_permit,
+    )
+    .map_err(|e| e.message)?;
+    let target = if current_bucket == target_bucket {
+        path.clone()
+    } else if let (Some(_), Some(expected)) = (completion_permit, expected_target) {
+        let bucket_target = target_path_for_bucket(&tasks_root, &path, target_bucket)?;
+        if expected.parent() != bucket_target.parent() {
+            return Err("task_completion_conflict: recorded target is outside its Archive bucket; restore the accepted intent or confirm a new completion".into());
+        }
+        // A sealed completion intent pins its destination, even when an older
+        // filename collision has since disappeared. Never choose another name.
+        expected.to_path_buf()
+    } else {
+        conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?)
+    };
+    if expected_target.is_some_and(|expected| expected != target) {
+        return Err("task_completion_conflict: archive target changed; refresh the task and confirm the new target".into());
+    }
+    if target
+        .parent()
+        .is_some_and(|parent| parent.exists() && !parent.is_dir())
+    {
+        return Err("Cannot create task target: the Archive parent is not a directory; move that entry aside and retry the task transition".into());
+    }
+    // A precompleted Active note still needs authority for the Archive move.
+    // Sealed receipt finalization has its own evidence checks; Cancelled is
+    // deliberately separate from completion and keeps its ordinary behavior.
+    if completion_permit.is_none() && status == TaskStatus::Done && current_bucket != target_bucket
+    {
+        crate::task_completion::guard_managed_task_move(&work, &path, &target)
+            .map_err(|e| e.message)?;
+    }
     if updated != original {
-        write_atomic(&path, updated.as_bytes())
-            .map_err(|err| format!("Cannot update task status: {err}"))?;
+        if let Some(permit) = completion_permit {
+            crate::atomic_file::write_atomic_checked(&path, updated.as_bytes(), 0o644, || {
+                permit.check_source(false)
+            })
+            .map_err(|e: crate::ipc_error::IpcError| e.message)?;
+        } else {
+            write_atomic(&path, updated.as_bytes())
+                .map_err(|err| format!("Cannot update task status: {err}"))?;
+        }
+    }
+    #[cfg(any(test, feature = "native-e2e"))]
+    if completion_permit.is_some() {
+        crate::task_completion::fail_after_done_write(&work)?;
     }
     if current_bucket == target_bucket {
         return task_row_for_path(&work, &path, current_bucket);
@@ -578,17 +683,35 @@ pub(crate) fn update_task_status_in_transaction(
         &normalize_existing_dir(&work_path)?.to_string_lossy(),
         WorkspaceWriteAction::RenameMove,
     )?;
-    let target = conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?);
+    #[cfg(test)]
+    if completion_permit.is_some() {
+        PathTransactionLease::test_stage(&[path.clone()], "completion-before-archive");
+    }
     let moved = (|| {
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)
                 .map_err(|err| format!("Cannot create task target: {err}"))?;
         }
+        if let Some(permit) = completion_permit {
+            permit.check_source(true).map_err(|e| e.message)?;
+            match fs::symlink_metadata(&target) {
+                Ok(_) => return Err("task_completion_conflict: archive target appeared; move that entry aside before resuming the recorded completion".into()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(error) => return Err(format!("Cannot inspect completion Archive target: {error}; check the target directory and retry the recorded completion")),
+            }
+        }
         fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))
     })();
     if let Err(error) = moved {
-        write_atomic(&path, original.as_bytes())
-            .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
+        if updated != original {
+            crate::atomic_file::write_atomic_checked(&path, original.as_bytes(), 0o644, || {
+                let current = fs::read(&path).map_err(|read| format!("Cannot recheck task before rollback: {read}; inspect the task and its saved snapshot"))?;
+                if current != updated.as_bytes() {
+                    return Err("Task changed after the status write; preserve the current bytes and inspect the saved snapshot before retrying".to_string());
+                }
+                Ok(())
+            }).map_err(|rollback: String| format!("{error}; rollback refused or failed: {rollback}"))?;
+        }
         return Err(error);
     }
     task_row_for_path(&work, &target, target_bucket)
@@ -656,6 +779,8 @@ pub(crate) fn update_task_schedule_fields_in_transaction(
     )?;
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &rel_path)?;
+    crate::task_completion::guard_managed_task_write(&work, &path, None, None)
+        .map_err(|error| error.to_string())?;
     let original =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
     let mut updated = original.clone();
@@ -666,6 +791,13 @@ pub(crate) fn update_task_schedule_fields_in_transaction(
     updated = patch_optional_string_field(updated, "calendarEnd", fields.calendar_end)?;
     updated = patch_optional_number_field(updated, "estimateMinutes", fields.estimate_minutes)?;
     if updated != original {
+        crate::task_completion::guard_managed_task_write(
+            &work,
+            &path,
+            Some(&original),
+            Some(&updated),
+        )
+        .map_err(|error| error.to_string())?;
         fs::write(&path, &updated).map_err(|err| format!("Cannot update task schedule: {err}"))?;
     }
     let bucket = bucket_from_rel_path(&rel_path).unwrap_or(TaskBucket::Active);
@@ -789,6 +921,8 @@ pub(crate) fn update_task_details_in_transaction(
             WorkspaceWriteAction::RenameMove,
         )?;
     }
+    crate::task_completion::guard_managed_task_write(&work, &path, Some(&original), Some(&updated))
+        .map_err(|e| e.message)?;
     if updated != original {
         write_atomic(&path, updated.as_bytes())
             .map_err(|err| format!("Cannot update task details: {err}"))?;
@@ -896,6 +1030,8 @@ pub(crate) fn move_task_note_in_transaction(
         return task_row_for_path(&work, &path, current_bucket);
     }
     let target = conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?);
+    crate::task_completion::guard_managed_task_move(&work, &path, &target)
+        .map_err(|e| e.message)?;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("Cannot create task target: {err}"))?;
     }
@@ -1115,7 +1251,7 @@ fn should_enter_task_path(path: &Path, root: &Path) -> bool {
     })
 }
 
-fn is_markdown(path: &Path) -> bool {
+pub(crate) fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .map(|value| value.eq_ignore_ascii_case("md"))
@@ -1194,7 +1330,7 @@ fn replace_markdown_body(content: &str, body: &str) -> Result<String, String> {
     Ok(next)
 }
 
-fn task_status_from_content(content: &str, bucket: TaskBucket) -> TaskStatus {
+pub(crate) fn task_status_from_content(content: &str, bucket: TaskBucket) -> TaskStatus {
     let parts = parse_frontmatter(content);
     let frontmatter = yaml_to_json(&parts.meta);
     string_field(&frontmatter, "status")
@@ -2719,5 +2855,210 @@ mod phase08_09 {
         let second = materialize_capture_task(&root, &prepared).unwrap();
         assert!(!second.created);
         assert_eq!(first.row.rel_path, second.row.rel_path);
+    }
+}
+
+#[cfg(test)]
+mod completion_schedule_review_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::Home;
+    use crate::scratchpad::phase08_08::registry;
+
+    fn fields() -> UpdateTaskScheduleFields {
+        UpdateTaskScheduleFields {
+            project: Some(Some(
+                "demo\nstatus: done\nmaruCompletionRequired: false".into(),
+            )),
+            priority: None,
+            due: None,
+            calendar_start: None,
+            calendar_end: None,
+            estimate_minutes: None,
+        }
+    }
+
+    #[test]
+    fn completion_review_schedule_fields_do_not_admit_status_or_policy() {
+        for field in [
+            "status",
+            "maruCompletionRequired",
+            "maruCompletionPolicyRevision",
+            "taskId",
+        ] {
+            let mut value = serde_json::Map::new();
+            value.insert(field.into(), serde_json::json!("forged"));
+            assert!(
+                serde_json::from_value::<UpdateTaskScheduleFields>(value.into()).is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn completion_review_schedule_values_preserve_required_task_metadata() {
+        let home = Home::new();
+        let work = home.root.path().join("schedule-review");
+        fs::create_dir_all(work.join("tasks/active")).unwrap();
+        registry(&work, "direct");
+        let path = work.join("tasks/active/task.md");
+        fs::write(&path, "---\nstatus: active\nmaruCompletionRequired: true\nmaruCompletionPolicyRevision: fixture-epoch\ntaskId: schedule-task\n---\n# Body\n").unwrap();
+        update_task_schedule_fields(
+            work.to_string_lossy().into(),
+            "tasks/active/task.md".into(),
+            fields(),
+        )
+        .unwrap();
+        let raw = fs::read_to_string(path).unwrap();
+        let meta = yaml_to_json(&parse_frontmatter(&raw).meta);
+        assert_eq!(meta["status"], "active");
+        assert_eq!(meta["maruCompletionRequired"], true);
+        assert_eq!(meta["maruCompletionPolicyRevision"], "fixture-epoch");
+        assert_eq!(meta["taskId"], "schedule-task");
+        assert!(raw.ends_with("# Body\n"));
+    }
+
+    #[test]
+    fn completion_review_schedule_cannot_overwrite_backend_evidence() {
+        let home = Home::new();
+        let work = home.root.path().join("schedule-namespace-review");
+        let relative = ".maru/task-completion/receipts/owned.json";
+        let path = work.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        registry(&work, "direct");
+        let before = "{\"schemaVersion\":\"backend-owned\"}";
+        fs::write(&path, before).unwrap();
+        let result =
+            update_task_schedule_fields(work.to_string_lossy().into(), relative.into(), fields());
+        assert!(
+            result.is_err(),
+            "schedule writer modified backend evidence: {result:?}"
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), before);
+    }
+}
+
+#[cfg(test)]
+mod completion_review_precompleted_archive_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::Home;
+    use crate::scratchpad::phase08_08::registry;
+
+    fn seed_precompleted_active(work: &Path) -> String {
+        fs::create_dir_all(work.join("tasks/active")).unwrap();
+        registry(work, "direct");
+        let content =
+            "---\ntitle: Precompleted active task\nstatus: done\ncustom: preserved\n---\n# Body\n";
+        fs::write(work.join("tasks/active/task.md"), content).unwrap();
+        content.into()
+    }
+
+    #[test]
+    fn completion_review_r4_ui_enabled_precompleted_active_cannot_archive_via_status_done() {
+        let home = Home::new();
+        let work = home.root.path().join("r4-required");
+        let original = seed_precompleted_active(&work);
+        // Seed the pre-existing status, then enable the requirement through
+        // the actual app policy operation rather than forging its fields.
+        crate::task_completion::set_policy(
+            &work,
+            "tasks/active/task.md",
+            true,
+            &revision_for(&original),
+        )
+        .unwrap();
+        let before = fs::read_to_string(work.join("tasks/active/task.md")).unwrap();
+        assert_eq!(
+            task_status_from_content(&before, TaskBucket::Active),
+            TaskStatus::Done
+        );
+        assert!(!work.join(".maru/task-completion/receipts").exists());
+        let result = update_task_status(
+            work.to_string_lossy().into_owned(),
+            "tasks/active/task.md".into(),
+            TaskStatus::Done,
+            None,
+        );
+        assert!(
+            result.is_err(),
+            "a precompleted Active note bypassed required acceptance when archiving: {result:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(work.join("tasks/active/task.md")).unwrap(),
+            before
+        );
+        assert!(!work.join("tasks/archive").exists());
+        assert!(!work.join(".maru/task-completion/receipts").exists());
+    }
+
+    #[test]
+    fn completion_review_r4_ordinary_precompleted_active_keeps_manual_archive_behavior() {
+        let home = Home::new();
+        for explicit_policy_off in [false, true] {
+            let work = home
+                .root
+                .path()
+                .join(format!("r4-ordinary-{explicit_policy_off}"));
+            let original = seed_precompleted_active(&work);
+            if explicit_policy_off {
+                crate::task_completion::set_policy(
+                    &work,
+                    "tasks/active/task.md",
+                    false,
+                    &revision_for(&original),
+                )
+                .unwrap();
+            }
+            let before = fs::read_to_string(work.join("tasks/active/task.md")).unwrap();
+            let row = update_task_status(
+                work.to_string_lossy().into_owned(),
+                "tasks/active/task.md".into(),
+                TaskStatus::Done,
+                None,
+            )
+            .unwrap();
+            assert_eq!(row.bucket, TaskBucket::Archive);
+            assert!(!work.join("tasks/active/task.md").exists());
+            assert_eq!(
+                fs::read_to_string(work.join("tasks/archive/task.md")).unwrap(),
+                before
+            );
+            assert!(!work.join(".maru/task-completion/receipts").exists());
+        }
+    }
+
+    #[test]
+    fn completion_review_r4_required_cancelled_transition_keeps_existing_archive_behavior() {
+        let home = Home::new();
+        let work = home.root.path().join("r4-cancelled");
+        let original = seed_precompleted_active(&work);
+        crate::task_completion::set_policy(
+            &work,
+            "tasks/active/task.md",
+            true,
+            &revision_for(&original),
+        )
+        .unwrap();
+        let row = update_task_status(
+            work.to_string_lossy().into_owned(),
+            "tasks/active/task.md".into(),
+            TaskStatus::Cancelled,
+            None,
+        )
+        .unwrap();
+        assert_eq!(row.bucket, TaskBucket::Archive);
+        assert!(!work.join("tasks/active/task.md").exists());
+        let saved = fs::read_to_string(work.join("tasks/archive/task.md")).unwrap();
+        assert_eq!(
+            task_status_from_content(&saved, TaskBucket::Archive),
+            TaskStatus::Cancelled
+        );
+        assert_eq!(
+            parse_frontmatter(&saved)
+                .meta
+                .get("maruCompletionRequired")
+                .and_then(YamlValue::as_bool),
+            Some(true)
+        );
+        assert!(!work.join(".maru/task-completion/receipts").exists());
     }
 }

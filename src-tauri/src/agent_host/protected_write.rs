@@ -62,6 +62,9 @@ pub fn apply_protected_write_claim(
 ) -> Result<ProtectedWriteOutcome, String> {
     claim.validate()?;
     let target = resolve_inside_vault(cwd, &claim.path)?;
+    let work = resolve_inside_vault(cwd, ".")?;
+    crate::task_completion::guard_managed_task_write(&work, &target, None, None)
+        .map_err(|error| error.to_string())?;
     let exists = target.exists();
     let previous_hash = if exists {
         Some(file_sha256_hex(&target)?)
@@ -77,6 +80,24 @@ pub fn apply_protected_write_claim(
             ));
         }
     }
+    let previous_content = if claim.operation != "delete"
+        && target
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+    {
+        match fs::read_to_string(&target) {
+            Ok(content) => Some(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(format!(
+                    "Cannot read Markdown before protected write: {error}; check file permissions and retry"
+                ));
+            }
+        }
+    } else {
+        None
+    };
 
     match claim.operation.as_str() {
         "create" => {
@@ -86,12 +107,26 @@ pub fn apply_protected_write_claim(
             }
             let next = content.ok_or_else(|| "write_content_required".to_string())?;
             validate_managed_write(cwd, &target.to_string_lossy(), next)?;
+            crate::task_completion::guard_managed_task_write(
+                &work,
+                &target,
+                previous_content.as_deref(),
+                Some(next),
+            )
+            .map_err(|error| error.to_string())?;
             write_content(&target, next)?;
         }
         "replace" => {
             assert_maru_can_write(cwd, WorkspaceWriteAction::Modify)?;
             let next = content.ok_or_else(|| "write_content_required".to_string())?;
             validate_managed_write(cwd, &target.to_string_lossy(), next)?;
+            crate::task_completion::guard_managed_task_write(
+                &work,
+                &target,
+                previous_content.as_deref(),
+                Some(next),
+            )
+            .map_err(|error| error.to_string())?;
             write_content(&target, next)?;
         }
         "append" => {
@@ -101,9 +136,16 @@ pub fn apply_protected_write_claim(
             } else {
                 String::new()
             };
-            let mut next = existing;
+            let mut next = existing.clone();
             next.push_str(content.ok_or_else(|| "write_content_required".to_string())?);
             validate_managed_write(cwd, &target.to_string_lossy(), &next)?;
+            crate::task_completion::guard_managed_task_write(
+                &work,
+                &target,
+                exists.then_some(existing.as_str()),
+                Some(&next),
+            )
+            .map_err(|error| error.to_string())?;
             write_content(&target, &next)?;
         }
         "delete" => {

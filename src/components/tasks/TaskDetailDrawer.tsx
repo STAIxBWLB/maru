@@ -5,7 +5,7 @@ import {
   Play,
   WandSparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { findSkill } from "../../lib/agents";
 import { useTranslation } from "../../lib/i18n";
 import type { TaskEntry } from "../../lib/tasks";
@@ -15,8 +15,14 @@ import type { DocumentLabelMode } from "../../lib/settings";
 import { resolveDisplayLabel } from "../../lib/document";
 import { Button } from "../ui/Button";
 import { TaskFormFields } from "./TaskFormFields";
+import { TaskCompletionSection } from "./TaskCompletionSection";
+import type { ApprovalInput } from "../../approval/ApprovalDialog";
+import { readDocument } from "../../lib/api";
+import { setError } from "../../lib/errorStore";
 
 interface TaskDetailDrawerProps {
+  workPath: string | null;
+  tasksRoot?: string | null;
   entry: TaskEntry | null;
   metadata: TaskMetadata | null;
   loading: boolean;
@@ -29,12 +35,21 @@ interface TaskDetailDrawerProps {
     skill: SkillRecord | null,
     context: SkillContextItem[],
     prompt?: string,
+    cwd?: string | null,
+    onDispatched?: () => void | Promise<void>,
+    metadata?: Record<string, unknown>,
   ) => void;
   onSaveDetails: (entry: TaskEntry, fields: TaskDetailsPatch) => Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
+  onCompletionChanged: () => void;
+  onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
+  onMissionStarted?: (id: string) => void;
+  completionRefreshKey?: string | number;
 }
 
 export function TaskDetailDrawer({
+  workPath,
+  tasksRoot,
   entry,
   metadata,
   loading,
@@ -46,9 +61,21 @@ export function TaskDetailDrawer({
   onOpenSkillCompose,
   onSaveDetails,
   onDirtyChange,
+  onCompletionChanged,
+  onConfirmApproval,
+  onMissionStarted,
+  completionRefreshKey,
 }: TaskDetailDrawerProps) {
   const { t } = useTranslation();
   const [dirty, setDirty] = useState(false);
+  const [preparingRun, setPreparingRun] = useState(false);
+  const runEpoch = useRef(0);
+  const selectedTaskPath = entry?.relPath;
+  useEffect(() => {
+    runEpoch.current += 1;
+    setPreparingRun(false);
+    return () => { ++runEpoch.current; };
+  }, [selectedTaskPath, tasksRoot, workPath]);
 
   if (collapsed) {
     return (
@@ -85,6 +112,32 @@ export function TaskDetailDrawer({
 
   const context: SkillContextItem[] = [{ path: entry.absPath, kind: "document" }];
   const taskManagement = findSkill(skills, "task-management");
+
+  const openTaskRun = async (skill: SkillRecord | null, prompt?: string) => {
+    if (preparingRun || !workPath) return;
+    const generation = runEpoch.current;
+    setPreparingRun(true);
+    try {
+      // A policy toggle changes the source revision. Capture both from the
+      // same current document before seeding a tracked execution request.
+      const current = await readDocument(workPath, entry.relPath);
+      if (generation !== runEpoch.current) return;
+      if (current.meta.maruCompletionRequired === true) {
+        onOpenSkillCompose(skill, context, prompt, workPath, undefined, {
+          taskExecution: {
+            requestId: crypto.randomUUID(), taskPath: entry.relPath, sourceRevision: current.revision,
+            ...(tasksRoot !== undefined && tasksRoot !== null ? { tasksRoot } : {}),
+          },
+        });
+      } else {
+        onOpenSkillCompose(skill, context, prompt);
+      }
+    } catch (failure) {
+      if (generation === runEpoch.current) setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      if (generation === runEpoch.current) setPreparingRun(false);
+    }
+  };
 
   const handleDirtyChange = (next: boolean) => {
     setDirty(next);
@@ -129,11 +182,11 @@ export function TaskDetailDrawer({
         <Button
           size="sm"
           variant="secondary"
+          disabled={preparingRun || !workPath}
           icon={<Play size={14} />}
           onClick={() =>
-            onOpenSkillCompose(
+            void openTaskRun(
               taskManagement,
-              context,
               `Review and update this task through task-management: ${entry.relPath}`,
             )
           }
@@ -143,8 +196,9 @@ export function TaskDetailDrawer({
         <Button
           size="sm"
           variant="ghost"
+          disabled={preparingRun || !workPath}
           icon={<WandSparkles size={14} />}
-          onClick={() => onOpenSkillCompose(null, context)}
+          onClick={() => { void openTaskRun(null); }}
         >
           {t("tasks.actions.otherSkill")}
         </Button>
@@ -156,6 +210,15 @@ export function TaskDetailDrawer({
         onSaveDetails={onSaveDetails}
         onDirtyChange={handleDirtyChange}
       />
+      {workPath ? <TaskCompletionSection
+        workPath={workPath}
+        tasksRoot={tasksRoot}
+        taskPath={entry.relPath}
+        onChanged={onCompletionChanged}
+        onConfirmApproval={onConfirmApproval}
+        onMissionStarted={onMissionStarted}
+        refreshKey={completionRefreshKey}
+      /> : null}
       <dl className="task-detail-meta">
         <div>
           <dt>{t("tasks.field.bucket")}</dt>

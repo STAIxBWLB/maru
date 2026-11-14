@@ -107,10 +107,11 @@ pub fn agent_run_structured_loop<R: tauri::Runtime>(
         requested_permission.to_string()
     };
 
-    let task_execution = crate::task_execution_runtime::TaskExecutionSession::admit(
+    let task_execution = crate::task_execution_runtime::TaskExecutionSession::admit_recorded(
         &cwd,
         metadata.as_ref(),
         &run_id,
+        provider_kind,
     )?;
     if let Some((session, true)) = &task_execution {
         return Ok(session.token.run_id.clone());

@@ -1606,6 +1606,151 @@
           "exitCode": 0
         }
       ]
+    },
+    {
+      "name": "task_completion",
+      "module": "src-tauri/src/task_completion.rs",
+      "registrationPath": "src-tauri/src/lib.rs::task_completion::task_completion",
+      "originalDisposition": "ISOLATED",
+      "disposition": "ISOLATED",
+      "helperChain": [
+        "src-tauri/src/task_completion.rs::task_completion checks both native main identities, owns request payloads and awaits spawn_blocking before filesystem, revision, claim and receipt work.",
+        "src-tauri/src/task_completion.rs::set_policy reserves the task, completion records, versions and workspace registry; src-tauri/src/task_completion.rs::with_context bounds claim/run/receipt identity and protected mutations; src-tauri/src/task_completion.rs::finalize consumes fresh approval and revision-bound evidence before managed publication."
+      ],
+      "workerBoundary": "src-tauri/src/task_completion.rs::task_completion awaits tauri::async_runtime::spawn_blocking; its main-webview/main-window check precedes the worker without filesystem or lock work. Inner structured IpcError survives; JoinError gains cause and retry guidance.",
+      "syncCallers": [
+        "src-tauri/src/task_completion.rs::view supports backend readback; src-tauri/src/task_completion.rs::set_policy is invoked only by the main-window command and hermetic fixtures. Agent completion routes do not set policy or perform final person acceptance."
+      ],
+      "mutationKey": {
+        "readOnly": false,
+        "lexicalPaths": [
+          "task Markdown note",
+          "workspace .maru/task-completion records",
+          "task claim and execution records",
+          "workspace .maru/versions",
+          "workspace registry and legacy input"
+        ],
+        "aliasPaths": [
+          "Shared PathTransactionRequest resolves lexical and physical aliases with parent reservations; task execution claim generations retain their existing OS lock."
+        ],
+        "sharedAdmissionEntry": "src-tauri/src/task_completion.rs::set_policy and src-tauri/src/task_completion.rs::with_context use src-tauri/src/atomic_file.rs::PathTransactionRequest and with_path_transactions, reserve all task/completion/claim/version destinations and include workspace registry before managed effects.",
+        "postAdmissionPreconditions": [
+          "Claim generation, task source revision and workspace policy are rechecked inside admission; receipt/artifact digests and reviewer run identity bind the acceptance.",
+          "Fresh person approval and final file revisions are rechecked before frontmatter publication through the existing managed writer."
+        ],
+        "domainLockOrder": "Task claim OS guard is acquired before shared path admission consistently with existing execution writers; registry/domain mutation locks and effects follow the complete admission. No new lock order is claimed."
+      },
+      "tests": [
+        {
+          "command": "cargo test --manifest-path src-tauri/Cargo.toml --lib task_completion_isolation -- --test-threads=2",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "exitCode": 0
+        }
+      ],
+      "processingCaller": {
+        "path": [
+          "src/lib/taskCompletion.ts",
+          "src/components/tasks/TaskCompletionSection.tsx"
+        ],
+        "payload": "Typed completion actions carry task source, token, review binding and approval revisions, never caller-authoritative reviewer identity.",
+        "terminalNoticeOwner": "TaskCompletionSection owns the command result and refresh/error display for the selected task.",
+        "classifier": "normalizeIpcError preserves known document_conflict for refresh/review recovery; unknown/forged codes degrade to plain failure.",
+        "successRetention": "The section refreshes current evidence after fulfilled commands; review launch does not finalize a task.",
+        "failureReasons": "Refusal leaves current task/evidence intact and names the cause plus next app action.",
+        "singleTerminalNoticeOwner": true
+      },
+      "evidence": {
+        "behaviorCases": [
+          "task_completion_isolation_actual_wrapper_yields_and_maps_worker_failure",
+          "task_completion_isolation_policy_serializes_aliases_rechecks_and_releases",
+          "task_completion_isolation_unknown_and_forged_actions_are_refused_by_ipc",
+          "task_completion_isolation_command_requires_main_webview_and_window"
+        ],
+        "workerProof": "Actual command same-task polling observes a distinct held worker, continued caller progress and mapped worker panic. Actual policy command waits on a competing alias writer, rejects stale revision, then releases admission. IPC refuses unknown actions and forged authority fields. Main identity checks are exercised on main, Sites, local child and a main-labelled child inside another window.",
+        "platformScope": "Disposable workspace/home fixtures and Tauri MockRuntime only. This is not native WebView, provider/live execution, Korean IME or release acceptance evidence.",
+        "sourceCommit": "0fe8c3d4669160ff7e4ce9d9a77ab9f4b750f48f",
+        "logSha256": "befc9134da00d99b786ef80ac2d0ca86fc1f9c182e7e133cc1da4a27b4a1ef10",
+        "sourceFiles": [
+          {
+            "path": "src-tauri/src/lib.rs",
+            "sha256": "0e213a9ac0cc633b3f323d0dd3696307dd73eb8581d5151c4b92af2a1da83aaa"
+          },
+          {
+            "path": "src-tauri/src/task_completion.rs",
+            "sha256": "52b3890bad37d4753ede8fe57cc9385f7ed01351761ab9bea6941907088141a0"
+          },
+          {
+            "path": "src-tauri/src/task_completion_isolation_tests.rs",
+            "sha256": "d83745938a5ec44e32cbb722f12db1bf134d770173b08f29904052fde89bd1de"
+          },
+          {
+            "path": "src-tauri/src/task_execution_claims.rs",
+            "sha256": "b0224d7a333fce2beb6efc6da28677e806323e93e48b59233fbcfa2e436bb6fb"
+          },
+          {
+            "path": "src-tauri/src/task_execution_runtime.rs",
+            "sha256": "de103cb64b282067f374352d0f13650a4a8607a00ef60e0193e489fad885889f"
+          },
+          {
+            "path": "src-tauri/src/tasks.rs",
+            "sha256": "0158622f02029615504ffd348c14ca9442fff75abbcff7488e237d7c36ddf07c"
+          },
+          {
+            "path": "src-tauri/src/agent_host/proposal.rs",
+            "sha256": "b551acdd67a754e469a92c9d8ffcf763eb1062705404cb65149ec80358facbc8"
+          },
+          {
+            "path": "src-tauri/src/agent_host/protected_write.rs",
+            "sha256": "fdc4cb539d4a6f2b53ea4e3991bd1f31ccd0eea9a4c83d8428f7d3d01c3101ee"
+          },
+          {
+            "path": "src-tauri/src/agent_host/event_store.rs",
+            "sha256": "20d8f723d2b00d701a533fe594003dae6baa361802d7fbf34d46a0eaae6ff1af"
+          },
+          {
+            "path": "src-tauri/src/document.rs",
+            "sha256": "bcb2493b1a7cea83fcfa14037b75fedd0d213aaee600b3c20a2a50efc626956c"
+          },
+          {
+            "path": "src-tauri/src/drafts.rs",
+            "sha256": "6d10ab51372e30d06d9761d79f9f8435a8ec1c063e4f94cb155d3a0e2069c7e2"
+          },
+          {
+            "path": "src-tauri/src/today_lifecycle.rs",
+            "sha256": "a394fb3c1fe3208f2a559298186372319c050a543a168b9fcc26890ccd08cbf4"
+          },
+          {
+            "path": "src-tauri/src/atomic_file.rs",
+            "sha256": "8cb7d52f64e729be0724ba9abb48fa6ec6eca467141cbde2020dc39998e950d2"
+          },
+          {
+            "path": "src-tauri/src/approval.rs",
+            "sha256": "dda1e6bd885aef980788adc8ad4ecabd6c0708ae6cc529057b4c1701cb677c4d"
+          },
+          {
+            "path": "src-tauri/src/ai_router.rs",
+            "sha256": "79ba519f60d6b378a45044a60ea41c09f32af7e0cebc0acdab88766b48583e50"
+          },
+          {
+            "path": "src/lib/taskCompletion.ts",
+            "sha256": "a991e82d3014395ff694108728f6ea2f7efd61f2a8376e59f69ac4fa88da202b"
+          },
+          {
+            "path": "src/components/tasks/TaskCompletionSection.tsx",
+            "sha256": "36c53eafa22f5424ab54b54dad181ed10bce8640c51481ac35fd9b4fa08479de"
+          },
+          {
+            "path": "scripts/record-task-completion-isolation.mjs",
+            "sha256": "ef6fe6ef796702d2d2cbd8b091dc32cb932b7a7d69de77265f83c06fb571515f"
+          },
+          {
+            "path": "scripts/check-command-isolation.mjs",
+            "sha256": "c6dc553aa04e15d585827ce9f287f34b837333033cf0e38fa8eb1558b75cb862"
+          }
+        ]
+      }
     }
   ],
   "consumedHandoffs": {

@@ -236,6 +236,80 @@ let fixtureRoot: string | null = null;
 /** Per-worker latch: the first beforeTest sees the just-seeded state (the
  *  app launched after onPrepare), so only later tests need a real reset. */
 const previousGitEnv = new Map<string, string | undefined>();
+const previousCompletionEnv = new Map<string, string | undefined>();
+
+/** Launcher-only, per-spec synthetic providers. Neither script forwards an
+ * argument to an ambient CLI or reads credentials. The production provider
+ * resolver discovers them through the PATH inherited before app launch. */
+export async function enableTaskCompletionProviders(): Promise<void> {
+  if (Number(process.env.MARU_NATIVE_E2E_LAUNCHER_PID) !== process.pid) {
+    throw new Error("task completion providers must be seeded by the native launcher before app spawn");
+  }
+  if (previousCompletionEnv.size) throw new Error("task completion providers are already active for this fixture");
+  const root = requireFixtureRoot();
+  const bin = path.join(root, "task-completion-bin");
+  const calls = path.join(root, "task-completion-provider-calls.jsonl");
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  const proposal = JSON.stringify({
+    schemaVersion: "maru_skill_proposal_v1", summary: "Native fixture proposes one task artifact",
+    files: [{ path: "scratchpad/memos/native-task-output.md", operation: "create", content: "# Native task output\n\nSynthetic provider lifecycle evidence.\n" }],
+    commands: [], risks: [], requiresApproval: true,
+  });
+  const review = JSON.stringify({ passed: true, reason: "Native fixture verified the committed artifact" });
+  const scripts: Record<string, string> = {
+    codex: ["#!/bin/sh", "set -eu",
+      'if test "$#" -eq 1 && test "$1" = --version; then printf "codex native-fixture\\n"; exit 0; fi',
+      'if test "$#" -eq 2 && test "$1" = login && test "$2" = status; then printf "Logged in using ChatGPT\\n"; exit 0; fi',
+      'test "$#" -gt 0 && test "$1" = exec || exit 97',
+      "/bin/cat >/dev/null",
+      `printf '%s\\n' '{"provider":"codex","operation":"creator"}' >> ${quote(calls)}`,
+      `printf '%s\\n' ${quote(proposal)}`, ""].join("\n"),
+    claude: ["#!/bin/sh", "set -eu",
+      'if test "$#" -eq 1 && test "$1" = --version; then printf "claude native-fixture\\n"; exit 0; fi',
+      'if test "$#" -ge 2 && test "$1" = auth && test "$2" = status; then printf \'{"loggedIn":true,"authMethod":"oauth"}\\n\'; exit 0; fi',
+      'test "$#" -gt 1 && test "$1" = -p || exit 98',
+      `printf '%s\\n' '{"provider":"claude","operation":"review"}' >> ${quote(calls)}`,
+      `printf '%s\\n' ${quote(review)}`, ""].join("\n"),
+    kimi: "#!/bin/sh\nexit 127\n",
+    "kiro-cli": "#!/bin/sh\nexit 127\n",
+    kiro: "#!/bin/sh\nexit 127\n",
+  };
+  await fs.mkdir(bin, { recursive: true });
+  for (const [name, source] of Object.entries(scripts)) {
+    const file = path.join(bin, name);
+    const handle = await fs.open(file, "w", 0o600);
+    try { await handle.writeFile(source); await handle.sync(); }
+    finally { await handle.close(); }
+    await fs.chmod(file, 0o700);
+    if (name === "codex" || name === "claude") {
+      execFileSync(file, ["--version"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"] });
+    }
+  }
+  const { homeDir, workspaceDir } = fixturePaths(root);
+  await fs.mkdir(path.join(workspaceDir, "scratchpad/memos"), { recursive: true });
+  const settingsFile = path.join(homeDir, ".maru/settings.json");
+  let settings: Record<string, unknown> = {};
+  try { settings = JSON.parse(await fs.readFile(settingsFile, "utf8")) as Record<string, unknown>; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  settings.ai = {
+    ...(typeof settings.ai === "object" && settings.ai !== null ? settings.ai : {}),
+    defaultRuntime: "codex", adaptivePolicy: { enabled: false, workload: "auto" },
+    commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
+  };
+  settings.tasks = {
+    ...(typeof settings.tasks === "object" && settings.tasks !== null ? settings.tasks : {}),
+    root: "work-items",
+  };
+  await fs.mkdir(path.dirname(settingsFile), { recursive: true });
+  await fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
+  for (const [key, value] of Object.entries({
+    PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+    MARU_NATIVE_E2E_TASK_COMPLETION_FIXTURE: "1",
+  })) {
+    previousCompletionEnv.set(key, process.env[key]);
+    process.env[key] = value;
+  }
+}
 
 /** Launcher-owned boundaries; a failed stop never permits deleting a live root. */
 export function createNativeFixtureLifecycle(actions: {
@@ -419,6 +493,13 @@ export async function resetFixtureWorkspace(): Promise<void> {
  */
 export async function cleanupFixtureWorkspace(): Promise<void> {
   if (!fixtureRoot) return;
+  // lifecycle.end/complete already stopped the owned app. Restore the launcher
+  // before another worker or application can inherit this fixture's providers.
+  for (const [key, value] of previousCompletionEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  previousCompletionEnv.clear();
   const root = fixtureRoot;
   await fs.rm(root, { recursive: true, force: true });
   fixtureRoot = null;
