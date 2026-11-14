@@ -2,16 +2,21 @@
 //!
 //! The document is the upstream interchange JSON, validated as authored: no
 //! layout, no renderer and no Floorplan code, which the spec allows as a
-//! reference only. The rules mirror the local floor the application already
-//! applies (`src/lib/diagram/floorplan.ts` in maru): schema and enum shape,
-//! unique node ids, parents that exist and do not cycle, edge endpoints that
-//! resolve, flows with at least two resolvable steps and resolvable tour stops.
+//! reference only. The rules are the floor the application already applies
+//! (`src/lib/diagram/floorplan.ts` in maru), and no stricter: an optional field
+//! may be omitted, an empty node list is a map with nothing on it yet, flow ids
+//! are any non-empty string, a field the format does not define is preserved
+//! rather than refused (the codec carries it verbatim as a fidelity note), and a
+//! present `null` is refused because the field was given rather than left out.
 //! Layout is E5 T2, the repository scanner T3 and the apply-gate switch T4.
 //!
 //! An edge endpoint, flow step or tour stop names a node id, or a file that some
 //! node's `paths` claim, which is why the upstream glob subset is matched here.
-//! It is written by hand because the crate carries no regex dependency and the
-//! WASM build is measured per chunk.
+//! A pattern is compiled to a small program and walked one character at a time,
+//! so an alternation is never expanded and no split point is retried: neither a
+//! `{a,b}` chain nor a `*`-heavy pattern can grow past the pattern and path
+//! lengths. It is written by hand because the crate carries no regex dependency
+//! and the WASM build is measured per chunk.
 
 use crate::common::{self, Context};
 use crate::Diagnostic;
@@ -36,10 +41,12 @@ pub const EDGE_KINDS: &[&str] = &[
 /// Audience values the schema documents; absent means everyone.
 pub const AUDIENCES: &[&str] = &["everyone", "developers"];
 
-const TOP_FIELDS: &[&str] = &[
+// The fields the format types when they are present. Each of them may also be
+// left out, so the rule they need is that an explicit `null` is refused: serde
+// reads it as the same absent value, while the codec's `value !== undefined`
+// checks refuse it.
+const SPEC_TYPED: &[&str] = &[
     "$schema",
-    "project",
-    "nodes",
     "edges",
     "annotations",
     "flows",
@@ -48,25 +55,25 @@ const TOP_FIELDS: &[&str] = &[
     "include",
     "ignore",
 ];
-const PROJECT_FIELDS: &[&str] = &["name", "summary", "entrypoints"];
-const NODE_FIELDS: &[&str] = &[
-    "id", "label", "kind", "parent", "summary", "details", "paths", "exclude", "packages", "hosts",
-    "tags",
+const PROJECT_TYPED: &[&str] = &["summary", "entrypoints"];
+const NODE_TYPED: &[&str] = &[
+    "parent", "summary", "details", "paths", "exclude", "packages", "hosts", "tags",
 ];
-const EDGE_FIELDS: &[&str] = &["from", "to", "kind", "label", "description"];
-const ANNOTATION_FIELDS: &[&str] = &["path", "note", "tags"];
-const FLOW_FIELDS: &[&str] = &["id", "title", "description", "steps"];
-const FLOW_STEP_FIELDS: &[&str] = &["node", "note"];
-const TOUR_STOP_FIELDS: &[&str] = &["node", "title", "note"];
+const EDGE_TYPED: &[&str] = &["kind", "label", "description"];
+const ANNOTATION_TYPED: &[&str] = &["note", "tags"];
+const FLOW_TYPED: &[&str] = &["description"];
+const FLOW_STEP_TYPED: &[&str] = &["note"];
+const TOUR_STOP_TYPED: &[&str] = &["title", "note"];
 
 /// One `floorplan/architecture@1` document. Optional collections stay optional
 /// so a map without edges, flows, annotations or a tour validates.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct FloorplanSpec {
-    #[serde(rename = "$schema")]
-    #[cfg_attr(feature = "typegen", ts(rename = "$schema"))]
-    pub schema: String,
+    // The codec accepts a document without it and refuses only another value.
+    #[serde(rename = "$schema", default)]
+    #[cfg_attr(feature = "typegen", ts(rename = "$schema", optional = nullable))]
+    pub schema: Option<String>,
     pub project: FloorplanProject,
     pub nodes: Vec<FloorplanNode>,
     #[serde(default)]
@@ -202,99 +209,187 @@ pub struct FloorplanTourStop {
 // The upstream glob subset
 // ---------------------------------------------------------------------------
 
-/// Whether `text` holds the upstream glob syntax. A whole path segment in
-/// brackets (`[id]`, `[...slug]`, `[[...slug]]`) is a literal folder name, so it
-/// does not count, exactly as the application's matcher decides it.
+/// Whether a pattern carries glob syntax, which decides whether a value it
+/// matches exactly also claims everything under it. A whole segment in brackets
+/// (`[id]`, `[...slug]`, `[[...slug]]`) is a literal folder name here, as the
+/// application's matcher treats it; any other `[` counts.
 fn has_wildcard(pattern: &str) -> bool {
-    let chars: Vec<char> = pattern.chars().collect();
-    let mut at = 0;
-    while at < chars.len() {
-        let segment_start = at == 0 || chars[at - 1] == '/';
-        if chars[at] == '[' && segment_start {
-            let mut end = at;
-            while end < chars.len() && chars[end] != '/' {
-                end += 1;
-            }
-            let segment: String = chars[at..end].iter().collect();
-            let literal =
-                segment.ends_with(']') && !segment.chars().any(|ch| matches!(ch, '{' | '}' | ','));
-            if literal {
-                at = end;
+    pattern.split('/').any(|segment| {
+        if segment.len() >= 2 && segment.starts_with('[') && segment.ends_with(']') {
+            return false;
+        }
+        segment
+            .chars()
+            .any(|ch| matches!(ch, '*' | '?' | '{' | '['))
+    })
+}
+
+/// One token of a compiled pattern. Alternation arms are indices into the
+/// pattern's arm list, so `{a,b}` is matched through the program rather than by
+/// expanding the cartesian product of its alternatives.
+#[derive(Debug, Clone)]
+enum Piece {
+    /// A literal character, including `/`.
+    Literal(char),
+    /// `*`: any run inside one segment.
+    Star,
+    /// `**`: any run, across segments.
+    Glob,
+    /// `**/`: an optional run ending at a segment boundary.
+    GlobSlash,
+    /// `?`: exactly one character inside the segment.
+    Any,
+    /// `[abc]` or `[!abc]`: exactly one listed character.
+    Class { negated: bool, body: Vec<char> },
+    /// `{a,b}`: one of the arms.
+    Alt(Vec<usize>),
+    /// The `(?:/.*)?` that a wildcard-free pattern also claims.
+    DirectoryTail,
+}
+
+/// A pattern parsed into arms: arm 0 is the pattern itself, the rest are
+/// `{a,b}` alternatives.
+struct Compiled {
+    arms: Vec<Vec<Piece>>,
+}
+
+impl Compiled {
+    fn new(pattern: &str) -> Self {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut arms: Vec<Vec<Piece>> = vec![Vec::new()];
+        let mut at = 0usize;
+        let mut top = parse_sequence(&chars, &mut at, &mut arms, false);
+        if !has_wildcard(pattern) {
+            top.push(Piece::DirectoryTail);
+        }
+        arms[0] = top;
+        Self { arms }
+    }
+}
+
+/// Parse one piece sequence. Inside an alternation it stops at `,` or `}`.
+fn parse_sequence(
+    chars: &[char],
+    at: &mut usize,
+    arms: &mut Vec<Vec<Piece>>,
+    in_brace: bool,
+) -> Vec<Piece> {
+    let mut pieces = Vec::new();
+    while *at < chars.len() {
+        let ch = chars[*at];
+        if in_brace && matches!(ch, ',' | '}') {
+            break;
+        }
+        let segment_start = *at == 0 || chars[*at - 1] == '/';
+        // A whole segment in brackets is a literal folder name, so it is copied
+        // character by character instead of becoming a class.
+        if ch == '[' && segment_start {
+            let rest = &chars[*at..];
+            let end = rest
+                .iter()
+                .position(|item| *item == '/')
+                .unwrap_or(rest.len());
+            let segment = &rest[..end];
+            if segment.last() == Some(&']')
+                && !segment.iter().any(|item| matches!(item, '{' | '}' | ','))
+            {
+                pieces.extend(segment.iter().map(|item| Piece::Literal(*item)));
+                *at += end;
                 continue;
             }
         }
-        if matches!(chars[at], '*' | '?' | '{') {
-            return true;
-        }
-        at += 1;
-    }
-    false
-}
-
-/// Expand `{a,b}` alternations, recursively, leaving bracketed literal segments
-/// and character classes alone. An unclosed `{` is a literal brace.
-fn expand_braces(pattern: &str) -> Vec<String> {
-    let Some(open) = pattern.find('{') else {
-        return vec![pattern.to_string()];
-    };
-    let mut depth = 0usize;
-    let mut close = None;
-    for (offset, ch) in pattern[open..].char_indices() {
         match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    close = Some(open + offset);
-                    break;
+            '*' if chars.get(*at + 1) == Some(&'*') => {
+                if chars.get(*at + 2) == Some(&'/') {
+                    pieces.push(Piece::GlobSlash);
+                    *at += 3;
+                } else {
+                    pieces.push(Piece::Glob);
+                    *at += 2;
                 }
             }
-            _ => {}
-        }
-    }
-    let Some(close) = close else {
-        return vec![pattern.to_string()];
-    };
-    let prefix = &pattern[..open];
-    let suffix = &pattern[close + 1..];
-    let body = &pattern[open + 1..close];
-    let mut members = Vec::new();
-    let mut depth = 0usize;
-    let mut start = 0usize;
-    for (offset, ch) in body.char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            ',' if depth == 0 => {
-                members.push(&body[start..offset]);
-                start = offset + 1;
+            '*' => {
+                pieces.push(Piece::Star);
+                *at += 1;
             }
-            _ => {}
+            '?' => {
+                pieces.push(Piece::Any);
+                *at += 1;
+            }
+            '{' => {
+                let open = *at;
+                let arms_before = arms.len();
+                *at += 1;
+                let mut branches = Vec::new();
+                let mut closed = false;
+                loop {
+                    branches.push(parse_sequence(chars, at, arms, true));
+                    match chars.get(*at) {
+                        Some(',') => *at += 1,
+                        Some('}') => {
+                            *at += 1;
+                            closed = true;
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+                if closed {
+                    let ids = branches
+                        .into_iter()
+                        .map(|branch| {
+                            arms.push(branch);
+                            arms.len() - 1
+                        })
+                        .collect();
+                    pieces.push(Piece::Alt(ids));
+                } else {
+                    // An unclosed `{` is a literal brace, and the arms read while
+                    // trying it are discarded.
+                    arms.truncate(arms_before);
+                    pieces.push(Piece::Literal('{'));
+                    *at = open + 1;
+                }
+            }
+            '[' => {
+                // A class runs to the next `]`; an unclosed `[` is literal.
+                let close = chars
+                    .get(*at + 2..)
+                    .and_then(|rest| rest.iter().position(|item| *item == ']'))
+                    .map(|offset| *at + 2 + offset);
+                match close {
+                    None => {
+                        pieces.push(Piece::Literal('['));
+                        *at += 1;
+                    }
+                    Some(close) => {
+                        let mut body = chars[*at + 1..close].to_vec();
+                        let negated = matches!(body.first(), Some('!') | Some('^'));
+                        if negated {
+                            body.remove(0);
+                        }
+                        pieces.push(Piece::Class { negated, body });
+                        *at = close + 1;
+                    }
+                }
+            }
+            other => {
+                pieces.push(Piece::Literal(other));
+                *at += 1;
+            }
         }
     }
-    members.push(&body[start..]);
-    let mut expanded = Vec::new();
-    for member in members {
-        for tail in expand_braces(suffix) {
-            expanded.extend(expand_braces(&format!("{prefix}{member}{tail}")));
-        }
-    }
-    expanded
+    pieces
 }
 
-/// Whether one character is listed by a class body, which takes ranges (`a-z`),
-/// a leading `\` escape and every other character literally.
+/// Whether one character is listed by a class body: a range (`a-z`) or any
+/// character taken literally, which is how the application's class reads it.
 fn class_matches(body: &[char], ch: char) -> bool {
     let mut at = 0;
     while at < body.len() {
-        let mut first = body[at];
-        if first == '\\' && at + 1 < body.len() {
-            at += 1;
-            first = body[at];
-        }
+        let first = body[at];
         if at + 2 < body.len() && body[at + 1] == '-' {
-            let last = body[at + 2];
-            if first <= ch && ch <= last {
+            if first <= ch && ch <= body[at + 2] {
                 return true;
             }
             at += 3;
@@ -308,89 +403,186 @@ fn class_matches(body: &[char], ch: char) -> bool {
     false
 }
 
-/// Match one path segment against one pattern segment: `*` any run inside the
-/// segment, `?` one character, `[abc]` an allowed set, `[!abc]` or `[^abc]` a
-/// refused set, an unclosed `[` a literal bracket.
-fn segment_matches(pattern: &[char], text: &[char]) -> bool {
-    match pattern.split_first() {
-        None => text.is_empty(),
-        Some(('*', rest)) => (0..=text.len()).any(|skip| segment_matches(rest, &text[skip..])),
-        Some(('?', rest)) => !text.is_empty() && segment_matches(rest, &text[1..]),
-        Some(('[', rest)) => {
-            let Some(close) = rest.iter().position(|ch| *ch == ']') else {
-                return text.first() == Some(&'[') && segment_matches(rest, &text[1..]);
-            };
-            let body = &rest[..close];
-            let (negated, members) = match body.first() {
-                Some('!') | Some('^') => (true, &body[1..]),
-                _ => (false, body),
-            };
-            let Some(first) = text.first() else {
-                return false;
-            };
-            if negated == class_matches(members, *first) {
-                return false;
+/// One instruction of a compiled pattern. Alternation and repetition become
+/// splits and jumps, so a pattern is matched in one pass over the path instead
+/// of by recursing over every split point.
+#[derive(Debug, Clone, Copy)]
+enum Inst {
+    Literal(char),
+    NotSlash,
+    AnyChar,
+    Class { negated: bool, body: usize },
+    Split(usize, usize),
+    Jump(usize),
+    Match,
+}
+
+struct Program {
+    insts: Vec<Inst>,
+    bodies: Vec<Vec<char>>,
+}
+
+impl Program {
+    fn compile(compiled: &Compiled) -> Self {
+        let mut program = Self {
+            insts: Vec::new(),
+            bodies: Vec::new(),
+        };
+        emit_arm(&compiled.arms, 0, &mut program.insts, &mut program.bodies);
+        program.insts.push(Inst::Match);
+        program
+    }
+}
+
+/// Emit `body*`: a split around one repeated instruction. `body` is `[^/]` for
+/// `*` and any character for `**`.
+fn emit_repeat(insts: &mut Vec<Inst>, body: Inst) {
+    let split = insts.len();
+    insts.push(Inst::Split(0, 0));
+    let repeated = insts.len();
+    insts.push(body);
+    insts.push(Inst::Jump(split));
+    let after = insts.len();
+    insts[split] = Inst::Split(repeated, after);
+}
+
+fn emit_arm(arms: &[Vec<Piece>], arm: usize, insts: &mut Vec<Inst>, bodies: &mut Vec<Vec<char>>) {
+    for piece in arms[arm].clone() {
+        match piece {
+            Piece::Literal(ch) => insts.push(Inst::Literal(ch)),
+            Piece::Any => insts.push(Inst::NotSlash),
+            Piece::Class { negated, body } => {
+                bodies.push(body);
+                insts.push(Inst::Class {
+                    negated,
+                    body: bodies.len() - 1,
+                });
             }
-            segment_matches(&rest[close + 1..], &text[1..])
+            Piece::Star => emit_repeat(insts, Inst::NotSlash),
+            Piece::Glob => emit_repeat(insts, Inst::AnyChar),
+            // `(?:.*/)?`: skip, or consume a run that ends at a `/`.
+            Piece::GlobSlash => {
+                let split = insts.len();
+                insts.push(Inst::Split(0, 0));
+                let run = insts.len();
+                insts.push(Inst::Split(0, 0));
+                let more = insts.len();
+                insts.push(Inst::AnyChar);
+                insts.push(Inst::Jump(run));
+                let slash = insts.len();
+                insts.push(Inst::Literal('/'));
+                let after = insts.len() + 1;
+                insts.push(Inst::Jump(after));
+                insts[split] = Inst::Split(after, run);
+                insts[run] = Inst::Split(slash, more);
+            }
+            // `(?:/.*)?` for the directory a wildcard-free pattern names.
+            Piece::DirectoryTail => {
+                let split = insts.len();
+                insts.push(Inst::Split(0, 0));
+                let slash = insts.len();
+                insts.push(Inst::Literal('/'));
+                let run = insts.len();
+                insts.push(Inst::Split(0, 0));
+                let more = insts.len();
+                insts.push(Inst::AnyChar);
+                insts.push(Inst::Jump(run));
+                let after = insts.len();
+                insts[split] = Inst::Split(after, slash);
+                insts[run] = Inst::Split(after, more);
+            }
+            Piece::Alt(ids) => {
+                if ids.len() == 1 {
+                    emit_arm(arms, ids[0], insts, bodies);
+                    continue;
+                }
+                let mut jumps = Vec::new();
+                for (position, id) in ids.iter().enumerate() {
+                    if position + 1 == ids.len() {
+                        emit_arm(arms, *id, insts, bodies);
+                        continue;
+                    }
+                    let split = insts.len();
+                    insts.push(Inst::Split(0, 0));
+                    let branch = insts.len();
+                    emit_arm(arms, *id, insts, bodies);
+                    jumps.push(insts.len());
+                    insts.push(Inst::Jump(0));
+                    let next = insts.len();
+                    insts[split] = Inst::Split(branch, next);
+                }
+                let after = insts.len();
+                for jump in jumps {
+                    insts[jump] = Inst::Jump(after);
+                }
+            }
         }
-        Some((literal, rest)) => text.first() == Some(literal) && segment_matches(rest, &text[1..]),
     }
 }
 
-fn split_segments(value: &str) -> Vec<&str> {
-    value.split('/').collect()
-}
-
-/// A whole segment in brackets is a literal folder name (`[id]`, `[...slug]`,
-/// `[[...slug]]`), the Next-style routes the upstream syntax keeps literal.
-fn literal_bracket_segment(segment: &str) -> bool {
-    segment.starts_with('[')
-        && segment.ends_with(']')
-        && !segment.chars().any(|ch| matches!(ch, '{' | '}' | ','))
-}
-
-fn segments_match(pattern: &[&str], text: &[&str]) -> bool {
-    let Some((head, rest)) = pattern.split_first() else {
-        return text.is_empty();
-    };
-    let segment = *head;
-    if segment == "**" {
-        // A trailing `**` needs at least one segment, which is what the
-        // application's `a/**` pattern means; elsewhere it spans zero or more.
-        if rest.is_empty() {
-            return !text.is_empty();
+impl Inst {
+    fn consumes(self, ch: char, bodies: &[Vec<char>]) -> bool {
+        match self {
+            Inst::Literal(expected) => expected == ch,
+            Inst::NotSlash => ch != '/',
+            Inst::AnyChar => true,
+            Inst::Class { negated, body } => class_matches(&bodies[body], ch) != negated,
+            Inst::Split(..) | Inst::Jump(..) | Inst::Match => false,
         }
-        return (0..=text.len()).any(|skip| segments_match(rest, &text[skip..]));
     }
-    let Some((first, tail)) = text.split_first() else {
-        return false;
-    };
-    let matched = if literal_bracket_segment(segment) {
-        segment == *first
-    } else {
-        let pattern_chars: Vec<char> = segment.chars().collect();
-        let text_chars: Vec<char> = first.chars().collect();
-        segment_matches(&pattern_chars, &text_chars)
-    };
-    matched && segments_match(rest, tail)
 }
 
-/// The upstream glob subset: `**` any depth, `*` within a segment, `?` one
-/// character, `{a,b}` alternation, a whole segment in brackets literal and
-/// elsewhere `[abc]` / `[!abc]` a class. A pattern with no wildcard also claims
-/// everything under that directory.
+/// Walk the program one character at a time, carrying the set of reachable
+/// instructions. The state count is the program size, so a path costs one pass
+/// of that many steps however many wildcards and alternatives the pattern holds.
+fn program_matches(program: &Program, text: &[char]) -> bool {
+    let count = program.insts.len();
+    let mut active = vec![false; count];
+    close(program, &[0], &mut active);
+    for ch in text {
+        let seeds: Vec<usize> = (0..count)
+            .filter(|pc| active[*pc] && program.insts[*pc].consumes(*ch, &program.bodies))
+            .map(|pc| pc + 1)
+            .collect();
+        if seeds.is_empty() {
+            return false;
+        }
+        close(program, &seeds, &mut active);
+    }
+    active[count - 1]
+}
+
+/// Mark every instruction reachable from `seeds` without consuming a character.
+fn close(program: &Program, seeds: &[usize], active: &mut [bool]) {
+    active.fill(false);
+    let mut pending: Vec<usize> = seeds.to_vec();
+    while let Some(pc) = pending.pop() {
+        if active[pc] {
+            continue;
+        }
+        active[pc] = true;
+        match program.insts[pc] {
+            Inst::Split(left, right) => {
+                pending.push(left);
+                pending.push(right);
+            }
+            Inst::Jump(target) => pending.push(target),
+            _ => {}
+        }
+    }
+}
+
+/// The upstream glob subset: `**` any depth (also inside a segment), `*` within
+/// a segment, `?` one character, `{a,b}` alternation, a whole segment in
+/// brackets literal and elsewhere `[abc]` / `[!abc]` a class. A pattern with no
+/// wildcard also claims everything under that directory. The document path goes
+/// through [`Claims`], which compiles each `paths` and `exclude` glob once.
+#[cfg(test)]
 pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
-    let wildcard = has_wildcard(pattern);
-    for alternative in expand_braces(pattern) {
-        let segments = split_segments(&alternative);
-        if segments_match(&segments, &split_segments(path)) {
-            return true;
-        }
-        if !wildcard && path.starts_with(&format!("{alternative}/")) {
-            return true;
-        }
-    }
-    false
+    let compiled = Compiled::new(pattern);
+    let program = Program::compile(&compiled);
+    let text: Vec<char> = path.chars().collect();
+    program_matches(&program, &text)
 }
 
 // ---------------------------------------------------------------------------
@@ -433,17 +625,40 @@ fn insert_floorplan_id(ctx: &mut Context, ids: &mut HashSet<String>, id: &str, p
 struct Claims<'a> {
     nodes: &'a [FloorplanNode],
     by_id: std::collections::HashMap<&'a str, &'a FloorplanNode>,
+    // Each `paths` and `exclude` glob is compiled once, so a map with many
+    // references does not recompile the same pattern for every one of them.
+    programs: std::collections::HashMap<&'a str, Program>,
 }
 
 impl<'a> Claims<'a> {
     fn new(spec: &'a FloorplanSpec) -> Self {
         let mut by_id = std::collections::HashMap::new();
+        let mut programs = std::collections::HashMap::new();
         for node in &spec.nodes {
             by_id.entry(node.id.as_str()).or_insert(node);
+            for glob in node
+                .paths
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .chain(node.exclude.as_deref().unwrap_or_default())
+            {
+                programs
+                    .entry(glob.as_str())
+                    .or_insert_with(|| Program::compile(&Compiled::new(glob)));
+            }
         }
         Self {
             nodes: &spec.nodes,
             by_id,
+            programs,
+        }
+    }
+
+    fn matches(&self, glob: &str, path: &str) -> bool {
+        match self.programs.get(glob) {
+            Some(program) => program_matches(program, &path.chars().collect::<Vec<_>>()),
+            None => false,
         }
     }
 
@@ -457,7 +672,7 @@ impl<'a> Claims<'a> {
             .as_deref()
             .unwrap_or_default()
             .iter()
-            .any(|glob| glob_matches(glob, path));
+            .any(|glob| self.matches(glob, path));
         if !matched {
             return false;
         }
@@ -469,7 +684,7 @@ impl<'a> Claims<'a> {
                 .as_deref()
                 .unwrap_or_default()
                 .iter()
-                .any(|glob| glob_matches(glob, path))
+                .any(|glob| self.matches(glob, path))
             {
                 return false;
             }
@@ -566,6 +781,20 @@ fn check_parents(ctx: &mut Context, spec: &FloorplanSpec, node_ids: &HashSet<Str
 }
 
 fn validate_spec(spec: &FloorplanSpec, ctx: &mut Context) {
+    // The schema is optional; only a document that declares a different one is
+    // refused, which is what the codec's `$schema !== undefined` check decides.
+    if let Some(schema) = &spec.schema {
+        if schema != FLOORPLAN_SCHEMA_ID {
+            ctx.error(
+                "schema",
+                "/$schema",
+                format!("the document declares schema {schema:?}, not {FLOORPLAN_SCHEMA_ID:?}"),
+                format!(
+                    "set \"$schema\" to \"{FLOORPLAN_SCHEMA_ID}\" or validate it as its own type"
+                ),
+            );
+        }
+    }
     ctx.text(&spec.project.name, 1, None, "/project/name");
     if let Some(summary) = &spec.project.summary {
         ctx.text(summary, 0, None, "/project/summary");
@@ -574,8 +803,8 @@ fn validate_spec(spec: &FloorplanSpec, ctx: &mut Context) {
         ctx.enum_value(audience, AUDIENCES, "/audience");
     }
 
+    // An empty node list is a map with nothing on it yet, which the codec allows.
     let mut node_ids = HashSet::new();
-    ctx.cardinality(spec.nodes.len(), 1, "/nodes");
     for (index, node) in spec.nodes.iter().enumerate() {
         let path = format!("/nodes/{index}");
         insert_floorplan_id(ctx, &mut node_ids, &node.id, &format!("{path}/id"));
@@ -632,7 +861,17 @@ fn validate_spec(spec: &FloorplanSpec, ctx: &mut Context) {
     let mut flow_ids = HashSet::new();
     for (index, flow) in spec.flows.as_deref().unwrap_or_default().iter().enumerate() {
         let path = format!("/flows/{index}");
-        insert_floorplan_id(ctx, &mut flow_ids, &flow.id, &format!("{path}/id"));
+        // Flow ids are any non-empty string ("request flow" is a flow), unlike
+        // the node ids they are never referenced by.
+        ctx.text(&flow.id, 1, None, &format!("{path}/id"));
+        if !flow_ids.insert(flow.id.as_str()) {
+            ctx.error(
+                "duplicate-id",
+                &format!("{path}/id"),
+                format!("flow ID {:?} occurs more than once", flow.id),
+                "give each flow its own ID, or remove the repeated entry",
+            );
+        }
         ctx.text(&flow.title, 1, None, &format!("{path}/title"));
         if let Some(description) = &flow.description {
             ctx.text(description, 0, None, &format!("{path}/description"));
@@ -685,16 +924,31 @@ fn validate_spec(spec: &FloorplanSpec, ctx: &mut Context) {
     }
 }
 
-fn check_object_fields(value: &Value, ctx: &mut Context, rules: &[(&str, &[&str])]) {
-    for (field, allowed) in rules {
-        if let Some(items) = value.get(*field).and_then(Value::as_array) {
-            for (index, item) in items.iter().enumerate() {
-                if item.is_object() {
-                    ctx.fields(item, &format!("/{field}/{index}"), allowed);
-                }
-            }
-        } else if let Some(item) = value.get(*field).filter(|item| item.is_object()) {
-            ctx.fields(item, &format!("/{field}"), allowed);
+/// The items of an array field, or nothing when the field is absent or is not
+/// an array (which serde reports as the wrong shape on its own).
+fn items<'a>(value: &'a Value, field: &str) -> &'a [Value] {
+    value
+        .get(field)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+/// Refuse an explicit `null` in a field the format types when it is present.
+/// Omitting the field and writing `null` read as the same value to serde, while
+/// the codec refuses the second, so this keeps the two verdicts equal.
+fn check_nulls(ctx: &mut Context, value: &Value, path: &str, fields: &[&str]) {
+    let Some(object) = value.as_object() else {
+        return;
+    };
+    for field in fields {
+        if object.get(*field).is_some_and(Value::is_null) {
+            ctx.error(
+                "null-field",
+                &format!("{path}/{field}"),
+                format!("field {field:?} is null, which the format does not accept"),
+                "remove the field, or give it its documented value",
+            );
         }
     }
 }
@@ -707,53 +961,33 @@ pub(crate) fn validate(value: Value) -> Vec<Diagnostic> {
             "shape",
             "/",
             "a floorplan document must be a JSON object",
-            "start from a document with $schema, project and nodes",
+            "start from a document with a project and its nodes",
         );
         return ctx.finish();
     }
-    ctx.fields(&value, "", TOP_FIELDS);
-    match value.get("$schema").and_then(Value::as_str) {
-        Some(id) if id == FLOORPLAN_SCHEMA_ID => {}
-        Some(id) => ctx.error(
-            "schema",
-            "/$schema",
-            format!("the document declares schema {id:?}, not {FLOORPLAN_SCHEMA_ID:?}"),
-            format!("set \"$schema\" to \"{FLOORPLAN_SCHEMA_ID}\" or validate it as its own type"),
-        ),
-        None => ctx.error(
-            "schema",
-            "/$schema",
-            "the document does not declare its schema",
-            format!("add \"$schema\": \"{FLOORPLAN_SCHEMA_ID}\""),
-        ),
+    check_nulls(&mut ctx, &value, "", SPEC_TYPED);
+    if let Some(project) = value.get("project") {
+        check_nulls(&mut ctx, project, "/project", PROJECT_TYPED);
     }
-    if let Some(project) = value.get("project").filter(|item| item.is_object()) {
-        ctx.fields(project, "/project", PROJECT_FIELDS);
+    for (field, fields) in [
+        ("nodes", NODE_TYPED),
+        ("edges", EDGE_TYPED),
+        ("annotations", ANNOTATION_TYPED),
+        ("flows", FLOW_TYPED),
+        ("tour", TOUR_STOP_TYPED),
+    ] {
+        for (index, item) in items(&value, field).iter().enumerate() {
+            check_nulls(&mut ctx, item, &format!("/{field}/{index}"), fields);
+        }
     }
-    check_object_fields(
-        &value,
-        &mut ctx,
-        &[
-            ("nodes", NODE_FIELDS),
-            ("edges", EDGE_FIELDS),
-            ("annotations", ANNOTATION_FIELDS),
-            ("flows", FLOW_FIELDS),
-            ("tour", TOUR_STOP_FIELDS),
-        ],
-    );
-    if let Some(flows) = value.get("flows").and_then(Value::as_array) {
-        for (index, flow) in flows.iter().enumerate() {
-            if let Some(steps) = flow.get("steps").and_then(Value::as_array) {
-                for (step_index, step) in steps.iter().enumerate() {
-                    if step.is_object() {
-                        ctx.fields(
-                            step,
-                            &format!("/flows/{index}/steps/{step_index}"),
-                            FLOW_STEP_FIELDS,
-                        );
-                    }
-                }
-            }
+    for (index, flow) in items(&value, "flows").iter().enumerate() {
+        for (step_index, step) in items(flow, "steps").iter().enumerate() {
+            check_nulls(
+                &mut ctx,
+                step,
+                &format!("/flows/{index}/steps/{step_index}"),
+                FLOW_STEP_TYPED,
+            );
         }
     }
     let Some(spec) = common::decode::<FloorplanSpec>(&value, &mut ctx) else {
@@ -887,22 +1121,95 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_fields_at_every_object_level() {
+    fn preserves_fields_the_format_does_not_define() {
+        // The codec keeps an unknown field verbatim and reports it as a fidelity
+        // note, so it is not a reason to refuse the document here either.
         let mut spec = nested_map();
-        spec["layout"] = json!({"cols": 3});
+        spec["custom"] = json!(true);
         spec["nodes"][0]["icon"] = json!("cube");
         spec["edges"][0]["weight"] = json!(2);
         spec["flows"][0]["steps"][0]["highlight"] = json!(true);
         spec["tour"][0]["duration"] = json!(3);
+        assert!(validate(spec).is_empty());
+    }
+
+    #[test]
+    fn accepts_an_absent_schema_and_an_empty_node_list() {
+        let mut spec = nested_map();
+        spec.as_object_mut().unwrap().remove("$schema");
+        assert!(validate(spec).is_empty(), "an absent $schema is allowed");
+
+        let mut empty = nested_map();
+        empty["nodes"] = json!([]);
+        empty["edges"] = json!([]);
+        empty["flows"] = json!([]);
+        empty["tour"] = json!([]);
+        assert!(
+            validate(empty).is_empty(),
+            "a map with no nodes yet is allowed"
+        );
+    }
+
+    #[test]
+    fn accepts_a_flow_id_that_is_not_an_identifier() {
+        // Only node ids carry the character rule; a flow is never referenced.
+        let mut spec = nested_map();
+        spec["flows"][0]["id"] = json!("request flow");
+        assert!(validate(spec).is_empty());
+
+        let mut repeated = nested_map();
+        let flow = repeated["flows"][0].clone();
+        repeated["flows"] = json!([flow.clone(), flow]);
+        let diagnostics = validate(repeated);
+        let listed = codes(&diagnostics);
+        assert!(listed.contains(&"floorplan/duplicate-id"), "{listed:?}");
+    }
+
+    #[test]
+    fn refuses_a_null_in_a_field_the_format_types() {
+        // Each optional collection, one scalar, and a nested step note: a present
+        // `null` is a value the format does not accept, while an omitted field is
+        // exactly the same document.
+        let mut spec = nested_map();
+        spec["edges"] = Value::Null;
+        spec["annotations"] = Value::Null;
+        spec["flows"] = Value::Null;
+        spec["tour"] = Value::Null;
+        spec["include"] = Value::Null;
+        spec["nodes"][0]["parent"] = Value::Null;
+        spec["nodes"][0]["summary"] = Value::Null;
         let diagnostics = validate(spec);
         let listed = codes(&diagnostics);
         assert_eq!(
             listed
                 .iter()
-                .filter(|code| **code == "floorplan/unknown-field")
+                .filter(|code| **code == "floorplan/null-field")
                 .count(),
-            5,
+            7,
             "{listed:?}"
+        );
+
+        let mut step = nested_map();
+        step["flows"][0]["steps"][0]["note"] = Value::Null;
+        assert_eq!(codes(&validate(step)), vec!["floorplan/null-field"]);
+    }
+
+    #[test]
+    fn a_pathological_pattern_stays_within_its_budget() {
+        // Neither an alternation chain nor a `*`-heavy segment may cost more than
+        // one pass over the path, which is what a pattern inside the apply gate
+        // needs: expanding either would be exponential.
+        let braces = format!("{}/x", "{a,b}".repeat(30));
+        let stars = format!("{}b", "a*".repeat(30));
+        let path = "a".repeat(60);
+        let started = std::time::Instant::now();
+        assert!(!glob_matches(&braces, "a/a/a"));
+        assert!(!glob_matches(&stars, &path));
+        assert!(glob_matches(&stars, &format!("{path}b")));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "the glob matcher took {:?} on a pathological pattern",
+            started.elapsed()
         );
     }
 
@@ -1008,6 +1315,29 @@ mod tests {
             ("app/src", "app/src", true),
             ("app/src", "app/src/main.ts", true),
             ("app/src", "app/src2/main.ts", false),
+            // The application's own table (src/lib/diagram/floorplan.test.ts).
+            ("shop-api/app", "shop-api/app/routes/x.py", true),
+            ("src/{a,b}.ts", "src/b.ts", true),
+            ("src/*.ts", "src/x/y.ts", false),
+            ("src/[ab].ts", "src/a.ts", true),
+            ("src/[ab].ts", "src/c.ts", false),
+            ("src/{?,bb}.ts", "src/z.ts", true),
+            ("src/{?,bb}.ts", "src/bb.ts", true),
+            ("src/{?,bb}.ts", "src/bbb.ts", false),
+            ("app/orders/[id]/**", "app/orders/[id]/page.tsx", true),
+            ("app/orders/[id]/**", "app/orders/7/page.tsx", false),
+            ("app/[...slug]/page.tsx", "app/[...slug]/page.tsx", true),
+            ("app/[[...slug]]/page.tsx", "app/[[...slug]]/page.tsx", true),
+            ("src/{broken", "src/{broken", true),
+            // `**` crosses directories wherever it stands, not only as a segment.
+            ("app/**.ts", "app/main.ts", true),
+            ("app/**.ts", "app/src/main.ts", true),
+            ("a/**.ts/x", "a/b/c.ts/x", true),
+            // A trailing `**` needs the segment boundary the pattern names.
+            ("a/**", "a/", true),
+            ("a/**", "a", false),
+            // A class is a wildcard, so it claims no directory of its own.
+            ("app/[abc].ts", "app/[abc].ts/x", false),
         ];
         for (pattern, path, expected) in cases {
             assert_eq!(

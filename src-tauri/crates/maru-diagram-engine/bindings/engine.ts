@@ -84,7 +84,7 @@ export type LifecycleState = { id: string, type: string, label: string, sublabel
 
 export type LifecycleTransition = { id?: string | null, from: string, to: string, label?: string | null, note?: string | null, variant?: string | null, route?: string | null, fromSide?: string | null, toSide?: string | null, channelX?: number | null, channelY?: number | null, cornerRadius?: number | null, labelAt?: [number, number] | null, labelDx?: number | null, labelDy?: number | null, labelSegment?: number | null, via?: Array<[number, number]> | null, width?: number | null, };
 
-export type FloorplanSpec = { $schema: string, project: FloorplanProject, nodes: Array<FloorplanNode>, edges?: Array<FloorplanEdge> | null, annotations?: Array<FloorplanAnnotation> | null, flows?: Array<FloorplanFlow> | null, tour?: Array<FloorplanTourStop> | null, audience?: string | null, include?: Array<string> | null, ignore?: Array<string> | null, };
+export type FloorplanSpec = { $schema?: string | null, project: FloorplanProject, nodes: Array<FloorplanNode>, edges?: Array<FloorplanEdge> | null, annotations?: Array<FloorplanAnnotation> | null, flows?: Array<FloorplanFlow> | null, tour?: Array<FloorplanTourStop> | null, audience?: string | null, include?: Array<string> | null, ignore?: Array<string> | null, };
 
 export type FloorplanProject = { name: string, summary?: string | null, entrypoints?: Array<string> | null, };
 
