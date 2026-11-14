@@ -855,3 +855,25 @@ fn completion_guard_scope_index_precedes_partial_policy_publication() {
     );
     assert!(!fixture.work.join(custom).join("archive/group").exists());
 }
+
+#[test]
+fn completion_guard_unrelated_and_same_bucket_file_renames_do_not_parse_legacy_bytes() {
+    let home = Home::new();
+    for directory in ["ordinary", "tasks/active"] {
+        let fixture = Fixture::new(&home, None);
+        fs::create_dir_all(fixture.work.join(directory)).unwrap();
+        let source = format!("{directory}/legacy.MD");
+        let target = format!("{directory}/renamed.MD");
+        fs::write(fixture.work.join(&source), [255, 0, 1]).unwrap();
+        crate::workspace_files::rename_workspace_entry(
+            fixture.work_path(),
+            source.clone(),
+            "renamed.MD".into(),
+        )
+        .unwrap();
+        assert!(!fixture.work.join(source).exists());
+        assert_eq!(fs::read(fixture.work.join(target)).unwrap(), [255, 0, 1]);
+        assert!(!fixture.work.join(".maru/task-execution").exists());
+        assert!(!fixture.work.join(".maru/task-completion").exists());
+    }
+}

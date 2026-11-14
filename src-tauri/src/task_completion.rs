@@ -536,11 +536,7 @@ fn record_known_scope(
         lease,
     )
 }
-fn directory_affects_task_buckets(
-    work: &Path,
-    source: &Path,
-    target: &Path,
-) -> Result<bool, IpcError> {
+fn move_affects_task_buckets(work: &Path, source: &Path, target: &Path) -> Result<bool, IpcError> {
     let source = physical_path(source)?;
     let target = physical_path(target)?;
     if source == target {
@@ -736,7 +732,7 @@ pub(crate) fn guard_managed_task_move(
     namespace_guard(work, source)?;
     namespace_guard(work, target)?;
     if source.is_dir() {
-        if !directory_affects_task_buckets(work, source, target)? {
+        if !move_affects_task_buckets(work, source, target)? {
             return Ok(());
         }
         for (count, entry) in walkdir::WalkDir::new(source)
@@ -776,6 +772,12 @@ pub(crate) fn guard_managed_task_move(
         if crate::tasks::is_markdown(target) && source.is_file() {
             guard_new_task_document(work, target, &read_task(source)?)?;
         }
+        return Ok(());
+    }
+    // The same scope proof applies to individual files. Ordinary binary or
+    // legacy bytes named .md must not be parsed for unrelated/same-bucket
+    // renames. Suffix conversions above still require new-note admission.
+    if !move_affects_task_buckets(work, source, target)? {
         return Ok(());
     }
     let text = read_task(source)?;

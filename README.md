@@ -325,6 +325,13 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   an attestation of a model account. Every provider used by the creator is
   excluded from independent review, including a new run under that provider.
   Tasks without this requirement retain ordinary manual Done behavior.
+  Policy scope retains its recorded/claim tasks root, otherwise `tasks`; the
+  opt-in operation accepts `tasksRoot` for an explicit custom root. Guards use
+  the Tasks parser and bucket defaults, including Markdown case and physical
+  aliases. Disable the requirement before moving a bound task out of its task
+  buckets. A private append-only scope index is published before policy effects;
+  directory moves unrelated to task scopes or staying in a bucket avoid a tree
+  scan, while affected moves check opted-in notes before moving any sibling.
   Ordinary invocations and task mutations do not create task identities, claim
   layouts or locks. Only existing opt-in claims take a task lock before the
   mutation path lease. Request IDs are scoped to each task, not the workspace.
