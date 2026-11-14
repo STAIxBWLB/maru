@@ -1106,6 +1106,60 @@ mod tests {
         (tmp, work)
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn candidate_staging_is_private_under_umask_022() {
+        use std::os::unix::fs::PermissionsExt;
+        const CHILD: &str = "MARU_ARCHIFY_PRIVATE_STAGE_TEST_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok("1") {
+            let home = crate::atomic_file::phase08_06::Home::new();
+            let work = home.root.path().join("workspace");
+            fs::create_dir_all(&work).unwrap();
+            crate::scratchpad::phase08_08::registry(&work, "direct");
+            let job = work.join(STAGING_DIR).join("private-mode-case");
+            let candidate = job.join("candidate.json");
+            stage_candidate(work.to_str().unwrap(), &job, &candidate, b"{}").unwrap();
+            assert_eq!(fs::read(&candidate).unwrap(), b"{}");
+            let mode = fs::metadata(&job).unwrap().permissions().mode() & 0o777;
+            println!("ARCHIFY_STAGE_OBSERVED mode={mode:o}");
+            assert_eq!(
+                mode, 0o700,
+                "create fixed Archify staging private under umask 022"
+            );
+            assert_eq!(job.file_name().unwrap(), "private-mode-case");
+            assert!(job.is_dir(), "staging must persist after the write returns");
+            println!("ARCHIFY_PRIVATE_STAGE_CHILD mode=700 path=ok");
+            return;
+        }
+        let fixture = tempfile::tempdir().unwrap();
+        let output = Command::new(crate::test_support::posix_shell())
+            .args(["-c", "umask 022; exec \"$@\"", "archify-private-stage-test"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "archify::tests::candidate_staging_is_private_under_umask_022",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .env("TMPDIR", fixture.path())
+            .env("TMP", fixture.path())
+            .env("TEMP", fixture.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "umask child failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("ARCHIFY_PRIVATE_STAGE_CHILD mode=700 path=ok"),
+            "the exact staging check must run"
+        );
+    }
+
     fn node_available() -> bool {
         Command::new("node")
             .arg("--version")
