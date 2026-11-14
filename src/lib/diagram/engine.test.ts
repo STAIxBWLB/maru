@@ -188,6 +188,96 @@ describe("product diagram engine facade", () => {
     await expect(engine.validateCandidate("architecture", specJson)).rejects.toThrow(/receipt does not match/i);
   });
 
+  describe("receipt envelope (#137)", () => {
+    type Mutate = (receipt: Record<string, unknown>) => void;
+    const cases: Array<[string, Mutate, RegExp]> = [
+      ["missing schemaVersion", (r) => { delete r.schemaVersion; }, /schemaVersion is missing, not the supported 1/],
+      ["unsupported schemaVersion", (r) => { r.schemaVersion = 2; }, /schemaVersion is 2, not the supported 1/],
+      ["non-number schemaVersion, not echoed", (r) => { r.schemaVersion = "/Users/someone/secret"; }, /schemaVersion is of type string, not the supported 1/],
+      ["missing gates", (r) => { delete r.gates; }, /no gates record/],
+      ["missing gate", (r) => { delete (r.gates as Record<string, unknown>).visualReview; }, /gate "visualReview" is missing or malformed/],
+      ["unknown gate status", (r) => { (r.gates as Record<string, Record<string, unknown>>).schema!.status = "skipped"; }, /gate "schema" is missing or malformed/],
+      ["empty gate scope", (r) => { (r.gates as Record<string, Record<string, unknown>>).browser!.scope = ""; }, /gate "browser" is missing or malformed/],
+    ];
+
+    for (const where of ["validation", "layout"] as const) {
+      for (const [name, mutate, message] of cases) {
+        it(`fails closed on ${name} in the ${where} receipt, naming the next step`, async () => {
+          const hash = await sha256(specJson);
+          const broken = (report: ValidationReport | GeometryReport) => {
+            const receiptCopy = structuredClone(report.receipt) as unknown as Record<string, unknown>;
+            mutate(receiptCopy);
+            return { ...report, receipt: receiptCopy as unknown as EngineReceipt };
+          };
+          const layout = vi.fn(async () => where === "layout" ? broken(geometryReport(true, hash)) as GeometryReport : geometryReport(true, hash));
+          const engine = createProductDiagramEngine({
+            validate: async () => where === "validation" ? broken(validationReport(true, hash)) as ValidationReport : validationReport(true, hash),
+            layout,
+            render: async () => { throw new Error("render is not expected in a validation test"); },
+          });
+          const rejection = engine.validateCandidate("architecture", specJson);
+          await expect(rejection).rejects.toThrow(message);
+          await expect(rejection).rejects.toThrow(/update Maru so the app and engine match, then retry/);
+          await expect(rejection).rejects.not.toThrow(/\/Users\//);
+          if (where === "validation") expect(layout).not.toHaveBeenCalled();
+        });
+      }
+
+      for (const status of ["failed", "not-run"]) {
+        it(`fails closed on an ok ${where} report whose schema gate is ${status} (T137-R1)`, async () => {
+          const hash = await sha256(specJson);
+          const stamp = <T extends ValidationReport | GeometryReport>(report: T): T => {
+            report.receipt.gates.schema = { status, scope: "architecture-document-validity" };
+            return report;
+          };
+          const layout = vi.fn(async () => where === "layout" ? stamp(geometryReport(true, hash)) : geometryReport(true, hash));
+          const engine = createProductDiagramEngine({
+            validate: async () => where === "validation" ? stamp(validationReport(true, hash)) : validationReport(true, hash),
+            layout,
+            render: async () => { throw new Error("render is not expected in a validation test"); },
+          });
+          const rejection = engine.validateCandidate("architecture", specJson);
+          await expect(rejection).rejects.toThrow(new RegExp(`${where} report says ok but its receipt's schema gate is "${status}"`));
+          await expect(rejection).rejects.toThrow(/update Maru so the app and engine match, then retry/);
+          if (where === "validation") expect(layout).not.toHaveBeenCalled();
+        });
+
+        it(`still reports a refused ${where} report whose schema gate is ${status}`, async () => {
+          const hash = await sha256(specJson);
+          const refuse = <T extends ValidationReport | GeometryReport>(report: T): T => {
+            report.receipt.gates.schema = { status, scope: "architecture-document-validity" };
+            return report;
+          };
+          const engine = createProductDiagramEngine({
+            validate: async () => where === "validation" ? refuse(validationReport(false, hash, [diagnostic("Bad.", "Fix it.")])) : validationReport(true, hash),
+            layout: async () => where === "layout" ? refuse(geometryReport(false, hash, [diagnostic("Bad.", "Fix it.")])) : geometryReport(true, hash),
+            render: async () => { throw new Error("render is not expected in a validation test"); },
+          });
+          const result = await engine.validateCandidate("architecture", specJson);
+          expect(result.ok).toBe(false);
+          expect(result.errors.join(" ")).toContain("Bad.");
+        });
+      }
+    }
+
+    it("accepts every gate status the engine emits", async () => {
+      const hash = await sha256(specJson);
+      const withStatus = (status: string) => {
+        const report = geometryReport(true, hash);
+        report.receipt.gates.artifact = { status, scope: "layout-only" };
+        return report;
+      };
+      for (const status of ["passed", "failed", "not-run"]) {
+        const engine = createProductDiagramEngine({
+          validate: async () => validationReport(true, hash),
+          layout: async () => withStatus(status),
+          render: async () => { throw new Error("render is not expected in a validation test"); },
+        });
+        expect((await engine.validateCandidate("architecture", specJson)).ok).toBe(true);
+      }
+    });
+  });
+
   it("routes floorplan to its own engine entry, never the diagram_type validator", async () => {
     const floorplanJson = JSON.stringify({ $schema: "floorplan/architecture@1", project: { name: "Map" }, nodes: [{ id: "a", label: "A", kind: "service" }], edges: [] });
     const hash = await sha256(floorplanJson);

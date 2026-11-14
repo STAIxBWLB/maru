@@ -176,6 +176,50 @@ function checkReceiptSource(receipt: EngineReceipt, expectedSha: string): void {
   if (receipt.engine.id !== "maru-diagram-engine" || !receipt.engine.version || !receipt.engine.revision) {
     throw new Error("The engine receipt has an unsupported engine identity; update Maru and retry.");
   }
+  checkReceiptEnvelope(receipt);
+}
+
+/** The receipt contract version `maru-diagram-engine` emits (`EngineReceipt.schema_version`). */
+const RECEIPT_SCHEMA_VERSION = 1;
+const RECEIPT_GATE_STATUSES: ReadonlySet<string> = new Set(["passed", "failed", "not-run"]);
+const RECEIPT_GATES = ["schema", "artifact", "browser", "visualReview"] as const;
+
+/**
+ * The mandatory envelope of an engine receipt (`ReceiptGates` in the engine
+ * crate): a supported schemaVersion and four gates, each with a known status
+ * and a scope. A report whose hash matches but whose envelope does not is not
+ * proof of validation, so admission fails closed.
+ */
+function checkReceiptEnvelope(receipt: EngineReceipt): void {
+  const raw = receipt as unknown as Record<string, unknown>;
+  if (raw.schemaVersion !== RECEIPT_SCHEMA_VERSION) {
+    // The value is untrusted: echo it only when it is a number.
+    const found = typeof raw.schemaVersion === "number" && Number.isFinite(raw.schemaVersion)
+      ? String(raw.schemaVersion)
+      : raw.schemaVersion === undefined ? "missing" : `of type ${raw.schemaVersion === null ? "null" : typeof raw.schemaVersion}`;
+    throw new Error(`The engine receipt schemaVersion is ${found}, not the supported ${RECEIPT_SCHEMA_VERSION}; update Maru so the app and engine match, then retry.`);
+  }
+  const gates = raw.gates;
+  if (!record(gates)) {
+    throw new Error("The engine receipt has no gates record; update Maru so the app and engine match, then retry.");
+  }
+  for (const name of RECEIPT_GATES) {
+    const gate = gates[name];
+    if (!record(gate) || typeof gate.status !== "string" || !RECEIPT_GATE_STATUSES.has(gate.status)
+        || typeof gate.scope !== "string" || gate.scope.length === 0) {
+      throw new Error(`The engine receipt gate "${name}" is missing or malformed; update Maru so the app and engine match, then retry.`);
+    }
+  }
+}
+
+/**
+ * A report that says ok must carry a receipt whose schema gate passed; a
+ * "failed" or "not-run" schema gate is only consistent with a refusal.
+ */
+function checkOkReceiptPassed(ok: boolean, receipt: EngineReceipt, step: "validation" | "layout"): void {
+  if (ok && receipt.gates.schema.status !== "passed") {
+    throw new Error(`The engine ${step} report says ok but its receipt's schema gate is "${receipt.gates.schema.status}", not "passed"; update Maru so the app and engine match, then retry.`);
+  }
 }
 
 function candidateFailure(
@@ -233,6 +277,7 @@ async function validateEngineCandidateWithPorts(
 
   const validation = await ports.validate(specJson);
   checkReceiptSource(validation.receipt, candidateSha256);
+  checkOkReceiptPassed(validation.ok, validation.receipt, "validation");
   if (!validation.ok) {
     return {
       ok: false,
@@ -254,6 +299,7 @@ function layoutAdmission(
   priorDiagnostics: Diagnostic[],
 ): EngineCandidateValidation {
   checkReceiptSource(layout.receipt, candidateSha256);
+  checkOkReceiptPassed(layout.ok, layout.receipt, "layout");
   const warnings = layout.ok ? layout.diagnostics.map(diagnosticText) : [];
   const errors = layout.ok
     ? []
