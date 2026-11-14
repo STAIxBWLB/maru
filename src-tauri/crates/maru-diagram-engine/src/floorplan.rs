@@ -6,8 +6,11 @@
 //! (`src/lib/diagram/floorplan.ts` in maru), and no stricter: an optional field
 //! may be omitted, an empty node list is a map with nothing on it yet, flow ids
 //! are any non-empty string, a field the format does not define is preserved
-//! rather than refused (the codec carries it verbatim as a fidelity note), and a
-//! present `null` is refused because the field was given rather than left out.
+//! rather than refused (the codec carries it verbatim as a fidelity note), a
+//! present `null` is refused because the field was given rather than left out,
+//! except in the four prose fields the codec never reads (`flow.description`,
+//! `steps[].note`, `tour[].title`, `tour[].note`), and an empty reference is
+//! refused before any glob is asked instead of resolving through a `*` claim.
 //! Layout is E5 T2, the repository scanner T3 and the apply-gate switch T4.
 //!
 //! An edge endpoint, flow step or tour stop names a node id, or a file that some
@@ -15,8 +18,10 @@
 //! A pattern is compiled to a small program and walked one character at a time,
 //! so an alternation is never expanded and no split point is retried: neither a
 //! `{a,b}` chain nor a `*`-heavy pattern can grow past the pattern and path
-//! lengths. It is written by hand because the crate carries no regex dependency
-//! and the WASM build is measured per chunk.
+//! lengths. Braces are paired in one pass first, so a `{` that never closes, or
+//! one nested past `MAX_BRACE_DEPTH`, is a literal brace and no suffix of the
+//! pattern is read twice. It is written by hand because the crate carries no
+//! regex dependency and the WASM build is measured per chunk.
 
 use crate::common::{self, Context};
 use crate::Diagnostic;
@@ -61,9 +66,18 @@ const NODE_TYPED: &[&str] = &[
 ];
 const EDGE_TYPED: &[&str] = &["kind", "label", "description"];
 const ANNOTATION_TYPED: &[&str] = &["note", "tags"];
-const FLOW_TYPED: &[&str] = &["description"];
-const FLOW_STEP_TYPED: &[&str] = &["note"];
-const TOUR_STOP_TYPED: &[&str] = &["title", "note"];
+
+/// The prose the codec never reads: `flow.description`, `steps[].note`,
+/// `tour[].title` and `tour[].note` are absent from its checks, so a value it
+/// would accept cannot be refused here. The string is kept when the document
+/// gives one and dropped otherwise, which leaves the model typed.
+fn unchecked_prose<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<Value>::deserialize(deserializer)?
+        .and_then(|value| value.as_str().map(str::to_string)))
+}
 
 /// One `floorplan/architecture@1` document. Optional collections stay optional
 /// so a map without edges, flows, annotations or a tour validates.
@@ -178,7 +192,7 @@ pub struct FloorplanAnnotation {
 pub struct FloorplanFlow {
     pub id: String,
     pub title: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "unchecked_prose")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub description: Option<String>,
     pub steps: Vec<FloorplanFlowStep>,
@@ -188,7 +202,7 @@ pub struct FloorplanFlow {
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct FloorplanFlowStep {
     pub node: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "unchecked_prose")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub note: Option<String>,
 }
@@ -197,10 +211,10 @@ pub struct FloorplanFlowStep {
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct FloorplanTourStop {
     pub node: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "unchecked_prose")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "unchecked_prose")]
     #[cfg_attr(feature = "typegen", ts(optional = nullable))]
     pub note: Option<String>,
 }
@@ -253,12 +267,64 @@ struct Compiled {
     arms: Vec<Vec<Piece>>,
 }
 
+/// How deep alternations may nest before a `{` is read literally. A map never
+/// nests two, and the cap keeps a hostile pattern off the stack.
+const MAX_BRACE_DEPTH: usize = 32;
+
+/// Pair every `{` with its `}` in one pass, so the parser never has to search
+/// for a closer and never re-reads a suffix. Character classes and literal
+/// bracketed segments are skipped exactly as the parser reads them, which is
+/// what keeps a `}` inside `[}]` from closing an alternation.
+fn brace_pairs(chars: &[char]) -> Vec<Option<usize>> {
+    let mut pairs = vec![None; chars.len()];
+    let mut open = Vec::new();
+    let mut at = 0usize;
+    while at < chars.len() {
+        let segment_start = at == 0 || chars[at - 1] == '/';
+        if chars[at] == '[' {
+            if segment_start {
+                let end = chars[at..]
+                    .iter()
+                    .position(|item| *item == '/')
+                    .unwrap_or(chars.len() - at);
+                let segment = &chars[at..at + end];
+                if segment.last() == Some(&']')
+                    && !segment.iter().any(|item| matches!(item, '{' | '}' | ','))
+                {
+                    at += end;
+                    continue;
+                }
+            }
+            match chars
+                .get(at + 2..)
+                .and_then(|rest| rest.iter().position(|item| *item == ']'))
+            {
+                Some(offset) => at += offset + 3,
+                None => at += 1,
+            }
+            continue;
+        }
+        match chars[at] {
+            '{' => open.push(at),
+            '}' => {
+                if let Some(start) = open.pop() {
+                    pairs[start] = Some(at);
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    pairs
+}
+
 impl Compiled {
     fn new(pattern: &str) -> Self {
         let chars: Vec<char> = pattern.chars().collect();
+        let pairs = brace_pairs(&chars);
         let mut arms: Vec<Vec<Piece>> = vec![Vec::new()];
         let mut at = 0usize;
-        let mut top = parse_sequence(&chars, &mut at, &mut arms, false);
+        let mut top = parse_sequence(&chars, &pairs, &mut at, &mut arms, false, 0);
         if !has_wildcard(pattern) {
             top.push(Piece::DirectoryTail);
         }
@@ -270,9 +336,11 @@ impl Compiled {
 /// Parse one piece sequence. Inside an alternation it stops at `,` or `}`.
 fn parse_sequence(
     chars: &[char],
+    pairs: &[Option<usize>],
     at: &mut usize,
     arms: &mut Vec<Vec<Piece>>,
     in_brace: bool,
+    depth: usize,
 ) -> Vec<Piece> {
     let mut pieces = Vec::new();
     while *at < chars.len() {
@@ -317,38 +385,53 @@ fn parse_sequence(
                 *at += 1;
             }
             '{' => {
-                let open = *at;
-                let arms_before = arms.len();
-                *at += 1;
-                let mut branches = Vec::new();
-                let mut closed = false;
-                loop {
-                    branches.push(parse_sequence(chars, at, arms, true));
-                    match chars.get(*at) {
-                        Some(',') => *at += 1,
-                        Some('}') => {
-                            *at += 1;
-                            closed = true;
+                // The closer comes from the one-pass pairing, so a brace is
+                // either an alternation or a literal and the suffix is never
+                // read twice.
+                match pairs[*at] {
+                    // Past the cap the whole span is copied literally, so an
+                    // over-nested pattern reads as text without moving the rest
+                    // of the parse.
+                    Some(close) if depth >= MAX_BRACE_DEPTH => {
+                        pieces.extend(chars[*at..=close].iter().map(|item| Piece::Literal(*item)));
+                        *at = close + 1;
+                    }
+                    Some(close) => {
+                        let arms_before = arms.len();
+                        *at += 1;
+                        let mut branches = Vec::new();
+                        while *at < close {
+                            branches.push(parse_sequence(chars, pairs, at, arms, true, depth + 1));
+                            if chars.get(*at) == Some(&',') {
+                                *at += 1;
+                                continue;
+                            }
                             break;
                         }
-                        _ => break,
+                        if chars.get(*at) == Some(&'}') {
+                            *at += 1;
+                            let ids = branches
+                                .into_iter()
+                                .map(|branch| {
+                                    arms.push(branch);
+                                    arms.len() - 1
+                                })
+                                .collect();
+                            pieces.push(Piece::Alt(ids));
+                        } else {
+                            // Unreachable while the pairing and the parser read
+                            // classes alike; kept as a literal instead of a
+                            // retry so no path re-reads the pattern.
+                            arms.truncate(arms_before);
+                            pieces.push(Piece::Literal('{'));
+                        }
                     }
-                }
-                if closed {
-                    let ids = branches
-                        .into_iter()
-                        .map(|branch| {
-                            arms.push(branch);
-                            arms.len() - 1
-                        })
-                        .collect();
-                    pieces.push(Piece::Alt(ids));
-                } else {
-                    // An unclosed `{` is a literal brace, and the arms read while
-                    // trying it are discarded.
-                    arms.truncate(arms_before);
-                    pieces.push(Piece::Literal('{'));
-                    *at = open + 1;
+                    // A `{` with no closer in the pattern is a literal brace,
+                    // which is how the application reads one.
+                    _ => {
+                        pieces.push(Piece::Literal('{'));
+                        *at += 1;
+                    }
                 }
             }
             '[' => {
@@ -627,6 +710,9 @@ struct Claims<'a> {
     by_id: std::collections::HashMap<&'a str, &'a FloorplanNode>,
     // Each `paths` and `exclude` glob is compiled once, so a map with many
     // references does not recompile the same pattern for every one of them.
+    // Compiling is one linear parse per pattern and matching one pass over it,
+    // so building this costs the map's glob text even when no edge, flow or tour
+    // ends up asking: a bounded parse, not a search.
     programs: std::collections::HashMap<&'a str, Program>,
 }
 
@@ -713,6 +799,17 @@ fn check_reference(
     claims: &Claims,
     action: &str,
 ) {
+    // An empty reference names nothing, and `*` claims the empty path, so it is
+    // refused before the globs are asked; the codec refuses it the same way.
+    if reference.is_empty() {
+        ctx.error(
+            "empty-reference",
+            path,
+            format!("{action} is empty, so it names no node and no file"),
+            format!("name the node id or the file {action} points at, or remove the entry"),
+        );
+        return;
+    }
     if !resolves(reference, node_ids, claims) {
         ctx.error(
             rule,
@@ -873,9 +970,6 @@ fn validate_spec(spec: &FloorplanSpec, ctx: &mut Context) {
             );
         }
         ctx.text(&flow.title, 1, None, &format!("{path}/title"));
-        if let Some(description) = &flow.description {
-            ctx.text(description, 0, None, &format!("{path}/description"));
-        }
         if flow.steps.len() < 2 {
             ctx.error(
                 "flow-steps",
@@ -898,9 +992,6 @@ fn validate_spec(spec: &FloorplanSpec, ctx: &mut Context) {
                 &claims,
                 "this flow step",
             );
-            if let Some(note) = &step.note {
-                ctx.text(note, 0, None, &format!("{path}/steps/{step_index}/note"));
-            }
         }
     }
 
@@ -915,12 +1006,6 @@ fn validate_spec(spec: &FloorplanSpec, ctx: &mut Context) {
             &claims,
             "this tour stop",
         );
-        if let Some(title) = &stop.title {
-            ctx.text(title, 0, None, &format!("{path}/title"));
-        }
-        if let Some(note) = &stop.note {
-            ctx.text(note, 0, None, &format!("{path}/note"));
-        }
     }
 }
 
@@ -973,21 +1058,9 @@ pub(crate) fn validate(value: Value) -> Vec<Diagnostic> {
         ("nodes", NODE_TYPED),
         ("edges", EDGE_TYPED),
         ("annotations", ANNOTATION_TYPED),
-        ("flows", FLOW_TYPED),
-        ("tour", TOUR_STOP_TYPED),
     ] {
         for (index, item) in items(&value, field).iter().enumerate() {
             check_nulls(&mut ctx, item, &format!("/{field}/{index}"), fields);
-        }
-    }
-    for (index, flow) in items(&value, "flows").iter().enumerate() {
-        for (step_index, step) in items(flow, "steps").iter().enumerate() {
-            check_nulls(
-                &mut ctx,
-                step,
-                &format!("/flows/{index}/steps/{step_index}"),
-                FLOW_STEP_TYPED,
-            );
         }
     }
     let Some(spec) = common::decode::<FloorplanSpec>(&value, &mut ctx) else {
@@ -1167,7 +1240,7 @@ mod tests {
 
     #[test]
     fn refuses_a_null_in_a_field_the_format_types() {
-        // Each optional collection, one scalar, and a nested step note: a present
+        // Each optional collection, one scalar, and one nested field: a present
         // `null` is a value the format does not accept, while an omitted field is
         // exactly the same document.
         let mut spec = nested_map();
@@ -1189,23 +1262,76 @@ mod tests {
             "{listed:?}"
         );
 
-        let mut step = nested_map();
-        step["flows"][0]["steps"][0]["note"] = Value::Null;
-        assert_eq!(codes(&validate(step)), vec!["floorplan/null-field"]);
+        // The four prose fields the codec never reads are not typed by it, so a
+        // present `null` there is accepted rather than refused.
+        let mut prose = nested_map();
+        prose["flows"][0]["description"] = Value::Null;
+        prose["flows"][0]["steps"][0]["note"] = Value::Null;
+        prose["tour"][0]["title"] = Value::Null;
+        prose["tour"][0]["note"] = Value::Null;
+        assert!(validate(prose).is_empty(), "unchecked prose was refused");
+    }
+
+    #[test]
+    fn accepts_prose_the_codec_does_not_read_in_any_shape() {
+        // The codec checks neither the type nor the presence of these four
+        // fields, so a number there is a document it accepts.
+        let mut spec = nested_map();
+        spec["flows"][0]["description"] = json!(7);
+        spec["flows"][0]["steps"][1]["note"] = json!(["not", "prose"]);
+        spec["tour"][0]["title"] = json!(false);
+        spec["tour"][0]["note"] = json!({"nested": 1});
+        let diagnostics = validate(spec);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn refuses_an_empty_reference_even_when_a_glob_would_claim_it() {
+        // `*` matches the empty path, so an empty reference would resolve as a
+        // file a node claims unless emptiness is refused first; the codec refuses
+        // it outright, in `isFloorplanRef` and in the edge endpoint check.
+        let mut spec = nested_map();
+        spec["nodes"][0]["paths"] = json!(["*"]);
+        assert!(
+            validate(spec.clone()).is_empty(),
+            "the * claim alone is a valid map"
+        );
+
+        let mut endpoint = spec.clone();
+        endpoint["edges"][0]["from"] = json!("");
+        assert_eq!(
+            codes(&validate(endpoint)),
+            vec!["floorplan/empty-reference"]
+        );
+
+        let mut step = spec.clone();
+        step["flows"][0]["steps"][1]["node"] = json!("");
+        assert_eq!(codes(&validate(step)), vec!["floorplan/empty-reference"]);
+
+        let mut stop = spec.clone();
+        stop["tour"][0]["node"] = json!("");
+        assert_eq!(codes(&validate(stop)), vec!["floorplan/empty-reference"]);
     }
 
     #[test]
     fn a_pathological_pattern_stays_within_its_budget() {
-        // Neither an alternation chain nor a `*`-heavy segment may cost more than
-        // one pass over the path, which is what a pattern inside the apply gate
-        // needs: expanding either would be exponential.
+        // Neither an alternation chain, a `*`-heavy segment nor a brace that
+        // never closes may cost more than one pass over the pattern and the path,
+        // which is what a pattern inside the apply gate needs: expanding either
+        // would be exponential.
         let braces = format!("{}/x", "{a,b}".repeat(30));
         let stars = format!("{}b", "a*".repeat(30));
         let path = "a".repeat(60);
+        let unclosed = format!("{}x", "{".repeat(30));
         let started = std::time::Instant::now();
         assert!(!glob_matches(&braces, "a/a/a"));
         assert!(!glob_matches(&stars, &path));
         assert!(glob_matches(&stars, &format!("{path}b")));
+        // An unclosed `{` is a literal brace, so the pattern reads as text.
+        assert!(glob_matches(&unclosed, &unclosed));
+        // An alternation nested one level is still an alternation.
+        assert!(glob_matches("{a,{b,c}}.ts", "c.ts"));
+        assert!(!glob_matches("{a,{b,c}}.ts", "d.ts"));
         assert!(
             started.elapsed() < std::time::Duration::from_secs(2),
             "the glob matcher took {:?} on a pathological pattern",
