@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.1",
+  "contract": "hwp-edit-report-v1",
+  "output": "preservation-font.out.hwp",
+  "dry_run": false,
+  "ops": [],
+  "applied_count": 0,
+  "failed_count": 0,
+  "refusal": {
+    "code": "preservation_loss",
+    "values": {
+      "events": [
+        {
+          "code": "font_type_info_unrepresentable",
+          "count": 1,
+          "disposition": "unrepresentable",
+          "resource": "metadata"
+        }
+      ]
+    },
+    "message": "보존할 수 없는 데이터를 지우거나 바꾸게 되어 거부했습니다"
+  }
+}

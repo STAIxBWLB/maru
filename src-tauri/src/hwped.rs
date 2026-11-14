@@ -52,6 +52,11 @@ const FEATURE_MIN_VERSION: (u64, u64, u64) = (0, 20, 0);
 /// `hwp info --body-stats` landed in hwp-cli 0.19.2 (its CHANGELOG, "Table
 /// placement switch"). Below it the read still answers, without `bodyTables`.
 const BODY_STATS_MIN_VERSION: (u64, u64, u64) = (0, 19, 2);
+/// `edit --report <file>` writes a structured refusal (edit-report-v1 1.1) on a
+/// refused edit from ahwp 1.6.3 on; older engines get no `--report` (maru#620).
+const REFUSAL_REPORT_MIN_VERSION: (u64, u64, u64) = (1, 6, 3);
+/// A report is small JSON; anything larger is treated as missing.
+const EDIT_REPORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Document reference crossing the bridge (JS `TauriDocumentRef`).
 #[derive(Debug, Clone, Deserialize)]
@@ -426,6 +431,21 @@ mod retry_tests;
 pub enum HwpedBridgeError {
     Legacy(String),
     FeatureVersion(crate::ipc_error::IpcError),
+    /// A refused edit whose engine wrote an edit-report-v1 refusal report
+    /// (maru#620). `message` is the exact legacy string, so a client that does
+    /// not read `report` classifies it as before.
+    RefusedEdit(HwpedRefusedEdit),
+}
+
+/// The structured rejection hwp-editor's Tauri client reads (`code`,
+/// `message`, `report`, `engineVersion`), mirroring its HTTP error body.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HwpedRefusedEdit {
+    pub code: String,
+    pub message: String,
+    pub report: Value,
+    pub engine_version: String,
 }
 
 impl From<String> for HwpedBridgeError {
@@ -439,6 +459,7 @@ impl std::fmt::Display for HwpedBridgeError {
         match self {
             Self::Legacy(message) => formatter.write_str(message),
             Self::FeatureVersion(error) => std::fmt::Display::fmt(error, formatter),
+            Self::RefusedEdit(error) => formatter.write_str(&error.message),
         }
     }
 }
@@ -1258,6 +1279,13 @@ mod json_ops_tests;
 #[path = "hwped/edit_failure_tests.rs"]
 mod edit_failure_tests;
 
+#[path = "hwped/report_paths.rs"]
+mod report_paths;
+
+#[cfg(all(test, unix))]
+#[path = "hwped/refusal_report_tests.rs"]
+mod refusal_report_tests;
+
 /// The stage dir a failing `hwp edit` reports has to be the same string its argv
 /// carries, so the editor can redact the reported prefix exactly. `canonicalize`
 /// on unix keeps a `/var` tempdir and the `/private/var` path the engine prints
@@ -1276,7 +1304,24 @@ fn edit_stage_dir(dir: &Path) -> Result<String, String> {
     }
 }
 
-fn edit_now(
+/// One `hwped_edit` request. `structured_refusal` is the client's
+/// `structuredRefusal: true`, a capability signal only a client that reads
+/// refused edit reports sends. It is not `report: true`: released core (1.4.x)
+/// already sends that for preset batches and block inserts, and its object
+/// branch skips the string classifier, so keying on it would cost today's
+/// client its refusal classification (maru#620).
+#[derive(Default)]
+struct EditRequest {
+    ops_argv: Option<Value>,
+    ops: Option<Value>,
+    verify: Option<bool>,
+    allow_partial: Option<bool>,
+    structured_refusal: bool,
+}
+
+/// The pre-#620 call shape (no structured refusal), kept for the tests.
+#[cfg(test)]
+fn edit_legacy_now(
     document: HwpedDocumentRef,
     ops_argv: Option<Value>,
     ops: Option<Value>,
@@ -1284,6 +1329,31 @@ fn edit_now(
     allow_partial: Option<bool>,
     workspace_root: Option<String>,
 ) -> Result<HwpedEditResponse, HwpedBridgeError> {
+    edit_now(
+        document,
+        EditRequest {
+            ops_argv,
+            ops,
+            verify,
+            allow_partial,
+            structured_refusal: false,
+        },
+        workspace_root,
+    )
+}
+
+fn edit_now(
+    document: HwpedDocumentRef,
+    request: EditRequest,
+    workspace_root: Option<String>,
+) -> Result<HwpedEditResponse, HwpedBridgeError> {
+    let EditRequest {
+        ops_argv,
+        ops,
+        verify,
+        allow_partial,
+        structured_refusal,
+    } = request;
     let operations = match (ops_argv, ops) {
         (Some(argv), None) => {
             let argv: Vec<String> = serde_json::from_value(argv).map_err(|_| {
@@ -1338,16 +1408,98 @@ fn edit_now(
     if allow_partial == Some(true) {
         args.push(OsString::from("--allow-partial"));
     }
-    if json_ops {
-        run_hwp_feature_ok(&bin, &args, Some(&stage_dir))?;
+    // From 1.6.3 a refused edit writes its refusal code to the report. It is
+    // requested on every call and read before the stage dir is removed.
+    let report_path = parse_version(version.as_bytes())
+        .is_some_and(|parsed| version_at_least(parsed, REFUSAL_REPORT_MIN_VERSION))
+        .then(|| stage.join("edit-report.json"));
+    if let Some(path) = &report_path {
+        args.extend([OsString::from("--report"), path.clone().into_os_string()]);
+    }
+    let outcome = if json_ops {
+        run_hwp_feature_ok(&bin, &args, Some(&stage_dir))
     } else {
-        run_hwp_ok(&bin, &args, Some(&stage_dir))?;
+        run_hwp_ok(&bin, &args, Some(&stage_dir))
+    };
+    if let Err(message) = outcome {
+        // Only an engine refusal carries a report; spawn, timeout and limit
+        // failures keep their string form.
+        if structured_refusal && message.starts_with("hwp_failed:") {
+            if let Some(report) = report_path
+                .as_deref()
+                .and_then(|path| read_refusal_report(path, &document.name, &stage_dir))
+            {
+                return Err(HwpedBridgeError::RefusedEdit(HwpedRefusedEdit {
+                    code: "failed".to_string(),
+                    message,
+                    report,
+                    engine_version: version,
+                }));
+            }
+        }
+        return Err(message.into());
     }
     let data = std::fs::read(&output).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     Ok(HwpedEditResponse {
         name: document.name,
         data_base64: BASE64.encode(&data),
     })
+}
+
+/// The refused run's edit report, ready to cross the IPC boundary, or `None`
+/// when it is absent, oversized or not a JSON object (the caller then keeps the
+/// legacy string, and hwp-editor falls back to stderr classification).
+fn read_refusal_report(path: &Path, name: &str, stage_dir: &str) -> Option<Value> {
+    use std::io::Read;
+    // One handle for the type check and a bounded read: a link at the leaf is
+    // refused, and a file larger than the cap is treated as missing.
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NOFOLLOW: 0x0100 on macOS/BSD, 0o400000 on Linux.
+        let no_follow = if cfg!(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd"
+        )) {
+            0x0100
+        } else {
+            0o400000
+        };
+        options.custom_flags(no_follow);
+    }
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(path)
+        .ok()?
+        .file_type()
+        .is_symlink()
+    {
+        return None;
+    }
+    let file = options.open(path).ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(EDIT_REPORT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > EDIT_REPORT_MAX_BYTES {
+        return None;
+    }
+    let report: Value = serde_json::from_slice(&bytes).ok()?;
+    sanitize_edit_report(report, name, stage_dir)
+}
+
+/// The report as hwp-editor's server exposes it: parsed into the known
+/// edit-report-v1 shape (unknown fields dropped, a report that is not
+/// edit-report-v1 refused), `output` replaced with the caller's name, and the
+/// stage dir and every absolute path removed from its diagnostics. Typed
+/// anchors, styles and issue paths stay exact (`hwped/report_paths.rs`).
+pub(crate) fn sanitize_edit_report(report: Value, name: &str, stage_dir: &str) -> Option<Value> {
+    report_paths::sanitize_report(&report, name, stage_dir)
 }
 
 fn compose_now(spec: Value, name: String) -> Result<HwpedComposeResponse, String> {
@@ -1502,6 +1654,7 @@ pub async fn hwped_edit(
     ops: HwpedEditArgument,
     verify: Option<bool>,
     allow_partial: Option<bool>,
+    structured_refusal: Option<bool>,
     workspace_root: Option<String>,
 ) -> Result<HwpedEditResponse, HwpedBridgeError> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1509,10 +1662,13 @@ pub async fn hwped_edit(
         PathTransactionLease::test_stage(&[std::env::temp_dir()], "worker:hwped_edit");
         edit_now(
             document,
-            ops_argv.0,
-            ops.0,
-            verify,
-            allow_partial,
+            EditRequest {
+                ops_argv: ops_argv.0,
+                ops: ops.0,
+                verify,
+                allow_partial,
+                structured_refusal: structured_refusal == Some(true),
+            },
             workspace_root,
         )
     })
@@ -1579,7 +1735,7 @@ mod tests {
             (None, None),
             (Some(serde_json::json!([])), Some(serde_json::json!([]))),
         ] {
-            let error = edit_now(document(), argv, ops, None, None, None).unwrap_err();
+            let error = edit_legacy_now(document(), argv, ops, None, None, None).unwrap_err();
             let error = error.to_string();
             assert!(error.starts_with("hwped_bad_request:"), "{error}");
             assert!(error.contains("ops and opsArgv"), "{error}");
@@ -1591,7 +1747,7 @@ mod tests {
             serde_json::json!("not an array"),
             serde_json::json!(7),
         ] {
-            let error = edit_now(document(), None, Some(ops), None, None, None).unwrap_err();
+            let error = edit_legacy_now(document(), None, Some(ops), None, None, None).unwrap_err();
             assert!(
                 error
                     .to_string()
@@ -2033,6 +2189,7 @@ mod phase08_21 {
             HwpedEditArgument(ops),
             verify,
             allow_partial,
+            None,
             workspace_root,
         )
         .await

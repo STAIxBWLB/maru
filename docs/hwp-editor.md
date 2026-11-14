@@ -24,7 +24,7 @@ CliEngine (`packages/server/src/cli-engine.ts` in hwp-editor).
 | `hwped_read` | `hwp cat <in> --format markdown --with-segments`, then `hwp info <in> --json --body-stats` | CatEnvelope JSON, plus `bodyTables?`; opt-in `captureSource` adds `source: { dataBase64, revision }` from the same immutable copy |
 | `hwped_save` | Private candidate validation and re-read, guarded workspace replacement | `{ revision, sizeBytes, snapshotPath }` |
 | `hwped_render` | `hwp render <in> -o page.<fmt> --format --pages --dpi --report [--layout-json <file>]` | `{ pages: [{ page, width, height, dpi, format, dataBase64, layout? }], notes?: [{ code, message }] }` |
-| `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial]` | `{ name, dataBase64 }` |
+| `hwped_edit` | `hwp edit <in> -o <out> (--ops <file> or <opsArgv...>) [--verify] [--allow-partial] [--report <file>]` (`--report` on ahwp >= 1.6.3) | `{ name, dataBase64 }` |
 | `hwped_compose` | `hwp compose <spec.json> -o <out> --report` | `{ name, dataBase64, report? }` |
 | `hwped_validate` | `hwp validate <in> --json` (exit 1 = invalid, report still parsed) | `{ valid, errors }` |
 | `hwped_capabilities` | `hwp --version` (enforces >= 0.8.7, memoized) | `{ version, editable, formats, editOps?: "v1" }` |
@@ -118,6 +118,46 @@ Most errors remain prefixed strings (`cli_missing:`, `hwp_timeout:`,
 convention. Feature-version refusals from JSON edit or explicitly requested
 layout use the structured IPC error shape so callers can branch on the code;
 the message includes the detected version, required minimum, and upgrade action.
+
+**Refused edits (maru#620).** On ahwp >= 1.6.3, `hwped_edit` passes
+`--report <stage>/edit-report.json` on every call and reads the report before
+the stage dir is removed. The version parser takes plain `X.Y.Z` only, so a
+prerelease or build-tagged engine (`1.6.3-rc.1`, `1.6.3+build`) fails closed
+before any edit, as an older engine does: `hwp_version: cannot parse the
+engine's --version output`, with its install-or-repoint step.
+
+A refused run (`hwp_failed:`) with a readable report rejects with the object
+hwp-editor's Tauri client reads, `{ code: "failed", message, report,
+engineVersion }`, **only when the call carries `structuredRefusal: true`**.
+That argument is the client's capability signal that it reads refused edit
+reports. It is deliberately not `report: true`: released @hwp-editor/core 1.4.x
+already sends `report` for preset batches and block inserts, and its object
+branch skips the string classifier, so keying on `report` would cost today's
+client its localised refusal classification. hwp-editor's Tauri client must
+send `structuredRefusal: true` on edits for this path to apply; until it does,
+maru keeps the string error. `message` is always the unchanged legacy string
+(including `[work dir <json>]`).
+
+Before it leaves the host, the report is sanitized as hwp-editor's server does
+(`sanitizeEditReport(parseEditReport(...))`, ported in
+`src-tauri/src/hwped/report_paths.rs`). It is parsed into the known
+edit-report-v1 1.1 shape, so unknown fields are dropped, and a report that is
+not edit-report-v1 (wrong contract, schema major or refusal code, or a value
+the schema forbids) keeps the string error. `output` becomes the caller's
+document name. Only diagnostics are redacted: op `reason`, refusal `message`,
+`values.detail` and issue messages, using the same passes as upstream
+`withoutPaths` (stage dir, quoted paths, the engine's file-head `{path}: `
+lines, paths running to a known extension, and other absolute POSIX, Windows
+drive, UNC or `file://` paths). Typed anchors, styles and issue-path segments
+stay exact. A parity test holds the port to input/output pairs recorded by
+running the upstream function. On unix the report is read through one
+`O_NOFOLLOW` handle capped at 4 MiB. On other platforms the link check and the
+open are separate calls, which is acceptable only because the stage dir is
+Maru's private tempdir and the engine has exited.
+
+Engines below 1.6.3, a missing, oversized or unparsable report, non-refusal
+failures (spawn, timeout, output limit) and calls without `structuredRefusal`
+keep the string error, and hwp-editor falls back to stderr classification.
 
 ## Binary resolution
 
