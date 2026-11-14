@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { TASK_COMPLETION_CASES, parseTaskCompletionBehavior } from "./record-task-completion-isolation.mjs";
 
