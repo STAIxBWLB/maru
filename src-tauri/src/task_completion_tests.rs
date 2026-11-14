@@ -877,3 +877,146 @@ fn completion_guard_unrelated_and_same_bucket_file_renames_do_not_parse_legacy_b
         assert!(!fixture.work.join(".maru/task-completion").exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn completion_guard_absent_namespaces_keep_config_parent_alias_moves_ordinary() {
+    let home = Home::new();
+    let fixture = Fixture::new(&home, None);
+    fs::remove_dir(fixture.work.join(".maru")).unwrap();
+    let config = fixture.work.join("config-storage");
+    fs::create_dir(&config).unwrap();
+    fs::write(config.join("agents.json"), "{\"agents\":[]}").unwrap();
+    std::os::unix::fs::symlink(&config, fixture.work.join(".maru")).unwrap();
+    crate::workspace_files::rename_workspace_entry(
+        fixture.work_path(),
+        "config-storage".into(),
+        "moved-config".into(),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(fixture.work.join("moved-config/agents.json")).unwrap(),
+        "{\"agents\":[]}"
+    );
+    assert!(!config.exists());
+    // Optional read absence does not authorize creation through the alias.
+    assert!(crate::task_completion::set_policy(
+        &fixture.work,
+        TASK_PATH,
+        true,
+        &crate::document::revision_for(&fixture.original)
+    )
+    .is_err());
+    assert_eq!(
+        fs::read_to_string(fixture.work.join(TASK_PATH)).unwrap(),
+        fixture.original
+    );
+    assert!(!fixture.work.join("moved-config/task-completion").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn completion_guard_existing_namespace_through_config_alias_still_refuses() {
+    let home = Home::new();
+    let fixture = Fixture::new(&home, None);
+    fs::remove_dir(fixture.work.join(".maru")).unwrap();
+    let config = fixture.work.join("config-storage");
+    fs::create_dir_all(config.join("task-completion/policies")).unwrap();
+    std::os::unix::fs::symlink(&config, fixture.work.join(".maru")).unwrap();
+    let result = crate::workspace_files::rename_workspace_entry(
+        fixture.work_path(),
+        "config-storage".into(),
+        "moved-config".into(),
+    );
+    assert!(result.is_err() || result.as_ref().is_ok_and(|outcome| outcome.error.is_some()));
+    assert!(config.join("task-completion/policies").is_dir());
+    assert!(!fixture.work.join("moved-config").exists());
+}
+
+#[test]
+fn completion_guard_unreferenced_corrupt_execution_claim_is_not_global_scope_evidence() {
+    let home = Home::new();
+    let fixture = Fixture::new(&home, None);
+    fs::create_dir_all(fixture.work.join(".maru/task-execution")).unwrap();
+    fs::write(
+        fixture.work.join(".maru/task-execution/other-task.json"),
+        "corrupt unrelated claim",
+    )
+    .unwrap();
+    fs::write(fixture.work.join("ordinary.md"), "# Ordinary\n").unwrap();
+    crate::workspace_files::rename_workspace_entry(
+        fixture.work_path(),
+        "ordinary.md".into(),
+        "renamed.md".into(),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(fixture.work.join("renamed.md")).unwrap(),
+        "# Ordinary\n"
+    );
+    assert!(!fixture.work.join(".maru/task-completion").exists());
+}
+
+#[test]
+fn completion_guard_corrupt_claim_referenced_by_enabled_legacy_policy_still_refuses() {
+    let home = Home::new();
+    let fixture = Fixture::new(&home, None);
+    fs::create_dir_all(fixture.work.join(".maru/task-execution")).unwrap();
+    fs::write(
+        fixture.work.join(".maru/task-execution/bound-task.json"),
+        "corrupt referenced claim",
+    )
+    .unwrap();
+    fs::create_dir_all(fixture.work.join(".maru/task-completion/policies")).unwrap();
+    fs::write(
+        fixture
+            .work
+            .join(".maru/task-completion/policies/legacy.json"),
+        "{\"taskId\":\"bound-task\",\"required\":true,\"revision\":\"legacy-policy\"}",
+    )
+    .unwrap();
+    fs::write(fixture.work.join("ordinary.md"), "# Ordinary\n").unwrap();
+    let result = crate::workspace_files::rename_workspace_entry(
+        fixture.work_path(),
+        "ordinary.md".into(),
+        "renamed.md".into(),
+    );
+    assert!(result.is_err() || result.as_ref().is_ok_and(|outcome| outcome.error.is_some()));
+    assert_eq!(
+        fs::read_to_string(fixture.work.join("ordinary.md")).unwrap(),
+        "# Ordinary\n"
+    );
+    assert!(!fixture.work.join("renamed.md").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn completion_guard_symlinked_config_root_still_protects_existing_physical_namespaces() {
+    let home = Home::new();
+    for namespace in ["task-completion", "task-execution"] {
+        let fixture = Fixture::new(&home, None);
+        fs::remove_dir(fixture.work.join(".maru")).unwrap();
+        let storage = fixture.work.join("config-storage");
+        fs::create_dir_all(storage.join(namespace)).unwrap();
+        std::os::unix::fs::symlink(&storage, fixture.work.join(".maru")).unwrap();
+        let record = storage.join(namespace).join("record.json");
+        let before = "{\"backendOwned\":true}";
+        fs::write(&record, before).unwrap();
+        let write = crate::document::save_document(
+            fixture.work_path(),
+            format!("config-storage/{namespace}/record.json"),
+            "{\"backendOwned\":false}".into(),
+            Some(crate::document::revision_for(before)),
+        );
+        assert!(write.is_err());
+        assert_eq!(fs::read_to_string(&record).unwrap(), before);
+        let moved = crate::workspace_files::rename_workspace_entry(
+            fixture.work_path(),
+            format!("config-storage/{namespace}"),
+            "moved-namespace".into(),
+        );
+        assert!(moved.is_err() || moved.as_ref().is_ok_and(|outcome| outcome.error.is_some()));
+        assert_eq!(fs::read_to_string(record).unwrap(), before);
+        assert!(!storage.join("moved-namespace").exists());
+    }
+}

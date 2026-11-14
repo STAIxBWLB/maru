@@ -171,10 +171,35 @@ fn validate_control(work: &Path, path: &Path) -> Result<(), IpcError> {
     }
     Ok(())
 }
+/// Optional feature reads must not turn an unrelated config-only `.maru`
+/// alias into completion infrastructure. Once the owned namespace exists,
+/// every ancestor and leaf still uses the strict no-symlink validator.
+fn optional_namespace_present(work: &Path, path: &Path) -> Result<bool, IpcError> {
+    let namespace = [root(work), work.join(".maru/task-execution")]
+        .into_iter()
+        .find(|namespace| path.starts_with(namespace));
+    let Some(namespace) = namespace else {
+        return Ok(true);
+    };
+    match fs::symlink_metadata(&namespace) {
+        Ok(_) => {
+            validate_control(work, &namespace)?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error(
+            "Cannot inspect optional completion namespace",
+            error,
+        )),
+    }
+}
 fn read_record<T: for<'de> Deserialize<'de>>(
     work: &Path,
     path: &Path,
 ) -> Result<Option<T>, IpcError> {
+    if !optional_namespace_present(work, path)? {
+        return Ok(None);
+    }
     validate_control(work, path)?;
     let file = match fs::File::open(path) {
         Ok(f) => f,
@@ -274,9 +299,23 @@ fn namespace_guard(work: &Path, path: &Path) -> Result<(), IpcError> {
     }
     for name in [CONTROL, ".maru/task-execution"] {
         let protected = canonical.join(name);
-        if physical.starts_with(&protected)
-            || (protected.exists() && protected.starts_with(&physical))
-        {
+        // The owned root may itself be reached through a legitimate config
+        // alias. Protect its existing physical destination and its parents,
+        // without treating an absent namespace as completion infrastructure.
+        match fs::symlink_metadata(&protected) {
+            Ok(_) => {
+                let protected_physical = fs::canonicalize(&protected)
+                    .map_err(|e| io_error("Cannot resolve existing completion namespace", e))?;
+                if physical.starts_with(&protected_physical)
+                    || protected_physical.starts_with(&physical)
+                {
+                    return Err(refused("Task execution and completion metadata is owned by the backend", "use the Task execution/completion controls instead of moving or editing its evidence"));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error("Cannot inspect completion namespace", error)),
+        }
+        if physical.starts_with(&protected) {
             return Err(refused("Task execution and completion metadata is owned by the backend", "use the Task execution/completion controls instead of moving or editing its evidence"));
         }
     }
@@ -420,7 +459,9 @@ fn scope_bound(scopes: &mut Vec<KnownScope>) -> Result<(), IpcError> {
 }
 
 /// A missing index can belong to an earlier receipt version. Discover its
-/// complete bounded metadata, never infer scope by walking user documents.
+/// complete bounded completion metadata, never infer scope by walking user
+/// documents or scanning unrelated ordinary execution claims. An enabled
+/// legacy policy may consult only its own claim to recover a missing root.
 fn legacy_scopes(work: &Path) -> Result<Vec<KnownScope>, IpcError> {
     let mut scopes = Vec::new();
     let mut records = 0usize;
@@ -428,8 +469,10 @@ fn legacy_scopes(work: &Path) -> Result<Vec<KnownScope>, IpcError> {
     for (directory, kind) in [
         (root(work).join("policy-revisions"), 0),
         (root(work).join("policies"), 1),
-        (work.join(".maru/task-execution"), 2),
     ] {
+        if !optional_namespace_present(work, &directory)? {
+            continue;
+        }
         validate_control(work, &directory)?;
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
@@ -464,7 +507,7 @@ fn legacy_scopes(work: &Path) -> Result<Vec<KnownScope>, IpcError> {
                         None => None,
                     }
                 }
-                1 => {
+                _ => {
                     let record = read_record::<PolicyRecord>(work, &path)?.ok_or_else(|| {
                         conflict("A policy record disappeared during scope discovery")
                     })?;
@@ -473,14 +516,6 @@ fn legacy_scopes(work: &Path) -> Result<Vec<KnownScope>, IpcError> {
                         None if record.required => Some(recorded_claim_scope(work, Some(&record.task_id))?.ok_or_else(|| refused("A legacy enabled completion policy has no recorded task scope", "reconcile its task scope before moving directories"))?),
                         None => None,
                     }
-                }
-                _ => {
-                    let claim = read_record::<TaskExecutionClaim>(work, &path)?
-                        .ok_or_else(|| conflict("A claim disappeared during scope discovery"))?;
-                    if claim.workspace != work.to_string_lossy().as_ref() {
-                        return Err(conflict("A legacy task scope belongs to another workspace"));
-                    }
-                    Some(claim.tasks_root)
                 }
             };
             if let Some(raw) = raw {
