@@ -203,7 +203,7 @@ fn the_rejection_serializes_as_the_object_hwp_editor_reads() {
 
 #[test]
 fn staging_paths_are_removed_from_report_diagnostics() {
-    // A report whose diagnostics name the stage dir, as a real engine's can.
+    // A schema-valid report whose diagnostics name the stage dir.
     let report = serde_json::json!({
         "schema_version": "1.1",
         "contract": "hwp-edit-report-v1",
@@ -218,8 +218,9 @@ fn staging_paths_are_removed_from_report_diagnostics() {
         }],
         "applied_count": 0,
         "failed_count": 1,
-        "refusal": {"code": "insert_blocks.invalid_definition",
-            "values": {"issues": [{"path": ["{STAGE}"], "message": "bad {STAGE}/z"}]},
+        "refusal": {"code": "insert_blocks.invalid_spec",
+            "values": {"container_width_mm": 150.0,
+                "issues": [{"code": "too_wide", "path": ["{STAGE}", 0], "message": "bad {STAGE}/z"}]},
             "message": "refused in {STAGE}"}
     })
     .to_string();
@@ -231,8 +232,7 @@ fn staging_paths_are_removed_from_report_diagnostics() {
         },
     );
     let _env = BinEnv::set(&binary);
-    let error = refused_edit(document()).unwrap_err();
-    let report = refused(error).report;
+    let report = refused(refused_edit(document()).unwrap_err()).report;
     assert_eq!(report["output"], "보고서.hwpx");
     let op = &report["ops"][0];
     assert_eq!(op["reason"], "cannot read <work dir>/in.hwpx");
@@ -246,14 +246,13 @@ fn staging_paths_are_removed_from_report_diagnostics() {
     // User-valued identifiers are data, not diagnostics: they stay exact.
     let style = op["refusal"]["values"]["style"].as_str().unwrap();
     assert!(
-        style.ends_with("-is-a-style-name")
-            && !style.starts_with("<work dir>")
-            && !style.starts_with("<path>")
+        style.ends_with("-is-a-style-name") && !style.contains('<'),
+        "{style}"
     );
-    assert!(!report["refusal"]["values"]["issues"][0]["path"][0]
+    let segment = report["refusal"]["values"]["issues"][0]["path"][0]
         .as_str()
-        .unwrap()
-        .contains("<work dir>"));
+        .unwrap();
+    assert!(!segment.contains('<'), "{segment}");
 }
 
 #[test]
@@ -360,7 +359,7 @@ fn a_client_that_did_not_signal_structured_refusals_keeps_the_string_error() {
 }
 
 #[test]
-fn home_and_windows_paths_anywhere_in_the_report_are_redacted() {
+fn home_and_windows_paths_are_redacted_and_unknown_fields_dropped() {
     let report = serde_json::json!({
         "schema_version": "1.1",
         "contract": "hwp-edit-report-v1",
@@ -368,15 +367,16 @@ fn home_and_windows_paths_anywhere_in_the_report_are_redacted() {
         "dry_run": false,
         "ops": [{
             "index": 0, "op": "insert_image", "status": "failed", "pieces_touched": 0,
-            "changed": [], "reason": r"cannot read C:\Users\someone\Pictures\a.png",
+            "changed": [], "reason": "cannot read C:\\Users\\someone\\Pictures\\a.png",
             "refusal": {"code": "unclassified", "values": {},
-                "message": "cannot read /Users/someone/workspace/image.png"}
+                "message": "입출력 오류: /Users/홍 길동/private.bin: permission denied"},
+            "future_op_field": "/Users/someone/op-secret"
         }],
         "applied_count": 0,
         "failed_count": 1,
-        "future_field": {"nested": ["see /home/someone/notes.txt", r"\\server\share\x.json"]},
+        "future": {"path": {"message": "/Users/alice/x"}},
         "refusal": {"code": "add_table.anchor_not_found",
-            "values": {"anchor": "/Users/someone/typed anchor"},
+            "values": {"anchor": "/Users/someone/typed anchor", "path": {"message": "/Users/alice/y"}},
             "message": "anchor missing; input was /var/folders/zz/doc.hwpx"}
     })
     .to_string();
@@ -391,27 +391,57 @@ fn home_and_windows_paths_anywhere_in_the_report_are_redacted() {
     let report = refused(refused_edit(document()).unwrap_err()).report;
     let text = report.to_string();
     for leaked in [
-        "/Users/someone/workspace",
-        r"Pictures",
-        "/home/someone",
-        "server",
+        "alice",
+        "Pictures",
+        "길동",
         "/var/folders",
+        "op-secret",
+        "future",
     ] {
         assert!(!text.contains(leaked), "{leaked} leaked: {text}");
     }
     assert_eq!(report["output"], "보고서.hwpx");
-    assert_eq!(report["ops"][0]["refusal"]["message"], "cannot read <path>");
     assert_eq!(report["ops"][0]["reason"], "cannot read <path>");
-    assert_eq!(report["future_field"]["nested"][0], "see <path>");
+    assert_eq!(
+        report["ops"][0]["refusal"]["message"],
+        "입출력 오류: <path>: permission denied"
+    );
     assert_eq!(
         report["refusal"]["message"],
         "anchor missing; input was <path>"
     );
-    // The typed anchor is an identifier and stays exact, even if path-shaped.
+    // The typed anchor is an identifier and stays exact, even if path-shaped;
+    // the unknown `path` beside it is dropped.
     assert_eq!(
-        report["refusal"]["values"]["anchor"],
-        "/Users/someone/typed anchor"
+        report["refusal"]["values"],
+        serde_json::json!({"anchor": "/Users/someone/typed anchor"})
     );
+}
+
+#[test]
+fn a_report_that_is_not_edit_report_v1_keeps_the_string_error() {
+    for report in [
+        serde_json::json!({"schema_version": "1.1", "contract": "other", "output": "x", "dry_run": false, "ops": [], "applied_count": 0, "failed_count": 0}),
+        serde_json::json!({"schema_version": "2.0", "contract": "hwp-edit-report-v1", "output": "x", "dry_run": false, "ops": [], "applied_count": 0, "failed_count": 0}),
+        serde_json::json!({"schema_version": "1.1", "contract": "hwp-edit-report-v1", "output": "x", "dry_run": false, "ops": [], "applied_count": 0, "failed_count": 0, "refusal": {"code": "made_up", "values": {}, "message": "m"}}),
+    ] {
+        let report = report.to_string();
+        let (_fixture, binary) = engine(
+            "2.0.0",
+            Edit::Refuse {
+                report: &report,
+                stderr: UNAPPLIED_STDERR,
+            },
+        );
+        let _env = BinEnv::set(&binary);
+        assert!(
+            matches!(
+                refused_edit(document()).unwrap_err(),
+                HwpedBridgeError::Legacy(_)
+            ),
+            "{report}"
+        );
+    }
 }
 
 #[test]

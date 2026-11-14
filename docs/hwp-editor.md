@@ -137,14 +137,22 @@ send `structuredRefusal: true` on edits for this path to apply; until it does,
 maru keeps the string error. `message` is always the unchanged legacy string
 (including `[work dir <json>]`).
 
-Before it leaves the host, the report is sanitized as hwp-editor's server does:
-`output` becomes the caller's document name, and every other string, at any
-depth and in unknown fields too, has the stage dir replaced with `<work dir>`
-and any absolute path (POSIX, Windows drive, UNC, `file://`) replaced with
-`<path>` (`src-tauri/src/hwped/report_paths.rs`, held to upstream
-`withoutPaths` by a recorded parity test). Strings under identifier keys
-(`anchor`, `style`, an issue's `path`) are user-valued and stay exact. The
-report is read through one no-follow handle capped at 4 MiB.
+Before it leaves the host, the report is sanitized as hwp-editor's server does
+(`sanitizeEditReport(parseEditReport(...))`, ported in
+`src-tauri/src/hwped/report_paths.rs`). It is parsed into the known
+edit-report-v1 1.1 shape, so unknown fields are dropped, and a report that is
+not edit-report-v1 (wrong contract, schema major or refusal code, or a value
+the schema forbids) keeps the string error. `output` becomes the caller's
+document name. Only diagnostics are redacted: op `reason`, refusal `message`,
+`values.detail` and issue messages, using the same passes as upstream
+`withoutPaths` (stage dir, quoted paths, the engine's file-head `{path}: `
+lines, paths running to a known extension, and other absolute POSIX, Windows
+drive, UNC or `file://` paths). Typed anchors, styles and issue-path segments
+stay exact. A parity test holds the port to input/output pairs recorded by
+running the upstream function. On unix the report is read through one
+`O_NOFOLLOW` handle capped at 4 MiB. On other platforms the link check and the
+open are separate calls, which is acceptable only because the stage dir is
+Maru's private tempdir and the engine has exited.
 
 Engines below 1.6.3, a missing, oversized or unparsable report, non-refusal
 failures (spawn, timeout, output limit) and calls without `structuredRefusal`

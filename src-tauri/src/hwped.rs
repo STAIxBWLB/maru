@@ -1490,25 +1490,16 @@ fn read_refusal_report(path: &Path, name: &str, stage_dir: &str) -> Option<Value
         return None;
     }
     let report: Value = serde_json::from_slice(&bytes).ok()?;
-    report
-        .is_object()
-        .then(|| sanitize_edit_report(report, name, stage_dir))
+    sanitize_edit_report(report, name, stage_dir)
 }
 
-/// Remove paths before a report leaves the host, as hwp-editor's server does:
-/// `output` becomes the caller's document name, and every other string, at any
-/// depth and in unknown fields too, has the stage dir replaced with
-/// `<work dir>` and any absolute path, POSIX or Windows, with `<path>`. Strings
-/// under identifier keys (`anchor`, `style`, an issue's `path`) are user-valued
-/// identifiers and stay exact.
-pub(crate) fn sanitize_edit_report(mut report: Value, name: &str, stage_dir: &str) -> Value {
-    report_paths::redact_value(&mut report, stage_dir);
-    if let Some(object) = report.as_object_mut() {
-        if object.contains_key("output") {
-            object.insert("output".to_string(), Value::String(name.to_string()));
-        }
-    }
-    report
+/// The report as hwp-editor's server exposes it: parsed into the known
+/// edit-report-v1 shape (unknown fields dropped, a report that is not
+/// edit-report-v1 refused), `output` replaced with the caller's name, and the
+/// stage dir and every absolute path removed from its diagnostics. Typed
+/// anchors, styles and issue paths stay exact (`hwped/report_paths.rs`).
+pub(crate) fn sanitize_edit_report(report: Value, name: &str, stage_dir: &str) -> Option<Value> {
+    report_paths::sanitize_report(&report, name, stage_dir)
 }
 
 fn compose_now(spec: Value, name: String) -> Result<HwpedComposeResponse, String> {
