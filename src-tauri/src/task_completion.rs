@@ -2110,6 +2110,18 @@ fn recover_observed_terminal(
     Ok(true)
 }
 #[cfg(test)]
+pub(crate) static AFTER_DONE_WRITE_FAILURE: std::sync::Mutex<Option<PathBuf>> =
+    std::sync::Mutex::new(None);
+#[cfg(test)]
+pub(crate) fn fail_after_done_write(work: &Path) -> Result<(), String> {
+    let mut failure = AFTER_DONE_WRITE_FAILURE.lock().unwrap();
+    if failure.as_deref() == Some(work) {
+        *failure = None;
+        return Err("Completion Done bytes were written but archive publication was interrupted; refresh evidence to reconcile the recorded acceptance intent".into());
+    }
+    Ok(())
+}
+#[cfg(test)]
 pub(crate) static AFTER_TASK_EFFECT_FAILURE: std::sync::Mutex<Option<PathBuf>> =
     std::sync::Mutex::new(None);
 pub(crate) fn finalize(

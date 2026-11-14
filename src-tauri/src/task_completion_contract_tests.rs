@@ -487,3 +487,105 @@ fn completion_ac3_restart_recovers_only_an_already_written_terminal_effect() {
     assert!(replay.receipt.acceptance.is_some());
     assert_eq!(files(&f.work.join(".maru/versions")), snapshots);
 }
+
+fn completion_review_r5_interrupted_before_archive() -> (Fixture, TaskExecutionToken, String, String)
+{
+    let f = Fixture::new();
+    let token = f.creator("creator-request", CREATOR);
+    f.apply(CREATOR);
+    f.review(&token, "review", CliProviderKind::Claude, true);
+    let (approval, revision) = f.approve(&token);
+    *completion::AFTER_DONE_WRITE_FAILURE.lock().unwrap() = Some(f.work.clone());
+    let error = completion::finalize(&f.state(), &f.work, &token, &approval, &revision)
+        .err()
+        .unwrap();
+    assert!(error
+        .message
+        .contains("archive publication was interrupted"));
+    assert!(fs::read_to_string(f.work.join(TASK))
+        .unwrap()
+        .contains("status: done"));
+    assert!(!f.work.join("tasks/archive/task.md").exists());
+    (f, token, approval, revision)
+}
+
+#[test]
+fn completion_review_r5_restart_reconciles_done_bytes_before_archive_rename() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let done = fs::read(f.work.join(TASK)).unwrap();
+    let snapshots = files(&f.work.join(".maru/versions"));
+    let restarted = ApprovalState::default();
+    let recovered =
+        completion::finalize(&restarted, &f.work, &token, &approval, &revision).unwrap();
+    assert!(recovered.duplicate);
+    assert!(!f.work.join(TASK).exists());
+    assert_eq!(
+        fs::read(f.work.join("tasks/archive/task.md")).unwrap(),
+        done
+    );
+    assert_eq!(files(&f.work.join(".maru/versions")), snapshots);
+    let receipt = serde_json::to_value(&recovered.receipt).unwrap();
+    assert_eq!(receipt["acceptance"]["completed"], true);
+    assert!(
+        completion::finalize(&restarted, &f.work, &token, &approval, &revision)
+            .unwrap()
+            .duplicate
+    );
+    assert_eq!(files(&f.work.join(".maru/versions")), snapshots);
+}
+
+#[test]
+fn completion_review_r5_changed_intermediate_source_is_never_archived() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let changed = fs::read_to_string(f.work.join(TASK)).unwrap() + "\nUnreviewed edit\n";
+    fs::write(f.work.join(TASK), &changed).unwrap();
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read_to_string(f.work.join(TASK)).unwrap(), changed);
+    assert!(!f.work.join("tasks/archive/task.md").exists());
+}
+
+#[test]
+fn completion_review_r5_changed_artifact_is_never_recovered_as_accepted() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let done = fs::read(f.work.join(TASK)).unwrap();
+    fs::write(f.work.join("output.json"), "unreviewed artifact").unwrap();
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read(f.work.join(TASK)).unwrap(), done);
+    assert!(!f.work.join("tasks/archive/task.md").exists());
+}
+
+#[test]
+fn completion_review_r5_occupied_archive_is_never_overwritten() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let done = fs::read(f.work.join(TASK)).unwrap();
+    let target = f.work.join("tasks/archive/task.md");
+    fs::create_dir_all(target.parent().unwrap()).unwrap();
+    fs::write(&target, "unrelated existing task").unwrap();
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read(f.work.join(TASK)).unwrap(), done);
+    assert_eq!(
+        fs::read_to_string(target).unwrap(),
+        "unrelated existing task"
+    );
+}

@@ -650,6 +650,10 @@ pub(crate) fn update_task_status_in_transaction_with_completion(
                 .map_err(|err| format!("Cannot update task status: {err}"))?;
         }
     }
+    #[cfg(test)]
+    if completion_permit.is_some() {
+        crate::task_completion::fail_after_done_write(&work)?;
+    }
     if current_bucket == target_bucket {
         return task_row_for_path(&work, &path, current_bucket);
     }
@@ -2895,5 +2899,95 @@ mod completion_schedule_review_tests {
             "schedule writer modified backend evidence: {result:?}"
         );
         assert_eq!(fs::read_to_string(path).unwrap(), before);
+    }
+}
+
+#[cfg(test)]
+mod completion_review_precompleted_archive_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::Home;
+    use crate::scratchpad::phase08_08::registry;
+
+    fn seed_precompleted_active(work: &Path) -> String {
+        fs::create_dir_all(work.join("tasks/active")).unwrap();
+        registry(work, "direct");
+        let content =
+            "---\ntitle: Precompleted active task\nstatus: done\ncustom: preserved\n---\n# Body\n";
+        fs::write(work.join("tasks/active/task.md"), content).unwrap();
+        content.into()
+    }
+
+    #[test]
+    fn completion_review_r4_ui_enabled_precompleted_active_cannot_archive_via_status_done() {
+        let home = Home::new();
+        let work = home.root.path().join("r4-required");
+        let original = seed_precompleted_active(&work);
+        // Seed the pre-existing status, then enable the requirement through
+        // the actual app policy operation rather than forging its fields.
+        crate::task_completion::set_policy(
+            &work,
+            "tasks/active/task.md",
+            true,
+            &revision_for(&original),
+        )
+        .unwrap();
+        let before = fs::read_to_string(work.join("tasks/active/task.md")).unwrap();
+        assert_eq!(
+            task_status_from_content(&before, TaskBucket::Active),
+            TaskStatus::Done
+        );
+        assert!(!work.join(".maru/task-completion/receipts").exists());
+        let result = update_task_status(
+            work.to_string_lossy().into_owned(),
+            "tasks/active/task.md".into(),
+            TaskStatus::Done,
+            None,
+        );
+        assert!(
+            result.is_err(),
+            "a precompleted Active note bypassed required acceptance when archiving: {result:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(work.join("tasks/active/task.md")).unwrap(),
+            before
+        );
+        assert!(!work.join("tasks/archive").exists());
+        assert!(!work.join(".maru/task-completion/receipts").exists());
+    }
+
+    #[test]
+    fn completion_review_r4_ordinary_precompleted_active_keeps_manual_archive_behavior() {
+        let home = Home::new();
+        for explicit_policy_off in [false, true] {
+            let work = home
+                .root
+                .path()
+                .join(format!("r4-ordinary-{explicit_policy_off}"));
+            let original = seed_precompleted_active(&work);
+            if explicit_policy_off {
+                crate::task_completion::set_policy(
+                    &work,
+                    "tasks/active/task.md",
+                    false,
+                    &revision_for(&original),
+                )
+                .unwrap();
+            }
+            let before = fs::read_to_string(work.join("tasks/active/task.md")).unwrap();
+            let row = update_task_status(
+                work.to_string_lossy().into_owned(),
+                "tasks/active/task.md".into(),
+                TaskStatus::Done,
+                None,
+            )
+            .unwrap();
+            assert_eq!(row.bucket, TaskBucket::Archive);
+            assert!(!work.join("tasks/active/task.md").exists());
+            assert_eq!(
+                fs::read_to_string(work.join("tasks/archive/task.md")).unwrap(),
+                before
+            );
+            assert!(!work.join(".maru/task-completion/receipts").exists());
+        }
     }
 }
