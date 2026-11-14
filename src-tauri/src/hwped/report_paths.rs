@@ -44,14 +44,16 @@ const EXTENSIONS: &[&str] = &[
 
 const PATH: &str = "<path>";
 
+/// JS `\p{Script=Hangul}`, recorded from that regex over every code point:
+/// 14 ranges, Han excluded. A Han point admitted here (`佐`, `々`, `〡`) makes a
+/// space-separated path tail survive a pass that redacts it upstream.
 fn is_hangul(ch: char) -> bool {
     matches!(ch,
-        '\u{1100}'..='\u{11FF}' | '\u{2E80}'..='\u{2EFF}' | '\u{3005}' | '\u{3021}'..='\u{3029}'
-        | '\u{302E}' | '\u{302F}' | '\u{3131}'..='\u{318E}' | '\u{3200}'..='\u{321E}'
-        | '\u{3260}'..='\u{327E}' | '\u{A960}'..='\u{A97C}' | '\u{AC00}'..='\u{D7A3}'
-        | '\u{D7B0}'..='\u{D7C6}' | '\u{D7CB}'..='\u{D7FB}' | '\u{FFA0}'..='\u{FFBE}'
-        | '\u{FFC2}'..='\u{FFC7}' | '\u{FFCA}'..='\u{FFCF}' | '\u{FFD2}'..='\u{FFD7}'
-        | '\u{FFDA}'..='\u{FFDC}')
+        '\u{1100}'..='\u{11FF}' | '\u{302E}' | '\u{302F}' | '\u{3131}'..='\u{318E}'
+        | '\u{3200}'..='\u{321E}' | '\u{3260}'..='\u{327E}' | '\u{A960}'..='\u{A97C}'
+        | '\u{AC00}'..='\u{D7A3}' | '\u{D7B0}'..='\u{D7C6}' | '\u{D7CB}'..='\u{D7FB}'
+        | '\u{FFA0}'..='\u{FFBE}' | '\u{FFC2}'..='\u{FFC7}' | '\u{FFCA}'..='\u{FFCF}'
+        | '\u{FFD2}'..='\u{FFD7}' | '\u{FFDA}'..='\u{FFDC}')
 }
 
 /// JS `\s` on the characters a report can carry.
@@ -349,10 +351,13 @@ fn nonempty(value: Option<&Value>) -> Option<String> {
     text(value).filter(|text| !text.trim().is_empty())
 }
 
-/// A non-negative safe integer (JS `Number.isSafeInteger(n) && n >= 0`).
+/// A non-negative safe integer (JS `Number.isSafeInteger(n) && n >= 0`), which
+/// takes an integral float too: a report written with `2.0` is a report, not
+/// one to drop to the legacy string.
 fn count(value: Option<&Value>) -> Option<Value> {
-    let number = value?.as_u64()?;
-    (number < (1u64 << 53)).then(|| Value::from(number))
+    let number = value?.as_f64()?;
+    (number.is_finite() && number.fract() == 0.0 && (0.0..(1u64 << 53) as f64).contains(&number))
+        .then(|| Value::from(number as u64))
 }
 
 fn millimetres(value: Option<&Value>) -> Option<Value> {

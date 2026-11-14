@@ -104,6 +104,18 @@ const UPSTREAM: &[(&str, &str, &str)] = &[
     ("<path> b/c/data 한글/x", "", "<path> 한글/x"),
     ("/a/b  c/d", "", "<path>  c/d"),
     ("/Users/x\ny/z", "", "<path>\ny/z"),
+    // Han code points are not Script=Hangul, so a space-separated tail holding
+    // them is a path tail upstream redacts (T124-R3.1).
+    (
+        "cannot read /Users/A 佐々木/private.bin",
+        "",
+        "cannot read <path>",
+    ),
+    (
+        "/々/private.bin: permission denied",
+        "",
+        "<path>: permission denied",
+    ),
 ];
 
 #[test]
@@ -123,4 +135,42 @@ fn a_file_head_line_redacts_the_whole_path_up_to_its_colon() {
         ),
         "입출력 오류: <path>: permission denied"
     );
+}
+
+#[test]
+fn count_mirrors_number_is_safe_integer() {
+    use serde_json::json;
+    // An integral float is a safe integer upstream (`0.0`, `2.0`), so the
+    // report it appears in must not drop to the legacy string (T124-R3.2).
+    assert_eq!(count(Some(&json!(0.0))), Some(json!(0)));
+    assert_eq!(count(Some(&json!(2.0))), Some(json!(2)));
+    assert_eq!(count(Some(&json!(3))), Some(json!(3)));
+    assert_eq!(count(Some(&json!(-1.0))), None);
+    assert_eq!(count(Some(&json!(-3))), None);
+    assert_eq!(count(Some(&json!(1.5))), None);
+    assert_eq!(count(Some(&json!(9_007_199_254_740_992.0))), None);
+    assert_eq!(count(Some(&json!(9_007_199_254_740_992u64))), None);
+    assert_eq!(count(Some(&json!("2"))), None);
+    assert_eq!(count(None), None);
+}
+
+#[test]
+fn an_integral_float_count_keeps_the_report_structured() {
+    let report = serde_json::json!({
+        "schema_version": "1.1",
+        "contract": "hwp-edit-report-v1",
+        "output": "/Users/someone/out.hwpx",
+        "dry_run": false,
+        "ops": [{
+            "index": 0.0, "op": "replace_text", "status": "applied",
+            "pieces_touched": 2.0, "changed": [], "reason": null
+        }],
+        "applied_count": 1.0,
+        "failed_count": 0.0
+    });
+    let out = sanitize_report(&report, "out.hwpx", "").expect("a safe integer stays a report");
+    assert_eq!(out["applied_count"], serde_json::json!(1));
+    assert_eq!(out["failed_count"], serde_json::json!(0));
+    assert_eq!(out["ops"][0]["index"], serde_json::json!(0));
+    assert_eq!(out["ops"][0]["pieces_touched"], serde_json::json!(2));
 }
