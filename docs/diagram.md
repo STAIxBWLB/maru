@@ -438,7 +438,11 @@ uses no network and writes nothing. Its only filesystem scope is the root
 `DiagramHost::scan_root` resolves for the caller-named workspace, which in
 Maru must be a registered workspace (`vault_list::registered_workspace_root`);
 a picked folder outside it, a `..` path or a link out of it is refused with
-`diagram_scan_outside_workspace`. Links are never followed. On unix every read,
+`diagram_scan_outside_workspace`. Links are never followed. The root is taken
+as the canonical path that host resolved, never canonicalized again: a second
+canonicalize follows links, so a component swapped for one would be adopted,
+while opening the path component by component from `/` with `O_NOFOLLOW`
+refuses it with `diagram_scan_workspace_unavailable`. On unix every read,
 listing and folder open is resolved from a handle on that root (`openat` with
 `O_NOFOLLOW` on each component), so a folder replaced by a link between the
 check and the read becomes a refused open instead of a read outside the

@@ -139,20 +139,17 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
         deadline: started + limits.time_budget,
         bytes: 0,
     };
-    let root = root.canonicalize().map_err(|error| {
-        ScanError::new(
-            "diagram_scan_workspace_unavailable",
-            format!("the workspace root cannot be opened: {error}"),
-            "reopen the workspace in Maru and scan again",
-        )
-    })?;
-    // Opened once, after the canonicalize above proved the root is the folder
-    // the host authorized. Every read below is resolved from this handle, not
-    // from that path, so replacing the root or a folder under it with a link
-    // during the scan cannot redirect a read outside the workspace.
-    let anchor = RootAnchor::open(&root)?;
-    let scan_root = resolve_picked(&root, picked)?;
-    let relative_path = relative_string(&root, &scan_root);
+    // Opened once, from the path the host resolved, without canonicalizing it
+    // again. A second canonicalize would walk the components again and adopt
+    // whatever one of them points at now, since it follows links; opening the
+    // canonical path component by component without following a link turns
+    // that replacement into a refusal instead. Every read below is resolved
+    // from this handle, not from the path, so replacing the root or a folder
+    // under it with a link during the scan cannot redirect a read outside the
+    // workspace either.
+    let anchor = RootAnchor::open(root)?;
+    let scan_root = resolve_picked(root, picked)?;
+    let relative_path = relative_string(root, &scan_root);
     let Some(scan_dir) = anchor.open_scan_root(&relative_path) else {
         return Err(ScanError::new(
             "diagram_scan_path_missing",
@@ -174,7 +171,7 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
         entries: 0,
         files: Vec::new(),
     };
-    let inventory = match git_index_files(&anchor, &root, &scan_root, &mut state)? {
+    let inventory = match git_index_files(&anchor, root, &scan_root, &mut state)? {
         Some(files) => {
             for file in files {
                 state.push(file)?;
@@ -372,7 +369,7 @@ struct RootAnchor {
 }
 
 impl RootAnchor {
-    /// Open `root`, which the caller has already canonicalized.
+    /// Open `root`, which is the canonical path the host resolved.
     fn open(root: &Path) -> Result<Self, ScanError> {
         let unavailable = |error: std::io::Error| {
             ScanError::new(
@@ -382,14 +379,57 @@ impl RootAnchor {
             )
         };
         #[cfg(unix)]
+        let replaced = |part: &Path| {
+            ScanError::new(
+                "diagram_scan_workspace_unavailable",
+                format!(
+                    "the workspace root cannot be opened: {} is now a link or not a folder",
+                    part.display()
+                ),
+                "reopen the workspace in Maru and scan again",
+            )
+        };
+        #[cfg(unix)]
         {
-            let handle = open_at(
+            // A canonical path contains no link, so walking it from `/` with
+            // `O_DIRECTORY|O_NOFOLLOW` per component reaches the authorized
+            // folder or refuses at the first component that has become a link
+            // since the host resolved it. Opening the whole path in one call
+            // guards the last component only, and a parent swapped for a link
+            // would be followed.
+            if !root.is_absolute() {
+                return Err(ScanError::new(
+                    "diagram_scan_workspace_unavailable",
+                    format!(
+                        "the workspace root cannot be opened: {} is not the absolute path the host resolved",
+                        root.display()
+                    ),
+                    "reopen the workspace in Maru and scan again",
+                ));
+            }
+            let mut current = open_at(
                 None,
-                root,
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Path::new("/"),
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
             )
             .ok_or_else(|| unavailable(std::io::Error::from(std::io::ErrorKind::NotFound)))?;
-            Ok(Self { handle })
+            for component in root.components() {
+                match component {
+                    Component::RootDir | Component::CurDir => continue,
+                    Component::Normal(name) => {
+                        current = open_at(
+                            Some(&current),
+                            Path::new(name),
+                            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                        )
+                        .ok_or_else(|| replaced(root))?;
+                    }
+                    // `..` and a prefix never appear in a canonical path, so a
+                    // root that carries one is not the path the host resolved.
+                    _ => return Err(replaced(root)),
+                }
+            }
+            Ok(Self { handle: current })
         }
         #[cfg(not(unix))]
         {
@@ -585,19 +625,23 @@ impl ScanDir {
                 .map_err(|error| self.list_error(error))?;
             for entry in listed {
                 let entry = entry.map_err(|error| self.list_error(error))?;
-                let name = match std::str::from_utf8(entry.file_name().to_bytes()) {
-                    Ok(name) => name,
-                    Err(_) => continue,
-                };
+                let bytes = entry.file_name().to_bytes();
                 // A handle-based listing yields the raw `.` and `..` entries
                 // that `read_dir` filters out, and neither may become a child of
-                // the walk.
-                if name == "." || name == ".." {
+                // the walk, so neither is charged.
+                if bytes == b"." || bytes == b".." {
                     continue;
                 }
+                // Charged before the name is decoded and before the type is
+                // resolved: a folder of names that are not UTF-8, or of names
+                // whose type the filesystem will not report, must still count
+                // toward the entry bound instead of being listed for free.
                 #[cfg(test)]
                 entry_probe::yielded_one();
                 admit()?;
+                let Ok(name) = std::str::from_utf8(bytes) else {
+                    continue;
+                };
                 visit(name, entry_kind(entry.file_type()))?;
             }
         }
@@ -606,15 +650,17 @@ impl ScanDir {
             let listed = fs::read_dir(&self.path).map_err(|error| self.list_error(error))?;
             for entry in listed {
                 let entry = entry.map_err(|error| self.list_error(error))?;
+                // Charged before the name is decoded and before the type is
+                // resolved, for the same reason as the Unix arm.
+                #[cfg(test)]
+                entry_probe::yielded_one();
+                admit()?;
                 let Ok(name) = entry.file_name().into_string() else {
                     continue;
                 };
                 let Ok(kind) = entry.file_type() else {
                     continue;
                 };
-                #[cfg(test)]
-                entry_probe::yielded_one();
-                admit()?;
                 let kind = if kind.is_dir() {
                     EntryKind::Dir
                 } else if kind.is_file() {

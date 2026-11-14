@@ -28,6 +28,9 @@ impl Drop for Scratch {
     }
 }
 
+/// The root is canonical, as the host hands it to [`scan`]: the system temp
+/// directory is reached through a link on macOS, and the scanner no longer
+/// canonicalizes a root it did not resolve.
 fn tempdir() -> Scratch {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -38,7 +41,7 @@ fn tempdir() -> Scratch {
     ));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
-    Scratch(path)
+    Scratch(path.canonicalize().unwrap())
 }
 
 /// A budget far from its deadline, for calling the resolvers directly.
@@ -930,6 +933,79 @@ fn a_wide_folder_is_refused_while_it_is_still_being_listed() {
         entry_probe::yielded(),
         cap + 1,
         "the listing must stop at the cap instead of enumerating the whole folder"
+    );
+}
+
+/// A name the scanner cannot represent is still an entry. The listing charges
+/// it before decoding it, so a folder of such names is refused at the cap
+/// instead of being read to the end and refused only afterwards.
+///
+/// Linux only: APFS rejects a file name that is not valid UTF-8 with `EILSEQ`,
+/// so the fixture cannot exist on macOS even though the Unix listing arm that
+/// skips such names runs there.
+#[test]
+#[cfg(all(unix, not(target_os = "macos")))]
+fn a_folder_of_unrepresentable_names_is_refused_while_it_is_still_being_listed() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tempdir();
+    // `fo\x80<index>`: the 0x80 is a lone continuation byte, so the name is not
+    // valid UTF-8. The index starts at 1 because a NUL byte cannot appear in a
+    // file name.
+    for index in 1..=40u8 {
+        let raw = [0x66, 0x6f, 0x80, index];
+        fs::write(dir.path().join(OsStr::from_bytes(&raw)), "").unwrap();
+    }
+    let anchor = RootAnchor::open(dir.path()).unwrap();
+    let scan_dir = anchor.open_dir("").unwrap();
+    let cap = 8;
+    let mut state = Walk {
+        limits: limits(),
+        budget: open_budget(),
+        entry_cap: cap,
+        entries: 0,
+        files: Vec::new(),
+    };
+    entry_probe::reset();
+    let error = walk(&scan_dir, &[], &mut state, 0).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_too_many_entries");
+    assert_eq!(
+        state.entries,
+        cap + 1,
+        "an unrepresentable name counts toward the entry bound"
+    );
+    assert_eq!(
+        entry_probe::yielded(),
+        cap + 1,
+        "the listing must stop at the cap rather than decode every name first"
+    );
+}
+
+/// The host hands [`scan`] the canonical root, and a canonical path carries no
+/// link. So a path that reaches the folder through a link is not the path the
+/// host resolved: the scan refuses it instead of adopting the folder the link
+/// points at.
+#[test]
+#[cfg(unix)]
+fn a_root_path_that_traverses_a_link_is_not_adopted() {
+    let dir = tempdir();
+    let outside = dir.path().join("outside");
+    write(&outside, "src/secret.ts", "export const secret = 1;\n");
+    let bridge = dir.path().join("bridge");
+    std::os::unix::fs::symlink(&outside, &bridge).unwrap();
+    let through_link = bridge.join("src");
+
+    // The same folder by its canonical path is scanned, so the refusal below is
+    // about the link and not about the folder being unreadable.
+    let report = scan(&outside.join("src"), ".", limits()).unwrap();
+    assert_eq!(report.stats.files, 1);
+
+    let error = scan(&through_link, ".", limits()).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_workspace_unavailable");
+    assert!(
+        error.message.contains("is now a link or not a folder"),
+        "{}",
+        error.message
     );
 }
 
