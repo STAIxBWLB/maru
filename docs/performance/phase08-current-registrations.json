@@ -2375,6 +2375,12 @@
     },
     {
       "surface": "plugin:maru-diagram",
+      "name": "scan_repository",
+      "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::scan_repository",
+      "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
+    },
+    {
+      "surface": "plugin:maru-diagram",
       "name": "validate",
       "registrationPath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs::commands::validate",
       "sourcePath": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs"
@@ -2382,13 +2388,13 @@
   ],
   "counts": {
     "app": 389,
-    "plugin": 7,
-    "total": 396
+    "plugin": 8,
+    "total": 397
   },
   "sourceFiles": [
     {
       "path": "scripts/check-command-isolation.mjs",
-      "sha256": "c6dc553aa04e15d585827ce9f287f34b837333033cf0e38fa8eb1558b75cb862"
+      "sha256": "8523e1f2d6061631f9b69acbdf937b26c9fa73a0cd05e9be843140ae4a44ce4e"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -2400,23 +2406,23 @@
     },
     {
       "path": "src-tauri/capabilities/diagram-render.json",
-      "sha256": "d3f981c364860fb5d23be897ad1b3a1a36b692fafc0efcc69548c03f7ee9f64f"
+      "sha256": "a227d14cedd0dcbce784f44e30b4df6d710207954689560feb88cd1a55ecc15a"
     },
     {
       "path": "src-tauri/crates/tauri-plugin-maru-diagram/Cargo.toml",
-      "sha256": "e50225e985d52ddc042aced4b5185917cf778b2a5072f0acff97ff1a13423252"
+      "sha256": "102088a3c509755aee7d7bc1aede0f6751d4404c23a11c3bfd56d5dfd5bdd324"
     },
     {
       "path": "src-tauri/crates/tauri-plugin-maru-diagram/build.rs",
-      "sha256": "5a853a1d034bf7f9e8656f5ad8be4a183130ad764378aa69df0fbb84ea3791a9"
+      "sha256": "382e310435ee2409fb14f830ce38c9675a0ce776fedb42f656bc84a790b05edc"
     },
     {
       "path": "src-tauri/crates/tauri-plugin-maru-diagram/permissions/default.toml",
-      "sha256": "4d86bcb70d0ffb7e1d016994b1967f5aaf8d9f81b5dfbedf7d2c3c1cde790f48"
+      "sha256": "62252f3ca2eabaed24f5a95c682aa52b0813906f1be167b0767071463effa265"
     },
     {
       "path": "src-tauri/crates/tauri-plugin-maru-diagram/src/lib.rs",
-      "sha256": "2e0b375f80a996fce97cc4cedd2c643f80f386615e80bd822f7a67d57bf6a4d0"
+      "sha256": "eb8f2a630fc81ef121ab3e87319cf6bfa7166a165040a7ec0a87a906f0bc6539"
     },
     {
       "path": "src-tauri/src/agent_host/cloud_dashboard.rs",
@@ -2580,7 +2586,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "0e213a9ac0cc633b3f323d0dd3696307dd73eb8581d5151c4b92af2a1da83aaa"
+      "sha256": "f74ee712ef9fad7aab531701e815aabca19502c8ec73435239dd33a4354181aa"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2740,7 +2746,7 @@
     },
     {
       "path": "src-tauri/src/vault_list.rs",
-      "sha256": "c1a7cd218f56b7c23aa5fc259a281b784527acdbf2175f95182c55c8051539fb"
+      "sha256": "9597d34e01279d75c65b71e5f9f59abd85ea34b591550aa973c5b474f81ac713"
     },
     {
       "path": "src-tauri/src/vault_watcher.rs",
@@ -2763,5 +2769,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "1fac2ee021a02501f9a71ea87403fab53f34f011"
+  "sourceCommit": "10e443e228701810727696cb9baa1a812424b3d3"
 }
