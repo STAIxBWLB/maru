@@ -1873,9 +1873,7 @@ pub(crate) fn scratchpad_cleanup_apply_in_transaction(
 }
 
 fn migration_stage_dir(parent: &Path) -> std::io::Result<tempfile::TempDir> {
-    tempfile::Builder::new()
-        .prefix("scratchpad-migration-staging-")
-        .tempdir_in(parent)
+    crate::hwped::private_temp_dir(Some(parent), Some("scratchpad-migration-staging-"))
 }
 
 pub fn scratchpad_migrate_legacy_memos(
