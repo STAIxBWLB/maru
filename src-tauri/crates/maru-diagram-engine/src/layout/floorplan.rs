@@ -58,11 +58,10 @@ const LEAF_PAD: Coord = 28 * 64;
 const TITLE_SIZE: Coord = 24 * 64;
 const SUBTITLE_SIZE: Coord = 12 * 64;
 const SUBTITLE_WRAP_X: f64 = 920.0;
-/// Deepest nesting the layout will place. `measure` and `place_rows` walk one
-/// level per call, and validation only requires that a parent exists and forms no
-/// cycle, so an acyclic chain past this would overflow the stack: the app or the
-/// WASM instance aborts instead of refusing. Real maps nest a handful of levels.
-const MAX_NESTING_DEPTH: usize = 64;
+// `measure` and `place_rows` walk one level per call, so an acyclic chain past
+// this would overflow the stack. Validation refuses it first; `place` keeps its
+// own check so the layout never relies on the caller having validated.
+use crate::floorplan::MAX_NESTING_DEPTH;
 
 /// One placed cell, in emitted coordinates.
 #[derive(Clone, Copy)]
@@ -485,6 +484,25 @@ pub fn layout_floorplan_json(input: &str) -> GeometryReport {
             }
         }
     };
+    // A pin moves a child or a frame's title band after the frames are sized
+    // around them, so the frame would stop enclosing what it nests with no
+    // error. Nothing sends floorplan pins, so they are refused, not honoured.
+    if request.pin_set.is_some() {
+        let diagnostics = vec![crate::Diagnostic {
+            code: "floorplan/pins".into(),
+            path: "/pinSet".into(),
+            rule: "floorplan-v1/pins".into(),
+            message: "a floorplan layout takes no pins: moving a node after its frame is sized would leave it outside the frame".into(),
+            fix: "send the request without pinSet; floorplan places every node from the document".into(),
+        }];
+        return GeometryReport {
+            api_version: 1,
+            ok: false,
+            geometry: None,
+            diagnostics: diagnostics.clone(),
+            receipt: crate::make_report(input, None, diagnostics).receipt,
+        };
+    }
     let validity = crate::validate_floorplan_json(&request.spec_json);
     if !validity.ok {
         return GeometryReport {
@@ -956,5 +974,40 @@ mod tests {
             "edges": [{ "from": "가나x", "to": "store", "kind": "import" }]
         });
         assert_eq!(scene(&spec).routes[0].from, "bracket");
+    }
+
+    #[test]
+    fn a_pin_set_is_refused_before_any_frame_is_sized() {
+        let spec = chain(1);
+        let request = serde_json::json!({
+            "specJson": spec.to_string(),
+            "pinSet": {
+                "sourceSpecSha256": crate::spec_hash(&spec.to_string()),
+                "pins": [{ "targetId": "n1", "targetKind": "node", "position": { "x": 0, "y": 0 } }]
+            }
+        });
+        let report = layout_floorplan_json(&request.to_string());
+        assert!(!report.ok);
+        assert!(report.geometry.is_none());
+        assert_eq!(report.diagnostics.len(), 1);
+        let diagnostic = &report.diagnostics[0];
+        assert_eq!(diagnostic.code, "floorplan/pins");
+        assert!(diagnostic.fix.contains("pinSet"), "{}", diagnostic.fix);
+        // An empty pin set is refused too: the family takes none.
+        let empty = serde_json::json!({
+            "specJson": spec.to_string(),
+            "pinSet": { "sourceSpecSha256": crate::spec_hash(&spec.to_string()) }
+        });
+        assert_eq!(
+            layout_floorplan_json(&empty.to_string()).diagnostics[0].code,
+            "floorplan/pins"
+        );
+    }
+
+    #[test]
+    fn layout_refuses_a_node_count_past_the_cap() {
+        let report = layout(&chain(crate::floorplan::MAX_NODES));
+        assert!(!report.ok);
+        assert_eq!(report.diagnostics[0].code, "floorplan/node-count");
     }
 }
