@@ -379,11 +379,11 @@ impl RootAnchor {
             )
         };
         #[cfg(unix)]
-        let replaced = |part: &Path| {
+        let changed = |part: &Path| {
             ScanError::new(
                 "diagram_scan_workspace_unavailable",
                 format!(
-                    "the workspace root cannot be opened: {} is now a link or not a folder",
+                    "the workspace root changed while the scan was starting: {} is now a link or not a folder",
                     part.display()
                 ),
                 "reopen the workspace in Maru and scan again",
@@ -422,11 +422,11 @@ impl RootAnchor {
                             Path::new(name),
                             OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
                         )
-                        .ok_or_else(|| replaced(root))?;
+                        .ok_or_else(|| changed(root))?;
                     }
                     // `..` and a prefix never appear in a canonical path, so a
                     // root that carries one is not the path the host resolved.
-                    _ => return Err(replaced(root)),
+                    _ => return Err(changed(root)),
                 }
             }
             Ok(Self { handle: current })

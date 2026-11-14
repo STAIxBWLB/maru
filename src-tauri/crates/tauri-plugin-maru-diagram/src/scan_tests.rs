@@ -981,10 +981,47 @@ fn a_folder_of_unrepresentable_names_is_refused_while_it_is_still_being_listed()
     );
 }
 
-/// The host hands [`scan`] the canonical root, and a canonical path carries no
-/// link. So a path that reaches the folder through a link is not the path the
-/// host resolved: the scan refuses it instead of adopting the folder the link
-/// points at.
+/// The workspace root is swapped for an outside link between the moment the
+/// host authorized it and the moment the scan starts. The path the host
+/// resolved is now a link, so the scan refuses it and reads nothing from
+/// outside, instead of re-resolving the path and adopting the outside folder.
+#[test]
+#[cfg(unix)]
+fn a_root_swapped_for_an_outside_link_before_the_scan_is_refused() {
+    let dir = tempdir();
+    let root = dir.path().join("root");
+    write(&root, "src/a.ts", "export const a = 1;\n");
+    let outside = dir.path().join("outside");
+    write(&outside, "secret/leak.ts", "export const leak = 1;\n");
+
+    // Inclusion control: the folder is scanned while it is still the folder.
+    let report = scan(&root, ".", limits()).unwrap();
+    assert_eq!(report.stats.files, 1);
+
+    // The swap lands before `scan` is called, so this is the host's canonical
+    // path arriving at a root that is no longer that folder.
+    fs::remove_dir_all(&root).unwrap();
+    std::os::unix::fs::symlink(&outside, &root).unwrap();
+    assert!(
+        fs::read_to_string(root.join("secret/leak.ts"))
+            .unwrap()
+            .contains("leak"),
+        "the fixture did not swap the root for the outside folder"
+    );
+
+    let error = scan(&root, ".", limits()).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_workspace_unavailable");
+    assert!(
+        error
+            .message
+            .contains("the workspace root changed while the scan was starting"),
+        "{}",
+        error.message
+    );
+}
+
+/// The same refusal one level up: a parent of the root is the component that
+/// became a link, which a single openat on the whole path would have followed.
 #[test]
 #[cfg(unix)]
 fn a_root_path_that_traverses_a_link_is_not_adopted() {
