@@ -2642,7 +2642,7 @@
     },
     {
       "path": "src-tauri/src/skill_host/store.rs",
-      "sha256": "eeaa52f3e3a33c8d7dd4b434d6fe9219075d885f307020e07dd3a6fdd1b3329c"
+      "sha256": "47f46595cebc00ac4a7cc2faac93b25927a70ee2e7f6b7f8faca1b2e64779553"
     },
     {
       "path": "src-tauri/src/studio/mod.rs",
@@ -2741,5 +2741,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "137329ff84f082fdbf06b176aff3a2205891be69"
+  "sourceCommit": "6750b8c01d3550dbb497942e1ae0e41f65dc5a18"
 }

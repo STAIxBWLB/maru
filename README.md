@@ -1065,6 +1065,14 @@ Maru v1.1.0 intentionally does not include:
 - [docs/macos-passkeys.md](docs/macos-passkeys.md): opt-in passkey distribution runbook
 - [.planning/reports/MILESTONE_SUMMARY-v1.0.md](.planning/reports/MILESTONE_SUMMARY-v1.0.md): completed structural milestone summary (archived GSD record)
 
+## AGENTS.md background
+
+Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
+
+### Change history
+
+- 2026-11-14: Cleanup ownership reviews exposed the same symlink boundary at the skill and generation-root levels. Resolving either to an external destination could classify a user's shared entry as Maru-owned. The cleanup regressions distinguish home-path aliases above the generation root from links at or below it.
+
 ## License
 
 No license file is currently published. All rights reserved unless a license is

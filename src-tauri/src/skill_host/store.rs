@@ -5331,12 +5331,55 @@ fn owned_builtin_entry_target(
     builtin: &Path,
     previous_workspace: Option<&Path>,
 ) -> bool {
-    let previous = previous_workspace.is_some_and(|root| {
-        host_fs::simplified(target) == host_fs::simplified(&root.join("skills").join(name))
-    });
+    // Entry links record the canonical skill path while the roots come from
+    // the home path, so compare both through their resolved ancestors (macOS
+    // `/var` -> `/private/var`, or any symlinked home component).
+    // Keep the previous generation root and skills/<name> literal; only its
+    // ancestors may resolve. Following that root or a skill-level link could
+    // claim a user's external directory. The target's final component stays literal too.
+    // Maru records absolute targets. A relative one resolves against the
+    // entry's directory, not the process CWD, so it is never treated as owned.
+    if target.is_relative() {
+        return false;
+    }
+    let resolved_target = resolved_parent(target);
+    let previous = previous_workspace
+        .is_some_and(|root| resolved_target == resolved_parent(root).join("skills").join(name));
     previous
-        || (host_fs::simplified(target).starts_with(host_fs::simplified(builtin))
+        || (resolved_target.starts_with(resolved_through_existing_ancestor(builtin))
             && !target.exists())
+}
+
+/// Resolve a path's parent through its existing ancestors, keeping its own
+/// final component literal.
+fn resolved_parent(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => resolved_through_existing_ancestor(parent).join(name),
+        _ => host_fs::simplified(path),
+    }
+}
+
+/// Canonicalize the deepest existing ancestor and re-append the rest, so a
+/// path whose tail was already removed still compares across aliases.
+fn resolved_through_existing_ancestor(path: &Path) -> PathBuf {
+    let path = host_fs::simplified(path);
+    let mut rest = Vec::new();
+    let mut current = path.as_path();
+    loop {
+        if let Ok(canonical) = current.canonicalize() {
+            return rest
+                .iter()
+                .rev()
+                .fold(canonical, |acc, part: &&std::ffi::OsStr| acc.join(part));
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                current = parent;
+            }
+            _ => return path.clone(),
+        }
+    }
 }
 
 fn remove_owned_builtin_entry(
@@ -9671,6 +9714,147 @@ mod tests {
                 host_fs::write_json_pretty(&manifest_path, &manifest).unwrap();
             }
             skills_rescan_source_impl(BUILTIN_SOURCE_ID.into(), ProgressReporter::noop()).unwrap();
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn owned_entry_target_matches_across_a_symlinked_home_ancestor() {
+            // macOS temp and home paths reach the same files through
+            // `/var` and `/private/var`; links record the resolved form.
+            let dir = TempDir::new().unwrap();
+            let real = dir.path().join("real");
+            fs::create_dir_all(real.join("skills/_builtin/skills")).unwrap();
+            let alias = dir.path().join("alias");
+            std::os::unix::fs::symlink(&real, &alias).unwrap();
+            let builtin = alias.join("skills/_builtin");
+            let resolved = real
+                .canonicalize()
+                .unwrap()
+                .join("skills/_builtin/skills/gone");
+            assert!(owned_builtin_entry_target(
+                &resolved, "gone", &builtin, None
+            ));
+            let previous = alias.join("skills/_bundles/old");
+            let resolved_previous = real
+                .canonicalize()
+                .unwrap()
+                .join("skills/_bundles/old/skills/gone");
+            assert!(owned_builtin_entry_target(
+                &resolved_previous,
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            // Still refuses a live target and a path outside the builtin root.
+            fs::create_dir_all(real.join("skills/_builtin/skills/live")).unwrap();
+            assert!(!owned_builtin_entry_target(
+                &real.join("skills/_builtin/skills/live"),
+                "live",
+                &builtin,
+                None
+            ));
+            assert!(!owned_builtin_entry_target(
+                &real.join("elsewhere/gone"),
+                "gone",
+                &builtin,
+                None
+            ));
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn relative_entry_target_is_never_treated_as_builtin_owned() {
+            // Root the fixture under the process CWD so the relative target
+            // really resolves into builtin there, the case the bug misread.
+            let cwd = std::env::current_dir().unwrap();
+            let dir = tempfile::Builder::new()
+                .prefix(".maru-relative-entry-")
+                .tempdir_in(&cwd)
+                .unwrap();
+            let name = dir.path().file_name().unwrap();
+            let builtin = dir.path().join(".maru/skills/_builtin");
+            fs::create_dir_all(builtin.join("skills")).unwrap();
+            let entry = dir.path().join(".maru/skills/gone");
+            let relative = Path::new(name).join(".maru/skills/_builtin/skills/gone");
+            std::os::unix::fs::symlink(&relative, &entry).unwrap();
+            let previous = dir.path().join(".maru/skills/_bundles/old");
+            assert!(!owned_builtin_entry_target(
+                &relative, "gone", &builtin, None
+            ));
+            assert!(!owned_builtin_entry_target(
+                Path::new("../_bundles/old/skills/gone"),
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            remove_owned_builtin_entry(&entry, "gone", &builtin, Some(&previous)).unwrap();
+            assert_eq!(host_fs::read_link_target(&entry), Some(relative));
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn previous_generation_root_symlink_does_not_claim_external_entry() {
+            let dir = TempDir::new().unwrap();
+            let external = dir.path().join("user/external-generation");
+            let external_skill = external.join("skills/gone");
+            fs::create_dir_all(&external_skill).unwrap();
+            fs::write(external_skill.join("keep"), "user content").unwrap();
+            let previous = dir.path().join(".maru/skills/_workspaces/old");
+            fs::create_dir_all(previous.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&external, &previous).unwrap();
+            let builtin = dir.path().join(".maru/skills/_builtin");
+            fs::create_dir_all(&builtin).unwrap();
+            let target = external_skill.canonicalize().unwrap();
+            let entry = dir.path().join(".maru/skills/gone");
+            std::os::unix::fs::symlink(&target, &entry).unwrap();
+
+            let owned = owned_builtin_entry_target(&target, "gone", &builtin, Some(&previous));
+            remove_owned_builtin_entry(&entry, "gone", &builtin, Some(&previous)).unwrap();
+            assert_eq!(host_fs::read_link_target(&entry), Some(target));
+            assert!(
+                !owned,
+                "a swapped generation root must not claim its external destination"
+            );
+            assert_eq!(
+                fs::read_to_string(external_skill.join("keep")).unwrap(),
+                "user content"
+            );
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn previous_skill_link_out_of_the_bundle_does_not_claim_a_user_entry() {
+            let dir = TempDir::new().unwrap();
+            let external = dir.path().join("user/shared-skill");
+            fs::create_dir_all(&external).unwrap();
+            let previous = dir.path().join("skills/_bundles/old");
+            fs::create_dir_all(previous.join("skills")).unwrap();
+            std::os::unix::fs::symlink(&external, previous.join("skills/gone")).unwrap();
+            let builtin = dir.path().join("skills/_builtin");
+            fs::create_dir_all(&builtin).unwrap();
+            assert!(!owned_builtin_entry_target(
+                &external,
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            assert!(!owned_builtin_entry_target(
+                &external.canonicalize().unwrap(),
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            let entry = dir.path().join("skills/gone");
+            std::os::unix::fs::symlink(&external, &entry).unwrap();
+            remove_owned_builtin_entry(&entry, "gone", &builtin, Some(&previous)).unwrap();
+            assert_eq!(host_fs::read_link_target(&entry), Some(external.clone()));
+            // The bundle's own path, through an aliased root, is still owned.
+            assert!(owned_builtin_entry_target(
+                &previous.canonicalize().unwrap().join("skills/gone"),
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
         }
 
         #[test]
