@@ -66,6 +66,19 @@ async function assertFixtureProviderResolution(): Promise<void> {
   }
 }
 
+async function expectNativeRefusal(command: string, args: Record<string, unknown>): Promise<unknown> {
+  const raw = await browser.executeAsync((name: string, params: Record<string, unknown>, done: (value: string) => void) => {
+    const scope = window as unknown as { __TAURI_INTERNALS__: { invoke(command: string, args: unknown): Promise<unknown> } };
+    void scope.__TAURI_INTERNALS__.invoke(name, params).then(
+      (body) => done(JSON.stringify({ refused: false, body })),
+      (body: unknown) => done(JSON.stringify({ refused: true, body })),
+    );
+  }, command, args);
+  const result = JSON.parse(raw) as { refused: boolean; body: unknown };
+  assert.equal(result.refused, true, `${command} bypassed completion evidence`);
+  return result.body;
+}
+
 async function clickNamed(scope: string, pattern: string, name: string): Promise<void> {
   await stage(name, () => browser.execute((selector: string, source: string) => {
     const expression = new RegExp(source);
@@ -197,19 +210,30 @@ describe("native task completion evidence", () => {
       catch (failure) { if ((failure as NodeJS.ErrnoException).code === "ENOENT") return []; throw failure; }
     };
     const beforeOutbox = await outboxNames();
-    const todayRaw = await browser.executeAsync((workPath: string, taskPath: string, revision: string, done: (value: string) => void) => {
-      const scope = window as unknown as { __TAURI_INTERNALS__: { invoke(command: string, args: unknown): Promise<unknown> } };
-      void scope.__TAURI_INTERNALS__.invoke("task_transition", { workPath, request: {
-        taskId: "native-completion-fixture", taskPath, kind: "complete", expectedTaskHash: revision,
+    const today = await expectNativeRefusal("task_transition", { workPath: workspace, request: {
+        taskId: "native-completion-fixture", taskPath: relative, kind: "complete", expectedTaskHash: createHash("sha256").update(requiredSource).digest("hex"),
         deferDate: null, date: "2026-11-14", nowIso: "2026-11-14T10:00:00+09:00", webActionId: null, payload: {},
-      } }).then((body) => done(JSON.stringify({ refused: false, body })), (body: unknown) => done(JSON.stringify({ refused: true, body })));
-    }, workspace, relative, createHash("sha256").update(requiredSource).digest("hex"));
-    const today = JSON.parse(todayRaw) as { refused: boolean; body: unknown };
-    assert.equal(today.refused, true, "Today completion bypassed the evidence gate");
-    assert.match(JSON.stringify(today.body), /requires reviewed, committed artifact evidence/);
+    } });
+    assert.match(JSON.stringify(today), /task_completion_refused/);
     assert.equal(await fs.readFile(file, "utf8"), requiredSource);
     assert.deepEqual(await outboxNames(), beforeOutbox, "refused Today completion created a provider outbox record");
     await assert.rejects(fs.stat(archive), { code: "ENOENT" });
+
+    const whitespace = await expectNativeRefusal("save_document", {
+      vaultPath: workspace, documentPath: relative,
+      content: requiredSource.replace("status: active", "status: ' done '"),
+      expectedRevision: createHash("sha256").update(requiredSource).digest("hex"),
+    });
+    assert.match(JSON.stringify(whitespace), /task_completion_refused/);
+    assert.equal(await fs.readFile(file, "utf8"), requiredSource);
+    const creation = await expectNativeRefusal("create_task_note", { workPath: workspace, root: "tasks", draft: {
+      slug: "forged-completion", title: "Forbidden completion fixture", bucket: "archive",
+      frontmatter: { maruCompletionRequired: true, status: "done" }, body: "# No approved evidence\n",
+    } });
+    // create_task_note retains its existing string-error wire contract.
+    assert.match(JSON.stringify(creation), /Completion policy/);
+    assert.match(JSON.stringify(creation), /Task details/);
+    await assert.rejects(fs.stat(path.join(workspace, "tasks/archive/forged-completion.md")), { code: "ENOENT" });
 
     await browser.reloadSession();
     await openTask();

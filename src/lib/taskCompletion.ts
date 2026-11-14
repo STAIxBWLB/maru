@@ -43,8 +43,10 @@ export function readTaskCompletion(workPath: string, taskPath: string): Promise<
   return completionRequest(workPath, { action: "read", taskPath });
 }
 
-export function setTaskCompletionPolicy(workPath: string, taskPath: string, required: boolean, expectedSourceRevision: string): Promise<TaskCompletionView> {
-  return completionRequest(workPath, { action: "setPolicy", taskPath, required, expectedRevision: expectedSourceRevision });
+export function setTaskCompletionPolicy(workPath: string, taskPath: string, required: boolean, expectedSourceRevision: string, tasksRoot?: string): Promise<TaskCompletionView> {
+  return completionRequest(workPath, { action: "setPolicy", taskPath, required, expectedRevision: expectedSourceRevision,
+    ...(tasksRoot !== undefined ? { tasksRoot } : {}),
+  });
 }
 
 export function startTaskCompletionReview(workPath: string, token: TaskCompletionToken, bindingRevision: string, provider: string, requestId: string): Promise<{ reviewRunId: string }> {

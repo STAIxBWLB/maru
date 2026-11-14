@@ -1257,6 +1257,8 @@ fn drafts_promote_in_transaction(
         DraftPromoteTarget::Document => {
             assert_maru_can_write(work_path, WorkspaceWriteAction::Create)?;
             let (dest, relative) = resolve_document_target(work_path, target_path)?;
+            crate::task_completion::guard_new_task_document(&work, &dest, &body)
+                .map_err(|e| e.message)?;
             crate::vault_guard::validate_managed_write(work_path, &relative, &body)?;
             lease.ensure_covered(vec![dest.clone()])?;
             if let Some(parent) = dest.parent() {
@@ -3404,5 +3406,51 @@ mod phase08_08 {
                 assert!(read_impl(&work, &draft.id).is_err());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod completion_guard_creation_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::Home;
+    use crate::scratchpad::phase08_08::registry;
+
+    #[test]
+    fn completion_guard_draft_document_promotion_refuses_reserved_policy_before_effects() {
+        let home = Home::new();
+        let work = home.root.path().join("completion-promotion");
+        fs::create_dir_all(&work).unwrap();
+        registry(&work, "direct");
+        let body = "---\nstatus: done\nmaruCompletionRequired: true\nmaruCompletionPolicyRevision: forged-policy\n---\n# Unreviewed completion\n";
+        let entry = create_impl(
+            &work.to_string_lossy(),
+            DraftKind::Task,
+            "Unreviewed task",
+            ScratchpadSource::Codex,
+            vec![],
+            None,
+            None,
+            body,
+        )
+        .unwrap();
+        let result = promote_impl(
+            &work.to_string_lossy(),
+            &entry.id,
+            DraftPromoteTarget::Document,
+            "tasks/archive/injected.md",
+        );
+        assert!(
+            result.is_err(),
+            "Document promotion injected completion policy: {result:?}"
+        );
+        assert!(!work.join("tasks").exists());
+        let saved = read_impl(&work.to_string_lossy(), &entry.id).unwrap();
+        assert_ne!(saved.entry.status, DraftStatus::Accepted);
+        assert_eq!(saved.content, body);
+        assert!(!work
+            .join(".maru/drafts")
+            .join(&entry.id)
+            .join("baseline.md")
+            .exists());
     }
 }

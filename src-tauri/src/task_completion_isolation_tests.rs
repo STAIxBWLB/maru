@@ -40,6 +40,7 @@ impl Fixture {
             task_path: TASK.into(),
             required: true,
             expected_revision: self.revision.clone(),
+            tasks_root: None,
         }
     }
     fn work_string(&self) -> String {

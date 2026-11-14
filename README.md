@@ -1094,7 +1094,7 @@ Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 ### Change history
 
-- 2026-11-14: Completion evidence review found that protecting only lexical paths, or only metadata below the selected workspace, missed deliberate aliases into backend-owned records. The regression covers aliases into both the same workspace and another workspace.
+- 2026-11-14: Completion evidence review found that lexical checks missed aliases into backend records, including another workspace. Separate status/path checks also disagreed with Tasks whitespace, Archive defaults, Markdown case and bucket interpretation, while creation/promotion missed the gate. The guard now shares the Tasks read model and explicit task scope; regressions cover those entry points before effects.
 
 - 2026-11-14: Cleanup ownership reviews exposed the same symlink boundary at the skill and generation-root levels. Resolving either to an external destination could classify a user's shared entry as Maru-owned. The cleanup regressions distinguish home-path aliases above the generation root from links at or below it.
 

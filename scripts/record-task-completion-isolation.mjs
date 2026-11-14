@@ -37,7 +37,8 @@ export function recordTaskCompletionIsolation(root, logFile, sourceCommit) {
     "src-tauri/src/lib.rs", "src-tauri/src/task_completion.rs", "src-tauri/src/task_completion_isolation_tests.rs",
     "src-tauri/src/task_execution_claims.rs", "src-tauri/src/task_execution_runtime.rs", "src-tauri/src/tasks.rs",
     "src-tauri/src/agent_host/proposal.rs", "src-tauri/src/agent_host/protected_write.rs", "src-tauri/src/agent_host/event_store.rs",
-    "src-tauri/src/document.rs", "src-tauri/src/atomic_file.rs", "src-tauri/src/approval.rs", "src-tauri/src/ai_router.rs",
+    "src-tauri/src/document.rs", "src-tauri/src/drafts.rs", "src-tauri/src/today_lifecycle.rs",
+    "src-tauri/src/atomic_file.rs", "src-tauri/src/approval.rs", "src-tauri/src/ai_router.rs",
     "src/lib/taskCompletion.ts", "src/components/tasks/TaskCompletionSection.tsx",
     "scripts/record-task-completion-isolation.mjs", "scripts/check-command-isolation.mjs",
   ];

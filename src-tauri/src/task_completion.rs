@@ -221,16 +221,15 @@ struct PolicyRecord {
     task_id: String,
     required: bool,
     revision: String,
+    #[serde(default)]
+    tasks_root: Option<String>,
 }
 fn known_policy(work: &Path, id: Option<&str>) -> Result<Option<PolicyRecord>, IpcError> {
     id.map(|id| read_record(work, &policy_path(work, id)))
         .transpose()
         .map(Option::flatten)
 }
-fn namespace_guard(work: &Path, path: &Path) -> Result<(), IpcError> {
-    let canonical = normalize_existing_dir(&work.to_string_lossy())?;
-    // Workspace authorization deliberately permits directory aliases. Backend
-    // evidence does not: a lexical alias must not expose its physical records.
+fn physical_path(path: &Path) -> Result<PathBuf, IpcError> {
     let mut existing = path;
     let mut tail = Vec::new();
     let physical = loop {
@@ -254,6 +253,13 @@ fn namespace_guard(work: &Path, path: &Path) -> Result<(), IpcError> {
             Err(error) => return Err(io_error("Cannot resolve completion namespace", error)),
         }
     };
+    Ok(physical)
+}
+fn namespace_guard(work: &Path, path: &Path) -> Result<(), IpcError> {
+    let canonical = normalize_existing_dir(&work.to_string_lossy())?;
+    // Workspace authorization deliberately permits directory aliases. Backend
+    // evidence does not: a lexical alias must not expose its physical records.
+    let physical = physical_path(path)?;
     let parts = physical
         .components()
         .map(|part| part.as_os_str())
@@ -290,6 +296,298 @@ fn namespace_guard(work: &Path, path: &Path) -> Result<(), IpcError> {
     }
     Ok(())
 }
+fn recorded_claim_scope(work: &Path, id: Option<&str>) -> Result<Option<String>, IpcError> {
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    {
+        return Err(conflict("Completion task identity is invalid"));
+    }
+    let claim: Option<TaskExecutionClaim> = read_record(
+        work,
+        &work.join(".maru/task-execution").join(format!("{id}.json")),
+    )?;
+    if let Some(claim) = claim {
+        if claim.workspace != work.to_string_lossy().as_ref() || claim.task_id != id {
+            return Err(conflict(
+                "Completion claim belongs to a different task or workspace",
+            ));
+        }
+        return Ok(Some(claim.tasks_root));
+    }
+    Ok(None)
+}
+
+fn normalized_tasks_scope(work: &Path, raw: &str) -> Result<PathBuf, IpcError> {
+    let lexical = crate::tasks::resolve_tasks_root(work, raw)?;
+    physical_path(&lexical)
+}
+
+fn policy_tasks_scope_lexical(
+    work: &Path,
+    p: &Policy,
+    requested: Option<&str>,
+) -> Result<PathBuf, IpcError> {
+    let record = known_policy(work, p.task_id.as_deref())?;
+    let proof: Option<UiPolicyProof> = p
+        .revision
+        .as_deref()
+        .map(|revision| read_record(work, &revision_path(work, revision)))
+        .transpose()?
+        .flatten();
+    let claim_root = recorded_claim_scope(work, p.task_id.as_deref())?;
+    let saved_root = record.as_ref().and_then(|r| r.tasks_root.as_deref());
+    let proof_root = proof.as_ref().and_then(|p| p.tasks_root.as_deref());
+    if requested.is_none() {
+        if let (Some(a), Some(b)) = (saved_root, proof_root) {
+            if normalized_tasks_scope(work, a)? != normalized_tasks_scope(work, b)? {
+                return Err(conflict("Recorded completion policy scopes disagree"));
+            }
+        }
+    }
+    let raw = requested
+        .or(saved_root)
+        .or(proof_root)
+        .or(claim_root.as_deref())
+        .unwrap_or("tasks");
+    let root = normalized_tasks_scope(work, raw)?;
+    if let Some(claim_root) = claim_root.as_deref() {
+        if root != normalized_tasks_scope(work, claim_root)? {
+            return Err(conflict(
+                "Completion policy tasks root differs from the existing execution claim",
+            ));
+        }
+    }
+    Ok(crate::tasks::resolve_tasks_root(work, raw)?)
+}
+
+fn policy_tasks_scope(
+    work: &Path,
+    p: &Policy,
+    requested: Option<&str>,
+) -> Result<PathBuf, IpcError> {
+    normalized_tasks_scope(
+        work,
+        &policy_tasks_scope_lexical(work, p, requested)?.to_string_lossy(),
+    )
+}
+
+const SCOPES_SCHEMA: &str = "maru_task_completion_scopes_v1";
+const MAX_SCOPES: usize = 1024;
+const MAX_SCOPE_RECORDS: usize = 4096;
+const MAX_SCOPE_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KnownScope {
+    lexical_root: String,
+    physical_root: String,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ScopeIndex {
+    schema_version: String,
+    scopes: Vec<KnownScope>,
+}
+fn scopes_path(work: &Path) -> PathBuf {
+    root(work).join("known-scopes.json")
+}
+fn known_scope(work: &Path, raw: &str) -> Result<KnownScope, IpcError> {
+    Ok(KnownScope {
+        lexical_root: crate::tasks::resolve_tasks_root(work, raw)?
+            .to_string_lossy()
+            .into_owned(),
+        physical_root: normalized_tasks_scope(work, raw)?
+            .to_string_lossy()
+            .into_owned(),
+    })
+}
+fn scope_bound(scopes: &mut Vec<KnownScope>) -> Result<(), IpcError> {
+    scopes.sort();
+    scopes.dedup();
+    if scopes.len() > MAX_SCOPES {
+        return Err(refused(
+            "Completion has more than 1024 recorded task scopes",
+            "reuse an existing task root or inspect completion metadata before adding another",
+        ));
+    }
+    Ok(())
+}
+
+/// A missing index can belong to an earlier receipt version. Discover its
+/// complete bounded metadata, never infer scope by walking user documents.
+fn legacy_scopes(work: &Path) -> Result<Vec<KnownScope>, IpcError> {
+    let mut scopes = Vec::new();
+    let mut records = 0usize;
+    let mut bytes = 0u64;
+    for (directory, kind) in [
+        (root(work).join("policy-revisions"), 0),
+        (root(work).join("policies"), 1),
+        (work.join(".maru/task-execution"), 2),
+    ] {
+        validate_control(work, &directory)?;
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(io_error("Cannot discover legacy completion scopes", e)),
+        };
+        for entry in entries {
+            let path = entry
+                .map_err(|e| io_error("Cannot inspect completion scope record", e))?
+                .path();
+            if path.extension().and_then(|v| v.to_str()) != Some("json") {
+                continue;
+            }
+            records += 1;
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|e| io_error("Cannot inspect completion scope record", e))?;
+            bytes = bytes.saturating_add(metadata.len());
+            if records > MAX_SCOPE_RECORDS || bytes > MAX_SCOPE_BYTES {
+                return Err(refused(
+                    "Legacy completion scope discovery exceeds its metadata bound",
+                    "inspect completion metadata before moving this directory",
+                ));
+            }
+            let raw = match kind {
+                0 => {
+                    let proof = read_record::<UiPolicyProof>(work, &path)?.ok_or_else(|| {
+                        conflict("A policy proof disappeared during scope discovery")
+                    })?;
+                    match proof.tasks_root {
+                        Some(root) => Some(root),
+                        None if proof.required => Some(recorded_claim_scope(work, proof.task_id.as_deref())?.ok_or_else(|| refused("A legacy enabled completion policy has no recorded task scope", "reconcile its task scope before moving directories"))?),
+                        None => None,
+                    }
+                }
+                1 => {
+                    let record = read_record::<PolicyRecord>(work, &path)?.ok_or_else(|| {
+                        conflict("A policy record disappeared during scope discovery")
+                    })?;
+                    match record.tasks_root {
+                        Some(root) => Some(root),
+                        None if record.required => Some(recorded_claim_scope(work, Some(&record.task_id))?.ok_or_else(|| refused("A legacy enabled completion policy has no recorded task scope", "reconcile its task scope before moving directories"))?),
+                        None => None,
+                    }
+                }
+                _ => {
+                    let claim = read_record::<TaskExecutionClaim>(work, &path)?
+                        .ok_or_else(|| conflict("A claim disappeared during scope discovery"))?;
+                    if claim.workspace != work.to_string_lossy().as_ref() {
+                        return Err(conflict("A legacy task scope belongs to another workspace"));
+                    }
+                    Some(claim.tasks_root)
+                }
+            };
+            if let Some(raw) = raw {
+                scopes.push(known_scope(work, &raw)?);
+            }
+        }
+    }
+    scope_bound(&mut scopes)?;
+    Ok(scopes)
+}
+fn known_scopes(work: &Path) -> Result<Vec<KnownScope>, IpcError> {
+    let Some(index) = read_record::<ScopeIndex>(work, &scopes_path(work))? else {
+        return legacy_scopes(work);
+    };
+    if index.schema_version != SCOPES_SCHEMA || index.scopes.len() > MAX_SCOPES {
+        return Err(refused(
+            "Completion scope index is invalid",
+            "inspect completion metadata before moving task directories",
+        ));
+    }
+    for scope in &index.scopes {
+        crate::tasks::resolve_tasks_root(work, &scope.lexical_root)?;
+        let physical = Path::new(&scope.physical_root);
+        if !physical.is_absolute()
+            || crate::vault::lexical_normalize(physical).as_path() != physical
+        {
+            return Err(refused(
+                "A recorded physical task scope is invalid",
+                "inspect completion metadata before moving task directories",
+            ));
+        }
+    }
+    Ok(index.scopes)
+}
+fn record_known_scope(
+    work: &Path,
+    raw: &str,
+    lease: &PathTransactionLease,
+) -> Result<(), IpcError> {
+    let mut scopes = known_scopes(work)?;
+    let scope = known_scope(work, raw)?;
+    scopes.push(scope);
+    scope_bound(&mut scopes)?;
+    // Publish before the policy note/proof/creator record. A later failure
+    // leaves extra exclusion coverage, never an enabled but omitted scope.
+    write_record(
+        work,
+        &scopes_path(work),
+        &ScopeIndex {
+            schema_version: SCOPES_SCHEMA.into(),
+            scopes,
+        },
+        lease,
+    )
+}
+fn directory_affects_task_buckets(
+    work: &Path,
+    source: &Path,
+    target: &Path,
+) -> Result<bool, IpcError> {
+    let source = physical_path(source)?;
+    let target = physical_path(target)?;
+    if source == target {
+        return Ok(false);
+    }
+    let mut roots = vec![normalized_tasks_scope(work, "tasks")?];
+    for scope in known_scopes(work)? {
+        // Keep the captured identity even if a deliberate alias was retargeted,
+        // while also covering its current physical destination.
+        roots.push(PathBuf::from(scope.physical_root));
+        roots.push(normalized_tasks_scope(work, &scope.lexical_root)?);
+    }
+    roots.sort();
+    roots.dedup();
+    for root in roots {
+        if root.starts_with(&source) {
+            return Ok(true);
+        }
+        if let Ok(before) = crate::tasks::bucket_from_task_path(&root, &source) {
+            let after = crate::tasks::bucket_from_task_path(&root, &target).ok();
+            if after != Some(before) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn scoped_bucket(root: &Path, path: &Path) -> Result<TaskBucket, IpcError> {
+    crate::tasks::bucket_from_task_path(root, &physical_path(path)?).map_err(|_| {
+        refused(
+        "Completion task path is outside its recorded task buckets",
+        "keep the task in its selected tasks root, or disable its requirement before relocating it",
+    )
+    })
+}
+
+/// New managed documents cannot mint the UI-only policy fields or attach a
+/// protected task identity. Ordinary non-opted manual Done notes stay valid.
+pub(crate) fn guard_new_task_document(
+    work: &Path,
+    path: &Path,
+    content: &str,
+) -> Result<(), IpcError> {
+    guard_managed_task_write(work, path, None, Some(content))
+}
+
 /// Sealed capability for exactly one UI-authorized content change. It is never
 /// deserialized and carries no caller-supplied human/actor flag.
 pub(crate) struct CompletionWritePermit {
@@ -413,21 +711,15 @@ pub(crate) fn guard_managed_task_write_with_permit(
             "keep its taskId and use the Task completion controls",
         ));
     }
-    let was_done = before.is_some_and(|s| {
-        crate::vault::parse_frontmatter(s)
-            .meta
-            .get("status")
-            .and_then(YamlValue::as_str)
-            .is_some_and(|s| s.eq_ignore_ascii_case("done"))
+    if !required {
+        return Ok(());
+    }
+    let scope = policy_tasks_scope(work, if before.is_some() { &old } else { &new }, None)?;
+    let bucket = scoped_bucket(&scope, path)?;
+    let was_done = before.is_some_and(|content| {
+        crate::tasks::task_status_from_content(content, bucket) == TaskStatus::Done
     });
-    if required
-        && !was_done
-        && crate::vault::parse_frontmatter(after)
-            .meta
-            .get("status")
-            .and_then(YamlValue::as_str)
-            .is_some_and(|s| s.eq_ignore_ascii_case("done"))
-    {
+    if !was_done && crate::tasks::task_status_from_content(after, bucket) == TaskStatus::Done {
         return Err(refused(
             "This task requires reviewed, committed artifact evidence before Done",
             "apply its output, run an independent review and confirm completion in Task details",
@@ -443,14 +735,10 @@ pub(crate) fn guard_managed_task_move(
 ) -> Result<(), IpcError> {
     namespace_guard(work, source)?;
     namespace_guard(work, target)?;
-    let archive = |path: &Path| {
-        path.strip_prefix(work)
-            .is_ok_and(|p| p.components().any(|c| c.as_os_str() == "archive"))
-    };
-    if !archive(target) || archive(source) {
-        return Ok(());
-    }
     if source.is_dir() {
+        if !directory_affects_task_buckets(work, source, target)? {
+            return Ok(());
+        }
         for (count, entry) in walkdir::WalkDir::new(source)
             .follow_links(false)
             .into_iter()
@@ -458,46 +746,51 @@ pub(crate) fn guard_managed_task_move(
         {
             if count >= 20_000 {
                 return Err(refused(
-                    "Archive move exceeds the 20,000-entry completion check limit",
+                    "Task move exceeds the 20,000-entry completion check limit",
                     "move a smaller folder after reviewing its tasks",
                 ));
             }
             let entry = entry.map_err(|e| io_error("Cannot inspect moved task directory", e))?;
             if entry.depth() > 64 {
                 return Err(refused(
-                    "Archive move exceeds the 64-level completion check limit",
+                    "Task move exceeds the 64-level completion check limit",
                     "move a shallower folder after reviewing its tasks",
                 ));
             }
-            if entry.file_type().is_file()
-                && entry.path().extension().and_then(|v| v.to_str()) == Some("md")
-            {
+            if entry.file_type().is_file() && crate::tasks::is_markdown(entry.path()) {
                 guard_managed_task_move(
                     work,
                     entry.path(),
-                    &target.join(entry.path().strip_prefix(source).unwrap()),
+                    &target.join(
+                        entry
+                            .path()
+                            .strip_prefix(source)
+                            .map_err(|e| io_error("Cannot resolve moved task path", e))?,
+                    ),
                 )?;
             }
         }
         return Ok(());
     }
-    if source.extension().and_then(|v| v.to_str()) != Some("md") {
+    if !crate::tasks::is_markdown(source) {
+        if crate::tasks::is_markdown(target) && source.is_file() {
+            guard_new_task_document(work, target, &read_task(source)?)?;
+        }
         return Ok(());
     }
     let text = read_task(source)?;
     let p = policy(&text)?;
     let known = known_policy(work, p.task_id.as_deref())?;
-    let cancelled = crate::vault::parse_frontmatter(&text)
-        .meta
-        .get("status")
-        .and_then(YamlValue::as_str)
-        == Some("cancelled");
-    if (p.required || known.is_some_and(|p| p.required))
-        && !cancelled
-        && archive(target)
-        && !archive(source)
-    {
-        return Err(refused("Moving this completion-bound task to Archive requires accepted evidence","complete its review and fresh confirmation, or explicitly disable the requirement in Task details"));
+    if !p.required && !known.is_some_and(|p| p.required) {
+        return Ok(());
+    }
+    let root = policy_tasks_scope(work, &p, None)?;
+    let source_bucket = scoped_bucket(&root, source)?;
+    let target_bucket = scoped_bucket(&root, target)?;
+    let cancelled =
+        crate::tasks::task_status_from_content(&text, source_bucket) == TaskStatus::Cancelled;
+    if target_bucket == TaskBucket::Archive && source_bucket != TaskBucket::Archive && !cancelled {
+        return Err(refused("Moving this completion-bound task to Archive requires accepted evidence", "complete its review and fresh confirmation, or explicitly disable the requirement in Task details"));
     }
     Ok(())
 }
@@ -744,7 +1037,7 @@ impl Context<'_> {
         if p.task_id.as_deref() != Some(&self.claim.task_id) {
             return Err(conflict("The task identity changed"));
         }
-        let rev = p.revision.ok_or_else(|| {
+        let rev = p.revision.clone().ok_or_else(|| {
             refused(
                 "Completion policy has not been confirmed",
                 "turn the requirement off and on in Task details",
@@ -757,6 +1050,11 @@ impl Context<'_> {
             if !record.required || record.revision != rev {
                 return Err(conflict("Task policy changed outside its app control"));
             }
+        }
+        if policy_tasks_scope(&self.work, &p, None)?
+            != normalized_tasks_scope(&self.work, &self.claim.tasks_root)?
+        {
+            return Err(conflict("Completion evidence tasks scope changed"));
         }
         let paths = r
             .apply
@@ -984,6 +1282,8 @@ struct UiPolicyProof {
     required: bool,
     revision: String,
     task_id: Option<String>,
+    #[serde(default)]
+    tasks_root: Option<String>,
 }
 fn revision_path(work: &Path, revision: &str) -> PathBuf {
     root(work)
@@ -996,9 +1296,23 @@ pub(crate) fn set_policy(
     required: bool,
     expected_revision: &str,
 ) -> Result<TaskCompletionView, IpcError> {
+    set_policy_scoped(work, task_path, required, expected_revision, None)
+}
+
+#[cfg(test)]
+pub(crate) static AFTER_POLICY_EFFECT_FAILURE: std::sync::Mutex<Option<PathBuf>> =
+    std::sync::Mutex::new(None);
+
+pub(crate) fn set_policy_scoped(
+    work: &Path,
+    task_path: &str,
+    required: bool,
+    expected_revision: &str,
+    tasks_root: Option<&str>,
+) -> Result<TaskCompletionView, IpcError> {
     let work = normalize_existing_dir(&work.to_string_lossy())?;
     let path = resolve_inside_vault(&work.to_string_lossy(), task_path)?;
-    if path.extension().and_then(|s| s.to_str()) != Some("md") {
+    if !crate::tasks::is_markdown(&path) {
         return Err(refused(
             "Completion policy belongs to a Markdown task",
             "select a task note",
@@ -1023,17 +1337,23 @@ pub(crate) fn set_policy(
                 return Err(conflict("The task changed before its policy update"));
             }
             let old = policy(&before)?;
+            let lexical_scope = policy_tasks_scope_lexical(&work, &old, tasks_root)?;
+            let scope_text = lexical_scope.to_string_lossy().into_owned();
+            scoped_bucket(&normalized_tasks_scope(&work, &scope_text)?, &path)?;
+            record_known_scope(&work, &scope_text, lease)?;
             if old.required == required && old.revision.is_some() {
                 let known = known_policy(&work, old.task_id.as_deref())?;
                 let proof = read_record::<UiPolicyProof>(
                     &work,
                     &revision_path(&work, old.revision.as_deref().unwrap()),
                 )?;
-                if proof.is_some_and(|p| p.required == required)
-                    && known.as_ref().is_none_or(|r| {
-                        r.required == required && Some(&r.revision) == old.revision.as_ref()
-                    })
-                {
+                if proof.is_some_and(|p| {
+                    p.required == required && p.tasks_root.as_deref() == Some(&scope_text)
+                }) && known.as_ref().is_none_or(|r| {
+                    r.required == required
+                        && Some(&r.revision) == old.revision.as_ref()
+                        && r.tasks_root.as_deref() == Some(&scope_text)
+                }) {
                     return Ok(());
                 }
             }
@@ -1064,6 +1384,17 @@ pub(crate) fn set_policy(
                 guard.as_mut(),
                 Some(&permit),
             )?;
+            #[cfg(test)]
+            {
+                let mut failure = AFTER_POLICY_EFFECT_FAILURE.lock().unwrap();
+                if failure.as_ref() == Some(&work) {
+                    *failure = None;
+                    return Err(refused(
+                        "Policy note publication was interrupted before its proof record",
+                        "refresh task policy and reconcile its recorded scope before retrying",
+                    ));
+                }
+            }
             write_record(
                 &work,
                 &revision_path(&work, &revision),
@@ -1071,6 +1402,7 @@ pub(crate) fn set_policy(
                     required,
                     revision: revision.clone(),
                     task_id: old.task_id.clone(),
+                    tasks_root: Some(scope_text.clone()),
                 },
                 lease,
             )?;
@@ -1082,6 +1414,7 @@ pub(crate) fn set_policy(
                         task_id: id,
                         required,
                         revision: revision.clone(),
+                        tasks_root: Some(scope_text.clone()),
                     },
                     lease,
                 )?;
@@ -1112,6 +1445,15 @@ pub(crate) fn record_execution(
         if !current.required {
             return Ok(());
         }
+        let lexical_scope = policy_tasks_scope_lexical(&ctx.work, &current, None)?;
+        let scope_text = lexical_scope.to_string_lossy().into_owned();
+        let scope = normalized_tasks_scope(&ctx.work, &scope_text)?;
+        if scope != normalized_tasks_scope(&ctx.work, &ctx.claim.tasks_root)? {
+            return Err(conflict(
+                "Completion policy and execution tasks root disagree",
+            ));
+        }
+        record_known_scope(&ctx.work, &scope_text, ctx.lease)?;
         let revision = current.revision.ok_or_else(|| {
             refused(
                 "The completion requirement was not confirmed in the app",
@@ -1168,6 +1510,7 @@ pub(crate) fn record_execution(
                 task_id: claim.task_id.clone(),
                 required: true,
                 revision,
+                tasks_root: Some(scope_text),
             },
             ctx.lease,
         )?;
@@ -1840,6 +2183,8 @@ pub(crate) enum TaskCompletionRequest {
         task_path: String,
         required: bool,
         expected_revision: String,
+        #[serde(default)]
+        tasks_root: Option<String>,
     },
     Review {
         token: TaskExecutionToken,
@@ -1892,8 +2237,21 @@ pub(crate) async fn task_completion<R: tauri::Runtime>(
                 task_path,
                 required,
                 expected_revision,
-            } => serde_json::to_value(set_policy(&work, &task_path, required, &expected_revision)?)
-                .map_err(|e| io_error("Cannot encode completion policy", e)),
+                tasks_root,
+            } => {
+                let view = match tasks_root.as_deref() {
+                    Some(tasks_root) => set_policy_scoped(
+                        &work,
+                        &task_path,
+                        required,
+                        &expected_revision,
+                        Some(tasks_root),
+                    ),
+                    None => set_policy(&work, &task_path, required, &expected_revision),
+                }?;
+                serde_json::to_value(view)
+                    .map_err(|e| io_error("Cannot encode completion policy", e))
+            }
             TaskCompletionRequest::Review {
                 token,
                 binding_revision,

@@ -327,7 +327,6 @@ pub(crate) fn create_task_note_in_transaction(
     let work = normalize_existing_dir(&work_path)?;
     let tasks_root = resolve_tasks_root(&work, root.as_deref().unwrap_or("tasks"))?;
     let bucket_root = tasks_root.join(draft.bucket.as_str());
-    fs::create_dir_all(&bucket_root).map_err(|err| format!("Cannot create task bucket: {err}"))?;
     let slug = slugify(&draft.slug);
     let stem = if slug == "untitled" {
         let title_slug = slugify(&draft.title);
@@ -356,6 +355,9 @@ pub(crate) fn create_task_note_in_transaction(
         );
     }
     let content = serialize_task_note(&frontmatter, &draft.body)?;
+    crate::task_completion::guard_new_task_document(&work, &path, &content)
+        .map_err(|e| e.message)?;
+    fs::create_dir_all(&bucket_root).map_err(|err| format!("Cannot create task bucket: {err}"))?;
     fs::write(&path, content).map_err(|err| format!("Cannot write task note: {err}"))?;
     task_row_for_path(&work, &path, draft.bucket)
 }
@@ -411,6 +413,8 @@ pub(crate) fn prepare_capture_task_materialization(
         );
     }
     let content = serialize_task_note(&draft.frontmatter, &draft.body)?;
+    crate::task_completion::guard_new_task_document(work, &path, &content)
+        .map_err(|e| e.message)?;
     let rel_path = crate::vault::relative_slash_path(&path, work);
     let content_hash = revision_for(&content);
     let will_create = !path.exists();
@@ -474,6 +478,8 @@ pub(crate) fn materialize_capture_task_in_transaction(
         });
     }
 
+    crate::task_completion::guard_new_task_document(work, &prepared.path, &prepared.content)
+        .map_err(|e| e.message)?;
     write_atomic(&prepared.path, prepared.content.as_bytes())
         .map_err(|err| format!("Cannot write capture task note: {err}"))?;
     let row = task_row_for_path(work, &prepared.path, prepared.bucket)?;
@@ -1197,7 +1203,7 @@ fn should_enter_task_path(path: &Path, root: &Path) -> bool {
     })
 }
 
-fn is_markdown(path: &Path) -> bool {
+pub(crate) fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .map(|value| value.eq_ignore_ascii_case("md"))
@@ -1276,7 +1282,7 @@ fn replace_markdown_body(content: &str, body: &str) -> Result<String, String> {
     Ok(next)
 }
 
-fn task_status_from_content(content: &str, bucket: TaskBucket) -> TaskStatus {
+pub(crate) fn task_status_from_content(content: &str, bucket: TaskBucket) -> TaskStatus {
     let parts = parse_frontmatter(content);
     let frontmatter = yaml_to_json(&parts.meta);
     string_field(&frontmatter, "status")
