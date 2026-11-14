@@ -873,7 +873,16 @@ fn stage_candidate(
         ensure_staging_path_absent(candidate)?;
         assert_maru_can_write(workspace, WorkspaceWriteAction::Create)?;
         lease.before_effect()?;
-        fs::create_dir_all(job_dir).map_err(|err| format!("Cannot create staging dir: {err}"))?;
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder
+            .create(job_dir)
+            .map_err(|err| format!("Cannot create staging dir: {err}"))?;
         if let Err(error) = write_atomic(candidate, bytes) {
             let cleanup = match fs::symlink_metadata(job_dir) {
                 Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {

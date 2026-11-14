@@ -1112,6 +1112,8 @@ Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 ### Change history
 
+- 2026-11-15: Scratchpad migration recovery copies and Archify candidate files also crossed default-permission staging directories. Migration keeps its unique temp prefix and explicit keep lifecycle through the shared creator; Archify keeps its transaction-bound fixed job path through in-place private directory creation.
+
 - 2026-11-15: Template inspection and fill staging now use the shared private-directory creator. Its optional prefix keeps the existing sibling names and parents while applying Unix 0700 at creation; the isolated umask test checks the actual fill factory.
 
 - 2026-11-14: Completion evidence review found that lexical checks missed aliases into backend records, including another workspace. Separate status/path checks also disagreed with Tasks whitespace, Archive defaults, Markdown case and bucket interpretation, while creation/promotion missed the gate. The guard now shares the Tasks read model and explicit task scope; regressions cover those entry points before effects.
