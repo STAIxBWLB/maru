@@ -74,7 +74,7 @@ export function isDocsOnlyPath(name) {
     || (name.startsWith(".github/") && name.endsWith(".md"));
 }
 
-export function classifyPrChanges(paths, labels = []) {
+export function classifyPrChanges(paths, labels = [], draft = undefined) {
   if (!Array.isArray(paths) || paths.some((name) => typeof name !== "string")) {
     throw new Error("PR changed paths are unavailable; inspect the changed-file lookup and rerun CI");
   }
@@ -82,31 +82,44 @@ export function classifyPrChanges(paths, labels = []) {
     throw new Error("PR labels are unavailable; inspect the PR event and rerun CI");
   }
   const docsOnly = paths.length > 0 && paths.every(isDocsOnlyPath);
-  const runNative = labels.some((label) => typeof label === "string" && label.toLowerCase() === "native-e2e")
+  const nativeLabel = labels.some((label) => typeof label === "string" && label.toLowerCase() === "native-e2e");
+  const runNative = nativeLabel
     || paths.some((name) => NATIVE_FILES.includes(name) || NATIVE_PREFIXES.some((prefix) => name.startsWith(prefix)));
-  return {
+  const selection = {
     run_full: !docsOnly,
     run_e2e: !docsOnly,
     run_native: runNative,
     run_native_compile: !docsOnly && !runNative,
     run_geometry: !docsOnly && needsGeometryDeterminism(paths),
   };
+  // maru#625: macOS PR jobs run only on ready PRs. The selection above is
+  // unchanged; a draft PR that would run any macOS job is marked deferred, and
+  // the native-e2e label is an explicit request that overrides draft. Only an
+  // explicit `true` is a draft: unknown draft state counts as ready.
+  const selectsMacos = selection.run_native || selection.run_native_compile || selection.run_geometry;
+  return { ...selection, macos_deferred: draft === true && !nativeLabel && selectsMacos };
 }
+
+export const MACOS_DEFERRED_MESSAGE = "draft PR; macOS jobs run when the PR is marked ready (gh pr ready)";
 
 export function evaluateCiJobs(needs) {
   if (!needs || needs.decision?.result !== "success") {
     return { ok: false, message: "CI decision did not succeed; inspect its logs and rerun CI" };
   }
   const outputs = needs.decision.outputs ?? {};
-  for (const flag of ["run_full", "run_e2e", "run_native", "run_native_compile", "run_geometry"]) {
+  for (const flag of ["run_full", "run_e2e", "run_native", "run_native_compile", "run_geometry", "macos_deferred"]) {
     if (!["true", "false"].includes(outputs[flag])) {
       return { ok: false, message: `CI decision output ${flag} is invalid; inspect the decision and rerun CI` };
     }
   }
+  const deferred = outputs.macos_deferred === "true";
+  // A deferred draft skips its macOS-only jobs; the geometry workflow still
+  // runs its Linux, Windows and WASM legs, so it must succeed either way.
+  const macosOnly = new Set(["native-e2e-compile", "native-e2e"]);
   const gates = { verify: "run_full", e2e: "run_e2e", "native-e2e-compile": "run_native_compile", "native-e2e": "run_native", "geometry-determinism": "run_geometry" };
   for (const [job, flag] of Object.entries(gates)) {
     const result = needs[job]?.result;
-    if (result === "success" || (result === "skipped" && outputs[flag] === "false")) continue;
+    if (result === "success" || (result === "skipped" && (outputs[flag] === "false" || (deferred && macosOnly.has(job))))) continue;
     return { ok: false, message: `${job} concluded ${result ?? "missing"}, inconsistent with decision ${flag}=${outputs[flag]}; inspect the job and rerun CI` };
   }
   for (const [job, state] of Object.entries(needs)) {
@@ -114,6 +127,9 @@ export function evaluateCiJobs(needs) {
       return { ok: false, message: `additional CI gate ${job} did not succeed; inspect its result and rerun CI` };
     }
   }
+  // Never a success: the main-push dedup and the release lookup read the run
+  // conclusion, so a deferred run must not look like one that ran macOS.
+  if (deferred) return { ok: false, deferred: true, message: MACOS_DEFERRED_MESSAGE };
   return { ok: true, message: "CI jobs passed with only decision-authorized skips" };
 }
 
@@ -134,6 +150,8 @@ function classifyFiles(filesPath, eventPath) {
       || !Array.isArray(event.pull_request.labels ?? [])) {
     throw new Error("PR event metadata is invalid; inspect the decision inputs and rerun CI");
   }
+  // Only a boolean draft flag is read; anything else counts as ready.
+  const draft = typeof event.pull_request.draft === "boolean" ? event.pull_request.draft : undefined;
   if (files.some((file) => !file || typeof file.filename !== "string"
       || (file.previous_filename !== undefined && typeof file.previous_filename !== "string"))) {
     throw new Error("PR changed-file paths are invalid; inspect the lookup and rerun CI");
@@ -142,7 +160,7 @@ function classifyFiles(filesPath, eventPath) {
     throw new Error("PR changed-file list is incomplete; inspect the PR diff and rerun CI");
   }
   const paths = files.flatMap((file) => file.previous_filename ? [file.filename, file.previous_filename] : [file.filename]);
-  return classifyPrChanges(paths, (event.pull_request.labels ?? []).map((label) => label.name));
+  return classifyPrChanges(paths, (event.pull_request.labels ?? []).map((label) => label.name), draft);
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
@@ -167,8 +185,11 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       try { needs = JSON.parse(process.env.CI_NEEDS_JSON ?? "null"); }
       catch { throw new Error("CI job results are not valid JSON; inspect ci-ok inputs and rerun CI"); }
       const result = evaluateCiJobs(needs);
-      if (!result.ok) throw new Error(result.message);
-      console.log(result.message);
+      if (result.deferred) {
+        console.error(`::error title=macOS deferred::${result.message}`);
+        process.exitCode = 1;
+      } else if (!result.ok) throw new Error(result.message);
+      else console.log(result.message);
     } else throw new Error("usage: ci-policy.mjs classify <files.json> <event.json> or geometry-push <compare.json> or aggregate with CI_NEEDS_JSON; correct inputs and rerun CI");
   } catch (error) {
     console.error(`::error::${error instanceof Error ? error.message : "CI policy failed; inspect the decision and rerun CI"}`);

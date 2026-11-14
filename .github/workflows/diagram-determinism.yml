@@ -2,6 +2,13 @@ name: diagram-determinism
 
 on:
   workflow_call:
+    inputs:
+      # maru#625: a draft PR defers macOS. false drops the macOS legs and the
+      # cross-platform comparisons that require a macOS receipt; the Linux,
+      # Windows and WASM legs still run. main and tags always pass true.
+      macos:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -12,13 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-22.04
-            receipt: linux
-          - os: macos-26
-            receipt: macos
-          - os: windows-latest
-            receipt: windows
+        include: ${{ fromJSON(inputs.macos && '[{"os":"ubuntu-22.04","receipt":"linux"},{"os":"macos-26","receipt":"macos"},{"os":"windows-latest","receipt":"windows"}]' || '[{"os":"ubuntu-22.04","receipt":"linux"},{"os":"windows-latest","receipt":"windows"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -95,6 +96,8 @@ jobs:
   compare:
     name: native and WASM scene hash agreement
     needs: [matrix, wasm]
+    # Agreement needs all four receipts; a deferred draft compares on ready.
+    if: inputs.macos
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -127,13 +130,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-22.04
-            receipt: native-linux
-          - os: macos-26
-            receipt: native-macos
-          - os: windows-latest
-            receipt: native-windows
+        include: ${{ fromJSON(inputs.macos && '[{"os":"ubuntu-22.04","receipt":"native-linux"},{"os":"macos-26","receipt":"native-macos"},{"os":"windows-latest","receipt":"native-windows"}]' || '[{"os":"ubuntu-22.04","receipt":"native-linux"},{"os":"windows-latest","receipt":"native-windows"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
@@ -224,6 +221,8 @@ jobs:
   png-compare:
     name: PNG native and WASM determinism
     needs: [png-native, png-wasm]
+    # Strict agreement needs the macOS receipt too; a deferred draft compares on ready.
+    if: inputs.macos
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:

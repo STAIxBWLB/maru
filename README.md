@@ -679,6 +679,15 @@ including an unchanged re-layout check for every parity-corpus record and
 three seeded 200-node stress scenes. The E3 SVG slice also compares both theme
 hashes and artifact gates for all retained scenes, including refused layouts. Renderer
 constraint parity and layout performance are separate E2 gates.
+macOS PR jobs run only on ready PRs (#625): on a draft, the policy keeps the same
+selection but marks it `macos_deferred`, so the native suite, the native compile
+check and the macOS determinism legs (with the cross-platform comparisons that
+need their receipts) are skipped while Linux, Windows and WASM legs still run, and
+`ci-ok` fails with "macOS deferred". `gh pr ready` (the `ready_for_review` event)
+starts a run with them; the `native-e2e` label overrides draft, and an unknown
+draft state counts as ready. A deferred `ci-ok` never succeeds, so neither the
+main-push dedup nor the release lookup, which both require a successful
+conclusion, can reuse it. `main` and tag pushes always run macOS.
 Version-changing PRs use `make release-checks`. Docs-only and `.planning/**`
 changes skip builds; performance evidence JSON remains validation input. Native
 label changes may reuse successful CI for the same SHA and tree, while unrelated labels
