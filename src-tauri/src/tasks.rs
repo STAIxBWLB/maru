@@ -633,6 +633,14 @@ pub(crate) fn update_task_status_in_transaction_with_completion(
     .map_err(|e| e.message)?;
     let target = if current_bucket == target_bucket {
         path.clone()
+    } else if let (Some(_), Some(expected)) = (completion_permit, expected_target) {
+        let bucket_target = target_path_for_bucket(&tasks_root, &path, target_bucket)?;
+        if expected.parent() != bucket_target.parent() {
+            return Err("task_completion_conflict: recorded target is outside its Archive bucket; restore the accepted intent or confirm a new completion".into());
+        }
+        // A sealed completion intent pins its destination, even when an older
+        // filename collision has since disappeared. Never choose another name.
+        expected.to_path_buf()
     } else {
         conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?)
     };
@@ -680,15 +688,24 @@ pub(crate) fn update_task_status_in_transaction_with_completion(
         }
         if let Some(permit) = completion_permit {
             permit.check_source(true).map_err(|e| e.message)?;
-            if target.exists() {
-                return Err("task_completion_conflict: archive target appeared; refresh and confirm a new target".into());
+            match fs::symlink_metadata(&target) {
+                Ok(_) => return Err("task_completion_conflict: archive target appeared; move that entry aside before resuming the recorded completion".into()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(error) => return Err(format!("Cannot inspect completion Archive target: {error}; check the target directory and retry the recorded completion")),
             }
         }
         fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))
     })();
     if let Err(error) = moved {
-        write_atomic(&path, original.as_bytes())
-            .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
+        if updated != original {
+            crate::atomic_file::write_atomic_checked(&path, original.as_bytes(), 0o644, || {
+                let current = fs::read(&path).map_err(|read| format!("Cannot recheck task before rollback: {read}; inspect the task and its saved snapshot"))?;
+                if current != updated.as_bytes() {
+                    return Err("Task changed after the status write; preserve the current bytes and inspect the saved snapshot before retrying".to_string());
+                }
+                Ok(())
+            }).map_err(|rollback: String| format!("{error}; rollback refused or failed: {rollback}"))?;
+        }
         return Err(error);
     }
     task_row_for_path(&work, &target, target_bucket)

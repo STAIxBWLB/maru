@@ -2065,6 +2065,11 @@ fn accepted_bytes_match(
             return Ok(false);
         }
     }
+    if policy_tasks_scope(&ctx.work, &p, None)?
+        != normalized_tasks_scope(&ctx.work, &ctx.claim.tasks_root)?
+    {
+        return Err(conflict("Completion evidence tasks scope changed"));
+    }
     if sha(ctx.source.as_bytes()) != a.after_revision {
         return Ok(false);
     }
@@ -2144,7 +2149,10 @@ fn can_resume_archive(ctx: &Context<'_>, r: &TaskCompletionReceipt) -> Result<bo
         || a.before_revision != a.binding.source_revision
         || !r.process_finished
         || !r.process_success
-        || !r.apply.as_ref().is_some_and(|apply| apply.complete)
+        || !r
+            .apply
+            .as_ref()
+            .is_some_and(|apply| apply.complete && apply.error.is_none() && !apply.paths.is_empty())
         || !r
             .review
             .as_ref()
@@ -2165,14 +2173,15 @@ fn can_resume_archive(ctx: &Context<'_>, r: &TaskCompletionReceipt) -> Result<bo
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
         Err(error) => return Err(io_error("Cannot inspect recorded Archive target", error)),
     }
-    let plan = crate::tasks::prepare_task_completion(
-        &ctx.work,
+    let archive = crate::tasks::target_path_for_bucket(
         Path::new(&ctx.claim.tasks_root),
         &ctx.path,
-        &ctx.source,
+        crate::tasks::TaskBucket::Archive,
     )?;
-    if plan.target != target || sha(plan.updated.as_bytes()) != a.after_revision {
-        return Err(conflict("Recorded completion target or Done bytes changed"));
+    if archive.parent() != target.parent() {
+        return Err(conflict(
+            "Recorded completion target leaves its Archive bucket",
+        ));
     }
     if !consumed_acceptance(ctx, r, a)? {
         return Err(refused("No consumed fresh person authority proves this interrupted completion", "restore its verified acceptance audit or restore the pre-acceptance snapshot and confirm again"));
