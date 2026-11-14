@@ -323,6 +323,38 @@ fn regular_file_without_links(base: &Path, relative: &str) -> bool {
     true
 }
 
+/// Open a file for reading without following a symbolic link at the leaf.
+fn open_regular_no_follow(path: &Path) -> Option<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc_o_nofollow());
+    }
+    #[cfg(not(unix))]
+    {
+        if fs::symlink_metadata(path).ok()?.file_type().is_symlink() {
+            return None;
+        }
+    }
+    options.open(path).ok()
+}
+
+/// `O_NOFOLLOW` without a libc dependency: the value is fixed per platform.
+#[cfg(unix)]
+fn libc_o_nofollow() -> i32 {
+    if cfg!(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd"
+    )) {
+        0x0100
+    } else {
+        0o400000
+    }
+}
+
 fn relative_string(base: &Path, path: &Path) -> String {
     path.strip_prefix(base)
         .map(|rest| {
@@ -1072,9 +1104,16 @@ fn rust_module_file(dir: &str, segments: &[&str], files: &BTreeSet<String>) -> O
     None
 }
 
-fn rust_refs(path: &str, text: &str, files: &BTreeSet<String>, refs: &mut Refs) {
+fn rust_refs(
+    path: &str,
+    text: &str,
+    files: &BTreeSet<String>,
+    refs: &mut Refs,
+    budget: &Budget,
+) -> Result<(), ScanError> {
     let module_dir = rust_module_dir(path);
     for line in text.lines() {
+        budget.check_time()?;
         let line = line.trim();
         if line.starts_with("//") {
             continue;
@@ -1143,6 +1182,7 @@ fn rust_refs(path: &str, text: &str, files: &BTreeSet<String>, refs: &mut Refs) 
             }
         }
     }
+    Ok(())
 }
 
 fn strip_visibility(line: &str) -> &str {
@@ -1162,7 +1202,12 @@ fn strip_visibility(line: &str) -> &str {
 }
 
 fn python_module_file(base: &str, dotted: &str, files: &BTreeSet<String>) -> Option<String> {
-    let segments: Vec<&str> = dotted.split('.').filter(|part| !part.is_empty()).collect();
+    // A long `import a.a.a...` is cut, so the prefix search stays linear.
+    let segments: Vec<&str> = dotted
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .take(MAX_USE_SEGMENTS)
+        .collect();
     for length in (1..=segments.len()).rev() {
         let target = join(base, &segments[..length].join("/"));
         for candidate in [format!("{target}.py"), join(&target, "__init__.py")] {
@@ -1246,7 +1291,13 @@ const PYTHON_STDLIB: &[&str] = &[
     "zipfile",
 ];
 
-fn python_refs(path: &str, text: &str, files: &BTreeSet<String>, refs: &mut Refs) {
+fn python_refs(
+    path: &str,
+    text: &str,
+    files: &BTreeSet<String>,
+    refs: &mut Refs,
+    budget: &Budget,
+) -> Result<(), ScanError> {
     let roots = python_roots(path, files);
     // An import no scanned file answers is an external package.
     let absolute = |module: &str, refs: &mut Refs| {
@@ -1265,6 +1316,7 @@ fn python_refs(path: &str, text: &str, files: &BTreeSet<String>, refs: &mut Refs
         }
     };
     for line in text.lines() {
+        budget.check_time()?;
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("import ") {
             for item in rest.split(',') {
@@ -1313,6 +1365,7 @@ fn python_refs(path: &str, text: &str, files: &BTreeSet<String>, refs: &mut Refs
             }
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1469,8 +1522,13 @@ fn propose(
         if !regular_file_without_links(scan_root, file) {
             continue;
         }
-        let path = scan_root.join(file);
-        let Ok(meta) = fs::symlink_metadata(&path) else {
+        // One open handle for the size check and the read: the leaf cannot be
+        // swapped for a link between them (O_NOFOLLOW), and a file that grows
+        // mid-scan is read only up to the cap.
+        let Some(file_handle) = open_regular_no_follow(&scan_root.join(file)) else {
+            continue;
+        };
+        let Ok(meta) = file_handle.metadata() else {
             continue;
         };
         if !meta.is_file() {
@@ -1481,9 +1539,21 @@ fn propose(
             continue;
         }
         budget.charge(meta.len())?;
-        let Ok(bytes) = fs::read(&path) else {
+        let mut bytes = Vec::new();
+        if std::io::Read::read_to_end(
+            &mut std::io::Read::take(&file_handle, MAX_SOURCE_BYTES + 1),
+            &mut bytes,
+        )
+        .is_err()
+        {
             continue;
-        };
+        }
+        if bytes.len() as u64 > MAX_SOURCE_BYTES {
+            skipped_large += 1;
+            continue;
+        }
+        // Charge what was actually read beyond the metadata size.
+        budget.charge((bytes.len() as u64).saturating_sub(meta.len()))?;
         let text = String::from_utf8_lossy(&bytes);
         let mut refs = Refs::default();
         match lang {
@@ -1496,8 +1566,8 @@ fn propose(
                     }
                 }
             }
-            Language::Rust => rust_refs(file, &text, &file_set, &mut refs),
-            Language::Python => python_refs(file, &text, &file_set, &mut refs),
+            Language::Rust => rust_refs(file, &text, &file_set, &mut refs, budget)?,
+            Language::Python => python_refs(file, &text, &file_set, &mut refs, budget)?,
         }
         let from = group_of(file);
         refs.files.remove(file);

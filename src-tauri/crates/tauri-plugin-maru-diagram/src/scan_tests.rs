@@ -41,6 +41,14 @@ fn tempdir() -> Scratch {
     Scratch(path)
 }
 
+/// A budget far from its deadline, for calling the resolvers directly.
+fn open_budget() -> Budget {
+    Budget {
+        deadline: Instant::now() + Duration::from_secs(60),
+        bytes: 0,
+    }
+}
+
 fn limits() -> ScanLimits {
     ScanLimits::new(None, None).unwrap()
 }
@@ -518,7 +526,9 @@ fn rust_and_python_resolution_cover_their_module_forms() {
         "mod b;\nuse super::z::Thing;\npub(crate) use crate::a::b::f;\n",
         &files,
         &mut refs,
-    );
+        &open_budget(),
+    )
+    .unwrap();
     assert_eq!(
         refs.files.iter().cloned().collect::<Vec<_>>(),
         ["c/src/a/b.rs", "c/src/z/mod.rs"]
@@ -529,7 +539,9 @@ fn rust_and_python_resolution_cover_their_module_forms() {
         "from .. import s\nfrom ..s import thing\nimport p.q\n",
         &files,
         &mut refs,
-    );
+        &open_budget(),
+    )
+    .unwrap();
     assert_eq!(
         refs.files.iter().cloned().collect::<Vec<_>>(),
         ["p/q/__init__.py", "p/s.py"]
@@ -667,7 +679,7 @@ fn a_long_rust_use_path_resolves_in_bounded_time() {
     let text = line.repeat(20);
     let started = Instant::now();
     let mut refs = Refs::default();
-    rust_refs("c/src/lib.rs", &text, &files, &mut refs);
+    rust_refs("c/src/lib.rs", &text, &files, &mut refs, &open_budget()).unwrap();
     assert_eq!(
         refs.files.iter().cloned().collect::<Vec<_>>(),
         ["c/src/a.rs"]
@@ -687,4 +699,40 @@ fn a_scan_that_overruns_its_budget_is_refused_not_returned() {
     tight.time_budget = Duration::from_nanos(1);
     let error = scan(dir.path(), ".", tight).unwrap_err();
     assert_eq!(error.code, "diagram_scan_timeout");
+}
+
+#[test]
+fn a_long_python_dotted_import_resolves_in_bounded_time() {
+    let files: BTreeSet<String> = ["p/__init__.py", "p/a.py", "p/q.py"]
+        .iter()
+        .map(|path| path.to_string())
+        .collect();
+    // ~200 KiB on one line, well under the 1 MiB per-file cap.
+    let line = format!("import p.{}x\n", "a.".repeat(100_000));
+    let started = Instant::now();
+    let mut refs = Refs::default();
+    python_refs("p/q.py", &line, &files, &mut refs, &open_budget()).unwrap();
+    assert_eq!(refs.files.iter().cloned().collect::<Vec<_>>(), ["p/a.py"]);
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_leaf_replaced_by_a_link_after_the_inventory_is_not_read() {
+    let outer = tempdir();
+    let root = outer.path().join("workspace");
+    write(&root, "src/a.ts", "");
+    write(
+        outer.path(),
+        "secret.ts",
+        "import leak from 'outside-only-package';\n",
+    );
+    // The no-follow open refuses a leaf link even if the path check raced.
+    std::os::unix::fs::symlink(outer.path().join("secret.ts"), root.join("src/b.ts")).unwrap();
+    assert!(open_regular_no_follow(&root.join("src/b.ts")).is_none());
+    assert!(open_regular_no_follow(&root.join("src/a.ts")).is_some());
 }

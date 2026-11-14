@@ -74,6 +74,7 @@ function getWorkspaceContext(key?: string | null): WorkspaceDiagramContext {
         legacySourceVersion: null,
         fileRevision: null,
         legacyBackupAttempted: false,
+        unsavedProposal: false,
       },
     };
     contexts.set(normalized, ctx);
@@ -182,6 +183,13 @@ export interface DiagramSession {
   fileRevision: string | null;
   /** True once the legacy backup has been attempted for the active document. */
   legacyBackupAttempted: boolean;
+  /**
+   * True while the open document is a repository-scan proposal that was never
+   * saved (issue #553). It lives with the document, not the mount, so leaving
+   * and re-entering Diagram keeps the hold: nothing (auto-snapshots or
+   * settings included) is written until the first explicit Save.
+   */
+  unsavedProposal: boolean;
 }
 
 export function getDiagramSession(storeKey?: string | null): DiagramSession {
@@ -199,6 +207,7 @@ export function setDiagramSession(
   if (patch.legacySourceVersion !== undefined) session.legacySourceVersion = patch.legacySourceVersion;
   if (patch.fileRevision !== undefined) session.fileRevision = patch.fileRevision;
   if (patch.legacyBackupAttempted !== undefined) session.legacyBackupAttempted = patch.legacyBackupAttempted;
+  if (patch.unsavedProposal !== undefined) session.unsavedProposal = patch.unsavedProposal;
 }
 
 export function _resetDiagramSessionForTests(): void {
@@ -209,5 +218,6 @@ export function _resetDiagramSessionForTests(): void {
     ctx.session.legacySourceVersion = null;
     ctx.session.fileRevision = null;
     ctx.session.legacyBackupAttempted = false;
+    ctx.session.unsavedProposal = false;
   }
 }
