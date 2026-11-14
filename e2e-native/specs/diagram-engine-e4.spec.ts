@@ -1219,19 +1219,69 @@ describe("native engine canvas (T4)", () => {
     // The refusing document is the only one whose layout the engine refuses,
     // so the canvas settles on `refused` rather than a stale scene.
     await openDocument(refusal.documentTitle, { specSha256: refusal.specSha256 });
-    // The diagnostic layer is a lazy chunk behind Suspense, so `refused` can be
-    // on the canvas a frame before the badge is. Wait for either the badge or
-    // the notice; the assertions below still decide which one is right.
-    await browser.waitUntil(async () => browser.execute(() =>
-      Boolean(document.querySelector(".maru-diagram-canvas [data-canvas-diagnostic], [data-canvas-diagnostic-notice]"))), {
-      timeout: 10_000,
-      interval: 100,
-      timeoutMsg: "the refused canvas drew neither a diagnostic badge nor the canvas notice within 10 s",
-    });
+    // The diagnostic layer is a lazy chunk behind Suspense, and the canvas
+    // notice shares its `data-canvas-diagnostic` attribute with the badge, so
+    // "something diagnostic rendered" is not the state the assertions below
+    // read. The hosted run on 11-12 read the canvas at `refused` with the right
+    // spec hash and found neither a badge nor a notice, and the read after a
+    // notice appears can still find none, because the two are separate
+    // renderings of the same mapping. Wait for what is asserted: the anchored
+    // badge for this fixture's own diagnostic, carrying the target attributes
+    // only the badge has.
+    const diagnosis = (await browser.executeAsync(
+      (
+        wanted: { code: string; targetId: string; targetKind: string },
+        timeout: number,
+        done: (state: "anchored" | "notice" | "other-badge" | "nothing") => void,
+      ) => {
+        const deadline = Date.now() + timeout;
+        const tick = () => {
+          const canvas = document.querySelector(".maru-diagram-canvas");
+          const badges = [...(canvas?.querySelectorAll("[data-canvas-diagnostic][data-target-id]") ?? [])];
+          const anchored = badges.some(
+            (badge) =>
+              badge.getAttribute("data-canvas-diagnostic") === wanted.code &&
+              badge.getAttribute("data-target-id") === wanted.targetId &&
+              badge.getAttribute("data-target-kind") === wanted.targetKind &&
+              badge.getAttribute("transform") !== null,
+          );
+          if (anchored) {
+            done("anchored");
+            return;
+          }
+          if (Date.now() > deadline) {
+            const notice = document.querySelectorAll("[data-canvas-diagnostic-notice]").length;
+            done(
+              notice > 0
+                ? "notice"
+                : badges.length > 0
+                  ? "other-badge"
+                  : "nothing",
+            );
+            return;
+          }
+          setTimeout(tick, 100);
+        };
+        tick();
+      },
+      { code: refusal.code, targetId: refusal.targetId, targetKind: refusal.targetKind },
+      10_000,
+    )) as "anchored" | "notice" | "other-badge" | "nothing";
+    assert.equal(
+      diagnosis,
+      "anchored",
+      diagnosis === "notice"
+        ? `the refused canvas rendered the engine's ${refusal.code} in the canvas notice instead of anchoring it to ${refusal.targetKind} ${refusal.targetId}`
+        : diagnosis === "other-badge"
+          ? `the refused canvas anchored a badge for another diagnostic within 10 s, never ${refusal.code} at ${refusal.targetKind} ${refusal.targetId}`
+          : "the refused canvas drew no diagnostic badge within 10 s",
+    );
     const state = await browser.execute(() => {
       const canvas = document.querySelector(".maru-diagram-canvas");
       if (!canvas) return null;
-      const badge = canvas.querySelector<SVGGElement>("[data-canvas-diagnostic]");
+      // The notice's own rows carry `data-canvas-diagnostic` as well; only the
+      // badge carries the anchor attributes this read is about.
+      const badge = canvas.querySelector<SVGGElement>("[data-canvas-diagnostic][data-target-id]");
       const target = badge
         ? canvas.querySelector<SVGGElement>(`[data-node-id="${badge.getAttribute("data-target-id") ?? ""}"]`)
         : null;
@@ -1296,7 +1346,7 @@ describe("native engine canvas (T4)", () => {
     // sees.
     const collision = await browser.execute((options: { targetId: string; frames: string[]; headerBand: number }) => {
       const canvas = document.querySelector(".maru-diagram-canvas");
-      const badge = canvas?.querySelector<SVGGElement>("[data-canvas-diagnostic]");
+      const badge = canvas?.querySelector<SVGGElement>("[data-canvas-diagnostic][data-target-id]");
       if (!canvas || !badge) return null;
       const shared = (a: DOMRect, b: DOMRect) => {
         const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
