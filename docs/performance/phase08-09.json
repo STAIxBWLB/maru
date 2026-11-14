@@ -1670,8 +1670,8 @@
         ],
         "workerProof": "Actual command same-task polling observes a distinct held worker, continued caller progress and mapped worker panic. Actual policy command waits on a competing alias writer, rejects stale revision, then releases admission. IPC refuses unknown actions and forged authority fields. Main identity checks are exercised on main, Sites, local child and a main-labelled child inside another window.",
         "platformScope": "Disposable workspace/home fixtures and Tauri MockRuntime only. This is not native WebView, provider/live execution, Korean IME or release acceptance evidence.",
-        "sourceCommit": "7e2fb89818263cbd4dedda938c5011fcf943fa8a",
-        "logSha256": "e20e26de0f2c231fb094d08097f004e9c3d6fc1a14462cf4061e25b6d8bac0fb",
+        "sourceCommit": "ed72acaad511ffe312579801e7d6af7bf9dc6a32",
+        "logSha256": "f8c91a8269693dd890acc9b3b851253322b7f82193effa4c73de146bdc235d05",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1679,7 +1679,7 @@
           },
           {
             "path": "src-tauri/src/task_completion.rs",
-            "sha256": "5954d70cf0c502f0b3ca668ad319d7abcf41f1bfefebb3bd411ec177ef1e254f"
+            "sha256": "0a5a3b90f28b208fb93b6d90df64436b319a0117ab22b6d4d5925b2ae53d5d3a"
           },
           {
             "path": "src-tauri/src/task_completion_isolation_tests.rs",
@@ -1695,7 +1695,7 @@
           },
           {
             "path": "src-tauri/src/tasks.rs",
-            "sha256": "864d8e7066f3c8d3e8e1c7eed165d1f98326f0ddede4e25e2ca7ef2eb5ba5dba"
+            "sha256": "0158622f02029615504ffd348c14ca9442fff75abbcff7488e237d7c36ddf07c"
           },
           {
             "path": "src-tauri/src/agent_host/proposal.rs",
@@ -1735,11 +1735,11 @@
           },
           {
             "path": "src/lib/taskCompletion.ts",
-            "sha256": "36323ea3e146f68ebd0a12d076bd849ddad2aee2b88a1619c8084442970650a5"
+            "sha256": "a991e82d3014395ff694108728f6ea2f7efd61f2a8376e59f69ac4fa88da202b"
           },
           {
             "path": "src/components/tasks/TaskCompletionSection.tsx",
-            "sha256": "741f5afb76563e8d6d3adce84207f2a30fef8fa411beb82ab74177b0beda48d5"
+            "sha256": "36c53eafa22f5424ab54b54dad181ed10bce8640c51481ac35fd9b4fa08479de"
           },
           {
             "path": "scripts/record-task-completion-isolation.mjs",
