@@ -13,6 +13,7 @@ const decisionOutputs = {
   run_native: "false",
   run_native_compile: "false",
   run_geometry: "false",
+  macos_deferred: "false",
 };
 
 function needs(overrides: Record<string, unknown> = {}) {
@@ -27,7 +28,7 @@ function needs(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function classifyThroughCli(files: unknown[], event: { pull_request: { changed_files: number; labels?: Array<{ name: string }> } }) {
+function classifyThroughCli(files: unknown[], event: { pull_request: { changed_files: number; draft?: unknown; labels?: Array<{ name: string }> } }) {
   const root = mkdtempSync(join(tmpdir(), "maru-ci-policy-"));
   try {
     const filesPath = join(root, "files.json");
@@ -101,6 +102,7 @@ describe("PR change classification", () => {
       run_native: false,
       run_native_compile: false,
       run_geometry: false,
+      macos_deferred: false,
     });
     expect(isDocsOnlyPath("docs/performance/evidence.json")).toBe(false);
     expect(classifyPrChanges(["docs/performance/evidence.json"]).run_full).toBe(true);
@@ -173,6 +175,7 @@ describe("PR change classification", () => {
       run_native: false,
       run_native_compile: true,
       run_geometry: false,
+      macos_deferred: false,
     });
   });
 
@@ -194,6 +197,7 @@ describe("PR change classification", () => {
         run_native: true,
         run_native_compile: false,
         run_geometry: path.startsWith("src-tauri/crates/"),
+        macos_deferred: false,
       });
     }
     expect(classifyPrChanges(["src/lib/ordinary.ts"], ["Native-E2E"])).toEqual({
@@ -202,6 +206,7 @@ describe("PR change classification", () => {
       run_native: true,
       run_native_compile: false,
       run_geometry: false,
+      macos_deferred: false,
     });
   });
 
@@ -226,6 +231,7 @@ describe("PR change classification", () => {
       run_native: false,
       run_native_compile: false,
       run_geometry: false,
+      macos_deferred: false,
     });
 
     const renamedIntoNative = classifyThroughCli(
@@ -239,6 +245,7 @@ describe("PR change classification", () => {
       run_native: true,
       run_native_compile: false,
       run_geometry: false,
+      macos_deferred: false,
     });
   });
 
@@ -276,6 +283,7 @@ describe("CI job aggregation", () => {
       run_native: "false",
       run_native_compile: "true",
       run_geometry: "false",
+      macos_deferred: "false",
     };
     expect(evaluateCiJobs(needs({
       decision: { result: "success", outputs: sourceOutputs },
@@ -318,6 +326,8 @@ describe("CI job aggregation", () => {
       ["run_native", { ...decisionOutputs, run_native: undefined }],
       ["run_native_compile", { ...decisionOutputs, run_native_compile: undefined }],
       ["run_geometry", { ...decisionOutputs, run_geometry: undefined }],
+      ["macos_deferred", { ...decisionOutputs, macos_deferred: undefined }],
+      ["macos_deferred", { ...decisionOutputs, macos_deferred: "draft" }],
     ] as const) {
       const result = evaluateCiJobs(needs({ decision: { result: "success", outputs } }));
       expect(result.ok).toBe(false);
@@ -371,5 +381,136 @@ describe("shared browser test bootstrap", () => {
     expect(policy.run_geometry).toBe(false);
     const config = readFileSync(resolve(process.cwd(), "playwright.config.ts"), "utf8");
     expect(config).toContain("command: `pnpm engine:assets && pnpm exec vite");
+  });
+});
+
+// maru#625: macOS PR jobs run only on ready PRs.
+describe("draft PRs defer macOS jobs", () => {
+  const nativePath = "src-tauri/src/terminal/input.rs";
+  const compilePath = "src/components/NewPanel.tsx";
+  const geometryPath = "src-tauri/crates/maru-diagram-engine/src/lib.rs";
+
+  it("keeps the selection unchanged and marks a draft that would run macOS as deferred", () => {
+    for (const path of [nativePath, compilePath, geometryPath]) {
+      const ready = classifyPrChanges([path], [], false);
+      const draft = classifyPrChanges([path], [], true);
+      expect(ready.macos_deferred, path).toBe(false);
+      expect(draft.macos_deferred, path).toBe(true);
+      const { macos_deferred: _ready, ...readySelection } = ready;
+      const { macos_deferred: _draft, ...draftSelection } = draft;
+      expect(draftSelection, path).toEqual(readySelection);
+    }
+  });
+
+  it("counts unknown draft state as ready", () => {
+    for (const draft of [undefined, null, "true", 1, {}]) {
+      expect(classifyPrChanges([nativePath], [], draft as unknown as boolean).macos_deferred, String(draft)).toBe(false);
+    }
+  });
+
+  it("lets the native-e2e label override draft, in any case", () => {
+    for (const label of ["native-e2e", "Native-E2E"]) {
+      expect(classifyPrChanges([nativePath], [label], true)).toMatchObject({ run_native: true, macos_deferred: false });
+      expect(classifyPrChanges([compilePath], [label], true)).toMatchObject({ run_native: true, macos_deferred: false });
+    }
+  });
+
+  it("does not defer a draft that selects no macOS job", () => {
+    expect(classifyPrChanges(["docs/guide.md"], [], true).macos_deferred).toBe(false);
+  });
+
+  it("reads only a boolean draft flag from the PR event through the CLI", () => {
+    const files = [{ filename: nativePath }];
+    for (const [draft, deferred] of [[true, true], [false, false], [undefined, false], ["true", false]] as const) {
+      const result = classifyThroughCli(files, { pull_request: { changed_files: 1, draft } });
+      expect(result.status, String(draft)).toBe(0);
+      expect(JSON.parse(result.stdout).macos_deferred, String(draft)).toBe(deferred);
+    }
+    const labelled = classifyThroughCli(files, { pull_request: { changed_files: 1, draft: true, labels: [{ name: "native-e2e" }] } });
+    expect(JSON.parse(labelled.stdout).macos_deferred).toBe(false);
+  });
+
+  it("never accepts a deferred plan as success, even when every job that ran passed", () => {
+    const deferred = { run_full: "true", run_e2e: "true", run_native: "true", run_native_compile: "false", run_geometry: "true", macos_deferred: "true" };
+    const outcome = evaluateCiJobs(needs({
+      decision: { result: "success", outputs: deferred },
+      verify: { result: "success" },
+      e2e: { result: "success" },
+      "native-e2e": { result: "skipped" },
+      "geometry-determinism": { result: "success" },
+    }));
+    expect(outcome).toEqual({ ok: false, deferred: true, message: "draft PR; macOS jobs run when the PR is marked ready (gh pr ready)" });
+
+    // A real failure on a deferred draft still reports that failure first.
+    const failed = evaluateCiJobs(needs({
+      decision: { result: "success", outputs: deferred },
+      verify: { result: "failure" },
+      e2e: { result: "success" },
+      "geometry-determinism": { result: "success" },
+    }));
+    expect(failed.ok).toBe(false);
+    expect(failed.message).toContain("verify concluded failure");
+
+    // The Linux/Windows geometry legs still run on a draft, so skipping the
+    // whole geometry workflow is not an authorized deferral.
+    const skippedGeometry = evaluateCiJobs(needs({
+      decision: { result: "success", outputs: deferred },
+      verify: { result: "success" },
+      e2e: { result: "success" },
+      "geometry-determinism": { result: "skipped" },
+    }));
+    expect(skippedGeometry.message).toContain("geometry-determinism concluded skipped");
+  });
+
+  it("fails the aggregate step with the deferred annotation", () => {
+    const deferred = { ...decisionOutputs, run_native: "true", macos_deferred: "true" };
+    const result = spawnSync(process.execPath, [policyPath, "aggregate"], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "", CI_NEEDS_JSON: JSON.stringify(needs({ decision: { result: "success", outputs: deferred } })) },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("::error title=macOS deferred::draft PR; macOS jobs run when the PR is marked ready (gh pr ready)");
+  });
+
+  it("wires the deferral through ci.yml and the determinism workflow", () => {
+    const ci = readFileSync(resolve(process.cwd(), ".github/workflows/ci.yml"), "utf8");
+    expect(ci).toMatch(/types: \[[^\]]*ready_for_review[^\]]*\]/);
+    expect(ci).toContain("macos_deferred: ${{ steps.dedupe.outputs.macos_deferred }}");
+    expect(ci).toContain("if: needs.decision.outputs.run_native_compile == 'true' && needs.decision.outputs.macos_deferred != 'true'");
+    expect(ci).toContain("if: needs.decision.outputs.run_native == 'true' && needs.decision.outputs.macos_deferred != 'true'");
+    expect(ci).toContain("macos: ${{ needs.decision.outputs.macos_deferred != 'true' }}");
+    // Push and dispatch start undeferred; only the classified PR value is read.
+    expect(ci).toMatch(/^ {10}macos_deferred=false$/m);
+    expect(ci).toContain('macos_deferred="$PR_MACOS_DEFERRED"');
+
+    const determinism = readFileSync(resolve(process.cwd(), ".github/workflows/diagram-determinism.yml"), "utf8");
+    expect(determinism).toMatch(/^ {6}macos:\n {8}type: boolean\n {8}default: true$/m);
+    const legs = [...determinism.matchAll(/include: \$\{\{ fromJSON\(inputs\.macos && '(\[.*?\])' \|\| '(\[.*?\])'\) \}\}/g)];
+    expect(legs).toHaveLength(2);
+    for (const [, withMacos, withoutMacos] of legs) {
+      const full = JSON.parse(withMacos).map((leg: { os: string }) => leg.os);
+      const deferred = JSON.parse(withoutMacos).map((leg: { os: string }) => leg.os);
+      expect(full).toEqual(["ubuntu-22.04", "macos-26", "windows-latest"]);
+      expect(deferred).toEqual(["ubuntu-22.04", "windows-latest"]);
+    }
+    // The comparisons need the macOS receipt, so they wait for a ready run.
+    expect(determinism.match(/^ {4}if: inputs\.macos$/gm)).toHaveLength(2);
+  });
+});
+
+// AC5: neither the main-push dedup nor the release lookup can borrow a
+// draft-deferred ci-ok, because both read the run conclusion, and a deferred
+// aggregate fails the run.
+describe("deferred runs are never reused as success", () => {
+  it("main-push dedup reuses only a successful PR run", () => {
+    const ci = readFileSync(resolve(process.cwd(), ".github/workflows/ci.yml"), "utf8");
+    expect(ci).toContain('if [ "$push_tree" = "$head_tree" ] && [ "$latest_conclusion" = "success" ]; then');
+    expect(ci).toContain('if [ "$previous" = "success" ]; then');
+  });
+
+  it("the release lookup admits only main/tag or manual runs that concluded success", () => {
+    const release = readFileSync(resolve(process.cwd(), "scripts/check-release-workflows.mjs"), "utf8");
+    expect(release).toContain('run.event === "push" && (run.head_branch === "main" || run.head_branch === tag)');
+    expect(release).toContain('if (run.conclusion !== "success")');
   });
 });

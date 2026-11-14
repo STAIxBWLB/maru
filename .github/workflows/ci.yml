@@ -4,7 +4,7 @@ run-name: "${{ (github.event_name == 'pull_request' && (github.event.action == '
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
   push:
     branches:
       - main
@@ -39,6 +39,7 @@ jobs:
       run_native: ${{ steps.dedupe.outputs.run_native }}
       run_native_compile: ${{ steps.dedupe.outputs.run_native_compile }}
       run_geometry: ${{ steps.dedupe.outputs.run_geometry }}
+      macos_deferred: ${{ steps.dedupe.outputs.macos_deferred }}
 
     steps:
       - name: Checkout CI policy
@@ -79,6 +80,7 @@ jobs:
           PR_RUN_NATIVE: ${{ steps.classify.outputs.run_native }}
           PR_RUN_COMPILE: ${{ steps.classify.outputs.run_native_compile }}
           PR_RUN_GEOMETRY: ${{ steps.classify.outputs.run_geometry }}
+          PR_MACOS_DEFERRED: ${{ steps.classify.outputs.macos_deferred }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_ACTION: ${{ github.event.action }}
@@ -92,6 +94,9 @@ jobs:
           run_native=false
           run_native_compile=false
           run_geometry=true
+          # Only a classified draft PR defers macOS (maru#625); push, dispatch
+          # and unrelated label events never do.
+          macos_deferred=false
           reason="this event requires verify; main avoids repeating PR-only checks"
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             run_e2e=true
@@ -110,6 +115,7 @@ jobs:
               run_native="$PR_RUN_NATIVE"
               run_native_compile="$PR_RUN_COMPILE"
               run_geometry="$PR_RUN_GEOMETRY"
+              macos_deferred="$PR_MACOS_DEFERRED"
               reason="PR path/label policy selected validation"
               # A native label requests the suite, not another copy of already
               # successful verify/browser/compile work on this identical SHA.
@@ -188,8 +194,12 @@ jobs:
             echo "run_native=$run_native"
             echo "run_native_compile=$run_native_compile"
             echo "run_geometry=$run_geometry"
+            echo "macos_deferred=$macos_deferred"
           } >> "$GITHUB_OUTPUT"
           echo "CI decision: $reason"
+          if [ "$macos_deferred" = "true" ]; then
+            echo "CI decision: draft PR; macOS jobs are deferred until the PR is marked ready (gh pr ready)"
+          fi
           if [ "$run_full" = "false" ]; then
             {
               echo "### CI validation intent"
@@ -385,7 +395,7 @@ jobs:
   native-e2e-compile:
     name: native e2e compile check
     needs: decision
-    if: needs.decision.outputs.run_native_compile == 'true'
+    if: needs.decision.outputs.run_native_compile == 'true' && needs.decision.outputs.macos_deferred != 'true'
     runs-on: macos-26
     timeout-minutes: 45
 
@@ -434,7 +444,7 @@ jobs:
   # The reusable suite owns its 45-minute runner timeout; no second Mac compile.
   native-e2e:
     needs: decision
-    if: needs.decision.outputs.run_native == 'true'
+    if: needs.decision.outputs.run_native == 'true' && needs.decision.outputs.macos_deferred != 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/native-e2e.yml
@@ -447,6 +457,9 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/diagram-determinism.yml
+    # A deferred draft still runs the Linux, Windows and WASM legs (maru#625).
+    with:
+      macos: ${{ needs.decision.outputs.macos_deferred != 'true' }}
 
   ci-ok:
     name: ${{ (github.event_name == 'pull_request' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name != 'native-e2e') && 'ci-label-ignored' || 'ci-ok' }}

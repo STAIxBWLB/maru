@@ -39,6 +39,10 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 - Conventional commits with a scope and the trailing PR number: `feat(meetings): ... (#321)`.
   Release commits are `chore(release): v<version> - <Release Name> (#PR)`.
 - Branches `<type>/<kebab-topic>`; work lands through PRs, not direct pushes to `main`.
+- **PRs open as drafts** (`gh pr create --draft`) and are marked ready (`gh pr ready`) just before
+  `hub_task_done`. Draft pushes run Linux and Windows CI only; `ci-ok` fails on a draft that needs
+  macOS ("macOS deferred") until `gh pr ready` starts the macOS jobs. The `native-e2e` label runs
+  the native suite on a draft. `main` and tags always run macOS (#625).
 - Versions live on **five surfaces** that must stay in sync (`package.json`, `tauri.conf.json`,
   `src-tauri/Cargo.toml`, `src-tauri/maru-cli/Cargo.toml`, `src-tauri/Cargo.lock`);
   `make release-version-check` enforces it. Releases bump the patch; the minor changes only when

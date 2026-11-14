@@ -31,15 +31,15 @@ describe("native-e2e CI placement (T-06-11)", () => {
 
   it("keeps fallback compile for code PRs while full native selection is decision-owned", () => {
     expect(compileJob).toMatch(/^ {4}needs: decision$/m);
-    expect(compileJob).toMatch(/^ {4}if: needs\.decision\.outputs\.run_native_compile == 'true'$/m);
+    expect(compileJob).toMatch(/^ {4}if: needs\.decision\.outputs\.run_native_compile == 'true' && needs\.decision\.outputs\.macos_deferred != 'true'$/m);
     const decision = jobBlock(ciYml, "decision");
-    for (const output of ["run_full", "run_e2e", "run_native", "run_native_compile", "run_geometry"]) {
+    for (const output of ["run_full", "run_e2e", "run_native", "run_native_compile", "run_geometry", "macos_deferred"]) {
       expect(decision).toContain(output + ": " + '${{ steps.dedupe.outputs.' + output + ' }}');
     }
     expect(decision).toContain('node scripts/ci-policy.mjs classify');
     const suite = jobBlock(ciYml, "native-e2e");
     expect(suite).toContain("uses: ./.github/workflows/native-e2e.yml");
-    expect(suite).toContain("if: needs.decision.outputs.run_native == 'true'");
+    expect(suite).toContain("if: needs.decision.outputs.run_native == 'true' && needs.decision.outputs.macos_deferred != 'true'");
   });
 
   it("always aggregates every gate and admits only intentional skips", () => {
