@@ -217,11 +217,20 @@ describe("native task completion evidence", () => {
       catch (failure) { if ((failure as NodeJS.ErrnoException).code === "ENOENT") return []; throw failure; }
     };
     const beforeOutbox = await outboxNames();
+    // Today retains its existing default-root contract; exercise that guard
+    // separately from the configured-root policy and execution flow below.
+    const todayRelative = "tasks/active/native-today-completion.md";
+    const todayFile = path.join(workspace, todayRelative);
+    const todaySource = "---\ntaskId: native-today-completion-fixture\nstatus: active\nmaruCompletionRequired: true\nmaruCompletionPolicyRevision: native-today-policy\n---\n# Native Today refusal\n";
+    await fs.mkdir(path.dirname(todayFile), { recursive: true });
+    await fs.writeFile(todayFile, todaySource);
     const today = await expectNativeRefusal("task_transition", { workPath: workspace, request: {
-        taskId: "native-completion-fixture", taskPath: relative, kind: "complete", expectedTaskHash: createHash("sha256").update(requiredSource).digest("hex"),
+        taskId: "native-today-completion-fixture", taskPath: todayRelative, kind: "complete", expectedTaskHash: createHash("sha256").update(todaySource).digest("hex"),
         deferDate: null, date: "2026-11-14", nowIso: "2026-11-14T10:00:00+09:00", webActionId: null, payload: {},
     } });
     assert.match(JSON.stringify(today), /task_completion_refused/);
+    assert.equal(await fs.readFile(todayFile, "utf8"), todaySource, "refused Today completion changed the default-root task");
+    await assert.rejects(fs.stat(path.join(workspace, "tasks/archive/native-today-completion.md")), { code: "ENOENT" });
     assert.equal(await fs.readFile(file, "utf8"), requiredSource);
     assert.deepEqual(await outboxNames(), beforeOutbox, "refused Today completion created a provider outbox record");
     await assert.rejects(fs.stat(archive), { code: "ENOENT" });
