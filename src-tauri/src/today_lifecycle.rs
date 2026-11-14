@@ -172,10 +172,29 @@ struct TransitionResult {
     outcome: TaskTransitionOutcome,
 }
 
+fn completed_task_content(ctx: &TransitionContext) -> Result<String, String> {
+    let updated = patch(
+        &ctx.raw,
+        "status",
+        Some(FrontmatterValue::String("done".to_string())),
+    )?;
+    let updated = patch(
+        &updated,
+        "done",
+        Some(FrontmatterValue::String(ctx.date.clone())),
+    )?;
+    patch(
+        &updated,
+        "completedAt",
+        Some(FrontmatterValue::String(ctx.now_iso.clone())),
+    )
+}
+
 fn run_complete(
     lease: &PathTransactionLease,
     ctx: TransitionContext,
     request: &TaskTransitionRequest,
+    updated: String,
 ) -> Result<TransitionResult, String> {
     // 1. Durable prepared record FIRST (see module docs for recovery rules).
     let prepared = match &ctx.google_task_id {
@@ -197,22 +216,7 @@ fn run_complete(
         )?),
         None => None,
     };
-    // 2. Frontmatter patch; unknown keys/comments preserved by the editor.
-    let mut updated = patch(
-        &ctx.raw,
-        "status",
-        Some(FrontmatterValue::String("done".to_string())),
-    )?;
-    updated = patch(
-        &updated,
-        "done",
-        Some(FrontmatterValue::String(ctx.date.clone())),
-    )?;
-    updated = patch(
-        &updated,
-        "completedAt",
-        Some(FrontmatterValue::String(ctx.now_iso.clone())),
-    )?;
+    // 2. Publish the checked frontmatter; unknown keys/comments are preserved.
     write_atomic(&ctx.path, updated.as_bytes())?;
     // 3. Prepared -> ready, BEFORE the move invalidates the recorded path;
     // until this lands, recovery owns the record.
@@ -573,7 +577,18 @@ pub(crate) fn task_transition_in_transaction(
     let result = match request.kind {
         TaskTransitionKind::Complete => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;
-            run_complete(lease, ctx, &request)
+            // Admission/refusal precedes the prepared provider record. For
+            // ordinary tasks that record remains the first durable effect.
+            let updated = completed_task_content(&ctx)?;
+            crate::task_completion::guard_managed_task_write(
+                &ctx.work,
+                &ctx.path,
+                Some(&ctx.raw),
+                Some(&updated),
+            )?;
+            let archive = target_path_for_bucket(&ctx.tasks_root, &ctx.path, TaskBucket::Archive)?;
+            crate::task_completion::guard_managed_task_move(&ctx.work, &ctx.path, &archive)?;
+            run_complete(lease, ctx, &request, updated)
         }
         TaskTransitionKind::Reopen => {
             assert_maru_can_write(&work_path, WorkspaceWriteAction::RenameMove)?;

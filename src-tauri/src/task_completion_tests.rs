@@ -71,6 +71,99 @@ fn done_details() -> UpdateTaskDetailsFields {
     }
 }
 
+fn complete_today(
+    fixture: &Fixture,
+) -> Result<crate::today::TaskTransitionOutcome, crate::ipc_error::IpcError> {
+    crate::today_lifecycle::task_transition(
+        fixture.work_path(),
+        crate::today::TaskTransitionRequest {
+            task_id: "completion-fixture".into(),
+            task_path: TASK_PATH.into(),
+            kind: crate::today::TaskTransitionKind::Complete,
+            expected_task_hash: crate::document::revision_for(&fixture.original),
+            defer_date: None,
+            date: Some("2026-11-14".into()),
+            now_iso: Some("2026-11-14T10:00:00+09:00".into()),
+            web_action_id: None,
+            payload: serde_json::json!({}),
+        },
+    )
+}
+
+fn link_google_task(fixture: &mut Fixture) {
+    fixture.original = fixture.original.replace(
+        "custom: preserved",
+        "googleTaskId: synthetic-google-task\ngoogleTaskListId: synthetic-list\ncustom: preserved",
+    );
+    fs::write(fixture.work.join(TASK_PATH), &fixture.original).unwrap();
+}
+
+#[test]
+fn completion_required_today_complete_is_refused_before_effects() {
+    let home = Home::new();
+    let fixture = Fixture::new(&home, Some(true));
+    let result = complete_today(&fixture);
+    assert!(
+        result.is_err(),
+        "Today bypassed completion evidence: {result:?}"
+    );
+    fixture.assert_task_untouched();
+    assert!(crate::today_outbox::list_records(&fixture.work)
+        .unwrap()
+        .is_empty());
+    assert!(!fixture.work.join(".maru/today").exists());
+}
+
+#[test]
+fn completion_required_linked_today_complete_creates_no_provider_outbox() {
+    let home = Home::new();
+    let mut fixture = Fixture::new(&home, Some(true));
+    link_google_task(&mut fixture);
+    let result = complete_today(&fixture);
+    assert!(
+        result.is_err(),
+        "linked Today bypassed completion evidence: {result:?}"
+    );
+    fixture.assert_task_untouched();
+    assert!(crate::today_outbox::list_records(&fixture.work)
+        .unwrap()
+        .is_empty());
+    assert!(!fixture.work.join(".maru/today").exists());
+}
+
+#[test]
+fn completion_manual_linked_today_keeps_archive_and_ready_outbox() {
+    let home = Home::new();
+    let mut fixture = Fixture::new(&home, Some(false));
+    link_google_task(&mut fixture);
+    complete_today(&fixture).unwrap();
+    assert!(!fixture.work.join(TASK_PATH).exists());
+    assert!(fs::read_to_string(fixture.work.join(ARCHIVED_PATH))
+        .unwrap()
+        .contains("status: done"));
+    let records = crate::today_outbox::list_records(&fixture.work).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].status, crate::today_outbox::OutboxStatus::Ready);
+}
+
+#[test]
+fn completion_required_precompleted_today_cannot_archive_without_acceptance() {
+    let home = Home::new();
+    let mut fixture = Fixture::new(&home, Some(true));
+    fixture.original = fixture.original.replace("status: active", "status: done");
+    fs::write(fixture.work.join(TASK_PATH), &fixture.original).unwrap();
+    let result = complete_today(&fixture);
+    assert!(
+        result.is_err(),
+        "a precompleted note must not bypass guarded archive publication: {result:?}"
+    );
+    fixture.assert_task_untouched();
+    assert!(crate::today_outbox::list_records(&fixture.work)
+        .unwrap()
+        .is_empty());
+    assert!(!fixture.work.join(".maru/today").exists());
+}
+
 fn assert_archived_manual_task(work: &Path, bucket: TaskBucket, rel_path: &str) -> String {
     assert_eq!(bucket, TaskBucket::Archive);
     assert_eq!(rel_path, ARCHIVED_PATH);

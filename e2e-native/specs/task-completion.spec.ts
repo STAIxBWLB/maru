@@ -191,6 +191,26 @@ describe("native task completion evidence", () => {
     assert.equal(await fs.readFile(file, "utf8"), requiredSource, "refused Done changed the task bytes");
     await assert.rejects(fs.stat(archive), { code: "ENOENT" }, "refused Done published an archived task");
 
+    const outbox = path.join(workspace, ".maru/today/outbox");
+    const outboxNames = async () => {
+      try { return (await fs.readdir(outbox)).sort(); }
+      catch (failure) { if ((failure as NodeJS.ErrnoException).code === "ENOENT") return []; throw failure; }
+    };
+    const beforeOutbox = await outboxNames();
+    const todayRaw = await browser.executeAsync((workPath: string, taskPath: string, revision: string, done: (value: string) => void) => {
+      const scope = window as unknown as { __TAURI_INTERNALS__: { invoke(command: string, args: unknown): Promise<unknown> } };
+      void scope.__TAURI_INTERNALS__.invoke("task_transition", { workPath, request: {
+        taskId: "native-completion-fixture", taskPath, kind: "complete", expectedTaskHash: revision,
+        deferDate: null, date: "2026-11-14", nowIso: "2026-11-14T10:00:00+09:00", webActionId: null, payload: {},
+      } }).then((body) => done(JSON.stringify({ refused: false, body })), (body: unknown) => done(JSON.stringify({ refused: true, body })));
+    }, workspace, relative, createHash("sha256").update(requiredSource).digest("hex"));
+    const today = JSON.parse(todayRaw) as { refused: boolean; body: unknown };
+    assert.equal(today.refused, true, "Today completion bypassed the evidence gate");
+    assert.match(JSON.stringify(today.body), /requires reviewed, committed artifact evidence/);
+    assert.equal(await fs.readFile(file, "utf8"), requiredSource);
+    assert.deepEqual(await outboxNames(), beforeOutbox, "refused Today completion created a provider outbox record");
+    await assert.rejects(fs.stat(archive), { code: "ENOENT" });
+
     await browser.reloadSession();
     await openTask();
     const restored = await completionState();
