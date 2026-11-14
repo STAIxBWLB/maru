@@ -675,3 +675,118 @@ fn completion_review_r5_retargeted_intent_cannot_reuse_consumed_audit() {
     assert_eq!(fs::read_to_string(target).unwrap(), "unrelated task");
     assert!(!alternate.exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn completion_review_r5_late_dangling_target_is_preserved() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let target = f.work.join("tasks/archive/task.md");
+    fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let target_for_hook = target.clone();
+    let _hook = crate::atomic_file::PathTransactionTestHook::new(
+        f.work.join(TASK),
+        "completion-before-archive",
+        move || {
+            std::os::unix::fs::symlink("missing.md", &target_for_hook).unwrap();
+        },
+    );
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read_link(target).unwrap(), PathBuf::from("missing.md"));
+    assert!(f.work.join(TASK).exists());
+}
+
+#[test]
+fn completion_review_r5_late_source_drift_is_not_rolled_back() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let source = f.work.join(TASK);
+    let changed = fs::read_to_string(&source).unwrap() + "\nConcurrent task edit\n";
+    let changed_for_hook = changed.clone();
+    let _hook = crate::atomic_file::PathTransactionTestHook::new(
+        source.clone(),
+        "completion-before-archive",
+        move || {
+            fs::write(&source, &changed_for_hook).unwrap();
+        },
+    );
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read_to_string(f.work.join(TASK)).unwrap(), changed);
+    assert!(!f.work.join("tasks/archive/task.md").exists());
+}
+
+#[test]
+fn completion_review_r5_disappeared_collision_does_not_retarget_the_intent() {
+    let f = Fixture::new();
+    let token = f.creator("creator-request", CREATOR);
+    f.apply(CREATOR);
+    f.review(&token, "review", CliProviderKind::Claude, true);
+    let first = f.work.join("tasks/archive/task.md");
+    fs::create_dir_all(first.parent().unwrap()).unwrap();
+    fs::write(&first, "earlier collision").unwrap();
+    let (approval, revision) = f.approve(&token);
+    *completion::AFTER_DONE_WRITE_FAILURE.lock().unwrap() = Some(f.work.clone());
+    assert!(completion::finalize(&f.state(), &f.work, &token, &approval, &revision).is_err());
+    let intended = crate::tasks::prepare_task_completion(
+        &f.work,
+        &f.work.join("tasks"),
+        &f.work.join(TASK),
+        &fs::read_to_string(f.work.join(TASK)).unwrap(),
+    )
+    .unwrap()
+    .target;
+    assert_ne!(intended, first);
+    fs::remove_file(&first).unwrap();
+    let recovered = completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision,
+    )
+    .unwrap();
+    assert!(recovered.duplicate);
+    assert!(intended.exists());
+    assert!(!first.exists());
+    assert!(!f.work.join(TASK).exists());
+}
+
+#[test]
+fn completion_review_r5_policy_scope_drift_cannot_resume() {
+    let (f, token, approval, revision) = completion_review_r5_interrupted_before_archive();
+    let done = fs::read(f.work.join(TASK)).unwrap();
+    let policy = walkdir::WalkDir::new(f.work.join(".maru/task-completion/policies"))
+        .into_iter()
+        .map(Result::unwrap)
+        .find(|e| e.file_type().is_file())
+        .unwrap()
+        .into_path();
+    let mut stored: serde_json::Value =
+        serde_json::from_slice(&fs::read(&policy).unwrap()).unwrap();
+    let different = f.work.join("different-tasks");
+    fs::create_dir_all(&different).unwrap();
+    stored["tasksRoot"] = json!(different.to_str().unwrap());
+    fs::write(policy, serde_json::to_vec(&stored).unwrap()).unwrap();
+    assert!(completion::finalize(
+        &ApprovalState::default(),
+        &f.work,
+        &token,
+        &approval,
+        &revision
+    )
+    .is_err());
+    assert_eq!(fs::read(f.work.join(TASK)).unwrap(), done);
+    assert!(!f.work.join("tasks/archive/task.md").exists());
+}

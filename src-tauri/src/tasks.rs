@@ -669,6 +669,10 @@ pub(crate) fn update_task_status_in_transaction_with_completion(
         &normalize_existing_dir(&work_path)?.to_string_lossy(),
         WorkspaceWriteAction::RenameMove,
     )?;
+    #[cfg(test)]
+    if completion_permit.is_some() {
+        PathTransactionLease::test_stage(&[path.clone()], "completion-before-archive");
+    }
     let moved = (|| {
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)
