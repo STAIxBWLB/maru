@@ -30,6 +30,15 @@ pub const MAX_SOURCE_BYTES: u64 = 1024 * 1024;
 /// Total bytes read across all parsed files and the index.
 pub const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+/// Total bytes of paths an index may expand to (v4 prefix compression lets a
+/// small index name very long paths), and the cap per path.
+pub const MAX_INDEX_PATH_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_PATH_BYTES: usize = 4096;
+/// Directory entries a walk may read, ignored ones included, so a very wide
+/// generated folder stops the scan instead of being listed in full.
+pub const MAX_DIR_ENTRIES: usize = 200_000;
+/// Segments of a Rust `use` path that are resolved.
+pub const MAX_USE_SEGMENTS: usize = 16;
 /// Folder nesting the map keeps: a top-level folder and one level inside it.
 pub const GROUP_DEPTH: usize = 2;
 pub const MAX_NODES: usize = 400;
@@ -137,6 +146,7 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
     let mut state = Walk {
         limits,
         budget,
+        entries: 0,
         files: Vec::new(),
     };
     let inventory = match git_index_files(&root, &scan_root, &mut state)? {
@@ -165,6 +175,8 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
         .unwrap_or("repository")
         .to_string();
     let (document, stats) = propose(&scan_root, &name, &files, inventory, &mut budget)?;
+    // A scan that ran past its budget is refused, never returned late.
+    budget.check_time()?;
     Ok(ScanReport {
         document,
         relative_path,
@@ -211,6 +223,8 @@ impl Budget {
 struct Walk {
     limits: ScanLimits,
     budget: Budget,
+    /// Directory entries read so far, ignored ones included.
+    entries: usize,
     /// Paths relative to the scanned folder, `/`-separated.
     files: Vec<String>,
 }
@@ -286,6 +300,29 @@ fn resolve_picked(root: &Path, picked: &str) -> Result<PathBuf, ScanError> {
     Ok(canonical)
 }
 
+/// Whether `relative` (a `/`-separated path under `base`) reaches a regular
+/// file with no symbolic link on the way. Every folder on the path and the
+/// file itself are checked without following links, so a tracked path whose
+/// folder was later replaced by a link out of the workspace is never read.
+fn regular_file_without_links(base: &Path, relative: &str) -> bool {
+    let mut current = base.to_path_buf();
+    let mut parts = relative.split('/').peekable();
+    while let Some(part) = parts.next() {
+        if part.is_empty() || part == "." || part == ".." {
+            return false;
+        }
+        current.push(part);
+        let Ok(meta) = fs::symlink_metadata(&current) else {
+            return false;
+        };
+        let last = parts.peek().is_none();
+        if meta.file_type().is_symlink() || (last && !meta.is_file()) || (!last && !meta.is_dir()) {
+            return false;
+        }
+    }
+    true
+}
+
 fn relative_string(base: &Path, path: &Path) -> String {
     path.strip_prefix(base)
         .map(|rest| {
@@ -331,7 +368,7 @@ fn git_index_files(
             let Ok(bytes) = fs::read(&index) else {
                 return Ok(None);
             };
-            let Some(entries) = parse_index(&bytes) else {
+            let Some(entries) = parse_index(&bytes, state.budget.deadline)? else {
                 return Ok(None);
             };
             let prefix = relative_string(dir, scan_root);
@@ -347,15 +384,13 @@ fn git_index_files(
                 } else {
                     continue;
                 };
-                // A tracked path that is now missing, a link or a directory is
-                // left out, so the map describes what is on disk.
-                let on_disk = scan_root.join(rest);
-                if fs::symlink_metadata(&on_disk).is_ok_and(|meta| meta.is_file()) {
+                // A tracked path that is now missing, a directory, a link or
+                // under a linked folder is left out: the map describes what is
+                // on disk inside the workspace, and nothing is read through a link.
+                if regular_file_without_links(scan_root, rest) {
                     files.push(rest.to_string());
                 }
-                if files.len().is_multiple_of(256) {
-                    state.budget.check_time()?;
-                }
+                state.budget.check_time()?;
             }
             return Ok(Some(files));
         }
@@ -365,47 +400,98 @@ fn git_index_files(
 }
 
 /// Paths of the regular files in a git index (versions 2, 3 and 4). Conflict
-/// stages, gitlinks and symbolic links are skipped. Any malformed entry makes
-/// the whole index unusable, and the caller walks the filesystem instead.
-pub(crate) fn parse_index(bytes: &[u8]) -> Option<Vec<String>> {
+/// stages, gitlinks and symbolic links are skipped. A malformed index is
+/// `Ok(None)` and the caller walks the filesystem instead. Every rebuilt path
+/// is charged against [`MAX_PATH_BYTES`] and [`MAX_INDEX_PATH_BYTES`] before it
+/// is kept, and the deadline is checked while parsing, so v4 prefix expansion
+/// cannot grow past the budget; exceeding it refuses the scan.
+pub(crate) fn parse_index(
+    bytes: &[u8],
+    deadline: Instant,
+) -> Result<Option<Vec<String>>, ScanError> {
+    let mut expanded = 0usize;
+    let mut seen = 0usize;
+    let mut admit = |length: usize| -> Result<(), ScanError> {
+        expanded = expanded.saturating_add(length);
+        seen += 1;
+        if length > MAX_PATH_BYTES || expanded > MAX_INDEX_PATH_BYTES {
+            return Err(ScanError::new(
+                "diagram_scan_index_too_large",
+                format!(
+                    "the git index names more than {} MiB of paths, or a path over {MAX_PATH_BYTES} bytes",
+                    MAX_INDEX_PATH_BYTES / (1024 * 1024)
+                ),
+                "pick a subfolder of a smaller repository, or scan a checkout with a smaller index",
+            ));
+        }
+        if seen.is_multiple_of(1024) && Instant::now() >= deadline {
+            return Err(ScanError::new(
+                "diagram_scan_timeout",
+                format!(
+                    "the scan stopped at its {} s time limit while reading the git index",
+                    SCAN_TIME_BUDGET.as_secs()
+                ),
+                "pick a smaller subfolder and scan again",
+            ));
+        }
+        Ok(())
+    };
+    parse_index_with(bytes, &mut admit)
+}
+
+/// `admit` sees each path's length before the path is built and kept.
+fn parse_index_with(
+    bytes: &[u8],
+    admit: &mut dyn FnMut(usize) -> Result<(), ScanError>,
+) -> Result<Option<Vec<String>>, ScanError> {
+    macro_rules! need {
+        ($value:expr) => {
+            match $value {
+                Some(value) => value,
+                None => return Ok(None),
+            }
+        };
+    }
     let read_u32 = |at: usize| -> Option<u32> {
         bytes
             .get(at..at + 4)
             .map(|slice| u32::from_be_bytes(slice.try_into().expect("four bytes")))
     };
-    if bytes.get(0..4)? != b"DIRC" {
-        return None;
+    if need!(bytes.get(0..4)) != b"DIRC" {
+        return Ok(None);
     }
-    let version = read_u32(4)?;
+    let version = need!(read_u32(4));
     if !(2..=4).contains(&version) {
-        return None;
+        return Ok(None);
     }
-    let count = read_u32(8)? as usize;
+    let count = need!(read_u32(8)) as usize;
     if count > 2_000_000 {
-        return None;
+        return Ok(None);
     }
     let mut at = 12usize;
     let mut previous: Vec<u8> = Vec::new();
     let mut paths = Vec::with_capacity(count.min(65_536));
     for _ in 0..count {
         let start = at;
-        let mode = read_u32(at + 24)?;
-        let flags = u16::from_be_bytes(bytes.get(at + 60..at + 62)?.try_into().ok()?);
+        let mode = need!(read_u32(at + 24));
+        let flags = u16::from_be_bytes(need!(need!(bytes.get(at + 60..at + 62)).try_into().ok()));
         at += 62;
         if version >= 3 && flags & 0x4000 != 0 {
             at += 2;
         }
         let path = if version == 4 {
-            let (strip, used) = read_offset_varint(bytes.get(at..)?)?;
+            let (strip, used) = need!(read_offset_varint(need!(bytes.get(at..))));
             at += used;
-            let end = at + bytes.get(at..)?.iter().position(|byte| *byte == 0)?;
-            let keep = previous.len().checked_sub(strip)?;
+            let end = at + need!(need!(bytes.get(at..)).iter().position(|byte| *byte == 0));
+            let keep = need!(previous.len().checked_sub(strip));
+            admit(keep + (end - at))?;
             let mut path = previous[..keep].to_vec();
             path.extend_from_slice(&bytes[at..end]);
             at = end + 1;
             path
         } else {
-            let end = at + bytes.get(at..)?.iter().position(|byte| *byte == 0)?;
+            let end = at + need!(need!(bytes.get(at..)).iter().position(|byte| *byte == 0));
+            admit(end - at)?;
             let path = bytes[at..end].to_vec();
             // Entries are NUL-padded to a multiple of eight bytes.
             let length = end + 1 - start;
@@ -418,18 +504,18 @@ pub(crate) fn parse_index(bytes: &[u8]) -> Option<Vec<String>> {
         if stage != 0 || kind != 0o100000 {
             continue;
         }
-        let text = String::from_utf8(path).ok()?;
+        let text = need!(String::from_utf8(path).ok());
         if text.is_empty()
             || text.starts_with('/')
             || text
                 .split('/')
                 .any(|part| part.is_empty() || part == "." || part == "..")
         {
-            return None;
+            return Ok(None);
         }
         paths.push(text);
     }
-    Some(paths)
+    Ok(Some(paths))
 }
 
 /// Git's index v4 offset varint: each continuation adds one before shifting.
@@ -660,7 +746,24 @@ fn walk(
         )
     })?;
     let mut children: Vec<(String, bool)> = Vec::new();
+    let mut kept_files = 0usize;
     for entry in entries {
+        // The entry and time budgets apply while reading, so one very wide
+        // folder (generated output, a vendored tree) cannot outrun them.
+        state.entries += 1;
+        if state.entries > MAX_DIR_ENTRIES {
+            return Err(ScanError::new(
+                "diagram_scan_too_many_entries",
+                format!(
+                    "the scan read more than {MAX_DIR_ENTRIES} folder entries (stopped in {})",
+                    display(relative)
+                ),
+                "pick a smaller subfolder, or list generated folders in .gitignore, and scan again",
+            ));
+        }
+        if state.entries.is_multiple_of(256) {
+            state.budget.check_time()?;
+        }
         let entry = entry.map_err(|error| {
             ScanError::new(
                 "diagram_scan_read_failed",
@@ -676,22 +779,37 @@ fn walk(
         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        if kind.is_dir() && name != ".git" {
-            children.push((name, true));
+        let is_dir = if kind.is_dir() && name != ".git" {
+            true
         } else if kind.is_file() {
-            children.push((name, false));
+            false
+        } else {
+            continue;
+        };
+        // Ignored entries are dropped as they are read, never kept or sorted.
+        if ignored(&rules, &join(relative, &name), is_dir) {
+            continue;
         }
+        if !is_dir {
+            kept_files += 1;
+            if state.files.len() + kept_files > state.limits.max_files {
+                return Err(ScanError::new(
+                    "diagram_scan_too_many_files",
+                    format!(
+                        "the folder holds more than {} files",
+                        state.limits.max_files
+                    ),
+                    format!(
+                        "pick a smaller subfolder, or raise maxFiles (up to {MAX_FILES_LIMIT})"
+                    ),
+                ));
+            }
+        }
+        children.push((name, is_dir));
     }
     children.sort();
     for (name, is_dir) in children {
-        let path = if relative.is_empty() {
-            name.clone()
-        } else {
-            format!("{relative}/{name}")
-        };
-        if ignored(&rules, &path, is_dir) {
-            continue;
-        }
+        let path = join(relative, &name);
         if is_dir {
             if depth + 1 >= usize::from(state.limits.max_depth) {
                 return Err(ScanError::new(
@@ -989,6 +1107,8 @@ fn rust_refs(path: &str, text: &str, files: &BTreeSet<String>, refs: &mut Refs) 
                     .unwrap_or("")
             })
             .take_while(|segment| !segment.is_empty())
+            // A long `use a::a::...` path is cut, so resolution stays linear.
+            .take(MAX_USE_SEGMENTS)
             .collect();
         let Some((first, rest)) = segments.split_first() else {
             continue;
@@ -1325,9 +1445,7 @@ fn propose(
             continue;
         };
         source_files += 1;
-        if source_files.is_multiple_of(64) {
-            budget.check_time()?;
-        }
+        budget.check_time()?;
         let base = file.rsplit('/').next().unwrap_or(file);
         let depth = file.matches('/').count();
         if depth <= 1
@@ -1345,6 +1463,11 @@ fn propose(
             )
         {
             entrypoints.push(file.clone());
+        }
+        // Checked again right before reading, folders included, so a link that
+        // replaced a folder after the inventory is never read through.
+        if !regular_file_without_links(scan_root, file) {
+            continue;
         }
         let path = scan_root.join(file);
         let Ok(meta) = fs::symlink_metadata(&path) else {
@@ -1389,6 +1512,7 @@ fn propose(
             packages.entry(from).or_default().extend(refs.packages);
         }
     }
+    budget.check_time()?;
     if edges.len() > MAX_EDGES {
         return Err(ScanError::new(
             "diagram_scan_too_many_edges",
