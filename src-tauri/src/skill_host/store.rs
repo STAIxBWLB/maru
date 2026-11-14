@@ -5334,13 +5334,27 @@ fn owned_builtin_entry_target(
     // Entry links record the canonical skill path while the roots come from
     // the home path, so compare both through their resolved ancestors (macOS
     // `/var` -> `/private/var`, or any symlinked home component).
-    let resolved_target = resolved_through_existing_ancestor(target);
+    // Only the parent side is resolved: following the final component could
+    // walk a skill-level link out of the bundle and claim a user's directory.
+    let resolved_target = resolved_parent(target);
     let previous = previous_workspace.is_some_and(|root| {
-        resolved_target == resolved_through_existing_ancestor(&root.join("skills").join(name))
+        resolved_target
+            == resolved_through_existing_ancestor(root)
+                .join("skills")
+                .join(name)
     });
     previous
         || (resolved_target.starts_with(resolved_through_existing_ancestor(builtin))
             && !target.exists())
+}
+
+/// Resolve a path's parent through its existing ancestors, keeping its own
+/// final component literal.
+fn resolved_parent(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => resolved_through_existing_ancestor(parent).join(name),
+        _ => host_fs::simplified(path),
+    }
 }
 
 /// Canonicalize the deepest existing ancestor and re-append the rest, so a
@@ -9742,6 +9756,42 @@ mod tests {
                 "gone",
                 &builtin,
                 None
+            ));
+        }
+
+        #[test]
+        #[cfg(unix)]
+        fn previous_skill_link_out_of_the_bundle_does_not_claim_a_user_entry() {
+            let dir = TempDir::new().unwrap();
+            let external = dir.path().join("user/shared-skill");
+            fs::create_dir_all(&external).unwrap();
+            let previous = dir.path().join("skills/_bundles/old");
+            fs::create_dir_all(previous.join("skills")).unwrap();
+            std::os::unix::fs::symlink(&external, previous.join("skills/gone")).unwrap();
+            let builtin = dir.path().join("skills/_builtin");
+            fs::create_dir_all(&builtin).unwrap();
+            assert!(!owned_builtin_entry_target(
+                &external,
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            assert!(!owned_builtin_entry_target(
+                &external.canonicalize().unwrap(),
+                "gone",
+                &builtin,
+                Some(&previous)
+            ));
+            let entry = dir.path().join("skills/gone");
+            std::os::unix::fs::symlink(&external, &entry).unwrap();
+            remove_owned_builtin_entry(&entry, "gone", &builtin, Some(&previous)).unwrap();
+            assert_eq!(host_fs::read_link_target(&entry), Some(external.clone()));
+            // The bundle's own path, through an aliased root, is still owned.
+            assert!(owned_builtin_entry_target(
+                &previous.canonicalize().unwrap().join("skills/gone"),
+                "gone",
+                &builtin,
+                Some(&previous)
             ));
         }
 
