@@ -1021,11 +1021,10 @@ fn completion_guard_symlinked_config_root_still_protects_existing_physical_names
     }
 }
 
-fn completion_suffix_roundtrip(fixture: &Fixture) -> Result<(), String> {
+fn completion_suffix_roundtrip(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>> {
     let html_path = "tasks/active/task.html";
     crate::document::move_document(fixture.work_path(), TASK_PATH.into(), html_path.into())?;
-    let html_before =
-        fs::read_to_string(fixture.work.join(html_path)).map_err(|e| e.to_string())?;
+    let html_before = fs::read_to_string(fixture.work.join(html_path))?;
     // The ordinary HTML writer does not carry task policy or identity fields.
     // Returning these bytes to Markdown would present Done to the Tasks parser.
     crate::document::save_document(
@@ -1033,8 +1032,7 @@ fn completion_suffix_roundtrip(fixture: &Fixture) -> Result<(), String> {
         html_path.into(),
         "---\nstatus: done\n---\n# Unreviewed roundtrip\n".into(),
         Some(crate::document::revision_for(&html_before)),
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     crate::document::move_document(fixture.work_path(), html_path.into(), TASK_PATH.into())?;
     Ok(())
 }
