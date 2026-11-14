@@ -6,19 +6,105 @@ import { verifyNativeProfileIsolation } from "../rootHooks";
 
 const POLL_TIMEOUT_MS = 20_000;
 
+/** Working shell tabs a persisted profile records, or 0 when it records none. */
+function persistedSessions(profile: string | null): number {
+  try {
+    const parsed = JSON.parse(profile ?? "null") as { sessions?: unknown } | null;
+    return Array.isArray(parsed?.sessions) ? parsed!.sessions!.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The panel writes `maru:terminal:v1` on a 400 ms debounce after the terminal
+ *  state changes (`TerminalPanel.tsx`), so the entry a change adds lands well
+ *  after the PTYs it belongs to are ready. Read the moment the split is ready,
+ *  the store still holds the profile the panel had reported when it mounted —
+ *  that is what the hosted run on 11-13 captured (saved
+ *  `{"version":1,"tasks":[],"sessions":[]}` against a restart that restored three
+ *  shell sessions). Wait for a profile that records at least `minSessions`
+ *  entries and has stopped changing across that debounce, instead of pinning a
+ *  count: the restored split plus the auto-launched pane does not always persist
+ *  the same number of tabs. */
+async function waitForPersistedProfile(minSessions: number): Promise<string | null> {
+  return (await browser.executeAsync(
+    (wanted: number, timeout: number, done: (value: string | null) => void) => {
+      const key = "maru:terminal:v1";
+      // TerminalPanel's persist effect restarts this window on every state change.
+      const settled = 500;
+      const deadline = Date.now() + timeout;
+      const sessions = (raw: string | null): number => {
+        try {
+          const parsed = JSON.parse(raw ?? "null") as { sessions?: unknown } | null;
+          return Array.isArray(parsed?.sessions) ? parsed.sessions.length : 0;
+        } catch {
+          return 0;
+        }
+      };
+      let last = window.localStorage.getItem(key);
+      let changedAt = Date.now();
+      const tick = () => {
+        const current = window.localStorage.getItem(key);
+        const now = Date.now();
+        if (current !== last) {
+          last = current;
+          changedAt = now;
+        }
+        if (sessions(last) >= wanted && now - changedAt >= settled) {
+          done(last);
+          return;
+        }
+        if (now >= deadline) {
+          done(last);
+          return;
+        }
+        setTimeout(tick, 50);
+      };
+      tick();
+    },
+    minSessions,
+    POLL_TIMEOUT_MS,
+  )) as string | null;
+}
+
 describe("native restored terminal topology", () => {
   it("retains one spec profile across restart and binds the explicit shell after restored split autolaunch", async () => {
     await verifyNativeProfileIsolation("retained");
     const firstId = await openShellSession();
+    // The split adds one entry to the profile, so the settled profile from before
+    // it is the floor the split has to move past.
+    const beforeSplit = persistedSessions(await waitForPersistedProfile(1));
     const splitDispatched = await browser.execute(() => window.__MARU_NATIVE_E2E__?.menuCommand("terminal.split"));
     assert.equal(splitDispatched, true, "the split command must be dispatched exactly once to the registered handler");
     const splitReady = await waitForShellSplitReady(firstId);
     assert.ok(splitReady, "both real split PTYs must be ready before restart");
-    const saved = await browser.execute(() => window.localStorage.getItem("maru:terminal:v1"));
+    const saved = await waitForPersistedProfile(beforeSplit + 1);
     assert.ok(saved, "terminal metadata must be persisted for the restored-state regression");
     await browser.reloadSession();
     await verifyNativeProfileIsolation("retained");
     const restored = await browser.execute(() => window.localStorage.getItem("maru:terminal:v1"));
+    if (restored !== saved) {
+      // Which side lost or gained an entry, without titles, paths or anything the
+      // shell printed: the restored store is rewritten by the relaunched app, so
+      // a diff here says whether the split's own tab survived the restart.
+      const summary = (profile: string | null) => {
+        try {
+          const parsed = JSON.parse(profile ?? "null") as {
+            tasks?: unknown[]; sessions?: Array<{ kind?: unknown; agentSessionId?: unknown }>;
+          } | null;
+          return {
+            tasks: Array.isArray(parsed?.tasks) ? parsed.tasks.length : 0,
+            kinds: (parsed?.sessions ?? []).map((session) => String(session?.kind)),
+            withAgentSession: (parsed?.sessions ?? []).filter(
+              (session) => typeof session?.agentSessionId === "string",
+            ).length,
+          };
+        } catch {
+          return { error: "unparseable profile" };
+        }
+      };
+      console.error("terminal_restoration_profile_diff", JSON.stringify({ saved: summary(saved), restored: summary(restored) }));
+    }
     assert.equal(restored, saved, "same-spec restart must preserve the actual terminal profile");
     const sessionId = await openShellSession();
     const focused = await browser.execute((id: string) => {

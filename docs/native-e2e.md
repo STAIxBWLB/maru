@@ -68,6 +68,18 @@ Readiness conditions replace session-set quiet-period guesses; existing timeout
 and text/paint assertions remain intact. Issue #388 requires five consecutive
 hosted native runs at the accepted fix, not retry-to-green closure.
 
+Three readiness conditions carry those same rules past the #388 follow-up.
+`terminal-restoration.spec.ts` waits for a `maru:terminal:v1` profile that
+records one more session than the settled pre-split profile and has stopped
+changing across the panel's 400 ms write debounce, because the restart compares
+the profile the split produced with the one the relaunched app rewrites.
+`ime.spec.ts` waits for the rich editor's mounted surface to carry imported
+text, not merely for its contenteditable. `diagram-engine-e4.spec.ts` waits for
+the anchored badge of the fixture's own refusal diagnostic, since the canvas
+notice carries the same attribute and is a separate rendering of the same
+mapping. Failure output names the state that was found instead (profile kinds,
+missing document, notice versus anchored badge).
+
 Menu tests wait for a registered dispatcher and require a receipt from their
 single command invocation; bridge-object presence alone is insufficient. A
 failed document-mode assertion reports active rail modes and list state, while
