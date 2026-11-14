@@ -271,8 +271,42 @@ describe("a malformed engine receipt envelope blocks the commit (#137)", () => {
     expect(result.status).toBe("invalid");
     if (result.status !== "invalid") throw new Error("Expected refusal");
     expect(result.diagnostics[0]?.key).toBe("diagram.semantic.engineValidationFailed");
-    expect(String(result.diagnostics[0]?.params?.message)).toMatch(/unsupported schemaVersion 2.*update Maru/);
+    expect(String(result.diagnostics[0]?.params?.message)).toMatch(/schemaVersion is 2, not the supported 1.*update Maru/);
     expect(store.getState().doc).toBe(before);
     expect(store.getState().ephemeral.history.past).toHaveLength(0);
   });
+
+  for (const step of ["validation", "layout"] as const) {
+    for (const status of ["failed", "not-run"]) {
+      it(`refuses an ok ${step} report whose schema gate is ${status}, leaving doc and history unchanged (T137-R1)`, async () => {
+        const { store } = storeOf("lifecycle");
+        const before = store.getState().doc;
+        const forged = {
+          validateCandidate: async (type: string, spec: unknown) => {
+            const { createProductDiagramEngine } = await import("./engine");
+            const real = await engineHost.validateCandidate(type, spec);
+            const base = { ...real.receipt!, inputSpecSha256: real.candidateSha256! };
+            const stamped = { ...base, gates: { ...base.gates, schema: { status, scope: base.gates.schema.scope } } };
+            const engine = createProductDiagramEngine({
+              validate: async () => ({ apiVersion: 1, ok: true, diagnostics: [], receipt: step === "validation" ? stamped : base }),
+              layout: async () => ({ apiVersion: 1, ok: true, diagnostics: [], geometry: null, receipt: step === "layout" ? stamped : base }),
+              render: async () => { throw new Error("render is not expected"); },
+            });
+            return engine.validateCandidate(type, spec);
+          },
+        };
+        const result = await applyValidatedSemanticEdit(
+          store,
+          "ds",
+          addSemanticEntry("lifecycle", "states", { type: "active", label: "Extra", lane: "main", col: 3 }),
+          forged,
+        );
+        expect(result).toMatchObject({ status: "invalid", diagnostics: [{ key: "diagram.semantic.engineValidationFailed" }] });
+        if (result.status !== "invalid") return;
+        expect(String(result.diagnostics[0]?.params?.message)).toContain(`schema gate is "${status}"`);
+        expect(store.getState().doc).toBe(before);
+        expect(store.getState().ephemeral.history.past).toHaveLength(0);
+      });
+    }
+  }
 });

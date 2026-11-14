@@ -191,8 +191,9 @@ describe("product diagram engine facade", () => {
   describe("receipt envelope (#137)", () => {
     type Mutate = (receipt: Record<string, unknown>) => void;
     const cases: Array<[string, Mutate, RegExp]> = [
-      ["missing schemaVersion", (r) => { delete r.schemaVersion; }, /unsupported schemaVersion null \(expected 1\)/],
-      ["unsupported schemaVersion", (r) => { r.schemaVersion = 2; }, /unsupported schemaVersion 2/],
+      ["missing schemaVersion", (r) => { delete r.schemaVersion; }, /schemaVersion is missing, not the supported 1/],
+      ["unsupported schemaVersion", (r) => { r.schemaVersion = 2; }, /schemaVersion is 2, not the supported 1/],
+      ["non-number schemaVersion, not echoed", (r) => { r.schemaVersion = "/Users/someone/secret"; }, /schemaVersion is of type string, not the supported 1/],
       ["missing gates", (r) => { delete r.gates; }, /no gates record/],
       ["missing gate", (r) => { delete (r.gates as Record<string, unknown>).visualReview; }, /gate "visualReview" is missing or malformed/],
       ["unknown gate status", (r) => { (r.gates as Record<string, Record<string, unknown>>).schema!.status = "skipped"; }, /gate "schema" is missing or malformed/],
@@ -217,7 +218,44 @@ describe("product diagram engine facade", () => {
           const rejection = engine.validateCandidate("architecture", specJson);
           await expect(rejection).rejects.toThrow(message);
           await expect(rejection).rejects.toThrow(/update Maru so the app and engine match, then retry/);
+          await expect(rejection).rejects.not.toThrow(/\/Users\//);
           if (where === "validation") expect(layout).not.toHaveBeenCalled();
+        });
+      }
+
+      for (const status of ["failed", "not-run"]) {
+        it(`fails closed on an ok ${where} report whose schema gate is ${status} (T137-R1)`, async () => {
+          const hash = await sha256(specJson);
+          const stamp = <T extends ValidationReport | GeometryReport>(report: T): T => {
+            report.receipt.gates.schema = { status, scope: "architecture-document-validity" };
+            return report;
+          };
+          const layout = vi.fn(async () => where === "layout" ? stamp(geometryReport(true, hash)) : geometryReport(true, hash));
+          const engine = createProductDiagramEngine({
+            validate: async () => where === "validation" ? stamp(validationReport(true, hash)) : validationReport(true, hash),
+            layout,
+            render: async () => { throw new Error("render is not expected in a validation test"); },
+          });
+          const rejection = engine.validateCandidate("architecture", specJson);
+          await expect(rejection).rejects.toThrow(new RegExp(`${where} report says ok but its receipt's schema gate is "${status}"`));
+          await expect(rejection).rejects.toThrow(/update Maru so the app and engine match, then retry/);
+          if (where === "validation") expect(layout).not.toHaveBeenCalled();
+        });
+
+        it(`still reports a refused ${where} report whose schema gate is ${status}`, async () => {
+          const hash = await sha256(specJson);
+          const refuse = <T extends ValidationReport | GeometryReport>(report: T): T => {
+            report.receipt.gates.schema = { status, scope: "architecture-document-validity" };
+            return report;
+          };
+          const engine = createProductDiagramEngine({
+            validate: async () => where === "validation" ? refuse(validationReport(false, hash, [diagnostic("Bad.", "Fix it.")])) : validationReport(true, hash),
+            layout: async () => where === "layout" ? refuse(geometryReport(false, hash, [diagnostic("Bad.", "Fix it.")])) : geometryReport(true, hash),
+            render: async () => { throw new Error("render is not expected in a validation test"); },
+          });
+          const result = await engine.validateCandidate("architecture", specJson);
+          expect(result.ok).toBe(false);
+          expect(result.errors.join(" ")).toContain("Bad.");
         });
       }
     }

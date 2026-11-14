@@ -193,7 +193,11 @@ const RECEIPT_GATES = ["schema", "artifact", "browser", "visualReview"] as const
 function checkReceiptEnvelope(receipt: EngineReceipt): void {
   const raw = receipt as unknown as Record<string, unknown>;
   if (raw.schemaVersion !== RECEIPT_SCHEMA_VERSION) {
-    throw new Error(`The engine receipt has unsupported schemaVersion ${JSON.stringify(raw.schemaVersion ?? null)} (expected ${RECEIPT_SCHEMA_VERSION}); update Maru so the app and engine match, then retry.`);
+    // The value is untrusted: echo it only when it is a number.
+    const found = typeof raw.schemaVersion === "number" && Number.isFinite(raw.schemaVersion)
+      ? String(raw.schemaVersion)
+      : raw.schemaVersion === undefined ? "missing" : `of type ${raw.schemaVersion === null ? "null" : typeof raw.schemaVersion}`;
+    throw new Error(`The engine receipt schemaVersion is ${found}, not the supported ${RECEIPT_SCHEMA_VERSION}; update Maru so the app and engine match, then retry.`);
   }
   const gates = raw.gates;
   if (!record(gates)) {
@@ -205,6 +209,16 @@ function checkReceiptEnvelope(receipt: EngineReceipt): void {
         || typeof gate.scope !== "string" || gate.scope.length === 0) {
       throw new Error(`The engine receipt gate "${name}" is missing or malformed; update Maru so the app and engine match, then retry.`);
     }
+  }
+}
+
+/**
+ * A report that says ok must carry a receipt whose schema gate passed; a
+ * "failed" or "not-run" schema gate is only consistent with a refusal.
+ */
+function checkOkReceiptPassed(ok: boolean, receipt: EngineReceipt, step: "validation" | "layout"): void {
+  if (ok && receipt.gates.schema.status !== "passed") {
+    throw new Error(`The engine ${step} report says ok but its receipt's schema gate is "${receipt.gates.schema.status}", not "passed"; update Maru so the app and engine match, then retry.`);
   }
 }
 
@@ -263,6 +277,7 @@ async function validateEngineCandidateWithPorts(
 
   const validation = await ports.validate(specJson);
   checkReceiptSource(validation.receipt, candidateSha256);
+  checkOkReceiptPassed(validation.ok, validation.receipt, "validation");
   if (!validation.ok) {
     return {
       ok: false,
@@ -284,6 +299,7 @@ function layoutAdmission(
   priorDiagnostics: Diagnostic[],
 ): EngineCandidateValidation {
   checkReceiptSource(layout.receipt, candidateSha256);
+  checkOkReceiptPassed(layout.ok, layout.receipt, "layout");
   const warnings = layout.ok ? layout.diagnostics.map(diagnosticText) : [];
   const errors = layout.ok
     ? []
