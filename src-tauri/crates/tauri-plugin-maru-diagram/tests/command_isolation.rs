@@ -18,6 +18,13 @@ impl DiagramHost for FixtureHost {
     fn ensure_write(&self, _: &std::path::Path, _: WriteAction) -> Result<(), HostError> {
         panic!("diagram fixture has no filesystem write path")
     }
+    fn scan_root(&self, _: &str) -> Result<PathBuf, HostError> {
+        Err(HostError::new(
+            "fixture_scan_refused",
+            "the fixture host opens no workspace",
+            "scan through a host that resolves a workspace",
+        ))
+    }
 }
 
 struct FixtureSources;
@@ -102,6 +109,7 @@ fn invoke(
 fn production_feature_commands_are_invokable_through_mock_runtime() {
     let mut commands = vec![
         "validate",
+        "scan_repository",
         "render_png",
         "diagram_list_renders",
         "diagram_prepare_render_view",
@@ -136,6 +144,15 @@ fn production_feature_commands_are_invokable_through_mock_runtime() {
         .unwrap();
     assert!(validated.ok);
     observed.push("validate");
+
+    let scan_refusal = invoke(
+        &main,
+        "scan_repository",
+        json!({"workspace":"fixture","path":"."}),
+    )
+    .unwrap_err();
+    assert_eq!(scan_refusal["code"], "fixture_scan_refused");
+    observed.push("scan_repository");
 
     let png_request =
         json!({"specJson":source,"format":"png","theme":"light","pixelRatio":1}).to_string();

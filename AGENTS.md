@@ -57,6 +57,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 ## Things the agent gets wrong
 
 - **Task completion guards (2026-11-14)**: reuse Tasks status, bucket and Markdown helpers with the configured/recorded root. Check creation, promotion, planned status-writer moves and format exits before effects; do not let a suffix change detach policy. Restrict completion approval grants to native main webview/window labels too. Preserve UI-only policy and reject backend-evidence aliases; retain boundary, scope, restart and one-effect regressions.
+- **Repository scan bounds (2026-11-14)**: when changing `scan.rs`, keep path checks portable across shipped platforms and enforce budgets inside parsers, matchers, import resolution and reads. Preserve malformed-input, deadline and actual-byte accounting regressions; a final deadline check alone is insufficient.
 
 - **HWP staging privacy (2026-11-14)**: create production document-staging and render-attempt directories through `src-tauri/src/hwped.rs::private_temp_dir`. Preserve the child-process umask-022 tests; do not change process-global umask in parallel tests.
 
@@ -79,7 +80,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
   touches `src-tauri/build.rs` first. A webview stuck on `about:blank` is this.
 - **`VITE_NATIVE_E2E=1` output is not shippable**: re-run `pnpm build:frontend` before inspecting a
   production artifact. The `native-e2e` cargo feature must never reach a release; three guards check.
-- **Command isolation count**: `check-command-isolation` expects exactly **396** registered commands
+- **Command isolation count**: `check-command-isolation` expects exactly **397** registered commands
   with recorded evidence. Adding or removing a `#[tauri::command]` means updating the evidence JSON
   under `docs/performance/`, which is input to the gate and must not be hand-forged.
 - **No raw `font-size: Npx` in `src/styles.css`**: use the `--type-*` / `--read-*` scale in

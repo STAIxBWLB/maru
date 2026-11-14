@@ -143,7 +143,7 @@ brew upgrade maru-cli
   ISOLATED commands run on awaited `spawn_blocking` workers and
   native-window commands stay UI-bound, and every filesystem mutation passes
   shared path-transaction admission before taking domain locks. The
-  396-command inventory, worker-boundary, and admission evidence are gated by
+  397-command inventory, worker-boundary, and admission evidence are gated by
   `check-command-isolation` in `make verify`.
 - Diagram's File > Renders keeps immutable engine HTML plus receipts in the
   workspace, verifies artifact hashes before exact-file grants, and uses an
@@ -565,8 +565,8 @@ make clippy
 # Complete hermetic verification
 make verify
 
-# Phase 08 evidence closure gate alone (396 production commands, PERF-01/PERF-02)
-node scripts/check-command-isolation.mjs --all --expected-count 396
+# Phase 08 evidence closure gate alone (397 production commands, PERF-01/PERF-02)
+node scripts/check-command-isolation.mjs --all --expected-count 397
 
 # Full verify plus release-only CLI and debug Tauri checks
 make release-checks
@@ -669,10 +669,10 @@ orchestrator must hold the applicable admission lease for the complete CLI call.
   ship-isolation scan of the produced bundle (D-10)
 - the Phase 08 evidence closure gate (`check-command-isolation`): every
   registered production command carries final justified worker-boundary,
-  mutation-admission and processing-caller evidence against the 396-command
-  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 396`).
+  mutation-admission and processing-caller evidence against the 397-command
+  inventory (`node scripts/check-command-isolation.mjs --all --expected-count 397`).
   The current source manifest records 389 app handlers
-  plus seven production plugin commands. Historical Phase 08 behavior evidence
+  plus eight production plugin commands. Historical Phase 08 behavior evidence
   remains archival for retired entries; plugin invocation and compiled-capability
   MockRuntime results are recorded separately and do not certify native WebView transport.
 
@@ -1116,6 +1116,7 @@ Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 - 2026-11-14: Repeated HWP staging reviews found that default temporary-directory creation becomes 0755 under umask 022. Shared capture, edit, render, compose, validation, save-candidate and form staging now applies Unix 0700 before creation. The isolated child tests cover both system-temp and explicit-parent directories without changing the parallel harness's umask.
 
+- 2026-11-14: Scanner review found the same bound gap in Rust imports, Python imports and ignore tokenization: a final timeout check could reject late success without stopping expensive work. Index paths also needed Windows separator checks on every platform. The scanner instruction records this shared invariant.
 - 2026-11-14: Cleanup ownership reviews exposed the same symlink boundary at the skill and generation-root levels. Resolving either to an external destination could classify a user's shared entry as Maru-owned. The cleanup regressions distinguish home-path aliases above the generation root from links at or below it.
 
 ## License

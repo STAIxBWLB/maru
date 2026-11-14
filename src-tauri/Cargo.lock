@@ -5170,6 +5170,7 @@ name = "tauri-plugin-maru-diagram"
 version = "0.1.0"
 dependencies = [
  "maru-diagram-engine",
+ "rustix",
  "serde",
  "serde_json",
  "tauri",

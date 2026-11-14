@@ -142,6 +142,7 @@ import { RendersDialog } from "./modals/RendersDialog";
 import { rerenderDocument } from "../../lib/diagram/renders";
 import { ImportExportDialog } from "./modals/ImportExportDialog";
 import { GenerateDiagramDialog } from "./modals/GenerateDiagramDialog";
+import { ScanRepositoryDialog } from "./modals/ScanRepositoryDialog";
 import { MappingPreviewDialog } from "./modals/MappingPreviewDialog";
 import { MemoDialog } from "./modals/MemoDialog";
 import {
@@ -325,6 +326,7 @@ function DiagramShell({
   const [rendersOpen, setRendersOpen] = useState(false);
   const [ioDialog, setIoDialog] = useState<"import" | "export" | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [memoOpen, setMemoOpen] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -351,6 +353,13 @@ function DiagramShell({
   const focusMode = useDiagram((s) => s.ephemeral.ui.focusMode);
   const [panels, setPanels] = useState<PersistedPanelState>(() => readPanelState());
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  /** The scan-proposal hold lives in the workspace session (it survives
+   *  remounts with the document): no snapshot or settings write until Save. */
+  const isUnsavedProposal = useCallback(() => getDiagramSession(sessionKey).unsavedProposal, [sessionKey]);
+  const setUnsavedProposal = useCallback(
+    (value: boolean) => setDiagramSession({ unsavedProposal: value }, sessionKey),
+    [sessionKey],
+  );
 
   /**
    * Replace the document. The viewport is not saved, and a nested Floorplan
@@ -359,6 +368,9 @@ function DiagramShell({
    */
   const openDoc = useCallback(
     (next: Parameters<typeof replaceDoc>[0]) => {
+      // Any document opened here is an ordinary one; a scan proposal marks
+      // itself again right after this call.
+      setUnsavedProposal(false);
       resetCanvasGeometry();
       store.setState(replaceDoc(next));
       if ((next.datasets ?? []).some((dataset) => dataset.kind === "semanticSpec" && dataset.diagramType === "floorplan")) {
@@ -368,7 +380,7 @@ function DiagramShell({
         store.setState(setViewport(fitView({ nodes: next.nodes.filter(modelDrawsNode(next)), viewportW: rect?.width ?? 800, viewportH: rect?.height ?? 600 })));
       }
     },
-    [store],
+    [setUnsavedProposal, store],
   );
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const insertOffsetRef = useRef(0);
@@ -434,6 +446,9 @@ function DiagramShell({
       enabled: true,
       getDoc: () => store.getState().doc,
       onFire: async (_content, doc) => {
+        // A scan proposal is never snapshotted before its first Save, even if
+        // the scheduler was armed before this mount (issue #553).
+        if (getDiagramSession(sessionKey).unsavedProposal) return;
         try {
           await saveSnapshotForDoc(workPath, doc);
         } catch {
@@ -446,12 +461,14 @@ function DiagramShell({
       sched.dispose();
       if (snapshotSchedRef.current === sched) snapshotSchedRef.current = null;
     };
-  }, [store, workPath]);
+  }, [sessionKey, store, workPath]);
 
   const docUpdatedAt = doc.updatedAt;
   useEffect(() => {
-    if (dirty) snapshotSchedRef.current?.markDirty();
-  }, [dirty, docUpdatedAt]);
+    // A scan proposal writes nothing before its first explicit Save, auto-
+    // snapshots included (issue #553).
+    if (dirty && !isUnsavedProposal()) snapshotSchedRef.current?.markDirty();
+  }, [dirty, docUpdatedAt, isUnsavedProposal]);
 
   const reportError = useCallback((message: string | null) => setError(message), []);
 
@@ -621,6 +638,7 @@ function DiagramShell({
               : t(getPattern(patternId)?.labelKey ?? ""),
         });
         resetCanvasGeometry();
+        setUnsavedProposal(false);
         store.setState(replaceDoc(next));
         setActiveName(null);
         setLastSavedBody(null);
@@ -632,7 +650,7 @@ function DiagramShell({
         reportError(t("diagram.error.load", { message: (err as Error).message ?? "unknown" }));
       }
     },
-    [persistLastDocument, recordRecentPattern, reportError, setActiveName, setLastSavedBody, store, t],
+    [persistLastDocument, recordRecentPattern, reportError, setActiveName, setLastSavedBody, setUnsavedProposal, store, t],
   );
 
   const handleGalleryInsert = useCallback(
@@ -967,6 +985,22 @@ function DiagramShell({
     [openDoc, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody],
   );
 
+  /** Open a scan proposal unsaved without writing anything: no settings write
+   *  and no snapshot until the user saves it (issue #553, review-then-save). */
+  const handleOpenProposal = useCallback(
+    (next: Parameters<typeof replaceDoc>[0]) => {
+      snapshotSchedRef.current?.markClean();
+      openDoc(next);
+      setUnsavedProposal(true);
+      setActiveName(null);
+      setLastSavedBody(null);
+      setDiagramSession({ fileRevision: null }, sessionKey);
+      setIoDialog(null);
+      reportError(null);
+    },
+    [openDoc, reportError, sessionKey, setActiveName, setLastSavedBody, setUnsavedProposal],
+  );
+
   const refreshList = useCallback(async () => {
     if (!workPath) return;
     try {
@@ -1089,6 +1123,7 @@ function DiagramShell({
         }, sessionKey);
         // A successful manual save satisfies the pending auto-snapshot.
         snapshotSchedRef.current?.markClean();
+        setUnsavedProposal(false);
         await persistLastDocument(name);
       } catch (err) {
         if (err instanceof IpcError && err.code === "document_conflict") {
@@ -1102,7 +1137,7 @@ function DiagramShell({
         setSaving(false);
       }
     },
-    [activeName, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store, t, workPath],
+    [activeName, persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, setUnsavedProposal, store, t, workPath],
   );
 
   const handleSave = useCallback(() => {
@@ -1128,13 +1163,14 @@ function DiagramShell({
   const handleNew = useCallback(() => {
     const fresh = createEmptyDoc(createDiagramId());
     resetCanvasGeometry();
+    setUnsavedProposal(false);
     store.setState(replaceDoc(fresh));
     setActiveName(null);
     setLastSavedBody(null);
     setDiagramSession({ migratedFromLegacy: false, legacySourceVersion: null, fileRevision: null, legacyBackupAttempted: false }, sessionKey);
     void persistLastDocument(null);
     reportError(null);
-  }, [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, store]);
+  }, [persistLastDocument, reportError, sessionKey, setActiveName, setLastSavedBody, setUnsavedProposal, store]);
 
   const handleOpen = useCallback(
     async (name: string) => {
@@ -1656,6 +1692,7 @@ function DiagramShell({
           onExport: () => setIoDialog("export"),
           onTemplates: () => openGallery("apply"),
           onGenerate: () => setGenerateOpen(true),
+          onScanRepository: () => setScanOpen(true),
           onHistory: () => setHistoryOpen(true),
           onRenders: () => setRendersOpen(true),
           onImport: () => setIoDialog("import"),
@@ -1870,6 +1907,18 @@ function DiagramShell({
         onImportDoc={handleImportDoc}
         onClose={() => setGenerateOpen(false)}
       />
+      {scanOpen && (
+        <ScanRepositoryDialog
+          open
+          workspace={workPath}
+          dirty={dirty}
+          onOpenProposal={(next) => {
+            handleOpenProposal(next);
+            setScanOpen(false);
+          }}
+          onClose={() => setScanOpen(false)}
+        />
+      )}
       <VersionHistoryDialog
         open={historyOpen}
         doc={store.getState().doc}
