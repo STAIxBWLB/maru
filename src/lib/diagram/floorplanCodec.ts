@@ -6,8 +6,10 @@
  * Fields the canvas does not draw (paths, flows, tour, ...) and fields the
  * upstream schema does not define are reported as fidelity diagnostics, never
  * dropped. Node ids are already valid Maru ids, so the id map is the
- * identity. There is no pinned Floorplan engine yet (#536): import and apply
- * validate locally with {@link validateFloorplanSpec}.
+ * identity. Import and apply still validate locally with
+ * {@link validateFloorplanSpec}: the engine validates, lays out and renders the
+ * same document (`maru-diagram-engine` `src/floorplan.rs`), but the apply gate
+ * does not call it yet (#553 E5 T4).
  */
 
 import {

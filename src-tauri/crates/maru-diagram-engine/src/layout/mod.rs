@@ -10,6 +10,8 @@ mod constraints_sequence;
 mod constraints_workflow_page;
 mod dataflow;
 pub mod fixed;
+mod floorplan;
+pub use floorplan::layout_floorplan_json;
 mod lifecycle;
 mod presets;
 mod sequence;

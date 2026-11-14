@@ -150,13 +150,29 @@ fn render(input: &str, entry: Entry) -> ArtifactReport {
             "request format svg, or use the native PNG command",
         ));
     }
-    let layout = crate::layout::layout_json(
-        &serde_json::to_string(&LayoutRequest {
-            spec_json: request.spec_json.clone(),
-            pin_set: request.pin_set,
-        })
-        .expect("layout request serializes"),
-    );
+    let spec: serde_json::Value = match serde_json::from_str(&request.spec_json) {
+        Ok(spec) => spec,
+        Err(cause) => {
+            return bad(super::error(
+                "export-source",
+                "/specJson",
+                format!("source spec cannot be decoded: {cause}"),
+                "provide the source spec as valid JSON",
+            ))
+        }
+    };
+    let layout_request = serde_json::to_string(&LayoutRequest {
+        spec_json: request.spec_json.clone(),
+        pin_set: request.pin_set.clone(),
+    })
+    .expect("layout request serializes");
+    // A Floorplan document has no `diagram_type`, so it has its own layout entry
+    // point; the apply-gate dispatch stays with `maru#553` E5 T4.
+    let layout = if crate::floorplan::is_document(&spec) {
+        crate::layout::layout_floorplan_json(&layout_request)
+    } else {
+        crate::layout::layout_json(&layout_request)
+    };
     let mut receipt = layout.receipt;
     receipt.engine_output_sha256 = None;
     receipt.gates.browser = crate::gate("not-run", "non-browser-rasterization");
@@ -179,9 +195,8 @@ fn render(input: &str, entry: Entry) -> ArtifactReport {
         );
     }
     let geometry = layout.geometry.expect("successful layout retains geometry");
-    let spec = serde_json::from_str(&request.spec_json).expect("validated spec JSON");
     let text_mode = request.text_mode.unwrap_or(default_text_mode);
-    let options = match SvgOptions::from_spec(&spec, request.theme) {
+    let options = match SvgOptions::from_source(&spec, request.theme) {
         Ok(mut options) => {
             options.text_mode = text_mode;
             options

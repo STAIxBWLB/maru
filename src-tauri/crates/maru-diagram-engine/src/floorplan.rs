@@ -867,6 +867,138 @@ fn resolves(reference: &str, node_ids: &HashSet<String>, claims: &Claims) -> boo
     node_ids.contains(reference) || claims.any(reference)
 }
 
+/// Chars of `glob` before its first wildcard: the upstream tie-break between two
+/// nodes that claim a file at the same depth.
+#[cfg(feature = "geometry")]
+fn literal_prefix_length(glob: &str) -> usize {
+    glob.find(['*', '?', '{']).unwrap_or(glob.len())
+}
+
+/// Which node a reference is drawn on.
+///
+/// A reference is a node id first. Otherwise it is a file path, and the node that
+/// owns it is the upstream assignment rule's: among the nodes whose `paths` claim
+/// it and whose own or inherited `exclude` does not, the deepest wins and the
+/// longer literal glob prefix breaks a tie, with document order keeping the
+/// rest. The canvas draws the same edge onto the same node (`floorplanOwner` in
+/// `src/lib/diagram/floorplan.ts`), so a map cannot be drawn on two nodes at
+/// once.
+#[cfg(feature = "geometry")]
+pub(crate) struct Resolver<'a> {
+    spec: &'a FloorplanSpec,
+    claims: Claims<'a>,
+}
+
+#[cfg(feature = "geometry")]
+impl<'a> Resolver<'a> {
+    pub(crate) fn new(spec: &'a FloorplanSpec) -> Self {
+        Self {
+            spec,
+            claims: Claims::new(spec),
+        }
+    }
+
+    /// How many parents a node has above it; a top-level node is 0.
+    fn depth(&self, node: &FloorplanNode) -> usize {
+        let mut depth = 0;
+        let mut seen = HashSet::new();
+        let mut current = node.parent.as_deref();
+        while let Some(id) = current {
+            if !seen.insert(id) {
+                break;
+            }
+            let Some(parent) = self.claims.by_id.get(id) else {
+                break;
+            };
+            depth += 1;
+            current = parent.parent.as_deref();
+        }
+        depth
+    }
+
+    fn owner(&self, path: &str) -> Option<&'a str> {
+        let mut best: Option<(&'a str, usize, usize)> = None;
+        for node in &self.spec.nodes {
+            if node.paths.as_deref().unwrap_or_default().is_empty()
+                || !self.claims.claims(node, path)
+            {
+                continue;
+            }
+            let prefix = node
+                .paths
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|glob| self.claims.matches(glob, path))
+                .map(|glob| literal_prefix_length(glob))
+                .max()
+                .unwrap_or(0);
+            let depth = self.depth(node);
+            let better = match best {
+                None => true,
+                Some((_, best_depth, best_prefix)) => {
+                    depth > best_depth || (depth == best_depth && prefix > best_prefix)
+                }
+            };
+            if better {
+                best = Some((node.id.as_str(), depth, prefix));
+            }
+        }
+        best.map(|(id, _, _)| id)
+    }
+
+    /// The node id this reference draws on, or `None` when it names no node and
+    /// no file a node claims.
+    pub(crate) fn resolve(&self, reference: &str) -> Option<&'a str> {
+        match self.claims.by_id.get(reference) {
+            Some(node) => Some(node.id.as_str()),
+            None => self.owner(reference),
+        }
+    }
+}
+
+/// Whether a JSON value is a Floorplan interchange document rather than one of
+/// the five `diagram_type` envelopes. The upstream `$schema` is optional (the
+/// codec accepts a document without it), so the shape decides as well.
+pub fn is_document(value: &Value) -> bool {
+    if let Some(schema) = value.get("$schema").and_then(Value::as_str) {
+        return schema == FLOORPLAN_SCHEMA_ID;
+    }
+    value.get("diagram_type").is_none()
+        && value.get("project").is_some_and(Value::is_object)
+        && value.get("nodes").is_some_and(Value::is_array)
+}
+
+/// The semantic projection the SVG writer paints a Floorplan map from: every
+/// member's own kind, so its box and its legend swatch take the same token. The
+/// family has no frame variants, activations, lifecycle overrides or route
+/// labels, so those maps stay empty.
+#[cfg(feature = "geometry")]
+pub fn semantic_context(spec: &FloorplanSpec) -> crate::semantics::SemanticContext {
+    use std::collections::BTreeMap;
+    crate::semantics::SemanticContext {
+        family: "floorplan".into(),
+        schema_version: 1,
+        nodes: spec
+            .nodes
+            .iter()
+            .map(|node| {
+                (
+                    node.id.clone(),
+                    crate::semantics::NodeSemantic {
+                        kind: node.kind.clone(),
+                        lane: None,
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>(),
+        frame_variants: BTreeMap::new(),
+        activations: BTreeMap::new(),
+        lifecycle_variants: BTreeMap::new(),
+        route_labels: BTreeMap::new(),
+    }
+}
+
 fn check_reference(
     ctx: &mut Context,
     rule: &str,

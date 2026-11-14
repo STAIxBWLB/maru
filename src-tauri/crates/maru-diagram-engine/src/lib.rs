@@ -460,6 +460,16 @@ pub fn layout_json_wasm(input: &str) -> String {
     serde_json::to_string(&layout::layout_json(input)).expect("integer geometry report serializes")
 }
 
+/// The sixth family's layout, in the same envelope: Floorplan documents carry no
+/// `diagram_type`, so they have their own entry point rather than a dispatch arm
+/// (`maru#553` E5 T2, switch in T4).
+#[cfg(feature = "wasm-layout")]
+#[wasm_bindgen(js_name = layout_floorplan_json)]
+pub fn layout_floorplan_json_wasm(input: &str) -> String {
+    serde_json::to_string(&layout::layout_floorplan_json(input))
+        .expect("integer geometry report serializes")
+}
+
 #[cfg(all(feature = "wasm-layout", feature = "geometry-corpus"))]
 #[wasm_bindgen(js_name = scene_corpus_hashes)]
 pub fn scene_corpus_hashes_wasm(input: &str) -> String {

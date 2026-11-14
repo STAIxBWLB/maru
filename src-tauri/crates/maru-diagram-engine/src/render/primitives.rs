@@ -32,6 +32,7 @@ pub(crate) fn context<'a>(
         "sequence",
         "dataflow",
         "lifecycle",
+        "floorplan",
     ]
     .contains(&c.family.as_str())
     {
@@ -39,7 +40,7 @@ pub(crate) fn context<'a>(
             "semantic-family",
             "/options/semantics",
             "SVG semantic family is unsupported",
-            "use one of the five E3 diagram families",
+            "use one of the accepted diagram families",
         ));
     }
     if ![1, 2].contains(&c.schema_version) {
