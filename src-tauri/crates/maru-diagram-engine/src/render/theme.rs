@@ -134,6 +134,17 @@ impl SvgTheme {
             "security" | "failure" => 4,
             "messagebus" => 5,
             "external" | "neutral" | "final" => 6,
+            // The sixth family's member kinds. The palette has seven structural
+            // tokens, so each Floorplan kind takes the one its role most
+            // resembles; the canvas draws the same members from the same
+            // vocabulary, and its own shape rule (data as a cylinder, external as
+            // a hexagon) is what tells those two apart there (`maru#553` E5 T2).
+            "ui" => 0,
+            "service" | "worker" => 1,
+            "data" => 2,
+            "infra" | "config" => 3,
+            "test" => 4,
+            "library" | "feature" | "script" => 5,
             _ => return None,
         };
         Some(match self {

@@ -21,14 +21,15 @@ pub(crate) struct Preset {
 }
 
 /// The E1 validators and this resolver share the same accepted vocabulary.
-/// Sequence messages do not accept a route-preset field.
+/// Sequence messages do not accept a route-preset field, and neither do the
+/// upstream Floorplan edges: both families route every connection automatically.
 pub(crate) fn accepted(kind: &str) -> Option<&'static [&'static str]> {
     match kind {
         "architecture" => Some(crate::architecture::ARCHITECTURE_ROUTES),
         "workflow" => Some(crate::workflow::WORKFLOW_ROUTES),
         "dataflow" => Some(crate::dataflow::ROUTES),
         "lifecycle" => Some(crate::lifecycle::LIFECYCLE_ROUTES),
-        "sequence" => Some(&[]),
+        "sequence" | "floorplan" => Some(&[]),
         _ => None,
     }
 }

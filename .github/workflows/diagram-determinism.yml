@@ -105,6 +105,7 @@ jobs:
             scripts/diagram-engine-e2-dense.mjs
             src-tauri/crates/maru-diagram-engine/testdata/parity.json
             src-tauri/crates/maru-diagram-engine/testdata/dense-scenes.json
+            src-tauri/crates/maru-diagram-engine/testdata/floorplan-scene.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/setup-node@v5

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const FIXTURE = "src-tauri/crates/maru-diagram-engine/testdata/dense-scenes.json";
 const PARITY = "src-tauri/crates/maru-diagram-engine/testdata/parity.json";
+const FLOORPLAN = "src-tauri/crates/maru-diagram-engine/testdata/floorplan-scene.json";
 export const DENSE_SEED = 5502026;
 export const DENSE_NODE_COUNT = 200;
 const LONG_EDGES = 32;
@@ -83,8 +84,30 @@ export function generateDenseScenes() {
   };
 }
 export function denseContents() { return `${JSON.stringify(generateDenseScenes(), null, 2)}\n`; }
+/** The checked-in Floorplan corpus case, hand-written and synthetic. */
+export function floorplanContents() { return readFileSync(resolve(FLOORPLAN), "utf8"); }
 
-export function combinedCorpus(parityContents, fixtureContents) {
+// A Floorplan document carries no `diagram_type`, so it is not one of the five
+// envelopes the parity corpus builds and the engine places it through its own
+// layout entry point. It still has to reach every platform's hash report, or the
+// determinism matrix would compare no case from that family (`maru#553` E5 T2).
+function floorplanCases(fixture) {
+  if (!Array.isArray(fixture?.cases) || fixture.cases.length === 0) {
+    throw new Error("Floorplan corpus fixture has no cases; restore testdata/floorplan-scene.json.");
+  }
+  return fixture.cases.map((item) => {
+    if (!item || typeof item.id !== "string" || item.id.length === 0 || !item.spec || typeof item.spec !== "object" || Array.isArray(item.spec)) {
+      throw new Error("Floorplan corpus case has a missing ID or spec object; restore testdata/floorplan-scene.json.");
+    }
+    if (item.spec.diagram_type !== undefined) {
+      throw new Error(`Floorplan corpus case ${item.id} declares a diagram_type; that family belongs in the parity corpus instead.`);
+    }
+    return { id: item.id, diagramType: item.spec.$schema ?? "floorplan", inputJson: JSON.stringify(item.spec),
+      origin: { kind: "synthetic-seeded", source: "src-tauri/crates/maru-diagram-engine/testdata/floorplan-scene.json" } };
+  });
+}
+
+export function combinedCorpus(parityContents, fixtureContents, floorplanFixture) {
   let parity;
   let dense;
   try { parity = JSON.parse(parityContents); dense = JSON.parse(fixtureContents); }
@@ -93,6 +116,9 @@ export function combinedCorpus(parityContents, fixtureContents) {
     throw new Error("Determinism corpus sources have missing cases; restore the parity corpus and all three seeded dense scenes.");
   }
   if (parity.boundaryCases !== undefined && !Array.isArray(parity.boundaryCases)) throw new Error("Boundary corpus is not an array; regenerate the geometry evidence before comparing platforms.");
+  let floorplan;
+  try { floorplan = JSON.parse(floorplanFixture); }
+  catch (error) { throw new Error(`Floorplan corpus fixture is invalid JSON: ${error}; restore testdata/floorplan-scene.json.`); }
   const cases = [...parity.cases, ...(parity.boundaryCases ?? []), ...dense.cases.map((item) => {
     if (!item || typeof item.id !== "string" || !item.spec || typeof item.spec !== "object" || Array.isArray(item.spec)) {
       throw new Error("Dense scene fixture has a missing ID or spec object; regenerate it from the checked-in seeded generator.");
@@ -101,7 +127,7 @@ export function combinedCorpus(parityContents, fixtureContents) {
     return { id: item.id, diagramType: item.spec.diagram_type, inputJson,
       origin: { kind: "synthetic-seeded", source: "scripts/diagram-engine-e2-dense.mjs", seed: item.seed },
       expectedCoreOk: true, comparison: { inputJson, accepted: true } };
-  })];
+  }), ...floorplanCases(floorplan)];
   const ids = cases.map((item) => item?.id);
   if (ids.some((id) => typeof id !== "string" || id.length === 0) || new Set(ids).size !== ids.length) {
     throw new Error("Combined determinism corpus has missing or duplicate IDs; give every base and dense case a unique ID.");
@@ -123,7 +149,7 @@ function run() {
     const parityFile = resolve(args.length === 3 ? args[1] : PARITY);
     const fixture = readFileSync(filename, "utf8");
     if (fixture !== denseContents()) throw new Error("Seeded dense fixtures drifted; regenerate and check them before combining platform inputs.");
-    const contents = combinedCorpus(readFileSync(parityFile, "utf8"), fixture);
+    const contents = combinedCorpus(readFileSync(parityFile, "utf8"), fixture, floorplanContents());
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, contents);
     console.log(`Combined scene corpus: ${JSON.parse(contents).cases.length} cases, SHA256 ${sha(contents)}`);

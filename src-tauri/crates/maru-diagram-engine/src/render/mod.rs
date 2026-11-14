@@ -74,6 +74,41 @@ impl SvgOptions {
                 .into(),
         })
     }
+
+    /// Options for whichever family the source snapshot declares.
+    ///
+    /// The five `diagram_type` families project their semantics from
+    /// `diagram_type` and `schema_version`; a Floorplan document carries neither,
+    /// so its projection comes from its own shape and the title and description
+    /// from the project block (`maru#553` E5 T2). The writer paints both the same
+    /// way, so the branch is here and not in the writer.
+    pub fn from_source(spec: &serde_json::Value, theme: SvgTheme) -> Result<Self, Diagnostic> {
+        if !crate::floorplan::is_document(spec) {
+            return Self::from_spec(spec, theme);
+        }
+        let document: crate::floorplan::FloorplanSpec = serde_json::from_value(spec.clone())
+            .map_err(|cause| {
+                error(
+                    "semantic-source",
+                    "/specJson",
+                    format!("Floorplan document cannot be decoded: {cause}"),
+                    "provide a floorplan/architecture@1 document",
+                )
+            })?;
+        Ok(Self {
+            semantics: Some(crate::floorplan::semantic_context(&document)),
+            theme,
+            text_mode: SvgTextMode::Text,
+            title: document.project.name.clone(),
+            description: document
+                .project
+                .summary
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or(crate::floorplan::FLOORPLAN_SCHEMA_ID)
+                .into(),
+        })
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

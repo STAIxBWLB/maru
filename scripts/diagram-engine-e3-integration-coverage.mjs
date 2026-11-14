@@ -4,7 +4,9 @@ import { readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const EXPECTED_SVG_SUITE_COUNT = 20;
+// The suite count is pinned so a new family's render coverage cannot land
+// without this gate knowing: `svg_floorplan` is the sixth family (`maru#553`).
+export const EXPECTED_SVG_SUITE_COUNT = 21;
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TEST_DIR = join(ROOT, "src-tauri/crates/maru-diagram-engine/tests");
 

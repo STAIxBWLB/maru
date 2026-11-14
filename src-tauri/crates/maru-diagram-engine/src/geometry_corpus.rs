@@ -40,6 +40,19 @@ fn canonical(report: &GeometryReport) -> Result<String, Diagnostic> {
     })
 }
 
+/// Lay out one corpus case in whichever family its document declares.
+///
+/// A Floorplan document carries no `diagram_type`, so it is placed through its
+/// own entry point rather than the five-family dispatcher, and the corpus has to
+/// hash that family on every platform too (`maru#553` E5 T2). The SVG options
+/// branch the same way in `SvgOptions::from_source`.
+fn layout_case(spec: &Value, request: &str) -> GeometryReport {
+    if crate::floorplan::is_document(spec) {
+        return crate::layout::layout_floorplan_json(request);
+    }
+    crate::layout::layout_json(request)
+}
+
 fn svg_hashes(
     geometry: Option<&crate::geometry::GeometryDocument>,
     spec: &Value,
@@ -54,7 +67,7 @@ fn svg_hashes(
         crate::render::SvgTheme::Light,
         crate::render::SvgTheme::Dark,
     ] {
-        let options = crate::render::SvgOptions::from_spec(spec, theme)?;
+        let options = crate::render::SvgOptions::from_source(spec, theme)?;
         let first_svg = crate::render::render_svg(geometry, &options);
         let second_svg = crate::render::render_svg(geometry, &options);
         if !first_svg.ok || !second_svg.ok || first_svg.svg != second_svg.svg {
@@ -173,8 +186,8 @@ pub fn scene_corpus_hashes(input: &str) -> Result<String, Diagnostic> {
             )
         })?;
         let request = json!({ "specJson": spec_json }).to_string();
-        let first = crate::layout::layout_json(&request);
-        let second = crate::layout::layout_json(&request);
+        let first = layout_case(&spec, &request);
+        let second = layout_case(&spec, &request);
         let first_bytes = canonical(&first)?;
         if first_bytes != canonical(&second)? {
             return Err(error("nondeterministic", &case_path, format!("unchanged re-layout of corpus case {id:?} produced different geometry or diagnostics"), "remove unordered iteration, platform text lookup or other nondeterminism before regenerating receipts"));
@@ -286,6 +299,39 @@ mod tests {
                 .as_array()
                 .unwrap();
             assert_eq!(nodes.len(), 200);
+        }
+    }
+
+    /// The checked-in fixture is the case every platform hashes, so the corpus
+    /// has to place and render it rather than refuse it: a Floorplan document is
+    /// not an E1 `diagram_type` family, and only the corpus dispatch in
+    /// `layout_case` reaches its layout (`maru#553` E5 T2). Accepted with
+    /// retained geometry and both theme artifacts is that dispatch working.
+    #[test]
+    fn the_floorplan_fixture_is_placed_and_rendered_by_the_corpus() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../testdata/floorplan-scene.json")).unwrap();
+        let cases: Vec<Value> = fixture["cases"]
+            .as_array()
+            .expect("the fixture carries its cases")
+            .iter()
+            .map(|case| {
+                assert!(crate::floorplan::is_document(&case["spec"]));
+                json!({"id": case["id"], "inputJson": case["spec"].to_string()})
+            })
+            .collect();
+        let report: Value = serde_json::from_str(
+            &scene_corpus_hashes(&json!({ "cases": cases }).to_string()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report["corpusCaseCount"], cases.len());
+        assert_eq!(report["acceptedCaseCount"], cases.len());
+        for case in report["cases"].as_array().unwrap() {
+            assert_eq!(case["ok"], true, "{case}");
+            assert_eq!(case["geometryRetained"], true, "{case}");
+            for theme in ["light", "dark"] {
+                assert_eq!(case["svg"][theme]["artifactGate"], true, "{theme}: {case}");
+            }
         }
     }
 

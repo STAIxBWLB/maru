@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "floorplan-nested-synthetic",
+      "spec": {
+        "$schema": "floorplan/architecture@1",
+        "project": {
+          "name": "결제 서비스 지도",
+          "summary": "A compound synthetic map whose frames are sized from the cells they hold and whose edges cross two frame borders.",
+          "entrypoints": ["client"]
+        },
+        "nodes": [
+          { "id": "client", "label": "웹 클라이언트", "kind": "ui", "paths": ["web/**"] },
+          { "id": "checkout", "label": "결제 checkout", "kind": "service", "paths": ["services/checkout/**"],
+            "summary": "주문 생성과 결제 승인을 조정한다" },
+          { "id": "checkout.authorize", "parent": "checkout", "label": "승인 authorize", "kind": "feature",
+            "summary": "카드 승인, 재시도, 부분 취소" },
+          { "id": "checkout.ledger", "parent": "checkout", "label": "원장 ledger", "kind": "data",
+            "paths": ["services/checkout/ledger/**"] },
+          { "id": "gateway", "label": "외부 결제 게이트웨이", "kind": "external" },
+          { "id": "retry", "label": "retry queue", "kind": "infra", "paths": ["infra/queue/*.tf"] }
+        ],
+        "edges": [
+          { "from": "client", "to": "checkout", "kind": "http", "label": "POST /checkout" },
+          { "from": "checkout.authorize", "to": "gateway", "kind": "call" },
+          { "from": "checkout.authorize", "to": "retry", "kind": "queue" },
+          { "from": "checkout.ledger", "to": "retry", "kind": "event", "label": "payment-recorded" },
+          { "from": "services/checkout/ledger/append.rs", "to": "gateway", "kind": "import" }
+        ],
+        "flows": [
+          {
+            "id": "pay",
+            "title": "결제 승인",
+            "steps": [{ "node": "client" }, { "node": "checkout.authorize" }, { "node": "gateway" }]
+          }
+        ],
+        "tour": [{ "node": "checkout", "title": "결제 경계" }],
+        "audience": "developers"
+      }
+    }
+  ]
+}
