@@ -24,6 +24,7 @@ use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Child;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -180,6 +181,24 @@ pub(crate) struct TaskMutationGuard {
 }
 
 impl TaskMutationGuard {
+    pub(crate) fn completion_claim(&self) -> &TaskExecutionClaim {
+        &self.claim
+    }
+
+    pub(crate) fn refresh_completion(
+        &mut self,
+        lease: &PathTransactionLease,
+    ) -> Result<(), String> {
+        lease.ensure_covered(self.paths())?;
+        verify_lock_identity(&self.task_lock, &self.task_lock_path)?;
+        let current = read_claim(&self.claim_path, &self.claim.task_id)?
+            .ok_or("task_execution_claim_missing: claim disappeared; refresh task execution")?;
+        validate_claim_token(&current, &self.claim.token())?;
+        self.source = resolve_inside_vault(&display(&self.work), &current.task_path)?;
+        self.claim = current;
+        Ok(())
+    }
+
     pub(crate) fn paths(&self) -> Vec<PathBuf> {
         vec![self.claim_path.clone(), self.task_lock_path.clone()]
     }
@@ -1682,6 +1701,72 @@ fn claim_task_context(
     Ok((roots, claim))
 }
 
+struct ClaimOperation {
+    // Release this reservation before the OS lock when it is the last owner.
+    lease: Arc<PathTransactionLease>,
+    lock: File,
+    roots: WorkspaceRoots,
+    claim: TaskExecutionClaim,
+    snapshot: TaskSnapshot,
+}
+
+fn claim_operation(
+    work: &Path,
+    task_id: &str,
+    extra_paths: &[PathBuf],
+    parents: &[PathTransactionParent],
+) -> Result<ClaimOperation, String> {
+    let (roots, initial) = claim_task_context(work, task_id)?;
+    ensure_claim_layout(&roots)?;
+    let lock_path = task_lock_path(&roots, task_id);
+    // Claim identity is locked before any caller-owned broad path reservation.
+    let lock = acquire_file_lock(&roots, &lock_path)?;
+    let initial_snapshot = snapshot_from_claim(&roots, &initial)?;
+    let claim_path = claim_path(&roots, task_id);
+    let mut request =
+        path_transaction_for_claim(&roots, &initial_snapshot.path, task_id, extra_paths)?;
+    request = request.require_parent_snapshot(&PathTransactionParent::capture(
+        initial_snapshot.path.parent().unwrap_or(&roots.tasks),
+    )?)?;
+    for parent in parents {
+        request = request.require_parent_snapshot(parent)?;
+    }
+    let lease = Arc::new(request.acquire()?);
+    verify_lock_identity(&lock, &lock_path)?;
+    let claim = read_claim(&claim_path, task_id)?.ok_or_else(|| {
+        action_error(
+            "task_execution_claim_missing",
+            &claim_path,
+            "claim was removed",
+            "refresh the task execution state and retry",
+        )
+    })?;
+    if claim.workspace != roots.identity || claim.tasks_root != display(&roots.tasks) {
+        return Err(action_error(
+            "task_execution_claim_invalid",
+            &claim_path,
+            "claim workspace or tasks root changed",
+            "review the claim before retrying",
+        ));
+    }
+    let snapshot = snapshot_from_claim(&roots, &claim)?;
+    if snapshot.path != initial_snapshot.path {
+        return Err(action_error(
+            "task_execution_path_changed",
+            &snapshot.path,
+            "task moved while the claim was being admitted",
+            "refresh the task path and retry",
+        ));
+    }
+    Ok(ClaimOperation {
+        lease,
+        lock,
+        roots,
+        claim,
+        snapshot,
+    })
+}
+
 fn with_claim_operation<T>(
     work: &Path,
     task_id: &str,
@@ -1693,45 +1778,14 @@ fn with_claim_operation<T>(
         &File,
     ) -> Result<T, String>,
 ) -> Result<T, String> {
-    let (roots, initial) = claim_task_context(work, task_id)?;
-    ensure_claim_layout(&roots)?;
-    let lock_path = task_lock_path(&roots, task_id);
-    let lock = acquire_file_lock(&roots, &lock_path)?;
-    let initial_snapshot = snapshot_from_claim(&roots, &initial)?;
-    let claim_path = claim_path(&roots, task_id);
-    let mut request = path_transaction_for_claim(&roots, &initial_snapshot.path, task_id, &[])?;
-    request = request.require_parent_snapshot(&PathTransactionParent::capture(
-        initial_snapshot.path.parent().unwrap_or(&roots.tasks),
-    )?)?;
-    with_path_transactions(request, |lease| {
-        verify_lock_identity(&lock, &lock_path)?;
-        let mut claim = read_claim(&claim_path, task_id)?.ok_or_else(|| {
-            action_error(
-                "task_execution_claim_missing",
-                &claim_path,
-                "claim was removed",
-                "refresh the task execution state and retry",
-            )
-        })?;
-        if claim.workspace != roots.identity || claim.tasks_root != display(&roots.tasks) {
-            return Err(action_error(
-                "task_execution_claim_invalid",
-                &claim_path,
-                "claim workspace or tasks root changed",
-                "review the claim before retrying",
-            ));
-        }
-        let snapshot = snapshot_from_claim(&roots, &claim)?;
-        if snapshot.path != initial_snapshot.path {
-            return Err(action_error(
-                "task_execution_path_changed",
-                &snapshot.path,
-                "task moved while the claim was being admitted",
-                "refresh the task path and retry",
-            ));
-        }
-        operation(&roots, &mut claim, &snapshot, lease, &lock)
-    })
+    let mut context = claim_operation(work, task_id, &[], &[])?;
+    operation(
+        &context.roots,
+        &mut context.claim,
+        &context.snapshot,
+        &context.lease,
+        &context.lock,
+    )
 }
 
 fn new_receipt(request: &TaskExecutionRequest, run_id: &str) -> JobRunReceipt {
@@ -1892,6 +1946,44 @@ pub(crate) fn guard_task_mutation(
         Some(target) => lock_target(target).map(Some),
         None => Ok(None),
     }
+}
+
+/// Completion holds the existing OS identity lock even after the task moved
+/// to Archive. It never grants execution or infers process completion.
+pub(crate) fn guard_completion(
+    work: &Path,
+    token: &TaskExecutionToken,
+) -> Result<TaskMutationGuard, String> {
+    if !valid_task_id(&token.task_id) {
+        return Err(
+            "task_execution_id_invalid: unsupported task identity; refresh the task".into(),
+        );
+    }
+    let work = normalize_existing_dir(&display(work))?;
+    let roots = WorkspaceRoots {
+        work: work.clone(),
+        tasks: work.clone(),
+        identity: display(&work),
+    };
+    inspect_claim_directory(&roots)?;
+    let file = claim_path(&roots, &token.task_id);
+    let task_lock_path = task_lock_path(&roots, &token.task_id);
+    let task_lock = open_existing_claim_lock(&task_lock_path)?;
+    let claim = read_claim(&file, &token.task_id)?
+        .ok_or("task_execution_claim_missing: no recorded execution; run this task first")?;
+    if claim.workspace != roots.identity {
+        return Err("task_execution_workspace_mismatch: claim belongs elsewhere; open its original workspace".into());
+    }
+    validate_claim_token(&claim, token)?;
+    let source = resolve_inside_vault(&display(&work), &claim.task_path)?;
+    Ok(TaskMutationGuard {
+        work,
+        source,
+        claim,
+        claim_path: file,
+        task_lock_path,
+        task_lock,
+    })
 }
 
 /// Read-only probe for a note that already carries a claim. Batch writers use
@@ -2370,56 +2462,69 @@ pub(crate) fn spawn_owned_child(
     token: &TaskExecutionToken,
     spawn: impl FnOnce() -> Result<Child, String>,
 ) -> Result<Child, String> {
-    let mut spawn = Some(spawn);
     with_claim_operation(
         work,
         &token.task_id,
         |roots, claim, snapshot, lease, lock| {
-            validate_claim_token(claim, token)?;
-            if claim.lifecycle != TaskExecutionLifecycle::Active {
-                return Err(action_error(
-                    "task_execution_claim_not_active",
-                    &snapshot.path,
-                    &format!("claim lifecycle is {:?}", claim.lifecycle),
-                    "refresh the task execution",
-                ));
-            }
-            task_is_current(claim, snapshot)?;
-            if claim.receipt.child.is_some() {
-                return Err(action_error(
-                    "task_execution_child_already_bound",
-                    &snapshot.path,
-                    "claim already has a child process",
-                    "wait for or reconcile the owned child before spawning another",
-                ));
-            }
-            // Clear the prior role's wait proof before entering the spawn window.
-            // A crash after spawn but before PID persistence must remain uncertain.
-            claim.child_reaped = false;
-            claim.spawn_attempted = true;
+            spawn_child_in_transaction(roots, claim, snapshot, lease, lock, token, spawn)
+        },
+    )
+}
+
+fn spawn_child_in_transaction(
+    roots: &WorkspaceRoots,
+    claim: &mut TaskExecutionClaim,
+    snapshot: &TaskSnapshot,
+    lease: &PathTransactionLease,
+    lock: &File,
+    token: &TaskExecutionToken,
+    spawn: impl FnOnce() -> Result<Child, String>,
+) -> Result<Child, String> {
+    validate_claim_token(claim, token)?;
+    if claim.lifecycle != TaskExecutionLifecycle::Active {
+        return Err(action_error(
+            "task_execution_claim_not_active",
+            &snapshot.path,
+            &format!("claim lifecycle is {:?}", claim.lifecycle),
+            "refresh the task execution",
+        ));
+    }
+    task_is_current(claim, snapshot)?;
+    if claim.receipt.child.is_some() {
+        return Err(action_error(
+            "task_execution_child_already_bound",
+            &snapshot.path,
+            "claim already has a child process",
+            "wait for or reconcile the owned child before spawning another",
+        ));
+    }
+    // Clear the prior role's wait proof before entering the spawn window.
+    // A crash after spawn but before PID persistence must remain uncertain.
+    claim.child_reaped = false;
+    claim.spawn_attempted = true;
+    rebind_claim_path(roots, claim, snapshot)?;
+    write_claim(roots, lease, claim, lock)?;
+    let mut child = match spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            claim.lifecycle = TaskExecutionLifecycle::Finished;
+            claim.receipt.process_outcome = "failed".into();
+            claim.receipt.exit_code = None;
+            claim.receipt.finished_at = Some(now_seconds());
             rebind_claim_path(roots, claim, snapshot)?;
             write_claim(roots, lease, claim, lock)?;
-            let mut child = match spawn.take().expect("spawn closure is called once")() {
-                Ok(child) => child,
-                Err(error) => {
-                    claim.lifecycle = TaskExecutionLifecycle::Finished;
-                    claim.receipt.process_outcome = "failed".into();
-                    claim.receipt.exit_code = None;
-                    claim.receipt.finished_at = Some(now_seconds());
-                    rebind_claim_path(roots, claim, snapshot)?;
-                    write_claim(roots, lease, claim, lock)?;
-                    return Err(format!("task_execution_spawn_failed: {error}; the failed request is recorded; refresh the task and use a new requestId to retry"));
-                }
-            };
-            let pid = child.id();
-            let child_identity = identity(pid).unwrap_or(NativeProcessIdentity {
-                pid,
-                start: String::new(),
-            });
-            claim.receipt.child = Some(child_identity);
-            rebind_claim_path(roots, claim, snapshot)?;
-            if let Err(error) = write_claim(roots, lease, claim, lock) {
-                let (cleanup, reaped) = match child.kill() {
+            return Err(format!("task_execution_spawn_failed: {error}; the failed request is recorded; refresh the task and use a new requestId to retry"));
+        }
+    };
+    let pid = child.id();
+    let child_identity = identity(pid).unwrap_or(NativeProcessIdentity {
+        pid,
+        start: String::new(),
+    });
+    claim.receipt.child = Some(child_identity);
+    rebind_claim_path(roots, claim, snapshot)?;
+    if let Err(error) = write_claim(roots, lease, claim, lock) {
+        let (cleanup, reaped) = match child.kill() {
                     Ok(()) => match child.wait() {
                         Ok(status) => (format!("owned child reaped with status {status}"), true),
                         Err(wait_error) => (format!("owned child kill succeeded but wait failed: {wait_error}"), false),
@@ -2430,27 +2535,122 @@ pub(crate) fn spawn_owned_child(
                         Err(wait_error) => (format!("kill failed: {kill_error}; nonblocking wait failed: {wait_error}"), false),
                     },
                 };
-                // Binding failed, but an owned wait is positive death proof.
-                // Persist it separately so the pre-registered mission can be
-                // reviewed and released without guessing from a missing PID.
-                let cleanup = if reaped {
-                    claim.receipt.child = None;
-                    claim.child_reaped = true;
-                    claim.lifecycle = TaskExecutionLifecycle::NeedsReview;
-                    match write_claim(roots, lease, claim, lock) {
-                        Ok(()) => format!("{cleanup}; wait proof recorded for reviewed stop"),
-                        Err(proof_error) => {
-                            format!("{cleanup}; wait proof could not be recorded: {proof_error}")
-                        }
-                    }
-                } else {
-                    cleanup
-                };
-                return Err(format!("task_execution_child_bind_failed: {error}; cleanup={cleanup}; review the task claim before retrying"));
+        // Binding failed, but an owned wait is positive death proof.
+        // Persist it separately so the pre-registered mission can be
+        // reviewed and released without guessing from a missing PID.
+        let cleanup = if reaped {
+            claim.receipt.child = None;
+            claim.child_reaped = true;
+            claim.lifecycle = TaskExecutionLifecycle::NeedsReview;
+            match write_claim(roots, lease, claim, lock) {
+                Ok(()) => format!("{cleanup}; wait proof recorded for reviewed stop"),
+                Err(proof_error) => {
+                    format!("{cleanup}; wait proof could not be recorded: {proof_error}")
+                }
             }
-            Ok(child)
+        } else {
+            cleanup
+        };
+        return Err(format!("task_execution_child_bind_failed: {error}; cleanup={cleanup}; review the task claim before retrying"));
+    }
+    Ok(child)
+}
+
+/// One approved execution retains the claim OS lock and the caller's complete
+/// reservation through its child and callbacks. No callback reacquires them.
+pub(crate) struct OwnedTaskExecution {
+    operation: ClaimOperation,
+    token: TaskExecutionToken,
+}
+
+impl OwnedTaskExecution {
+    /// The caller must have waited successfully on this exact owned child.
+    pub(crate) fn record_waited_result(
+        &mut self,
+        pid: u32,
+        success: bool,
+        exit_code: Option<i32>,
+    ) -> Result<(), String> {
+        let context = &mut self.operation;
+        let file = claim_path(&context.roots, &self.token.task_id);
+        let mut claim = read_claim(&file, &self.token.task_id)?
+            .ok_or("task_execution_claim_missing: ownership evidence disappeared; review this task execution before retrying")?;
+        verify_lock_identity(
+            &context.lock,
+            &task_lock_path(&context.roots, &self.token.task_id),
+        )?;
+        if claim.workspace != context.roots.identity
+            || claim.tasks_root != display(&context.roots.tasks)
+        {
+            return Err(action_error(
+                "task_execution_claim_invalid",
+                &file,
+                "claim workspace or task root changed during execution",
+                "retain the execution evidence and review the task claim",
+            ));
+        }
+        record_reaped_child_in_transaction(
+            &context.roots,
+            &mut claim,
+            &context.lease,
+            &context.lock,
+            &self.token,
+            pid,
+        )?;
+        // A worker may have changed or removed task bytes through its own CLI.
+        // Preserve the wait proof first, then derive a fresh source snapshot.
+        let snapshot = snapshot_from_claim(&context.roots, &claim)?;
+        finish_in_transaction(
+            &context.roots,
+            &mut claim,
+            &snapshot,
+            &context.lease,
+            &context.lock,
+            &self.token,
+            success,
+            exit_code,
+        )?;
+        context.claim = claim;
+        Ok(())
+    }
+}
+
+pub(crate) fn spawn_owned_child_with_paths(
+    work: &Path,
+    token: &TaskExecutionToken,
+    paths: &[PathBuf],
+    parents: &[PathTransactionParent],
+    before_spawn: impl FnOnce(&Arc<PathTransactionLease>) -> Result<(), String>,
+    spawn: impl FnOnce() -> Result<Child, String>,
+) -> Result<(Child, OwnedTaskExecution), String> {
+    let mut operation = claim_operation(work, &token.task_id, paths, parents)?;
+    validate_claim_token(&operation.claim, token)?;
+    if operation.claim.lifecycle != TaskExecutionLifecycle::Active {
+        return Err(action_error(
+            "task_execution_claim_not_active",
+            &operation.snapshot.path,
+            "this execution is no longer active",
+            "refresh the task execution before starting a child",
+        ));
+    }
+    task_is_current(&operation.claim, &operation.snapshot)?;
+    before_spawn(&operation.lease)?;
+    let child = spawn_child_in_transaction(
+        &operation.roots,
+        &mut operation.claim,
+        &operation.snapshot,
+        &operation.lease,
+        &operation.lock,
+        token,
+        spawn,
+    )?;
+    Ok((
+        child,
+        OwnedTaskExecution {
+            operation,
+            token: token.clone(),
         },
-    )
+    ))
 }
 
 /// Bind exactly one native child to the current generation. An unknown start
@@ -2530,64 +2730,75 @@ pub(crate) fn record_reaped_child(
     pid: u32,
 ) -> Result<TaskExecutionClaim, String> {
     with_claim_identity(work, token, |roots, claim, lease, lock| {
-        let label = roots.work.join(&claim.task_path);
-        validate_claim_token(claim, token)?;
-        if !matches!(
-            claim.lifecycle,
-            TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
-        ) {
-            return Err(action_error(
-                "task_execution_claim_not_active",
-                &label,
-                &format!("claim lifecycle is {:?}", claim.lifecycle),
-                "refresh the task execution",
-            ));
-        }
-        let current_owner = identity(std::process::id()).ok_or_else(|| {
-            action_error(
-                "task_execution_launcher_unverified",
-                &label,
-                "native launcher start time is unavailable",
-                "retain the claim for review instead of clearing child ownership",
-            )
-        })?;
-        let owner = claim.receipt.owner.as_ref().ok_or_else(|| {
-            action_error(
-                "task_execution_launcher_unverified",
-                &label,
-                "claim has no native owner identity",
-                "retain the claim for review instead of clearing child ownership",
-            )
-        })?;
-        if owner != &current_owner || process_ownership(owner) != ProcessOwnership::Live {
-            return Err(action_error(
-                "task_execution_launcher_changed",
-                &label,
-                "current launcher does not match the recorded owner",
-                "retain the claim for review",
-            ));
-        }
-        let child = claim.receipt.child.as_ref().ok_or_else(|| {
-            action_error(
-                "task_execution_child_binding_missing",
-                &label,
-                "no child identity is recorded",
-                "bind the owned child before acknowledging its wait result",
-            )
-        })?;
-        if child.pid != pid {
-            return Err(action_error(
-                "task_execution_child_binding_mismatch",
-                &label,
-                "wait result PID differs from the claimed child",
-                "retain the claim for review; do not clear another process",
-            ));
-        }
-        claim.receipt.child = None;
-        claim.child_reaped = true;
-        write_claim(roots, lease, claim, lock)?;
-        Ok(claim.clone())
+        record_reaped_child_in_transaction(roots, claim, lease, lock, token, pid)
     })
+}
+
+fn record_reaped_child_in_transaction(
+    roots: &WorkspaceRoots,
+    claim: &mut TaskExecutionClaim,
+    lease: &PathTransactionLease,
+    lock: &File,
+    token: &TaskExecutionToken,
+    pid: u32,
+) -> Result<TaskExecutionClaim, String> {
+    let label = roots.work.join(&claim.task_path);
+    validate_claim_token(claim, token)?;
+    if !matches!(
+        claim.lifecycle,
+        TaskExecutionLifecycle::Active | TaskExecutionLifecycle::NeedsReview
+    ) {
+        return Err(action_error(
+            "task_execution_claim_not_active",
+            &label,
+            &format!("claim lifecycle is {:?}", claim.lifecycle),
+            "refresh the task execution",
+        ));
+    }
+    let current_owner = identity(std::process::id()).ok_or_else(|| {
+        action_error(
+            "task_execution_launcher_unverified",
+            &label,
+            "native launcher start time is unavailable",
+            "retain the claim for review instead of clearing child ownership",
+        )
+    })?;
+    let owner = claim.receipt.owner.as_ref().ok_or_else(|| {
+        action_error(
+            "task_execution_launcher_unverified",
+            &label,
+            "claim has no native owner identity",
+            "retain the claim for review instead of clearing child ownership",
+        )
+    })?;
+    if owner != &current_owner || process_ownership(owner) != ProcessOwnership::Live {
+        return Err(action_error(
+            "task_execution_launcher_changed",
+            &label,
+            "current launcher does not match the recorded owner",
+            "retain the claim for review",
+        ));
+    }
+    let child = claim.receipt.child.as_ref().ok_or_else(|| {
+        action_error(
+            "task_execution_child_binding_missing",
+            &label,
+            "no child identity is recorded",
+            "bind the owned child before acknowledging its wait result",
+        )
+    })?;
+    if child.pid != pid {
+        return Err(action_error(
+            "task_execution_child_binding_mismatch",
+            &label,
+            "wait result PID differs from the claimed child",
+            "retain the claim for review; do not clear another process",
+        ));
+    }
+    claim.receipt.child = None;
+    claim.child_reaped = true;
+    write_claim(roots, lease, claim, lock)?;
+    Ok(claim.clone())
 }
 
 /// Record process completion only; task status remains owned by task APIs.
@@ -2601,79 +2812,92 @@ pub(crate) fn finish(
         work,
         &token.task_id,
         |roots, claim, snapshot, lease, lock| {
-            validate_claim_token(claim, token)?;
-            let requested_outcome = if success { "succeeded" } else { "failed" };
-            if claim.lifecycle == TaskExecutionLifecycle::Released
-                && !success
-                && exit_code.is_none()
-            {
-                return Ok(claim.clone());
-            }
-            if claim.lifecycle == TaskExecutionLifecycle::Finished {
-                if claim.receipt.process_outcome == requested_outcome
-                    && claim.receipt.exit_code == exit_code
-                {
-                    return Ok(claim.clone());
-                }
-                return Err(action_error(
-                    "task_execution_finish_conflict",
-                    &snapshot.path,
-                    "this generation already has a different terminal result",
-                    "refresh the current task execution; terminal results cannot be overwritten",
-                ));
-            }
-            if claim.lifecycle == TaskExecutionLifecycle::NeedsReview {
-                return Err(action_error(
-                    "task_execution_needs_review",
-                    &snapshot.path,
-                    "task changed while the worker was running",
-                    "review the task and discard or manually reconcile the result",
-                ));
-            }
-            if claim.lifecycle != TaskExecutionLifecycle::Active {
-                return Err(action_error(
-                    "task_execution_claim_not_active",
-                    &snapshot.path,
-                    &format!("claim lifecycle is {:?}", claim.lifecycle),
-                    "refresh the task execution",
-                ));
-            }
-            if !claim.child_reaped {
-                if let Some(child) = claim.receipt.child.as_ref() {
-                    if process_ownership(child) != ProcessOwnership::Dead {
-                        return Err(action_error(
-                            "task_execution_child_not_reaped",
-                            &snapshot.path,
-                            "worker child is live or unverified",
-                            "wait for and reap the owned child before finishing the claim",
-                        ));
-                    }
-                }
-                return Err(action_error(
-                    "task_execution_child_reap_unconfirmed",
-                    &snapshot.path,
-                    "successful wait proof was not durably recorded",
-                    "call record_reaped_child after waiting on the owned Child, then finish",
-                ));
-            }
-            if let Err(error) = task_is_current(claim, snapshot) {
-                claim.lifecycle = TaskExecutionLifecycle::NeedsReview;
-                claim.receipt.process_outcome = "needsReview".into();
-                claim.receipt.exit_code = exit_code;
-                claim.receipt.finished_at = Some(now_seconds());
-                rebind_claim_path(roots, claim, snapshot)?;
-                write_claim(roots, lease, claim, lock)?;
-                return Err(error);
-            }
-            claim.lifecycle = TaskExecutionLifecycle::Finished;
-            claim.receipt.process_outcome = requested_outcome.into();
-            claim.receipt.exit_code = exit_code;
-            claim.receipt.finished_at = Some(now_seconds());
-            rebind_claim_path(roots, claim, snapshot)?;
-            write_claim(roots, lease, claim, lock)?;
-            Ok(claim.clone())
+            finish_in_transaction(
+                roots, claim, snapshot, lease, lock, token, success, exit_code,
+            )
         },
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_in_transaction(
+    roots: &WorkspaceRoots,
+    claim: &mut TaskExecutionClaim,
+    snapshot: &TaskSnapshot,
+    lease: &PathTransactionLease,
+    lock: &File,
+    token: &TaskExecutionToken,
+    success: bool,
+    exit_code: Option<i32>,
+) -> Result<TaskExecutionClaim, String> {
+    validate_claim_token(claim, token)?;
+    let requested_outcome = if success { "succeeded" } else { "failed" };
+    if claim.lifecycle == TaskExecutionLifecycle::Released && !success && exit_code.is_none() {
+        return Ok(claim.clone());
+    }
+    if claim.lifecycle == TaskExecutionLifecycle::Finished {
+        if claim.receipt.process_outcome == requested_outcome
+            && claim.receipt.exit_code == exit_code
+        {
+            return Ok(claim.clone());
+        }
+        return Err(action_error(
+            "task_execution_finish_conflict",
+            &snapshot.path,
+            "this generation already has a different terminal result",
+            "refresh the current task execution; terminal results cannot be overwritten",
+        ));
+    }
+    if claim.lifecycle == TaskExecutionLifecycle::NeedsReview {
+        return Err(action_error(
+            "task_execution_needs_review",
+            &snapshot.path,
+            "task changed while the worker was running",
+            "review the task and discard or manually reconcile the result",
+        ));
+    }
+    if claim.lifecycle != TaskExecutionLifecycle::Active {
+        return Err(action_error(
+            "task_execution_claim_not_active",
+            &snapshot.path,
+            &format!("claim lifecycle is {:?}", claim.lifecycle),
+            "refresh the task execution",
+        ));
+    }
+    if !claim.child_reaped {
+        if let Some(child) = claim.receipt.child.as_ref() {
+            if process_ownership(child) != ProcessOwnership::Dead {
+                return Err(action_error(
+                    "task_execution_child_not_reaped",
+                    &snapshot.path,
+                    "worker child is live or unverified",
+                    "wait for and reap the owned child before finishing the claim",
+                ));
+            }
+        }
+        return Err(action_error(
+            "task_execution_child_reap_unconfirmed",
+            &snapshot.path,
+            "successful wait proof was not durably recorded",
+            "call record_reaped_child after waiting on the owned Child, then finish",
+        ));
+    }
+    if let Err(error) = task_is_current(claim, snapshot) {
+        claim.lifecycle = TaskExecutionLifecycle::NeedsReview;
+        claim.receipt.process_outcome = "needsReview".into();
+        claim.receipt.exit_code = exit_code;
+        claim.receipt.finished_at = Some(now_seconds());
+        rebind_claim_path(roots, claim, snapshot)?;
+        write_claim(roots, lease, claim, lock)?;
+        return Err(error);
+    }
+    claim.lifecycle = TaskExecutionLifecycle::Finished;
+    claim.receipt.process_outcome = requested_outcome.into();
+    claim.receipt.exit_code = exit_code;
+    claim.receipt.finished_at = Some(now_seconds());
+    rebind_claim_path(roots, claim, snapshot)?;
+    write_claim(roots, lease, claim, lock)?;
+    Ok(claim.clone())
 }
 
 /// Cleanup requires the same verified launcher and no live or uncertain

@@ -226,7 +226,27 @@ pub(crate) fn save_document_in_transaction(
     document_path: String,
     content: String,
     expected_revision: Option<String>,
+    claim: Option<&mut crate::task_execution_claims::TaskMutationGuard>,
+) -> Result<DocumentPayload, IpcError> {
+    save_document_in_transaction_with_completion_permit(
+        lease,
+        vault_path,
+        document_path,
+        content,
+        expected_revision,
+        claim,
+        None,
+    )
+}
+
+pub(crate) fn save_document_in_transaction_with_completion_permit(
+    lease: &PathTransactionLease,
+    vault_path: String,
+    document_path: String,
+    content: String,
+    expected_revision: Option<String>,
     mut claim: Option<&mut crate::task_execution_claims::TaskMutationGuard>,
+    completion_permit: Option<&crate::task_completion::CompletionWritePermit>,
 ) -> Result<DocumentPayload, IpcError> {
     lease.ensure_workspace_registry()?;
     let path = resolve_inside_vault(&vault_path, &document_path)?;
@@ -238,21 +258,36 @@ pub(crate) fn save_document_in_transaction(
     assert_document_owner(&vault_path, &path)?;
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Modify)?;
     validate_managed_write(&vault_path, &document_path, &content)?;
-    if path.is_file() {
-        let current =
-            fs::read_to_string(&path).map_err(|err| format!("Cannot read document: {err}"))?;
-        assert_expected_revision(&current, expected_revision.as_deref())?;
+    let previous = match fs::read_to_string(&path) {
+        Ok(current) => Some(current),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "Cannot read document before saving: {error}; check file permissions and reload the document"
+            )
+            .into());
+        }
+    };
+    if let Some(current) = previous.as_deref() {
+        assert_expected_revision(current, expected_revision.as_deref())?;
     } else if let Some(expected) = expected_revision.as_deref() {
         return Err(IpcError {
             code: DOCUMENT_CONFLICT.to_string(),
             message: format!("expected revision {expected}, file is missing"),
         });
     }
+    crate::task_completion::guard_managed_task_write_with_permit(
+        &vault,
+        &path,
+        previous.as_deref(),
+        Some(&content),
+        completion_permit,
+    )?;
     lease.before_effect()?;
     // Managed roots snapshot the on-disk content before every overwrite
     // (maru-vault-graph-spec §2.4 가드 불변식) — conflict safety vs MCP co-writes.
-    if is_managed_root(&vault_path) && path.is_file() {
-        if let Ok(previous) = fs::read_to_string(&path) {
+    if is_managed_root(&vault_path) {
+        if let Some(previous) = previous.as_deref() {
             let stem = path
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -262,7 +297,7 @@ pub(crate) fn save_document_in_transaction(
                 &vault_path,
                 &document_path,
                 stem,
-                &previous,
+                previous,
                 "managed-write auto snapshot",
             )?;
         }
@@ -290,7 +325,32 @@ pub(crate) fn save_document_in_transaction(
             });
         }
     }
-    write_atomic(&path, content.as_bytes())?;
+    // Recheck the completion policy against the actual bytes after a snapshot
+    // operation, just as the revision check above rechecks an external writer.
+    let current = match fs::read_to_string(&path) {
+        Ok(value) => Some(value),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "Cannot read document before replacement: {error}; check file permissions and reload the document"
+            )
+            .into());
+        }
+    };
+    crate::task_completion::guard_managed_task_write_with_permit(
+        &vault,
+        &path,
+        current.as_deref(),
+        Some(&content),
+        completion_permit,
+    )?;
+    if let Some(permit) = completion_permit {
+        crate::atomic_file::write_atomic_checked(&path, content.as_bytes(), 0o644, || {
+            permit.check_source(false)
+        })?;
+    } else {
+        write_atomic(&path, content.as_bytes())?;
+    }
     // The claim follows the note it locked: a body edit moves an Active claim
     // to NeedsReview so the provider cannot adopt into a changed source.
     if let Some(guard) = claim.as_mut() {
@@ -367,6 +427,12 @@ pub(crate) fn update_frontmatter_field_in_transaction(
     assert_expected_revision(&original, expected_revision.as_deref())?;
     let mapped = value.map(FrontmatterValue::from);
     let updated = update_frontmatter_content(&original, &key, mapped)?;
+    crate::task_completion::guard_managed_task_write(
+        &vault,
+        &path,
+        Some(&original),
+        Some(&updated),
+    )?;
     if updated != original {
         validate_managed_write(&vault_path, &document_path, &updated)?;
         lease.before_effect()?;
@@ -534,6 +600,9 @@ pub(crate) fn create_document_in_transaction(
     let body_with_heading = format!("# {title}\n\n{body}\n");
     let content = build_frontmatter(&fields, &body_with_heading);
     validate_managed_write(&vault_path, &rel_path, &content)?;
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    crate::task_completion::guard_managed_task_write(&vault, &path, None, Some(&content))
+        .map_err(|error| error.to_string())?;
 
     lease.before_effect()?;
     if let Some(parent) = path.parent() {
@@ -642,6 +711,12 @@ pub(crate) fn move_document_in_transaction(
     if target_path.exists() {
         return Err("A document already exists at that path".to_string());
     }
+    crate::task_completion::guard_managed_task_write(&vault, &source_path, None, None)
+        .map_err(|error| error.to_string())?;
+    crate::task_completion::guard_managed_task_write(&vault, &target_path, None, None)
+        .map_err(|error| error.to_string())?;
+    crate::task_completion::guard_managed_task_move(&vault, &source_path, &target_path)
+        .map_err(|error| error.to_string())?;
 
     lease.before_effect()?;
     if let Some(parent) = target_path.parent() {
@@ -704,6 +779,25 @@ pub(crate) fn duplicate_document_in_transaction(
     assert_maru_can_write(&vault_path, WorkspaceWriteAction::Create)?;
     ensure_existing_document(&source_path)?;
     let target_path = unique_duplicate_path(&source_path);
+    let vault = resolve_inside_vault(&vault_path, ".")?;
+    let markdown = source_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"));
+    let copied_content = if markdown {
+        Some(fs::read_to_string(&source_path).map_err(|error| {
+            format!("Cannot read document before duplicating: {error}; check file permissions and retry")
+        })?)
+    } else {
+        None
+    };
+    crate::task_completion::guard_managed_task_write(
+        &vault,
+        &target_path,
+        None,
+        copied_content.as_deref(),
+    )
+    .map_err(|error| error.to_string())?;
     if is_managed_root(&vault_path) {
         let vault = resolve_inside_vault(&vault_path, ".")?;
         let content = fs::read_to_string(&source_path)
@@ -782,6 +876,7 @@ pub(crate) fn trash_document_in_transaction(
     lease.ensure_covered(covered.clone())?;
     for path in &covered {
         assert_document_owner(&vault_path, path)?;
+        crate::task_completion::guard_managed_task_write(&vault, path, None, None)?;
     }
     assert_document_delete_allowed(&vault_path, &vault, &covered)?;
     if fs::symlink_metadata(&source).is_err() {

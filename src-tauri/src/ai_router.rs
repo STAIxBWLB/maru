@@ -68,6 +68,54 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
     permission_mode: Option<String>,
     metadata: Option<JsonValue>,
 ) -> Result<String, String> {
+    start_agent_cli_invocation_with_completion(
+        app,
+        provider,
+        prompt,
+        cwd,
+        extra_args,
+        extra_env,
+        command_override,
+        permission_mode,
+        metadata,
+        None,
+    )
+}
+
+pub(crate) fn start_completion_review<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    provider: String,
+    prompt: String,
+    cwd: String,
+    review: crate::task_completion::ReviewLaunch,
+) -> Result<String, String> {
+    start_agent_cli_invocation_with_completion(
+        app,
+        provider,
+        prompt,
+        Some(cwd),
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(review),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_agent_cli_invocation_with_completion<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    provider: String,
+    prompt: String,
+    cwd: Option<String>,
+    extra_args: Option<Vec<String>>,
+    extra_env: Option<HashMap<String, String>>,
+    command_override: Option<String>,
+    permission_mode: Option<String>,
+    metadata: Option<JsonValue>,
+    review_launch: Option<crate::task_completion::ReviewLaunch>,
+) -> Result<String, String> {
     let command_override = command_override.filter(|value| !value.trim().is_empty());
     let permission_mode =
         normalize_permission_mode(permission_mode.as_deref().unwrap_or("plan")).to_string();
@@ -99,15 +147,26 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
         permission_mode
     };
     let invocation_id = format!("ai-{}", Uuid::new_v4());
-    let task_execution = crate::task_execution_runtime::TaskExecutionSession::admit(
+    let task_execution = crate::task_execution_runtime::TaskExecutionSession::admit_recorded(
         &resolved_cwd,
         metadata.as_ref(),
         &invocation_id,
+        provider_kind,
     )?;
     if let Some((session, true)) = &task_execution {
         return Ok(session.token.run_id.clone());
     }
     let task_execution = task_execution.map(|(session, _)| session);
+    // Only the internal UI review entry supplies this typed launch context.
+    // metadata.actor/name/taskCompletionReview are never authority.
+    let completion_review = review_launch
+        .map(|launch| launch.register(&resolved_cwd, &invocation_id, provider_kind))
+        .transpose()?;
+    if let Some(review) = &completion_review {
+        if review.replayed {
+            return Ok(review.run_id.clone());
+        }
+    }
     if let Some(resolution) = &resolution {
         let _ = app.emit(
             "ai://runtime",
@@ -146,6 +205,7 @@ pub fn start_agent_cli_invocation<R: tauri::Runtime>(
             kind: provider_kind.id().to_string(),
             metadata: Some(mission_metadata),
             task_execution,
+            completion_review,
         },
     )
 }
@@ -247,6 +307,7 @@ struct MissionInfo {
     kind: String,
     metadata: Option<JsonValue>,
     task_execution: Option<crate::task_execution_runtime::TaskExecutionSession>,
+    completion_review: Option<crate::task_completion::ReviewSession>,
 }
 
 /// Spawn `cmd`, wire stdout/stderr pumps + the reaper, register a mission keyed
@@ -311,7 +372,15 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
             }
         }
     } else {
-        cmd.spawn().map_err(|err| format_spawn_error(&err))?
+        match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                if let Some(review) = &mission.completion_review {
+                    let _ = review.finish("", false);
+                }
+                return Err(format_spawn_error(&error));
+            }
+        }
     };
     let child_pid = child.id();
 
@@ -343,15 +412,22 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
         child_pid,
         mission.metadata,
     );
-    if let (Some(session), Err(error)) = (&mission.task_execution, registration) {
-        let _ = child.kill();
-        if child.wait().is_ok() {
-            let _ = session
-                .child_reaped(child_pid)
-                .and_then(|()| session.finish(false, None));
-            mission_state::fail_mission(&app, &invocation_id, &error);
+    if let Err(error) = &registration {
+        if mission.task_execution.is_some() || mission.completion_review.is_some() {
+            let _ = child.kill();
+            if child.wait().is_ok() {
+                if let Some(session) = &mission.task_execution {
+                    let _ = session
+                        .child_reaped(child_pid)
+                        .and_then(|()| session.finish(false, None));
+                }
+                if let Some(review) = &mission.completion_review {
+                    let _ = review.finish("", false);
+                }
+                mission_state::fail_mission(&app, &invocation_id, error);
+            }
+            return Err(format!("task_execution_mission_registration_failed: {error}; review the task claim and retry with a fresh requestId"));
         }
-        return Err(format!("task_execution_mission_registration_failed: {error}; review the task claim and retry with a fresh requestId"));
     }
 
     let stdout_pump = spawn_line_pump(
@@ -359,12 +435,14 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
         invocation_id.clone(),
         "stdout".to_string(),
         stdout,
+        mission.completion_review.is_some(),
     );
     let stderr_pump = spawn_line_pump(
         app.clone(),
         invocation_id.clone(),
         "stderr".to_string(),
         stderr,
+        false,
     );
 
     // Reaper thread: wait for exit, then drain both output pumps before
@@ -375,8 +453,27 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
     let id_done = invocation_id.clone();
     thread::spawn(move || match child.wait() {
         Ok(status) => {
-            let _ = stdout_pump.join();
+            let output = stdout_pump.join().unwrap_or(ReviewOutput {
+                text: String::new(),
+                failed: true,
+            });
             let _ = stderr_pump.join();
+            if let Some(review) = &mission.completion_review {
+                let outcome = review.finish(&output.text, status.success() && !output.failed);
+                let _ = app_done.emit("task-completion://updated", ());
+                if let Err(error) = outcome {
+                    mission_state::fail_mission(&app_done, &id_done, &error.message);
+                    let _ = app_done.emit(
+                        "ai://error",
+                        AiErrorEvent {
+                            invocation_id: id_done,
+                            kind: "task_completion_conflict".into(),
+                            message: error.message,
+                        },
+                    );
+                    return;
+                }
+            }
             if let Some(session) = &mission.task_execution {
                 if let Err(error) = session
                     .child_reaped(child_pid)
@@ -405,6 +502,10 @@ fn spawn_streaming_invocation<R: tauri::Runtime>(
             );
         }
         Err(err) => {
+            if let Some(review) = &mission.completion_review {
+                let _ = review.finish("", false);
+                let _ = app_done.emit("task-completion://updated", ());
+            }
             mission_state::fail_mission(&app_done, &id_done, &err.to_string());
             let _ = app_done.emit(
                 "ai://error",
@@ -507,23 +608,50 @@ fn prepare_invocation_env(
     Ok(extra_env)
 }
 
+struct ReviewOutput {
+    text: String,
+    failed: bool,
+}
+
 fn spawn_line_pump<R, ReadSource>(
     app: AppHandle<R>,
     invocation_id: String,
     stream_name: String,
     source: ReadSource,
-) -> thread::JoinHandle<()>
+    capture_review: bool,
+) -> thread::JoinHandle<ReviewOutput>
 where
     R: tauri::Runtime,
     ReadSource: Read + Send + 'static,
 {
     thread::spawn(move || {
         let reader = BufReader::new(source);
+        let mut output = ReviewOutput {
+            text: String::new(),
+            failed: false,
+        };
         for line in reader.lines() {
             let line = match line {
                 Ok(line) => line,
-                Err(_) => break,
+                Err(_) => {
+                    output.failed = true;
+                    break;
+                }
             };
+            if capture_review {
+                if output
+                    .text
+                    .len()
+                    .saturating_add(line.len())
+                    .saturating_add(1)
+                    > 2 * 1024 * 1024
+                {
+                    output.failed = true;
+                } else if !output.failed {
+                    output.text.push_str(&line);
+                    output.text.push('\n');
+                }
+            }
             let _ = app.emit(
                 "ai://output",
                 AiOutputEvent {
@@ -534,6 +662,7 @@ where
             );
             mission_state::touch_output(&app, &invocation_id, &stream_name, &line);
         }
+        output
     })
 }
 

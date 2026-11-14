@@ -65,6 +65,7 @@ function skillAcceptsSource(skill: SkillRecord | null): boolean {
 }
 
 export interface ComposeDialogSeed {
+  metadata?: Record<string, unknown>;
   skill?: SkillRecord | null;
   context?: SkillContextItem[];
   cwd?: string | null;
@@ -252,6 +253,10 @@ export function ComposeDialog({
     setBusy(true);
     setError(null);
     try {
+      if (seed?.metadata?.taskExecution && mode === "terminal") {
+        setError(t("tasks.completion.trackedModeRequired"));
+        return;
+      }
       if (isMeetingNotes) {
         const workspace = meetingsWorkspacePath ?? seed?.cwd;
         if (!workspace || !onOpenMeetingsWorkbench) throw new Error(t("skills.compose.meetingNeedsWorkspace"));
@@ -286,7 +291,9 @@ export function ComposeDialog({
         const runId = await agentRunStructuredLoop({
           provider: runtime,
           metadata: {
-            origin: "skillCompose",
+            ...seed?.metadata,
+            origin: seed?.metadata?.origin ?? (seed?.metadata?.taskExecution ? "taskManagementExecution" : "skillCompose"),
+            skillName: selectedSkill.name,
             skillId: selectedSkill.id,
             skillPrompt: effectivePrompt,
             skillContext: effectiveContext,
@@ -333,8 +340,9 @@ export function ComposeDialog({
           permissionMode: permissionMode ?? null,
           metadata: isMeetingNotes
             ? {
+                ...seed?.metadata,
                 ...(invocationPolicy ? { adaptivePolicy: invocationPolicy } : {}),
-                origin: "meetingNotesFromTranscript",
+                origin: seed?.metadata?.origin ?? "meetingNotesFromTranscript",
                 skillName: selectedSkill.name,
                 runtime,
                 reviewFlow: true,
@@ -343,8 +351,9 @@ export function ComposeDialog({
                 inputPaths: effectiveContext.map((item) => item.path),
               }
             : {
+                ...seed?.metadata,
                 ...(invocationPolicy ? { adaptivePolicy: invocationPolicy } : {}),
-                origin: "skillCompose",
+                origin: seed?.metadata?.origin ?? (seed?.metadata?.taskExecution ? "taskManagementExecution" : "skillCompose"),
                 skillName: selectedSkill.name,
                 runtime,
                 workspacePath: backgroundCwd,

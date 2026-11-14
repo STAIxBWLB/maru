@@ -517,7 +517,7 @@ function cfgFeatureEnabled(expression, enabledFeatures) {
   return enabledFeatures.has(feature[1]);
 }
 export function parseArgs(argv) {
-  const options = { expectedCount: 395 };
+  const options = { expectedCount: 396 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--all") { insist(!options.all, "Duplicate --all"); options.all = true; }

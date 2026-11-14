@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+const TASK_COMPLETION_ACCEPT_KIND: &str = "task.completion.accept";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRequest {
@@ -222,6 +224,9 @@ impl ApprovalState {
         if trimmed_kind.is_empty() {
             return Err("approval_kind_required".to_string());
         }
+        if trimmed_kind == TASK_COMPLETION_ACCEPT_KIND {
+            return Err("approval_binding_required: task completion acceptance requires current completion evidence; open the task's completion review and request a fresh confirmation".into());
+        }
         let id = format!("approval-{}", Uuid::new_v4());
         let mut store = self
             .store
@@ -291,6 +296,42 @@ impl ApprovalState {
         })
     }
 
+    /// Task acceptance always starts pending, even if the exact binding was
+    /// remembered for another operation. Only the dedicated bound consumer can
+    /// use this authority after a fresh person decision.
+    pub(crate) fn prepare_fresh_bound(
+        &self,
+        cwd: &str,
+        summary: String,
+        target: Option<String>,
+        preview: Option<String>,
+        binding: ApprovalBinding,
+    ) -> Result<ApprovalRequest, String> {
+        let id = format!("approval-{}", Uuid::new_v4());
+        let path = audit_path(cwd, &id)?;
+        with_path_transactions(audit_transaction(path)?, |lease| {
+            let mut store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+            let request = ApprovalRequest {
+                id: id.clone(),
+                kind: TASK_COMPLETION_ACCEPT_KIND.into(),
+                summary,
+                target,
+                payload_preview: preview,
+                auto_approved: false,
+                binding: Some(binding),
+            };
+            let stored = StoredApproval {
+                request: request.clone(),
+                decision: ApprovalDecision::Pending,
+                consumed: false,
+                audit_workspace: Some(cwd.into()),
+            };
+            persist_audit(&stored, "requested", None, lease)?;
+            store.approvals.insert(id, stored);
+            Ok(request)
+        })
+    }
+
     fn record(
         &self,
         id: &str,
@@ -324,6 +365,9 @@ impl ApprovalState {
     ) -> Result<ApprovalRequest, String> {
         let mut store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
         let current = store.approvals.get(id).ok_or("approval_not_found")?;
+        if current.request.kind == TASK_COMPLETION_ACCEPT_KIND && remember_kind {
+            return Err("approval_remember_forbidden: task completion acceptance cannot be remembered; confirm this request without remembering it".into());
+        }
         if current.consumed {
             return Err("approval_consumed".into());
         }
@@ -383,6 +427,37 @@ impl ApprovalState {
         Ok(id.into())
     }
 
+    pub(crate) fn consume_fresh_bound(
+        &self,
+        id: Option<&str>,
+        binding: &ApprovalBinding,
+        lease: &PathTransactionLease,
+    ) -> Result<String, String> {
+        let id = id.ok_or("approval_required: task.completion.accept; review the current completion evidence and confirm acceptance in the app")?;
+        let mut store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+        let stored = store.approvals.get_mut(id).ok_or("approval_not_found")?;
+        if stored.consumed {
+            return Err("approval_consumed".into());
+        }
+        if stored.request.kind != TASK_COMPLETION_ACCEPT_KIND {
+            return Err("approval_kind_mismatch".into());
+        }
+        if stored.request.binding.as_ref() != Some(binding) {
+            return Err("approval_binding_mismatch".into());
+        }
+        if stored.decision != ApprovalDecision::Approved {
+            return Err("approval_not_granted".into());
+        }
+        if stored.request.auto_approved {
+            return Err("approval_fresh_required: cached approval cannot accept a task; request and confirm a fresh completion acceptance".into());
+        }
+        // As with proposal approval, an uncertain audit publication must never
+        // leave authority available for another attempt.
+        stored.consumed = true;
+        persist_audit(stored, "consumed", None, lease)?;
+        Ok(id.into())
+    }
+
     pub(crate) fn record_effect(
         &self,
         id: &str,
@@ -411,6 +486,9 @@ impl ApprovalState {
         let Some(stored) = store.approvals.get_mut(approval_id) else {
             return Err("approval_not_found".to_string());
         };
+        if stored.request.kind == TASK_COMPLETION_ACCEPT_KIND {
+            return Err("approval_fresh_bound_required: task completion acceptance must validate its current evidence; use the task's completion acceptance action".into());
+        }
         if stored.consumed {
             return Err("approval_consumed".to_string());
         }
@@ -498,6 +576,10 @@ pub mod ipc {
         .map_err(|err| format!("record_approval_task_failed: {err}"))?
     }
 }
+
+#[cfg(test)]
+#[path = "task_completion_approval_tests.rs"]
+mod task_completion_approval_tests;
 
 #[cfg(test)]
 mod tests {

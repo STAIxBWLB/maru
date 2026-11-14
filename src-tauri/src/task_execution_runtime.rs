@@ -29,6 +29,40 @@ impl TaskExecutionSession {
         )))
     }
 
+    /// The provider is supplied by the backend after effective policy resolution,
+    /// never read from request metadata. Old claim JSON remains unchanged.
+    pub(crate) fn admit_recorded(
+        cwd: &str,
+        metadata: Option<&serde_json::Value>,
+        run_id: &str,
+        provider: crate::agent_host::provider::CliProviderKind,
+    ) -> Result<Option<(Self, bool)>, String> {
+        let admitted = Self::admit(cwd, metadata, run_id)?;
+        if let Some((session, false)) = &admitted {
+            let guard = claims::guard_completion(session.workspace(), &session.token)?;
+            let claim = guard.completion_claim().clone();
+            drop(guard);
+            if let Err(error) =
+                crate::task_completion::record_execution(session.workspace(), &claim, provider)
+            {
+                session.admission_failed();
+                return Err(error.message);
+            }
+        }
+        Ok(admitted)
+    }
+    pub(crate) fn record_provider(
+        &self,
+        provider: crate::agent_host::provider::CliProviderKind,
+    ) -> Result<(), String> {
+        self.check()?;
+        let guard = claims::guard_completion(&self.work, &self.token)?;
+        let claim = guard.completion_claim().clone();
+        drop(guard);
+        crate::task_completion::record_execution(&self.work, &claim, provider)
+            .map_err(|e| e.message)
+    }
+
     pub fn workspace(&self) -> &Path {
         &self.work
     }
@@ -50,13 +84,36 @@ impl TaskExecutionSession {
         result
     }
 
+    /// The pre-spawn callback may retain the complete reservation. Cleanup is
+    /// owned by that caller, after it releases its retained lease on errors.
+    pub(crate) fn spawn_child_with_paths(
+        &self,
+        paths: &[PathBuf],
+        parents: &[crate::atomic_file::PathTransactionParent],
+        before_spawn: impl FnOnce(
+            &std::sync::Arc<crate::atomic_file::PathTransactionLease>,
+        ) -> Result<(), String>,
+        spawn: impl FnOnce() -> Result<std::process::Child, String>,
+    ) -> Result<(std::process::Child, claims::OwnedTaskExecution), String> {
+        claims::spawn_owned_child_with_paths(
+            &self.work,
+            &self.token,
+            paths,
+            parents,
+            before_spawn,
+            spawn,
+        )
+    }
+
     /// Called only after successfully waiting on the Child handle owned here.
     pub fn child_reaped(&self, pid: u32) -> Result<(), String> {
         claims::record_reaped_child(&self.work, &self.token, pid).map(|_| ())
     }
 
     pub fn finish(&self, success: bool, exit_code: Option<i32>) -> Result<(), String> {
-        claims::finish(&self.work, &self.token, success, exit_code).map(|_| ())
+        claims::finish(&self.work, &self.token, success, exit_code)?;
+        crate::task_completion::record_process_result(&self.work, &self.token, success)
+            .map_err(|e| e.message)
     }
 
     pub fn admission_failed(&self) {

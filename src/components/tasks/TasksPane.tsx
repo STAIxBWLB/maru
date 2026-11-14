@@ -70,6 +70,7 @@ import { NaturalScheduleDialog } from "./NaturalScheduleDialog";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { TaskDetailDrawer } from "./TaskDetailDrawer";
 import { TasksRunsPanel } from "./TasksRunsPanel";
+import type { ApprovalInput } from "../../approval/ApprovalDialog";
 import { TasksSidebar, type TasksFilterView } from "./TasksSidebar";
 import { UnifiedCalendarView } from "../calendar/UnifiedCalendarView";
 import { toUnifiedTaskEvents } from "../../lib/calendar/fromEntries";
@@ -96,15 +97,11 @@ export interface TasksPaneProps {
     prompt?: string,
     cwd?: string | null,
     onDispatched?: () => void | Promise<void>,
+    metadata?: Record<string, unknown>,
   ) => void;
   onMissionStarted: (invocationId: string) => void;
   onStopMission: (id: string) => void;
-  onConfirmApproval: (input: {
-    kind: string;
-    summary: string;
-    target?: string | null;
-    payloadPreview?: string | null;
-  }) => Promise<string | null>;
+  onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   onRevealPath?: (path: string) => void;
   layout?: Pick<
     LayoutSettings,
@@ -235,6 +232,7 @@ export function TasksPane({
     () => mergeTaskMissions(tasksMissions, localRuns),
     [tasksMissions, localRuns],
   );
+  const completionRefreshKey = `${selectedEntry?.modifiedAt ?? ""}:${processingMissions.map((mission) => `${mission.id}:${mission.status}`).join("|")}`;
   const progressCount = useMemo(
     () => mergedMissions.filter((mission) => mission.status === "running" || mission.status === "idle").length,
     [mergedMissions],
@@ -713,6 +711,7 @@ export function TasksPane({
             />
           </div>
           <TaskDetailDrawer
+            workPath={workPath}
             entry={selectedEntry}
             metadata={metadata}
             loading={metadataLoading}
@@ -724,6 +723,10 @@ export function TasksPane({
             onOpenSkillCompose={onOpenSkillCompose}
             onSaveDetails={updateDetails}
             onDirtyChange={setDetailDirty}
+            onCompletionChanged={() => { void load(); }}
+            onConfirmApproval={onConfirmApproval}
+            onMissionStarted={onMissionStarted}
+            completionRefreshKey={completionRefreshKey}
           />
         </>
       ) : null}

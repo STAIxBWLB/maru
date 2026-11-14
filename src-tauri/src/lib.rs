@@ -76,6 +76,13 @@ mod sites;
 mod skill_host;
 mod studio;
 mod system_jobs;
+mod task_completion;
+#[cfg(test)]
+mod task_completion_contract_tests;
+#[cfg(test)]
+mod task_completion_isolation_tests;
+#[cfg(test)]
+mod task_completion_tests;
 mod task_execution_claims;
 mod task_execution_runtime;
 mod tasks;
@@ -649,6 +656,7 @@ pub fn run() {
             // hwp-editor engine bridge (thin hwp-cli spawner; hwped.rs)
             hwped_read,
             hwped_save,
+            task_completion::task_completion,
             hwped_render,
             hwped_edit,
             hwped_compose,

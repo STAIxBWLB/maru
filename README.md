@@ -311,6 +311,20 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   retain the ID, and renamed files are resolved by that ID. Source changes and terminal/archived
   tasks prevent result adoption. Recovery holds live or unverified native owners
   for review, never elapsed-time takeover.
+  Task details can additionally require completion evidence (#429). Only the
+  person's main app window changes `maruCompletionRequired` and its policy
+  revision through managed frontmatter. An opted task uses Background or
+  Structured execution, explicitly applies its artifact proposal, then requests
+  an independent review and a fresh person confirmation before Done/Archive.
+  Review never finalizes automatically, and acceptance cannot be remembered.
+  `.maru/task-completion/` retains the exact claim generation, source/artifact
+  hashes, apply readback, reviewer verdict and consumed acceptance. Drift requires
+  a new review. Restart repairs only effects already proven on disk; it never
+  replays an approval or provider call. The current identity boundary is the
+  effective CLI provider recorded by the backend, not a caller's actor/name or
+  an attestation of a model account. Every provider used by the creator is
+  excluded from independent review, including a new run under that provider.
+  Tasks without this requirement retain ordinary manual Done behavior.
   Ordinary invocations and task mutations do not create task identities, claim
   layouts or locks. Only existing opt-in claims take a task lock before the
   mutation path lease. Request IDs are scoped to each task, not the workspace.

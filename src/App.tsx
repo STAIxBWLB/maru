@@ -4203,6 +4203,7 @@ export function MainApp() {
       prompt?: string,
       cwdOverride?: string | null,
       onDispatched?: ComposeDialogSeed["onDispatched"],
+      metadata?: ComposeDialogSeed["metadata"],
     ) => {
       const context =
         contextOverride ??
@@ -4223,6 +4224,7 @@ export function MainApp() {
         prompt,
         cwd: cwdOverride ?? activeDocumentWorkspacePath ?? explorerWorkspacePath ?? settingsWorkPath,
         onDispatched,
+        metadata,
       });
     },
     [
@@ -7725,7 +7727,8 @@ export function MainApp() {
       prompt?: string,
       cwd?: string | null,
       onDispatched?: () => void | Promise<void>,
-    ) => openSkillCompose(skill, context, prompt, cwd, onDispatched),
+      metadata?: ComposeDialogSeed["metadata"],
+    ) => openSkillCompose(skill, context, prompt, cwd, onDispatched, metadata),
     [openSkillCompose],
   );
   const tasksProps = useMemo<TasksPaneProps>(

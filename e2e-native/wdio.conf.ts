@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { cleanupFixtureWorkspace, createNativeFixtureLifecycle, seedFixtureWorkspace } from "./helpers/fixtureWorkspace";
+import { cleanupFixtureWorkspace, createNativeFixtureLifecycle, enableTaskCompletionProviders, seedFixtureWorkspace } from "./helpers/fixtureWorkspace";
 import { nativeWorkerBoundary } from "./rootHooks";
 
 const APP_BINARY = "./src-tauri/target/debug/maru";
@@ -175,8 +175,17 @@ export const config = {
     delete process.env.MARU_NATIVE_E2E_SETUP_ERROR;
     await launcherBoundary(() => lifecycle.prepare());
   },
-  onWorkerStart: async (id: string) => {
-    await launcherBoundary(() => lifecycle.start(id));
+  onWorkerStart: async (id: string, _caps: unknown, specs: string[]) => {
+    await launcherBoundary(async () => {
+      await lifecycle.start(id);
+      if (specs.some((spec) => /(?:^|[\\/])task-completion\.spec\.ts$/.test(spec))) {
+        // onPrepare may already have started the first owned app. Stop it
+        // before changing PATH; tauri-service's later worker hook restarts it
+        // with the fixture providers. Later specs are stopped by lifecycle.end.
+        await stopOwnedApp();
+        await enableTaskCompletionProviders();
+      }
+    });
   },
   beforeSession: async () => {
     await nativeWorkerBoundary(async () => {

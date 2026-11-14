@@ -12,6 +12,7 @@ interface PendingApproval {
 }
 
 export interface ApprovalInput {
+  preparedRequest?: ApprovalRequest;
   proposalContext?: import("../lib/skills").ProposalApprovalContext | null;
   kind: string;
   summary: string;
@@ -24,8 +25,15 @@ export function useApprovalGate() {
   const [rememberKind, setRememberKind] = useState(false);
 
   const confirmApproval = useCallback(async (input: ApprovalInput): Promise<string | null> => {
-    const request = await prepareApproval(input);
-    if (request.autoApproved) return request.id;
+    const completion = input.kind === "task.completion.accept";
+    if (completion && !input.preparedRequest) {
+      throw new Error("Task acceptance has no prepared review binding. Reload the task evidence and confirm acceptance again.");
+    }
+    const request = input.preparedRequest ?? await prepareApproval(input);
+    if (request.kind !== input.kind) {
+      throw new Error("The prepared approval belongs to a different action. Reload the task evidence and confirm again.");
+    }
+    if (request.autoApproved && !completion) return request.id;
     return await new Promise<string | null>((resolve) => {
       setRememberKind(false);
       setPending({ request, resolve });
@@ -38,7 +46,7 @@ export function useApprovalGate() {
       const { request, resolve } = pending;
       setPending(null);
       try {
-        await recordApproval(request.id, approved ? "approved" : "rejected", approved && rememberKind);
+        await recordApproval(request.id, approved ? "approved" : "rejected", request.kind !== "task.completion.accept" && approved && rememberKind);
         resolve(approved ? request.id : null);
       } catch {
         resolve(null);
@@ -116,19 +124,19 @@ function ApprovalDialog({
               {request.payloadPreview ? (
                 <pre className="approval-preview">{request.payloadPreview}</pre>
               ) : null}
-              <label className="approval-remember">
+              {request.kind !== "task.completion.accept" ? <label className="approval-remember">
                 <input
                   type="checkbox"
                   checked={rememberKind}
                   onChange={(event) => onRememberKind(event.currentTarget.checked)}
                 />
                 <span>{t(request.binding ? "approval.dialog.rememberBinding" : "approval.dialog.rememberKind")}</span>
-              </label>
+              </label> : null}
             </div>
           ) : null}
 
           <div className="dialog-actions">
-            <Button type="button" variant="ghost" onClick={onCancel}>
+            <Button type="button" variant="ghost" autoFocus={request?.kind === "task.completion.accept"} onClick={onCancel}>
               {t("dialog.cancel")}
             </Button>
             <Button type="button" onClick={onApprove}>

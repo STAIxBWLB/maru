@@ -4268,4 +4268,20 @@ export const ko: Record<string, string> = {
 
   "diagram.renders.ambiguous": "중복 문서 ID",
 
+  "tasks.completion.heading": "완료 근거",
+  "tasks.completion.required": "검토된 근거가 있어야 완료 처리",
+  "tasks.completion.description": "실행 종료, 검토 통과, 산출물 반영과 최종 수락은 별개입니다. 이 요구 사항은 사용자만 바꿀 수 있습니다.",
+  "tasks.completion.loading": "완료 근거를 불러오는 중...",
+  "tasks.completion.source": "작업 리비전",
+  "tasks.completion.run": "산출물 생성 실행",
+  "tasks.completion.reviewRevision": "검토된 리비전",
+  "tasks.completion.provider": "독립 검토자",
+  "tasks.completion.chooseProvider": "검토자 선택",
+  "tasks.completion.review": "검토 시작",
+  "tasks.completion.accept": "수락하고 완료 처리",
+  "tasks.completion.accepted": "이 리비전을 수락했습니다.",
+  "tasks.completion.reviewStarted": "검토를 시작했습니다. 완료하려면 사용자의 수락이 필요합니다.",
+  "tasks.completion.evidence": "기록된 근거 확인",
+  "tasks.completion.trackedModeRequired": "이 작업은 실행 추적이 필요합니다. 실행 권한과 완료 근거를 기록하려면 백그라운드 또는 구조화 모드를 선택하세요. 터미널 스킬 실행은 이 근거를 제공하지 않습니다.",
+
 };

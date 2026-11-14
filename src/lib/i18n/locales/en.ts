@@ -4273,4 +4273,20 @@ export const en: Record<string, string> = {
 
   "diagram.renders.ambiguous": "Duplicate document ID",
 
+  "tasks.completion.heading": "Completion evidence",
+  "tasks.completion.required": "Require reviewed evidence before Done",
+  "tasks.completion.description": "A finished run, passed review and committed artifacts are separate from your final acceptance. Only you can change this requirement.",
+  "tasks.completion.loading": "Loading completion evidence...",
+  "tasks.completion.source": "Task revision",
+  "tasks.completion.run": "Creator run",
+  "tasks.completion.reviewRevision": "Reviewed revision",
+  "tasks.completion.provider": "Independent reviewer",
+  "tasks.completion.chooseProvider": "Choose a reviewer",
+  "tasks.completion.review": "Start review",
+  "tasks.completion.accept": "Accept and mark Done",
+  "tasks.completion.accepted": "This revision was accepted.",
+  "tasks.completion.reviewStarted": "Review started. Completion still requires your acceptance.",
+  "tasks.completion.evidence": "Inspect recorded evidence",
+  "tasks.completion.trackedModeRequired": "This task requires a tracked execution. Select Background or Structured mode to record its claim and completion evidence; terminal skill runs cannot supply that evidence.",
+
 };

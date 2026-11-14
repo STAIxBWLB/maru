@@ -480,6 +480,42 @@ pub(crate) fn materialize_capture_task_in_transaction(
     Ok(MaterializedTaskWrite { row, created: true })
 }
 
+pub(crate) struct TaskCompletionPlan {
+    pub updated: String,
+    pub target: PathBuf,
+}
+
+pub(crate) fn prepare_task_completion(
+    _work: &Path,
+    tasks_root: &Path,
+    path: &Path,
+    original: &str,
+) -> Result<TaskCompletionPlan, String> {
+    let updated = update_frontmatter_content(
+        original,
+        "status",
+        Some(FrontmatterValue::String("done".into())),
+    )?;
+    let bucket = bucket_from_task_path(tasks_root, path)?;
+    let target = if bucket == TaskBucket::Archive {
+        path.to_path_buf()
+    } else {
+        conflict_free_path(&target_path_for_bucket(
+            tasks_root,
+            path,
+            TaskBucket::Archive,
+        )?)
+    };
+    Ok(TaskCompletionPlan { updated, target })
+}
+pub(crate) fn completion_task_row(
+    work: &Path,
+    path: &Path,
+    tasks_root: &Path,
+) -> Result<TaskNoteRow, String> {
+    task_row_for_path(work, path, bucket_from_task_path(tasks_root, path)?)
+}
+
 pub fn update_task_status(
     work_path: String,
     rel_path: String,
@@ -536,6 +572,20 @@ pub(crate) fn update_task_status_in_transaction(
     status: TaskStatus,
     root: Option<String>,
 ) -> Result<TaskNoteRow, String> {
+    update_task_status_in_transaction_with_completion(
+        lease, work_path, rel_path, status, root, None, None,
+    )
+}
+
+pub(crate) fn update_task_status_in_transaction_with_completion(
+    lease: &PathTransactionLease,
+    work_path: String,
+    rel_path: String,
+    status: TaskStatus,
+    root: Option<String>,
+    completion_permit: Option<&crate::task_completion::CompletionWritePermit>,
+    expected_target: Option<&Path>,
+) -> Result<TaskNoteRow, String> {
     let work = normalize_existing_dir(&work_path)?;
     let paths = vec![
         resolve_inside_vault(&work_path, &rel_path)?,
@@ -567,9 +617,32 @@ pub(crate) fn update_task_status_in_transaction(
             WorkspaceWriteAction::RenameMove,
         )?;
     }
+    crate::task_completion::guard_managed_task_write_with_permit(
+        &work,
+        &path,
+        Some(&original),
+        Some(&updated),
+        completion_permit,
+    )
+    .map_err(|e| e.message)?;
+    let target = if current_bucket == target_bucket {
+        path.clone()
+    } else {
+        conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?)
+    };
+    if expected_target.is_some_and(|expected| expected != target) {
+        return Err("task_completion_conflict: archive target changed; refresh the task and confirm the new target".into());
+    }
     if updated != original {
-        write_atomic(&path, updated.as_bytes())
-            .map_err(|err| format!("Cannot update task status: {err}"))?;
+        if let Some(permit) = completion_permit {
+            crate::atomic_file::write_atomic_checked(&path, updated.as_bytes(), 0o644, || {
+                permit.check_source(false)
+            })
+            .map_err(|e: crate::ipc_error::IpcError| e.message)?;
+        } else {
+            write_atomic(&path, updated.as_bytes())
+                .map_err(|err| format!("Cannot update task status: {err}"))?;
+        }
     }
     if current_bucket == target_bucket {
         return task_row_for_path(&work, &path, current_bucket);
@@ -578,11 +651,16 @@ pub(crate) fn update_task_status_in_transaction(
         &normalize_existing_dir(&work_path)?.to_string_lossy(),
         WorkspaceWriteAction::RenameMove,
     )?;
-    let target = conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?);
     let moved = (|| {
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)
                 .map_err(|err| format!("Cannot create task target: {err}"))?;
+        }
+        if let Some(permit) = completion_permit {
+            permit.check_source(true).map_err(|e| e.message)?;
+            if target.exists() {
+                return Err("task_completion_conflict: archive target appeared; refresh and confirm a new target".into());
+            }
         }
         fs::rename(&path, &target).map_err(|err| format!("Cannot move task note: {err}"))
     })();
@@ -789,6 +867,8 @@ pub(crate) fn update_task_details_in_transaction(
             WorkspaceWriteAction::RenameMove,
         )?;
     }
+    crate::task_completion::guard_managed_task_write(&work, &path, Some(&original), Some(&updated))
+        .map_err(|e| e.message)?;
     if updated != original {
         write_atomic(&path, updated.as_bytes())
             .map_err(|err| format!("Cannot update task details: {err}"))?;
@@ -896,6 +976,8 @@ pub(crate) fn move_task_note_in_transaction(
         return task_row_for_path(&work, &path, current_bucket);
     }
     let target = conflict_free_path(&target_path_for_bucket(&tasks_root, &path, target_bucket)?);
+    crate::task_completion::guard_managed_task_move(&work, &path, &target)
+        .map_err(|e| e.message)?;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("Cannot create task target: {err}"))?;
     }
