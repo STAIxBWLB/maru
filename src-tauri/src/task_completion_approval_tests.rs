@@ -289,3 +289,146 @@ fn task_completion_concurrent_consumption_has_one_winner_and_one_audit_effect() 
         1
     );
 }
+
+mod native_ipc {
+    use super::*;
+    use serde_json::{json, Value};
+    use tauri::ipc::{CallbackFn, InvokeBody};
+    use tauri::test::{get_ipc_response, MockRuntime, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+    use tauri::{Manager, WebviewWindowBuilder};
+
+    struct ChildIpc<'a>(&'a tauri::Webview<MockRuntime>);
+
+    impl AsRef<tauri::Webview<MockRuntime>> for ChildIpc<'_> {
+        fn as_ref(&self) -> &tauri::Webview<MockRuntime> {
+            self.0
+        }
+    }
+
+    fn app(state: ApprovalState) -> tauri::App<MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![
+                crate::approval::ipc::record_approval
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    fn request(id: &str) -> InvokeRequest {
+        InvokeRequest {
+            cmd: "record_approval".into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: if cfg!(windows) {
+                "http://tauri.localhost"
+            } else {
+                "tauri://localhost"
+            }
+            .parse()
+            .unwrap(),
+            // These forged labels must never substitute for the injected
+            // native webview and its actual owning window.
+            body: InvokeBody::Json(json!({
+                "id": id, "decision": "approved", "rememberKind": false,
+                "webviewLabel": "main", "windowLabel": "main", "actor": "person",
+            })),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.into(),
+        }
+    }
+
+    fn pending(state: &ApprovalState, cwd: &str, id: &str, before: &[u8]) {
+        let store = state.store.lock().unwrap();
+        assert_eq!(store.approvals[id].decision, ApprovalDecision::Pending);
+        assert!(!store.approvals[id].consumed);
+        assert!(store.session_allowed_kinds.is_empty());
+        assert!(store.session_allowed_bindings.is_empty());
+        drop(store);
+        assert_eq!(std::fs::read(audit_path(cwd, id).unwrap()).unwrap(), before);
+    }
+
+    #[test]
+    fn task_completion_record_ipc_requires_both_native_main_labels_before_effects() {
+        let home = Home::new();
+        let cwd = workspace(&home);
+        let state = ApprovalState::default();
+        let approval = prepare(&state, &cwd, binding());
+        let before = std::fs::read(audit_path(&cwd, &approval.id).unwrap()).unwrap();
+        let app = app(state.clone());
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let skill_editor = WebviewWindowBuilder::new(&app, "skill-editor", Default::default())
+            .build()
+            .unwrap();
+        let local_child = main
+            .as_ref()
+            .window()
+            .add_child(
+                tauri::WebviewBuilder::new("local-child", tauri::WebviewUrl::default()),
+                tauri::Position::Logical(tauri::LogicalPosition::new(0.0, 0.0)),
+                tauri::Size::Logical(tauri::LogicalSize::new(100.0, 100.0)),
+            )
+            .unwrap();
+        for view in [skill_editor.as_ref().clone(), local_child] {
+            let result = get_ipc_response(&ChildIpc(&view), request(&approval.id));
+            assert!(
+                result.is_err(),
+                "completion approval from {}/{} must be refused: {result:?}",
+                view.window().label(),
+                view.label()
+            );
+            pending(&state, &cwd, &approval.id, &before);
+        }
+        let other_app = self::app(state.clone());
+        let other_window = tauri::WindowBuilder::new(&other_app, "other-window")
+            .build()
+            .unwrap();
+        let disguised_main = other_window
+            .add_child(
+                tauri::WebviewBuilder::new("main", tauri::WebviewUrl::default()),
+                tauri::Position::Logical(tauri::LogicalPosition::new(0.0, 0.0)),
+                tauri::Size::Logical(tauri::LogicalSize::new(100.0, 100.0)),
+            )
+            .unwrap();
+        let result = get_ipc_response(&ChildIpc(&disguised_main), request(&approval.id));
+        assert!(
+            result.is_err(),
+            "a main-labelled child inside another window must be refused: {result:?}"
+        );
+        pending(&state, &cwd, &approval.id, &before);
+
+        let result = get_ipc_response(&main, request(&approval.id)).unwrap();
+        let recorded: Value = result.deserialize().unwrap();
+        assert_eq!(recorded["kind"], KIND);
+        assert_eq!(
+            state.store.lock().unwrap().approvals[&approval.id].decision,
+            ApprovalDecision::Approved
+        );
+        assert_eq!(read_approval_audit(&cwd, &approval.id).unwrap().len(), 2);
+        consume(&state, &cwd, &approval.id, &binding()).unwrap();
+    }
+
+    #[test]
+    fn ordinary_record_ipc_keeps_existing_skill_editor_window_behavior() {
+        let state = ApprovalState::default();
+        let approval = state
+            .prepare(
+                "inbox.file.accept".into(),
+                "Ordinary action".into(),
+                None,
+                None,
+            )
+            .unwrap();
+        let app = app(state.clone());
+        let skill_editor = WebviewWindowBuilder::new(&app, "skill-editor", Default::default())
+            .build()
+            .unwrap();
+        get_ipc_response(&skill_editor, request(&approval.id)).unwrap();
+        state
+            .consume_any(Some(&approval.id), &["inbox.file.accept"])
+            .unwrap();
+    }
+}

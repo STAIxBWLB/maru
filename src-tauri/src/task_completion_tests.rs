@@ -1020,3 +1020,117 @@ fn completion_guard_symlinked_config_root_still_protects_existing_physical_names
         assert!(!storage.join("moved-namespace").exists());
     }
 }
+
+fn completion_suffix_roundtrip(fixture: &Fixture) -> Result<(), String> {
+    let html_path = "tasks/active/task.html";
+    crate::document::move_document(fixture.work_path(), TASK_PATH.into(), html_path.into())?;
+    let html_before =
+        fs::read_to_string(fixture.work.join(html_path)).map_err(|e| e.to_string())?;
+    // The ordinary HTML writer does not carry task policy or identity fields.
+    // Returning these bytes to Markdown would present Done to the Tasks parser.
+    crate::document::save_document(
+        fixture.work_path(),
+        html_path.into(),
+        "---\nstatus: done\n---\n# Unreviewed roundtrip\n".into(),
+        Some(crate::document::revision_for(&html_before)),
+    )
+    .map_err(|e| e.to_string())?;
+    crate::document::move_document(fixture.work_path(), html_path.into(), TASK_PATH.into())?;
+    Ok(())
+}
+
+#[test]
+fn completion_guard_r1_policy_cannot_be_stripped_by_full_same_bucket_suffix_roundtrip() {
+    let home = Home::new();
+    for (required, revision_only) in [(Some(true), false), (Some(false), false), (None, true)] {
+        let mut fixture = Fixture::new(&home, required);
+        if revision_only {
+            fixture.original = fixture.original.replace(
+                "custom: preserved",
+                "maruCompletionPolicyRevision: reserved-policy\ncustom: preserved",
+            );
+            fs::write(fixture.work.join(TASK_PATH), &fixture.original).unwrap();
+        }
+        let result = completion_suffix_roundtrip(&fixture);
+        assert!(
+            result.is_err(),
+            "suffix roundtrip stripped reserved completion fields and wrote Done: {result:?}"
+        );
+        fixture.assert_task_untouched();
+        assert!(!fixture.work.join("tasks/active/task.html").exists());
+    }
+}
+
+#[test]
+fn completion_guard_r1_known_policy_identity_cannot_be_stripped_by_suffix_roundtrip() {
+    use sha2::Digest;
+    let home = Home::new();
+    for (required, padding) in [(true, ""), (false, ""), (true, " ")] {
+        let mut fixture = Fixture::new(&home, None);
+        let task_id = "known-completion-task";
+        fixture.original = fixture.original.replace(
+            "custom: preserved",
+            &format!("taskId: '{padding}{task_id}{padding}'\ncustom: preserved"),
+        );
+        fs::write(fixture.work.join(TASK_PATH), &fixture.original).unwrap();
+        let policies = fixture.work.join(".maru/task-completion/policies");
+        fs::create_dir_all(&policies).unwrap();
+        let name = format!("{:x}.json", sha2::Sha256::digest(task_id.as_bytes()));
+        fs::write(policies.join(name), serde_json::to_vec(&serde_json::json!({
+            "taskId":task_id, "required":required, "revision":"known-policy", "tasksRoot":fs::canonicalize(fixture.work.join("tasks")).unwrap()
+        })).unwrap()).unwrap();
+        let result = completion_suffix_roundtrip(&fixture);
+        assert!(
+            result.is_err(),
+            "suffix roundtrip detached a known completion policy identity: {result:?}"
+        );
+        fixture.assert_task_untouched();
+        assert!(!fixture.work.join("tasks/active/task.html").exists());
+    }
+}
+
+#[test]
+fn completion_guard_r1_ordinary_unbound_suffix_roundtrip_keeps_manual_done_behavior() {
+    let home = Home::new();
+    for task_id in [None, Some("ordinary-unbound-id")] {
+        let mut fixture = Fixture::new(&home, None);
+        if let Some(task_id) = task_id {
+            fixture.original = fixture.original.replace(
+                "custom: preserved",
+                &format!("taskId: {task_id}\ncustom: preserved"),
+            );
+            fs::write(fixture.work.join(TASK_PATH), &fixture.original).unwrap();
+        }
+        completion_suffix_roundtrip(&fixture).unwrap();
+        let rows = crate::tasks::scan_task_notes(fixture.work_path(), None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].frontmatter["status"], "done");
+        assert!(!fixture.work.join(".maru/task-completion").exists());
+    }
+}
+
+#[test]
+fn completion_guard_r1_ordinary_suffix_exit_keeps_non_utf8_and_large_body_bytes() {
+    let home = Home::new();
+    let mut large =
+        b"---\ntitle: Ordinary legacy document\n---\nmaruCompletionRequired: true is body prose\n"
+            .to_vec();
+    large.extend(std::iter::repeat_n(255, 4 * 1024 * 1024 + 1));
+    for bytes in [vec![255, 0, 1], large] {
+        let fixture = Fixture::new(&home, None);
+        fs::write(fixture.work.join(TASK_PATH), &bytes).unwrap();
+        crate::workspace_files::rename_workspace_entry(
+            fixture.work_path(),
+            TASK_PATH.into(),
+            "task.html".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(fixture.work.join("tasks/active/task.html")).unwrap(),
+            bytes
+        );
+        assert!(!fixture.work.join(TASK_PATH).exists());
+        assert!(!fixture.work.join(".maru/task-completion").exists());
+        assert!(!fixture.work.join(".maru/task-execution").exists());
+    }
+}

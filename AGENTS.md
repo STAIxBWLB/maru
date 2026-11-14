@@ -56,7 +56,7 @@ make test-e2e      # Playwright (chromium, own web server on 5307)
 
 ## Things the agent gets wrong
 
-- **Task completion guards (2026-11-14)**: reuse Tasks status, bucket and Markdown helpers with the recorded task scope; do not infer completion from strings or path substrings. Check creation/promotion before effects and preserve UI-only policy. Reject lexical/physical aliases into backend evidence in any workspace; retain status-default, creation, alias, restart and one-effect regressions.
+- **Task completion guards (2026-11-14)**: reuse Tasks status, bucket and Markdown helpers with the configured/recorded root. Check creation, promotion and format exits before effects; do not let a suffix change detach policy. Restrict completion approval grants to native main webview/window labels too. Preserve UI-only policy and reject backend-evidence aliases; retain boundary, scope, restart and one-effect regressions.
 
 - **Semantic apply (2026-11-10)**: preserve the SDK gate before structural semantic edits commit in `src/lib/diagram/semanticApply.ts`; test refusal without a doc/history commit. Diagnostics shown when inspecting an existing dataset are asynchronous and read-only: do not gate load, rewrite source or apply stale results; keep Floorplan local-only. See `docs/diagram.md` §Semantic editing.
 

@@ -296,6 +296,10 @@ export async function enableTaskCompletionProviders(): Promise<void> {
     defaultRuntime: "codex", adaptivePolicy: { enabled: false, workload: "auto" },
     commandOverrides: { claude: null, codex: null, kimi: null, kiro: null },
   };
+  settings.tasks = {
+    ...(typeof settings.tasks === "object" && settings.tasks !== null ? settings.tasks : {}),
+    root: "work-items",
+  };
   await fs.mkdir(path.dirname(settingsFile), { recursive: true });
   await fs.writeFile(settingsFile, JSON.stringify(settings, null, 2));
   for (const [key, value] of Object.entries({

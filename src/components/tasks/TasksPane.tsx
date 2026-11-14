@@ -712,6 +712,7 @@ export function TasksPane({
           </div>
           <TaskDetailDrawer
             workPath={workPath}
+            tasksRoot={effectiveSettings.root}
             entry={selectedEntry}
             metadata={metadata}
             loading={metadataLoading}

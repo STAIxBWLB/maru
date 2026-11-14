@@ -22,6 +22,7 @@ import { setError } from "../../lib/errorStore";
 
 interface TaskDetailDrawerProps {
   workPath: string | null;
+  tasksRoot?: string | null;
   entry: TaskEntry | null;
   metadata: TaskMetadata | null;
   loading: boolean;
@@ -48,6 +49,7 @@ interface TaskDetailDrawerProps {
 
 export function TaskDetailDrawer({
   workPath,
+  tasksRoot,
   entry,
   metadata,
   loading,
@@ -73,7 +75,7 @@ export function TaskDetailDrawer({
     runEpoch.current += 1;
     setPreparingRun(false);
     return () => { ++runEpoch.current; };
-  }, [selectedTaskPath, workPath]);
+  }, [selectedTaskPath, tasksRoot, workPath]);
 
   if (collapsed) {
     return (
@@ -122,7 +124,10 @@ export function TaskDetailDrawer({
       if (generation !== runEpoch.current) return;
       if (current.meta.maruCompletionRequired === true) {
         onOpenSkillCompose(skill, context, prompt, workPath, undefined, {
-          taskExecution: { requestId: crypto.randomUUID(), taskPath: entry.relPath, sourceRevision: current.revision },
+          taskExecution: {
+            requestId: crypto.randomUUID(), taskPath: entry.relPath, sourceRevision: current.revision,
+            ...(tasksRoot !== undefined && tasksRoot !== null ? { tasksRoot } : {}),
+          },
         });
       } else {
         onOpenSkillCompose(skill, context, prompt);
@@ -207,6 +212,7 @@ export function TaskDetailDrawer({
       />
       {workPath ? <TaskCompletionSection
         workPath={workPath}
+        tasksRoot={tasksRoot}
         taskPath={entry.relPath}
         onChanged={onCompletionChanged}
         onConfirmApproval={onConfirmApproval}

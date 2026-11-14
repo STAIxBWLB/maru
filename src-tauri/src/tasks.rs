@@ -740,6 +740,8 @@ pub(crate) fn update_task_schedule_fields_in_transaction(
     )?;
     let work = normalize_existing_dir(&work_path)?;
     let path = resolve_inside_vault(&work_path, &rel_path)?;
+    crate::task_completion::guard_managed_task_write(&work, &path, None, None)
+        .map_err(|error| error.to_string())?;
     let original =
         fs::read_to_string(&path).map_err(|err| format!("Cannot read task note: {err}"))?;
     let mut updated = original.clone();
@@ -750,6 +752,13 @@ pub(crate) fn update_task_schedule_fields_in_transaction(
     updated = patch_optional_string_field(updated, "calendarEnd", fields.calendar_end)?;
     updated = patch_optional_number_field(updated, "estimateMinutes", fields.estimate_minutes)?;
     if updated != original {
+        crate::task_completion::guard_managed_task_write(
+            &work,
+            &path,
+            Some(&original),
+            Some(&updated),
+        )
+        .map_err(|error| error.to_string())?;
         fs::write(&path, &updated).map_err(|err| format!("Cannot update task schedule: {err}"))?;
     }
     let bucket = bucket_from_rel_path(&rel_path).unwrap_or(TaskBucket::Active);
@@ -2807,5 +2816,84 @@ mod phase08_09 {
         let second = materialize_capture_task(&root, &prepared).unwrap();
         assert!(!second.created);
         assert_eq!(first.row.rel_path, second.row.rel_path);
+    }
+}
+
+#[cfg(test)]
+mod completion_schedule_review_tests {
+    use super::*;
+    use crate::atomic_file::phase08_06::Home;
+    use crate::scratchpad::phase08_08::registry;
+
+    fn fields() -> UpdateTaskScheduleFields {
+        UpdateTaskScheduleFields {
+            project: Some(Some(
+                "demo\nstatus: done\nmaruCompletionRequired: false".into(),
+            )),
+            priority: None,
+            due: None,
+            calendar_start: None,
+            calendar_end: None,
+            estimate_minutes: None,
+        }
+    }
+
+    #[test]
+    fn completion_review_schedule_fields_do_not_admit_status_or_policy() {
+        for field in [
+            "status",
+            "maruCompletionRequired",
+            "maruCompletionPolicyRevision",
+            "taskId",
+        ] {
+            let mut value = serde_json::Map::new();
+            value.insert(field.into(), serde_json::json!("forged"));
+            assert!(
+                serde_json::from_value::<UpdateTaskScheduleFields>(value.into()).is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn completion_review_schedule_values_preserve_required_task_metadata() {
+        let home = Home::new();
+        let work = home.root.path().join("schedule-review");
+        fs::create_dir_all(work.join("tasks/active")).unwrap();
+        registry(&work, "direct");
+        let path = work.join("tasks/active/task.md");
+        fs::write(&path, "---\nstatus: active\nmaruCompletionRequired: true\nmaruCompletionPolicyRevision: fixture-epoch\ntaskId: schedule-task\n---\n# Body\n").unwrap();
+        update_task_schedule_fields(
+            work.to_string_lossy().into(),
+            "tasks/active/task.md".into(),
+            fields(),
+        )
+        .unwrap();
+        let raw = fs::read_to_string(path).unwrap();
+        let meta = yaml_to_json(&parse_frontmatter(&raw).meta);
+        assert_eq!(meta["status"], "active");
+        assert_eq!(meta["maruCompletionRequired"], true);
+        assert_eq!(meta["maruCompletionPolicyRevision"], "fixture-epoch");
+        assert_eq!(meta["taskId"], "schedule-task");
+        assert!(raw.ends_with("# Body\n"));
+    }
+
+    #[test]
+    fn completion_review_schedule_cannot_overwrite_backend_evidence() {
+        let home = Home::new();
+        let work = home.root.path().join("schedule-namespace-review");
+        let relative = ".maru/task-completion/receipts/owned.json";
+        let path = work.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        registry(&work, "direct");
+        let before = "{\"schemaVersion\":\"backend-owned\"}";
+        fs::write(&path, before).unwrap();
+        let result =
+            update_task_schedule_fields(work.to_string_lossy().into(), relative.into(), fields());
+        assert!(
+            result.is_err(),
+            "schedule writer modified backend evidence: {result:?}"
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), before);
     }
 }

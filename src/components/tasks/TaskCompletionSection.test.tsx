@@ -72,7 +72,7 @@ const onChanged = vi.fn();
 const onConfirmApproval = vi.fn();
 const onMissionStarted = vi.fn();
 
-async function render(nextTaskPath = taskPath) {
+async function render(nextTaskPath = taskPath, tasksRoot?: string) {
   if (!root) {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -81,6 +81,7 @@ async function render(nextTaskPath = taskPath) {
   await act(async () => {
     root!.render(
       <TaskCompletionSection
+        {...(tasksRoot === undefined ? {} : { tasksRoot })}
         workPath={workPath}
         taskPath={nextTaskPath}
         onChanged={onChanged}
@@ -146,6 +147,40 @@ describe("TaskCompletionSection opt-in and review", () => {
 
     expect(api.setTaskCompletionPolicy).toHaveBeenCalledExactlyOnceWith(workPath, taskPath, true, sourceRevision);
     expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(api.finalizeTaskCompletion).not.toHaveBeenCalled();
+  });
+
+  it("passes a configured custom task root to the revision-bound policy setter", async () => {
+    const tasksRoot = "notes/tasks";
+    const customTask = `${tasksRoot}/active/task.md`;
+    api.readTaskCompletion.mockResolvedValue(view({ required: false, token: undefined, canReview: false }));
+    await render(customTask, tasksRoot);
+    await click(checkbox());
+
+    expect(api.setTaskCompletionPolicy).toHaveBeenCalledExactlyOnceWith(workPath, customTask, true, sourceRevision, tasksRoot);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(api.finalizeTaskCompletion).not.toHaveBeenCalled();
+  });
+
+  it("preserves an explicitly empty task root in the policy request", async () => {
+    api.readTaskCompletion.mockResolvedValue(view({ required: false, token: undefined, canReview: false }));
+    await render("active/task.md", "");
+    await click(checkbox());
+
+    expect(api.setTaskCompletionPolicy).toHaveBeenCalledExactlyOnceWith(workPath, "active/task.md", true, sourceRevision, "");
+  });
+
+  it("ignores a pending policy result after the configured task root changes", async () => {
+    const policy = deferred<ReturnType<typeof view>>();
+    api.readTaskCompletion.mockResolvedValue(view({ required: false, token: undefined, canReview: false }));
+    api.setTaskCompletionPolicy.mockReturnValue(policy.promise);
+    await render(taskPath, "notes/tasks");
+    await click(checkbox());
+    await render(taskPath, "other/tasks");
+    await act(async () => { policy.resolve(view()); });
+
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(checkbox().checked).toBe(false);
     expect(api.finalizeTaskCompletion).not.toHaveBeenCalled();
   });
 

@@ -16,13 +16,14 @@ import { Button } from "../ui/Button";
 interface TaskCompletionSectionProps {
   workPath: string;
   taskPath: string;
+  tasksRoot?: string | null;
   onChanged: () => void;
   onConfirmApproval: (input: ApprovalInput) => Promise<string | null>;
   onMissionStarted?: (id: string) => void;
   refreshKey?: string | number;
 }
 
-export function TaskCompletionSection({ workPath, taskPath, onChanged, onConfirmApproval, onMissionStarted, refreshKey }: TaskCompletionSectionProps) {
+export function TaskCompletionSection({ workPath, taskPath, tasksRoot, onChanged, onConfirmApproval, onMissionStarted, refreshKey }: TaskCompletionSectionProps) {
   const { t } = useTranslation();
   const id = useId();
   const [view, setView] = useState<TaskCompletionView | null>(null);
@@ -84,7 +85,7 @@ export function TaskCompletionSection({ workPath, taskPath, onChanged, onConfirm
       window.removeEventListener("maru-task-completion-changed", refresh);
       for (const stop of unlisten) stop();
     };
-  }, [reload]);
+  }, [reload, tasksRoot]);
 
   useEffect(() => {
     if (previousRefreshKey.current === refreshKey) return;
@@ -147,7 +148,11 @@ export function TaskCompletionSection({ workPath, taskPath, onChanged, onConfirm
             const required = event.currentTarget.checked;
             const sourceRevision = view.sourceRevision;
             void mutate(async () => {
-              await setTaskCompletionPolicy(workPath, taskPath, required, sourceRevision);
+              if (tasksRoot !== undefined && tasksRoot !== null) {
+                await setTaskCompletionPolicy(workPath, taskPath, required, sourceRevision, tasksRoot);
+              } else {
+                await setTaskCompletionPolicy(workPath, taskPath, required, sourceRevision);
+              }
               return true;
             });
           }} />

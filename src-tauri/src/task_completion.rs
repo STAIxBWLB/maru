@@ -20,7 +20,7 @@ use serde_yaml::Value as YamlValue;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -29,6 +29,7 @@ pub(crate) const POLICY_KEY: &str = "maruCompletionPolicyRevision";
 const SCHEMA: &str = "maru_task_completion_receipt_v1";
 const CONTROL: &str = ".maru/task-completion";
 const MAX_RECORD: u64 = 1024 * 1024;
+const MAX_TASK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ARTIFACT: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL: u64 = 64 * 1024 * 1024;
 const MAX_ARTIFACTS: usize = 32;
@@ -759,6 +760,91 @@ pub(crate) fn guard_managed_task_write_with_permit(
     Ok(())
 }
 
+/// Inspect only the leading header for a format-boundary transition. A short
+/// header never makes an unrelated large/non-UTF8 document body task evidence.
+fn move_policy_header(source: &Path) -> Result<Option<Vec<u8>>, IpcError> {
+    if !fs::metadata(source)
+        .map_err(|e| io_error("Cannot inspect Markdown policy header", e))?
+        .is_file()
+    {
+        return Ok(None);
+    }
+    let file =
+        fs::File::open(source).map_err(|e| io_error("Cannot read Markdown policy header", e))?;
+    let mut reader = BufReader::new(file.take(MAX_TASK_BYTES + 1));
+    let mut prefix = [0u8; 4];
+    match reader.read_exact(&mut prefix) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(io_error("Cannot read Markdown policy header", error)),
+    }
+    if &prefix != b"---\n" {
+        return Ok(None);
+    }
+    let mut header = prefix.to_vec();
+    loop {
+        let chunk = reader
+            .fill_buf()
+            .map_err(|e| io_error("Cannot read Markdown policy header", e))?;
+        if chunk.is_empty() {
+            return Ok(Some(header));
+        }
+        let consumed = chunk.len();
+        let search_from = header.len().saturating_sub(3).max(4);
+        header.extend_from_slice(chunk);
+        // This is exactly parse_frontmatter's delimiter search, including its
+        // offset after the opening marker. Do not parse or retain body bytes.
+        if let Some(offset) = header[search_from..].windows(4).position(|v| v == b"\n---") {
+            let end = search_from + offset + 4;
+            if end as u64 <= MAX_TASK_BYTES {
+                header.truncate(end);
+                return Ok(Some(header));
+            }
+        }
+        if header.len() as u64 > MAX_TASK_BYTES {
+            return Err(refused("Markdown frontmatter exceeds the 4 MiB task bound", "keep the current suffix and shorten or repair its frontmatter before changing formats"));
+        }
+        reader.consume(consumed);
+    }
+}
+
+fn suffix_policy_refusal() -> IpcError {
+    refused(
+        "A task completion policy or known identity cannot be detached by a suffix change",
+        "keep this task as .md and create a separate unbound document for another format",
+    )
+}
+
+fn guard_markdown_policy_exit(work: &Path, source: &Path) -> Result<(), IpcError> {
+    let Some(header) = move_policy_header(source)? else {
+        return Ok(());
+    };
+    let text = match std::str::from_utf8(&header) {
+        Ok(text) => text,
+        Err(_) => {
+            if [REQUIRED_KEY, POLICY_KEY]
+                .iter()
+                .any(|key| header.windows(key.len()).any(|v| v == key.as_bytes()))
+            {
+                return Err(suffix_policy_refusal());
+            }
+            return Ok(());
+        }
+    };
+    let parsed = policy(text)?;
+    if parsed.raw_required.is_some() || parsed.raw_revision.is_some() {
+        return Err(suffix_policy_refusal());
+    }
+    // Tasks trims/scalar-normalizes its identity on read; use that same
+    // interpretation rather than trusting an untrimmed caller spelling.
+    let parts = crate::vault::parse_frontmatter(text);
+    let task_id = crate::tasks::string_field(&crate::tasks::yaml_to_json(&parts.meta), "taskId");
+    if known_policy(work, task_id.as_deref())?.is_some() {
+        return Err(suffix_policy_refusal());
+    }
+    Ok(())
+}
+
 pub(crate) fn guard_managed_task_move(
     work: &Path,
     source: &Path,
@@ -808,6 +894,9 @@ pub(crate) fn guard_managed_task_move(
             guard_new_task_document(work, target, &read_task(source)?)?;
         }
         return Ok(());
+    }
+    if !crate::tasks::is_markdown(target) {
+        guard_markdown_policy_exit(work, source)?;
     }
     // The same scope proof applies to individual files. Ordinary binary or
     // legacy bytes named .md must not be parsed for unrelated/same-bucket
@@ -998,10 +1087,10 @@ fn read_task(path: &Path) -> Result<String, IpcError> {
         ));
     }
     let mut bytes = Vec::new();
-    file.take(4 * 1024 * 1024 + 1)
+    file.take(MAX_TASK_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| io_error("Cannot read completion task", e))?;
-    if bytes.len() > 4 * 1024 * 1024 {
+    if bytes.len() as u64 > MAX_TASK_BYTES {
         return Err(refused(
             "Task exceeds 4 MiB",
             "split the task before enabling completion evidence",

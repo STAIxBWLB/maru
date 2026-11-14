@@ -9,7 +9,7 @@ import type {} from "webdriverio";
 import { fixtureRootDir } from "../helpers/fixtureWorkspace";
 
 const title = "Native completion evidence fixture";
-const relative = "tasks/active/native-completion.md";
+const relative = "work-items/active/native-completion.md";
 
 interface NativeReceipt {
   schemaVersion: string;
@@ -169,7 +169,7 @@ describe("native task completion evidence", () => {
     assert.equal(process.env.MARU_NATIVE_E2E_TASK_COMPLETION_FIXTURE, "1", "the launcher must activate isolated fake providers before app spawn");
     const workspace = path.join(fixtureRootDir(), "workspace");
     const file = path.join(workspace, relative);
-    const archive = path.join(workspace, "tasks/archive/native-completion.md");
+    const archive = path.join(workspace, "work-items/archive/native-completion.md");
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, `---\ntitle: ${title}\nstatus: active\ncustom: retained\n---\n# Native completion fixture\n`);
     await openTask();
@@ -204,6 +204,13 @@ describe("native task completion evidence", () => {
     assert.equal(await fs.readFile(file, "utf8"), requiredSource, "refused Done changed the task bytes");
     await assert.rejects(fs.stat(archive), { code: "ENOENT" }, "refused Done published an archived task");
 
+    const suffix = await expectNativeRefusal("move_document", {
+      vaultPath: workspace, documentPath: relative, targetRelPath: relative.replace(/\.md$/, ".html"),
+    });
+    assert.match(JSON.stringify(suffix), /task_completion_refused/);
+    assert.equal(await fs.readFile(file, "utf8"), requiredSource);
+    await assert.rejects(fs.stat(path.join(workspace, relative.replace(/\.md$/, ".html"))), { code: "ENOENT" });
+
     const outbox = path.join(workspace, ".maru/today/outbox");
     const outboxNames = async () => {
       try { return (await fs.readdir(outbox)).sort(); }
@@ -226,14 +233,14 @@ describe("native task completion evidence", () => {
     });
     assert.match(JSON.stringify(whitespace), /task_completion_refused/);
     assert.equal(await fs.readFile(file, "utf8"), requiredSource);
-    const creation = await expectNativeRefusal("create_task_note", { workPath: workspace, root: "tasks", draft: {
+    const creation = await expectNativeRefusal("create_task_note", { workPath: workspace, root: "work-items", draft: {
       slug: "forged-completion", title: "Forbidden completion fixture", bucket: "archive",
       frontmatter: { maruCompletionRequired: true, status: "done" }, body: "# No approved evidence\n",
     } });
     // create_task_note retains its existing string-error wire contract.
     assert.match(JSON.stringify(creation), /Completion policy/);
     assert.match(JSON.stringify(creation), /Task details/);
-    await assert.rejects(fs.stat(path.join(workspace, "tasks/archive/forged-completion.md")), { code: "ENOENT" });
+    await assert.rejects(fs.stat(path.join(workspace, "work-items/archive/forged-completion.md")), { code: "ENOENT" });
 
     await browser.reloadSession();
     await openTask();
@@ -252,6 +259,9 @@ describe("native task completion evidence", () => {
     await clickNamed(".compose-dialog", "^(백그라운드|Background)$", "Background creator mode");
     await clickNamed(".compose-dialog .compose-actions", "^(실행|Run)$", "Creator launch");
     await stage("Creator terminal receipt", async () => (await recordedReceipts()).some(({ receipt }) => receipt.processFinished && receipt.processSuccess));
+    const creatorReceipt = (await recordedReceipts())[0].receipt;
+    const claim = JSON.parse(await fs.readFile(path.join(workspace, ".maru/task-execution", `${creatorReceipt.token.taskId}.json`), "utf8")) as { tasksRoot: string };
+    assert.equal(await fs.realpath(claim.tasksRoot), await fs.realpath(path.join(workspace, "work-items")), "tracked execution ignored the configured Tasks root");
     assert.deepEqual(await providerCalls(), [{ provider: "codex", operation: "creator" }]);
     const artifact = path.join(workspace, "scratchpad/memos/native-task-output.md");
     await assert.rejects(fs.stat(artifact), { code: "ENOENT" }, "a process exit committed an unapproved proposal");

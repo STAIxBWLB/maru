@@ -332,6 +332,10 @@ macOS, Linux and Windows. No local native build is implied by a passing web test
   buckets. A private append-only scope index is published before policy effects;
   directory moves unrelated to task scopes or staying in a bucket avoid a tree
   scan, while affected moves check opted-in notes before moving any sibling.
+  A Markdown format exit cannot detach reserved policy or a known policy
+  identity. Completion approval decisions also require the native main webview
+  and window; ordinary approval kinds retain their existing window behavior.
+  The Tasks UI forwards its configured root to policy and tracked execution.
   Ordinary invocations and task mutations do not create task identities, claim
   layouts or locks. Only existing opt-in claims take a task lock before the
   mutation path lease. Request IDs are scoped to each task, not the workspace.

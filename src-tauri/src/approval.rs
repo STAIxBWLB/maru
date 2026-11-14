@@ -332,6 +332,26 @@ impl ApprovalState {
         })
     }
 
+    fn record_from_webview(
+        &self,
+        id: &str,
+        decision: ApprovalDecision,
+        remember_kind: bool,
+        webview_label: &str,
+        window_label: &str,
+    ) -> Result<ApprovalRequest, String> {
+        {
+            let store = self.store.lock().map_err(|_| "approval_state_poisoned")?;
+            let stored = store.approvals.get(id).ok_or("approval_not_found")?;
+            if stored.request.kind == TASK_COMPLETION_ACCEPT_KIND
+                && (webview_label != "main" || window_label != "main")
+            {
+                return Err("approval_main_window_required: task completion acceptance requires the person's main app webview and window; open Task details in the main Maru window and confirm acceptance there".into());
+            }
+        }
+        self.record(id, decision, remember_kind)
+    }
+
     fn record(
         &self,
         id: &str,
@@ -557,20 +577,30 @@ pub mod ipc {
     }
 
     #[tauri::command]
-    pub async fn record_approval(
+    pub async fn record_approval<R: tauri::Runtime>(
+        webview: tauri::Webview<R>,
         state: tauri::State<'_, ApprovalState>,
         id: String,
         decision: ApprovalDecision,
         remember_kind: Option<bool>,
     ) -> Result<ApprovalRequest, String> {
         let state = state.inner().clone();
+        // These labels come from native IPC injection, never request JSON.
+        let webview_label = webview.label().to_string();
+        let window_label = webview.window().label().to_string();
         tauri::async_runtime::spawn_blocking(move || {
             #[cfg(test)]
             crate::atomic_file::PathTransactionLease::test_stage(
                 &[std::path::PathBuf::from(WORKER_HOOK_KEY)],
                 "worker:record_approval",
             );
-            state.record(&id, decision, remember_kind.unwrap_or(false))
+            state.record_from_webview(
+                &id,
+                decision,
+                remember_kind.unwrap_or(false),
+                &webview_label,
+                &window_label,
+            )
         })
         .await
         .map_err(|err| format!("record_approval_task_failed: {err}"))?
@@ -670,6 +700,9 @@ mod tests {
         fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
             let app = tauri::test::mock_app();
             app.manage(ApprovalState::default());
+            tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+                .build()
+                .unwrap();
             app
         }
 
@@ -710,6 +743,7 @@ mod tests {
             let record_app = app.handle().clone();
             boundary(key, "record_approval", async move {
                 ipc::record_approval(
+                    record_app.get_webview("main").unwrap(),
                     record_app.state(),
                     "approval-missing".into(),
                     ApprovalDecision::Approved,
@@ -740,6 +774,7 @@ mod tests {
                 assert_eq!(request.kind, "inbox.file.accept");
 
                 let recorded = ipc::record_approval(
+                    app.get_webview("main").unwrap(),
                     app.state(),
                     request.id.clone(),
                     ApprovalDecision::Approved,
@@ -750,6 +785,7 @@ mod tests {
                 assert!(!recorded.auto_approved);
 
                 let error = ipc::record_approval(
+                    app.get_webview("main").unwrap(),
                     app.state(),
                     "approval-nope".into(),
                     ApprovalDecision::Approved,
@@ -782,6 +818,7 @@ mod tests {
                 .await
                 .unwrap();
                 ipc::record_approval(
+                    app.get_webview("main").unwrap(),
                     app.state(),
                     remembered.id.clone(),
                     ApprovalDecision::Approved,
@@ -850,8 +887,14 @@ mod tests {
                 let blocked_guard = store.lock().unwrap();
                 let blocked_app = app.clone();
                 let blocked = start(async move {
-                    ipc::record_approval(blocked_app.state(), request_id.clone(), decision_a, None)
-                        .await
+                    ipc::record_approval(
+                        blocked_app.get_webview("main").unwrap(),
+                        blocked_app.state(),
+                        request_id.clone(),
+                        decision_a,
+                        None,
+                    )
+                    .await
                 });
                 assert!(
                     blocked.recv_timeout(Duration::from_millis(100)).is_err(),
@@ -865,12 +908,26 @@ mod tests {
                 let first_app = app.clone();
                 let first_id = id.clone();
                 let first = start(async move {
-                    ipc::record_approval(first_app.state(), first_id, decision_a, None).await
+                    ipc::record_approval(
+                        first_app.get_webview("main").unwrap(),
+                        first_app.state(),
+                        first_id,
+                        decision_a,
+                        None,
+                    )
+                    .await
                 });
                 let second_app = app.clone();
                 let second_id = id.clone();
                 let second = start(async move {
-                    ipc::record_approval(second_app.state(), second_id, decision_b, None).await
+                    ipc::record_approval(
+                        second_app.get_webview("main").unwrap(),
+                        second_app.state(),
+                        second_id,
+                        decision_b,
+                        None,
+                    )
+                    .await
                 });
                 assert_eq!(done(first).unwrap().kind, "inbox.bulk");
                 assert_eq!(done(second).unwrap_err(), "approval_decision_terminal");
