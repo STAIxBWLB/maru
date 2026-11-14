@@ -62,11 +62,20 @@ const REFUSAL_REPORT_MIN_VERSION: (u64, u64, u64) = (1, 6, 3);
 /// A report is small JSON; anything larger is treated as missing.
 const EDIT_REPORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Shared creation point for legacy HWP staging and render-attempt directories.
+/// Create private HWP staging and render-attempt directories. Unix owner-only
+/// permissions are set in the builder before the directory is created.
 fn private_temp_dir(parent: Option<&Path>) -> std::io::Result<tempfile::TempDir> {
+    let builder = tempfile::Builder::new();
+    #[cfg(unix)]
+    let builder = {
+        use std::os::unix::fs::PermissionsExt;
+        let mut builder = builder;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+        builder
+    };
     match parent {
-        Some(parent) => tempfile::tempdir_in(parent),
-        None => tempfile::tempdir(),
+        Some(parent) => builder.tempdir_in(parent),
+        None => builder.tempdir(),
     }
 }
 
