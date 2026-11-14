@@ -818,7 +818,9 @@ export function filtersForView(view: TasksFilterView) {
   if (view === "backlog") {
     return { statuses: ["backlog"] as const, buckets: ["backlog"] as const };
   }
-  return { statuses: ["done", "cancelled"] as const, buckets: ["archive"] as const };
+  // An interrupted accepted publication can leave Done bytes in Active.
+  // Keep terminal status counts and the recovery list consistent.
+  return { statuses: ["done", "cancelled"] as const };
 }
 
 function displayViewLabel(mode: TasksDisplayView): string {

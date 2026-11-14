@@ -330,13 +330,14 @@ describe("native task completion evidence", () => {
     await assert.rejects(fs.stat(archive), { code: "ENOENT" }, "readback resumed a task move without the explicit action");
     await clickNamed(".task-detail-drawer", "^(승인된 완료 마무리|Finish accepted completion)$", "Resume the already accepted Archive move");
     assert.equal(await browser.execute(() => Boolean(document.querySelector(".approval-dialog"))), false, "resume prepared another approval instead of reconciling the consumed one");
-    assert.deepEqual(await providerCalls(), callsBeforeResume, "resume replayed a provider");
-    assert.deepEqual((await fs.readdir(path.join(workspace, ".maru/versions"), { recursive: true })).sort(), snapshotsBeforeResume, "resume wrote another snapshot");
     await stage("Archived accepted task", async () => {
       try { return /^status: done$/m.test(await fs.readFile(archive, "utf8")); }
       catch (failure) { if ((failure as NodeJS.ErrnoException).code === "ENOENT") return false; throw failure; }
     });
     await assert.rejects(fs.stat(file), { code: "ENOENT" });
+    await stage("Resumed acceptance receipt", async () => (await recordedReceipts())[0]?.receipt.acceptance?.completed === true);
+    assert.deepEqual(await providerCalls(), callsBeforeResume, "resume replayed a provider");
+    assert.deepEqual((await fs.readdir(path.join(workspace, ".maru/versions"), { recursive: true })).sort(), snapshotsBeforeResume, "resume wrote another snapshot");
     const completed = await recordedReceipts();
     assert.equal(completed.length, 1);
     assert.equal(completed[0].receipt.apply?.complete, true);
