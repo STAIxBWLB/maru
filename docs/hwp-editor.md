@@ -141,6 +141,14 @@ convention. Feature-version refusals from JSON edit or explicitly requested
 layout use the structured IPC error shape so callers can branch on the code;
 the message includes the detected version, required minimum, and upgrade action.
 
+Form worker failures keep `hwped_task_failed:` and name `worker_cancelled`,
+`worker_panicked` or `worker_failed` with retry/check guidance. Join task IDs
+and panic details are not forwarded. Shared staging I/O failures keep
+`hwp_stage_failed:` and report the operation plus `ErrorKind`, with temporary
+storage directory/permission/free-space checks instead of raw path-bearing I/O
+text. The form parser corpus checks normalized JSON values and serialization;
+it does not certify upstream input key order.
+
 **Refused edits (maru#620).** On ahwp >= 1.6.3, `hwped_edit` passes
 `--report <stage>/edit-report.json` on every call and reads the report before
 the stage dir is removed. The version parser takes plain `X.Y.Z` only, so a
