@@ -62,6 +62,27 @@ const REFUSAL_REPORT_MIN_VERSION: (u64, u64, u64) = (1, 6, 3);
 /// A report is small JSON; anything larger is treated as missing.
 const EDIT_REPORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
+/// Create private HWP staging and render-attempt directories. Unix owner-only
+/// permissions are set in the builder before the directory is created.
+fn private_temp_dir(parent: Option<&Path>) -> std::io::Result<tempfile::TempDir> {
+    let builder = tempfile::Builder::new();
+    #[cfg(unix)]
+    let builder = {
+        use std::os::unix::fs::PermissionsExt;
+        let mut builder = builder;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+        builder
+    };
+    match parent {
+        Some(parent) => builder.tempdir_in(parent),
+        None => builder.tempdir(),
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "hwped/private_tempdir_tests.rs"]
+mod private_tempdir_tests;
+
 /// Document reference crossing the bridge (JS `TauriDocumentRef`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -558,7 +579,7 @@ fn stage_document(
 fn read_now(document: HwpedDocumentRef, workspace_root: Option<String>) -> Result<Value, String> {
     let bin = hwp_bin()?;
     let version = ensure_version(&bin)?;
-    let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     read_staged(&bin, &version, &input)
 }
@@ -949,14 +970,14 @@ fn render_with_layout_fallback(
 ) -> Result<(Vec<HwpedRenderPage>, Vec<HwpedRenderNote>), String> {
     // Each attempt has its own output directory: partially written pages or
     // layout files from a failed CLI pass must not leak into a successful retry.
-    let attempt = tempfile::tempdir_in(dir).map_err(|error| {
+    let attempt = private_temp_dir(Some(dir)).map_err(|error| {
         format!("hwp_stage_failed: cannot create render attempt directory: {error}; check temporary storage permissions and free space, then retry")
     })?;
     match render_attempt(bin, attempt.path(), input, format, pages, dpi, layout_mode) {
         Err(error)
             if layout_mode == LayoutMetadataMode::Optional && error.starts_with("hwp_failed:") =>
         {
-            let retry = tempfile::tempdir_in(dir).map_err(|cause| {
+            let retry = private_temp_dir(Some(dir)).map_err(|cause| {
                 format!("hwp_stage_failed: cannot create image-only render retry directory: {cause}; check temporary storage permissions and free space, then retry")
             })?;
             let (images, mut notes) = render_attempt(
@@ -1013,7 +1034,7 @@ fn render_now(
     if !valid_range {
         return Err(format!("hwped_bad_request: invalid page range: {pages}").into());
     }
-    let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     match render_with_layout_fallback(
         &bin,
@@ -1386,7 +1407,7 @@ fn edit_now(
     if json_ops {
         require_feature_version(&version, "JSON edit ops")?;
     }
-    let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let stage_dir = edit_stage_dir(tmp.path())?;
     let stage = Path::new(&stage_dir);
     let input = stage_document(stage, &document, workspace_root.as_deref())?;
@@ -1517,7 +1538,7 @@ fn compose_now(spec: Value, name: String) -> Result<HwpedComposeResponse, String
     if name.trim().is_empty() {
         return Err("hwped_bad_request: compose requires a non-empty name".to_string());
     }
-    let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let spec_path = tmp.path().join("spec.json");
     std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap_or_default())
         .map_err(|err| format!("hwp_stage_failed: {err}"))?;
@@ -1549,7 +1570,7 @@ fn validate_now(
 ) -> Result<HwpedValidationReport, String> {
     let bin = hwp_bin()?;
     ensure_version(&bin)?;
-    let tmp = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let tmp = private_temp_dir(None).map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let input = stage_document(tmp.path(), &document, workspace_root.as_deref())?;
     // Exit 1 means "invalid" and still prints the JSON report.
     let run = run_hwp(
