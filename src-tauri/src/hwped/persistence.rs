@@ -138,7 +138,7 @@ pub(super) fn capture_now(
         return Err(failure("the captured source is empty"));
     }
     let revision = digest(&bytes);
-    let tmp = super::private_temp_dir(None)
+    let tmp = super::private_temp_dir(None, None)
         .map_err(|_| failure("cannot create private capture staging"))?;
     let staged = tmp.path().join("source.hwpx");
     fs::write(&staged, &bytes).map_err(|_| failure("cannot stage the captured source"))?;
@@ -260,7 +260,7 @@ fn save_with_engine(
     // Resolve only for replacement semantics, never for lexical authorization.
     // Replacing the physical target keeps a deliberate workspace symlink intact.
     let physical = path.canonicalize().map_err(|_| conflict())?;
-    let tmp = super::private_temp_dir(None)
+    let tmp = super::private_temp_dir(None, None)
         .map_err(|_| failure("cannot create private candidate staging"))?;
     stage(&vault, "candidate-stage")?;
     let staged = tmp.path().join("candidate.hwpx");

@@ -515,7 +515,8 @@ fn fields_with_bin(
 ) -> Result<HwpCliTemplateFieldsResponse, String> {
     let (alias, slug) = canonical_template(source, template_key)?;
     ensure_released_version(bin)?;
-    let dir = tempfile::tempdir().map_err(|err| format!("hwp_stage_failed: {err}"))?;
+    let dir = crate::hwped::private_temp_dir(None, None)
+        .map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let template = native_template_path(dir.path());
     create_template(bin, alias, &template)?;
     validate_template(bin, &template)?;
@@ -795,9 +796,7 @@ fn fill_with_bin(
         .to_path_buf();
     lease.ensure_covered(vec![output.clone(), parent.clone()])?;
     fs::create_dir_all(&parent).map_err(|err| format!("Cannot create output directory: {err}"))?;
-    let stage = tempfile::Builder::new()
-        .prefix(".maru-hwp-cli-")
-        .tempdir_in(&parent)
+    let stage = crate::hwped::private_temp_dir(Some(&parent), Some(".maru-hwp-cli-"))
         .map_err(|err| format!("hwp_stage_failed: {err}"))?;
     let template = native_template_path(stage.path());
     let staged_output = stage.path().join("filled.hwpx");

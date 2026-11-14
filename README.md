@@ -1112,6 +1112,8 @@ Human-facing explanation. Agent instructions: [AGENTS.md](AGENTS.md).
 
 ### Change history
 
+- 2026-11-15: Template inspection and fill staging now use the shared private-directory creator. Its optional prefix keeps the existing sibling names and parents while applying Unix 0700 at creation; the isolated umask test checks the actual fill factory.
+
 - 2026-11-14: Completion evidence review found that lexical checks missed aliases into backend records, including another workspace. Separate status/path checks also disagreed with Tasks whitespace, Archive defaults, Markdown case and bucket interpretation, while creation/promotion missed the gate. The guard now shares the Tasks read model and explicit task scope; regressions cover those entry points before effects.
 
 - 2026-11-14: Repeated HWP staging reviews found that default temporary-directory creation becomes 0755 under umask 022. Shared capture, edit, render, compose, validation, save-candidate and form staging now applies Unix 0700 before creation. The isolated child tests cover both system-temp and explicit-parent directories without changing the parallel harness's umask.

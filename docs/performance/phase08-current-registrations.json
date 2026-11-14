@@ -2536,11 +2536,11 @@
     },
     {
       "path": "src-tauri/src/hwp_cli_template.rs",
-      "sha256": "5f18ce6d1b260f10e1e199cf010f69aca264fa8d15af1fab5c2840ab353c6123"
+      "sha256": "3fdc95e19e4fd2f35ccd86e8a50f9c75b222728d8ff66b7bddfcdd5fd53bde13"
     },
     {
       "path": "src-tauri/src/hwped.rs",
-      "sha256": "ec30c3ac4fbda397712516faf236d6e88657e20dada9cecac1bc26e3831266ae"
+      "sha256": "9ad657eb43c718569e1ed44b16474b47984c39c577f669fb9a3f67d700924e51"
     },
     {
       "path": "src-tauri/src/inbox.rs",
@@ -2688,7 +2688,7 @@
     },
     {
       "path": "src-tauri/src/template_fill.rs",
-      "sha256": "a2f83d5b371694c1c4f1381dccf1f6b0726fd4e316b64c85500eb4cf2dab90df"
+      "sha256": "4ffdc3ab108d990e5262787b3ce84f9ffe1b744a0649a2ba0ca188b8e7d22ec1"
     },
     {
       "path": "src-tauri/src/terminal/mod.rs",
@@ -2763,5 +2763,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "1fac2ee021a02501f9a71ea87403fab53f34f011"
+  "sourceCommit": "4e4498b4d15eea011ce058379d8f776fd01f428c"
 }
