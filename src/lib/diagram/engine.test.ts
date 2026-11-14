@@ -187,6 +187,35 @@ describe("product diagram engine facade", () => {
     });
     await expect(engine.validateCandidate("architecture", specJson)).rejects.toThrow(/receipt does not match/i);
   });
+
+  it("routes floorplan to its own engine entry, never the diagram_type validator", async () => {
+    const floorplanJson = JSON.stringify({ $schema: "floorplan/architecture@1", project: { name: "Map" }, nodes: [{ id: "a", label: "A", kind: "service" }], edges: [] });
+    const hash = await sha256(floorplanJson);
+    const validate = vi.fn(async () => validationReport(true, hash));
+    const layout = vi.fn(async () => geometryReport(true, hash));
+    const layoutFloorplan = vi.fn(async () => geometryReport(false, hash, [diagnostic("A frame nests too deep.", "Flatten the deepest frames.")]));
+    const engine = createProductDiagramEngine({ validate, layout, layoutFloorplan, render: async () => { throw new Error("render is not expected"); } });
+    const result = await engine.validateCandidate("floorplan", floorplanJson);
+    expect(validate).not.toHaveBeenCalled();
+    expect(layout).not.toHaveBeenCalled();
+    expect(layoutFloorplan).toHaveBeenCalledWith({ specJson: floorplanJson });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toContain("A frame nests too deep.");
+    expect(result.errors.join(" ")).toContain("Flatten the deepest frames.");
+    expect(result.receipt?.inputSpecSha256).toBe(hash);
+  });
+
+  it("fails closed when a floorplan receipt names another source or the floorplan entry is missing", async () => {
+    const floorplanJson = JSON.stringify({ $schema: "floorplan/architecture@1", project: { name: "Map" }, nodes: [{ id: "a", label: "A", kind: "service" }], edges: [] });
+    const base = { validate: async () => validationReport(true, "0".repeat(64)), layout: async () => geometryReport(true, "0".repeat(64)), render: async () => { throw new Error("render is not expected"); } };
+    const forged = createProductDiagramEngine({ ...base, layoutFloorplan: async () => geometryReport(true, "0".repeat(64)) });
+    await expect(forged.validateCandidate("floorplan", floorplanJson)).rejects.toThrow(/receipt does not match/i);
+    const missing = createProductDiagramEngine(base);
+    await expect(missing.validateCandidate("floorplan", floorplanJson)).rejects.toThrow(/Floorplan engine entry is missing/);
+    const enveloped = await forged.validateCandidate("floorplan", JSON.stringify({ diagram_type: "architecture" }));
+    expect(enveloped.ok).toBe(false);
+    expect(enveloped.errors.join(" ")).toContain("not a Floorplan document");
+  });
 });
 
 describe("product artifact transport", () => {

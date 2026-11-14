@@ -1,7 +1,7 @@
 /** Apply-time engine admission. Preview/projection stays pure and synchronous. */
 import { defaultCoalescer, withSnapshot } from "./actions";
 import type { GenerationHost } from "./generation";
-import { semanticDatasetsOf, validateSemanticContent } from "./semantic";
+import { semanticDatasetsOf } from "./semantic";
 import { planSemanticEdit, type SemanticEditOutcome, type SpecTransform } from "./semanticEdit";
 import type { DiagramStore } from "./state";
 import type { DiagramDoc } from "./types";
@@ -17,13 +17,8 @@ export async function validateSemanticDraft(
   for (const id of new Set(datasetIds)) {
     const dataset = semanticDatasetsOf(draft).find((item) => item.id === id);
     if (!dataset) return [{ key: "diagram.semantic.editStale" }];
-    // Floorplan keeps its local validation path; all engine-backed families
-    // use the asynchronous SDK schema and geometry gate below.
-    if (dataset.diagramType === "floorplan") {
-      const local = validateSemanticContent("floorplan", dataset.spec);
-      if (local.length > 0) return local;
-      continue;
-    }
+    // Every family, Floorplan included (`maru#553` E5 T4), passes the
+    // asynchronous SDK schema and geometry gate before the edit commits.
     try {
       const receipt = await host.validateCandidate(dataset.diagramType, dataset.spec);
       if (receipt.ok !== true) return receipt.errors.length > 0

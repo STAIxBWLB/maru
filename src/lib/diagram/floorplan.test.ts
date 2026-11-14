@@ -15,6 +15,7 @@ import { applyValidatedSemanticEdit, validateSemanticDraft } from "./semanticApp
 import { addSemanticEntry, planSemanticEdit, removeSemanticEntries, setSpecField } from "./semanticEdit";
 import { createDiagramStore } from "./state";
 import { createEmptyDoc, createInitialEphemeral } from "./types";
+import { pinnedEngineHost as engineHost } from "./__fixtures__/engineHost";
 
 const fixture = () => structuredClone(FLOORPLAN_FIXTURE);
 const nodeIndex = (spec: Record<string, unknown>, id: string) =>
@@ -27,7 +28,7 @@ function storeOf(spec = fixture()) {
 const specOf = (store: ReturnType<typeof storeOf>) =>
   (store.getState().doc.datasets!.find((d) => d.id === "fp") as SemanticSpecDataset).spec;
 
-/** Engine host that must never be called for floorplan. */
+/** Generation keeps the local floor for floorplan candidates; this host must not be reached there. */
 const refusingHost = {
   validateCandidate: async () => {
     throw new Error("engine must not be called for floorplan");
@@ -134,7 +135,7 @@ describe("floorplan structural edge cases", () => {
     ] };
     const store = storeOf(spec);
     expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(["a", "b"]);
-    const out = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "b"), refusingHost);
+    const out = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "b"), engineHost);
     expect(out.status).toBe("applied");
     const dataset = store.getState().doc.datasets![0] as SemanticSpecDataset;
     expect(store.getState().doc.nodes.map((n) => n.id)).toEqual(projectSemanticDataset(dataset).nodes.map((n) => n.id));
@@ -226,9 +227,9 @@ describe("floorplan edge identity", () => {
   it("changing an edge kind from event to http clears the dash", async () => {
     const store = storeOf(withEdges());
     expect(store.getState().doc.edges[0]!.dash).toBe("dashed");
-    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "http"), refusingHost)).status).toBe("applied");
+    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "http"), engineHost)).status).toBe("applied");
     expect(store.getState().doc.edges[0]!.dash).toBe("solid");
-    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "queue"), refusingHost)).status).toBe("applied");
+    expect((await applyValidatedSemanticEdit(store, "fp", setSpecField("edges", 0, "kind", "queue"), engineHost)).status).toBe("applied");
     expect(store.getState().doc.edges[0]!.dash).toBe("dashed");
   });
 });
@@ -331,13 +332,13 @@ describe("floorplan projection", () => {
 });
 
 describe("floorplan editing (AC2)", () => {
-  it("edits kind and parent as one undo step each, through the local gate only", async () => {
+  it("edits kind and parent as one undo step each, through the engine gate", async () => {
     const store = storeOf();
     const before = JSON.stringify(store.getState().doc);
     const index = nodeIndex(specOf(store), "ahub.cli");
-    const kind = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "kind", "script"), refusingHost);
+    const kind = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "kind", "script"), engineHost);
     expect(kind.status).toBe("applied");
-    const moved = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "parent", "amem"), refusingHost);
+    const moved = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", index, "parent", "amem"), engineHost);
     expect(moved.status).toBe("applied");
     const doc = store.getState().doc;
     const amem = doc.nodes.find((n) => n.id === "amem")!;
@@ -352,7 +353,7 @@ describe("floorplan editing (AC2)", () => {
   it("refuses a parent cycle without committing", async () => {
     const store = storeOf();
     const before = store.getState().doc;
-    const outcome = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "ahub.hub.tasks"), refusingHost);
+    const outcome = await applyValidatedSemanticEdit(store, "fp", setSpecField("nodes", 0, "parent", "ahub.hub.tasks"), engineHost);
     expect(outcome.status).toBe("invalid");
     if (outcome.status === "invalid") expect(outcome.diagnostics.map((d) => d.key)).toContain("diagram.semantic.parentCycle");
     expect(store.getState().doc).toBe(before);
@@ -362,10 +363,10 @@ describe("floorplan editing (AC2)", () => {
   it("adds a nested node and an id-less edge", async () => {
     const store = storeOf();
     const add = await applyValidatedSemanticEdit(store, "fp",
-      addSemanticEntry("floorplan", "nodes", { id: "ahub.hub.audit", label: "Audit", kind: "feature", parent: "ahub.hub" }), refusingHost);
+      addSemanticEntry("floorplan", "nodes", { id: "ahub.hub.audit", label: "Audit", kind: "feature", parent: "ahub.hub" }), engineHost);
     expect(add.status).toBe("applied");
     const edge = await applyValidatedSemanticEdit(store, "fp",
-      addSemanticEntry("floorplan", "edges", { from: "ahub.hub.audit", to: "github", kind: "http" }), refusingHost);
+      addSemanticEntry("floorplan", "edges", { from: "ahub.hub.audit", to: "github", kind: "http" }), engineHost);
     expect(edge.status).toBe("applied");
     const spec = specOf(store);
     expect((spec.edges as Record<string, unknown>[]).at(-1)).toEqual({ from: "ahub.hub.audit", to: "github", kind: "http" });
@@ -413,7 +414,7 @@ describe("floorplan editing (AC2)", () => {
     expect(JSON.stringify(store.getState().doc)).toBe(before);
     if (plan.status !== "applied") return;
     const draft = plan.transformer(store.getState()).doc;
-    expect(await validateSemanticDraft(draft, ["fp"], refusingHost)).toEqual([]);
+    expect(await validateSemanticDraft(draft, ["fp"], engineHost)).toEqual([]);
     store.setState(withSnapshot(plan.transformer, defaultCoalescer()));
     expect(store.getState().doc.nodes.some((n) => n.id.startsWith("ahub"))).toBe(false);
     expect(store.getState().ephemeral.history.past).toHaveLength(1);

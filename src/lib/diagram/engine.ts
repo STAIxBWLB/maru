@@ -98,6 +98,12 @@ export interface ProductDiagramEngine {
 export interface ProductDiagramEnginePorts {
   validate(input: string): Promise<ValidationReport>;
   layout(request: LayoutRequest): GeometryReport | Promise<GeometryReport>;
+  /**
+   * Floorplan's own engine entry (`layout_floorplan_json`): it runs the
+   * document validity rules, then lays the map out. Floorplan documents carry
+   * no `diagram_type`, so they cannot go through `validate`/`layout`.
+   */
+  layoutFloorplan?(request: LayoutRequest): GeometryReport | Promise<GeometryReport>;
   render(request: EngineArtifactRequest): Promise<EngineArtifactReport>;
 }
 
@@ -119,7 +125,7 @@ function preflightDiagnosticText(diagnostic: ValidationDiagnostic): string {
     fix = "provide an object containing the selected diagram type and its required collections";
   } else if (diagnostic.key === "diagram.validation.specType") {
     cause = "The selected diagram type is not supported by the SDK";
-    fix = "select architecture, workflow, sequence, dataflow or lifecycle; keep Floorplan on its local path";
+    fix = "select architecture, workflow, sequence, dataflow, lifecycle or floorplan";
   } else if (diagnostic.key === "diagram.validation.specBudget") {
     cause = "The semantic source exceeds its UTF-8 byte limit or cannot be serialized";
     fix = "split the diagram or remove oversized and non-JSON values, then retry";
@@ -204,6 +210,7 @@ async function validateEngineCandidateWithPorts(
   } catch (error) {
     return candidateFailure(`The semantic spec is not valid JSON: ${error instanceof Error ? error.message : String(error)}; repair the JSON syntax and retry.`);
   }
+  if (diagramType === "floorplan") return validateFloorplanCandidateWithPorts(ports, specJson, parsed);
   if (!record(parsed) || parsed.diagram_type !== diagramType) {
     return candidateFailure(
       `The semantic spec type does not match the selected ${diagramType} dataset; select the matching dataset and retry.`,
@@ -238,6 +245,14 @@ async function validateEngineCandidateWithPorts(
   }
 
   const layout = await ports.layout({ specJson });
+  return layoutAdmission(layout, candidateSha256, validation.diagnostics);
+}
+
+function layoutAdmission(
+  layout: GeometryReport,
+  candidateSha256: string,
+  priorDiagnostics: Diagnostic[],
+): EngineCandidateValidation {
   checkReceiptSource(layout.receipt, candidateSha256);
   const warnings = layout.ok ? layout.diagnostics.map(diagnosticText) : [];
   const errors = layout.ok
@@ -251,9 +266,37 @@ async function validateEngineCandidateWithPorts(
     errors,
     warnings,
     candidateSha256,
-    diagnostics: [...validation.diagnostics, ...layout.diagnostics],
+    diagnostics: [...priorDiagnostics, ...layout.diagnostics],
     receipt: layout.receipt,
   };
+}
+
+/**
+ * Floorplan admission (`maru#553` E5 T4): the local floor runs first for
+ * field-named diagnostics, then the engine's Floorplan entry validates the
+ * document and lays it out. Its receipt must name the exact submitted source.
+ */
+async function validateFloorplanCandidateWithPorts(
+  ports: ProductDiagramEnginePorts,
+  specJson: string,
+  parsed: unknown,
+): Promise<EngineCandidateValidation> {
+  if (!record(parsed) || "diagram_type" in parsed) {
+    return candidateFailure(
+      "The semantic spec is not a Floorplan document; select the matching dataset, or remove diagram_type from the floorplan/architecture@1 map, and retry.",
+      await sourceSha256(specJson),
+    );
+  }
+  const candidateSha256 = await sourceSha256(specJson);
+  const { validateSemanticContentShape } = await import("./semantic");
+  const preflight = validateSemanticContentShape("floorplan", parsed);
+  if (preflight.length > 0) {
+    return { ok: false, errors: preflight.map(preflightDiagnosticText), warnings: [], candidateSha256, diagnostics: [] };
+  }
+  if (!ports.layoutFloorplan) {
+    throw new Error("The Floorplan engine entry is missing from this build; update Maru and apply again.");
+  }
+  return layoutAdmission(await ports.layoutFloorplan({ specJson }), candidateSha256, []);
 }
 
 /** Testable product-engine factory; ports are per-instance, never process-global overrides. */
@@ -298,6 +341,9 @@ export function loadDiagramEngine(): Promise<ProductDiagramEngine> {
     },
     async layout(request) {
       return (await loadProductGeometryEngine()).layout(request);
+    },
+    async layoutFloorplan(request) {
+      return (await loadProductGeometryEngine()).layoutFloorplan(request);
     },
     async render(request) {
       const { renderEngineArtifact } = await import("./engineArtifact");
