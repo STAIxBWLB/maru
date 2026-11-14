@@ -639,6 +639,14 @@ pub(crate) fn update_task_status_in_transaction_with_completion(
     if expected_target.is_some_and(|expected| expected != target) {
         return Err("task_completion_conflict: archive target changed; refresh the task and confirm the new target".into());
     }
+    // A precompleted Active note still needs authority for the Archive move.
+    // Sealed receipt finalization has its own evidence checks; Cancelled is
+    // deliberately separate from completion and keeps its ordinary behavior.
+    if completion_permit.is_none() && status == TaskStatus::Done && current_bucket != target_bucket
+    {
+        crate::task_completion::guard_managed_task_move(&work, &path, &target)
+            .map_err(|e| e.message)?;
+    }
     if updated != original {
         if let Some(permit) = completion_permit {
             crate::atomic_file::write_atomic_checked(&path, updated.as_bytes(), 0o644, || {
@@ -2989,5 +2997,41 @@ mod completion_review_precompleted_archive_tests {
             );
             assert!(!work.join(".maru/task-completion/receipts").exists());
         }
+    }
+
+    #[test]
+    fn completion_review_r4_required_cancelled_transition_keeps_existing_archive_behavior() {
+        let home = Home::new();
+        let work = home.root.path().join("r4-cancelled");
+        let original = seed_precompleted_active(&work);
+        crate::task_completion::set_policy(
+            &work,
+            "tasks/active/task.md",
+            true,
+            &revision_for(&original),
+        )
+        .unwrap();
+        let row = update_task_status(
+            work.to_string_lossy().into_owned(),
+            "tasks/active/task.md".into(),
+            TaskStatus::Cancelled,
+            None,
+        )
+        .unwrap();
+        assert_eq!(row.bucket, TaskBucket::Archive);
+        assert!(!work.join("tasks/active/task.md").exists());
+        let saved = fs::read_to_string(work.join("tasks/archive/task.md")).unwrap();
+        assert_eq!(
+            task_status_from_content(&saved, TaskBucket::Archive),
+            TaskStatus::Cancelled
+        );
+        assert_eq!(
+            parse_frontmatter(&saved)
+                .meta
+                .get("maruCompletionRequired")
+                .and_then(YamlValue::as_bool),
+            Some(true)
+        );
+        assert!(!work.join(".maru/task-completion/receipts").exists());
     }
 }

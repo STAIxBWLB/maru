@@ -321,3 +321,79 @@ describe("TaskCompletionSection fresh person acceptance", () => {
     expect(onChanged).not.toHaveBeenCalled();
   });
 });
+
+describe("TaskCompletionSection explicit accepted-completion resume", () => {
+  const resumeAcceptance = { approvalId: "recorded-approval", reviewRevision: "recorded-review" };
+
+  it("finishes only a backend-verified recorded acceptance without asking for another approval", async () => {
+    api.readTaskCompletion.mockResolvedValue(view({ canAccept: false, resumeAcceptance }));
+    await render();
+
+    expect(button("tasks.completion.accept").disabled).toBe(true);
+    const resume = button("tasks.completion.resume");
+    expect(resume.disabled).toBe(false);
+    expect(api.finalizeTaskCompletion).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
+    await click(resume);
+
+    expect(api.finalizeTaskCompletion).toHaveBeenCalledExactlyOnceWith(workPath, token, resumeAcceptance.approvalId, resumeAcceptance.reviewRevision);
+    expect(api.prepareTaskCompletionAcceptance).not.toHaveBeenCalled();
+    expect(onConfirmApproval).not.toHaveBeenCalled();
+    expect(api.startTaskCompletionReview).not.toHaveBeenCalled();
+    expect(onMissionStarted).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("serializes repeated resume clicks while finalization is in flight", async () => {
+    const finalization = deferred<{ duplicate: boolean }>();
+    api.readTaskCompletion.mockResolvedValue(view({ canAccept: false, resumeAcceptance }));
+    api.finalizeTaskCompletion.mockReturnValue(finalization.promise);
+    await render();
+    const resume = button("tasks.completion.resume");
+    await act(async () => {
+      resume.click();
+      resume.click();
+    });
+
+    expect(api.finalizeTaskCompletion).toHaveBeenCalledTimes(1);
+    expect(button("tasks.completion.resume").disabled).toBe(true);
+    expect(onChanged).not.toHaveBeenCalled();
+    await act(async () => { finalization.resolve({ duplicate: true }); });
+
+    expect(api.finalizeTaskCompletion).toHaveBeenCalledTimes(1);
+    expect(api.prepareTaskCompletionAcceptance).not.toHaveBeenCalled();
+    expect(onConfirmApproval).not.toHaveBeenCalled();
+    expect(api.startTaskCompletionReview).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refresh a new task from a previous task's late resume result", async () => {
+    const finalization = deferred<{ duplicate: boolean }>();
+    api.readTaskCompletion.mockResolvedValue(view({ canAccept: false, resumeAcceptance }));
+    api.finalizeTaskCompletion.mockReturnValue(finalization.promise);
+    await render();
+    await click(button("tasks.completion.resume"));
+    api.readTaskCompletion.mockResolvedValue(view({ canAccept: false, resumeAcceptance: null }));
+    await render("tasks/active/other.md");
+    await act(async () => { finalization.resolve({ duplicate: false }); });
+
+    expect(api.finalizeTaskCompletion).toHaveBeenCalledExactlyOnceWith(workPath, token, resumeAcceptance.approvalId, resumeAcceptance.reviewRevision);
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(onConfirmApproval).not.toHaveBeenCalled();
+    expect(api.prepareTaskCompletionAcceptance).not.toHaveBeenCalled();
+    expect(api.startTaskCompletionReview).not.toHaveBeenCalled();
+    expect([...container.querySelectorAll("button")].some((element) => element.textContent?.trim() === "tasks.completion.resume")).toBe(false);
+  });
+
+  it.each([undefined, null])("offers no resume action when verified resume readback is %s", async (resume) => {
+    api.readTaskCompletion.mockResolvedValue(view({ canAccept: false, ...(resume === undefined ? {} : { resumeAcceptance: resume }) }));
+    await render();
+
+    expect(button("tasks.completion.accept").disabled).toBe(true);
+    expect([...container.querySelectorAll("button")].some((element) => element.textContent?.trim() === "tasks.completion.resume")).toBe(false);
+    expect(api.finalizeTaskCompletion).not.toHaveBeenCalled();
+    expect(api.prepareTaskCompletionAcceptance).not.toHaveBeenCalled();
+    expect(onConfirmApproval).not.toHaveBeenCalled();
+    expect(api.startTaskCompletionReview).not.toHaveBeenCalled();
+  });
+});

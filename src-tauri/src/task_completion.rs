@@ -986,6 +986,12 @@ pub(crate) struct TaskCompletionReceipt {
     pub acceptance: Option<AcceptanceEvidence>,
     acceptance_history: Vec<AcceptanceEvidence>,
 }
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResumeAcceptance {
+    approval_id: String,
+    review_revision: String,
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaskCompletionView {
@@ -1001,6 +1007,7 @@ pub(crate) struct TaskCompletionView {
     pub can_review: bool,
     pub can_accept: bool,
     pub accepted_current: bool,
+    pub resume_acceptance: Option<ResumeAcceptance>,
     pub blocked_reason: Option<String>,
 }
 #[derive(Serialize)]
@@ -1348,6 +1355,7 @@ fn empty_view(required: bool, source_revision: String) -> TaskCompletionView {
         can_review: false,
         can_accept: false,
         accepted_current: false,
+        resume_acceptance: None,
         blocked_reason: None,
     }
 }
@@ -1394,6 +1402,20 @@ pub(crate) fn view(work: &Path, task_path: &str) -> Result<TaskCompletionView, I
             }
             if !v.can_accept && !v.accepted_current {
                 v.blocked_reason = reviewed(ctx, &r).err().map(|e| e.message);
+            }
+            match can_resume_archive(ctx, &r) {
+                Ok(true) => {
+                    let pending = r.acceptance.as_ref().unwrap();
+                    v.resume_acceptance = Some(ResumeAcceptance {
+                        approval_id: pending.approval_id.clone(),
+                        review_revision: pending.review_revision.clone(),
+                    });
+                    v.can_review = false;
+                    v.can_accept = false;
+                    v.blocked_reason = Some("An already accepted completion stopped before Archive publication. Finish the recorded move; no new approval or provider run is needed.".into());
+                }
+                Err(error) => v.blocked_reason = Some(error.message),
+                Ok(false) => {}
             }
             v.receipt = Some(r);
         } else {
@@ -2023,7 +2045,7 @@ pub(crate) fn prepare_acceptance(
         .prepare_fresh_bound(&cwd, summary, target, preview, binding)
         .map_err(|e| refused(e, "request a fresh person confirmation from Task details"))
 }
-fn terminal_matches(
+fn accepted_bytes_match(
     ctx: &Context<'_>,
     r: &TaskCompletionReceipt,
     a: &AcceptanceEvidence,
@@ -2043,8 +2065,7 @@ fn terminal_matches(
             return Ok(false);
         }
     }
-    if rel(&ctx.work, &ctx.path)? != a.target_path || sha(ctx.source.as_bytes()) != a.after_revision
-    {
+    if sha(ctx.source.as_bytes()) != a.after_revision {
         return Ok(false);
     }
     if crate::vault::parse_frontmatter(&ctx.source)
@@ -2072,6 +2093,140 @@ fn terminal_matches(
         .collect::<Vec<_>>();
     Ok(fingerprints(&ctx.work, &paths)? == a.binding.artifacts)
 }
+fn terminal_matches(
+    ctx: &Context<'_>,
+    r: &TaskCompletionReceipt,
+    a: &AcceptanceEvidence,
+) -> Result<bool, IpcError> {
+    Ok(rel(&ctx.work, &ctx.path)? == a.target_path && accepted_bytes_match(ctx, r, a)?)
+}
+fn consumed_acceptance(
+    ctx: &Context<'_>,
+    r: &TaskCompletionReceipt,
+    a: &AcceptanceEvidence,
+) -> Result<bool, IpcError> {
+    // Rebuild the exact approved publication from the journal, independently
+    // of its stored approval binding. A changed target cannot reuse the audit.
+    let expected = ApprovalBinding {
+        logical_target: digest(&(
+            ctx.work.to_string_lossy(),
+            &r.token,
+            &a.binding.task_path,
+            &a.target_path,
+        ))?,
+        payload_hash: digest(&(&a.review_revision, &a.binding, &a.after_revision))?,
+        source_run_id: Some(r.token.run_id.clone()),
+        source_revision: a.binding.source_revision.clone(),
+        base_revision: digest(&a.binding.artifacts)?,
+        policy_revision: a.binding.policy_revision.clone(),
+    };
+    if a.approval_binding != expected {
+        return Ok(false);
+    }
+    let audit = crate::approval::read_approval_audit(&ctx.work.to_string_lossy(), &a.approval_id)?;
+    Ok(audit.iter().any(|e| {
+        e.event == "consumed"
+            && e.request.id == a.approval_id
+            && e.request.kind == "task.completion.accept"
+            && !e.request.auto_approved
+            && e.decision == crate::approval::ApprovalDecision::Approved
+            && e.request.binding.as_ref() == Some(&expected)
+    }))
+}
+fn can_resume_archive(ctx: &Context<'_>, r: &TaskCompletionReceipt) -> Result<bool, IpcError> {
+    let Some(a) = &r.acceptance else {
+        return Ok(false);
+    };
+    if a.completed
+        || rel(&ctx.work, &ctx.path)? != a.binding.task_path
+        || a.binding.task_path != ctx.claim.task_path
+        || a.target_path == a.binding.task_path
+        || a.before_revision != a.binding.source_revision
+        || !r.process_finished
+        || !r.process_success
+        || !r.apply.as_ref().is_some_and(|apply| apply.complete)
+        || !r
+            .review
+            .as_ref()
+            .is_some_and(|review| review.binding == a.binding)
+        || !accepted_bytes_match(ctx, r, a)?
+    {
+        return Ok(false);
+    }
+    let target = resolve_inside_vault(&ctx.work.to_string_lossy(), &a.target_path)?;
+    if !target.starts_with(Path::new(&ctx.claim.tasks_root)) {
+        return Err(conflict(
+            "Recorded completion target leaves its claimed Tasks root",
+        ));
+    }
+    // Path::exists would miss an occupied dangling symlink.
+    match fs::symlink_metadata(&target) {
+        Ok(_) => return Err(conflict("Recorded Archive target is occupied; move that entry aside before resuming the accepted completion")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) => return Err(io_error("Cannot inspect recorded Archive target", error)),
+    }
+    let plan = crate::tasks::prepare_task_completion(
+        &ctx.work,
+        Path::new(&ctx.claim.tasks_root),
+        &ctx.path,
+        &ctx.source,
+    )?;
+    if plan.target != target || sha(plan.updated.as_bytes()) != a.after_revision {
+        return Err(conflict("Recorded completion target or Done bytes changed"));
+    }
+    if !consumed_acceptance(ctx, r, a)? {
+        return Err(refused("No consumed fresh person authority proves this interrupted completion", "restore its verified acceptance audit or restore the pre-acceptance snapshot and confirm again"));
+    }
+    Ok(true)
+}
+fn resume_archive(
+    ctx: &mut Context<'_>,
+    r: &mut TaskCompletionReceipt,
+    approval_id: &str,
+    review_revision: &str,
+) -> Result<bool, IpcError> {
+    if !r
+        .acceptance
+        .as_ref()
+        .is_some_and(|a| a.approval_id == approval_id && a.review_revision == review_revision)
+        || !can_resume_archive(ctx, r)?
+    {
+        return Ok(false);
+    }
+    let a = r.acceptance.as_ref().unwrap();
+    let target = resolve_inside_vault(&ctx.work.to_string_lossy(), &a.target_path)?;
+    let receipt_file = receipt_path(&ctx.work, &r.token);
+    let claim_file = ctx.guard.paths()[0].clone();
+    let permit = CompletionWritePermit {
+        work: ctx.work.clone(),
+        path: ctx.path.clone(),
+        before: a.after_revision.clone(),
+        after: a.after_revision.clone(),
+        final_check: Some(FinalCheck {
+            receipt_path: receipt_file.clone(),
+            receipt_hash: sha(&fs::read(&receipt_file)
+                .map_err(|e| io_error("Cannot pin interrupted completion intent", e))?),
+            claim_path: claim_file.clone(),
+            claim_hash: sha(&fs::read(&claim_file)
+                .map_err(|e| io_error("Cannot pin interrupted completion claim", e))?),
+            artifacts: a.binding.artifacts.clone(),
+        }),
+    };
+    // Done bytes are already present: this path only completes the fixed move.
+    // It neither consumes another grant nor repeats a snapshot or provider run.
+    crate::tasks::update_task_status_in_transaction_with_completion(
+        ctx.lease,
+        ctx.work.to_string_lossy().into(),
+        a.binding.task_path.clone(),
+        TaskStatus::Done,
+        Some(ctx.claim.tasks_root.clone()),
+        Some(&permit),
+        Some(&target),
+    )?;
+    ctx.path = target;
+    ctx.source = read_task(&ctx.path)?;
+    recover_observed_terminal(ctx, r)
+}
 fn terminal_current(ctx: &Context<'_>, r: &TaskCompletionReceipt) -> Result<bool, IpcError> {
     let Some(a) = &r.acceptance else {
         return Ok(false);
@@ -2088,14 +2243,7 @@ fn recover_observed_terminal(
     if a.completed || !terminal_matches(ctx, r, a)? {
         return Ok(false);
     }
-    let audit = crate::approval::read_approval_audit(&ctx.work.to_string_lossy(), &a.approval_id)?;
-    let consumed = audit.iter().any(|e| {
-        e.event == "consumed"
-            && e.request.kind == "task.completion.accept"
-            && !e.request.auto_approved
-            && e.decision == crate::approval::ApprovalDecision::Approved
-            && e.request.binding.as_ref() == Some(&a.approval_binding)
-    });
+    let consumed = consumed_acceptance(ctx, r, a)?;
     if !consumed {
         return Err(refused(
             "No consumed fresh person authority proves the observed task write",
@@ -2134,6 +2282,7 @@ pub(crate) fn finalize(
     with_context(work, token, Some(approval_id), |ctx| {
         let mut r = ctx.require()?;
         recover_observed_terminal(ctx, &mut r)?;
+        resume_archive(ctx, &mut r, approval_id, expected_review)?;
         if let Some(a) = &r.acceptance {
             if a.completed && a.approval_id == approval_id && a.review_revision == expected_review {
                 if !terminal_current(ctx, &r)? {
