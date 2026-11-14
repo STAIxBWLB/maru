@@ -46,6 +46,21 @@ pub const EDGE_KINDS: &[&str] = &[
 /// Audience values the schema documents; absent means everyone.
 pub const AUDIENCES: &[&str] = &["everyone", "developers"];
 
+/// Deepest nesting a map may declare. The layout walks one level per call, so
+/// an acyclic chain past this would overflow the stack, and validation bounds
+/// each ancestor walk by it so a long chain costs linear time, not quadratic.
+/// Real maps nest a handful of levels.
+pub(crate) const MAX_NESTING_DEPTH: usize = 64;
+
+/// Most nodes one map may hold. AC6 sizes the format at 1,000 nodes; four times
+/// that leaves room for a large monorepo map while keeping a hostile document
+/// from making validation and layout allocate without bound.
+pub const MAX_NODES: usize = 4_096;
+
+/// Most edges one map may hold: two per node at the node cap, which is denser
+/// than any published map, and each edge is one route request at layout.
+pub const MAX_EDGES: usize = 8_192;
+
 // The fields the format types when they are present. Each of them may also be
 // left out, so the rule they need is that an explicit `null` is refused: serde
 // reads it as the same absent value, while the codec's `value !== undefined`
@@ -1070,11 +1085,35 @@ fn check_parents(ctx: &mut Context, spec: &FloorplanSpec, node_ids: &HashSet<Str
         .enumerate()
         .map(|(index, node)| (node.id.as_str(), index))
         .collect();
+    // Each walk stops once it has climbed MAX_NESTING_DEPTH ancestors, so the
+    // check is O(nodes * cap). A chain that reaches the cap is refused once for
+    // the document: that is past what the layout places, and a cycle longer
+    // than the cap is caught by the same refusal.
+    let mut too_deep = false;
     for (index, _) in spec.nodes.iter().enumerate() {
         let mut seen = HashSet::new();
         seen.insert(spec.nodes[index].id.as_str());
         let mut current = parent_of[index];
+        let mut climbed = 0usize;
         while let Some(parent) = current {
+            climbed += 1;
+            if climbed > MAX_NESTING_DEPTH {
+                if !too_deep {
+                    too_deep = true;
+                    ctx.error(
+                        "nesting-depth",
+                        &format!("/nodes/{index}/parent"),
+                        format!(
+                            "node {:?} nests at least {climbed} levels deep, past the {MAX_NESTING_DEPTH} levels a map may nest (a parent cycle longer than that reads the same)",
+                            spec.nodes[index].id
+                        ),
+                        format!(
+                            "flatten the deepest frames to {MAX_NESTING_DEPTH} levels or fewer, break any cycle in the chain, or split the map into several documents"
+                        ),
+                    );
+                }
+                break;
+            }
             if !seen.insert(parent) {
                 ctx.error(
                     "parent-cycle",
@@ -1263,6 +1302,24 @@ pub(crate) fn validate(value: Value) -> Vec<Diagnostic> {
             "a floorplan document must be a JSON object",
             "start from a document with a project and its nodes",
         );
+        return ctx.finish();
+    }
+    // Counted before anything walks the items, so an oversized document is
+    // refused at the cost of reading its length.
+    let mut oversized = false;
+    for (field, cap, noun) in [("nodes", MAX_NODES, "node"), ("edges", MAX_EDGES, "edge")] {
+        let count = items(&value, field).len();
+        if count > cap {
+            oversized = true;
+            ctx.error(
+                &format!("{noun}-count"),
+                &format!("/{field}"),
+                format!("the map lists {count} {noun}s, past the {cap} one map may hold"),
+                format!("split the map into several documents of at most {cap} {noun}s each"),
+            );
+        }
+    }
+    if oversized {
         return ctx.finish();
     }
     check_nulls(&mut ctx, &value, "", SPEC_TYPED);
@@ -1709,5 +1766,90 @@ mod tests {
                 "pattern {pattern:?} against {path:?}"
             );
         }
+    }
+
+    fn chain_map(length: usize) -> Value {
+        let nodes: Vec<Value> = (0..length)
+            .map(|level| {
+                let mut node =
+                    json!({ "id": format!("n{level}"), "label": "L", "kind": "service" });
+                if level > 0 {
+                    node["parent"] = json!(format!("n{}", level - 1));
+                }
+                node
+            })
+            .collect();
+        json!({ "project": { "name": "chain" }, "nodes": nodes })
+    }
+
+    #[test]
+    fn a_chain_past_the_nesting_cap_is_refused_once_by_validation() {
+        let cap = super::MAX_NESTING_DEPTH;
+        // cap + 1 nodes nest exactly cap levels, which the layout still places.
+        assert!(validate(chain_map(cap + 1)).is_empty());
+        let diagnostics = validate(chain_map(cap + 2));
+        assert_eq!(codes(&diagnostics), vec!["floorplan/nesting-depth"]);
+        assert!(
+            diagnostics[0].fix.contains(&cap.to_string()),
+            "{}",
+            diagnostics[0].fix
+        );
+    }
+
+    #[test]
+    fn a_short_cycle_is_still_named_a_cycle() {
+        let mut cyclic = chain_map(3);
+        cyclic["nodes"][0]["parent"] = json!("n2");
+        let listed = validate(cyclic);
+        let listed = codes(&listed);
+        assert!(listed.contains(&"floorplan/parent-cycle"), "{listed:?}");
+        assert!(!listed.contains(&"floorplan/nesting-depth"), "{listed:?}");
+    }
+
+    #[test]
+    fn a_hundred_thousand_node_chain_validates_in_linear_time() {
+        // Unbounded ancestor walks cost ~5e9 steps here; the capped walk costs
+        // ~6.4e6. The bound is loose for slow CI, far below the quadratic cost.
+        let mut spec = chain_map(100_000);
+        // Count caps run first, so lift the chain under them by checking the
+        // walk directly through validate_spec.
+        let started = std::time::Instant::now();
+        let parsed: super::FloorplanSpec = serde_json::from_value(spec.take()).unwrap();
+        let mut ctx = crate::common::Context::new("floorplan");
+        super::validate_spec(&parsed, &mut ctx);
+        let diagnostics = ctx.finish();
+        let elapsed = started.elapsed();
+        assert_eq!(codes(&diagnostics), vec!["floorplan/nesting-depth"]);
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_hundred_thousand_node_document_is_refused_by_count_first() {
+        let started = std::time::Instant::now();
+        let diagnostics = validate(chain_map(100_000));
+        assert_eq!(codes(&diagnostics), vec!["floorplan/node-count"]);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn node_and_edge_counts_past_their_caps_are_refused() {
+        let at_cap = chain_map(super::MAX_NODES);
+        assert!(!codes(&validate(at_cap)).contains(&"floorplan/node-count"));
+        let diagnostics = validate(chain_map(super::MAX_NODES + 1));
+        assert_eq!(codes(&diagnostics), vec!["floorplan/node-count"]);
+        assert!(diagnostics[0]
+            .message
+            .contains(&(super::MAX_NODES + 1).to_string()));
+        assert!(diagnostics[0].fix.contains(&super::MAX_NODES.to_string()));
+
+        let mut spec = nested_map();
+        let edge = spec["edges"][0].clone();
+        spec["edges"] = Value::Array(vec![edge; super::MAX_EDGES + 1]);
+        let diagnostics = validate(spec);
+        assert_eq!(codes(&diagnostics), vec!["floorplan/edge-count"]);
+        assert!(diagnostics[0].fix.contains(&super::MAX_EDGES.to_string()));
     }
 }
