@@ -1670,8 +1670,8 @@
         ],
         "workerProof": "Actual command same-task polling observes a distinct held worker, continued caller progress and mapped worker panic. Actual policy command waits on a competing alias writer, rejects stale revision, then releases admission. IPC refuses unknown actions and forged authority fields. Main identity checks are exercised on main, Sites, local child and a main-labelled child inside another window.",
         "platformScope": "Disposable workspace/home fixtures and Tauri MockRuntime only. This is not native WebView, provider/live execution, Korean IME or release acceptance evidence.",
-        "sourceCommit": "a623cc9641c8cf5118159cadbfc2ea8214c05ae9",
-        "logSha256": "1a4483a2b63ecb3d86de63aa95d450b712fdfb7750b8be0e8b2b228a51df210c",
+        "sourceCommit": "bf989679d57d408d235763f3071a3cca4e168bc7",
+        "logSha256": "c5457ec9628cbc428d820592e0139dcb96a12622547fa7cc32fb8ddd260d7bc1",
         "sourceFiles": [
           {
             "path": "src-tauri/src/lib.rs",
@@ -1679,7 +1679,7 @@
           },
           {
             "path": "src-tauri/src/task_completion.rs",
-            "sha256": "ec1ad54fc48fc1832a8451994e35189aba5507dc71a2c85e4408d08dcf36ada0"
+            "sha256": "5954d70cf0c502f0b3ca668ad319d7abcf41f1bfefebb3bd411ec177ef1e254f"
           },
           {
             "path": "src-tauri/src/task_completion_isolation_tests.rs",
@@ -1695,7 +1695,7 @@
           },
           {
             "path": "src-tauri/src/tasks.rs",
-            "sha256": "4ea9bcb63710ce64ad3ce2667f8940329a97982684cf9b4e0879057d4247ab5b"
+            "sha256": "864d8e7066f3c8d3e8e1c7eed165d1f98326f0ddede4e25e2ca7ef2eb5ba5dba"
           },
           {
             "path": "src-tauri/src/agent_host/proposal.rs",
@@ -1727,7 +1727,7 @@
           },
           {
             "path": "src-tauri/src/approval.rs",
-            "sha256": "25c3a0bb5688bf96bcb4a8dbf3ac68c4f7ea04cb6806334874753b6966d7473e"
+            "sha256": "dda1e6bd885aef980788adc8ad4ecabd6c0708ae6cc529057b4c1701cb677c4d"
           },
           {
             "path": "src-tauri/src/ai_router.rs",
@@ -1739,7 +1739,7 @@
           },
           {
             "path": "src/components/tasks/TaskCompletionSection.tsx",
-            "sha256": "ae59d24a36d9bd92497d3f53dfbf827b8b8f2c66c1b100607fb25b57ad6299b9"
+            "sha256": "741f5afb76563e8d6d3adce84207f2a30fef8fa411beb82ab74177b0beda48d5"
           },
           {
             "path": "scripts/record-task-completion-isolation.mjs",
