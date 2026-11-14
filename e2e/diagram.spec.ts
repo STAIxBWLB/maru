@@ -58,10 +58,10 @@ test("opens Diagram from the command palette and restores the last saved documen
   await expect(page.locator(".maru-diagram-node")).toHaveCount(1);
 
   await page.getByRole("tab", { name: "파일" }).click();
-  await page.getByRole("button", { name: "저장" }).click();
+  await page.getByRole("button", { name: "저장", exact: true }).click();
   const dialog = page.locator(".dialog-content", { hasText: "다이어그램 저장" });
   await dialog.getByLabel("파일 이름").fill("e2e-diagram");
-  await dialog.getByRole("button", { name: "저장" }).click();
+  await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await expect(page.locator(".maru-diagram-status", { hasText: "저장됨" })).toBeVisible();
 
   await page.reload();
@@ -364,10 +364,10 @@ test("reorders an imported sequence message, undoes it, and persists the order",
   await page.getByTestId("semantic-move-earlier").click();
   await expect(order).toHaveText("2/4");
   await page.getByRole("tab", { name: "파일" }).click();
-  await page.getByRole("button", { name: "저장" }).click();
+  await page.getByRole("button", { name: "저장", exact: true }).click();
   const saveDialog = page.locator(".dialog-content", { hasText: "다이어그램 저장" });
   await saveDialog.getByLabel("파일 이름").fill("e2e-sequence");
-  await saveDialog.getByRole("button", { name: "저장" }).click();
+  await saveDialog.getByRole("button", { name: "저장", exact: true }).click();
   await expect(page.locator(".maru-diagram-status", { hasText: "저장됨" })).toBeVisible();
 
   await page.reload();
@@ -547,10 +547,10 @@ test("imports a floorplan map, edits a node kind, undoes, saves and reloads (iss
   await page.getByTestId("semantic-floorplan-kind").selectOption("worker");
   await expect(page.getByTestId("semantic-floorplan-kind")).toHaveValue("worker");
   await page.getByRole("tab", { name: "파일" }).click();
-  await page.getByRole("button", { name: "저장" }).click();
+  await page.getByRole("button", { name: "저장", exact: true }).click();
   const saveDialog = page.locator(".dialog-content", { hasText: "다이어그램 저장" });
   await saveDialog.getByLabel("파일 이름").fill("e2e-floorplan");
-  await saveDialog.getByRole("button", { name: "저장" }).click();
+  await saveDialog.getByRole("button", { name: "저장", exact: true }).click();
   await expect(page.locator(".maru-diagram-status", { hasText: "저장됨" })).toBeVisible();
 
   await page.reload();

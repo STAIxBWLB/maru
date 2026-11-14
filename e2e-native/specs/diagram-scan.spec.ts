@@ -53,7 +53,7 @@ describe("native repository scan", () => {
     await rail.waitForDisplayed({ timeout: 30_000 });
     await (await browser.$('.activity-rail button[aria-label="다이어그램"]')).click();
     await (await browser.$('[role="tab"]*=파일')).click();
-    await (await browser.$("button*=리포지토리 스캔")).click();
+    await (await browser.$("button*=저장소 스캔")).click();
     const dialog = await browser.$('[data-testid="diagram-scan-dialog"]');
     await dialog.waitForDisplayed({ timeout: 30_000 });
 
@@ -98,5 +98,28 @@ describe("native repository scan", () => {
     assert.deepEqual(diagramsAfter.sort(), diagramsBefore.sort(), "Opening the proposal wrote a document; saving must stay the user's step");
     assert.deepEqual(await listing(maruDir).catch(() => [] as string[]), maruBefore, "Opening the proposal wrote under .maru (history or settings); nothing may be written before Save");
     assert.deepEqual(await listing(repo), before);
+
+    // The hold belongs to the document, not the Diagram mount: switch to the
+    // Documents activity (Diagram unmounts), come back to the still-open
+    // proposal and wait past the snapshot debounce.
+    await (await browser.$('.activity-rail button[aria-label="문서"]')).click();
+    await (await browser.$('[data-testid="diagram-scan-dialog"]')).waitForExist({ reverse: true, timeout: 10_000 });
+    await browser.waitUntil(async () => !(await (await browser.$('[role="tab"]*=파일')).isExisting()), {
+      timeout: 15_000, timeoutMsg: "Diagram did not unmount when leaving to Documents; the remount check would prove nothing",
+    });
+    await browser.pause(1_000);
+    await (await browser.$('.activity-rail button[aria-label="다이어그램"]')).click();
+    await (await browser.$('[role="tab"]*=파일')).waitForDisplayed({ timeout: 30_000 });
+    await browser.pause(4_000);
+    const afterReturn = await listing(maruDir).catch(() => [] as string[]);
+    // workspace.json records lastActiveMode on every activity switch: that is
+    // the navigation this step performs, not a write caused by the proposal.
+    // Snapshot history, workspace state and settings are still compared.
+    const proposalScoped = (entries: string[]) => entries.filter((entry) => !entry.startsWith("workspace.json:"));
+    const changed = proposalScoped(afterReturn).filter((entry) => !maruBefore.includes(entry))
+      .concat(proposalScoped(maruBefore).filter((entry) => !afterReturn.includes(entry)));
+    assert.deepEqual(changed, [], `Leaving and returning to Diagram wrote under .maru before Save: ${changed.join(", ")}`);
+    const diagramsAfterReturn = await fs.readdir(path.join(workspace, "diagrams")).catch(() => [] as string[]);
+    assert.deepEqual(diagramsAfterReturn.sort(), diagramsBefore.sort());
   }).timeout(180_000);
 });
