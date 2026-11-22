@@ -181,7 +181,7 @@ pub fn scan(root: &Path, picked: &str, limits: ScanLimits) -> Result<ScanReport,
             Inventory::GitIndex
         }
         None => {
-            walk(&scan_dir, &[], &mut state, 0)?;
+            walk(&scan_dir, &mut Vec::new(), &mut state, 0)?;
             Inventory::Filesystem
         }
     };
@@ -335,11 +335,11 @@ fn resolve_picked(root: &Path, picked: &str) -> Result<PathBuf, ScanError> {
     Ok(canonical)
 }
 
-/// Git names use `/` on every platform. Reject Windows separators/prefixes
-/// even on Unix, and never let a pushed component reset or traverse the root.
+/// Validate native relative paths without permitting root resets or traversal.
 fn plain_relative_path(relative: &str) -> bool {
     !relative.is_empty()
-        && !relative.contains(['\\', ':', '\0'])
+        && !relative.contains('\0')
+        && (cfg!(unix) || !relative.contains(['\\', ':']))
         && relative.split('/').all(|part| {
             let mut components = Path::new(part).components();
             matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
@@ -1127,6 +1127,13 @@ fn git_index_files(
                     // under a linked folder is left out: the map describes what is
                     // on disk inside the workspace, and nothing is read through a link.
                     if anchor.is_regular_file(&join(&scan_relative, rest)) {
+                        if state.files.len() + files.len() >= state.limits.max_files {
+                            return Err(ScanError::new(
+                                "diagram_scan_too_many_files",
+                                format!("the folder holds more than {} files", state.limits.max_files),
+                                format!("pick a smaller subfolder, or raise maxFiles (up to {MAX_FILES_LIMIT})"),
+                            ));
+                        }
                         files.push(rest.to_string());
                     }
                     state.budget.check_time()?;
@@ -1245,7 +1252,7 @@ fn parse_index_with(
             continue;
         }
         let text = need!(String::from_utf8(path).ok());
-        if !plain_relative_path(&text) {
+        if text.contains(['\\', ':']) || !plain_relative_path(&text) {
             return Ok(None);
         }
         paths.push(text);
@@ -1271,7 +1278,7 @@ fn read_offset_varint(bytes: &[u8]) -> Option<(usize, usize)> {
 // Inventory: the filesystem walk with .gitignore
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct IgnoreRule {
     /// The folder (relative to the scanned folder) whose `.gitignore` holds it.
     base: String,
@@ -1512,12 +1519,12 @@ fn glob_match_with_budget(
 
 fn walk(
     dir: &ScanDir,
-    inherited: &[IgnoreRule],
+    rules: &mut Vec<IgnoreRule>,
     state: &mut Walk,
     depth: usize,
 ) -> Result<(), ScanError> {
     state.budget.check_time()?;
-    let mut rules = inherited.to_vec();
+    let inherited_len = rules.len();
     let relative = dir.relative().to_string();
     if let BoundedRead::Bytes(bytes) =
         dir.read_bounded(".gitignore", MAX_SOURCE_BYTES, &mut state.budget)?
@@ -1565,7 +1572,7 @@ fn walk(
                 EntryKind::Skip => return Ok(()),
             };
             // Ignored entries are dropped as they are read, never kept or sorted.
-            if ignored_with_budget(&rules, &join(&relative, name), is_dir, &state.budget)? {
+            if ignored_with_budget(rules, &join(&relative, name), is_dir, &state.budget)? {
                 return Ok(());
             }
             if !is_dir {
@@ -1609,11 +1616,12 @@ fn walk(
                 // listed: it is skipped instead of being read through.
                 continue;
             };
-            walk(&child, &rules, state, depth + 1)?;
+            walk(&child, rules, state, depth + 1)?;
         } else {
             state.push(path)?;
         }
     }
+    rules.truncate(inherited_len);
     Ok(())
 }
 
