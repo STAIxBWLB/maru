@@ -15,8 +15,8 @@
 //!   that layer judged (the evidence-stripped input for a public case);
 //! - `frozenOracle.verdictsSha256` digests every oracle-labelled case's inputs,
 //!   all six verdict layers (ok, codes and diagnostics) and its whole
-//!   `comparison` (accepted, equivalentCodes, oracleLayer, currentScope and
-//!   inputJson), so any edit to a frozen verdict or to the expectation the
+//!   `comparison` (accepted, equivalentCodes, oracleLayer, oracleMapping,
+//!   currentScope and inputJson) and `geometryComparison`, so any edit to a frozen verdict or to the expectation the
 //!   engine is tested against fails, even one that keeps the case internally
 //!   consistent;
 //! - a case added after E6 is labelled `maru-engine` and names the PR that
@@ -107,6 +107,7 @@ const FROZEN_FIELDS: &[&str] = &[
     "validitySchemaOracle",
     "validityDocumentOracle",
     "comparison",
+    "geometryComparison",
 ];
 
 /// JSON with object keys sorted (independent of serde_json's map feature)
@@ -304,7 +305,7 @@ fn the_frozen_verdicts_match_their_recorded_digest() {
     assert_eq!(
         corpus().frozen_oracle.verdicts_sha256,
         actual,
-        "an archify-oracle verdict, input or code changed; frozen verdicts are never edited (a new expectation is a maru-engine case reviewed in a PR)"
+        "a frozen archify-oracle field changed (inputs, the six verdict layers, comparison.{{accepted,equivalentCodes,oracleLayer,oracleMapping,currentScope,inputJson}} or geometryComparison); restore testdata/parity.json from git history, or add the new expectation as a maru-engine case reviewed in a PR"
     );
 }
 
@@ -544,17 +545,15 @@ fn loosening_the_comparison_expectation_still_fails() {
                 && case.comparison.oracle_layer.as_deref() == Some("full")
         })
         .expect("a document-validity case");
-    // Rescope to a named difference, which the contract does not compare,
-    // then flip the expectation the engine is tested against.
-    assert_digest_only(&full.id, "a rescoped and flipped comparison", |case| {
-        let comparison = case.get_mut("comparison").unwrap();
-        comparison["currentScope"] =
+    // Each edit below changes exactly one comparison field and stays
+    // contract-consistent, so only the digest can catch it.
+    // Rescope alone: a named difference is not compared by the contract.
+    assert_digest_only(&full.id, "a rescoped comparison", |case| {
+        case.get_mut("comparison").unwrap()["currentScope"] =
             serde_json::json!({"kind": "e2-geometry", "reasonId": "edited", "reason": "edited"});
-        let accepted = comparison["accepted"].as_bool().unwrap();
-        comparison["accepted"] = Value::Bool(!accepted);
     });
-    // Repoint oracleLayer to a layer whose verdict differs, with a matching
-    // accepted: consistent for the contract, but a different expectation.
+    // Repoint oracleLayer alone, to a layer whose frozen verdict equals the
+    // full one, so `accepted` still matches.
     let repointed = corpus
         .cases
         .iter()
@@ -563,18 +562,30 @@ fn loosening_the_comparison_expectation_still_fails() {
                 && case.validity_input_json.is_none()
                 && case.comparison.oracle_layer.as_deref() == Some("full")
                 && case.schema_oracle.as_ref().map(|verdict| verdict.ok)
-                    != case.oracle.as_ref().map(|verdict| verdict.ok)
+                    == case.oracle.as_ref().map(|verdict| verdict.ok)
         })
-        .expect("a full-layer case whose schema verdict differs");
-    let schema_ok = repointed.schema_oracle.as_ref().unwrap().ok;
-    assert_digest_only(&repointed.id, "a repointed oracleLayer", move |case| {
-        let comparison = case.get_mut("comparison").unwrap();
-        comparison["oracleLayer"] = Value::from("schema");
-        comparison["accepted"] = Value::Bool(schema_ok);
+        .expect("a full-layer case whose schema verdict is the same");
+    assert_digest_only(&repointed.id, "a repointed oracleLayer", |case| {
+        case.get_mut("comparison").unwrap()["oracleLayer"] = Value::from("schema");
     });
     // Equivalent codes the differential tests match against.
     assert_digest_only(&full.id, "an equivalentCodes edit", |case| {
         case.get_mut("comparison").unwrap()["equivalentCodes"] = serde_json::json!(["edited/code"]);
+    });
+}
+
+#[test]
+fn loosening_the_geometry_expectation_still_fails() {
+    let corpus = corpus();
+    let id = corpus.cases[0].id.clone();
+    assert_digest_only(&id, "a flipped geometryComparison.accepted", |case| {
+        let geometry = case.get_mut("geometryComparison").unwrap();
+        let accepted = geometry["accepted"].as_bool().unwrap();
+        geometry["accepted"] = Value::Bool(!accepted);
+    });
+    assert_digest_only(&id, "a geometryComparison.equivalentCodes edit", |case| {
+        case.get_mut("geometryComparison").unwrap()["equivalentCodes"] =
+            serde_json::json!(["edited/code"]);
     });
 }
 
