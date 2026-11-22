@@ -16,7 +16,8 @@
 //! - `frozenOracle.verdictsSha256` digests every oracle-labelled case's inputs,
 //!   all six verdict layers (ok, codes and diagnostics) and its whole
 //!   `comparison` (accepted, equivalentCodes, oracleLayer, oracleMapping,
-//!   currentScope and inputJson) and `geometryComparison`, so any edit to a frozen verdict or to the expectation the
+//!   currentScope and inputJson) and `geometryComparison`, so any edit to a
+//!   frozen verdict or to the expectation the
 //!   engine is tested against fails, even one that keeps the case internally
 //!   consistent;
 //! - a case added after E6 is labelled `maru-engine` and names the PR that

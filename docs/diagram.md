@@ -1154,13 +1154,15 @@ recorded verdicts only; no test runs Archify.
   (`accepted`, `equivalentCodes`, `oracleLayer`, `oracleMapping`,
   `currentScope`, `inputJson`) and its whole `geometryComparison`, which are
   the expectations the differential and geometry-boundary tests hold the
-  engine to. Keys
-  are sorted and non-integers fixed to six decimals. Any edit to a frozen
-  verdict or comparison fails, including a consistent one: a verdict flipped
-  with its comparison, a case rescoped to a named difference, a repointed
-  `oracleLayer` or a flipped geometry expectation. Each regression changes one
-  field and stays contract-consistent. A digest mismatch is fixed by
-  restoring `testdata/parity.json` from git history. The contract checks and the digest are asserted separately,
+  engine to. Keys are sorted and non-integers fixed to six decimals. Any edit
+  to a frozen verdict or comparison fails, including a consistent one: a
+  verdict flipped with its comparison, a case rescoped to a named difference,
+  a repointed `oracleLayer` or a flipped geometry expectation. The rescope,
+  repoint and geometry regressions each change one field; the verdict flip
+  and the codes edit change two on purpose. All of them stay
+  contract-consistent, so only the digest can catch them. A digest mismatch is
+  fixed by restoring `testdata/parity.json` from git history. The contract
+  checks and the digest are asserted separately,
   so neither guard stands in for the other. Frozen verdicts are
   never edited; a new expectation is a new `maru-engine` case. No script
   writes `parity.json` any more: the generator left with the sidecar, so
