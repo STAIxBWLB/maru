@@ -577,7 +577,13 @@ fn loosening_the_comparison_expectation_still_fails() {
 #[test]
 fn loosening_the_geometry_expectation_still_fails() {
     let corpus = corpus();
-    let id = corpus.cases[0].id.clone();
+    // A boundary case, so omitting boundaryCases from the digest is caught too.
+    let id = corpus
+        .boundary_cases
+        .first()
+        .expect("a boundary case")
+        .id
+        .clone();
     assert_digest_only(&id, "a flipped geometryComparison.accepted", |case| {
         let geometry = case.get_mut("geometryComparison").unwrap();
         let accepted = geometry["accepted"].as_bool().unwrap();
