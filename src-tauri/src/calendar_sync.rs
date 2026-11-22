@@ -623,9 +623,8 @@ pub fn calendar_sync_run(
 
 // --- CLI -----------------------------------------------------------------------------
 
-pub(crate) fn calendar_sync_usage() -> &'static str {
-    "usage: maru calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
-}
+pub(crate) const CALENDAR_SYNC_USAGE: &str =
+    "maru calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]";
 
 /// `maru calendar-sync`: the daily job's entry point. Exit 0 when nothing
 /// failed or blocked, 1 otherwise, 2 on usage errors.
@@ -642,9 +641,11 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
             "--json" => json = true,
             "--work" | "--destination" | "--gws" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("{arg} requires a value");
-                    eprintln!("{}", calendar_sync_usage());
-                    return 2;
+                    return crate::cli_output::usage_error(
+                        &format!("{arg} requires a value"),
+                        CALENDAR_SYNC_USAGE,
+                        "calendar-sync",
+                    );
                 };
                 match arg.as_str() {
                     "--work" => work = Some(value.clone()),
@@ -653,9 +654,11 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
                 }
             }
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("{}", calendar_sync_usage());
-                return 2;
+                return crate::cli_output::usage_error(
+                    &format!("unknown option: {other}"),
+                    CALENDAR_SYNC_USAGE,
+                    "calendar-sync",
+                );
             }
         }
     }
@@ -665,8 +668,7 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
             .map(|path| path.to_string_lossy().to_string())
     });
     let Some(work) = work else {
-        eprintln!("cannot resolve current directory");
-        return 1;
+        return crate::cli_output::fail("cannot resolve current directory");
     };
     let now_iso = chrono::Local::now().to_rfc3339();
     match calendar_sync_run(work, destination, gws, now_iso, dry_run) {
@@ -712,10 +714,7 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
                 1
             }
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => crate::cli_output::fail(&format!("calendar-sync: {err}")),
     }
 }
 

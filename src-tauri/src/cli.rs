@@ -1,5 +1,9 @@
 use std::env;
 
+use crate::cli_output::{
+    self as out, fail, fail_with_next, usage_error, ColorChoice, Marker, OutputFlags,
+};
+
 use crate::secrets::{secrets_doctor, secrets_migrate, secrets_scan};
 // The CLI shares synchronous transactions; async scheduling belongs to desktop IPC.
 use crate::skill_host::{
@@ -17,15 +21,16 @@ pub fn run_cli(args: Vec<String>) -> i32 {
     } else {
         args
     };
+    let (flags, args) = match take_output_flags(args) {
+        Ok(parsed) => parsed,
+        Err(code) => return code,
+    };
+    out::set_flags(flags);
     let Some(command) = args.first().map(String::as_str) else {
-        eprintln!("{}", usage());
-        return 2;
+        return usage_error("no command given", USAGE, "");
     };
     match command {
-        "--help" | "-h" | "help" => {
-            println!("{}", usage());
-            0
-        }
+        "--help" | "-h" | "help" => run_help(&args[1..]),
         "--version" | "-V" | "version" => {
             println!("maru {}", env!("CARGO_PKG_VERSION"));
             0
@@ -36,27 +41,164 @@ pub fn run_cli(args: Vec<String>) -> i32 {
         "jobs" => run_jobs(&args[1..]),
         "calendar-sync" => crate::calendar_sync::run_calendar_sync(&args[1..]),
         "terminal-hook" => crate::terminal_hooks::run_terminal_hook(&args[1..]),
-        other => {
-            eprintln!("unknown command: {other}");
-            eprintln!("{}", usage());
-            2
+        other => usage_error(&format!("unknown command: {other}"), USAGE, ""),
+    }
+}
+
+/// Strip the global output flags (`--color=<when>`, `--color <when>`,
+/// `--ascii`) wherever they appear; every command accepts them.
+fn take_output_flags(args: Vec<String>) -> Result<(OutputFlags, Vec<String>), i32> {
+    let mut flags = OutputFlags::default();
+    let mut rest = Vec::with_capacity(args.len());
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        let value = if arg == "--color" {
+            Some(iter.next().unwrap_or_default())
+        } else {
+            arg.strip_prefix("--color=").map(str::to_string)
+        };
+        if let Some(value) = value {
+            let Some(choice) = ColorChoice::parse(&value) else {
+                return Err(usage_error(
+                    &format!("invalid --color value: {value:?}: use auto, always or never"),
+                    USAGE,
+                    "",
+                ));
+            };
+            flags.color = choice;
+        } else if arg == "--ascii" {
+            flags.ascii = true;
+        } else {
+            rest.push(arg);
         }
+    }
+    Ok((flags, rest))
+}
+
+/// The command overview: name, one-line summary, and the usage forms that
+/// `maru help <command>` prints.
+const COMMANDS: &[(&str, &str, &str)] = &[
+    (
+        "doctor",
+        "Check the skills store and installs",
+        DOCTOR_USAGE,
+    ),
+    (
+        "secrets",
+        "Scan, check and migrate workspace secrets",
+        SECRETS_USAGE,
+    ),
+    (
+        "skills",
+        "List, sync, update and repair skills",
+        SKILLS_USAGE,
+    ),
+    ("jobs", "Manage the workspace's launchd jobs", JOBS_USAGE),
+    (
+        "calendar-sync",
+        "Sync tasks to calendars (the daily job)",
+        crate::calendar_sync::CALENDAR_SYNC_USAGE,
+    ),
+    (
+        "terminal-hook",
+        "Agent terminal hook entry point (internal)",
+        "maru terminal-hook <event>",
+    ),
+    ("help", "Show help for a command", "maru help [<command>]"),
+    ("version", "Print the version", "maru version"),
+];
+
+fn help_overview(style: &out::Style) -> String {
+    let width = COMMANDS
+        .iter()
+        .map(|(name, _, _)| name.len())
+        .max()
+        .unwrap_or(0);
+    let mut text = format!(
+        "{} {}\n\n{}\n  maru [--color=auto|always|never] [--ascii] <command> [args]\n\n{}",
+        style.paint(out::Role::Header, "maru"),
+        style.paint(out::Role::Hint, env!("CARGO_PKG_VERSION")),
+        style.section("Usage", None),
+        style.section("Commands", None),
+    );
+    for (name, summary, _) in COMMANDS {
+        text.push_str(&format!(
+            "\n  {}  {summary}",
+            style.paint(out::Role::Accent, &format!("{name:width$}"))
+        ));
+    }
+    text.push_str("\n\nRun 'maru help <command>' for a command's forms and flags.");
+    text
+}
+
+fn help_command(style: &out::Style, name: &str) -> Option<String> {
+    let (_, summary, usage) = COMMANDS.iter().find(|(command, _, _)| *command == name)?;
+    let mut text = style.section("Usage", None);
+    for line in usage.lines() {
+        if line.is_empty() {
+            break;
+        }
+        text.push_str(&help_lines(line.trim_start(), 6));
+    }
+    text.push_str(&format!(
+        "\n\n{}\n  {summary}",
+        style.section("Description", None)
+    ));
+    let details: Vec<&str> = usage
+        .lines()
+        .skip_while(|line| !line.is_empty())
+        .skip(1)
+        .collect();
+    if !details.is_empty() {
+        text.push_str(&format!("\n\n{}", style.section("Details", None)));
+        for line in details {
+            text.push_str(&help_lines(line, 2));
+        }
+    }
+    Some(text)
+}
+
+/// One help line at a two-space indent, wrapped within 80 columns (help
+/// always fits 80, on a TTY or a pipe); continuations hang at `hang`.
+fn help_lines(line: &str, hang: usize) -> String {
+    let lines = out::wrap(line, Some(80 - hang));
+    let mut text = format!("\n  {}", lines[0]);
+    for rest in &lines[1..] {
+        text.push_str(&format!("\n{}{rest}", " ".repeat(hang)));
+    }
+    text
+}
+
+/// `maru help [<command>]`, `-h`, `--help`: stdout, exit 0.
+fn run_help(args: &[String]) -> i32 {
+    match args.first() {
+        None => {
+            println!("{}", help_overview(&out::stdout_style()));
+            0
+        }
+        Some(name) => match help_command(&out::stdout_style(), name) {
+            Some(text) => {
+                println!("{text}");
+                0
+            }
+            None => usage_error(&format!("unknown command: {name}"), USAGE, ""),
+        },
     }
 }
 
 fn run_secrets(args: &[String]) -> i32 {
     let Some(subcommand) = args.first().map(String::as_str) else {
-        eprintln!("{}", secrets_usage());
-        return 2;
+        return usage_error("secrets: subcommand required", SECRETS_USAGE, "secrets");
     };
     match subcommand {
         "scan" => run_secrets_scan(&args[1..]),
         "doctor" => run_secrets_doctor(&args[1..]),
         "migrate" => run_secrets_migrate(&args[1..]),
-        _ => {
-            eprintln!("{}", secrets_usage());
-            2
-        }
+        other => usage_error(
+            &format!("secrets: unknown subcommand: {other}"),
+            SECRETS_USAGE,
+            "secrets",
+        ),
     }
 }
 
@@ -66,9 +208,11 @@ fn run_secrets_scan(args: &[String]) -> i32 {
         match arg.as_str() {
             "--json" => json = true,
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("usage: maru secrets scan [--json]");
-                return 2;
+                return usage_error(
+                    &format!("unknown option: {other}"),
+                    SECRETS_USAGE,
+                    "secrets",
+                );
             }
         }
     }
@@ -106,10 +250,7 @@ fn run_secrets_scan(args: &[String]) -> i32 {
                 1
             }
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("secrets scan: {err}")),
     }
 }
 
@@ -121,9 +262,11 @@ fn run_secrets_doctor(args: &[String]) -> i32 {
             "--json" => json = true,
             "--quiet" => quiet = true,
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("usage: maru secrets doctor [--json] [--quiet]");
-                return 2;
+                return usage_error(
+                    &format!("unknown option: {other}"),
+                    SECRETS_USAGE,
+                    "secrets",
+                );
             }
         }
     }
@@ -135,35 +278,31 @@ fn run_secrets_doctor(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&report).unwrap_or_default()
                 );
             } else if !quiet || !report.ok {
-                let error_count = report
+                let findings: Vec<Finding> = report
                     .issues
                     .iter()
-                    .filter(|issue| issue.severity == "error")
-                    .count();
-                let warn_count = report
-                    .issues
-                    .iter()
-                    .filter(|issue| issue.severity == "warn")
-                    .count();
+                    .filter(|issue| issue.severity == "error" || !quiet)
+                    .map(|issue| Finding {
+                        severity: issue.severity.clone(),
+                        code: issue.code.clone(),
+                        message: issue.message.clone(),
+                        subject: issue.path.clone(),
+                    })
+                    .collect();
+                let facts = [
+                    ("Managed", report.managed.len().to_string()),
+                    ("Candidates", report.candidates.len().to_string()),
+                ];
                 println!(
-                    "secrets doctor: {} managed, {} candidate(s), {error_count} error(s), {warn_count} warning(s)",
-                    report.managed.len(),
-                    report.candidates.len()
+                    "{}",
+                    render_check_report(
+                        &out::stdout_style(),
+                        "Secrets doctor",
+                        &facts,
+                        &findings,
+                        (report.issues.len() - findings.len(), "maru secrets doctor"),
+                    )
                 );
-                for issue in &report.issues {
-                    if issue.severity == "error" || !quiet {
-                        println!(
-                            "{}: {}{}",
-                            issue.code,
-                            issue.message,
-                            issue
-                                .path
-                                .as_ref()
-                                .map(|path| format!(" ({path})"))
-                                .unwrap_or_default()
-                        );
-                    }
-                }
             }
             if report.ok {
                 0
@@ -171,10 +310,7 @@ fn run_secrets_doctor(args: &[String]) -> i32 {
                 1
             }
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("secrets doctor: {err}")),
     }
 }
 
@@ -188,39 +324,47 @@ fn run_secrets_migrate(args: &[String]) -> i32 {
             "--json" => json = true,
             "--dry-run" => {
                 if dry_run == Some(false) {
-                    eprintln!("conflicting options: --dry-run and --apply");
-                    return 2;
+                    return usage_error(
+                        "conflicting options: --dry-run and --apply",
+                        SECRETS_USAGE,
+                        "secrets",
+                    );
                 }
                 dry_run = Some(true);
             }
             "--apply" => {
                 if dry_run == Some(true) {
-                    eprintln!("conflicting options: --dry-run and --apply");
-                    return 2;
+                    return usage_error(
+                        "conflicting options: --dry-run and --apply",
+                        SECRETS_USAGE,
+                        "secrets",
+                    );
                 }
                 dry_run = Some(false);
             }
             "--select" => {
                 index += 1;
                 let Some(value) = args.get(index) else {
-                    eprintln!("--select requires a workspace-relative path");
-                    return 2;
+                    return usage_error(
+                        "--select requires a workspace-relative path",
+                        SECRETS_USAGE,
+                        "secrets",
+                    );
                 };
                 selected.push(value.clone());
             }
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!(
-                    "usage: maru secrets migrate --dry-run|--apply [--select <relpath>] [--json]"
+                return usage_error(
+                    &format!("unknown option: {other}"),
+                    SECRETS_USAGE,
+                    "secrets",
                 );
-                return 2;
             }
         }
         index += 1;
     }
     let Some(dry_run) = dry_run else {
-        eprintln!("--dry-run or --apply required");
-        return 2;
+        return usage_error("--dry-run or --apply required", SECRETS_USAGE, "secrets");
     };
     match secrets_migrate(
         current_work_path().unwrap_or_else(|| ".".to_string()),
@@ -254,10 +398,7 @@ fn run_secrets_migrate(args: &[String]) -> i32 {
                 1
             }
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("secrets migrate: {err}")),
     }
 }
 
@@ -269,9 +410,7 @@ fn run_doctor(args: &[String]) -> i32 {
             "--json" => json = true,
             "--quiet" => quiet = true,
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("usage: maru doctor [--json] [--quiet]");
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), DOCTOR_USAGE, "doctor");
             }
         }
     }
@@ -283,42 +422,32 @@ fn run_doctor(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&report).unwrap_or_default()
                 );
             } else if !quiet || !report.ok {
-                let error_count = report
+                let findings: Vec<Finding> = report
                     .issues
                     .iter()
-                    .filter(|issue| issue.severity == "error")
-                    .count();
-                let warn_count = report
-                    .issues
-                    .iter()
-                    .filter(|issue| issue.severity == "warn")
-                    .count();
-                let line = format!(
-                    "skills doctor: {} source(s), {} skill(s), {} install(s), {error_count} error(s), {warn_count} warning(s)",
-                    report.sources, report.skills, report.installs
+                    .filter(|issue| issue.severity == "error" || issue.code == "env_incomplete")
+                    .map(|issue| Finding {
+                        severity: issue.severity.clone(),
+                        code: issue.code.clone(),
+                        message: issue.message.clone(),
+                        subject: issue.skill_name.clone(),
+                    })
+                    .collect();
+                let facts = [
+                    ("Sources", report.sources.to_string()),
+                    ("Skills", report.skills.to_string()),
+                    ("Installs", report.installs.to_string()),
+                ];
+                println!(
+                    "{}",
+                    render_check_report(
+                        &out::stdout_style(),
+                        "Skills doctor",
+                        &facts,
+                        &findings,
+                        (report.issues.len() - findings.len(), "maru doctor --json"),
+                    )
                 );
-                if report.ok {
-                    println!("{line}");
-                    for issue in report.issues.iter().filter(|i| i.code == "env_incomplete") {
-                        println!("{}: {}", issue.code, issue.message);
-                    }
-                } else {
-                    eprintln!("{line}");
-                    for issue in &report.issues {
-                        if issue.severity == "error" || issue.code == "env_incomplete" {
-                            eprintln!(
-                                "{}: {}{}",
-                                issue.code,
-                                issue.message,
-                                issue
-                                    .skill_name
-                                    .as_ref()
-                                    .map(|name| format!(" ({name})"))
-                                    .unwrap_or_default()
-                            );
-                        }
-                    }
-                }
             }
             if report.ok {
                 0
@@ -326,23 +455,92 @@ fn run_doctor(args: &[String]) -> i32 {
                 1
             }
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
+        Err(err) => fail(&format!("doctor: {err}")),
+    }
+}
+
+/// One finding of a check report, independent of the report type.
+struct Finding {
+    severity: String,
+    code: String,
+    message: String,
+    subject: Option<String>,
+}
+
+/// A check command's human report: header, problems first under
+/// `Attention`, the facts, then the summary line (cli-output v1 layout).
+fn render_check_report(
+    style: &out::Style,
+    title: &str,
+    facts: &[(&str, String)],
+    findings: &[Finding],
+    hidden: (usize, &str),
+) -> String {
+    let mut text = format!(
+        "{} {}",
+        style.paint(out::Role::Header, &format!("maru {title}")),
+        style.paint(out::Role::Hint, env!("CARGO_PKG_VERSION"))
+    );
+    let mut ordered: Vec<&Finding> = findings.iter().collect();
+    ordered.sort_by_key(|finding| finding.severity != "error");
+    if !ordered.is_empty() {
+        let count = ordered.len().to_string();
+        text.push_str(&format!("\n\n{}", style.section("Attention", Some(&count))));
+        for finding in &ordered {
+            let marker = if finding.severity == "error" {
+                Marker::Fail
+            } else {
+                Marker::Warn
+            };
+            let subject = finding
+                .subject
+                .as_ref()
+                .map(|subject| format!(" ({subject})"))
+                .unwrap_or_default();
+            text.push('\n');
+            text.push_str(&style.bullet(
+                marker,
+                &format!("{}: {}{subject}", finding.code, finding.message),
+            ));
         }
     }
+    let (hidden_warnings, full_command) = hidden;
+    if hidden_warnings > 0 {
+        text.push_str(&format!(
+            "\n  {}",
+            style.paint(
+                out::Role::Hint,
+                &format!("{hidden_warnings} more warnings not shown; `{full_command}` lists them")
+            )
+        ));
+    }
+    text.push_str(&format!("\n\n{}", style.section("Checked", None)));
+    let width = facts
+        .iter()
+        .map(|(key, _)| key.len() + 1)
+        .max()
+        .unwrap_or(0);
+    for (key, value) in facts {
+        let label = format!("{key}:");
+        text.push_str(&format!(
+            "\n  {}  {value}",
+            style.paint(out::Role::Key, &format!("{label:width$}"))
+        ));
+    }
+    let failed = findings.iter().filter(|f| f.severity == "error").count();
+    let warnings = findings.len() - failed + hidden_warnings;
+    text.push_str(&format!("\n\n{}", style.summary(failed, warnings, 0)));
+    text
 }
 
 fn run_skills(args: &[String]) -> i32 {
     let Some(subcommand) = args.first().map(String::as_str) else {
-        eprintln!("{}", skills_usage());
-        return 2;
+        return usage_error("skills: subcommand required", SKILLS_USAGE, "skills");
     };
     match subcommand {
         "capabilities" | "list" => {
             if args[1..] != ["--json"] {
-                eprintln!("--json required");
-                return 2;
+                return usage_error("--json required", SKILLS_USAGE, "skills");
             }
             if subcommand == "capabilities" {
                 println!("{}", skills_capabilities_json());
@@ -353,10 +551,7 @@ fn run_skills(args: &[String]) -> i32 {
                         println!("{}", serde_json::to_string(&skills).unwrap_or_default());
                         0
                     }
-                    Err(error) => {
-                        eprintln!("{error}");
-                        1
-                    }
+                    Err(error) => fail(&format!("skills: {error}")),
                 }
             }
         }
@@ -368,18 +563,21 @@ fn run_skills(args: &[String]) -> i32 {
         "reconcile" => run_skills_reconcile(&args[1..]),
         "import" => run_skills_import(&args[1..]),
         "import-unmanage" => run_skills_import_unmanage(&args[1..]),
-        _ => {
-            eprintln!("{}", skills_usage());
-            2
-        }
+        other => usage_error(
+            &format!("skills: unknown subcommand: {other}"),
+            SKILLS_USAGE,
+            "skills",
+        ),
     }
 }
 
 fn run_skills_env(args: &[String]) -> i32 {
-    let usage = "usage: maru skills env repair [--force] [--json]";
     if args.first().map(String::as_str) != Some("repair") {
-        eprintln!("{usage}");
-        return 2;
+        return usage_error(
+            "skills env repair: subcommand required",
+            SKILLS_USAGE,
+            "skills",
+        );
     }
     let mut json = false;
     let mut force = false;
@@ -388,9 +586,7 @@ fn run_skills_env(args: &[String]) -> i32 {
             "--json" => json = true,
             "--force" => force = true,
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("{usage}");
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), SKILLS_USAGE, "skills");
             }
         }
     }
@@ -425,11 +621,13 @@ fn run_skills_env(args: &[String]) -> i32 {
                 } else {
                     cause
                 };
-                eprintln!(
-                    "skills env repair failed at {}: {cause}. Fix the cause shown in the setup output above, then rerun `maru skills env repair`",
-                    outcome.root
-                );
-                1
+                fail_with_next(
+                    &format!(
+                        "skills env repair failed at {}: {cause}. Fix the cause shown in the setup output above",
+                        outcome.root
+                    ),
+                    "maru skills env repair",
+                )
             }
         }
         Err(err) if err.starts_with(crate::skill_host::ENV_REPAIR_NOT_NEEDED) => {
@@ -443,10 +641,7 @@ fn run_skills_env(args: &[String]) -> i32 {
             }
             0
         }
-        Err(err) => {
-            eprintln!("{}", env_repair_preflight_error(&err));
-            1
-        }
+        Err(err) => fail(&env_repair_preflight_error(&err)),
     }
 }
 
@@ -466,8 +661,11 @@ fn run_skills_rollback(args: &[String]) -> i32 {
         [] => false,
         [flag] if flag == "--json" => true,
         _ => {
-            eprintln!("usage: maru skills rollback [--json]");
-            return 2;
+            return usage_error(
+                "skills rollback: missing or invalid arguments",
+                SKILLS_USAGE,
+                "skills",
+            );
         }
     };
     match crate::skill_host::store::skills_rollback_bundle() {
@@ -485,10 +683,7 @@ fn run_skills_rollback(args: &[String]) -> i32 {
             }
             0
         }
-        Err(error) => {
-            eprintln!("{error}");
-            1
-        }
+        Err(error) => fail(&format!("skills rollback: {error}")),
     }
 }
 
@@ -535,30 +730,33 @@ fn run_skills_update(args: &[String]) -> i32 {
         match arg.as_str() {
             "--check" => {
                 if check == Some(false) {
-                    eprintln!("conflicting options: --check and --apply");
-                    return 2;
+                    return usage_error(
+                        "conflicting options: --check and --apply",
+                        SKILLS_USAGE,
+                        "skills",
+                    );
                 }
                 check = Some(true);
             }
             "--apply" => {
                 if check == Some(true) {
-                    eprintln!("conflicting options: --check and --apply");
-                    return 2;
+                    return usage_error(
+                        "conflicting options: --check and --apply",
+                        SKILLS_USAGE,
+                        "skills",
+                    );
                 }
                 check = Some(false);
             }
             "--repair-env" => repair_env = true,
             "--json" => json = true,
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("usage: maru skills update --check|--apply [--repair-env] [--json]");
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), SKILLS_USAGE, "skills");
             }
         }
     }
     let Some(check) = check else {
-        eprintln!("--check or --apply required");
-        return 2;
+        return usage_error("--check or --apply required", SKILLS_USAGE, "skills");
     };
     if check {
         match skills_check_bundle_update(None) {
@@ -589,10 +787,7 @@ fn run_skills_update(args: &[String]) -> i32 {
                 }
                 0
             }
-            Err(err) => {
-                eprintln!("{err}");
-                1
-            }
+            Err(err) => fail(&format!("skills update: {err}")),
         }
     } else {
         match skills_apply_bundle_update_headless(None, repair_env) {
@@ -629,10 +824,7 @@ fn run_skills_update(args: &[String]) -> i32 {
                 }
                 0
             }
-            Err(err) => {
-                eprintln!("{err}");
-                1
-            }
+            Err(err) => fail(&format!("skills update: {err}")),
         }
     }
 }
@@ -648,15 +840,21 @@ fn run_skills_sync(args: &[String]) -> i32 {
         match args[index].as_str() {
             "--check" => {
                 if apply == Some(true) {
-                    eprintln!("conflicting options: --check and --apply");
-                    return 2;
+                    return usage_error(
+                        "conflicting options: --check and --apply",
+                        SKILLS_USAGE,
+                        "skills",
+                    );
                 }
                 apply = Some(false);
             }
             "--apply" => {
                 if apply == Some(false) {
-                    eprintln!("conflicting options: --check and --apply");
-                    return 2;
+                    return usage_error(
+                        "conflicting options: --check and --apply",
+                        SKILLS_USAGE,
+                        "skills",
+                    );
                 }
                 apply = Some(true);
             }
@@ -665,8 +863,11 @@ fn run_skills_sync(args: &[String]) -> i32 {
                 let option = args[index].clone();
                 index += 1;
                 let Some(value) = args.get(index) else {
-                    eprintln!("{option} requires a comma-separated value");
-                    return 2;
+                    return usage_error(
+                        &format!("{option} requires a comma-separated value"),
+                        SKILLS_USAGE,
+                        "skills",
+                    );
                 };
                 let parsed: Vec<String> = value
                     .split(',')
@@ -674,8 +875,11 @@ fn run_skills_sync(args: &[String]) -> i32 {
                     .map(ToString::to_string)
                     .collect();
                 if parsed.is_empty() || parsed.iter().any(String::is_empty) {
-                    eprintln!("{option} requires nonempty comma-separated selectors");
-                    return 2;
+                    return usage_error(
+                        &format!("{option} requires nonempty comma-separated selectors"),
+                        SKILLS_USAGE,
+                        "skills",
+                    );
                 }
                 if option == "--skills" {
                     skills = Some(parsed);
@@ -685,26 +889,19 @@ fn run_skills_sync(args: &[String]) -> i32 {
             }
             "--json" => json = true,
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!(
-                    "usage: maru skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--retarget] [--json]"
-                );
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), SKILLS_USAGE, "skills");
             }
         }
         index += 1;
     }
     let Some(apply) = apply else {
-        eprintln!("--check or --apply required");
-        return 2;
+        return usage_error("--check or --apply required", SKILLS_USAGE, "skills");
     };
     if retarget && !apply {
-        eprintln!("--retarget requires --apply");
-        return 2;
+        return usage_error("--retarget requires --apply", SKILLS_USAGE, "skills");
     }
     let Some(tools) = tools else {
-        eprintln!("--tools required");
-        return 2;
+        return usage_error("--tools required", SKILLS_USAGE, "skills");
     };
     let result = match skills {
         Some(selection) => crate::skill_host::store::skills_sync_selected_tools(
@@ -747,10 +944,7 @@ fn run_skills_sync(args: &[String]) -> i32 {
                 0
             }
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("skills sync: {err}")),
     }
 }
 
@@ -760,9 +954,7 @@ fn run_skills_dirty(args: &[String]) -> i32 {
         match arg.as_str() {
             "--json" => json = true,
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("usage: maru skills dirty [--json]");
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), SKILLS_USAGE, "skills");
             }
         }
     }
@@ -783,17 +975,13 @@ fn run_skills_dirty(args: &[String]) -> i32 {
             }
             0
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("skills dirty: {err}")),
     }
 }
 
 fn run_skills_reconcile(args: &[String]) -> i32 {
     let Some(skill) = args.first() else {
-        eprintln!("skill required");
-        return 2;
+        return usage_error("skill required", SKILLS_USAGE, "skills");
     };
     let mut action: Option<String> = None;
     let mut message: Option<String> = None;
@@ -803,43 +991,40 @@ fn run_skills_reconcile(args: &[String]) -> i32 {
         match args[index].as_str() {
             "--accept" => {
                 if action.as_deref().is_some_and(|value| value != "accept") {
-                    eprintln!("conflicting options: --accept and --discard");
-                    eprintln!(
-                        "usage: maru skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]"
+                    return usage_error(
+                        "conflicting options: --accept and --discard",
+                        SKILLS_USAGE,
+                        "skills",
                     );
-                    return 2;
                 }
                 action = Some("accept".to_string());
             }
             "--discard" => {
                 if action.as_deref().is_some_and(|value| value != "discard") {
-                    eprintln!("conflicting options: --accept and --discard");
-                    eprintln!(
-                        "usage: maru skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]"
+                    return usage_error(
+                        "conflicting options: --accept and --discard",
+                        SKILLS_USAGE,
+                        "skills",
                     );
-                    return 2;
                 }
                 action = Some("discard".to_string());
             }
             "--message" => {
                 index += 1;
                 let Some(value) = args.get(index) else {
-                    eprintln!("--message requires a value");
-                    return 2;
+                    return usage_error("--message requires a value", SKILLS_USAGE, "skills");
                 };
                 message = Some(value.clone());
             }
             "--dry-run" => dry_run = true,
             other => {
-                eprintln!("unknown option: {other}");
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), SKILLS_USAGE, "skills");
             }
         }
         index += 1;
     }
     let Some(action) = action else {
-        eprintln!("--accept or --discard required");
-        return 2;
+        return usage_error("--accept or --discard required", SKILLS_USAGE, "skills");
     };
     match skills_reconcile_skill(
         current_work_path(),
@@ -855,17 +1040,13 @@ fn run_skills_reconcile(args: &[String]) -> i32 {
             );
             0
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("skills reconcile: {err}")),
     }
 }
 
 fn run_skills_import(args: &[String]) -> i32 {
     let Some(source_path) = args.first() else {
-        eprintln!("source path required");
-        return 2;
+        return usage_error("source path required", SKILLS_USAGE, "skills");
     };
     let mut name: Option<String> = None;
     let mut mode: Option<String> = None;
@@ -875,34 +1056,32 @@ fn run_skills_import(args: &[String]) -> i32 {
             "--name" => {
                 index += 1;
                 let Some(value) = args.get(index) else {
-                    eprintln!("--name requires a value");
-                    return 2;
+                    return usage_error("--name requires a value", SKILLS_USAGE, "skills");
                 };
                 name = Some(value.clone());
             }
             "--copy" => {
                 if mode.as_deref().is_some_and(|value| value != "copy") {
-                    eprintln!("conflicting options: --copy and --link");
-                    eprintln!(
-                        "usage: maru skills import <source-path> [--name <name>] [--copy|--link]"
+                    return usage_error(
+                        "conflicting options: --copy and --link",
+                        SKILLS_USAGE,
+                        "skills",
                     );
-                    return 2;
                 }
                 mode = Some("copy".to_string());
             }
             "--link" => {
                 if mode.as_deref().is_some_and(|value| value != "link") {
-                    eprintln!("conflicting options: --copy and --link");
-                    eprintln!(
-                        "usage: maru skills import <source-path> [--name <name>] [--copy|--link]"
+                    return usage_error(
+                        "conflicting options: --copy and --link",
+                        SKILLS_USAGE,
+                        "skills",
                     );
-                    return 2;
                 }
                 mode = Some("link".to_string());
             }
             other => {
-                eprintln!("unknown option: {other}");
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), SKILLS_USAGE, "skills");
             }
         }
         index += 1;
@@ -915,17 +1094,13 @@ fn run_skills_import(args: &[String]) -> i32 {
             );
             0
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("skills import: {err}")),
     }
 }
 
 fn run_skills_import_unmanage(args: &[String]) -> i32 {
     let Some(name) = args.first() else {
-        eprintln!("skill name required");
-        return 2;
+        return usage_error("skill name required", SKILLS_USAGE, "skills");
     };
     let delete_files = args.iter().skip(1).any(|arg| arg == "--delete-files");
     if args
@@ -933,8 +1108,7 @@ fn run_skills_import_unmanage(args: &[String]) -> i32 {
         .skip(1)
         .any(|arg| arg.as_str() != "--delete-files")
     {
-        eprintln!("unknown option");
-        return 2;
+        return usage_error("unknown option", SKILLS_USAGE, "skills");
     }
     match skills_import_unmanage(current_work_path(), name.clone(), Some(delete_files)) {
         Ok(outcome) => {
@@ -944,10 +1118,7 @@ fn run_skills_import_unmanage(args: &[String]) -> i32 {
             );
             0
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("skills import-unmanage: {err}")),
     }
 }
 
@@ -959,8 +1130,7 @@ fn current_work_path() -> Option<String> {
 
 fn run_jobs(args: &[String]) -> i32 {
     let Some(subcommand) = args.first().map(String::as_str) else {
-        eprintln!("{}", jobs_usage());
-        return 2;
+        return usage_error("jobs: subcommand required", JOBS_USAGE, "jobs");
     };
     match subcommand {
         "list" | "status" => run_jobs_list(&args[1..]),
@@ -970,10 +1140,11 @@ fn run_jobs(args: &[String]) -> i32 {
         "stop" => run_jobs_action("stop", &args[1..]),
         "run" => run_jobs_action("run", &args[1..]),
         "exec" => run_jobs_exec(&args[1..]),
-        _ => {
-            eprintln!("{}", jobs_usage());
-            2
-        }
+        other => usage_error(
+            &format!("jobs: unknown subcommand: {other}"),
+            JOBS_USAGE,
+            "jobs",
+        ),
     }
 }
 
@@ -989,27 +1160,29 @@ fn run_jobs_exec(args: &[String]) -> i32 {
         match arg.as_str() {
             "--if-missed" => if_missed = true,
             other if other.starts_with('-') => {
-                eprintln!("unknown option: {other}");
-                eprintln!("usage: maru jobs exec [--if-missed] <id>");
-                return 2;
+                return usage_error(&format!("unknown option: {other}"), JOBS_USAGE, "jobs");
             }
             other => {
                 if id.is_some() {
-                    eprintln!("unexpected argument: {other}");
-                    eprintln!("usage: maru jobs exec [--if-missed] <id>");
-                    return 2;
+                    return usage_error(
+                        &format!("unexpected argument: {other}"),
+                        JOBS_USAGE,
+                        "jobs",
+                    );
                 }
                 id = Some(other.to_string());
             }
         }
     }
     let Some(id) = id else {
-        eprintln!("usage: maru jobs exec [--if-missed] <id>");
-        return 2;
+        return usage_error(
+            "jobs exec: missing or invalid arguments",
+            JOBS_USAGE,
+            "jobs",
+        );
     };
     let Some(work) = current_work_path() else {
-        eprintln!("cannot resolve current directory");
-        return 1;
+        return fail("cannot resolve current directory");
     };
     crate::jobs::jobs_exec_in(std::path::Path::new(&work), &id, if_missed)
 }
@@ -1022,15 +1195,19 @@ fn parse_jobs_args(args: &[String]) -> Result<(Option<String>, bool), i32> {
         match arg.as_str() {
             "--json" => json = true,
             other if other.starts_with('-') => {
-                eprintln!("unknown option: {other}");
-                eprintln!("{}", jobs_usage());
-                return Err(2);
+                return Err(usage_error(
+                    &format!("unknown option: {other}"),
+                    JOBS_USAGE,
+                    "jobs",
+                ));
             }
             other => {
                 if id.is_some() {
-                    eprintln!("unexpected argument: {other}");
-                    eprintln!("{}", jobs_usage());
-                    return Err(2);
+                    return Err(usage_error(
+                        &format!("unexpected argument: {other}"),
+                        JOBS_USAGE,
+                        "jobs",
+                    ));
                 }
                 id = Some(other.to_string());
             }
@@ -1045,21 +1222,17 @@ fn resolve_jobs_id(work_path: &std::path::Path, id: Option<String>) -> Result<St
     }
     let jobs = match crate::jobs::load_jobs(work_path) {
         Ok(jobs) => jobs,
-        Err(err) => {
-            eprintln!("{err}");
-            return Err(1);
-        }
+        Err(err) => return Err(fail(&format!("jobs: {err}"))),
     };
     if jobs.jobs.len() == 1 {
         return Ok(jobs.jobs[0].id.clone());
     }
-    if jobs.jobs.is_empty() {
-        eprintln!("no jobs declared in <cwd>/.maru/jobs.json");
+    let message = if jobs.jobs.is_empty() {
+        "no jobs declared in <cwd>/.maru/jobs.json"
     } else {
-        eprintln!("multiple jobs declared; pass <id>");
-    }
-    eprintln!("{}", jobs_usage());
-    Err(2)
+        "multiple jobs declared; pass <id>"
+    };
+    Err(usage_error(message, JOBS_USAGE, "jobs"))
 }
 
 fn run_jobs_list(args: &[String]) -> i32 {
@@ -1068,8 +1241,7 @@ fn run_jobs_list(args: &[String]) -> i32 {
         Err(code) => return code,
     };
     let Some(work) = current_work_path() else {
-        eprintln!("cannot resolve current directory");
-        return 1;
+        return fail("cannot resolve current directory");
     };
     let work_path = std::path::Path::new(&work);
     match crate::jobs::jobs_list_in(work_path) {
@@ -1077,8 +1249,7 @@ fn run_jobs_list(args: &[String]) -> i32 {
             if let Some(id) = id {
                 statuses.retain(|status| status.id == id);
                 if statuses.is_empty() {
-                    eprintln!("job_not_found: {id}");
-                    return 1;
+                    return fail(&format!("job_not_found: {id}"));
                 }
             }
             if json {
@@ -1091,10 +1262,7 @@ fn run_jobs_list(args: &[String]) -> i32 {
             }
             0
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("jobs list: {err}")),
     }
 }
 
@@ -1104,8 +1272,7 @@ fn run_jobs_action(verb: &str, args: &[String]) -> i32 {
         Err(code) => return code,
     };
     let Some(work) = current_work_path() else {
-        eprintln!("cannot resolve current directory");
-        return 1;
+        return fail("cannot resolve current directory");
     };
     let work_path = std::path::Path::new(&work);
     let id = match resolve_jobs_id(work_path, id) {
@@ -1132,10 +1299,7 @@ fn run_jobs_action(verb: &str, args: &[String]) -> i32 {
             }
             0
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => fail(&format!("jobs: {err}")),
     }
 }
 
@@ -1167,10 +1331,6 @@ fn yes_no(value: bool) -> &'static str {
     }
 }
 
-fn skills_usage() -> &'static str {
-    "usage: maru skills capabilities|list|sync|update|env repair|rollback|dirty|reconcile|import|import-unmanage"
-}
-
 /// The additive federation contract dotfiles discovers first (issue #396).
 /// Keys and target order are contractual; extend only additively.
 fn skills_capabilities_json() -> serde_json::Value {
@@ -1182,17 +1342,31 @@ fn skills_capabilities_json() -> serde_json::Value {
     })
 }
 
-fn jobs_usage() -> &'static str {
-    "usage: maru jobs list|status [<id>] [--json]\n       maru jobs install|uninstall|start|stop|run [<id>] [--json]\n       maru jobs exec [--if-missed] <id>\n\nThe workspace is the current directory (jobs are read from <cwd>/.maru/jobs.json).\nAction verbs require <id> unless exactly one job is declared.\nexec is the launchd wrapper entry point for missed-fire recovery jobs."
-}
+const DOCTOR_USAGE: &str = "maru doctor [--json] [--quiet]";
 
-fn secrets_usage() -> &'static str {
-    "usage: maru secrets scan|doctor|migrate"
-}
+const SECRETS_USAGE: &str = "maru secrets scan [--json]
+maru secrets doctor [--json] [--quiet]
+maru secrets migrate --dry-run|--apply [--select <relpath>] [--json]";
 
-fn usage() -> &'static str {
-    "usage: maru [--version] [--help] <command>\n\ncommands:\n  doctor [--json] [--quiet]\n  secrets scan [--json]\n  secrets doctor [--json] [--quiet]\n  secrets migrate --dry-run|--apply [--select <relpath>] [--json]\n  skills capabilities|list --json\n  skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--json]\n  skills update --check|--apply [--repair-env] [--json]\n  skills env repair [--force] [--json]\n  skills rollback [--json]\n  skills dirty [--json]\n  skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]\n  skills import <source-path> [--name <name>] [--copy|--link]\n  skills import-unmanage <name> [--delete-files]\n  jobs list|status [<id>] [--json]\n  jobs install|uninstall|start|stop|run [<id>] [--json]\n  jobs exec [--if-missed] <id>\n  calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
-}
+const SKILLS_USAGE: &str = "maru skills capabilities|list --json
+maru skills sync --check|--apply --tools <csv> [--skills <names-or-ids>] [--retarget] [--json]
+maru skills update --check|--apply [--repair-env] [--json]
+maru skills env repair [--force] [--json]
+maru skills rollback [--json]
+maru skills dirty [--json]
+maru skills reconcile <name-or-id> (--accept|--discard) [--message <m>] [--dry-run]
+maru skills import <source-path> [--name <name>] [--copy|--link]
+maru skills import-unmanage <name> [--delete-files]";
+
+const JOBS_USAGE: &str = "maru jobs list|status [<id>] [--json]
+maru jobs install|uninstall|start|stop|run [<id>] [--json]
+maru jobs exec [--if-missed] <id>
+
+The workspace is the current directory (jobs are read from <cwd>/.maru/jobs.json).
+Action verbs require <id> unless exactly one job is declared.
+exec is the launchd wrapper entry point for missed-fire recovery jobs.";
+
+const USAGE: &str = "maru [--color=auto|always|never] [--ascii] <command> [args]";
 
 #[cfg(test)]
 mod tests {
@@ -1214,6 +1388,182 @@ mod tests {
     }
 
     use super::{env_repair_preflight_error, run_cli, skills_capabilities_json};
+    use super::{help_command, help_overview, render_check_report, take_output_flags, Finding};
+    use super::{COMMANDS, USAGE};
+    use crate::cli_output::{ColorChoice, Style};
+    use unicode_width::UnicodeWidthStr;
+
+    fn style(color: bool, ascii: bool) -> Style {
+        Style {
+            color,
+            ascii,
+            width: Some(80),
+            tty: false,
+        }
+    }
+
+    fn findings() -> Vec<Finding> {
+        vec![
+            Finding {
+                severity: "warn".into(),
+                code: "env_incomplete".into(),
+                message: "the skills env is missing python".into(),
+                subject: None,
+            },
+            Finding {
+                severity: "error".into(),
+                code: "install_broken".into(),
+                message: "link target is gone".into(),
+                subject: Some("vault-lint".into()),
+            },
+        ]
+    }
+
+    fn facts() -> Vec<(&'static str, String)> {
+        vec![("Sources", "2".into()), ("Skills", "38".into())]
+    }
+
+    // Conformance 1: golden report with color off.
+    #[test]
+    fn check_report_golden_color_off() {
+        let text = render_check_report(
+            &style(false, false),
+            "Skills doctor",
+            &facts(),
+            &findings(),
+            (0, ""),
+        );
+        let expected = format!(
+            "maru Skills doctor {}\n\n\u{25b8} Attention (2)\n  \u{2717}  install_broken: link target is gone (vault-lint)\n  \u{26a0}  env_incomplete: the skills env is missing python\n\n\u{25b8} Checked\n  Sources:  2\n  Skills:   38\n\n\u{2717} 1 failed  \u{26a0} 1 warning",
+            env!("CARGO_PKG_VERSION")
+        );
+        assert_eq!(text, expected);
+    }
+
+    // Conformance 1: --color=always maps roles to the normative ANSI codes.
+    #[test]
+    fn check_report_golden_color_on_uses_role_codes() {
+        let text = render_check_report(
+            &style(true, false),
+            "Skills doctor",
+            &facts(),
+            &findings(),
+            (0, ""),
+        );
+        assert!(
+            text.starts_with("\x1b[1;34mmaru Skills doctor\x1b[0m \x1b[90m"),
+            "{text:?}"
+        );
+        assert!(text.contains("\x1b[1;35m\u{25b8} Attention\x1b[0m \x1b[90m(2)\x1b[0m"));
+        assert!(text.contains("\x1b[1;31m\u{2717}\x1b[0m "));
+        assert!(text.contains("\x1b[1;33m\u{26a0}\x1b[0m "));
+        assert!(text.contains("\x1b[34mSources:\x1b[0m"));
+    }
+
+    // Conformance 2: color off emits no ESC; --json never contains ESC.
+    #[test]
+    fn color_off_and_json_carry_no_escape() {
+        let plain = render_check_report(
+            &style(false, false),
+            "Skills doctor",
+            &facts(),
+            &findings(),
+            (0, ""),
+        );
+        assert!(!plain.contains('\x1b'));
+        assert!(!help_overview(&style(false, false)).contains('\x1b'));
+        assert!(!skills_capabilities_json().to_string().contains('\x1b'));
+    }
+
+    // Conformance 3: at 80 columns no line exceeds 80 cells.
+    #[test]
+    fn help_and_reports_fit_80_columns() {
+        let long = vec![Finding {
+            severity: "error".into(),
+            code: "install_broken".into(),
+            message: "word ".repeat(60),
+            subject: None,
+        }];
+        let mut texts = vec![
+            help_overview(&style(false, false)),
+            render_check_report(
+                &style(false, false),
+                "Skills doctor",
+                &facts(),
+                &long,
+                (3, "maru doctor --json"),
+            ),
+        ];
+        for (name, _, _) in COMMANDS {
+            texts.push(help_command(&style(false, false), name).unwrap());
+        }
+        for text in texts {
+            for line in text.lines() {
+                assert!(UnicodeWidthStr::width(line) <= 80, "{line}");
+            }
+        }
+    }
+
+    // Conformance 4: help exits 0, a usage error exits 2, a failure exits 1.
+    #[test]
+    fn help_usage_and_failure_exit_codes() {
+        assert_eq!(run_cli(vec!["--help".into()]), 0);
+        assert_eq!(run_cli(vec!["help".into(), "skills".into()]), 0);
+        assert_eq!(run_cli(vec!["help".into(), "nope".into()]), 2);
+        assert_eq!(run_cli(vec![]), 2);
+        assert_eq!(
+            run_cli(vec!["--color=sometimes".into(), "doctor".into()]),
+            2
+        );
+        assert_eq!(
+            run_cli(vec![
+                "jobs".into(),
+                "status".into(),
+                "no-such-job-618".into()
+            ]),
+            1
+        );
+    }
+
+    // Conformance 5: ASCII markers (as LANG=C selects).
+    #[test]
+    fn ascii_markers_replace_glyphs() {
+        let text = render_check_report(
+            &style(false, true),
+            "Skills doctor",
+            &facts(),
+            &findings(),
+            (0, ""),
+        );
+        assert!(text.contains("> Attention (2)"));
+        assert!(text.contains("  x  install_broken"));
+        assert!(text.contains("  !  env_incomplete"));
+        assert!(text.ends_with("x 1 failed  ! 1 warning"));
+        assert!(!text.chars().any(|ch| !ch.is_ascii()));
+    }
+
+    #[test]
+    fn global_output_flags_are_taken_anywhere() {
+        let (flags, rest) = take_output_flags(vec![
+            "doctor".into(),
+            "--color".into(),
+            "never".into(),
+            "--ascii".into(),
+            "--json".into(),
+        ])
+        .unwrap();
+        assert_eq!(flags.color, ColorChoice::Never);
+        assert!(flags.ascii);
+        assert_eq!(rest, vec!["doctor".to_string(), "--json".to_string()]);
+    }
+
+    #[test]
+    fn usage_names_the_installed_binary() {
+        assert!(USAGE.starts_with("maru "));
+        for (_, _, usage) in COMMANDS {
+            assert!(usage.starts_with("maru "), "{usage}");
+        }
+    }
 
     #[test]
     fn capabilities_json_matches_the_federation_contract_exactly() {
