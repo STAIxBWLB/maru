@@ -533,6 +533,10 @@ Requirements:
   toolchain and the `wasm32-unknown-unknown` target used by semantic diagrams
 - Platform libraries required by Tauri 2
 
+Node is a development requirement only. The installed app runs diagram
+validation, layout and SVG/PNG rendering on the built-in diagram engine, so
+users need no `node` binary for diagram features.
+
 Browser development, frontend builds and unit tests generate the ignored diagram
 WASM assets through `pnpm engine:assets` before loading them. The first run
 therefore requires the pinned Rust toolchain as well as Node; native outline

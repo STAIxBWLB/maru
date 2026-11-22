@@ -1,8 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 import { SEMANTIC_FIXTURES } from "./__fixtures__/semantic";
 import { pinnedEngineHost } from "./__fixtures__/engineHost";
@@ -180,25 +176,15 @@ const removalTarget: Record<ArchifyDiagramType, { field: string; index: number }
   lifecycle: { field: "states", index: 0 },
 };
 
-function validateWithPinnedArchify(type: SemanticDiagramType, spec: Record<string, unknown>) {
-  const dir = mkdtempSync(join(tmpdir(), "maru-semantic-edit-"));
-  try {
-    const path = join(dir, "candidate.json");
-    writeFileSync(path, JSON.stringify(spec));
-    const result = spawnSync("node", ["sidecars/archify/bin/archify.mjs", "validate", type, path, "--json"], {
-      cwd: process.cwd(), encoding: "utf8", timeout: 10_000,
-    });
-    expect(result.error, result.stderr).toBeUndefined();
-    expect(result.status, result.stdout || result.stderr).toBe(0);
-    const receipt = JSON.parse(result.stdout) as { ok: boolean; errors?: string[] };
-    expect(receipt.ok, JSON.stringify(receipt.errors)).toBe(true);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+// The product engine is the validator since the Archify sidecar was removed
+// (maru#554 E6); every edited spec must still pass its full candidate check.
+async function validateWithEngine(type: SemanticDiagramType, spec: Record<string, unknown>) {
+  const receipt = await pinnedEngineHost.validateCandidate(type, spec);
+  expect(receipt.ok, JSON.stringify(receipt.errors)).toBe(true);
 }
 
 describe("semantic structural edits", () => {
-  it.each(Object.keys(additions) as ArchifyDiagramType[])("adds and removes valid %s entries through one undo", (type) => {
+  it.each(Object.keys(additions) as ArchifyDiagramType[])("adds and removes valid %s entries through one undo", async (type) => {
     const store = storeOf(type);
     const before = JSON.stringify(store.getState().doc);
     const { field, entry } = additions[type];
@@ -206,7 +192,7 @@ describe("semantic structural edits", () => {
     expect(added.status, JSON.stringify(added)).toBe("applied");
     expect(store.getState().ephemeral.history.past).toHaveLength(1);
     let current = specOf(store.getState()) as Record<string, unknown>;
-    validateWithPinnedArchify(type, current);
+    await validateWithEngine(type, current);
     const addedEntry = (current[field] as Record<string, unknown>[]).at(-1)!;
     expect(addedEntry.id).toEqual(expect.any(String));
 
@@ -216,7 +202,7 @@ describe("semantic structural edits", () => {
     const removed = apply(store, remove.transform);
     expect(removed.status).toBe("applied");
     current = specOf(store.getState()) as Record<string, unknown>;
-    validateWithPinnedArchify(type, current);
+    await validateWithEngine(type, current);
     const shiftedEntity = (SEMANTIC_FIXTURES[type][field] as Record<string, unknown>[])[1];
     if (typeof shiftedEntity?.id === "string") {
       const dataset = store.getState().doc.datasets!.find((item) => item.id === "ds") as SemanticSpecDataset;
@@ -262,12 +248,12 @@ describe("semantic structural edits", () => {
     expect(stageRemoval.effects).not.toContainEqual(expect.objectContaining({ field: "nodes", index: 0, action: "unlink" }));
   });
 
-  it("drops invalid workflow main paths after node or relation removal", () => {
+  it("drops invalid workflow main paths after node or relation removal", async () => {
     const source = {
       ...structuredClone(SEMANTIC_FIXTURES.workflow),
       mainPath: ["draft", "review", "merge"],
     };
-    validateWithPinnedArchify("workflow", source);
+    await validateWithEngine("workflow", source);
 
     for (const target of [
       { field: "nodes", index: 1 },
@@ -279,11 +265,11 @@ describe("semantic structural edits", () => {
       expect(apply(store, removal.transform).status).toBe("applied");
       const next = specOf(store.getState()) as Record<string, unknown>;
       expect(next).not.toHaveProperty("mainPath");
-      validateWithPinnedArchify("workflow", next);
+      await validateWithEngine("workflow", next);
     }
   });
 
-  it("drops broken workflow semantic checks after relation removal and preserves root/terminal allowlists", () => {
+  it("drops broken workflow semantic checks after relation removal and preserves root/terminal allowlists", async () => {
     const source = {
       ...structuredClone(SEMANTIC_FIXTURES.workflow),
       semanticChecks: {
@@ -293,7 +279,7 @@ describe("semantic structural edits", () => {
         requiredPaths: [{ from: "draft", to: "merge" }],
       },
     };
-    validateWithPinnedArchify("workflow", source);
+    await validateWithEngine("workflow", source);
     const removal = removeSemanticEntries("workflow", source, [{ field: "edges", index: 0 }]);
     expect(removal.effects).toContainEqual({ field: "semanticChecks.requiredEdges", index: 0, label: "requiredEdges", action: "remove" });
     expect(removal.effects).toContainEqual({ field: "semanticChecks.requiredPaths", index: 0, label: "requiredPaths", action: "remove" });
@@ -304,7 +290,7 @@ describe("semantic structural edits", () => {
       requiredEdges: [],
       requiredPaths: [],
     });
-    validateWithPinnedArchify("workflow", next);
+    await validateWithEngine("workflow", next);
   });
 
   it("refuses removal of lifecycle lane main even when other lanes remain", () => {
@@ -330,29 +316,29 @@ describe("semantic structural edits", () => {
     expect(removal.transform({ ...source })).toBeNull();
   });
 
-  it("widens a narrow spread sequence canvas before participant columns overflow", () => {
+  it("widens a narrow spread sequence canvas before participant columns overflow", async () => {
     let spec = { ...structuredClone(SEMANTIC_FIXTURES.sequence), meta: { title: "Login", output: "login.html", locale: "en", column_fit: "spread", viewBox: [250, 760] } };
     for (let index = 0; index < 6; index++) {
       spec = addSemanticEntry("sequence", "participants", { type: "backend", label: `Worker ${index}` })(spec)!.spec as typeof spec;
     }
     expect((spec.meta.viewBox as number[])[0]).toBeGreaterThanOrEqual(188 + 8 * 108);
-    validateWithPinnedArchify("sequence", spec);
+    await validateWithEngine("sequence", spec);
   });
 
-  it("grows a valid ten-message showcase canvas before adding the eleventh message", () => {
+  it("grows a valid ten-message showcase canvas before adding the eleventh message", async () => {
     const source = {
       ...structuredClone(SEMANTIC_FIXTURES.sequence),
       meta: { title: "Calls", output: "calls.html", locale: "en", quality_profile: "showcase", viewBox: [920, 760] },
       messages: Array.from({ length: 10 }, (_, index) => ({ from: "web", to: "api", y: 180 + index * 50, label: `Call ${index + 1}` })),
     };
-    validateWithPinnedArchify("sequence", source);
+    await validateWithEngine("sequence", source);
     const next = addSemanticEntry("sequence", "messages", { from: "web", to: "api", label: "Call 11" })(source)!.spec;
     expect(((next.meta as Record<string, unknown>).viewBox as number[])[1]).toBeGreaterThanOrEqual(784);
     expect((next.messages as Record<string, unknown>[]).at(-1)!.y).toBe(680);
-    validateWithPinnedArchify("sequence", next);
+    await validateWithEngine("sequence", next);
   });
 
-  it("leaves renderer clearance for showcase legends, late activations, and wrapped labels", () => {
+  it("leaves renderer clearance for showcase legends, late activations, and wrapped labels", async () => {
     let source = {
       ...structuredClone(SEMANTIC_FIXTURES.sequence),
       meta: {
@@ -369,10 +355,10 @@ describe("semantic structural edits", () => {
     expect(source.messages.at(-1)!.y).toBe(680);
     source = addSemanticEntry("sequence", "activations", { participant: "api", from: 730, to: 770 })(source)!.spec as typeof source;
     expect(source.meta.viewBox[1]).toBeGreaterThanOrEqual(956);
-    validateWithPinnedArchify("sequence", source);
+    await validateWithEngine("sequence", source);
   });
 
-  it("uses nearest surviving anchor segments below, between, and above the timeline", () => {
+  it("uses nearest surviving anchor segments below, between, and above the timeline", async () => {
     const source = { ...structuredClone(SEMANTIC_FIXTURES.sequence),
       activations: [
         { participant: "api", from: 100, to: 140 },
@@ -381,16 +367,16 @@ describe("semantic structural edits", () => {
       ],
       segments: [{ from: 400, to: 450, label: "Tail" }],
     };
-    validateWithPinnedArchify("sequence", source);
+    await validateWithEngine("sequence", source);
     const next = removeSemanticEntries("sequence", source, [{ field: "messages", index: 1 }]).transform(source)!.spec;
     const activations = next.activations as Array<{ from: number; to: number }>;
     expect(activations.map(({ from, to }) => [from, to])).toEqual([[140, 160], [190, 200], [350, 400]]);
     expect(activations[2]!.to - activations[2]!.from).toBe(50);
     expect(next.segments).toEqual([{ from: 350, to: 400, label: "Tail" }]);
-    validateWithPinnedArchify("sequence", next);
+    await validateWithEngine("sequence", next);
   });
 
-  it("shifts stage references on index insertion and keeps both old stage memberships", () => {
+  it("shifts stage references on index insertion and keeps both old stage memberships", async () => {
     const store = storeOf("dataflow");
     const before = JSON.stringify(store.getState().doc);
     const oldStageA = semanticContainerId("ds", "stage", "0");
@@ -405,13 +391,13 @@ describe("semantic structural edits", () => {
     expect(next.stages!.map((stage) => stage.label)).toEqual(["Before collect", "Collect", "Store"]);
     expect(store.getState().doc.edges.find((edge) => edge.id === "stage-note")?.fromNode).toBe(semanticContainerId("ds", "stage", "1"));
     expect(store.getState().ephemeral.history.past).toHaveLength(1);
-    validateWithPinnedArchify("dataflow", next);
+    await validateWithEngine("dataflow", next);
     store.setState(undo());
     expect(JSON.stringify(store.getState().doc)).toBe(annotated);
     expect(before).not.toBe(annotated);
   });
 
-  it("keeps a surviving segment within engine bounds after removing a leading message block", () => {
+  it("keeps a surviving segment within engine bounds after removing a leading message block", async () => {
     const source = { ...structuredClone(SEMANTIC_FIXTURES.sequence), segments: [{ from: 170, to: 340, label: "Exchange" }] };
     const store = storeOf("sequence", source);
     const spec = specOf(store.getState());
@@ -420,7 +406,7 @@ describe("semantic structural edits", () => {
     const next = specOf(store.getState());
     expect(next.segments![0]!.from).toBe(72);
     expect(next.messages!.map((message) => message.y)).toEqual([180]);
-    validateWithPinnedArchify("sequence", next);
+    await validateWithEngine("sequence", next);
   });
 
   it("supports boundary membership and lets asynchronous engine validation reject minimum-count violations", async () => {

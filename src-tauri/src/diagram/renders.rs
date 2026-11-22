@@ -4,8 +4,6 @@
 //! are fixed by the receipt MIME type, and the asset protocol receives one
 //! verified file at a time.
 
-#[cfg(test)]
-use crate::archify::{ArchifyRenderArtifact, ArchifyRenderReceipt};
 use crate::atomic_file::{
     with_path_transactions, write_atomic_create, PathTransactionLease, PathTransactionRequest,
 };
@@ -194,6 +192,57 @@ fn artifact_for_mime(mime_type: &str) -> Option<&'static str> {
 
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+/// The last Archify `PIN.json`, kept verbatim so a fixture receipt carries the
+/// exact engine pin metadata that Archify-era stored renders contain.
+#[cfg(test)]
+const LEGACY_ARCHIFY_PIN_JSON: &str = include_str!("testdata/legacy-archify-pin.json");
+
+/// Test-only shape of an Archify-era render, as the retired engine produced it
+/// before maru#554 E6. Fixtures build legacy receipts from it so the reader for
+/// stored Archify-era renders keeps its coverage.
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArchifyEnginePin {
+    pub name: String,
+    pub version: String,
+    pub revision: String,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArchifyRenderGate {
+    pub status: String,
+    pub scope: String,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArchifyRenderGates {
+    pub schema: ArchifyRenderGate,
+    pub artifact: ArchifyRenderGate,
+    pub browser: ArchifyRenderGate,
+    pub visual_review: ArchifyRenderGate,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArchifyRenderReceipt {
+    pub schema_version: u32,
+    pub input_spec_sha256: String,
+    pub engine_pin: ArchifyEnginePin,
+    pub output_sha256: String,
+    pub output_mime_type: String,
+    pub gates: ArchifyRenderGates,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArchifyRenderArtifact {
+    pub bytes: Vec<u8>,
+    pub receipt: ArchifyRenderReceipt,
+    pub store_warning: Option<String>,
 }
 
 #[cfg(test)]
@@ -1776,27 +1825,27 @@ mod tests {
                 receipt: ArchifyRenderReceipt {
                     schema_version: 1,
                     input_spec_sha256: sha256(b"semantic input"),
-                    engine_pin: crate::archify::ArchifyEnginePin {
+                    engine_pin: super::ArchifyEnginePin {
                         name: "archify".into(),
                         version: "3.0.0".into(),
                         revision: "0123456789abcdef0123456789abcdef01234567".into(),
                     },
                     output_sha256: sha256(bytes),
                     output_mime_type: mime_type.into(),
-                    gates: crate::archify::ArchifyRenderGates {
-                        schema: crate::archify::ArchifyRenderGate {
+                    gates: super::ArchifyRenderGates {
+                        schema: super::ArchifyRenderGate {
                             status: "passed".into(),
                             scope: "pinned-engine-validation".into(),
                         },
-                        artifact: crate::archify::ArchifyRenderGate {
+                        artifact: super::ArchifyRenderGate {
                             status: "passed".into(),
                             scope: "pinned-engine-rendered-html".into(),
                         },
-                        browser: crate::archify::ArchifyRenderGate {
+                        browser: super::ArchifyRenderGate {
                             status: "passed".into(),
                             scope: "verified-static-conversion".into(),
                         },
-                        visual_review: crate::archify::ArchifyRenderGate {
+                        visual_review: super::ArchifyRenderGate {
                             status: "not-run".into(),
                             scope: "manual-visual-review".into(),
                         },
@@ -1909,7 +1958,7 @@ mod tests {
         let source = fs::read(&source_path).unwrap();
         fs::write(render_dir.join(HTML_FILE), HTML).unwrap();
         let pin: serde_json::Value =
-            serde_json::from_str(include_str!("../../../sidecars/archify/PIN.json")).unwrap();
+            serde_json::from_str(LEGACY_ARCHIFY_PIN_JSON).unwrap();
         let receipt = serde_json::json!({
             "schemaVersion": 1,
             "docId": fixture.doc_id.clone(),

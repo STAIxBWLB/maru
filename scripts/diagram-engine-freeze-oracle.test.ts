@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { normalizeStagingPaths, portableOracleReport } from "./diagram-engine-e0-corpus.mjs";
-import { FREEZE_COMMAND, ORACLE_LABEL, verdictDifferences } from "./diagram-engine-freeze-oracle.mjs";
+import { existsSync, readFileSync } from "node:fs";
 
+// E6 (maru#554): the Archify oracle is frozen into parity.json and the sidecar
+// is gone, so these verdicts are the oracle now. No test may rerun Archify.
 const corpus = JSON.parse(readFileSync("src-tauri/crates/maru-diagram-engine/testdata/parity.json", "utf8"));
 const all = [...corpus.cases, ...corpus.boundaryCases];
+const ORACLE_LABEL = { source: "archify-oracle" };
 
-describe("E6 T1 frozen oracle corpus", () => {
-  it("names the pinned oracle and the command that recorded it", () => {
-    const pin = JSON.parse(readFileSync("sidecars/archify/PIN.json", "utf8"));
-    expect(corpus.frozenOracle).toMatchObject({ id: pin.name, version: pin.version, revision: pin.revision, command: FREEZE_COMMAND });
+describe("E6 frozen oracle corpus", () => {
+  it("names the retired oracle pin that recorded the verdicts", () => {
+    expect(corpus.frozenOracle).toMatchObject({ id: "archify", version: "3.0.0", revision: corpus.oracle.revision });
+    expect(corpus.frozenOracle.revision).toMatch(/^[a-f0-9]{40}$/);
+    expect(corpus.frozenOracle.pinSha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("labels every recorded case with where its verdict came from", () => {
@@ -25,32 +27,7 @@ describe("E6 T1 frozen oracle corpus", () => {
     expect(text).not.toMatch(/\/(?:var\/folders|Users|home|tmp)\/[^"]*archify-validate-/);
   });
 
-  it("normalizes the whole staging directory, with spaces and Windows separators", () => {
-    const json = (path: string) => JSON.stringify({ subject: { input: `${path}/specification.snapshot.json` } });
-    const staged = JSON.stringify({ subject: { input: "<oracle-staging>/specification.snapshot.json" } });
-    expect(normalizeStagingPaths(json("/tmp/oracle tmp/archify-validate-Ab_1"), "/tmp/oracle tmp")).toBe(staged);
-    expect(normalizeStagingPaths(json("/tmp/oracle tmp/archify-validate-Ab_1"), "/tmp/oracle tmp/")).toBe(staged);
-    expect(normalizeStagingPaths(json("/private/var/folders/x/T/archify-validate-Q9"), "/var/folders/x/T")).toBe(staged);
-    const windows = String.raw`C:\Users\Some One\AppData\Local\Temp`;
-    const windowsInput = JSON.stringify({ subject: { input: String.raw`${windows}\archify-validate-Zz9\specification.snapshot.json` } });
-    expect(normalizeStagingPaths(windowsInput, windows)).toBe(JSON.stringify({ subject: { input: String.raw`<oracle-staging>/specification.snapshot.json` } }));
-    expect(normalizeStagingPaths(windowsInput, windows)).not.toContain("Some One");
-    // An unrelated path that merely contains the marker is left alone.
-    expect(normalizeStagingPaths(json("/elsewhere/archify-validate-X"), "/tmp/oracle tmp")).toBe(json("/elsewhere/archify-validate-X"));
-  });
-
-  it("normalizes staging when the temp root is the repository root or below it", () => {
-    const repo = "/work/maru";
-    const report = (dir: string) => ({ subject: { input: `${dir}/archify-validate-VhLMBn/specification.snapshot.json` }, other: `${repo}/x.json` });
-    const expected = { subject: { input: "<oracle-staging>/specification.snapshot.json" }, other: "<fixture-root>/x.json" };
-    expect(portableOracleReport(report(repo), repo, repo)).toEqual(expected);
-    expect(portableOracleReport(report(`${repo}/.tmp`), `${repo}/.tmp`, repo)).toEqual(expected);
-    expect(portableOracleReport(report("/tmp"), "/tmp", repo)).toEqual(expected);
-  });
-
-  it("reports exactly the verdict fields that differ", () => {
-    const item = { oracle: { ok: true, codes: [], diagnostics: [] }, schemaOracle: { ok: false, codes: ["x"], diagnostics: [{ code: "x" }] } };
-    expect(verdictDifferences(item, { oracle: { ok: true, codes: [], diagnostics: [] }, schemaOracle: item.schemaOracle })).toEqual([]);
-    expect(verdictDifferences(item, { oracle: { ok: false, codes: ["y"], diagnostics: [{ code: "y" }] }, schemaOracle: item.schemaOracle })).toEqual(["oracle"]);
+  it("ships without the sidecar the verdicts were recorded from", () => {
+    expect(existsSync("sidecars/archify")).toBe(false);
   });
 });
