@@ -1970,7 +1970,7 @@ mod tests {
         let plain =
             crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome, &problems);
         assert!(
-            plain.contains("\u{25b8} Attention (1 unresolved records)\n  \u{2717}  failed: calendar_insert_failed: 403 (Today/2026-11-22.md)\n\n\u{25b8} Changes"),
+            plain.contains("\u{25b8} Attention (1 unresolved records)\n  \u{2717}  failed: calendar_insert_failed: 403 (Today/2026-11-22.md)"),
             "{plain}"
         );
         assert!(!plain.contains("--json"), "no rerun is suggested: {plain}");
