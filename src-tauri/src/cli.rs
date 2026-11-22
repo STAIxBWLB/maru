@@ -45,58 +45,38 @@ pub fn run_cli(args: Vec<String>) -> i32 {
     }
 }
 
-/// Options that take the next argument as their value. Their value is never
-/// read as an output flag, so `--message --ascii` keeps `--ascii` as the
-/// message, as before the output flags existed.
-const VALUE_OPTIONS: &[&str] = &[
-    "--select",
-    "--tools",
-    "--skills",
-    "--message",
-    "--name",
-    "--work",
-    "--destination",
-    "--gws",
-    "--event",
-    "--agent",
-    "--session-id",
-];
-
-/// Strip the global output flags (`--color=<when>`, `--color <when>`,
-/// `--ascii`) wherever they appear as options; every command accepts them.
+/// Take the global output flags (`--color=<when>`, `--color <when>`,
+/// `--ascii`) from the front of the argument list, before the command.
+/// After the command every argument is the command's own, so a positional
+/// value or an option value that looks like an output flag (`skills import
+/// --ascii`, `--message --ascii`) keeps its meaning.
 fn take_output_flags(args: Vec<String>) -> Result<(OutputFlags, Vec<String>), i32> {
     let mut flags = OutputFlags::default();
-    let mut rest = Vec::with_capacity(args.len());
-    let mut iter = args.into_iter();
-    while let Some(arg) = iter.next() {
-        if VALUE_OPTIONS.contains(&arg.as_str()) {
-            rest.push(arg);
-            if let Some(value) = iter.next() {
-                rest.push(value);
-            }
-            continue;
-        }
+    let mut iter = args.into_iter().peekable();
+    while let Some(arg) = iter.peek().cloned() {
         let value = if arg == "--color" {
-            Some(iter.next().unwrap_or_default())
-        } else {
-            arg.strip_prefix("--color=").map(str::to_string)
-        };
-        if let Some(value) = value {
-            let Some(choice) = ColorChoice::parse(&value) else {
-                return Err(usage_error(
-                    &format!("invalid --color value: {value:?}: use auto, always or never"),
-                    USAGE,
-                    "",
-                ));
-            };
-            flags.color = choice;
+            iter.next();
+            iter.next().unwrap_or_default()
+        } else if let Some(value) = arg.strip_prefix("--color=") {
+            iter.next();
+            value.to_string()
         } else if arg == "--ascii" {
+            iter.next();
             flags.ascii = true;
+            continue;
         } else {
-            rest.push(arg);
-        }
+            break;
+        };
+        let Some(choice) = ColorChoice::parse(&value) else {
+            return Err(usage_error(
+                &format!("invalid --color value: {value:?}: use auto, always or never"),
+                USAGE,
+                "",
+            ));
+        };
+        flags.color = choice;
     }
-    Ok((flags, rest))
+    Ok((flags, iter.collect()))
 }
 
 /// The command overview: name, one-line summary, and the usage forms that
@@ -1398,10 +1378,9 @@ fn work_dir_or_fail() -> Result<String, i32> {
     env::current_dir()
         .map(|path| path.to_string_lossy().to_string())
         .map_err(|err| {
-            out::fail_with_next(
-                &format!("cannot read the current directory: {err}"),
-                "cd <workspace folder> and rerun the command",
-            )
+            fail(&format!(
+                "cannot read the current directory: {err}; change to the workspace folder and rerun"
+            ))
         })
 }
 
@@ -1702,7 +1681,7 @@ mod tests {
     use super::{env_repair_preflight_error, run_cli, skills_capabilities_json};
     use super::{help_command, help_overview, render_check_report, take_output_flags, Finding};
     use super::{COMMANDS, USAGE};
-    use crate::cli_output::{ColorChoice, Style};
+    use crate::cli_output::{ColorChoice, OutputFlags, Style};
     use unicode_width::UnicodeWidthStr;
 
     fn style(color: bool, ascii: bool) -> Style {
@@ -1855,77 +1834,52 @@ mod tests {
     }
 
     #[test]
-    fn global_output_flags_are_taken_anywhere() {
-        let (flags, rest) = take_output_flags(vec![
-            "doctor".into(),
-            "--color".into(),
-            "never".into(),
-            "--ascii".into(),
-            "--json".into(),
-        ])
-        .unwrap();
+    fn global_output_flags_are_taken_before_the_command_only() {
+        let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        let (flags, rest) =
+            take_output_flags(args(&["--color", "never", "--ascii", "doctor", "--json"])).unwrap();
         assert_eq!(flags.color, ColorChoice::Never);
         assert!(flags.ascii);
-        assert_eq!(rest, vec!["doctor".to_string(), "--json".to_string()]);
+        assert_eq!(rest, args(&["doctor", "--json"]));
+        let (flags, rest) = take_output_flags(args(&["--color=always", "help"])).unwrap();
+        assert_eq!(flags.color, ColorChoice::Always);
+        assert_eq!(rest, args(&["help"]));
+        assert!(take_output_flags(args(&["--color=sometimes", "help"])).is_err());
     }
 
-    // Review T142-1: an option's value is never taken as an output flag, so
-    // `--message --ascii` keeps --ascii as the message and the conflicting
-    // actions are refused (exit 2) before any effect.
+    // Review T142-1 and T142-6: after the command nothing is an output flag,
+    // neither an option value nor a positional value. `--message --ascii`
+    // keeps --ascii as the message and the conflicting actions are refused
+    // (exit 2) before any effect; `skills import --ascii --copy` keeps
+    // --ascii as the source and --copy as the mode.
     #[test]
-    fn option_values_are_not_taken_as_output_flags() {
-        let (flags, rest) = take_output_flags(
-            [
-                "skills",
-                "reconcile",
-                "NAME",
-                "--message",
-                "--ascii",
-                "--accept",
-                "--discard",
-            ]
-            .map(String::from)
-            .to_vec(),
-        )
-        .unwrap();
+    fn arguments_after_the_command_are_never_output_flags() {
+        let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        let reconcile = args(&[
+            "skills",
+            "reconcile",
+            "NAME",
+            "--message",
+            "--ascii",
+            "--accept",
+            "--discard",
+        ]);
+        let (flags, rest) = take_output_flags(reconcile.clone()).unwrap();
         assert!(!flags.ascii);
-        assert_eq!(
-            rest,
-            [
-                "skills",
-                "reconcile",
-                "NAME",
-                "--message",
-                "--ascii",
-                "--accept",
-                "--discard"
-            ]
-            .map(String::from)
-            .to_vec()
-        );
-        assert_eq!(
-            run_cli(
-                [
-                    "skills",
-                    "reconcile",
-                    "NAME",
-                    "--message",
-                    "--ascii",
-                    "--accept",
-                    "--discard"
-                ]
-                .map(String::from)
-                .to_vec()
-            ),
-            2
-        );
-        let (_, rest) = take_output_flags(
-            ["calendar-sync", "--work", "--color", "--dry-run"]
-                .map(String::from)
-                .to_vec(),
-        )
-        .unwrap();
-        assert_eq!(rest.len(), 4);
+        assert_eq!(rest, reconcile);
+        assert_eq!(run_cli(reconcile), 2);
+        for list in [
+            &["skills", "import", "--ascii", "--copy"][..],
+            &["calendar-sync", "--work", "--color", "--dry-run"],
+            &["doctor", "--color=never"],
+        ] {
+            let (flags, rest) = take_output_flags(args(list)).unwrap();
+            assert_eq!(flags, OutputFlags::default(), "{list:?}");
+            assert_eq!(rest, args(list));
+        }
+        // An output flag after the command is the command's own argument now,
+        // so doctor refuses it as an unknown option rather than reading it.
+        assert_eq!(run_cli(args(&["doctor", "--ascii"])), 2);
     }
 
     #[test]
@@ -2007,9 +1961,21 @@ mod tests {
             }],
             ..Default::default()
         };
-        let plain = crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome);
+        let problems = vec![crate::calendar_sync::ProblemRecord {
+            state: "failed",
+            blocked: false,
+            error: "calendar_insert_failed: 403".into(),
+            task_path: "Today/2026-11-22.md".into(),
+        }];
+        let plain =
+            crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome, &problems);
         assert!(
-            plain.starts_with("maru calendar-sync primary dry run\n\n\u{25b8} Changes (1)"),
+            plain.contains("\u{25b8} Attention (1)\n  \u{2717}  failed: calendar_insert_failed: 403 (Today/2026-11-22.md)\n\n\u{25b8} Changes"),
+            "{plain}"
+        );
+        assert!(!plain.contains("--json"), "no rerun is suggested: {plain}");
+        assert!(
+            plain.starts_with("maru calendar-sync primary dry run\n\n\u{25b8} Attention (1)"),
             "{plain}"
         );
         assert!(
@@ -2017,10 +1983,12 @@ mod tests {
             "{plain}"
         );
         assert!(plain.contains("\u{2717} 1 failed"), "{plain}");
-        let ascii = crate::calendar_sync::render_calendar_sync(&style(false, true), &outcome);
+        let ascii =
+            crate::calendar_sync::render_calendar_sync(&style(false, true), &outcome, &problems);
         assert!(ascii.is_ascii(), "{ascii}");
         assert!(ascii.contains("x 1 failed"), "{ascii}");
-        let colored = crate::calendar_sync::render_calendar_sync(&style(true, false), &outcome);
+        let colored =
+            crate::calendar_sync::render_calendar_sync(&style(true, false), &outcome, &problems);
         assert!(
             colored.contains("\x1b[1;34mmaru calendar-sync primary\x1b[0m"),
             "{colored}"

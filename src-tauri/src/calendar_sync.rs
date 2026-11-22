@@ -631,6 +631,7 @@ pub(crate) const CALENDAR_SYNC_USAGE: &str =
 pub(crate) fn render_calendar_sync(
     style: &crate::cli_output::Style,
     outcome: &CalendarSyncOutcome,
+    problems: &[ProblemRecord],
 ) -> String {
     use crate::cli_output::Marker;
     let context = if outcome.dry_run { "dry run" } else { "" };
@@ -675,19 +676,82 @@ pub(crate) fn render_calendar_sync(
         style.section("Counts", None),
         style.rows(&rows)
     ));
-    let problems = outcome.failed + outcome.blocked;
+    let problem_count = outcome.failed + outcome.blocked;
     text.push_str("\n\n");
-    if problems == 0 {
+    if problem_count == 0 {
         text.push_str(&style.summary(0, 0, outcome.drained));
     } else {
+        // Problems first: the failed or blocked records, read from the outbox
+        // after the drain, each with its stored error. Nothing reruns.
+        let mut attention = format!(
+            "\n\n{}",
+            style.section("Attention", Some(&problems.len().to_string()))
+        );
+        for problem in problems {
+            let marker = if problem.blocked {
+                Marker::Warn
+            } else {
+                Marker::Fail
+            };
+            attention.push('\n');
+            attention.push_str(&style.bullet(
+                marker,
+                &format!(
+                    "{}: {} ({})",
+                    problem.state, problem.error, problem.task_path
+                ),
+            ));
+        }
+        if problems.is_empty() {
+            attention.push('\n');
+            attention.push_str(&style.bullet(
+                Marker::Unknown,
+                "the outbox records were not readable; see .maru/today/outbox/",
+            ));
+        }
+        if let Some(offset) = text.find("\n\n") {
+            text.insert_str(offset, &attention);
+        } else {
+            text.push_str(&attention);
+        }
         text.push_str(&style.summary(outcome.failed, outcome.blocked, outcome.drained));
-        text.push('\n');
-        text.push_str(&style.bullet(
-            Marker::Next,
-            "maru calendar-sync --json shows each failed or blocked record",
-        ));
     }
     text
+}
+
+/// A failed or blocked outbox record as the human report lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProblemRecord {
+    pub state: &'static str,
+    pub blocked: bool,
+    pub error: String,
+    pub task_path: String,
+}
+
+/// The outbox records left failed or blocked, read-only, for the report.
+fn problem_records(work: &Path) -> Vec<ProblemRecord> {
+    let Ok(records) = crate::today_outbox::list_records(work) else {
+        return Vec::new();
+    };
+    records
+        .into_iter()
+        .filter_map(|record| {
+            let (state, blocked) = match record.status {
+                OutboxStatus::AuthBlocked => ("blocked", true),
+                OutboxStatus::RetryNeeded => ("failed", false),
+                _ => return None,
+            };
+            Some(ProblemRecord {
+                state,
+                blocked,
+                error: record
+                    .last_error
+                    .clone()
+                    .unwrap_or_else(|| "no error recorded".to_string()),
+                task_path: record.task_path.clone(),
+            })
+        })
+        .collect()
 }
 
 /// `maru calendar-sync`: the daily job's entry point. Exit 0 when nothing
@@ -731,14 +795,15 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
         None => match std::env::current_dir() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(err) => {
-                return crate::cli_output::fail_with_next(
-                    &format!("calendar-sync: cannot read the current directory: {err}"),
-                    "maru calendar-sync --work <workspace folder>",
-                );
+                return crate::cli_output::fail(&format!(
+                    "calendar-sync: cannot read the current directory: {err}; \
+                     change to the workspace folder or pass --work with its path"
+                ));
             }
         },
     };
     let now_iso = chrono::Local::now().to_rfc3339();
+    let work_for_report = work.clone();
     match calendar_sync_run(work, destination, gws, now_iso, dry_run) {
         Ok(outcome) => {
             if json {
@@ -749,7 +814,15 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
             } else {
                 println!(
                     "{}",
-                    render_calendar_sync(&crate::cli_output::stdout_style(), &outcome)
+                    render_calendar_sync(
+                        &crate::cli_output::stdout_style(),
+                        &outcome,
+                        &if outcome.failed + outcome.blocked > 0 {
+                            problem_records(Path::new(&work_for_report))
+                        } else {
+                            Vec::new()
+                        },
+                    )
                 );
             }
             if outcome.failed == 0 && outcome.blocked == 0 {

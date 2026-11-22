@@ -518,7 +518,31 @@ fn fd_width(fd: libc::c_int) -> Option<usize> {
     (rc == 0 && size.ws_col > 0).then_some(size.ws_col as usize)
 }
 
-#[cfg(not(unix))]
+/// The console's visible column count (window width, not buffer width).
+#[cfg(windows)]
+fn terminal_width(stream: Stream) -> Option<usize> {
+    use windows_sys::Win32::System::Console::{
+        GetConsoleScreenBufferInfo, GetStdHandle, CONSOLE_SCREEN_BUFFER_INFO, STD_ERROR_HANDLE,
+        STD_OUTPUT_HANDLE,
+    };
+    let which = match stream {
+        Stream::Stdout => STD_OUTPUT_HANDLE,
+        Stream::Stderr => STD_ERROR_HANDLE,
+    };
+    // SAFETY: GetStdHandle has no preconditions; GetConsoleScreenBufferInfo
+    // writes one CONSOLE_SCREEN_BUFFER_INFO and fails on a non-console handle.
+    unsafe {
+        let handle = GetStdHandle(which);
+        let mut info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
+        if GetConsoleScreenBufferInfo(handle, &mut info) == 0 {
+            return None;
+        }
+        let columns = i32::from(info.srWindow.Right) - i32::from(info.srWindow.Left) + 1;
+        (columns > 0).then_some(columns as usize)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn terminal_width(_stream: Stream) -> Option<usize> {
     None
 }
