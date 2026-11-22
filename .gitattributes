@@ -1,8 +1,3 @@
-# Vendored third-party trees are hash-pinned verbatim copies of upstream
-# (see sidecars/archify/PIN.json and scripts/check-archify-pin.mjs). Their
-# whitespace is upstream's own; `git diff --check` must not flag it, because
-# "fixing" it would break the pin hashes. Drift is owned by the pin guard.
-sidecars/archify/** -whitespace
 # Keep source, scripts, and hash-pinned text byte-stable on every platform.
 # Git's Windows CRLF conversion also breaks shebang imports and source guards.
 * text=auto eol=lf

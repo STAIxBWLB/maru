@@ -4,7 +4,7 @@ Maru is a local-first desktop workspace for Korean knowledge and document
 operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
 core, and treats the filesystem as the source of truth.
 
-The current product release is **v1.1.30, Editable Pages**. Releases
+The current product release is **v1.1.31, Scanned Maps**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
 identifier and on-disk migration to Maru.
 
@@ -12,7 +12,7 @@ identifier and on-disk migration to Maru.
 
 | Area | State | Evidence |
 |------|-------|----------|
-| Product release | v1.1.30 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
+| Product release | v1.1.31 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
 | Planning milestone | v1.1 Felt Quality and Native Proof, closed | Closed 2026-09-27: phases 6-11 (56 plans), audit `tech_debt` with the debt accepted |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
@@ -532,6 +532,10 @@ Requirements:
 - Rust MSRV 1.90.0; `rust-toolchain.toml` pins the repository verification
   toolchain and the `wasm32-unknown-unknown` target used by semantic diagrams
 - Platform libraries required by Tauri 2
+
+Node is a development requirement only. The installed app runs diagram
+validation, layout and SVG/PNG rendering on the built-in diagram engine, so
+users need no `node` binary for diagram features.
 
 Browser development, frontend builds and unit tests generate the ignored diagram
 WASM assets through `pnpm engine:assets` before loading them. The first run

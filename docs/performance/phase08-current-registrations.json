@@ -2398,7 +2398,7 @@
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "1ff54989cc444f7e3910454915372c6491006818db3692650d2459794cc5bcda"
+      "sha256": "49024367838395fc54f4da70064005b2fe4ee3e6333c4f9ad21a987e30125188"
     },
     {
       "path": "src-tauri/capabilities/default.json",
@@ -2470,7 +2470,7 @@
     },
     {
       "path": "src-tauri/src/calendar_sync.rs",
-      "sha256": "af704a4b291b315bcba0a848f816d81e182b7ad87c0c2106d3cb4b5b9fad3259"
+      "sha256": "c97b3c9fe1407e33477d5cb4343b459fa6e9f29f6d876122da3a8aab3a7a5226"
     },
     {
       "path": "src-tauri/src/content_search.rs",
@@ -2586,7 +2586,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "e9ea3f3aea61ee8c23270b4ef4d30018cbc2e38472d5d0380a1d403335b0819a"
+      "sha256": "65560af66c52da03ba57b898d0cac9e8147c30afb3f1f187d4cb4b40f3a68a0b"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2766,8 +2766,8 @@
     },
     {
       "path": "src-tauri/tauri.conf.json",
-      "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
+      "sha256": "6f401ff63df4a5a3894a99fba349b4d5e8c54e6b6c23cf4612694c95ed3725ac"
     }
   ],
-  "sourceCommit": "19686810d9dae71c55ac92773dbbaf33607c8f0a"
+  "sourceCommit": "88a69014e519b4081d5126a3c1547a979a964304"
 }

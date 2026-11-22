@@ -210,13 +210,6 @@ check-type-tokens: ## Static guard: styles.css font sizes must use the --type-*/
 	@! grep -nE 'font-size: *[0-9.]+px' src/styles.css \
 		|| (echo "check-type-tokens: raw px font-size above — use a --type-*/--read-* token (src/foundations.css)"; exit 1)
 
-# Archify engine pin (issue #433): the Diagram generation pipeline runs the
-# vendored, hash-pinned Archify copy in sidecars/archify, never the
-# user-mutable installed skill. Drift from PIN.json fails the build.
-.PHONY: check-archify-pin
-check-archify-pin: ## Static guard: vendored Archify engine matches sidecars/archify/PIN.json
-	$(NODE) scripts/check-archify-pin.mjs
-
 .PHONY: test-ts
 test-ts: node_modules ## TypeScript / React unit tests (vitest)
 	$(PNPM) test
@@ -416,7 +409,7 @@ homebrew-fetch: homebrew-trust ## Fetch the published Maru cask and CLI formula
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-main-iframes check-type-tokens check-archify-pin test-ts test-rust test-diagram-plugin fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
+verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-main-iframes check-type-tokens test-ts test-rust test-diagram-plugin fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
 
 # ---------------------------------------------------------------------------
 # Clean

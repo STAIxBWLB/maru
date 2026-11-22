@@ -43,9 +43,9 @@ Backend commands (`src-tauri/src/diagram/mod.rs`): `diagram_save_document`,
 `diagram_backup_document` (one-time legacy backup), pattern presets
 `diagram_pattern_save` / `diagram_pattern_list` / `diagram_pattern_delete`,
 and `diagram_write_report_asset` (report assets; extension-whitelisted to
-svg/png/json, traversal-safe, atomic, write-guard checked). Generation adds
-`archify_validate_candidate` (`src-tauri/src/archify.rs`, pinned-engine
-validation). The retired gallery commands are no longer registered.
+svg/png/json, traversal-safe, atomic, write-guard checked). Generation
+validates and renders through the diagram engine plugin. The retired gallery
+commands and the Archify sidecar commands are no longer registered.
 The command-isolation gate expects the registered command
 count set in `Makefile` (`--expected-count`) with recorded evidence.
 
@@ -489,28 +489,16 @@ codec). The Archify `architecture` type is told apart by `diagram_type` and
 `<name>.architecture.json`, never by the bare name. Export emits the spec
 verbatim; Mermaid does not apply.
 
-## Archify engine pin
+## Diagram engine
 
-The validation/render engine is the vendored, hash-pinned copy at
-`sidecars/archify/` — never the user-installed skill at
-`~/.agents/skills/archify`, which is user-mutable. `sidecars/archify/PIN.json`
-carries `version`, `repository`, a 40-hex `revision` (plus `revisionRef`),
-`pinnedAt`, `license: MIT` with `licenseHolders`, the vendoring `excludes`,
-and a `fileHashes` SHA-256 manifest of every vendored file. `make verify`
-runs `check-archify-pin` (`scripts/check-archify-pin.mjs`), which fails the
-build when the tree drifts from the manifest, when LICENSE or
-THIRD_PARTY_NOTICES.md go missing, or when the pin metadata is incomplete.
-
-Refresh after a deliberate engine update: re-vendor the files, regenerate
-the manifest from the repo root —
-
-```bash
-node -e 'const{createHash}=require("node:crypto"),{readdirSync,readFileSync,statSync}=require("node:fs"),{join,relative,sep}=require("node:path");const root="sidecars/archify";const walk=(d)=>readdirSync(d).sort().flatMap((e)=>{const p=join(d,e);return statSync(p).isDirectory()?walk(p):[p]});const out={};for(const f of walk(root)){const rel=relative(root,f).split(sep).join("/");if(rel!=="PIN.json")out[rel]=createHash("sha256").update(readFileSync(f)).digest("hex")}console.log(JSON.stringify(out,null,2))'
-```
-
-— write the result into `PIN.json.fileHashes`, bump `version` / `revision` /
-`pinnedAt`, review the diff, and keep the MIT notices (LICENSE,
-THIRD_PARTY_NOTICES.md) intact.
+Validation, layout, SVG and PNG rendering and the offline viewer run on the
+Maru diagram engine (`src-tauri/crates/maru-diagram-engine`, see
+[Engine](#engine)): natively in the app and as WebAssembly in the browser.
+The vendored Archify sidecar, its pin check and the Node runtime it needed were
+removed in E6 (#554), so diagram features need neither `node` nor a
+`sidecars/` directory. Archify JSON stays an interchange format through
+`archifyCodec.ts`, and Archify-era receipts and stored renders still open
+(`LegacyArchifyReceipt` in `src-tauri/src/diagram/renders.rs`).
 
 ## Architecture documents
 
@@ -895,17 +883,6 @@ Viewport culling (`visibleSubset`) + a position-keyed edge-route Map cache
   undo → save/reload, detach, delete guard, no `localhost:5500` / Google
   Fonts requests).
 
-## Archify engine pin
-
-The renderer is vendored under `sidecars/archify/`; `PIN.json` records the
-upstream revision and SHA-256 manifest. Run `make check-archify-pin` to verify
-integrity. To refresh, fetch an explicitly reviewed upstream tag, replace only
-the vendored paths listed by the manifest, retain the MIT license and third-party
-notices, and regenerate the manifest from those exact upstream bytes. Update
-`ARCHIFY_ENGINE` in `src/lib/diagram/archifyCodec.ts` to the same version and
-review the upstream diff before running the full verification gate. Never
-refresh from a mutable installed skill directory.
-
 ## Engine
 
 E0 (#544) is an independent architecture validation spike, not the product
@@ -1144,6 +1121,32 @@ The final SDK subtree split `f7858382` (tree `a5c859a1`) passed 28 core unit
 and two differential tests plus three plugin tests from its source-only archive
 with Node removed from PATH. This is separate from the browser's Node-free
 validation proof and from the pending hosted final-head gate.
+
+### Frozen oracle verdicts (E6 T1, #554)
+
+Every corpus case in `testdata/parity.json` (`cases` and `boundaryCases`)
+keeps the last verdict the pinned Archify oracle returned: `oracle`,
+`schemaOracle`, `documentOracle` and, for public cases, the evidence-stripped
+`validity*` verdicts. The differential tests compare the engine against these
+recorded verdicts only; no test runs Archify.
+
+- `frozenOracle` names the oracle (`id`, `version`, `revision`, the sha256 of
+  the last `sidecars/archify/PIN.json`) and the command that recorded the
+  verdicts, `node scripts/diagram-engine-freeze-oracle.mjs --write`, which
+  reran the CLI oracle uncached for every case at #643. E6 T2 removed that
+  script, its `make check-oracle-freeze` gate and the sidecar, so these
+  recorded verdicts are now the oracle and are never edited by hand. The last
+  pin file is kept verbatim as a render-receipt fixture at
+  `src-tauri/src/diagram/testdata/legacy-archify-pin.json`.
+- Each case has a `label`. `{"source": "archify-oracle"}` marks a verdict
+  recorded from the oracle. A case added after E6 has no oracle to ask, so it
+  is labelled `{"source": "maru-engine", "reviewedIn": "#<PR>"}`: its expected
+  result comes from the Maru engine, and the named PR is where a reviewer
+  accepted it. `tests/frozen_oracle.rs` fails an unlabelled case, an
+  engine-labelled case with no reviewing PR, or an oracle case whose
+  `comparison.accepted` disagrees with its frozen verdict.
+- Oracle staging paths are normalized to `<oracle-staging>`, so a recorded
+  verdict is identical on every host and names no local path.
 
 
 ### E1 hosted baseline and object-shape follow-up
