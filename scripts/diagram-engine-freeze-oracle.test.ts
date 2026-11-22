@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { normalizeStagingPaths } from "./diagram-engine-e0-corpus.mjs";
+import { normalizeStagingPaths, portableOracleReport } from "./diagram-engine-e0-corpus.mjs";
 import { FREEZE_COMMAND, ORACLE_LABEL, verdictDifferences } from "./diagram-engine-freeze-oracle.mjs";
 
 const corpus = JSON.parse(readFileSync("src-tauri/crates/maru-diagram-engine/testdata/parity.json", "utf8"));
@@ -37,6 +37,15 @@ describe("E6 T1 frozen oracle corpus", () => {
     expect(normalizeStagingPaths(windowsInput, windows)).not.toContain("Some One");
     // An unrelated path that merely contains the marker is left alone.
     expect(normalizeStagingPaths(json("/elsewhere/archify-validate-X"), "/tmp/oracle tmp")).toBe(json("/elsewhere/archify-validate-X"));
+  });
+
+  it("normalizes staging when the temp root is the repository root or below it", () => {
+    const repo = "/work/maru";
+    const report = (dir: string) => ({ subject: { input: `${dir}/archify-validate-VhLMBn/specification.snapshot.json` }, other: `${repo}/x.json` });
+    const expected = { subject: { input: "<oracle-staging>/specification.snapshot.json" }, other: "<fixture-root>/x.json" };
+    expect(portableOracleReport(report(repo), repo, repo)).toEqual(expected);
+    expect(portableOracleReport(report(`${repo}/.tmp`), `${repo}/.tmp`, repo)).toEqual(expected);
+    expect(portableOracleReport(report("/tmp"), "/tmp", repo)).toEqual(expected);
   });
 
   it("reports exactly the verdict fields that differ", () => {

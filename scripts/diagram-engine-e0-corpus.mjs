@@ -184,9 +184,13 @@ export function normalizeStagingPaths(text, tmpRoot) {
   return text.replace(pattern, (_match, after) => (after ? "<oracle-staging>/" : "<oracle-staging>"));
 }
 
-function portableOracleReport(value) {
+/** @param {unknown} value @param {string} [tmpRoot] @param {string} [repoRoot] */
+export function portableOracleReport(value, tmpRoot = tmpdir(), repoRoot = root) {
   // A recorded verdict must be identical on every host and name no local path.
-  return JSON.parse(normalizeStagingPaths(JSON.stringify(value).split(root).join("<fixture-root>"), tmpdir()));
+  // Staging goes first: a TMPDIR at or below the repository root would
+  // otherwise turn into <fixture-root>/archify-validate-* and keep its random
+  // directory name.
+  return JSON.parse(normalizeStagingPaths(JSON.stringify(value), tmpRoot).split(repoRoot).join("<fixture-root>"));
 }
 /** Run the pinned CLI oracle on one case. `useCache: false` always spawns the
  * sidecar, which the oracle freeze check needs to prove the recorded verdict.
