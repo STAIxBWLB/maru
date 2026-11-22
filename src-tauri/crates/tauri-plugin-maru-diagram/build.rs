@@ -1,5 +1,5 @@
 fn main() {
-    let mut commands = vec!["validate"];
+    let mut commands = vec!["validate", "scan_repository"];
     if std::env::var_os("CARGO_FEATURE_PNG").is_some() {
         commands.push("render_png");
     }

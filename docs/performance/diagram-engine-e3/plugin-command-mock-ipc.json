@@ -1,7 +1,8 @@
 {
-  "pluginCommandCount": 7,
+  "pluginCommandCount": 8,
   "pluginCommandsObserved": [
     "validate",
+    "scan_repository",
     "render_png",
     "diagram_list_renders",
     "diagram_prepare_render_view",

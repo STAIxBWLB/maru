@@ -5,6 +5,7 @@ import {
   FileImage,
   FileInput,
   FolderOpen,
+  FolderSearch,
   ImportIcon,
   LayoutTemplate,
   GalleryHorizontalEnd,
@@ -23,6 +24,8 @@ export interface RibbonFileProps {
   onExport: () => void;
   onTemplates: () => void;
   onGenerate: () => void;
+  /** Opens the read-only repository scan (issue #553); optional for older hosts. */
+  onScanRepository?: () => void;
   onHistory: () => void;
   onRenders: () => void;
   onImport: () => void;
@@ -46,6 +49,7 @@ export function RibbonFile({
   onExport,
   onTemplates,
   onGenerate,
+  onScanRepository,
   onHistory,
   onRenders,
   onImport,
@@ -92,6 +96,13 @@ export function RibbonFile({
           onClick={onGenerate}
           icon={<Sparkles size={14} />}
         />
+        {onScanRepository && (
+          <RibbonButton
+            labelKey="diagram.ribbon.scanRepository"
+            onClick={onScanRepository}
+            icon={<FolderSearch size={14} />}
+          />
+        )}
       </RibbonGroup>
       <RibbonGroup labelKey="diagram.ribbon.export">
         <RibbonButton labelKey="diagram.renders.title" onClick={onRenders} icon={<GalleryHorizontalEnd size={14} />} />
