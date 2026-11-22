@@ -4,7 +4,6 @@ mod agents;
 mod ai_router;
 mod app_menu;
 mod approval;
-#[cfg(test)]
 mod artifact_checks;
 mod atomic_file;
 mod binary_viewer;
