@@ -1919,6 +1919,20 @@ order or collision predicate changed:
 | Base engine (243.4 ms hosted head) | 2.8-2.9 / 2.9-3.0 | 12.1-12.3 / 12.5-12.6 | 83.6-84.1 / 85.7-86.5 |
 | This head | 2.0 / 2.1 | 9.0 / 9.4 | 60.7 / 62.3 |
 
+| Hosted Chromium/WASM p95, ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| `3212ff93` (#576), run 42834613105 | 7.0 | 31.7 | 279.3 |
+| `43155594876` (#584), run 43155594876 | 7.2 | 33.1 | 243.4 |
+| This head `680a613c`, run 45004427356 | 5.0 | 22.2 | 157.1 |
+
+The hosted 1,000-node median at this head is 152.6 ms with a 418.8 ms first
+layout, so the harness reports `targetMet:true` for the 200 ms AC6 requirement
+and `budgetMet:true` for the 400 ms E2 budget: the 243.4 ms accepted floor falls
+by 35.4%, and the 50- and 200-node rows move with it. That hosted run measured
+the same commit this section describes, and the 157.1 ms p95 is the acceptance
+figure; the local pair above is the engine-to-engine comparison on a machine
+about 2.6x faster than the runner.
+
 The local 1,000-node first layout falls from 134.1-135.5 ms to 110.1 ms at this
 head. The same `bench-1000.json` fixture still routes all 999 edges and emits the
 same 1,963,330-byte report; the native release layout measures median 39.0 / p95
