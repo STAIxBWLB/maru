@@ -933,6 +933,64 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_nodes_across_a_bucket_boundary_report_each_pair_once() {
+        // Nodes are 120x60px and the grid's column edge sits 512px right of the
+        // scene's leftmost node, so this scene puts every overlapping pair
+        // across that edge: `left` (400..520) and `straddler` (450..570) each
+        // join both columns, while `left_of_boundary` (380..500) joins only the
+        // left column and `right_of_boundary` (512..632) only the right one.
+        // The lookup for `left` therefore gathers two columns and returns
+        // `left` and `straddler` twice, in column order rather than index
+        // order, which is what the sort and the dedup in `within` undo.
+        let spec = serde_json::json!({"schema_version":1,"diagram_type":"architecture",
+            "meta":{"title":"Boundary pairs","output":"boundary.html","viewBox":[1400,400]},
+            "components":[{"id":"anchor","type":"frontend","label":"Anchor","pos":[0,300]},
+                {"id":"left","type":"backend","label":"Left","pos":[400,100]},
+                {"id":"right_of_boundary","type":"backend","label":"Right","pos":[512,100]},
+                {"id":"left_of_boundary","type":"database","label":"Bleed","pos":[380,100]},
+                {"id":"straddler","type":"database","label":"Straddle","pos":[450,100]}],
+            "connections":[]});
+        let report = crate::layout::layout_json(
+            &serde_json::json!({"specJson":spec.to_string()}).to_string(),
+        );
+        let overlaps: Vec<(&str, &str)> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "architecture/geometry-node-overlap")
+            .map(|d| (d.path.as_str(), d.message.as_str()))
+            .collect();
+        assert_eq!(
+            overlaps,
+            [
+                // Geometry order is the node id's order, so the pairs report
+                // left index ascending and, within one left node, right index
+                // ascending: `left` pairs with left_of_boundary (2),
+                // right_of_boundary (3) and straddler (4) in that order.
+                (
+                    "/components/3",
+                    "nodes \"left\" and \"left_of_boundary\" have less than 8px of separation"
+                ),
+                (
+                    "/components/2",
+                    "nodes \"left\" and \"right_of_boundary\" have less than 8px of separation"
+                ),
+                (
+                    "/components/4",
+                    "nodes \"left\" and \"straddler\" have less than 8px of separation"
+                ),
+                (
+                    "/components/4",
+                    "nodes \"left_of_boundary\" and \"straddler\" have less than 8px of separation"
+                ),
+                (
+                    "/components/4",
+                    "nodes \"right_of_boundary\" and \"straddler\" have less than 8px of separation"
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn duplicate_boundary_captions_are_checked_by_namespaced_identity() {
         let spec = serde_json::json!({"schema_version":1,"diagram_type":"architecture",
             "meta":{"title":"Boundary identity","output":"boundaries.html","quality_profile":"showcase","viewBox":[400,300]},
