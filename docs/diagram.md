@@ -1929,6 +1929,77 @@ tests or `geometry-corpus`, with no hooks in normal product builds. They do not
 measure allocation, hash-table probes, font internals or elapsed time. Updating
 a ceiling requires deliberate remeasurement with `geometry-work` and review.
 
+#### E4 T5 diagnostics and build-profile tranche (#552)
+
+The 243.4 ms hosted floor above is still above the 200 ms AC6 target, so this
+tranche priced the remaining blocks before changing any of them. A 6 s macOS
+`sample` run over warm 1,000-node layouts (native release, sorted by top of
+stack, cargo's default release profile) names, of 4,130 self samples, 15.2% in
+the A* clearance lookups (`ClearanceCache::segment_clear` 280 +
+`point_clear` 258), 18.9% in allocation traffic (`malloc`/`free`/`memmove`),
+10.4% in scene finish, 10.5% in the scene digest (`sha2::compress256` 303 plus
+its `serde_json` sink), 8.3% in the endpoint-escape closure `route_points`
+builds per candidate, 8.6% in the A* queue and state maps, 6.6% in font
+metrics, 3.5% in `route_geometry_diagnostics` and 2.6% in
+`constraints::geometry_diagnostics`.
+
+A wasm artifact cannot be sampled symbolically, so the same shares were priced
+on the production `wasm-layout` build by removing one block at a time and
+re-running the harness locally (20 warm samples, 1,000 nodes): skipping only the
+receipt digest removes 4.1 ms, skipping the five source-relative diagnostic
+passes removes 11.4 ms, and keeping only `route_geometry_diagnostics` removes
+6.1 ms. Diagnostics were the largest removable block, and 6.1 ms of the 11.4 ms
+sat in the route pass.
+
+Four changes follow from those numbers. No geometry rule, obstacle set, search
+order or collision predicate changed:
+
+- `check_node_overlap` asks the bucket grid the route diagnostics already use for
+  the nodes within one `gap` of each left node, instead of walking every
+  remaining node; a lookup still returns candidates in scene order, so pairs are
+  reported left index ascending then right index ascending;
+- `check_node_labels` groups the emitted labels by owning member once, instead of
+  filtering the whole label list for every node;
+- the route-label overlap walk visits only routes that secured a label, and
+  `pair_quality` skips its quadratic walk unless the scene is `showcase` or
+  workflow v2, which are the only two conditions under which a pair can report;
+- `src-tauri/crates/Cargo.toml` pins `lto = "fat"` and `codegen-units = 1` for
+  release builds of the engine workspace, because the pass is a chain of small
+  generic helpers across one crate graph: the same 1,000-node artifact measures
+  median 66.3 / p95 69.8 ms without it.
+
+| Local production WASM, median / p95 ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| Base engine (243.4 ms hosted head) | 2.8-2.9 / 2.9-3.0 | 12.1-12.3 / 12.5-12.6 | 83.6-84.1 / 85.7-86.5 |
+| This head | 2.0 / 2.1 | 9.0 / 9.4 | 60.7 / 62.3 |
+
+| Hosted Chromium/WASM p95, ms | 50 nodes | 200 nodes | 1,000 nodes |
+| --- | --- | --- | --- |
+| `3212ff93` (#576), run 42834613105 | 7.0 | 31.7 | 279.3 |
+| `0aba7960` (#584), run 43155594876 | 7.2 | 33.1 | 243.4 |
+| `680a613c`, run 45004427356 | 5.0 | 22.2 | 157.1 |
+| `dd47a9af` (documentation only), run 45005893606 | 4.4 | 13.3 | 88.4 |
+| `b07c62f4` (final head), run 45008781270 | 5.0 | 21.7 | 158.0 |
+
+The three runs of this engine differ by 1.8x at 1,000 nodes (median 152.6,
+84.1 and 146.0 ms, first layouts 418.8, 211.3 and 343.5 ms), which is the
+runner spread the earlier sections saw; the two slow-runner figures agree
+within 0.6%, so 158.0 ms is the conservative one. Every one of the three
+reports `targetMet:true` for the 200 ms AC6 requirement and `budgetMet:true`
+for the 400 ms E2 budget, and the 243.4 ms accepted floor falls by 35.1% on
+that figure and by 63.7% on the faster runner. The local pair above is the
+engine-to-engine comparison on a machine about 1.4x to 2.6x faster than those
+runners.
+
+The local 1,000-node first layout falls from 134.1-135.5 ms to 110.1 ms at this
+head. The same `bench-1000.json` fixture still routes all 999 edges and emits the
+same 1,963,330-byte report; the native release layout measures median 39.0 / p95
+41.2 ms, down from 59.2 / 63.8 ms. Scene hashes, SVG hashes, PNG manifests and
+every corpus case stay byte-identical, and no checked-in work ceiling moved. The
+only receipt change is the constraint-evaluation counter,
+`benchmarkWork.stats.constraintEvaluations` 2,013,086 to 18,083, because the two
+pair walks no longer enumerate pairs that cannot report.
+
 Remaining model/admission investigations are tracked in [#560](https://github.com/STAIxBWLB/maru/issues/560),
 a prerequisite for E4. The recorded model disagreements retain their individual
 oracle results and require evidence-based classification before fixes.

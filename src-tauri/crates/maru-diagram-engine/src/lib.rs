@@ -241,6 +241,30 @@ fn spec_hash(input: &str) -> String {
     format!("{:x}", Sha256::digest(input.as_bytes()))
 }
 
+/// Hash the exact JSON bytes of a value without materializing them first.
+///
+/// The digest is the same one `spec_hash` of `to_string` would produce, because
+/// both use serde_json's compact formatter; a scene-sized value saves its own
+/// buffer and one copy of them.
+pub(crate) fn json_sha256<T>(value: &T) -> Result<String, serde_json::Error>
+where
+    T: serde::Serialize + ?Sized,
+{
+    struct Sink<'a>(&'a mut Sha256);
+    impl std::io::Write for Sink<'_> {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.update(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut digest = Sha256::new();
+    serde_json::to_writer(&mut Sink(&mut digest), value)?;
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 fn diagnostic(
     code: &str,
     path: &str,

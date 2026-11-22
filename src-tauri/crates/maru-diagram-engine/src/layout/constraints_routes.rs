@@ -24,7 +24,7 @@ pub(crate) fn is_route_quality_notice(diagnostic: &Diagnostic) -> bool {
 const U: i64 = 64;
 type Point = (i64, i64);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct Rect {
+pub(super) struct Rect {
     x: i64,
     y: i64,
     w: i64,
@@ -37,6 +37,16 @@ impl Rect {
     fn bottom(self) -> i64 {
         self.y + self.h
     }
+    /// The same rectangle grown by `limit` on every side, which is the bounds a
+    /// clearance witness within `limit` still reaches.
+    pub(super) fn grown(self, limit: i64) -> Rect {
+        Rect {
+            x: self.x - limit,
+            y: self.y - limit,
+            w: self.w + 2 * limit,
+            h: self.h + 2 * limit,
+        }
+    }
 }
 
 /// A uniform bucket grid over the id-keyed rectangles of one domain, so a
@@ -47,7 +57,7 @@ impl Rect {
 /// witness; and because rectangles join in the caller's order, a lookup
 /// returns its witnesses in that same order. A route therefore still reports
 /// the same first node it reported when this pass compared against all of them.
-struct RectBuckets<'a> {
+pub(super) struct RectBuckets<'a> {
     items: Vec<(&'a str, Rect)>,
     buckets: Vec<Vec<u32>>,
     origin_x: i64,
@@ -63,7 +73,7 @@ const BUCKET_SPAN: i64 = 512 * 64;
 const BUCKET_LIMIT: usize = 1 << 18;
 
 impl<'a> RectBuckets<'a> {
-    fn build(items: impl IntoIterator<Item = (&'a str, Rect)>) -> Self {
+    pub(super) fn build(items: impl IntoIterator<Item = (&'a str, Rect)>) -> Self {
         let items: Vec<_> = items.into_iter().collect();
         let mut grid = Self {
             items,
@@ -148,7 +158,7 @@ impl<'a> RectBuckets<'a> {
     }
 
     /// The rectangles whose bounds reach `bounds`, in build order.
-    fn within<'s>(&self, bounds: Rect, scratch: &'s mut Vec<u32>) -> &'s [u32] {
+    pub(super) fn within<'s>(&self, bounds: Rect, scratch: &'s mut Vec<u32>) -> &'s [u32] {
         scratch.clear();
         if self.buckets.is_empty() {
             for (index, (_, rect)) in self.items.iter().enumerate() {
@@ -277,7 +287,7 @@ fn point(v: &Value) -> Option<Point> {
 fn gp(p: GeometryPoint) -> Point {
     (i64::from(p.x), i64::from(p.y))
 }
-fn rect(b: crate::geometry::GeometryBox) -> Rect {
+pub(super) fn rect(b: crate::geometry::GeometryBox) -> Rect {
     Rect {
         x: i64::from(b.x),
         y: i64::from(b.y),
@@ -1410,8 +1420,18 @@ fn node_and_label_safety(
             }
         }
     }
-    for (i, a) in routes.iter().enumerate() {
-        for b in routes.iter().skip(i + 1) {
+    // A pair can only report label overlap when both sides secured a label in
+    // the same domain, so label-less routes are not part of any pair.
+    let labelled: Vec<usize> = routes
+        .iter()
+        .enumerate()
+        .filter(|(_, route)| route.label.is_some() || route.reference_label.is_some())
+        .map(|(index, _)| index)
+        .collect();
+    for (position, &left) in labelled.iter().enumerate() {
+        let a = &routes[left];
+        for &right in &labelled[position + 1..] {
+            let b = &routes[right];
             #[cfg(any(test, feature = "geometry-corpus"))]
             crate::work::record_constraint_evaluation();
             let scene_hit = a
@@ -1438,35 +1458,42 @@ fn pair_quality(
 ) {
     let workflow_v2 =
         f.name == "workflow" && spec.get("schema_version").and_then(Value::as_u64) == Some(2);
-    for a in routes {
-        for b in routes {
-            if a.index == b.index {
-                continue;
-            }
-            #[cfg(any(test, feature = "geometry-corpus"))]
-            crate::work::record_constraint_evaluation();
-            let explicit_pair = workflow_v2 && (label_authored(a) || authored_route(b));
-            if !showcase && !explicit_pair {
-                continue;
-            }
-            for (label, points, domain) in [
-                (a.label, &b.scene, Domain::Scene),
-                (a.reference_label, &b.reference, Domain::Reference),
-                (
-                    if explicit_pair {
-                        a.reference_label
-                    } else {
-                        None
-                    },
-                    &b.authored,
-                    Domain::Authored,
-                ),
-            ] {
-                if let Some(label) = label {
-                    if let Some(path_owned) = near_ownership(b, points, domain, label, 4 * U, false)
-                    {
-                        let (index, other, owned) = pair_owner(a, label_authored(a), b, path_owned);
-                        emit(out,f,index,"geometry-route-clearance","label-route-clearance",other,format!("relationship {} label is less than 4px from relationship {} or masks its path",a.index,b.index),"move the offending authored label position or the other authored route control",owned);
+    // Every pair of this pass needs the showcase profile or an authored
+    // workflow-v2 pair before it inspects anything, so a scene with neither
+    // owes the quadratic walk nothing.
+    if showcase || workflow_v2 {
+        for a in routes {
+            for b in routes {
+                if a.index == b.index {
+                    continue;
+                }
+                #[cfg(any(test, feature = "geometry-corpus"))]
+                crate::work::record_constraint_evaluation();
+                let explicit_pair = workflow_v2 && (label_authored(a) || authored_route(b));
+                if !showcase && !explicit_pair {
+                    continue;
+                }
+                for (label, points, domain) in [
+                    (a.label, &b.scene, Domain::Scene),
+                    (a.reference_label, &b.reference, Domain::Reference),
+                    (
+                        if explicit_pair {
+                            a.reference_label
+                        } else {
+                            None
+                        },
+                        &b.authored,
+                        Domain::Authored,
+                    ),
+                ] {
+                    if let Some(label) = label {
+                        if let Some(path_owned) =
+                            near_ownership(b, points, domain, label, 4 * U, false)
+                        {
+                            let (index, other, owned) =
+                                pair_owner(a, label_authored(a), b, path_owned);
+                            emit(out,f,index,"geometry-route-clearance","label-route-clearance",other,format!("relationship {} label is less than 4px from relationship {} or masks its path",a.index,b.index),"move the offending authored label position or the other authored route control",owned);
+                        }
                     }
                 }
             }

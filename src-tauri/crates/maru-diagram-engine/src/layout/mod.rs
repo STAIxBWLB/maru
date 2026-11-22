@@ -174,11 +174,21 @@ fn contains_bounds(outer: GeometryBox, inner: GeometryBox) -> bool {
 }
 
 fn is_node_label(label: &GeometryLabel, node_id: &str) -> bool {
-    let prefix = format!("node:{node_id}:");
-    label
-        .id
-        .as_deref()
-        .is_some_and(|id| matches!(id.strip_prefix(&prefix), Some("label" | "sublabel" | "tag")))
+    label.id.as_deref().is_some_and(|id| {
+        id.strip_prefix("node:")
+            .and_then(|rest| rest.strip_prefix(node_id))
+            .and_then(|rest| rest.strip_prefix(':'))
+            .is_some_and(|role| matches!(role, "label" | "sublabel" | "tag"))
+    })
+}
+
+/// Whether a label id is this node's own (`node:<id>:<role>`), decided without
+/// formatting a prefix: the ladder asks this for every label it places.
+fn belongs_to(node_id: &str, label_id: &str) -> bool {
+    label_id
+        .strip_prefix("node:")
+        .and_then(|rest| rest.strip_prefix(node_id))
+        .is_some_and(|rest| rest.starts_with(':'))
 }
 
 /// Space a standalone SVG keeps between the emitted header band (title plus
@@ -658,37 +668,50 @@ impl SceneBuilder {
         weight: u16,
         size: Coord,
     ) -> Result<GeometryBox, Diagnostic> {
-        let (width, height) = self.text_size(text, weight, size)?;
-        let mut bounds = rect(origin.x, origin.y, width, height)?;
+        // One measurement per line feeds both the block's own box and its glyph
+        // run, so a label costs one pass over its text instead of two. The
+        // accumulation is `text_size`'s, in the same order.
         let font = metrics::font_identity(weight)?;
+        let mut width: Coord = 0;
+        let mut height: Coord = 0;
         let mut glyphs = Vec::new();
         let mut top = origin.y;
-        for line in text.split('\n') {
-            let m = metrics::measure_text(line, weight, size)?;
-            let baseline = add(top, m.ascender)?;
-            for g in m.glyphs {
-                glyphs.push(GeometryGlyph {
-                    glyph_id: g.glyph_id,
-                    input: g.input,
-                    position: GeometryPoint {
-                        x: add(origin.x, g.position.x)?,
-                        y: add(baseline, g.position.y)?,
-                    },
-                    ink: g
-                        .ink
-                        .checked_translate(origin.x, baseline)
-                        .map_err(arithmetic)?,
-                    advance: g.advance,
-                    ignored: g.ignored,
-                    replaced: g.replaced,
-                });
+        if !text.is_empty() {
+            for line in text.split('\n') {
+                let m = metrics::measure_text(line, weight, size)?;
+                let right = m.advance.max(m.ink.right().map_err(arithmetic)?);
+                let left = m.ink.x.min(0);
+                width = width.max(fixed::checked_sub(right, left).map_err(arithmetic)?);
+                height = add(
+                    height,
+                    add(m.ascender, -m.descender)?.max(add(size, size / 2)?),
+                )?;
+                let baseline = add(top, m.ascender)?;
+                for g in m.glyphs {
+                    glyphs.push(GeometryGlyph {
+                        glyph_id: g.glyph_id,
+                        input: g.input,
+                        position: GeometryPoint {
+                            x: add(origin.x, g.position.x)?,
+                            y: add(baseline, g.position.y)?,
+                        },
+                        ink: g
+                            .ink
+                            .checked_translate(origin.x, baseline)
+                            .map_err(arithmetic)?,
+                        advance: g.advance,
+                        ignored: g.ignored,
+                        replaced: g.replaced,
+                    });
+                }
+                self.diagnostics.extend(m.diagnostics);
+                top = add(
+                    top,
+                    add(m.ascender, -m.descender)?.max(add(size, size / 2)?),
+                )?;
             }
-            self.diagnostics.extend(m.diagnostics);
-            top = add(
-                top,
-                add(m.ascender, -m.descender)?.max(add(size, size / 2)?),
-            )?;
         }
+        let mut bounds = rect(origin.x, origin.y, width, height)?;
         for glyph in &glyphs {
             if glyph.ink.width > 0 && glyph.ink.height > 0 {
                 bounds = bounds.union(glyph.ink).map_err(arithmetic)?;
@@ -1044,7 +1067,12 @@ impl SceneBuilder {
             NODE_LABEL_STEPS[0],
             roles,
         )?;
-        let (_, overflow_y) = self.placed_node_label_overflow(id, candidate, label_mark);
+        let (overflow_x, overflow_y) = self.placed_node_label_overflow(id, candidate, label_mark);
+        // The first placement is the loop's first iteration: a label that already
+        // fits keeps those labels instead of placing them a second time.
+        if overflow_x == 0 && overflow_y == 0 {
+            return Ok(Some(candidate));
+        }
         self.document.labels.truncate(label_mark);
         self.diagnostics.truncate(diagnostic_mark);
         // An oval's height is the shape the author's rows and bands are drawn
@@ -1052,7 +1080,8 @@ impl SceneBuilder {
         // accepted scene into the band below it and refuse a document that laid
         // out before. Oval text takes the wrap and type steps instead, and a
         // label that still does not fit is placed as it always was.
-        if overflow_y > 0 && !self.ellipses.contains(id) {
+        let grew = overflow_y > 0 && !self.ellipses.contains(id);
+        if grew {
             // The wrapped lines are fixed once the width is, so one growth
             // step absorbs the whole overflow; only the ceiling limits it.
             let grown = i64::from(candidate.height) + overflow_y;
@@ -1067,7 +1096,13 @@ impl SceneBuilder {
             })?;
             candidate.bottom().map_err(arithmetic)?;
         }
-        for &sizes in NODE_LABEL_STEPS.iter() {
+        for (index, &sizes) in NODE_LABEL_STEPS.iter().enumerate() {
+            // Without growth this is the same box, size and cut permission the
+            // probe above already placed and rejected; labels were discarded, so
+            // the attempt can only fail the same way.
+            if index == 0 && !grew {
+                continue;
+            }
             self.place_node_labels_at(id, label, detail, tag, candidate, sizes, roles)?;
             if self.placed_node_labels_fit(id, candidate, label_mark) {
                 return Ok(Some(candidate));
@@ -1219,7 +1254,6 @@ impl SceneBuilder {
         bounds: GeometryBox,
         since: usize,
     ) -> (i64, i64) {
-        let prefix = format!("node:{id}:");
         let Ok((left, top, right, bottom)) = self.node_text_area(id, bounds) else {
             return (0, 0);
         };
@@ -1235,7 +1269,7 @@ impl SceneBuilder {
             label
                 .id
                 .as_deref()
-                .is_some_and(|label_id| label_id.starts_with(&prefix))
+                .is_some_and(|label_id| belongs_to(id, label_id))
         }) {
             for glyph in label
                 .glyphs
@@ -2481,10 +2515,13 @@ impl SceneBuilder {
         let mut first_routes = BTreeMap::new();
         let mut cached_points = 0;
         let mut failed = BTreeSet::new();
-        for r in self.connections.clone() {
+        // Both passes need the requests while `self` is borrowed mutably, so the
+        // scene is copied once and read twice rather than copied per pass.
+        let connections = self.connections.clone();
+        for r in &connections {
             let label_count = self.document.labels.len();
             let diagnostic_count = self.diagnostics.len();
-            match self.route_label(&r, &sequence_anchors) {
+            match self.route_label(r, &sequence_anchors) {
                 Ok((points, endpoint_masks)) => {
                     if self.cache_enabled && points.len() <= 65_536 - cached_points {
                         cached_points += points.len();
@@ -2495,12 +2532,12 @@ impl SceneBuilder {
                     self.document.labels.truncate(label_count);
                     self.diagnostics.truncate(diagnostic_count);
                     failed.insert(r.source_index);
-                    self.route_error(&r, diagnostic);
+                    self.route_error(r, diagnostic);
                 }
             }
         }
         let mut final_routes = Vec::new();
-        for r in self.connections.clone() {
+        for r in &connections {
             let points = if failed.contains(&r.source_index) {
                 Vec::new()
             } else {
@@ -2511,7 +2548,7 @@ impl SceneBuilder {
                     });
                 let (routed, endpoint_masks) = match reusable {
                     Some((_, points, endpoint_masks)) => (Ok(points), endpoint_masks),
-                    None => match self.route_points(&r, false) {
+                    None => match self.route_points(r, false) {
                         Ok((points, _, endpoint_masks)) => (Ok(points), endpoint_masks),
                         Err(error) => (Err(error), EndpointMasks::default()),
                     },
@@ -2553,7 +2590,7 @@ impl SceneBuilder {
                 match result {
                     Ok(points) => points,
                     Err(diagnostic) => {
-                        self.route_error(&r, diagnostic);
+                        self.route_error(r, diagnostic);
                         Vec::new()
                     }
                 }
@@ -2573,7 +2610,7 @@ impl SceneBuilder {
                     self.diagnostics.push(Diagnostic{code:format!("{}/route-preset-adjusted",self.kind),path:format!("/{collection}/{}",r.source_index),rule:"geometry-v1/orthogonal-straight-preference".into(),message:format!("edge {:?} preset straight requires bends to keep its route orthogonal and obstacle-free",r.id),fix:"align endpoints on a clear axis for a straight segment, or select an orthogonal/channel preset".into()});
                 }
             }
-            final_routes.push(Self::route_record(&r, points));
+            final_routes.push(Self::route_record(r, points));
         }
         self.document.routes = final_routes;
         for (id, card) in self.cards.clone() {
@@ -3098,9 +3135,8 @@ fn layout_with_options(input: &str, options: LayoutOptions) -> GeometryReport {
                 }),
             }
             let mut receipt = validity.receipt;
-            receipt.engine_output_sha256 = Some(crate::spec_hash(
-                &serde_json::to_string(&geometry).expect("integer geometry serializes"),
-            ));
+            receipt.engine_output_sha256 =
+                Some(crate::json_sha256(&geometry).expect("integer geometry serializes"));
             GeometryReport {
                 api_version: 1,
                 ok,
