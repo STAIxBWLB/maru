@@ -751,14 +751,19 @@ fn last_success_covers_fire(
 /// output appends to the same log files a direct plist would write. With
 /// `if_missed` (the guard agent), exits 0 without running when the recorded
 /// success already covers the most recent scheduled fire.
+/// The CLI (`cli.rs::run_jobs_exec`) calls [`jobs_exec_result_in`] and prints
+/// the failure through the shared output module; tests use this exit-code form.
+#[cfg(test)]
 pub fn jobs_exec_in(work_path: &Path, job_id: &str, if_missed: bool) -> i32 {
     match jobs_exec_result(work_path, job_id, if_missed) {
         Ok(code) => code,
-        Err(err) => {
-            eprintln!("jobs_exec_failed: {err}");
-            1
-        }
+        Err(err) => crate::cli_output::fail(&format!("jobs exec: jobs_exec_failed: {err}")),
     }
+}
+
+/// [`jobs_exec_in`] without printing, for callers that format the failure.
+pub fn jobs_exec_result_in(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i32, String> {
+    jobs_exec_result(work_path, job_id, if_missed)
 }
 
 fn jobs_exec_result(work_path: &Path, job_id: &str, if_missed: bool) -> Result<i32, String> {

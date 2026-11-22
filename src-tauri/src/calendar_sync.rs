@@ -623,8 +623,142 @@ pub fn calendar_sync_run(
 
 // --- CLI -----------------------------------------------------------------------------
 
-pub(crate) fn calendar_sync_usage() -> &'static str {
-    "usage: maru calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]"
+pub(crate) const CALENDAR_SYNC_USAGE: &str =
+    "maru calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]";
+
+/// Human report of one run: header, the changes table, the counts and a
+/// summary line (cli-output v1 layout).
+pub(crate) fn render_calendar_sync(
+    style: &crate::cli_output::Style,
+    outcome: &CalendarSyncOutcome,
+    problems: &[ProblemRecord],
+) -> String {
+    use crate::cli_output::Marker;
+    let context = if outcome.dry_run { "dry run" } else { "" };
+    let mut text = style.header(
+        &format!("maru calendar-sync {}", outcome.destination),
+        Some(context),
+    );
+    if !outcome.changes.is_empty() {
+        let count = outcome.changes.len().to_string();
+        text.push_str(&format!("\n\n{}", style.section("Changes", Some(&count))));
+        let rows: Vec<Vec<String>> = outcome
+            .changes
+            .iter()
+            .map(|change| {
+                vec![
+                    change.action.clone(),
+                    change.event_id.clone().unwrap_or_default(),
+                    change.rel_path.clone(),
+                ]
+            })
+            .collect();
+        text.push('\n');
+        text.push_str(&style.table(&["action", "event", "note"], &rows));
+    }
+    let counts = [
+        ("Scanned", outcome.scanned),
+        ("Insert", outcome.inserts),
+        ("Patch", outcome.patches),
+        ("Delete", outcome.deletes),
+        ("Adopt", outcome.adopted),
+        ("Unchanged", outcome.unchanged),
+        ("Foreign", outcome.skipped_foreign),
+        ("Pending", outcome.pending),
+        ("Drained", outcome.drained),
+    ];
+    let rows: Vec<(&str, String)> = counts
+        .iter()
+        .map(|(key, value)| (*key, value.to_string()))
+        .collect();
+    text.push_str(&format!(
+        "\n\n{}\n{}",
+        style.section("Counts", None),
+        style.rows(&rows)
+    ));
+    let problem_count = outcome.failed + outcome.blocked;
+    text.push_str("\n\n");
+    if problem_count == 0 {
+        text.push_str(&style.summary(0, 0, outcome.drained));
+    } else {
+        // The outbox can also contain failures from earlier attempts. Label the
+        // section accordingly and inspect it without repeating provider writes.
+        let mut attention = format!(
+            "\n\n{}",
+            style.section(
+                "Attention",
+                Some(&format!("{} unresolved records", problems.len()))
+            )
+        );
+        for problem in problems {
+            let marker = if problem.blocked {
+                Marker::Warn
+            } else {
+                Marker::Fail
+            };
+            attention.push('\n');
+            attention.push_str(&style.bullet(
+                marker,
+                &format!(
+                    "{}: {} ({})",
+                    problem.state,
+                    crate::cli_output::sanitize_terminal_text(&problem.error),
+                    crate::cli_output::sanitize_terminal_text(&problem.task_path)
+                ),
+            ));
+        }
+        if problems.is_empty() {
+            attention.push('\n');
+            attention.push_str(&style.bullet(
+                Marker::Unknown,
+                "the outbox records were not readable; see .maru/today/outbox/",
+            ));
+        }
+        attention.push('\n');
+        attention.push_str(&style.next_step("Inspect .maru/today/outbox/ before retrying"));
+        if let Some(offset) = text.find("\n\n") {
+            text.insert_str(offset, &attention);
+        } else {
+            text.push_str(&attention);
+        }
+        text.push_str(&style.summary(outcome.failed, outcome.blocked, outcome.drained));
+    }
+    text
+}
+
+/// A failed or blocked outbox record as the human report lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProblemRecord {
+    pub state: &'static str,
+    pub blocked: bool,
+    pub error: String,
+    pub task_path: String,
+}
+
+/// The outbox records left failed or blocked, read-only, for the report.
+fn problem_records(work: &Path) -> Vec<ProblemRecord> {
+    let Ok(records) = crate::today_outbox::list_records(work) else {
+        return Vec::new();
+    };
+    records
+        .into_iter()
+        .filter_map(|record| {
+            let (state, blocked) = match record.status {
+                OutboxStatus::AuthBlocked => ("blocked", true),
+                OutboxStatus::RetryNeeded => ("failed", false),
+                _ => return None,
+            };
+            Some(ProblemRecord {
+                state,
+                blocked,
+                error: record
+                    .last_error
+                    .clone()
+                    .unwrap_or_else(|| "no error recorded".to_string()),
+                task_path: record.task_path.clone(),
+            })
+        })
+        .collect()
 }
 
 /// `maru calendar-sync`: the daily job's entry point. Exit 0 when nothing
@@ -642,9 +776,11 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
             "--json" => json = true,
             "--work" | "--destination" | "--gws" => {
                 let Some(value) = iter.next() else {
-                    eprintln!("{arg} requires a value");
-                    eprintln!("{}", calendar_sync_usage());
-                    return 2;
+                    return crate::cli_output::usage_error(
+                        &format!("{arg} requires a value"),
+                        CALENDAR_SYNC_USAGE,
+                        "calendar-sync",
+                    );
                 };
                 match arg.as_str() {
                     "--work" => work = Some(value.clone()),
@@ -653,22 +789,28 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
                 }
             }
             other => {
-                eprintln!("unknown option: {other}");
-                eprintln!("{}", calendar_sync_usage());
-                return 2;
+                return crate::cli_output::usage_error(
+                    &format!("unknown option: {other}"),
+                    CALENDAR_SYNC_USAGE,
+                    "calendar-sync",
+                );
             }
         }
     }
-    let work = work.or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .map(|path| path.to_string_lossy().to_string())
-    });
-    let Some(work) = work else {
-        eprintln!("cannot resolve current directory");
-        return 1;
+    let work = match work {
+        Some(work) => work,
+        None => match std::env::current_dir() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(err) => {
+                return crate::cli_output::fail(&format!(
+                    "calendar-sync: cannot read the current directory: {err}; \
+                     change to the workspace folder or pass --work with its path"
+                ));
+            }
+        },
     };
     let now_iso = chrono::Local::now().to_rfc3339();
+    let work_for_report = work.clone();
     match calendar_sync_run(work, destination, gws, now_iso, dry_run) {
         Ok(outcome) => {
             if json {
@@ -678,33 +820,17 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
                 );
             } else {
                 println!(
-                    "calendar-sync{}: {} → scanned {}, insert {}, patch {}, delete {}, adopt {}, unchanged {}, foreign {}, pending {}; drained {}, failed {}, blocked {}",
-                    if outcome.dry_run { " (dry run)" } else { "" },
-                    outcome.destination,
-                    outcome.scanned,
-                    outcome.inserts,
-                    outcome.patches,
-                    outcome.deletes,
-                    outcome.adopted,
-                    outcome.unchanged,
-                    outcome.skipped_foreign,
-                    outcome.pending,
-                    outcome.drained,
-                    outcome.failed,
-                    outcome.blocked,
+                    "{}",
+                    render_calendar_sync(
+                        &crate::cli_output::stdout_style(),
+                        &outcome,
+                        &if outcome.failed + outcome.blocked > 0 {
+                            problem_records(Path::new(&work_for_report))
+                        } else {
+                            Vec::new()
+                        },
+                    )
                 );
-                for change in &outcome.changes {
-                    println!(
-                        "  {:<12} {}{}",
-                        change.action,
-                        change.rel_path,
-                        change
-                            .event_id
-                            .as_deref()
-                            .map(|id| format!(" [{id}]"))
-                            .unwrap_or_default()
-                    );
-                }
             }
             if outcome.failed == 0 && outcome.blocked == 0 {
                 0
@@ -712,10 +838,7 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
                 1
             }
         }
-        Err(err) => {
-            eprintln!("{err}");
-            1
-        }
+        Err(err) => crate::cli_output::fail(&format!("calendar-sync: {err}")),
     }
 }
 

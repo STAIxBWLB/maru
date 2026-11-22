@@ -14,6 +14,7 @@ mod calendar_search;
 mod calendar_sync;
 mod channel_delivery;
 mod cli;
+mod cli_output;
 mod cli_path;
 mod command_output;
 mod content_search;
