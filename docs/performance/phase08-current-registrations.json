@@ -2464,7 +2464,7 @@
     },
     {
       "path": "src-tauri/src/calendar_sync.rs",
-      "sha256": "17b364662e8ac6b9058dbb458775ff40c590f286936528adf7878d6ee503a9df"
+      "sha256": "a5ff721934bd092913b31b32e6623d43dabd56a1231b997bbf4f46049035be2b"
     },
     {
       "path": "src-tauri/src/content_search.rs",
@@ -2580,7 +2580,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "0e213a9ac0cc633b3f323d0dd3696307dd73eb8581d5151c4b92af2a1da83aaa"
+      "sha256": "2a87a817c95842ccc0cdee7c84b807ab8f83bf46a07e4037bf1bc05119df5073"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2763,5 +2763,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "deb1b96647e1540bae5c3236688a1a76c7dc9cf1"
+  "sourceCommit": "682a6e10f90bf52f44fcfb7e76be10208358fba0"
 }
