@@ -1145,6 +1145,32 @@ and two differential tests plus three plugin tests from its source-only archive
 with Node removed from PATH. This is separate from the browser's Node-free
 validation proof and from the pending hosted final-head gate.
 
+### Frozen oracle verdicts (E6 T1, #554)
+
+Every corpus case in `testdata/parity.json` (`cases` and `boundaryCases`)
+keeps the last verdict the pinned Archify oracle returned: `oracle`,
+`schemaOracle`, `documentOracle` and, for public cases, the evidence-stripped
+`validity*` verdicts. The differential tests compare the engine against these
+recorded verdicts only; none of them runs the sidecar.
+
+- `frozenOracle` names the oracle (`id`, `version`, `revision`, the sha256 of
+  `sidecars/archify/PIN.json`) and the command that recorded the verdicts:
+  `node scripts/diagram-engine-freeze-oracle.mjs --write`. It reruns the CLI
+  oracle uncached for every case and rewrites only oracle-produced fields.
+  Verdicts are never edited by hand.
+- `make check-oracle-freeze` (in `make verify`) runs the same command with
+  `--check` and fails when any recorded verdict differs from what the pinned
+  sidecar returns at that head. E6 T2 removes it with the sidecar.
+- Each case has a `label`. `{"source": "archify-oracle"}` marks a verdict
+  recorded from the oracle. A case added after E6 has no oracle to ask, so it
+  is labelled `{"source": "maru-engine", "reviewedIn": "#<PR>"}`: its expected
+  result comes from the Maru engine, and the named PR is where a reviewer
+  accepted it. `tests/frozen_oracle.rs` fails an unlabelled case, an
+  engine-labelled case with no reviewing PR, or an oracle case whose
+  `comparison.accepted` disagrees with its frozen verdict.
+- Oracle staging paths are normalized to `<oracle-staging>`, so a recorded
+  verdict is identical on every host and names no local path.
+
 
 ### E1 hosted baseline and object-shape follow-up
 

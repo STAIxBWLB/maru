@@ -156,24 +156,32 @@ const cacheFile = join(root, ".engine-e0/oracle-cache.json");
 /** @type {Record<string, OracleReport>} */
 const oracleCache = existsSync(cacheFile) ? JSON.parse(readFileSync(cacheFile, "utf8")) : {};
 function portableOracleReport(value) {
+  // The CLI stages input under os.tmpdir(), which differs per host (/tmp,
+  // /var/folders/..., $TMPDIR); any staging directory becomes one token so a
+  // recorded verdict is the same on every machine and names no local path.
   return JSON.parse(JSON.stringify(value).split(root).join("<fixture-root>")
-    .replace(/\/tmp\/archify-validate-[A-Za-z0-9_-]+/g, "<oracle-staging>"));
+    .replace(/[^"\s]*\/archify-validate-[A-Za-z0-9_-]+/g, "<oracle-staging>"));
 }
-function oracle(corpusCase) {
+/** Run the pinned CLI oracle on one case. `useCache: false` always spawns the
+ * sidecar, which the oracle freeze check needs to prove the recorded verdict.
+ * @param {CorpusCase} corpusCase @param {{useCache?: boolean}} [options] */
+export function oracle(corpusCase, { useCache = true } = {}) {
   const key = digest(readFileSync(join(root, "sidecars/archify/PIN.json"), "utf8") + corpusCase.diagramType + corpusCase.inputJson);
-  if (oracleCache[key]) return portableOracleReport(oracleCache[key]);
+  if (useCache && oracleCache[key]) return portableOracleReport(oracleCache[key]);
   const temp = join(root, ".engine-e0/oracle-input.json"); mkdirSync(join(root, ".engine-e0"), { recursive: true }); writeFileSync(temp, corpusCase.inputJson);
   const result = spawnSync(process.execPath, [join(root, "sidecars/archify/bin/archify.mjs"), "validate", corpusCase.diagramType, temp, "--json"], { encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024 });
   if (result.error) throw new Error(`Oracle failed for ${corpusCase.id}: ${result.error.message}; check the pinned Node engine`);
   let report; try { report = JSON.parse(result.stdout); } catch { throw new Error(`Oracle returned no JSON for ${corpusCase.id}; inspect the pinned engine`); }
   report = portableOracleReport(JSON.parse(JSON.stringify(report).replaceAll(temp, "oracle-input.json")));
   const receipt = { ...(corpusCase.diagramType === "floorplan" ? { scope: "unsupported-type, not a document validity verdict" } : {}), ok: report.ok === true, codes: (report.diagnostics ?? []).map((d) => d.code ?? "diagnostic"), diagnostics: report.diagnostics ?? [], ...(report.error ? { error: report.error } : {}) };
-  oracleCache[key] = receipt;
-  writeFileSync(cacheFile, JSON.stringify(oracleCache));
+  if (useCache) {
+    oracleCache[key] = receipt;
+    writeFileSync(cacheFile, JSON.stringify(oracleCache));
+  }
   return receipt;
 }
 
-function schemaOracle(corpusCase) {
+export function schemaOracle(corpusCase) {
   if (corpusCase.diagramType === "floorplan") return { ok: false, codes: ["oracle/type-unsupported"], diagnostics: [], scope: "unsupported-type, not a document validity verdict" };
   try {
     validateSchema(corpusCase.diagramType, JSON.parse(corpusCase.inputJson));
@@ -186,7 +194,7 @@ function schemaOracle(corpusCase) {
   }
 }
 /** @param {CorpusCase} corpusCase @param {OracleReport} schemaReport @returns {OracleReport} */
-function documentOracle(corpusCase, schemaReport) {
+export function documentOracle(corpusCase, schemaReport) {
   if (!schemaReport.ok) return schemaReport;
   const input = JSON.parse(corpusCase.inputJson);
   try {

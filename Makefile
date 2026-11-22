@@ -217,6 +217,13 @@ check-type-tokens: ## Static guard: styles.css font sizes must use the --type-*/
 check-archify-pin: ## Static guard: vendored Archify engine matches sidecars/archify/PIN.json
 	$(NODE) scripts/check-archify-pin.mjs
 
+# Frozen oracle (maru#554 E6 T1): every corpus verdict in parity.json must be
+# what the pinned sidecar returns at this head, rerun uncached. E6 T2 removes
+# this target with the sidecar; the recorded verdicts then are the oracle.
+.PHONY: check-oracle-freeze
+check-oracle-freeze: node_modules ## Static guard: frozen corpus verdicts equal the pinned Archify oracle
+	$(NODE) scripts/diagram-engine-freeze-oracle.mjs --check
+
 .PHONY: test-ts
 test-ts: node_modules ## TypeScript / React unit tests (vitest)
 	$(PNPM) test
@@ -416,7 +423,7 @@ homebrew-fetch: homebrew-trust ## Fetch the published Maru cask and CLI formula
 # ---------------------------------------------------------------------------
 
 .PHONY: verify
-verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-main-iframes check-type-tokens check-archify-pin test-ts test-rust test-diagram-plugin fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
+verify: typecheck lint release-version-check icons-check lint-i18n check-select-chrome check-dom-sanitizer check-main-iframes check-type-tokens check-archify-pin check-oracle-freeze test-ts test-rust test-diagram-plugin fmt-check clippy build-frontend check-command-isolation ## Full verification: typecheck + ESLint gate + release versions + generated assets + guards + tests + Rust format check + Rust lint gate + frontend build + Phase 08 evidence closure
 
 # ---------------------------------------------------------------------------
 # Clean

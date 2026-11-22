@@ -4688,6 +4688,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -4734,6 +4737,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -4780,6 +4786,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -4826,6 +4835,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -4872,6 +4884,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -4956,6 +4971,9 @@
         "kind": "e5-floorplan",
         "reasonId": "floorplan-outside-e1",
         "reason": "Floorplan has no E1 validator and remains an E5 input; its unsupported-type receipt is not a document-validity verdict."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5003,6 +5021,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5049,6 +5070,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5156,6 +5180,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5202,6 +5229,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5248,6 +5278,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5294,6 +5327,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5340,6 +5376,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5433,6 +5472,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5526,6 +5568,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5619,6 +5664,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5712,6 +5760,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5805,6 +5856,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5902,6 +5956,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -5995,6 +6052,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6088,6 +6148,9 @@
         "kind": "document-validity",
         "reasonId": "repository-evidence-stripped",
         "reason": "The differential document-validity input removes repository/source evidence, while preserving original input and original verdict; repository checkout verification is outside the pure E1 contract."
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6134,6 +6197,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6244,6 +6310,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6308,6 +6377,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6418,6 +6490,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6482,6 +6557,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6546,6 +6624,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6656,6 +6737,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6766,6 +6850,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6830,6 +6917,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6943,6 +7033,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -6989,6 +7082,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7035,6 +7131,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7142,6 +7241,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7249,6 +7351,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7356,6 +7461,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7568,6 +7676,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7675,6 +7786,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7785,6 +7899,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7892,6 +8009,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -7999,6 +8119,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8106,6 +8229,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8213,6 +8339,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8320,6 +8449,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8427,6 +8559,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8528,6 +8663,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8629,6 +8767,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8739,6 +8880,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8814,6 +8958,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8879,6 +9026,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -8989,6 +9139,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -9123,6 +9276,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -9230,6 +9386,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -9337,6 +9496,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -9467,6 +9629,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -9569,6 +9734,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -9676,6 +9844,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -9828,6 +9999,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10040,6 +10214,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10150,6 +10327,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10317,6 +10497,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10424,6 +10607,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10525,6 +10711,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10632,6 +10821,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10696,6 +10888,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10803,6 +10998,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -10913,6 +11111,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11023,6 +11224,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11087,6 +11291,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11110,7 +11317,7 @@
             "severity": "error",
             "message": "Cannot read properties of undefined (reading '0')",
             "subject": {
-              "input": "/var/folders/qn/v82hvrgn0w76wsnd3y3v597m0000gn/T/archify-validate-39dfoT/specification.snapshot.json"
+              "input": "<oracle-staging>/specification.snapshot.json"
             },
             "evidence": {
               "errorName": "TypeError"
@@ -11157,6 +11364,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11180,7 +11390,7 @@
             "severity": "error",
             "message": "Cannot read properties of undefined (reading '0')",
             "subject": {
-              "input": "/var/folders/qn/v82hvrgn0w76wsnd3y3v597m0000gn/T/archify-validate-7ifhZn/specification.snapshot.json"
+              "input": "<oracle-staging>/specification.snapshot.json"
             },
             "evidence": {
               "errorName": "TypeError"
@@ -11227,6 +11437,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11302,6 +11515,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11348,6 +11564,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11394,6 +11613,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11487,6 +11709,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11582,6 +11807,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11677,6 +11905,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11790,6 +12021,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -11885,6 +12119,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12016,6 +12253,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12123,6 +12363,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12187,6 +12430,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12233,6 +12479,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12279,6 +12528,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12386,6 +12638,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12493,6 +12748,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12600,6 +12858,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12812,6 +13073,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -12919,6 +13183,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13029,6 +13296,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13136,6 +13406,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13243,6 +13516,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13350,6 +13626,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13457,6 +13736,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13564,6 +13846,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13671,6 +13956,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13787,6 +14075,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13833,6 +14124,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -13934,6 +14228,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14044,6 +14341,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14130,6 +14430,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14195,6 +14498,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14305,6 +14611,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14439,6 +14748,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14546,6 +14858,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14653,6 +14968,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14783,6 +15101,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14885,6 +15206,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -14992,6 +15316,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -15144,6 +15471,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -15356,6 +15686,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -15466,6 +15799,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -15633,6 +15969,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -15740,6 +16079,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -15841,6 +16183,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -15948,6 +16293,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16012,6 +16360,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16119,6 +16470,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16226,6 +16580,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16333,6 +16690,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16446,6 +16806,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16510,6 +16873,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16585,6 +16951,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16660,6 +17029,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16724,6 +17096,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16788,6 +17163,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16852,6 +17230,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16916,6 +17297,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -16980,6 +17364,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17081,6 +17468,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17156,6 +17546,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17228,6 +17621,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17300,6 +17696,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17371,6 +17770,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17445,6 +17847,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17491,6 +17896,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17537,6 +17945,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17644,6 +18055,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17751,6 +18165,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -17858,6 +18275,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18070,6 +18490,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18177,6 +18600,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18287,6 +18713,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18394,6 +18823,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18501,6 +18933,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18608,6 +19043,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18715,6 +19153,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18822,6 +19263,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -18929,6 +19373,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19030,6 +19477,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19131,6 +19581,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19241,6 +19694,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19316,6 +19772,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19381,6 +19840,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19491,6 +19953,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19625,6 +20090,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19732,6 +20200,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19839,6 +20310,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -19969,6 +20443,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -20071,6 +20548,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -20178,6 +20658,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -20330,6 +20813,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -20542,6 +21028,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -20652,6 +21141,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -20819,6 +21311,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -20926,6 +21421,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21027,6 +21525,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21134,6 +21635,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21198,6 +21702,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21305,6 +21812,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21412,6 +21922,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21525,6 +22038,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21589,6 +22105,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21653,6 +22172,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21717,6 +22239,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21763,6 +22288,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21809,6 +22337,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21855,6 +22386,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -21962,6 +22496,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22069,6 +22606,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22176,6 +22716,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22388,6 +22931,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22495,6 +23041,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22605,6 +23154,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22712,6 +23264,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22819,6 +23374,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -22926,6 +23484,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23033,6 +23594,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23140,6 +23704,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23247,6 +23814,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23348,6 +23918,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23449,6 +24022,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23559,6 +24135,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23645,6 +24224,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23710,6 +24292,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23820,6 +24405,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -23954,6 +24542,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24061,6 +24652,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24168,6 +24762,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24298,6 +24895,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24400,6 +25000,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24507,6 +25110,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24659,6 +25265,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24871,6 +25480,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -24981,6 +25593,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25148,6 +25763,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25255,6 +25873,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25356,6 +25977,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25463,6 +26087,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25527,6 +26154,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25634,6 +26264,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25747,6 +26380,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25857,6 +26493,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25921,6 +26560,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -25997,6 +26639,9 @@
         ],
         "layer": "renderer",
         "geometryExpected": true
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26062,6 +26707,9 @@
         ],
         "layer": "renderer",
         "geometryExpected": true
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26108,6 +26756,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26154,6 +26805,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26261,6 +26915,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26368,6 +27025,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26475,6 +27135,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26687,6 +27350,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26794,6 +27460,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -26904,6 +27573,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27011,6 +27683,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27118,6 +27793,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27225,6 +27903,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27332,6 +28013,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27439,6 +28123,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27546,6 +28233,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27662,6 +28352,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27708,6 +28401,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27809,6 +28505,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27919,6 +28618,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -27994,6 +28696,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28059,6 +28764,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28169,6 +28877,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28306,6 +29017,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28413,6 +29127,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28520,6 +29237,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28650,6 +29370,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28752,6 +29475,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -28859,6 +29585,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29011,6 +29740,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29223,6 +29955,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29333,6 +30068,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29500,6 +30238,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29607,6 +30348,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29708,6 +30452,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29815,6 +30562,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29879,6 +30629,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -29986,6 +30739,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30099,6 +30855,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30206,6 +30965,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30270,6 +31032,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30335,6 +31100,9 @@
         ],
         "layer": "renderer",
         "geometryExpected": true
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30397,6 +31165,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30459,6 +31230,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30521,6 +31295,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30567,6 +31344,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30629,6 +31409,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30691,6 +31474,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30753,6 +31539,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30799,6 +31588,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30861,6 +31653,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30923,6 +31718,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -30969,6 +31767,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31031,6 +31832,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31093,6 +31897,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31155,6 +31962,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31228,6 +32038,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31290,6 +32103,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31352,6 +32168,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31414,6 +32233,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31498,6 +32320,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31560,6 +32385,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31622,6 +32450,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31734,6 +32565,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31796,6 +32630,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31858,6 +32695,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31931,6 +32771,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -31993,6 +32836,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32055,6 +32901,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32117,6 +32966,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32179,6 +33031,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32225,6 +33080,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32298,6 +33156,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32344,6 +33205,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32390,6 +33254,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32473,6 +33340,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32580,6 +33450,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32721,6 +33594,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32862,6 +33738,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32924,6 +33803,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -32986,6 +33868,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33048,6 +33933,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33110,6 +33998,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33172,6 +34063,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33234,6 +34128,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33296,6 +34193,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33358,6 +34258,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33420,6 +34323,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33482,6 +34388,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33528,6 +34437,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33574,6 +34486,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33620,6 +34535,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33666,6 +34584,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33728,6 +34649,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33774,6 +34698,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33836,6 +34763,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -33882,6 +34812,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     }
   ],
@@ -33940,6 +34873,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34012,6 +34948,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34084,6 +35023,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34140,6 +35082,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34196,6 +35141,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34268,6 +35216,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34340,6 +35291,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34396,6 +35350,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34468,6 +35425,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34524,6 +35484,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34597,6 +35560,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34654,6 +35620,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34727,6 +35696,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34784,6 +35756,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34857,6 +35832,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34914,6 +35892,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -34986,6 +35967,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35042,6 +36026,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35114,6 +36101,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35170,6 +36160,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35226,6 +36219,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35298,6 +36294,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35370,6 +36369,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35426,6 +36428,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35482,6 +36487,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35554,6 +36562,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35626,6 +36637,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35682,6 +36696,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35754,6 +36771,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35810,6 +36830,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35882,6 +36905,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -35938,6 +36964,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36010,6 +37039,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36066,6 +37098,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36138,6 +37173,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36194,6 +37232,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36266,6 +37307,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36322,6 +37366,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36378,6 +37425,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36450,6 +37500,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36522,6 +37575,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36578,6 +37634,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36634,6 +37693,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36706,6 +37768,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36778,6 +37843,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36834,6 +37902,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36906,6 +37977,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -36962,6 +38036,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37034,6 +38111,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37090,6 +38170,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37162,6 +38245,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37218,6 +38304,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37290,6 +38379,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37346,6 +38438,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37418,6 +38513,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37474,6 +38572,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37530,6 +38631,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37602,6 +38706,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37658,6 +38765,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37730,6 +38840,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37850,6 +38963,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37906,6 +39022,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -37978,6 +39097,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38034,6 +39156,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38106,6 +39231,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38162,6 +39290,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38234,6 +39365,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38290,6 +39424,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38362,6 +39499,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38418,6 +39558,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38474,6 +39617,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38546,6 +39692,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38618,6 +39767,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38674,6 +39826,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38746,6 +39901,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38802,6 +39960,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38874,6 +40035,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -38930,6 +40094,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39002,6 +40169,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39058,6 +40228,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39130,6 +40303,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39186,6 +40362,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39258,6 +40437,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39314,6 +40496,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39386,6 +40571,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39442,6 +40630,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39498,6 +40689,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39570,6 +40764,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39626,6 +40823,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39742,6 +40942,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39833,6 +41036,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39889,6 +41095,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -39980,6 +41189,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40036,6 +41248,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40092,6 +41307,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40185,6 +41403,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40241,6 +41462,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40297,6 +41521,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40389,6 +41616,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40445,6 +41675,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40543,6 +41776,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40599,6 +41835,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40691,6 +41930,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40784,6 +42026,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40883,6 +42128,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -40977,6 +42225,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41033,6 +42284,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41127,6 +42381,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41183,6 +42440,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41239,6 +42499,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41333,6 +42596,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41428,6 +42694,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41484,6 +42753,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41556,6 +42828,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41612,6 +42887,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41668,6 +42946,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41762,6 +43043,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41818,6 +43102,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -41912,6 +43199,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42123,6 +43413,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42179,6 +43472,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42291,6 +43587,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42347,6 +43646,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42467,6 +43769,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42523,6 +43828,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42579,6 +43887,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42651,6 +43962,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42707,6 +44021,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42779,6 +44096,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42851,6 +44171,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42907,6 +44230,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -42963,6 +44289,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43042,6 +44371,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43121,6 +44453,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43177,6 +44512,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43233,6 +44571,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43305,6 +44646,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43361,6 +44705,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43433,6 +44780,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43489,6 +44839,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43561,6 +44914,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43617,6 +44973,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43689,6 +45048,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43745,6 +45107,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43817,6 +45182,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -43942,6 +45310,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44067,6 +45438,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44192,6 +45566,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44250,6 +45627,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44322,6 +45702,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44378,6 +45761,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44451,6 +45837,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44508,6 +45897,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44633,6 +46025,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44690,6 +46085,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44746,6 +46144,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44875,6 +46276,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44933,6 +46337,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -44991,6 +46398,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45113,6 +46523,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45170,6 +46583,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45262,6 +46678,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45319,6 +46738,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45441,6 +46863,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45498,6 +46923,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45590,6 +47018,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45647,6 +47078,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45704,6 +47138,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45761,6 +47198,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45823,6 +47263,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -45929,6 +47372,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46030,6 +47476,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46125,6 +47574,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46218,6 +47670,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46275,6 +47730,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46333,6 +47791,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46391,6 +47852,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46449,6 +47913,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46507,6 +47974,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46570,6 +48040,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46733,6 +48206,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46795,6 +48271,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -46957,6 +48436,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47019,6 +48501,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47197,6 +48682,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47269,6 +48757,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47366,6 +48857,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47459,6 +48953,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47517,6 +49014,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47640,6 +49140,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47698,6 +49201,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47817,6 +49323,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47875,6 +49384,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -47994,6 +49506,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48052,6 +49567,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48173,6 +49691,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48230,6 +49751,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48334,6 +49858,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48401,6 +49928,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48519,6 +50049,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48575,6 +50108,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48689,6 +50225,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48803,6 +50342,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48858,6 +50400,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -48949,6 +50494,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49004,6 +50552,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49069,6 +50620,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49178,6 +50732,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49243,6 +50800,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49390,6 +50950,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49458,6 +51021,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49578,6 +51144,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49640,6 +51209,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49755,6 +51327,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49817,6 +51392,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -49978,6 +51556,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50058,6 +51639,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50122,6 +51706,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50202,6 +51789,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50282,6 +51872,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50377,6 +51970,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50434,6 +52030,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50492,6 +52091,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50617,6 +52219,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50673,6 +52278,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50729,6 +52337,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50785,6 +52396,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50841,6 +52455,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50903,6 +52520,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -50966,6 +52586,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51028,6 +52651,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51091,6 +52717,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51153,6 +52782,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51215,6 +52847,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51277,6 +52912,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51340,6 +52978,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51402,6 +53043,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51465,6 +53109,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51525,6 +53172,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51586,6 +53236,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51646,6 +53299,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51708,6 +53364,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51771,6 +53430,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51834,6 +53496,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51897,6 +53562,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -51960,6 +53628,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52021,6 +53692,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52081,6 +53755,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52144,6 +53821,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52210,6 +53890,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52273,6 +53956,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52337,6 +54023,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52401,6 +54090,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52463,6 +54155,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52525,6 +54220,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52587,6 +54285,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52650,6 +54351,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52712,6 +54416,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52775,6 +54482,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52838,6 +54548,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52901,6 +54614,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -52964,6 +54680,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53026,6 +54745,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53089,6 +54811,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53152,6 +54877,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53216,6 +54944,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53279,6 +55010,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53342,6 +55076,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53402,6 +55139,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53462,6 +55202,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53522,6 +55265,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53583,6 +55329,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53654,6 +55403,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53725,6 +55477,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53796,6 +55551,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53856,6 +55614,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53919,6 +55680,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -53982,6 +55746,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54042,6 +55809,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54103,6 +55873,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54166,6 +55939,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54231,6 +56007,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54291,6 +56070,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54351,6 +56133,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54411,6 +56196,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54468,6 +56256,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54525,6 +56316,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54582,6 +56376,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54686,6 +56483,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54757,6 +56557,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54812,6 +56615,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54883,6 +56689,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -54938,6 +56747,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55009,6 +56821,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55064,6 +56879,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55161,6 +56979,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55216,6 +57037,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55313,6 +57137,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55368,6 +57195,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55423,6 +57253,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55516,6 +57349,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55571,6 +57407,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55664,6 +57503,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55754,6 +57596,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55844,6 +57689,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55899,6 +57747,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -55954,6 +57805,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -56074,6 +57928,9 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     },
     {
@@ -56129,7 +57986,18 @@
       },
       "currentScope": {
         "kind": "document-validity"
+      },
+      "label": {
+        "source": "archify-oracle"
       }
     }
-  ]
+  ],
+  "frozenOracle": {
+    "id": "archify",
+    "version": "3.0.0",
+    "revision": "9286c3b9c2cef359e98586b420d769d87bcb163f",
+    "pinSha256": "1e5927be63e7483a05b1c30081a9722cf580661ac1bc7d7d1641aefdead92180",
+    "command": "node scripts/diagram-engine-freeze-oracle.mjs --write",
+    "note": "Verdicts recorded from the pinned sidecar; cases labelled maru-engine were added after E6 and reviewed in the named PR."
+  }
 }
