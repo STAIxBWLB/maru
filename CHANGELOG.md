@@ -9,13 +9,12 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
-## v1.1.32 - Native Engine (2026-11-23)
+## v1.1.32 - Faster Layout (2026-11-23)
 
-- Diagrams no longer need Node or the bundled Archify sidecar. Validation, layout, SVG and PNG render and the offline viewer run on the Maru engine alone, and the sidecar is gone from the app bundle. Diagrams, receipts and stored renders from the Archify era still open. The engine's tests check it against the last Archify verdicts, which are frozen in its corpus with a digest so they cannot be edited unnoticed (#554, #643, #646, #649, #652, #653).
 - Layout and routing of a 1,000-node diagram is faster: the p95 on hosted Chromium WebAssembly fell from 243.4 ms to 158.0 ms, and the geometry is byte-identical (#552, #641, #651).
-- A workspace whose root is the filesystem root (/) can be scanned for a floorplan map. Read permission on / is asked for only when the scan lists / itself, and a refused read names the missing permission and how to grant it (#647, #650).
-- The standalone `maru` CLI keeps tables within the terminal width, including wide and emoji characters. Pending and refused actions show the pending or warning marker, usage errors name the invalid input, and control and bidirectional formatting characters are removed from external text in human output; `--json` is unchanged (#645).
-- The README says the standalone CLI ships for macOS only (#654).
+- The Archify sidecar, its pin check and the last development-time Node path are removed from the source tree. The app has run diagrams on the Maru engine alone, with no sidecar in its bundle, since v1.1.27 (#573); the README now says Node is a development requirement only. Archify-era diagrams, receipts and stored renders still open. The engine's tests check it against the last Archify verdicts, which are frozen in its corpus with a digest so they cannot be edited unnoticed (#554, #643, #646, #649, #652, #653).
+- On macOS and Linux, a workspace whose root is the filesystem root (/) can be scanned for a floorplan map. Read permission on / is asked for only when the scan lists / itself, and a refused read names the missing permission and how to grant it (#647, #650).
+- The standalone `maru` CLI, published for macOS only (#654), keeps tables within the terminal width, including wide and emoji characters. Pending and refused actions show the pending or warning marker, usage errors name the invalid input, reports name the resolved workspace outbox path and use singular counts, and control and bidirectional formatting characters are removed from external text in human output; `--json` is unchanged (#645).
 
 ## v1.1.31 - Scanned Maps (2026-11-22)
 

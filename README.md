@@ -4,7 +4,7 @@ Maru is a local-first desktop workspace for Korean knowledge and document
 operations. It combines a React 19 and TypeScript interface with a Tauri 2 Rust
 core, and treats the filesystem as the source of truth.
 
-The current product release is **v1.1.32, Native Engine**. Releases
+The current product release is **v1.1.32, Faster Layout**. Releases
 before v0.3.0 shipped under the name Anchor; v0.3.0 completed the application
 identifier and on-disk migration to Maru.
 
