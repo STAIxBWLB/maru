@@ -2374,6 +2374,23 @@ mod tests {
                 w: 10,
                 h: 10,
             },
+            // Span-scale queries gather several buckets at once, which is where
+            // a rectangle held by more than one of them can come back twice and
+            // where bucket order stops matching scene order. Without these the
+            // grid is only ever asked inside one bucket, and neither the sort
+            // nor the dedup in `within` is exercised.
+            Rect {
+                x: -600,
+                y: -1000,
+                w: span * 2,
+                h: span * 3,
+            },
+            Rect {
+                x: span / 2,
+                y: -span,
+                w: span,
+                h: span * 4,
+            },
         ] {
             let found = grid.within(bounds, &mut scratch).to_vec();
             let expected: Vec<u32> = rects
