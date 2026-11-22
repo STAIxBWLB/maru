@@ -2672,6 +2672,7 @@ dependencies = [
  "tauri-plugin-wdio-webdriver",
  "tempfile",
  "trash",
+ "unicode-bidi",
  "unicode-width",
  "uuid",
  "walkdir",
