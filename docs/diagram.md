@@ -1922,18 +1922,20 @@ order or collision predicate changed:
 | Hosted Chromium/WASM p95, ms | 50 nodes | 200 nodes | 1,000 nodes |
 | --- | --- | --- | --- |
 | `3212ff93` (#576), run 42834613105 | 7.0 | 31.7 | 279.3 |
-| `43155594876` (#584), run 43155594876 | 7.2 | 33.1 | 243.4 |
+| `0aba7960` (#584), run 43155594876 | 7.2 | 33.1 | 243.4 |
 | `680a613c`, run 45004427356 | 5.0 | 22.2 | 157.1 |
 | `dd47a9af` (documentation only), run 45005893606 | 4.4 | 13.3 | 88.4 |
+| `b07c62f4` (final head), run 45008781270 | 5.0 | 21.7 | 158.0 |
 
-The hosted 1,000-node median is 152.6 ms in the first row and 84.1 ms in the
-second, with first layouts of 418.8 ms and 211.3 ms; both runs report
-`targetMet:true` for the 200 ms AC6 requirement and `budgetMet:true` for the
-400 ms E2 budget. Two runs of the same engine differ by 1.8x, which is the
-runner spread the earlier sections saw, so the 157.1 ms figure is the
-conservative one and the 243.4 ms accepted floor falls by 35.4% on it and by
-63.7% on the faster runner. The local pair above is the engine-to-engine
-comparison on a machine about 1.4x to 2.6x faster than those runners.
+The three runs of this engine differ by 1.8x at 1,000 nodes (median 152.6,
+84.1 and 146.0 ms, first layouts 418.8, 211.3 and 343.5 ms), which is the
+runner spread the earlier sections saw; the two slow-runner figures agree
+within 0.6%, so 158.0 ms is the conservative one. Every one of the three
+reports `targetMet:true` for the 200 ms AC6 requirement and `budgetMet:true`
+for the 400 ms E2 budget, and the 243.4 ms accepted floor falls by 35.1% on
+that figure and by 63.7% on the faster runner. The local pair above is the
+engine-to-engine comparison on a machine about 1.4x to 2.6x faster than those
+runners.
 
 The local 1,000-node first layout falls from 134.1-135.5 ms to 110.1 ms at this
 head. The same `bench-1000.json` fixture still routes all 999 edges and emits the
