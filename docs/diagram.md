@@ -1961,7 +1961,7 @@ passes removes 11.4 ms, and keeping only `route_geometry_diagnostics` removes
 6.1 ms. Diagnostics were the largest removable block, and 6.1 ms of the 11.4 ms
 sat in the route pass.
 
-Four changes follow from those numbers. No geometry rule, obstacle set, search
+Eight changes follow from those numbers. No geometry rule, obstacle set, search
 order or collision predicate changed:
 
 - `check_node_overlap` asks the bucket grid the route diagnostics already use for
@@ -1973,6 +1973,20 @@ order or collision predicate changed:
 - the route-label overlap walk visits only routes that secured a label, and
   `pair_quality` skips its quadratic walk unless the scene is `showcase` or
   workflow v2, which are the only two conditions under which a pair can report;
+  both routing passes in that function read one clone of the connection list
+  instead of taking their own;
+- `place_node_labels_pass` keeps its first placement when the label already
+  fits, and the type ladder skips its first step when the probe grew nothing,
+  which can only repeat the attempt just rejected; the overflow walk no longer
+  formats a `node:<id>:` prefix for every candidate label;
+- the label emitter takes one measurement per line and feeds both the block's
+  box and its glyph run from that single measurement, instead of measuring every
+  line twice;
+- the pinned font identity is built once with the `FontTable` at parse time
+  instead of formatting the font hash for every label;
+- `receipt.engineOutputSha256` hashes the document through a streaming
+  `std::io::Write` sink, so a scene-sized value is never serialized into an
+  intermediate `String` first;
 - `src-tauri/crates/Cargo.toml` pins `lto = "fat"` and `codegen-units = 1` for
   release builds of the engine workspace, because the pass is a chain of small
   generic helpers across one crate graph: the same 1,000-node artifact measures
