@@ -1137,14 +1137,24 @@ recorded verdicts only; no test runs Archify.
   script, its `make check-oracle-freeze` gate and the sidecar, so these
   recorded verdicts are now the oracle and are never edited by hand. The last
   pin file is kept verbatim as a render-receipt fixture at
-  `src-tauri/src/diagram/testdata/legacy-archify-pin.json`.
+  `src-tauri/crates/maru-diagram-engine/testdata/legacy-archify-pin.json`.
 - Each case has a `label`. `{"source": "archify-oracle"}` marks a verdict
   recorded from the oracle. A case added after E6 has no oracle to ask, so it
   is labelled `{"source": "maru-engine", "reviewedIn": "#<PR>"}`: its expected
   result comes from the Maru engine, and the named PR is where a reviewer
-  accepted it. `tests/frozen_oracle.rs` fails an unlabelled case, an
-  engine-labelled case with no reviewing PR, or an oracle case whose
-  `comparison.accepted` disagrees with its frozen verdict.
+  accepted it. `tests/frozen_oracle.rs` runs one `contract_failures` check
+  for the corpus and for its mutation regressions. It fails an unlabelled
+  case, an engine-labelled case with no reviewing PR, an oracle case whose
+  `comparison.accepted` disagrees with the layer it was derived from, and a
+  `comparison.inputJson` that is not the input that layer judged
+  (`validityInputJson` for a public case, else `inputJson`).
+- `frozenOracle.verdictsSha256` digests every `archify-oracle` case's
+  inputs and all six verdict layers (ok, codes, diagnostics; sorted keys,
+  non-integers to six decimals). Any edit to a frozen verdict fails, even one
+  that flips a verdict together with its comparison. Frozen verdicts are
+  never edited; a new expectation is a new `maru-engine` case. No script
+  writes `parity.json` any more: the generator left with the sidecar, so
+  the frozen block and labels cannot be dropped by a regeneration.
 - Oracle staging paths are normalized to `<oracle-staging>`, so a recorded
   verdict is identical on every host and names no local path.
 

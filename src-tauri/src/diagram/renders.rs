@@ -197,7 +197,8 @@ fn sha256(bytes: &[u8]) -> String {
 /// The last Archify `PIN.json`, kept verbatim so a fixture receipt carries the
 /// exact engine pin metadata that Archify-era stored renders contain.
 #[cfg(test)]
-const LEGACY_ARCHIFY_PIN_JSON: &str = include_str!("testdata/legacy-archify-pin.json");
+const LEGACY_ARCHIFY_PIN_JSON: &str =
+    include_str!("../../crates/maru-diagram-engine/testdata/legacy-archify-pin.json");
 
 /// Test-only shape of an Archify-era render, as the retired engine produced it
 /// before maru#554 E6. Fixtures build legacy receipts from it so the reader for

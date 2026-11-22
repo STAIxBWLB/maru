@@ -10,12 +10,17 @@
 //! - the corpus names which oracle and pin produced it, and keeps the command
 //!   that recorded it as provenance only (the script was removed in E6 T2);
 //! - every case says where its verdict came from (`label.source`);
-//! - an oracle-labelled case keeps a full verdict and its comparison agrees
-//!   with that verdict, so a later edit cannot silently flip one side;
+//! - an oracle-labelled case keeps a full verdict, its comparison agrees with
+//!   the layer it was derived from, and `comparison.inputJson` is the input
+//!   that layer judged (the evidence-stripped input for a public case);
+//! - `frozenOracle.verdictsSha256` digests every oracle-labelled case's inputs
+//!   and all six verdict layers (ok, codes and diagnostics), so any edit to a
+//!   frozen verdict fails, even one that keeps the case internally consistent;
 //! - a case added after E6 is labelled `maru-engine` and names the PR that
 //!   reviewed its expected result, since no oracle exists to label it.
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +39,7 @@ struct FrozenOracle {
     revision: String,
     pin_sha256: String,
     command: String,
+    verdicts_sha256: String,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +47,7 @@ struct FrozenOracle {
 struct Case {
     id: String,
     label: Option<Label>,
+    input_json: String,
     validity_input_json: Option<String>,
     oracle: Option<Verdict>,
     schema_oracle: Option<Verdict>,
@@ -69,6 +76,7 @@ struct Verdict {
 #[serde(rename_all = "camelCase")]
 struct Comparison {
     accepted: bool,
+    input_json: String,
     oracle_layer: Option<String>,
     current_scope: Scope,
 }
@@ -78,8 +86,75 @@ struct Scope {
     kind: String,
 }
 
+const PARITY: &str = include_str!("../testdata/parity.json");
+
 fn corpus() -> Corpus {
-    serde_json::from_str(include_str!("../testdata/parity.json")).unwrap()
+    serde_json::from_str(PARITY).unwrap()
+}
+
+/// The oracle-produced fields of one case that the digest covers.
+const FROZEN_FIELDS: &[&str] = &[
+    "id",
+    "inputJson",
+    "validityInputJson",
+    "oracle",
+    "schemaOracle",
+    "documentOracle",
+    "validityOracle",
+    "validitySchemaOracle",
+    "validityDocumentOracle",
+];
+
+/// JSON with object keys sorted (independent of serde_json's map feature)
+/// and non-integer numbers fixed to six decimals.
+fn canonical(value: &Value) -> String {
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let body: Vec<String> = keys
+                .into_iter()
+                .map(|key| format!("{}:{}", Value::from(key.as_str()), canonical(&map[key])))
+                .collect();
+            format!("{{{}}}", body.join(","))
+        }
+        Value::Array(items) => {
+            let body: Vec<String> = items.iter().map(canonical).collect();
+            format!("[{}]", body.join(","))
+        }
+        // serde_json's default float parsing may be off by one ulp, and a
+        // dependency enabling `float_roundtrip` would change it; six decimals
+        // keeps the digest independent of that (geometry is 1/64 px).
+        Value::Number(number) if !number.is_i64() && !number.is_u64() => {
+            format!("{:.6}", number.as_f64().unwrap_or(f64::NAN))
+        }
+        other => other.to_string(),
+    }
+}
+
+/// sha256 over the frozen fields of every `archify-oracle` case, in corpus
+/// order (`cases`, then `boundaryCases`). Absent fields are hashed as null.
+fn verdicts_sha256(value: &Value) -> String {
+    let mut hasher = Sha256::new();
+    for list in ["cases", "boundaryCases"] {
+        for case in value[list].as_array().into_iter().flatten() {
+            if case["label"]["source"] != "archify-oracle" {
+                continue;
+            }
+            let frozen: serde_json::Map<String, Value> = FROZEN_FIELDS
+                .iter()
+                .map(|field| {
+                    (
+                        field.to_string(),
+                        case.get(*field).cloned().unwrap_or(Value::Null),
+                    )
+                })
+                .collect();
+            hasher.update(canonical(&Value::Object(frozen)).as_bytes());
+            hasher.update(b"\n");
+        }
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 #[test]
@@ -91,29 +166,32 @@ fn the_corpus_names_the_oracle_that_produced_it_and_its_recording_command() {
     assert_eq!(corpus.oracle["version"], frozen.version.as_str());
     assert_eq!(corpus.oracle["revision"], frozen.revision.as_str());
     assert_eq!(frozen.revision.len(), 40, "a full pinned commit");
-    assert_eq!(frozen.pin_sha256.len(), 64, "the sha256 of the pin file");
+    let pin = include_bytes!("../testdata/legacy-archify-pin.json");
+    assert_eq!(
+        frozen.pin_sha256,
+        format!("{:x}", Sha256::digest(pin)),
+        "pinSha256 must be the sha256 of the kept legacy Archify pin"
+    );
     assert_eq!(
         frozen.command,
         "node scripts/diagram-engine-freeze-oracle.mjs --write"
     );
 }
 
-#[test]
-fn every_case_is_labelled_and_oracle_cases_keep_a_consistent_frozen_verdict() {
-    let corpus = corpus();
+/// Every per-case contract failure in `corpus`. The main test and the
+/// mutation regressions below both run exactly this.
+fn contract_failures(corpus: &Corpus) -> Vec<String> {
     let mut failures = Vec::new();
-    let mut oracle_cases = 0;
     for case in corpus.cases.iter().chain(&corpus.boundary_cases) {
         let Some(label) = &case.label else {
             failures.push(format!(
-                "{}: no label; record it with the freeze command",
+                "{}: no label; add {{\"source\":\"maru-engine\",\"reviewedIn\":\"#<PR>\"}} for a case added after E6",
                 case.id
             ));
             continue;
         };
         match label.source.as_str() {
             "archify-oracle" => {
-                oracle_cases += 1;
                 let mut layers = vec![
                     ("oracle", &case.oracle),
                     ("schemaOracle", &case.schema_oracle),
@@ -144,6 +222,16 @@ fn every_case_is_labelled_and_oracle_cases_keep_a_consistent_frozen_verdict() {
                         }
                     }
                 }
+                let judged = case
+                    .validity_input_json
+                    .as_ref()
+                    .unwrap_or(&case.input_json);
+                if &case.comparison.input_json != judged {
+                    failures.push(format!(
+                        "{}: comparison.inputJson is not the input its oracle layer judged",
+                        case.id
+                    ));
+                }
                 match frozen_accepted(case) {
                     Ok(Some(expected)) if expected != case.comparison.accepted => {
                         failures.push(format!(
@@ -173,14 +261,46 @@ fn every_case_is_labelled_and_oracle_cases_keep_a_consistent_frozen_verdict() {
             other => failures.push(format!("{}: unknown label source {other:?}", case.id)),
         }
     }
+    failures
+}
+
+fn oracle_case_count(corpus: &Corpus) -> usize {
+    corpus
+        .cases
+        .iter()
+        .chain(&corpus.boundary_cases)
+        .filter(|case| {
+            case.label
+                .as_ref()
+                .is_some_and(|label| label.source == "archify-oracle")
+        })
+        .count()
+}
+
+#[test]
+fn every_case_is_labelled_and_oracle_cases_keep_a_consistent_frozen_verdict() {
+    let corpus = corpus();
+    let failures = contract_failures(&corpus);
     assert!(
         failures.is_empty(),
         "Frozen oracle contract:\n{}",
         failures.join("\n")
     );
+    let oracle_cases = oracle_case_count(&corpus);
     assert!(
         oracle_cases >= 620,
         "the frozen corpus lost oracle cases: {oracle_cases}"
+    );
+}
+
+#[test]
+fn the_frozen_verdicts_match_their_recorded_digest() {
+    let value: Value = serde_json::from_str(PARITY).unwrap();
+    let actual = verdicts_sha256(&value);
+    assert_eq!(
+        corpus().frozen_oracle.verdicts_sha256,
+        actual,
+        "an archify-oracle verdict, input or code changed; frozen verdicts are never edited (a new expectation is a maru-engine case reviewed in a PR)"
     );
 }
 
@@ -236,51 +356,41 @@ fn frozen_accepted(case: &Case) -> Result<Option<bool>, String> {
     Ok(Some(accepted))
 }
 
-/// Removes `fields` from the named case of a corpus copy and returns the
-/// contract failures; used by the deletion regressions below.
-fn failures_after_removing(id: &str, fields: &[&str]) -> Vec<String> {
-    let mut value: Value = serde_json::from_str(include_str!("../testdata/parity.json")).unwrap();
+/// Applies `edit` to the named case of a corpus copy, then returns what the
+/// real checks report: the contract failures for that case, plus a digest
+/// mismatch when the frozen fields changed.
+fn failures_after(id: &str, edit: impl Fn(&mut serde_json::Map<String, Value>)) -> Vec<String> {
+    let mut value: Value = serde_json::from_str(PARITY).unwrap();
+    let recorded = verdicts_sha256(&value);
     let mut found = false;
     for list in ["cases", "boundaryCases"] {
         for case in value[list].as_array_mut().unwrap() {
             if case["id"] == id {
                 found = true;
-                let object = case.as_object_mut().unwrap();
-                for field in fields {
-                    object.remove(*field);
-                }
+                edit(case.as_object_mut().unwrap());
             }
         }
     }
     assert!(found, "{id} is not in the corpus");
+    let digest_changed = verdicts_sha256(&value) != recorded;
     let corpus: Corpus = serde_json::from_value(value).unwrap();
-    let mut failures = Vec::new();
-    for case in corpus.cases.iter().chain(&corpus.boundary_cases) {
-        if case.id != id {
-            continue;
-        }
-        if case.label.is_none() {
-            failures.push("label missing".to_string());
-        }
-        let mut layers = vec![&case.oracle, &case.schema_oracle, &case.document_oracle];
-        if case.validity_input_json.is_some() {
-            layers.extend([
-                &case.validity_oracle,
-                &case.validity_schema_oracle,
-                &case.validity_document_oracle,
-            ]);
-        }
-        failures.extend(
-            layers
-                .iter()
-                .filter(|layer| layer.is_none())
-                .map(|_| "layer missing".to_string()),
-        );
-        if let Err(cause) = frozen_accepted(case) {
-            failures.push(cause);
-        }
+    let prefix = format!("{id}:");
+    let mut failures: Vec<String> = contract_failures(&corpus)
+        .into_iter()
+        .filter(|failure| failure.starts_with(&prefix))
+        .collect();
+    if digest_changed {
+        failures.push(format!("{id}: frozen verdict digest changed"));
     }
     failures
+}
+
+fn failures_after_removing(id: &str, fields: &[&str]) -> Vec<String> {
+    failures_after(id, |case| {
+        for field in fields {
+            case.remove(*field);
+        }
+    })
 }
 
 #[test]
@@ -329,4 +439,71 @@ fn deleting_a_verdict_or_label_of_any_layer_fails_the_contract() {
             );
         }
     }
+}
+
+#[test]
+fn a_consistent_edit_to_a_frozen_verdict_still_fails() {
+    let corpus = corpus();
+    let case = corpus
+        .cases
+        .iter()
+        .find(|case| case.comparison.oracle_layer.as_deref() == Some("full"))
+        .expect("a full-layer case");
+    // Flip the verdict and the comparison together: internally consistent.
+    let flipped = failures_after(&case.id, |case| {
+        let ok = case["oracle"]["ok"].as_bool().unwrap();
+        case.get_mut("oracle").unwrap()["ok"] = Value::Bool(!ok);
+        let accepted = case["comparison"]["accepted"].as_bool().unwrap();
+        case.get_mut("comparison").unwrap()["accepted"] = Value::Bool(!accepted);
+    });
+    assert!(
+        !flipped.is_empty(),
+        "a consistent verdict flip went unnoticed"
+    );
+    // A layer the comparison does not read.
+    let unused = failures_after(&case.id, |case| {
+        let ok = case["schemaOracle"]["ok"].as_bool().unwrap();
+        case.get_mut("schemaOracle").unwrap()["ok"] = Value::Bool(!ok);
+    });
+    assert!(
+        !unused.is_empty(),
+        "flipping an unused layer went unnoticed"
+    );
+    // Codes or diagnostics only.
+    let codes = failures_after(&case.id, |case| {
+        case.get_mut("oracle").unwrap()["codes"] = serde_json::json!(["edited/code"]);
+        case.get_mut("oracle").unwrap()["diagnostics"] =
+            serde_json::json!([{"code": "edited/code"}]);
+    });
+    assert!(!codes.is_empty(), "editing codes went unnoticed");
+    // The comparison judged a different input.
+    let input = failures_after(&case.id, |case| {
+        case.get_mut("comparison").unwrap()["inputJson"] = Value::from("{}");
+    });
+    assert!(
+        input
+            .iter()
+            .any(|failure| failure.contains("comparison.inputJson")),
+        "{input:?}"
+    );
+}
+
+#[test]
+fn a_public_case_comparison_must_judge_the_evidence_stripped_input() {
+    let corpus = corpus();
+    let public = corpus
+        .cases
+        .iter()
+        .find(|case| case.validity_input_json.is_some())
+        .expect("a public case");
+    let original = public.input_json.clone();
+    let failures = failures_after(&public.id, move |case| {
+        case.get_mut("comparison").unwrap()["inputJson"] = Value::from(original.clone());
+    });
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("comparison.inputJson")),
+        "{failures:?}"
+    );
 }
