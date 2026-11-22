@@ -2006,10 +2006,12 @@ mod tests {
             failed: 1,
             ..Default::default()
         };
+        let provider_color = style(true, false).paint(crate::cli_output::Role::Error, "provider");
+        let raw_error = format!("{provider_color} error\rforged\nline");
         let problems = vec![crate::calendar_sync::ProblemRecord {
             state: "failed",
             blocked: false,
-            error: "provider error\rforged\nline".into(),
+            error: raw_error.clone(),
             task_path: "tasks/a\tname".into(),
         }];
         let report =
@@ -2021,13 +2023,14 @@ mod tests {
             "{report:?}"
         );
         assert!(
-            report.contains("provider error forged line (tasks/a name)"),
+            report.contains("error forged line (tasks/a name)"),
             "{report}"
         );
         assert!(report.contains(".maru/today/outbox/"), "{report}");
         assert!(report.contains("unresolved records"), "{report}");
         assert!(!report.contains("calendar-sync --json"), "{report}");
-        assert_eq!(problems[0].error, "provider error\rforged\nline");
+        assert!(!report.contains(&provider_color), "{report:?}");
+        assert_eq!(problems[0].error, raw_error);
     }
 
     #[test]
