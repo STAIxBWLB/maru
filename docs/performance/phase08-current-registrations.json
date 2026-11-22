@@ -2398,7 +2398,7 @@
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "4ef9f5b1319033e883c1778e855a628de9230104049d0d2ed75113ed8b49c0fe"
+      "sha256": "914a4fea8d155e3c7cacc1947ba8d1b4a9fda500f3664673aa974159f4e90f8c"
     },
     {
       "path": "src-tauri/capabilities/default.json",
@@ -2470,7 +2470,7 @@
     },
     {
       "path": "src-tauri/src/calendar_sync.rs",
-      "sha256": "c97b3c9fe1407e33477d5cb4343b459fa6e9f29f6d876122da3a8aab3a7a5226"
+      "sha256": "17b364662e8ac6b9058dbb458775ff40c590f286936528adf7878d6ee503a9df"
     },
     {
       "path": "src-tauri/src/content_search.rs",
@@ -2566,7 +2566,7 @@
     },
     {
       "path": "src-tauri/src/jobs.rs",
-      "sha256": "1de64d21f2e371bf5ab6b45f058b8b1fc23ddd024794f9cd14c4c3713deeec3c"
+      "sha256": "5bf2ac3cd70b23d13286d26f2690195b3ace42d940afa429321716e11616751f"
     },
     {
       "path": "src-tauri/src/kakao_relay.rs",
@@ -2586,7 +2586,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "e9ea3f3aea61ee8c23270b4ef4d30018cbc2e38472d5d0380a1d403335b0819a"
+      "sha256": "f74ee712ef9fad7aab531701e815aabca19502c8ec73435239dd33a4354181aa"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2769,5 +2769,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "607b9b906f8491802170e9936a396e785d98f43b"
+  "sourceCommit": "95b40a2e573ddab374ab8c5b7bce625f6523df75"
 }
