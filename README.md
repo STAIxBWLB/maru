@@ -12,7 +12,7 @@ identifier and on-disk migration to Maru.
 
 | Area | State | Evidence |
 |------|-------|----------|
-| Product release | v1.1.31 | Signed desktop bundles and standalone CLI for macOS, Windows, and Linux |
+| Product release | v1.1.31 | Signed desktop bundles for macOS, Windows, and Linux; the standalone CLI ships for macOS only |
 | Planning milestone | v1.1 Felt Quality and Native Proof, closed | Closed 2026-09-27: phases 6-11 (56 plans), audit `tech_debt` with the debt accepted |
 | Application shell | Complete | 18 lazy modes; `MainApp` held to 15 `useState` and 24 `useEffect` calls |
 | Verification | Passing | Typecheck, ESLint, unit tests, Rust fmt/clippy, E2E, build, and bundle budgets |
@@ -77,7 +77,10 @@ Graph are enabled by default; E2E Flow is flag-gated.
 
 ## Install
 
-The desktop application and standalone CLI are separate artifacts.
+The desktop application and standalone CLI are separate artifacts. The desktop
+application ships signed bundles for macOS, Windows, and Linux; the published
+standalone CLI artifact is macOS-only, and the commands below install it from
+the macOS Homebrew tap.
 
 ```bash
 # Desktop application only
