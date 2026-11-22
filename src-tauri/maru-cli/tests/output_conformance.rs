@@ -95,3 +95,13 @@ fn lang_c_prints_ascii_markers() {
     assert!(stdout.contains("> Usage"), "{stdout}");
     assert!(stdout.is_ascii(), "{stdout}");
 }
+
+#[test]
+fn usage_errors_name_the_actual_unknown_arguments() {
+    let env = maru(&["skills", "env", "wrong"], &[]);
+    assert_eq!(env.status.code(), Some(2));
+    assert!(text(&env.stderr).contains("unknown subcommand: wrong"));
+    let import = maru(&["skills", "import-unmanage", "name", "--bogus"], &[]);
+    assert_eq!(import.status.code(), Some(2));
+    assert!(text(&import.stderr).contains("unknown option: --bogus"));
+}

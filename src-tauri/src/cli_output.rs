@@ -188,7 +188,10 @@ impl Style {
     /// `▸ <Name>` with an optional count in `hint`.
     pub(crate) fn section(&self, name: &str, count: Option<&str>) -> String {
         let arrow = if self.ascii { ">" } else { "▸" };
-        let title = self.paint(Role::Section, &format!("{arrow} {name}"));
+        let title = self.paint(
+            Role::Section,
+            &format!("{arrow} {}", sanitize_terminal_text(name)),
+        );
         match count {
             Some(count) => format!("{title} {}", self.paint(Role::Hint, &format!("({count})"))),
             None => title,
@@ -204,13 +207,20 @@ impl Style {
     #[allow(dead_code)]
     pub(crate) fn next_step(&self, text: &str) -> String {
         let arrow = self.marker(Marker::Next);
-        format!("    {arrow} {}", self.paint(Role::Accent, text))
+        let safe = sanitize_terminal_text(text);
+        let lines = wrap(&safe, self.width.map(|width| width.saturating_sub(7)));
+        let mut output = format!("    {arrow} {}", self.paint(Role::Accent, &lines[0]));
+        for line in &lines[1..] {
+            output.push_str(&format!("\n       {}", self.paint(Role::Accent, line)));
+        }
+        output
     }
 
     fn bullet_at(&self, indent: usize, marker: Marker, text: &str) -> String {
         let lead = " ".repeat(indent);
         let hang = indent + 3;
-        let lines = wrap(text, self.width.map(|width| width.saturating_sub(hang)));
+        let safe = sanitize_terminal_text(text);
+        let lines = wrap(&safe, self.width.map(|width| width.saturating_sub(hang)));
         let mut out = format!("{lead}{} {}", self.marker(marker), lines[0]);
         for line in &lines[1..] {
             out.push('\n');
@@ -260,6 +270,7 @@ impl Style {
 
     /// `<tool>: <message>`, with the fail marker when the stream is a TTY.
     pub(crate) fn error_line(&self, message: &str) -> String {
+        let message = sanitize_terminal_text(message);
         if self.tty {
             format!("{} {TOOL}: {message}", self.marker(Marker::Fail))
         } else {
@@ -269,14 +280,21 @@ impl Style {
 
     /// `✓ <what was done>`, the success confirmation.
     pub(crate) fn done_line(&self, message: &str) -> String {
-        format!("{} {message}", self.marker(Marker::Ok))
+        format!(
+            "{} {}",
+            self.marker(Marker::Ok),
+            sanitize_terminal_text(message)
+        )
     }
 
     /// Header line: ` <title>` in `header`, optional context in `hint`.
     pub(crate) fn header(&self, title: &str, context: Option<&str>) -> String {
-        let title = self.paint(Role::Header, title);
+        let title = self.paint(Role::Header, &sanitize_terminal_text(title));
         match context.filter(|context| !context.is_empty()) {
-            Some(context) => format!("{title} {}", self.paint(Role::Hint, context)),
+            Some(context) => format!(
+                "{title} {}",
+                self.paint(Role::Hint, &sanitize_terminal_text(context))
+            ),
             None => title,
         }
     }
@@ -296,7 +314,7 @@ impl Style {
                 let value = if value.is_empty() {
                     self.paint(Role::Hint, "(unset)")
                 } else {
-                    value.clone()
+                    sanitize_terminal_text(value)
                 };
                 format!("  {}{pad}  {value}", self.paint(Role::Key, &label))
             })
@@ -312,7 +330,8 @@ impl Style {
         const CAP: usize = 32;
         let columns = headings.len();
         let cell = |row: &Vec<String>, index: usize| -> String {
-            let value = row.get(index).cloned().unwrap_or_default();
+            let value =
+                sanitize_terminal_text(row.get(index).map(String::as_str).unwrap_or_default());
             if index + 1 < columns {
                 shorten_middle(&value, CAP)
             } else {
@@ -326,6 +345,19 @@ impl Style {
                 *width = (*width).max(UnicodeWidthStr::width(value.as_str()).max(1));
             }
         }
+        // Reserve useful space for the flexible column. If the fixed columns
+        // fill the terminal, shorten the widest ones toward their headings.
+        if let Some(limit) = self.width {
+            let flex_min = (limit / 3).clamp(2, 20);
+            while 2 + widths[..columns - 1].iter().map(|w| w + 2).sum::<usize>() + flex_min > limit
+            {
+                let candidate = (0..columns - 1)
+                    .filter(|&i| widths[i] > headings[i].len().max(3))
+                    .max_by_key(|&i| widths[i]);
+                let Some(i) = candidate else { break };
+                widths[i] -= 1;
+            }
+        }
         let lead: usize = 2 + widths[..columns - 1].iter().map(|w| w + 2).sum::<usize>();
         let flex = self.width.map(|width| width.saturating_sub(lead));
         let render = |values: Vec<String>, heading: bool| -> String {
@@ -336,7 +368,7 @@ impl Style {
                 } else {
                     value.as_str()
                 };
-                let pad = " ".repeat(widths[index] - UnicodeWidthStr::width(shown));
+                let pad = " ".repeat(widths[index].saturating_sub(UnicodeWidthStr::width(shown)));
                 let role = if heading {
                     Role::Key
                 } else if value.is_empty() {
@@ -358,7 +390,19 @@ impl Style {
         let mut text = render(headings.iter().map(|h| h.to_uppercase()).collect(), true);
         for row in rows {
             text.push('\n');
-            text.push_str(&render((0..columns).map(|i| cell(row, i)).collect(), false));
+            text.push_str(&render(
+                (0..columns)
+                    .map(|i| {
+                        let value = cell(row, i);
+                        if i + 1 < columns {
+                            shorten_middle(&value, widths[i])
+                        } else {
+                            value
+                        }
+                    })
+                    .collect(),
+                false,
+            ));
         }
         text
     }
@@ -368,7 +412,7 @@ impl Style {
         format!(
             "  {} {}",
             self.marker(Marker::Next),
-            self.paint(Role::Accent, command)
+            self.paint(Role::Accent, &sanitize_terminal_text(command))
         )
     }
 }
@@ -378,7 +422,10 @@ pub(crate) fn shorten_middle(text: &str, cap: usize) -> String {
     if UnicodeWidthStr::width(text) <= cap {
         return text.to_string();
     }
-    let keep = cap.saturating_sub(3);
+    if cap < 3 {
+        return ".".repeat(cap);
+    }
+    let keep = cap - 3;
     let head_cells = keep / 2;
     let tail_cells = keep - head_cells;
     let mut head = String::new();
@@ -402,21 +449,43 @@ pub(crate) fn shorten_middle(text: &str, cap: usize) -> String {
         tail.push(ch);
     }
     tail.reverse();
-    format!("{head}...{}", tail.into_iter().collect::<String>())
+    let mut tail: String = tail.into_iter().collect();
+    // Sequence presentation can be wider than the sum of its scalar widths.
+    // Check the actual rendered string rather than relying on those sums.
+    loop {
+        let result = format!("{head}...{tail}");
+        if UnicodeWidthStr::width(result.as_str()) <= cap {
+            return result;
+        }
+        if head.pop().is_none() {
+            if tail.is_empty() {
+                return "...".to_string();
+            }
+            tail.remove(0);
+        }
+    }
 }
 
 /// Keep externally supplied text inert when printed on a terminal. Control
 /// characters, including ESC, C1 controls and line breaks, cannot create
 /// terminal commands or forge extra report lines. Stored and JSON data stay intact.
 pub(crate) fn sanitize_terminal_text(text: &str) -> String {
+    use unicode_bidi::format_chars::{FSI, LRE, LRI, LRO, PDF, PDI, RLE, RLI, RLO};
     text.chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, LRE | RLE | PDF | LRO | RLO | LRI | RLI | FSI | PDI)
+            {
+                ' '
+            } else {
+                ch
+            }
+        })
         .collect()
 }
 
 /// Greedy word wrap measured in terminal cells (ambiguous width narrow).
 pub(crate) fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
-    let Some(width) = width.filter(|width| *width >= 20) else {
+    let Some(width) = width.filter(|width| *width >= 2) else {
         return vec![text.to_string()];
     };
     let mut lines = Vec::new();
@@ -443,6 +512,18 @@ pub(crate) fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
                 }
                 cells += w;
                 cut = index + ch.len_utf8();
+            }
+            // Some presentation sequences occupy more cells than the sum of
+            // their scalar widths. Shrink the candidate to a fitting prefix.
+            while cut > 0 && UnicodeWidthStr::width(&line[..cut]) > width {
+                cut = line[..cut]
+                    .char_indices()
+                    .last()
+                    .map_or(0, |(index, _)| index);
+            }
+            if cut == 0 {
+                // Even an indivisible glyph wider than the width must advance.
+                cut = line.chars().next().map_or(0, char::len_utf8);
             }
             let rest = line.split_off(cut);
             lines.push(std::mem::replace(&mut line, rest));
@@ -754,6 +835,100 @@ mod tests {
             UnicodeWidthStr::width(shorten_middle(&"x".repeat(50), 32).as_str()),
             32
         );
+    }
+
+    #[test]
+    fn narrow_table_columns_wrap_and_external_text_is_safe() {
+        use unicode_bidi::format_chars::{FSI, LRE, LRI, LRO, PDF, PDI, RLE, RLI, RLO};
+        let style = Style {
+            width: Some(80),
+            ..Style::plain()
+        };
+        let bidi = [LRE, RLE, PDF, LRO, RLO, LRI, RLI, FSI, PDI]
+            .into_iter()
+            .collect::<String>();
+        let raw = format!("label{bidi}\rforged");
+        let rows = vec![vec![
+            "n".repeat(25),
+            "s".repeat(25),
+            "tier".into(),
+            format!("{} {raw}", "p".repeat(60)),
+        ]];
+        let output = style.table(&["name", "source", "tier", "path"], &rows);
+        for line in output.lines() {
+            assert!(UnicodeWidthStr::width(line) <= 80, "{line}");
+            assert!(
+                !line.chars().any(|c| c.is_control() || bidi.contains(c)),
+                "{line:?}"
+            );
+        }
+        assert!(output.contains("forged"));
+        assert_eq!(rows[0][3], format!("{} {raw}", "p".repeat(60)));
+        let error = style.error_line(&raw);
+        assert!(!error.chars().any(|c| c.is_control() || bidi.contains(c)));
+        let section = style.section(&raw, None);
+        assert!(!section.chars().any(|c| c.is_control() || bidi.contains(c)));
+    }
+
+    #[test]
+    fn wide_emoji_cells_shrink_without_overflow_and_leave_room_for_paths() {
+        let style = Style {
+            width: Some(56),
+            ..Style::plain()
+        };
+        for prefix in ["❤️", "#️"] {
+            let name = format!("{prefix}{}", "a".repeat(29));
+            let rows = vec![vec![
+                name,
+                "source-id".into(),
+                "managed".into(),
+                "p".repeat(60),
+            ]];
+            let report = style.table(&["name", "source", "tier", "path"], &rows);
+            for line in report.lines() {
+                assert!(UnicodeWidthStr::width(line) <= 56, "{line:?}");
+            }
+            assert!(report.lines().count() <= 7, "{report}");
+        }
+        // Three wide fixed columns force the shrink loop even at 80 cells.
+        let wide = Style {
+            width: Some(80),
+            ..Style::plain()
+        };
+        let rows = vec![vec![
+            "n".repeat(31),
+            "s".repeat(31),
+            "t".repeat(31),
+            "p".repeat(60),
+        ]];
+        let report = wide.table(&["name", "source", "tier", "path"], &rows);
+        assert!(
+            report
+                .lines()
+                .all(|line| UnicodeWidthStr::width(line) <= 80),
+            "{report}"
+        );
+        assert!(
+            report.contains("..."),
+            "the fixed columns must shrink: {report}"
+        );
+        assert!(report.lines().count() <= 6, "{report}");
+        for cap in 3..=32 {
+            let value = format!("❤️{}#️", "a".repeat(40));
+            let result = shorten_middle(&value, cap);
+            assert!(
+                UnicodeWidthStr::width(result.as_str()) <= cap,
+                "{cap}: {result:?}"
+            );
+        }
+        let wrapped = wrap("❤️❤️", Some(2));
+        assert!(
+            wrapped
+                .iter()
+                .all(|line| UnicodeWidthStr::width(line.as_str()) <= 2),
+            "{wrapped:?}"
+        );
+        assert_eq!(wrapped.concat(), "❤️❤️");
     }
 
     #[test]
