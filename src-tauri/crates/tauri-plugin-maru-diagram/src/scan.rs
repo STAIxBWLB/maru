@@ -504,6 +504,8 @@ impl RootAnchor {
                     "reopen the workspace in Maru and scan again",
                 )
             })?;
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            let mut previous_name = std::ffi::OsStr::new("/");
             for component in root.components() {
                 match component {
                     Component::RootDir | Component::CurDir => continue,
@@ -513,6 +515,12 @@ impl RootAnchor {
                         // folders above it and nothing more, so an ancestor is
                         // opened search-only. Only the root itself is opened for
                         // reading, which it has to be to be listed.
+                        // Linux O_PATH checks search permission on the parent,
+                        // not on the component being opened. Probe the root the
+                        // same way before opening it for directory reads.
+                        #[cfg(any(target_os = "linux", target_os = "android"))]
+                        let base = search_only_flags();
+                        #[cfg(not(any(target_os = "linux", target_os = "android")))]
                         let base = if position == total {
                             OFlags::RDONLY
                         } else {
@@ -523,7 +531,18 @@ impl RootAnchor {
                             Path::new(name),
                             base | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
                         )
-                        .map_err(|errno| component_refusal(errno, name, position, total))?;
+                        .map_err(|errno| {
+                            #[cfg(any(target_os = "linux", target_os = "android"))]
+                            if errno == Errno::ACCESS || errno == Errno::PERM {
+                                return component_refusal(
+                                    errno,
+                                    previous_name,
+                                    position - 1,
+                                    total,
+                                );
+                            }
+                            component_refusal(errno, name, position, total)
+                        })?;
                         // `O_PATH|O_NOFOLLOW` describes the link itself rather
                         // than failing, so the component is confirmed to be a
                         // folder instead of trusting the flags to refuse it.
@@ -537,7 +556,25 @@ impl RootAnchor {
                         if !is_dir {
                             return Err(component_refusal(Errno::NOTDIR, name, position, total));
                         }
+                        #[cfg(any(target_os = "linux", target_os = "android"))]
+                        let opened = if position == total {
+                            open_component(
+                                Some(&opened),
+                                Path::new("."),
+                                OFlags::RDONLY
+                                    | OFlags::DIRECTORY
+                                    | OFlags::NOFOLLOW
+                                    | OFlags::CLOEXEC,
+                            )
+                            .map_err(|errno| component_refusal(errno, name, position, total))?
+                        } else {
+                            opened
+                        };
                         current = opened;
+                        #[cfg(any(target_os = "linux", target_os = "android"))]
+                        {
+                            previous_name = name;
+                        }
                     }
                     // `..` and a prefix never appear in a canonical path, so a
                     // root that carries one is not the path the host resolved.

@@ -1173,6 +1173,36 @@ fn an_ancestor_that_cannot_be_searched_is_refused_with_its_permission() {
         "{}",
         error.next_step
     );
+    assert!(error.message.contains("(ancestor)"), "{}", error.message);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_root_parent_that_cannot_be_searched_is_not_a_root_read_failure() {
+    let dir = tempdir();
+    let parent = dir.path().join("parent");
+    let root = parent.join("ws");
+    write(&root, "src/a.ts", "export const a = 1;\n");
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o400)).unwrap();
+    let restore = RestoreMode(parent.clone());
+    if fs::File::open(&parent).is_err() {
+        eprintln!("skipped: this process cannot read the 0400 parent either");
+        return;
+    }
+    let error = scan(&root, ".", limits()).unwrap_err();
+    drop(restore);
+    assert_eq!(error.code, "diagram_scan_workspace_unavailable");
+    assert!(error.message.contains("(parent)"), "{}", error.message);
+    assert!(
+        error.message.contains("cannot be searched"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.next_step.contains("search permission"),
+        "{}",
+        error.next_step
+    );
 }
 
 #[test]
