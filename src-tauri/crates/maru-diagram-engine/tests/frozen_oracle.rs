@@ -166,7 +166,12 @@ fn the_corpus_names_the_oracle_that_produced_it_and_its_recording_command() {
     assert_eq!(corpus.oracle["version"], frozen.version.as_str());
     assert_eq!(corpus.oracle["revision"], frozen.revision.as_str());
     assert_eq!(frozen.revision.len(), 40, "a full pinned commit");
-    assert_eq!(frozen.pin_sha256.len(), 64, "the sha256 of the pin file");
+    let pin = include_bytes!("../../../src/diagram/testdata/legacy-archify-pin.json");
+    assert_eq!(
+        frozen.pin_sha256,
+        format!("{:x}", Sha256::digest(pin)),
+        "pinSha256 must be the sha256 of the kept legacy Archify pin"
+    );
     assert_eq!(
         frozen.command,
         "node scripts/diagram-engine-freeze-oracle.mjs --write"
@@ -180,7 +185,7 @@ fn contract_failures(corpus: &Corpus) -> Vec<String> {
     for case in corpus.cases.iter().chain(&corpus.boundary_cases) {
         let Some(label) = &case.label else {
             failures.push(format!(
-                "{}: no label; record it with the freeze command",
+                "{}: no label; add {{\"source\":\"maru-engine\",\"reviewedIn\":\"#<PR>\"}} for a case added after E6",
                 case.id
             ));
             continue;
