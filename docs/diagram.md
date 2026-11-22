@@ -1923,15 +1923,17 @@ order or collision predicate changed:
 | --- | --- | --- | --- |
 | `3212ff93` (#576), run 42834613105 | 7.0 | 31.7 | 279.3 |
 | `43155594876` (#584), run 43155594876 | 7.2 | 33.1 | 243.4 |
-| This head `680a613c`, run 45004427356 | 5.0 | 22.2 | 157.1 |
+| `680a613c`, run 45004427356 | 5.0 | 22.2 | 157.1 |
+| `dd47a9af` (documentation only), run 45005893606 | 4.4 | 13.3 | 88.4 |
 
-The hosted 1,000-node median at this head is 152.6 ms with a 418.8 ms first
-layout, so the harness reports `targetMet:true` for the 200 ms AC6 requirement
-and `budgetMet:true` for the 400 ms E2 budget: the 243.4 ms accepted floor falls
-by 35.4%, and the 50- and 200-node rows move with it. That hosted run measured
-the same commit this section describes, and the 157.1 ms p95 is the acceptance
-figure; the local pair above is the engine-to-engine comparison on a machine
-about 2.6x faster than the runner.
+The hosted 1,000-node median is 152.6 ms in the first row and 84.1 ms in the
+second, with first layouts of 418.8 ms and 211.3 ms; both runs report
+`targetMet:true` for the 200 ms AC6 requirement and `budgetMet:true` for the
+400 ms E2 budget. Two runs of the same engine differ by 1.8x, which is the
+runner spread the earlier sections saw, so the 157.1 ms figure is the
+conservative one and the 243.4 ms accepted floor falls by 35.4% on it and by
+63.7% on the faster runner. The local pair above is the engine-to-engine
+comparison on a machine about 1.4x to 2.6x faster than those runners.
 
 The local 1,000-node first layout falls from 134.1-135.5 ms to 110.1 ms at this
 head. The same `bench-1000.json` fixture still routes all 999 edges and emits the
