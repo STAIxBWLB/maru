@@ -13,9 +13,12 @@
 //! - an oracle-labelled case keeps a full verdict, its comparison agrees with
 //!   the layer it was derived from, and `comparison.inputJson` is the input
 //!   that layer judged (the evidence-stripped input for a public case);
-//! - `frozenOracle.verdictsSha256` digests every oracle-labelled case's inputs
-//!   and all six verdict layers (ok, codes and diagnostics), so any edit to a
-//!   frozen verdict fails, even one that keeps the case internally consistent;
+//! - `frozenOracle.verdictsSha256` digests every oracle-labelled case's inputs,
+//!   all six verdict layers (ok, codes and diagnostics) and its whole
+//!   `comparison` (accepted, equivalentCodes, oracleLayer, currentScope and
+//!   inputJson), so any edit to a frozen verdict or to the expectation the
+//!   engine is tested against fails, even one that keeps the case internally
+//!   consistent;
 //! - a case added after E6 is labelled `maru-engine` and names the PR that
 //!   reviewed its expected result, since no oracle exists to label it.
 use serde::Deserialize;
@@ -103,6 +106,7 @@ const FROZEN_FIELDS: &[&str] = &[
     "validityOracle",
     "validitySchemaOracle",
     "validityDocumentOracle",
+    "comparison",
 ];
 
 /// JSON with object keys sorted (independent of serde_json's map feature)
@@ -170,7 +174,7 @@ fn the_corpus_names_the_oracle_that_produced_it_and_its_recording_command() {
     assert_eq!(
         frozen.pin_sha256,
         format!("{:x}", Sha256::digest(pin)),
-        "pinSha256 must be the sha256 of the kept legacy Archify pin"
+        "pinSha256 must be the sha256 of the kept legacy Archify pin; restore testdata/legacy-archify-pin.json from git history"
     );
     assert_eq!(
         frozen.command,
@@ -356,10 +360,17 @@ fn frozen_accepted(case: &Case) -> Result<Option<bool>, String> {
     Ok(Some(accepted))
 }
 
-/// Applies `edit` to the named case of a corpus copy, then returns what the
-/// real checks report: the contract failures for that case, plus a digest
-/// mismatch when the frozen fields changed.
-fn failures_after(id: &str, edit: impl Fn(&mut serde_json::Map<String, Value>)) -> Vec<String> {
+/// What each guard reports after an edit, kept apart so one guard can never
+/// stand in for the other in a regression.
+struct Outcome {
+    /// `contract_failures` for the edited case only.
+    contract: Vec<String>,
+    /// Whether `verdicts_sha256` moved.
+    digest_changed: bool,
+}
+
+/// Applies `edit` to the named case of a corpus copy and runs both guards.
+fn outcome_after(id: &str, edit: impl Fn(&mut serde_json::Map<String, Value>)) -> Outcome {
     let mut value: Value = serde_json::from_str(PARITY).unwrap();
     let recorded = verdicts_sha256(&value);
     let mut found = false;
@@ -375,22 +386,51 @@ fn failures_after(id: &str, edit: impl Fn(&mut serde_json::Map<String, Value>)) 
     let digest_changed = verdicts_sha256(&value) != recorded;
     let corpus: Corpus = serde_json::from_value(value).unwrap();
     let prefix = format!("{id}:");
-    let mut failures: Vec<String> = contract_failures(&corpus)
+    let contract = contract_failures(&corpus)
         .into_iter()
         .filter(|failure| failure.starts_with(&prefix))
         .collect();
-    if digest_changed {
-        failures.push(format!("{id}: frozen verdict digest changed"));
+    Outcome {
+        contract,
+        digest_changed,
     }
-    failures
 }
 
-fn failures_after_removing(id: &str, fields: &[&str]) -> Vec<String> {
-    failures_after(id, |case| {
+/// The contract failures after removing `fields`; the digest is not consulted.
+fn contract_after_removing(id: &str, fields: &[&str]) -> Vec<String> {
+    outcome_after(id, |case| {
         for field in fields {
             case.remove(*field);
         }
     })
+    .contract
+}
+
+/// Asserts that only the digest catches an edit: the contract stays clean,
+/// so the regression fails if the digest guard is removed.
+fn assert_digest_only(id: &str, what: &str, edit: impl Fn(&mut serde_json::Map<String, Value>)) {
+    let outcome = outcome_after(id, edit);
+    assert!(
+        outcome.contract.is_empty(),
+        "{what}: the edit must stay contract-consistent so only the digest can catch it: {:?}",
+        outcome.contract
+    );
+    assert!(outcome.digest_changed, "{what} on {id} went unnoticed");
+}
+
+/// Flips a verdict layer consistently: `ok` together with matching codes and
+/// diagnostics, so the per-layer contract rules still hold.
+fn flip_layer(case: &mut serde_json::Map<String, Value>, layer: &str) {
+    let verdict = case.get_mut(layer).unwrap();
+    if verdict["ok"].as_bool().unwrap() {
+        verdict["ok"] = Value::Bool(false);
+        verdict["codes"] = serde_json::json!(["edited/code"]);
+        verdict["diagnostics"] = serde_json::json!([{"code": "edited/code"}]);
+    } else {
+        verdict["ok"] = Value::Bool(true);
+        verdict["codes"] = serde_json::json!([]);
+        verdict["diagnostics"] = serde_json::json!([]);
+    }
 }
 
 #[test]
@@ -406,12 +446,15 @@ fn deleting_a_public_case_validity_layer_fails_the_contract() {
         "validitySchemaOracle",
         "validityDocumentOracle",
     ] {
+        let contract = contract_after_removing(&public, &[field]);
         assert!(
-            !failures_after_removing(&public, &[field]).is_empty(),
-            "removing {field} from {public} went unnoticed"
+            contract
+                .iter()
+                .any(|failure| failure.contains(&format!("frozen {field} missing"))),
+            "removing {field} from {public} went unnoticed by the contract: {contract:?}"
         );
     }
-    let all = failures_after_removing(
+    let all = contract_after_removing(
         &public,
         &[
             "validityOracle",
@@ -432,9 +475,15 @@ fn deleting_a_verdict_or_label_of_any_layer_fails_the_contract() {
             .find(|case| case.comparison.oracle_layer.as_deref() == Some(layer))
             .unwrap_or_else(|| panic!("a {layer} case"));
         for field in ["oracle", "schemaOracle", "documentOracle", "label"] {
+            let contract = contract_after_removing(&case.id, &[field]);
+            let expected = if field == "label" {
+                "no label".to_string()
+            } else {
+                format!("frozen {field} missing")
+            };
             assert!(
-                !failures_after_removing(&case.id, &[field]).is_empty(),
-                "removing {field} from {} ({layer}) went unnoticed",
+                contract.iter().any(|failure| failure.contains(&expected)),
+                "removing {field} from {} ({layer}) went unnoticed by the contract: {contract:?}",
                 case.id
             );
         }
@@ -449,43 +498,84 @@ fn a_consistent_edit_to_a_frozen_verdict_still_fails() {
         .iter()
         .find(|case| case.comparison.oracle_layer.as_deref() == Some("full"))
         .expect("a full-layer case");
-    // Flip the verdict and the comparison together: internally consistent.
-    let flipped = failures_after(&case.id, |case| {
-        let ok = case["oracle"]["ok"].as_bool().unwrap();
-        case.get_mut("oracle").unwrap()["ok"] = Value::Bool(!ok);
+    assert_digest_only(&case.id, "a verdict flipped with its comparison", |case| {
+        flip_layer(case, "oracle");
         let accepted = case["comparison"]["accepted"].as_bool().unwrap();
         case.get_mut("comparison").unwrap()["accepted"] = Value::Bool(!accepted);
     });
-    assert!(
-        !flipped.is_empty(),
-        "a consistent verdict flip went unnoticed"
+    assert_digest_only(
+        &case.id,
+        "a flip of a layer the comparison does not read",
+        |case| {
+            flip_layer(case, "schemaOracle");
+        },
     );
-    // A layer the comparison does not read.
-    let unused = failures_after(&case.id, |case| {
-        let ok = case["schemaOracle"]["ok"].as_bool().unwrap();
-        case.get_mut("schemaOracle").unwrap()["ok"] = Value::Bool(!ok);
+    assert_digest_only(&case.id, "a codes and diagnostics edit", |case| {
+        let verdict = case.get_mut("oracle").unwrap();
+        let code = if verdict["ok"].as_bool().unwrap() {
+            "edited/warning"
+        } else {
+            "edited/code"
+        };
+        verdict["codes"] = serde_json::json!([code]);
+        verdict["diagnostics"] = serde_json::json!([{ "code": code }]);
     });
-    assert!(
-        !unused.is_empty(),
-        "flipping an unused layer went unnoticed"
-    );
-    // Codes or diagnostics only.
-    let codes = failures_after(&case.id, |case| {
-        case.get_mut("oracle").unwrap()["codes"] = serde_json::json!(["edited/code"]);
-        case.get_mut("oracle").unwrap()["diagnostics"] =
-            serde_json::json!([{"code": "edited/code"}]);
-    });
-    assert!(!codes.is_empty(), "editing codes went unnoticed");
-    // The comparison judged a different input.
-    let input = failures_after(&case.id, |case| {
+    let input = outcome_after(&case.id, |case| {
         case.get_mut("comparison").unwrap()["inputJson"] = Value::from("{}");
     });
     assert!(
         input
+            .contract
             .iter()
             .any(|failure| failure.contains("comparison.inputJson")),
-        "{input:?}"
+        "{:?}",
+        input.contract
     );
+}
+
+#[test]
+fn loosening_the_comparison_expectation_still_fails() {
+    let corpus = corpus();
+    let full = corpus
+        .cases
+        .iter()
+        .find(|case| {
+            case.comparison.current_scope.kind == "document-validity"
+                && case.comparison.oracle_layer.as_deref() == Some("full")
+        })
+        .expect("a document-validity case");
+    // Rescope to a named difference, which the contract does not compare,
+    // then flip the expectation the engine is tested against.
+    assert_digest_only(&full.id, "a rescoped and flipped comparison", |case| {
+        let comparison = case.get_mut("comparison").unwrap();
+        comparison["currentScope"] =
+            serde_json::json!({"kind": "e2-geometry", "reasonId": "edited", "reason": "edited"});
+        let accepted = comparison["accepted"].as_bool().unwrap();
+        comparison["accepted"] = Value::Bool(!accepted);
+    });
+    // Repoint oracleLayer to a layer whose verdict differs, with a matching
+    // accepted: consistent for the contract, but a different expectation.
+    let repointed = corpus
+        .cases
+        .iter()
+        .find(|case| {
+            case.comparison.current_scope.kind == "document-validity"
+                && case.validity_input_json.is_none()
+                && case.comparison.oracle_layer.as_deref() == Some("full")
+                && case.schema_oracle.as_ref().map(|verdict| verdict.ok)
+                    != case.oracle.as_ref().map(|verdict| verdict.ok)
+        })
+        .expect("a full-layer case whose schema verdict differs");
+    let schema_ok = repointed.schema_oracle.as_ref().unwrap().ok;
+    assert_digest_only(&repointed.id, "a repointed oracleLayer", move |case| {
+        let comparison = case.get_mut("comparison").unwrap();
+        comparison["oracleLayer"] = Value::from("schema");
+        comparison["accepted"] = Value::Bool(schema_ok);
+    });
+    // Equivalent codes the differential tests match against.
+    assert_digest_only(&full.id, "an equivalentCodes edit", |case| {
+        case.get_mut("comparison").unwrap()["equivalentCodes"] = serde_json::json!(["edited/code"]);
+    });
 }
 
 #[test]
@@ -497,9 +587,10 @@ fn a_public_case_comparison_must_judge_the_evidence_stripped_input() {
         .find(|case| case.validity_input_json.is_some())
         .expect("a public case");
     let original = public.input_json.clone();
-    let failures = failures_after(&public.id, move |case| {
+    let failures = outcome_after(&public.id, move |case| {
         case.get_mut("comparison").unwrap()["inputJson"] = Value::from(original.clone());
-    });
+    })
+    .contract;
     assert!(
         failures
             .iter()
