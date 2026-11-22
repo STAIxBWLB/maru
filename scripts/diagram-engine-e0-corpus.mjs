@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { stripTypeScriptTypes } from "node:module";
 import { geometryComparisonFor } from "./diagram-engine-e2-comparison.mjs";
 import { generatedBoundaryCases, REFUSAL_AUDIT } from "./diagram-engine-e2-boundaries.mjs";
@@ -155,25 +156,62 @@ export async function collectCases(publicCandidates = [], retainedPublicCases = 
 const cacheFile = join(root, ".engine-e0/oracle-cache.json");
 /** @type {Record<string, OracleReport>} */
 const oracleCache = existsSync(cacheFile) ? JSON.parse(readFileSync(cacheFile, "utf8")) : {};
-function portableOracleReport(value) {
-  return JSON.parse(JSON.stringify(value).split(root).join("<fixture-root>")
-    .replace(/\/tmp\/archify-validate-[A-Za-z0-9_-]+/g, "<oracle-staging>"));
+/** Replace every occurrence of a host staging directory in `text`.
+ * The sidecar stages its input in `mkdtemp(join(os.tmpdir(), "archify-validate-"))`,
+ * and it inherits this process's environment, so the staging root is exactly
+ * `tmpRoot`. That root may hold spaces or Windows separators, and inside JSON a
+ * backslash is escaped, so each spelling of the root is replaced in full.
+ * @param {string} text JSON text @param {string} tmpRoot */
+export function normalizeStagingPaths(text, tmpRoot) {
+  const roots = new Set();
+  for (const root of [tmpRoot, tmpRoot.replace(/[\\/]+$/, "")]) {
+    if (!root) continue;
+    roots.add(root);
+    roots.add(root.replaceAll("\\", "/"));
+    roots.add(root.replaceAll("/", "\\"));
+    // A realpath'd macOS tmpdir (/private/var/...) is the same directory.
+    if (root.startsWith("/var/")) roots.add(`/private${root}`);
+  }
+  const spellings = [...roots].flatMap((root) => [JSON.stringify(root).slice(1, -1), root]);
+  const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sep = String.raw`(?:\\\\|\\|/)`; // escaped backslash, backslash or slash
+  const pattern = new RegExp(
+    `(?:${[...new Set(spellings)].sort((a, b) => b.length - a.length).map(escape).join("|")})${sep}*archify-validate-[A-Za-z0-9_-]+(${sep})?`,
+    "g",
+  );
+  // The separator after the staging directory becomes "/" on every host, so a
+  // Windows run records the same verdict as a Unix one.
+  return text.replace(pattern, (_match, after) => (after ? "<oracle-staging>/" : "<oracle-staging>"));
 }
-function oracle(corpusCase) {
+
+/** @param {unknown} value @param {string} [tmpRoot] @param {string} [repoRoot] */
+export function portableOracleReport(value, tmpRoot = tmpdir(), repoRoot = root) {
+  // A recorded verdict must be identical on every host and name no local path.
+  // Staging goes first: a TMPDIR at or below the repository root would
+  // otherwise turn into <fixture-root>/archify-validate-* and keep its random
+  // directory name.
+  return JSON.parse(normalizeStagingPaths(JSON.stringify(value), tmpRoot).split(repoRoot).join("<fixture-root>"));
+}
+/** Run the pinned CLI oracle on one case. `useCache: false` always spawns the
+ * sidecar, which the oracle freeze check needs to prove the recorded verdict.
+ * @param {CorpusCase} corpusCase @param {{useCache?: boolean}} [options] */
+export function oracle(corpusCase, { useCache = true } = {}) {
   const key = digest(readFileSync(join(root, "sidecars/archify/PIN.json"), "utf8") + corpusCase.diagramType + corpusCase.inputJson);
-  if (oracleCache[key]) return portableOracleReport(oracleCache[key]);
+  if (useCache && oracleCache[key]) return portableOracleReport(oracleCache[key]);
   const temp = join(root, ".engine-e0/oracle-input.json"); mkdirSync(join(root, ".engine-e0"), { recursive: true }); writeFileSync(temp, corpusCase.inputJson);
   const result = spawnSync(process.execPath, [join(root, "sidecars/archify/bin/archify.mjs"), "validate", corpusCase.diagramType, temp, "--json"], { encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024 });
   if (result.error) throw new Error(`Oracle failed for ${corpusCase.id}: ${result.error.message}; check the pinned Node engine`);
   let report; try { report = JSON.parse(result.stdout); } catch { throw new Error(`Oracle returned no JSON for ${corpusCase.id}; inspect the pinned engine`); }
   report = portableOracleReport(JSON.parse(JSON.stringify(report).replaceAll(temp, "oracle-input.json")));
   const receipt = { ...(corpusCase.diagramType === "floorplan" ? { scope: "unsupported-type, not a document validity verdict" } : {}), ok: report.ok === true, codes: (report.diagnostics ?? []).map((d) => d.code ?? "diagnostic"), diagnostics: report.diagnostics ?? [], ...(report.error ? { error: report.error } : {}) };
-  oracleCache[key] = receipt;
-  writeFileSync(cacheFile, JSON.stringify(oracleCache));
+  if (useCache) {
+    oracleCache[key] = receipt;
+    writeFileSync(cacheFile, JSON.stringify(oracleCache));
+  }
   return receipt;
 }
 
-function schemaOracle(corpusCase) {
+export function schemaOracle(corpusCase) {
   if (corpusCase.diagramType === "floorplan") return { ok: false, codes: ["oracle/type-unsupported"], diagnostics: [], scope: "unsupported-type, not a document validity verdict" };
   try {
     validateSchema(corpusCase.diagramType, JSON.parse(corpusCase.inputJson));
@@ -186,7 +224,7 @@ function schemaOracle(corpusCase) {
   }
 }
 /** @param {CorpusCase} corpusCase @param {OracleReport} schemaReport @returns {OracleReport} */
-function documentOracle(corpusCase, schemaReport) {
+export function documentOracle(corpusCase, schemaReport) {
   if (!schemaReport.ok) return schemaReport;
   const input = JSON.parse(corpusCase.inputJson);
   try {
