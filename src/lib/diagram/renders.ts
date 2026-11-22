@@ -1,5 +1,4 @@
 import { listStoredRenders, prepareStoredRender, deleteStoredRender, renderEngineCandidate } from "./engine";
-import type { ArchifyRenderReceipt } from "../archify";
 import type { EngineIdentity, EngineReceipt } from "../../../src-tauri/crates/maru-diagram-engine/bindings/engine";
 import { readDiagramDetailed } from "./persistence";
 import { canonicalSemanticExportInput } from "./export";
@@ -12,7 +11,27 @@ export interface RenderDocumentContext {
   diagramType: string;
   datasetId?: string | null;
 }
-export type RenderReceipt = (ArchifyRenderReceipt | EngineReceipt) & RenderDocumentContext & { renderedAt: string };
+/** A gate recorded by an Archify-era receipt. */
+export interface LegacyArchifyRenderGate {
+  status: "passed" | "not-run";
+  scope: string;
+}
+
+/** Receipt written by the retired Archify engine (before maru#554 E6). It is
+ * still read so Archify-era stored renders keep opening; nothing writes it. */
+export interface LegacyArchifyRenderReceipt {
+  schemaVersion: 1;
+  inputSpecSha256: string;
+  enginePin: { name: string; version: string; revision: string };
+  outputSha256: string;
+  outputMimeType: string;
+  engineOutputSha256?: string;
+  conversion?: { format: "svg" | "png"; theme: "light" | "dark"; pixelRatio: 1 };
+  gates: { schema: LegacyArchifyRenderGate; artifact: LegacyArchifyRenderGate; browser: LegacyArchifyRenderGate; visualReview: LegacyArchifyRenderGate };
+  readback?: LegacyArchifyRenderGate;
+}
+
+export type RenderReceipt = (LegacyArchifyRenderReceipt | EngineReceipt) & RenderDocumentContext & { renderedAt: string };
 export interface StoredRender {
   docId: string;
   renderId: string;

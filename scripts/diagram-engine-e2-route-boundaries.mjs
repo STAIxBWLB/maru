@@ -1,6 +1,9 @@
 // Original synthetic inputs and an audit of the pinned oracle's refusal sites.
 // No renderer implementation is imported. Actual oracle verdicts, not the
 // intended boundary side, decide acceptance when these cases enter the corpus.
+// The `sidecars/archify/...` paths below cite the retired Archify v3.0.0 pin
+// (revision in parity.json frozenOracle); that tree was removed in maru#554 E6
+// and these strings are recorded evidence, not files in this repository.
 const ARCH = "sidecars/archify/renderers/architecture/render-architecture.mjs";
 const WF = "sidecars/archify/renderers/workflow/workflow-compiler.mjs";
 const SHARED = "sidecars/archify/renderers/shared/geometry.mjs";

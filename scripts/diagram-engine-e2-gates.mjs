@@ -1,5 +1,8 @@
 // Renderer gate/adjustment inventory. Every key is explicitly assigned below;
 // neither source text nor diagnostic names are classified by regular expression.
+// The `sidecars/archify/...` paths below cite the retired Archify v3.0.0 pin
+// (revision in parity.json frozenOracle); that tree was removed in maru#554 E6
+// and these strings are recorded evidence, not files in this repository.
 import { generatedBoundaryCases, REFUSAL_AUDIT } from "./diagram-engine-e2-boundaries.mjs";
 import { generatedGeometryCases } from "./diagram-engine-e2-cases.mjs";
 import { ROUTE_REFUSAL_AUDIT, generatedRouteBoundaryCases } from "./diagram-engine-e2-route-boundaries.mjs";

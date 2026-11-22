@@ -2,10 +2,13 @@
 //!
 //! Every corpus case carries the verdict the pinned Archify oracle returned,
 //! recorded by `node scripts/diagram-engine-freeze-oracle.mjs --write` (the
-//! `frozenOracle.command` below). The differential tests compare the engine
+//! `frozenOracle.command` below). E6 T2 removed that script with the sidecar,
+//! so the command is provenance only and these recorded verdicts are the
+//! oracle. The differential tests compare the engine
 //! against these recorded verdicts only; no test runs a sidecar. This test
 //! holds the frozen data to its own contract:
-//! - the corpus names which oracle and pin produced it and how to reproduce it;
+//! - the corpus names which oracle and pin produced it, and keeps the command
+//!   that recorded it as provenance only (the script was removed in E6 T2);
 //! - every case says where its verdict came from (`label.source`);
 //! - an oracle-labelled case keeps a full verdict and its comparison agrees
 //!   with that verdict, so a later edit cannot silently flip one side;
@@ -80,7 +83,7 @@ fn corpus() -> Corpus {
 }
 
 #[test]
-fn the_corpus_names_the_oracle_that_produced_it_and_how_to_reproduce_it() {
+fn the_corpus_names_the_oracle_that_produced_it_and_its_recording_command() {
     let corpus = corpus();
     let frozen = &corpus.frozen_oracle;
     assert_eq!(frozen.id, "archify");

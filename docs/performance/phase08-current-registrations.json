@@ -2586,7 +2586,7 @@
     },
     {
       "path": "src-tauri/src/lib.rs",
-      "sha256": "e9ea3f3aea61ee8c23270b4ef4d30018cbc2e38472d5d0380a1d403335b0819a"
+      "sha256": "65560af66c52da03ba57b898d0cac9e8147c30afb3f1f187d4cb4b40f3a68a0b"
     },
     {
       "path": "src-tauri/src/linter/gaejosik.rs",
@@ -2769,5 +2769,5 @@
       "sha256": "6f401ff63df4a5a3894a99fba349b4d5e8c54e6b6c23cf4612694c95ed3725ac"
     }
   ],
-  "sourceCommit": "18b7a935c7e95e640cc672ce900541deac447b80"
+  "sourceCommit": "88a69014e519b4081d5126a3c1547a979a964304"
 }
