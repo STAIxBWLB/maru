@@ -681,11 +681,14 @@ pub(crate) fn render_calendar_sync(
     if problem_count == 0 {
         text.push_str(&style.summary(0, 0, outcome.drained));
     } else {
-        // Problems first: the failed or blocked records, read from the outbox
-        // after the drain, each with its stored error. Nothing reruns.
+        // The outbox can also contain failures from earlier attempts. Label the
+        // section accordingly and inspect it without repeating provider writes.
         let mut attention = format!(
             "\n\n{}",
-            style.section("Attention", Some(&problems.len().to_string()))
+            style.section(
+                "Attention",
+                Some(&format!("{} unresolved records", problems.len()))
+            )
         );
         for problem in problems {
             let marker = if problem.blocked {
@@ -698,7 +701,9 @@ pub(crate) fn render_calendar_sync(
                 marker,
                 &format!(
                     "{}: {} ({})",
-                    problem.state, problem.error, problem.task_path
+                    problem.state,
+                    crate::cli_output::sanitize_terminal_text(&problem.error),
+                    crate::cli_output::sanitize_terminal_text(&problem.task_path)
                 ),
             ));
         }
@@ -709,6 +714,8 @@ pub(crate) fn render_calendar_sync(
                 "the outbox records were not readable; see .maru/today/outbox/",
             ));
         }
+        attention.push('\n');
+        attention.push_str(&style.next_step("Inspect .maru/today/outbox/ before retrying"));
         if let Some(offset) = text.find("\n\n") {
             text.insert_str(offset, &attention);
         } else {

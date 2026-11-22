@@ -1970,12 +1970,14 @@ mod tests {
         let plain =
             crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome, &problems);
         assert!(
-            plain.contains("\u{25b8} Attention (1)\n  \u{2717}  failed: calendar_insert_failed: 403 (Today/2026-11-22.md)\n\n\u{25b8} Changes"),
+            plain.contains("\u{25b8} Attention (1 unresolved records)\n  \u{2717}  failed: calendar_insert_failed: 403 (Today/2026-11-22.md)\n\n\u{25b8} Changes"),
             "{plain}"
         );
         assert!(!plain.contains("--json"), "no rerun is suggested: {plain}");
         assert!(
-            plain.starts_with("maru calendar-sync primary dry run\n\n\u{25b8} Attention (1)"),
+            plain.starts_with(
+                "maru calendar-sync primary dry run\n\n\u{25b8} Attention (1 unresolved records)"
+            ),
             "{plain}"
         );
         assert!(
@@ -1996,6 +1998,36 @@ mod tests {
         for line in plain.lines() {
             assert!(UnicodeWidthStr::width(line) <= 80, "{line}");
         }
+    }
+
+    #[test]
+    fn calendar_failure_details_are_inert_and_include_read_only_recovery() {
+        let outcome = crate::calendar_sync::CalendarSyncOutcome {
+            failed: 1,
+            ..Default::default()
+        };
+        let problems = vec![crate::calendar_sync::ProblemRecord {
+            state: "failed",
+            blocked: false,
+            error: "provider error\rforged\nline".into(),
+            task_path: "tasks/a\tname".into(),
+        }];
+        let report =
+            crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome, &problems);
+        assert!(
+            report
+                .lines()
+                .all(|line| !line.chars().any(char::is_control)),
+            "{report:?}"
+        );
+        assert!(
+            report.contains("provider error forged line (tasks/a name)"),
+            "{report}"
+        );
+        assert!(report.contains(".maru/today/outbox/"), "{report}");
+        assert!(report.contains("unresolved records"), "{report}");
+        assert!(!report.contains("calendar-sync --json"), "{report}");
+        assert_eq!(problems[0].error, "provider error\rforged\nline");
     }
 
     #[test]

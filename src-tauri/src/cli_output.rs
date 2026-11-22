@@ -405,6 +405,15 @@ pub(crate) fn shorten_middle(text: &str, cap: usize) -> String {
     format!("{head}...{}", tail.into_iter().collect::<String>())
 }
 
+/// Keep externally supplied text inert when printed on a terminal. Control
+/// characters, including ESC, C1 controls and line breaks, cannot create
+/// terminal commands or forge extra report lines. Stored and JSON data stay intact.
+pub(crate) fn sanitize_terminal_text(text: &str) -> String {
+    text.chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect()
+}
+
 /// Greedy word wrap measured in terminal cells (ambiguous width narrow).
 pub(crate) fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
     let Some(width) = width.filter(|width| *width >= 20) else {
