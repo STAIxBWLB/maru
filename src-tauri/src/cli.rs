@@ -576,6 +576,7 @@ fn run_secrets_migrate(args: &[String]) -> i32 {
                     render_action_report(
                         &out::stdout_style(),
                         &format!("secrets migrate: {} action(s) {verb}", report.actions.len()),
+                        Marker::Ok,
                         &["action", "status", "path"],
                         &rows,
                     )
@@ -653,10 +654,15 @@ fn run_doctor(args: &[String]) -> i32 {
 fn render_action_report(
     style: &out::Style,
     summary: &str,
+    marker: Marker,
     headings: &[&str],
     rows: &[Vec<String>],
 ) -> String {
-    let mut text = style.done_line(summary);
+    let mut text = if marker == Marker::Ok {
+        style.done_line(summary)
+    } else {
+        style.bullet(marker, summary)
+    };
     if !rows.is_empty() {
         text.push_str("\n\n");
         text.push_str(&style.table(headings, rows));
@@ -715,7 +721,14 @@ fn render_check_report(
             "\n  {}",
             style.paint(
                 out::Role::Hint,
-                &format!("{hidden_warnings} more warnings not shown; `{full_command}` lists them")
+                &format!(
+                    "{hidden_warnings} more {} not shown; `{full_command}` lists them",
+                    if hidden_warnings == 1 {
+                        "warning"
+                    } else {
+                        "warnings"
+                    }
+                )
             )
         ));
     }
@@ -777,12 +790,16 @@ fn run_skills(args: &[String]) -> i32 {
 }
 
 fn run_skills_env(args: &[String]) -> i32 {
-    if args.first().map(String::as_str) != Some("repair") {
-        return usage_error(
-            "skills env repair: subcommand required",
-            SKILLS_USAGE,
-            "skills",
-        );
+    match args.first().map(String::as_str) {
+        Some("repair") => {}
+        Some(other) => {
+            return usage_error(
+                &format!("skills env: unknown subcommand: {other}"),
+                SKILLS_USAGE,
+                "skills",
+            )
+        }
+        None => return usage_error("skills env: subcommand required", SKILLS_USAGE, "skills"),
     }
     let mut json = false;
     let mut force = false;
@@ -842,7 +859,7 @@ fn run_skills_env(args: &[String]) -> i32 {
                     serde_json::json!({ "repaired": false, "reason": err })
                 );
             } else {
-                out::done(&err);
+                println!("{}", out::stdout_style().bullet(Marker::Warn, &err));
             }
             0
         }
@@ -1170,6 +1187,11 @@ fn run_skills_sync(args: &[String]) -> i32 {
                             report.desired_installs,
                             report.actions.len()
                         ),
+                        if !apply && !report.actions.is_empty() {
+                            Marker::Pending
+                        } else {
+                            Marker::Ok
+                        },
                         &["action", "target", "skill", "path"],
                         &rows,
                     )
@@ -1353,12 +1375,12 @@ fn run_skills_import_unmanage(args: &[String]) -> i32 {
         return usage_error("skill name required", SKILLS_USAGE, "skills");
     };
     let delete_files = args.iter().skip(1).any(|arg| arg == "--delete-files");
-    if args
+    if let Some(arg) = args
         .iter()
         .skip(1)
-        .any(|arg| arg.as_str() != "--delete-files")
+        .find(|arg| arg.as_str() != "--delete-files")
     {
-        return usage_error("unknown option", SKILLS_USAGE, "skills");
+        return usage_error(&format!("unknown option: {arg}"), SKILLS_USAGE, "skills");
     }
     match skills_import_unmanage(current_work_path(), name.clone(), Some(delete_files)) {
         Ok(outcome) => {
@@ -1494,11 +1516,14 @@ fn resolve_jobs_id(work_path: &std::path::Path, id: Option<String>) -> Result<St
         return Ok(jobs.jobs[0].id.clone());
     }
     let message = if jobs.jobs.is_empty() {
-        "no jobs declared in <cwd>/.maru/jobs.json"
+        format!(
+            "no jobs declared in {}",
+            work_path.join(".maru/jobs.json").display()
+        )
     } else {
-        "multiple jobs declared; pass <id>"
+        "multiple jobs declared; pass <id>".to_string()
     };
-    Err(usage_error(message, JOBS_USAGE, "jobs"))
+    Err(usage_error(&message, JOBS_USAGE, "jobs"))
 }
 
 fn run_jobs_list(args: &[String]) -> i32 {
@@ -1947,6 +1972,68 @@ mod tests {
     }
 
     #[test]
+    fn human_reports_use_pending_markers_and_sanitize_external_fields() {
+        use unicode_bidi::format_chars::RLO;
+        let style = style(false, true);
+        let action = super::render_action_report(
+            &style,
+            "pending actions",
+            crate::cli_output::Marker::Pending,
+            &["name", "path"],
+            &[vec![format!("skill{RLO}name"), "path\rforged".into()]],
+        );
+        assert!(action.starts_with("  ~  pending actions"), "{action}");
+        assert!(!action.contains(RLO));
+        assert!(!action.contains('\r'));
+        let mut status = job(&format!("job{RLO}id"));
+        status.title = "title\nforged".into();
+        let jobs = super::render_jobs(&style, &[status]);
+        assert!(!jobs.contains(RLO));
+        assert!(!jobs.contains("title\nforged"));
+        let report =
+            super::render_check_report(&style, "doctor", &[], &[], (1, "maru doctor --json"));
+        assert!(report.contains("1 more warning not shown"), "{report}");
+    }
+
+    #[test]
+    fn calendar_report_uses_supplied_workspace_and_sanitizes_event_id() {
+        use unicode_bidi::format_chars::RLO;
+        let outcome = crate::calendar_sync::CalendarSyncOutcome {
+            failed: 1,
+            changes: vec![crate::calendar_sync::CalendarSyncChange {
+                rel_path: "note.md".into(),
+                action: "insert".into(),
+                event_id: Some(format!("event{RLO}id")),
+            }],
+            ..Default::default()
+        };
+        let work = std::env::temp_dir().join("different-workspace");
+        let report = crate::calendar_sync::render_calendar_sync(
+            &Style {
+                width: None,
+                ..style(false, true)
+            },
+            &outcome,
+            &[],
+            &work,
+        );
+        assert!(
+            report.contains(
+                &work
+                    .join(".maru/today/outbox")
+                    .to_string_lossy()
+                    .to_string()
+            ),
+            "{report}"
+        );
+        assert!(!report.contains(RLO), "{report}");
+        assert_eq!(
+            outcome.changes[0].event_id.as_deref(),
+            Some(format!("event{RLO}id").as_str())
+        );
+    }
+
+    #[test]
     fn calendar_sync_report_follows_the_layout_in_both_alphabets() {
         let outcome = crate::calendar_sync::CalendarSyncOutcome {
             destination: "primary".into(),
@@ -1967,16 +2054,20 @@ mod tests {
             error: "calendar_insert_failed: 403".into(),
             task_path: "Today/2026-11-22.md".into(),
         }];
-        let plain =
-            crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome, &problems);
+        let plain = crate::calendar_sync::render_calendar_sync(
+            &style(false, false),
+            &outcome,
+            &problems,
+            std::env::temp_dir().as_path(),
+        );
         assert!(
-            plain.contains("\u{25b8} Attention (1 unresolved records)\n  \u{2717}  failed: calendar_insert_failed: 403 (Today/2026-11-22.md)"),
+            plain.contains("\u{25b8} Attention (1 unresolved record)\n  \u{2717}  failed: calendar_insert_failed: 403 (Today/2026-11-22.md)"),
             "{plain}"
         );
         assert!(!plain.contains("--json"), "no rerun is suggested: {plain}");
         assert!(
             plain.starts_with(
-                "maru calendar-sync primary dry run\n\n\u{25b8} Attention (1 unresolved records)"
+                "maru calendar-sync primary dry run\n\n\u{25b8} Attention (1 unresolved record)"
             ),
             "{plain}"
         );
@@ -1985,12 +2076,20 @@ mod tests {
             "{plain}"
         );
         assert!(plain.contains("\u{2717} 1 failed"), "{plain}");
-        let ascii =
-            crate::calendar_sync::render_calendar_sync(&style(false, true), &outcome, &problems);
+        let ascii = crate::calendar_sync::render_calendar_sync(
+            &style(false, true),
+            &outcome,
+            &problems,
+            std::env::temp_dir().as_path(),
+        );
         assert!(ascii.is_ascii(), "{ascii}");
         assert!(ascii.contains("x 1 failed"), "{ascii}");
-        let colored =
-            crate::calendar_sync::render_calendar_sync(&style(true, false), &outcome, &problems);
+        let colored = crate::calendar_sync::render_calendar_sync(
+            &style(true, false),
+            &outcome,
+            &problems,
+            std::env::temp_dir().as_path(),
+        );
         assert!(
             colored.contains("\x1b[1;34mmaru calendar-sync primary\x1b[0m"),
             "{colored}"
@@ -2014,8 +2113,12 @@ mod tests {
             error: raw_error.clone(),
             task_path: "tasks/a\tname".into(),
         }];
-        let report =
-            crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome, &problems);
+        let report = crate::calendar_sync::render_calendar_sync(
+            &style(false, false),
+            &outcome,
+            &problems,
+            std::env::temp_dir().as_path(),
+        );
         assert!(
             report
                 .lines()
@@ -2026,8 +2129,8 @@ mod tests {
             report.contains("error forged line (tasks/a name)"),
             "{report}"
         );
-        assert!(report.contains(".maru/today/outbox/"), "{report}");
-        assert!(report.contains("unresolved records"), "{report}");
+        assert!(report.contains(".maru/today/outbox"), "{report}");
+        assert!(report.contains("unresolved record"), "{report}");
         assert!(!report.contains("calendar-sync --json"), "{report}");
         assert!(!report.contains(&provider_color), "{report:?}");
         assert_eq!(problems[0].error, raw_error);

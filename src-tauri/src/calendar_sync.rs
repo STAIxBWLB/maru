@@ -632,6 +632,7 @@ pub(crate) fn render_calendar_sync(
     style: &crate::cli_output::Style,
     outcome: &CalendarSyncOutcome,
     problems: &[ProblemRecord],
+    work: &Path,
 ) -> String {
     use crate::cli_output::Marker;
     let context = if outcome.dry_run { "dry run" } else { "" };
@@ -687,7 +688,15 @@ pub(crate) fn render_calendar_sync(
             "\n\n{}",
             style.section(
                 "Attention",
-                Some(&format!("{} unresolved records", problems.len()))
+                Some(&format!(
+                    "{} unresolved {}",
+                    problems.len(),
+                    if problems.len() == 1 {
+                        "record"
+                    } else {
+                        "records"
+                    }
+                ))
             )
         );
         for problem in problems {
@@ -711,11 +720,17 @@ pub(crate) fn render_calendar_sync(
             attention.push('\n');
             attention.push_str(&style.bullet(
                 Marker::Unknown,
-                "the outbox records were not readable; see .maru/today/outbox/",
+                &format!(
+                    "the outbox records were not readable; see {}",
+                    work.join(".maru/today/outbox").display()
+                ),
             ));
         }
         attention.push('\n');
-        attention.push_str(&style.next_step("Inspect .maru/today/outbox/ before retrying"));
+        attention.push_str(&style.next_step(&format!(
+            "Inspect {} before retrying",
+            work.join(".maru/today/outbox").display()
+        )));
         if let Some(offset) = text.find("\n\n") {
             text.insert_str(offset, &attention);
         } else {
@@ -810,7 +825,10 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
         },
     };
     let now_iso = chrono::Local::now().to_rfc3339();
-    let work_for_report = work.clone();
+    let work_for_report = match normalize_existing_dir(&work) {
+        Ok(path) => path,
+        Err(err) => return crate::cli_output::fail(&format!("calendar-sync: {err}")),
+    };
     match calendar_sync_run(work, destination, gws, now_iso, dry_run) {
         Ok(outcome) => {
             if json {
@@ -825,10 +843,11 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
                         &crate::cli_output::stdout_style(),
                         &outcome,
                         &if outcome.failed + outcome.blocked > 0 {
-                            problem_records(Path::new(&work_for_report))
+                            problem_records(&work_for_report)
                         } else {
                             Vec::new()
                         },
+                        &work_for_report,
                     )
                 );
             }

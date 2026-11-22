@@ -188,7 +188,10 @@ impl Style {
     /// `▸ <Name>` with an optional count in `hint`.
     pub(crate) fn section(&self, name: &str, count: Option<&str>) -> String {
         let arrow = if self.ascii { ">" } else { "▸" };
-        let title = self.paint(Role::Section, &format!("{arrow} {name}"));
+        let title = self.paint(
+            Role::Section,
+            &format!("{arrow} {}", sanitize_terminal_text(name)),
+        );
         match count {
             Some(count) => format!("{title} {}", self.paint(Role::Hint, &format!("({count})"))),
             None => title,
@@ -204,13 +207,20 @@ impl Style {
     #[allow(dead_code)]
     pub(crate) fn next_step(&self, text: &str) -> String {
         let arrow = self.marker(Marker::Next);
-        format!("    {arrow} {}", self.paint(Role::Accent, text))
+        let safe = sanitize_terminal_text(text);
+        let lines = wrap(&safe, self.width.map(|width| width.saturating_sub(7)));
+        let mut output = format!("    {arrow} {}", self.paint(Role::Accent, &lines[0]));
+        for line in &lines[1..] {
+            output.push_str(&format!("\n       {}", self.paint(Role::Accent, line)));
+        }
+        output
     }
 
     fn bullet_at(&self, indent: usize, marker: Marker, text: &str) -> String {
         let lead = " ".repeat(indent);
         let hang = indent + 3;
-        let lines = wrap(text, self.width.map(|width| width.saturating_sub(hang)));
+        let safe = sanitize_terminal_text(text);
+        let lines = wrap(&safe, self.width.map(|width| width.saturating_sub(hang)));
         let mut out = format!("{lead}{} {}", self.marker(marker), lines[0]);
         for line in &lines[1..] {
             out.push('\n');
@@ -260,6 +270,7 @@ impl Style {
 
     /// `<tool>: <message>`, with the fail marker when the stream is a TTY.
     pub(crate) fn error_line(&self, message: &str) -> String {
+        let message = sanitize_terminal_text(message);
         if self.tty {
             format!("{} {TOOL}: {message}", self.marker(Marker::Fail))
         } else {
@@ -269,14 +280,21 @@ impl Style {
 
     /// `✓ <what was done>`, the success confirmation.
     pub(crate) fn done_line(&self, message: &str) -> String {
-        format!("{} {message}", self.marker(Marker::Ok))
+        format!(
+            "{} {}",
+            self.marker(Marker::Ok),
+            sanitize_terminal_text(message)
+        )
     }
 
     /// Header line: ` <title>` in `header`, optional context in `hint`.
     pub(crate) fn header(&self, title: &str, context: Option<&str>) -> String {
-        let title = self.paint(Role::Header, title);
+        let title = self.paint(Role::Header, &sanitize_terminal_text(title));
         match context.filter(|context| !context.is_empty()) {
-            Some(context) => format!("{title} {}", self.paint(Role::Hint, context)),
+            Some(context) => format!(
+                "{title} {}",
+                self.paint(Role::Hint, &sanitize_terminal_text(context))
+            ),
             None => title,
         }
     }
@@ -296,7 +314,7 @@ impl Style {
                 let value = if value.is_empty() {
                     self.paint(Role::Hint, "(unset)")
                 } else {
-                    value.clone()
+                    sanitize_terminal_text(value)
                 };
                 format!("  {}{pad}  {value}", self.paint(Role::Key, &label))
             })
@@ -312,7 +330,8 @@ impl Style {
         const CAP: usize = 32;
         let columns = headings.len();
         let cell = |row: &Vec<String>, index: usize| -> String {
-            let value = row.get(index).cloned().unwrap_or_default();
+            let value =
+                sanitize_terminal_text(row.get(index).map(String::as_str).unwrap_or_default());
             if index + 1 < columns {
                 shorten_middle(&value, CAP)
             } else {
@@ -324,6 +343,17 @@ impl Style {
             for (index, width) in widths.iter_mut().enumerate().take(columns - 1) {
                 let value = cell(row, index);
                 *width = (*width).max(UnicodeWidthStr::width(value.as_str()).max(1));
+            }
+        }
+        // Leave at least two cells for the flexible column. If the fixed
+        // columns fill the terminal, shorten the widest ones to their headings.
+        if let Some(limit) = self.width {
+            while 2 + widths[..columns - 1].iter().map(|w| w + 2).sum::<usize>() + 2 > limit {
+                let candidate = (0..columns - 1)
+                    .filter(|&i| widths[i] > headings[i].len().max(3))
+                    .max_by_key(|&i| widths[i]);
+                let Some(i) = candidate else { break };
+                widths[i] -= 1;
             }
         }
         let lead: usize = 2 + widths[..columns - 1].iter().map(|w| w + 2).sum::<usize>();
@@ -358,7 +388,19 @@ impl Style {
         let mut text = render(headings.iter().map(|h| h.to_uppercase()).collect(), true);
         for row in rows {
             text.push('\n');
-            text.push_str(&render((0..columns).map(|i| cell(row, i)).collect(), false));
+            text.push_str(&render(
+                (0..columns)
+                    .map(|i| {
+                        let value = cell(row, i);
+                        if i + 1 < columns {
+                            shorten_middle(&value, widths[i])
+                        } else {
+                            value
+                        }
+                    })
+                    .collect(),
+                false,
+            ));
         }
         text
     }
@@ -368,7 +410,7 @@ impl Style {
         format!(
             "  {} {}",
             self.marker(Marker::Next),
-            self.paint(Role::Accent, command)
+            self.paint(Role::Accent, &sanitize_terminal_text(command))
         )
     }
 }
@@ -409,14 +451,22 @@ pub(crate) fn shorten_middle(text: &str, cap: usize) -> String {
 /// characters, including ESC, C1 controls and line breaks, cannot create
 /// terminal commands or forge extra report lines. Stored and JSON data stay intact.
 pub(crate) fn sanitize_terminal_text(text: &str) -> String {
+    use unicode_bidi::format_chars::{FSI, LRE, LRI, LRO, PDF, PDI, RLE, RLI, RLO};
     text.chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, LRE | RLE | PDF | LRO | RLO | LRI | RLI | FSI | PDI)
+            {
+                ' '
+            } else {
+                ch
+            }
+        })
         .collect()
 }
 
 /// Greedy word wrap measured in terminal cells (ambiguous width narrow).
 pub(crate) fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
-    let Some(width) = width.filter(|width| *width >= 20) else {
+    let Some(width) = width.filter(|width| *width >= 2) else {
         return vec![text.to_string()];
     };
     let mut lines = Vec::new();
@@ -754,6 +804,39 @@ mod tests {
             UnicodeWidthStr::width(shorten_middle(&"x".repeat(50), 32).as_str()),
             32
         );
+    }
+
+    #[test]
+    fn narrow_table_columns_wrap_and_external_text_is_safe() {
+        use unicode_bidi::format_chars::{FSI, LRE, LRI, LRO, PDF, PDI, RLE, RLI, RLO};
+        let style = Style {
+            width: Some(80),
+            ..Style::plain()
+        };
+        let bidi = [LRE, RLE, PDF, LRO, RLO, LRI, RLI, FSI, PDI]
+            .into_iter()
+            .collect::<String>();
+        let raw = format!("label{bidi}\rforged");
+        let rows = vec![vec![
+            "n".repeat(25),
+            "s".repeat(25),
+            "tier".into(),
+            format!("{} {raw}", "p".repeat(60)),
+        ]];
+        let output = style.table(&["name", "source", "tier", "path"], &rows);
+        for line in output.lines() {
+            assert!(UnicodeWidthStr::width(line) <= 80, "{line}");
+            assert!(
+                !line.chars().any(|c| c.is_control() || bidi.contains(c)),
+                "{line:?}"
+            );
+        }
+        assert!(output.contains("forged"));
+        assert_eq!(rows[0][3], format!("{} {raw}", "p".repeat(60)));
+        let error = style.error_line(&raw);
+        assert!(!error.chars().any(|c| c.is_control() || bidi.contains(c)));
+        let section = style.section(&raw, None);
+        assert!(!section.chars().any(|c| c.is_control() || bidi.contains(c)));
     }
 
     #[test]
