@@ -87,9 +87,13 @@ function main() {
       Object.assign(item, live, { label: ORACLE_LABEL });
       continue;
     }
-    if (!item.label) failures.push(`${item.id}: no label; run ${FREEZE_COMMAND}`);
+    if (!item.label) {
+      failures.push(`${item.id}: label missing (every case needs label.source archify-oracle or maru-engine)`);
+    }
     const differences = verdictDifferences(item, live);
-    if (differences.length) failures.push(`${item.id}: recorded ${differences.join(", ")} differs from the pinned oracle`);
+    if (differences.length) {
+      failures.push(`${item.id}: recorded ${differences.join(", ")} differs from what the pinned oracle returns now`);
+    }
   }
   if (mode === "--write") {
     corpus.frozenOracle = expectedBlock;
@@ -98,9 +102,11 @@ function main() {
     return;
   }
   if (failures.length) {
-    console.error(`diagram-engine-freeze-oracle: ${failures.length} frozen verdict(s) differ from the pinned oracle`);
-    for (const failure of failures.filter((f) => !f.includes("no label")).slice(0, 20)) console.error(`  ${failure}`);
-    console.error(`  -> inspect the oracle change, then run ${FREEZE_COMMAND}`);
+    console.error(`diagram-engine-freeze-oracle: the frozen corpus does not match the pinned oracle: ${failures.length} problem(s)`);
+    const shown = 20;
+    for (const failure of failures.slice(0, shown)) console.error(`  ${failure}`);
+    if (failures.length > shown) console.error(`  ... and ${failures.length - shown} more`);
+    console.error(`  -> if the pin changed on purpose, run ${FREEZE_COMMAND} and review the parity.json diff`);
     process.exit(1);
   }
   console.log(`diagram-engine-freeze-oracle: ${checked} frozen verdict sets equal the pinned oracle`);

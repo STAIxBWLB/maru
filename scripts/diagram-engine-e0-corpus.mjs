@@ -4,6 +4,7 @@ import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { stripTypeScriptTypes } from "node:module";
 import { geometryComparisonFor } from "./diagram-engine-e2-comparison.mjs";
 import { generatedBoundaryCases, REFUSAL_AUDIT } from "./diagram-engine-e2-boundaries.mjs";
@@ -155,12 +156,37 @@ export async function collectCases(publicCandidates = [], retainedPublicCases = 
 const cacheFile = join(root, ".engine-e0/oracle-cache.json");
 /** @type {Record<string, OracleReport>} */
 const oracleCache = existsSync(cacheFile) ? JSON.parse(readFileSync(cacheFile, "utf8")) : {};
+/** Replace every occurrence of a host staging directory in `text`.
+ * The sidecar stages its input in `mkdtemp(join(os.tmpdir(), "archify-validate-"))`,
+ * and it inherits this process's environment, so the staging root is exactly
+ * `tmpRoot`. That root may hold spaces or Windows separators, and inside JSON a
+ * backslash is escaped, so each spelling of the root is replaced in full.
+ * @param {string} text JSON text @param {string} tmpRoot */
+export function normalizeStagingPaths(text, tmpRoot) {
+  const roots = new Set();
+  for (const root of [tmpRoot, tmpRoot.replace(/[\\/]+$/, "")]) {
+    if (!root) continue;
+    roots.add(root);
+    roots.add(root.replaceAll("\\", "/"));
+    roots.add(root.replaceAll("/", "\\"));
+    // A realpath'd macOS tmpdir (/private/var/...) is the same directory.
+    if (root.startsWith("/var/")) roots.add(`/private${root}`);
+  }
+  const spellings = [...roots].flatMap((root) => [JSON.stringify(root).slice(1, -1), root]);
+  const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sep = String.raw`(?:\\\\|\\|/)`; // escaped backslash, backslash or slash
+  const pattern = new RegExp(
+    `(?:${[...new Set(spellings)].sort((a, b) => b.length - a.length).map(escape).join("|")})${sep}*archify-validate-[A-Za-z0-9_-]+(${sep})?`,
+    "g",
+  );
+  // The separator after the staging directory becomes "/" on every host, so a
+  // Windows run records the same verdict as a Unix one.
+  return text.replace(pattern, (_match, after) => (after ? "<oracle-staging>/" : "<oracle-staging>"));
+}
+
 function portableOracleReport(value) {
-  // The CLI stages input under os.tmpdir(), which differs per host (/tmp,
-  // /var/folders/..., $TMPDIR); any staging directory becomes one token so a
-  // recorded verdict is the same on every machine and names no local path.
-  return JSON.parse(JSON.stringify(value).split(root).join("<fixture-root>")
-    .replace(/[^"\s]*\/archify-validate-[A-Za-z0-9_-]+/g, "<oracle-staging>"));
+  // A recorded verdict must be identical on every host and name no local path.
+  return JSON.parse(normalizeStagingPaths(JSON.stringify(value).split(root).join("<fixture-root>"), tmpdir()));
 }
 /** Run the pinned CLI oracle on one case. `useCache: false` always spawns the
  * sidecar, which the oracle freeze check needs to prove the recorded verdict.
