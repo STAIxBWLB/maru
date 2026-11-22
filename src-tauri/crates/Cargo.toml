@@ -1,3 +1,12 @@
 [workspace]
 members = ["maru-diagram-engine", "tauri-plugin-maru-diagram"]
 resolver = "2"
+
+# The engine's release artifacts, native and the wasm the canvas loads, are
+# compute-bound and route through many small generic helpers that stay out of
+# line without whole program optimisation. maru#552 measures the 1,000-node
+# layout, so this workspace pins cross-crate optimisation instead of inheriting
+# cargo's per-crate codegen default.
+[profile.release]
+lto = "fat"
+codegen-units = 1

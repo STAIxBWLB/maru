@@ -153,6 +153,16 @@ fn check_node_labels(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let indices = source_indices(spec, family.node_collection);
+    // Group the emitted labels by their owning member once: the scan below is
+    // per node, and filtering the whole scene's labels for each of them is the
+    // quadratic half of this check.
+    let mut labels_by_owner: BTreeMap<&str, Vec<&GeometryLabel>> = BTreeMap::new();
+    for label in &geometry.labels {
+        labels_by_owner
+            .entry(label.target_id.as_str())
+            .or_default()
+            .push(label);
+    }
     for (id, node) in nodes_by_id {
         let Some(index) = indices.get(id).copied() else {
             continue;
@@ -168,11 +178,11 @@ fn check_node_labels(
         // box within its family ceiling and shrank to the 10px floor before
         // this check sees the scene. What is left is checked as the actual
         // emitted box, never scaled down to a hypothetical smaller font.
-        for label in geometry
-            .labels
-            .iter()
-            .filter(|label| label.target_id == *id)
-        {
+        let owned_labels: &[&GeometryLabel] = labels_by_owner
+            .get(id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for label in owned_labels {
             let Some(role) = label_role(label, id) else {
                 continue;
             };
@@ -280,10 +290,30 @@ fn check_node_overlap(
         _ => return,
     };
     let indices = source_indices(spec, family.node_collection);
+    // Only a node within `gap` of another can report separation, so each left
+    // node asks the bucket grid for that neighbourhood instead of every
+    // remaining node. The grid returns candidates in scene order, so the pairs
+    // are still reported left index ascending, then right index ascending.
+    let buckets =
+        super::constraints_routes::RectBuckets::build(geometry.nodes.iter().map(|node| {
+            (
+                node.id.as_str(),
+                super::constraints_routes::rect(node.bounds),
+            )
+        }));
+    let gap_fixed = (gap * UNITS) as i64;
+    let mut scratch: Vec<u32> = Vec::new();
     for left_index in 0..geometry.nodes.len() {
-        for right_index in left_index + 1..geometry.nodes.len() {
-            let left = &geometry.nodes[left_index];
-            let right = &geometry.nodes[right_index];
+        let left = &geometry.nodes[left_index];
+        let reach = super::constraints_routes::rect(left.bounds).grown(gap_fixed);
+        for &candidate in buckets.within(reach, &mut scratch) {
+            let right_index = candidate as usize;
+            if right_index <= left_index {
+                continue;
+            }
+            let Some(right) = geometry.nodes.get(right_index) else {
+                continue;
+            };
             if !overlaps(left.bounds, right.bounds, gap) {
                 continue;
             }
@@ -875,6 +905,31 @@ mod tests {
                 report.diagnostics
             );
         }
+    }
+
+    #[test]
+    fn overlapping_nodes_report_each_pair_after_the_node_it_pairs_with() {
+        // The bucket grid only narrows the candidate set; the report order must
+        // still be left index ascending, then right index ascending, because
+        // the refusal list is part of the report bytes.
+        let spec = serde_json::json!({"schema_version":1,"diagram_type":"architecture",
+            "meta":{"title":"Stacked nodes","output":"stacked.html","viewBox":[400,300]},
+            "components":[{"id":"a","type":"frontend","label":"A","pos":[100,100]},
+                {"id":"b","type":"backend","label":"B","pos":[104,104]},
+                {"id":"c","type":"database","label":"C","pos":[108,108]}],"connections":[]});
+        let report = crate::layout::layout_json(
+            &serde_json::json!({"specJson":spec.to_string()}).to_string(),
+        );
+        let overlaps: Vec<&str> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "architecture/geometry-node-overlap")
+            .map(|d| d.path.as_str())
+            .collect();
+        assert_eq!(
+            overlaps,
+            ["/components/1", "/components/2", "/components/2"]
+        );
     }
 
     #[test]
