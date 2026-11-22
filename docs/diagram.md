@@ -1148,10 +1148,16 @@ recorded verdicts only; no test runs Archify.
   `comparison.accepted` disagrees with the layer it was derived from, and a
   `comparison.inputJson` that is not the input that layer judged
   (`validityInputJson` for a public case, else `inputJson`).
-- `frozenOracle.verdictsSha256` digests every `archify-oracle` case's
-  inputs and all six verdict layers (ok, codes, diagnostics; sorted keys,
-  non-integers to six decimals). Any edit to a frozen verdict fails, even one
-  that flips a verdict together with its comparison. Frozen verdicts are
+- `frozenOracle.verdictsSha256` digests what is frozen for every
+  `archify-oracle` case: its id, `inputJson` and `validityInputJson`, all six
+  verdict layers (ok, codes, diagnostics) and its whole `comparison`
+  (`accepted`, `equivalentCodes`, `oracleLayer`, `currentScope`, `inputJson`),
+  which is the expectation the differential tests hold the engine to. Keys
+  are sorted and non-integers fixed to six decimals. Any edit to a frozen
+  verdict or comparison fails, including a consistent one: a verdict flipped
+  with its comparison, a case rescoped to a named difference, or a repointed
+  `oracleLayer`. The contract checks and the digest are asserted separately,
+  so neither guard stands in for the other. Frozen verdicts are
   never edited; a new expectation is a new `maru-engine` case. No script
   writes `parity.json` any more: the generator left with the sidecar, so
   the frozen block and labels cannot be dropped by a regeneration.

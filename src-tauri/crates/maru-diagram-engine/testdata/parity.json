@@ -57998,7 +57998,7 @@
     "revision": "9286c3b9c2cef359e98586b420d769d87bcb163f",
     "pinSha256": "1e5927be63e7483a05b1c30081a9722cf580661ac1bc7d7d1641aefdead92180",
     "command": "node scripts/diagram-engine-freeze-oracle.mjs --write",
-    "verdictsSha256": "f67017b4650bc0418f5d4790a0ee0d7617244073b2e59ec2143f7d8b145126de",
+    "verdictsSha256": "a60f4f4d7c207f13fe6e0a1cefa9590fab14beafaa1848f79053e8c7816f1ba2",
     "note": "Verdicts recorded from the pinned sidecar; cases labelled maru-engine were added after E6 and reviewed in the named PR."
   }
 }
