@@ -229,7 +229,7 @@ export async function exportPdf(
   }, 250);
 }
 
-/** Only the diagram types implemented by the current pinned Archify engine. */
+/** The Archify-format diagram types the Maru diagram engine renders. */
 export const ARCHIFY_STATIC_TYPES = ["architecture", "workflow", "sequence", "dataflow", "lifecycle"] as const;
 export function supportsArchifyStaticExport(type: string): boolean {
   return ARCHIFY_STATIC_TYPES.some((supported) => supported === type);
@@ -255,7 +255,7 @@ export function canonicalSemanticExportInput(
     throw new Error("A semantic dataset was not selected; select the diagram's semantic dataset and retry the engine export.");
   }
   if (!supportsArchifyStaticExport(dataset.diagramType)) {
-    throw new Error("The pinned Archify engine does not render this diagram type; select a supported semantic dataset or export its source JSON.");
+    throw new Error("The Maru diagram engine does not render this diagram type; select a supported semantic dataset or export its source JSON.");
   }
   const validation = validateArchifySpecPreCheck(dataset.diagramType, dataset.spec);
   if (!validation.ok) {

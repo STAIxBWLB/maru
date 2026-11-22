@@ -426,10 +426,19 @@ fn component_refusal(
     position: usize,
     total: usize,
 ) -> ScanError {
-    let component = format!(
-        "component {position} of {total} in the workspace root's path ({})",
-        name.to_string_lossy()
-    );
+    // The Linux descent checks search permission on the folder above the
+    // component it opens, so an unsearchable first component arrives here as
+    // position 0 named `/`: that component is the filesystem root, not a
+    // component of the root path, and "component 0 of N" would name one that
+    // does not exist.
+    let component = if position == 0 {
+        "the filesystem root (/)".to_string()
+    } else {
+        format!(
+            "component {position} of {total} in the workspace root's path ({})",
+            name.to_string_lossy()
+        )
+    };
     let permission = errno == Errno::ACCESS || errno == Errno::PERM;
     if permission && position == total {
         ScanError::new(
@@ -490,20 +499,26 @@ impl RootAnchor {
                 .filter(|component| matches!(component, Component::Normal(_)))
                 .count();
             let mut position = 0;
-            let mut current = open_component(
-                None,
-                Path::new("/"),
-                search_only_flags() | OFlags::DIRECTORY | OFlags::CLOEXEC,
-            )
-            .map_err(|errno| {
-                ScanError::new(
-                    "diagram_scan_workspace_unavailable",
-                    format!(
-                        "the workspace root cannot be opened: the filesystem root failed ({errno})"
-                    ),
-                    "reopen the workspace in Maru and scan again",
-                )
-            })?;
+            // A root that is `/` itself has no Normal component, so this open is
+            // also the root's own handle and has to be readable to be listed;
+            // the loop below is what opens every other root for reading, at its
+            // last component. Search-only flags here leave such a root with a
+            // handle `ScanDir` cannot enumerate.
+            let root_handle_flags = if total == 0 {
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC
+            } else {
+                search_only_flags() | OFlags::DIRECTORY | OFlags::CLOEXEC
+            };
+            let mut current =
+                open_component(None, Path::new("/"), root_handle_flags).map_err(|errno| {
+                    ScanError::new(
+                        "diagram_scan_workspace_unavailable",
+                        format!(
+                            "the workspace root cannot be opened: the filesystem root failed ({errno})"
+                        ),
+                        "reopen the workspace in Maru and scan again",
+                    )
+                })?;
             #[cfg(any(target_os = "linux", target_os = "android"))]
             let mut previous_name = std::ffi::OsStr::new("/");
             for component in root.components() {

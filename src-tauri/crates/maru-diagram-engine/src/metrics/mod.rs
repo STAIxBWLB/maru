@@ -116,6 +116,9 @@ struct FontTable {
     map_count: usize,
     weight: u16,
     replacement: u16,
+    /// Built once with the table: a label asks for it, so formatting the
+    /// pinned hash per label would dominate an otherwise constant record.
+    identity: FontIdentity,
 }
 
 fn error(suffix: &str, path: &str, cause: impl Into<String>, fix: &str) -> Diagnostic {
@@ -183,6 +186,17 @@ impl FontTable {
             map_count,
             weight: u16_at(bytes, 56),
             replacement: u16_at(bytes, 58),
+            identity: FontIdentity {
+                id: "noto-sans-cjk-kr".into(),
+                revision: REVISION.into(),
+                font_sha256: bytes[24..56]
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect(),
+                weight: expected_weight,
+                units_per_em: u16_at(bytes, 8),
+                license: "OFL-1.1".into(),
+            },
         };
         if expected != bytes.len()
             || table.upem == 0
@@ -267,17 +281,7 @@ impl FontTable {
         None
     }
     fn identity(&self) -> FontIdentity {
-        FontIdentity {
-            id: "noto-sans-cjk-kr".into(),
-            revision: REVISION.into(),
-            font_sha256: self.bytes[24..56]
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
-            weight: self.weight,
-            units_per_em: self.upem,
-            license: "OFL-1.1".into(),
-        }
+        self.identity.clone()
     }
 }
 fn table(weight: u16) -> Result<&'static FontTable, Diagnostic> {

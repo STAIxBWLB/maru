@@ -291,7 +291,7 @@ fn lifecycle_v2_row_and_width_controls_remain_oracle_accepted() {
             .unwrap()
             .iter()
             .find(|case| case["id"] == id)
-            .unwrap_or_else(|| panic!("regenerate the pinned oracle corpus to restore {id}"));
+            .unwrap_or_else(|| panic!("{id} is missing from the frozen corpus; restore it from git history (frozen verdicts are not regenerated)"));
         assert_eq!(case["oracle"]["ok"], true, "{id}: oracle must accept");
         assert_eq!(case["geometryComparison"]["accepted"], true);
         let input = case["geometryComparison"]["inputJson"].as_str().unwrap();

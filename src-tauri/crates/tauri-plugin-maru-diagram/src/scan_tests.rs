@@ -1278,6 +1278,64 @@ fn a_root_parent_that_cannot_be_searched_is_not_a_root_read_failure() {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_workspace_rooted_at_the_filesystem_root_keeps_a_handle_it_can_list() {
+    // `/` is never scanned here: the root's own handle is opened and one entry
+    // is read, which is exactly the operation a search-only open breaks (EBADF
+    // on Linux, a listing failure on macOS).
+    let anchor = RootAnchor::open(Path::new("/")).unwrap();
+    let root = anchor.open_dir("").unwrap();
+    let mut listed = 0;
+    let outcome = root.for_each_entry(
+        || Ok(()),
+        |_, _| {
+            listed += 1;
+            Err(ScanError::new(
+                "scan_test_one_entry_is_enough",
+                "the root listed at least one entry",
+                "none",
+            ))
+        },
+    );
+    match outcome {
+        // The only acceptable failure here is the test's own stop, which runs
+        // after an entry was read: an unlistable handle fails before `visit`.
+        Err(error) => assert_eq!(
+            error.code, "scan_test_one_entry_is_enough",
+            "the filesystem root's handle could not be listed: {}",
+            error.message
+        ),
+        Ok(()) => panic!("the filesystem root listed no entry"),
+    }
+    assert_eq!(listed, 1);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn an_unsearchable_filesystem_root_is_named_as_the_root_not_as_component_zero() {
+    // This branch needs `/` to deny search to the account running the test,
+    // which a test cannot arrange, so the refusal is asked for the position the
+    // Linux descent reports when that happens: the parent of the first
+    // component, which is `/` itself.
+    let error = component_refusal(Errno::ACCESS, std::ffi::OsStr::new("/"), 0, 2);
+    assert!(
+        error.message.contains("the filesystem root (/)"),
+        "{}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("component 0 of"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.next_step.contains("search permission"),
+        "{}",
+        error.next_step
+    );
+}
+
+#[test]
 fn a_long_rust_use_path_resolves_in_bounded_time() {
     let files: BTreeSet<String> = ["c/Cargo.toml", "c/src/lib.rs", "c/src/a.rs"]
         .iter()
