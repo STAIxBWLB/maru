@@ -50,7 +50,7 @@ describe("native saved Diagram renders", () => {
     await fs.writeFile(path.join(workspace, "diagrams/native-render.cmd.json"), source);
     await fs.writeFile(path.join(folder, "index.html"), HTML);
     await fs.writeFile(path.join(folder, "neighbor.html"), "Never granted");
-    const pin = JSON.parse(await fs.readFile(new URL("../../src-tauri/src/diagram/testdata/legacy-archify-pin.json", import.meta.url), "utf8")) as { name: string; version: string; revision: string };
+    const pin = JSON.parse(await fs.readFile(new URL("../../src-tauri/crates/maru-diagram-engine/testdata/legacy-archify-pin.json", import.meta.url), "utf8")) as { name: string; version: string; revision: string };
     const hash = (body: string) => createHash("sha256").update(body).digest("hex");
     await fs.writeFile(path.join(folder, "receipt.json"), JSON.stringify({
       schemaVersion: 1, docId: "native-render-doc", documentName: "native-render", documentRevision: hash(source), diagramType: "architecture", renderedAt: "2026-11-08T00:00:00Z",

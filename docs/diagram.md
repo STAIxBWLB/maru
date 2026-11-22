@@ -1137,7 +1137,7 @@ recorded verdicts only; no test runs Archify.
   script, its `make check-oracle-freeze` gate and the sidecar, so these
   recorded verdicts are now the oracle and are never edited by hand. The last
   pin file is kept verbatim as a render-receipt fixture at
-  `src-tauri/src/diagram/testdata/legacy-archify-pin.json`.
+  `src-tauri/crates/maru-diagram-engine/testdata/legacy-archify-pin.json`.
 - Each case has a `label`. `{"source": "archify-oracle"}` marks a verdict
   recorded from the oracle. A case added after E6 has no oracle to ask, so it
   is labelled `{"source": "maru-engine", "reviewedIn": "#<PR>"}`: its expected

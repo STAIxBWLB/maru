@@ -166,7 +166,7 @@ fn the_corpus_names_the_oracle_that_produced_it_and_its_recording_command() {
     assert_eq!(corpus.oracle["version"], frozen.version.as_str());
     assert_eq!(corpus.oracle["revision"], frozen.revision.as_str());
     assert_eq!(frozen.revision.len(), 40, "a full pinned commit");
-    let pin = include_bytes!("../../../src/diagram/testdata/legacy-archify-pin.json");
+    let pin = include_bytes!("../testdata/legacy-archify-pin.json");
     assert_eq!(
         frozen.pin_sha256,
         format!("{:x}", Sha256::digest(pin)),
