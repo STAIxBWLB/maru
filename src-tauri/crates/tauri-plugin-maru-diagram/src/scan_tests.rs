@@ -500,16 +500,7 @@ fn windows_index_paths_are_refused_on_every_platform() {
     }
     let dir = tempdir();
     let anchor = RootAnchor::open(dir.path()).unwrap();
-    for path in [
-        "",
-        ".",
-        "../escape",
-        "src//a.ts",
-        "src/a.ts/",
-        "src/a\0.ts",
-        r"..\outside\leak.ts",
-        r"C:\outside\leak.ts",
-    ] {
+    for path in ["", ".", "../escape", "src//a.ts", "src/a.ts/", "src/a\0.ts"] {
         assert!(!plain_relative_path(path), "{path}");
         assert!(!anchor.is_regular_file(path), "{path}");
     }
@@ -611,7 +602,9 @@ fn index_and_ignore_reads_share_the_remaining_budget() {
     let scan_dir = anchor.open_dir("").unwrap();
     state.budget.bytes = MAX_TOTAL_BYTES - 3;
     assert_eq!(
-        walk(&scan_dir, &[], &mut state, 0).unwrap_err().code,
+        walk(&scan_dir, &mut Vec::new(), &mut state, 0)
+            .unwrap_err()
+            .code,
         "diagram_scan_too_much_data"
     );
     assert_eq!(state.budget.bytes, MAX_TOTAL_BYTES + 1);
@@ -648,6 +641,79 @@ fn a_git_index_inside_the_workspace_is_the_inventory() {
     let sub = scan(root, "src/lib", limits()).unwrap();
     assert_eq!(sub.stats.inventory, Inventory::GitIndex);
     assert_eq!(sub.stats.files, 1);
+}
+
+#[test]
+fn index_file_limit_is_enforced_during_inventory() {
+    let dir = tempdir();
+    for name in ["a.ts", "b.ts", "c.ts"] {
+        write(dir.path(), name, "");
+    }
+    write(dir.path(), ".git/index", "");
+    fs::write(
+        dir.path().join(".git/index"),
+        index_v2(&[(0o100644, "a.ts"), (0o100644, "b.ts"), (0o100644, "c.ts")]),
+    )
+    .unwrap();
+    let mut limited = limits();
+    limited.max_files = 2;
+    let mut state = Walk {
+        limits: limited,
+        budget: open_budget(),
+        entry_cap: MAX_DIR_ENTRIES,
+        entries: 0,
+        files: Vec::new(),
+    };
+    let anchor = RootAnchor::open(dir.path()).unwrap();
+    let error = git_index_files(&anchor, dir.path(), dir.path(), &mut state).unwrap_err();
+    assert_eq!(error.code, "diagram_scan_too_many_files");
+    assert!(error.next_step.contains("raise maxFiles"));
+}
+
+#[test]
+fn inherited_ignore_rules_are_shared_and_sibling_rules_are_restored() {
+    let dir = tempdir();
+    write(dir.path(), "a/.gitignore", "*.ts\n");
+    write(dir.path(), "a/hidden.ts", "");
+    write(dir.path(), "b/visible.ts", "");
+    let anchor = RootAnchor::open(dir.path()).unwrap();
+    let scan_dir = anchor.open_dir("").unwrap();
+    let mut rules = parse_gitignore("", &"unused-pattern\n".repeat(5000));
+    rules.reserve(8);
+    let original = rules.as_ptr();
+    let mut state = Walk {
+        limits: limits(),
+        budget: open_budget(),
+        entry_cap: MAX_DIR_ENTRIES,
+        entries: 0,
+        files: Vec::new(),
+    };
+    walk(&scan_dir, &mut rules, &mut state, 0).unwrap();
+    assert_eq!(rules.len(), 5000);
+    assert_eq!(
+        rules.as_ptr(),
+        original,
+        "inherited rules remain in the same allocation"
+    );
+    assert!(state.files.iter().any(|path| path == "b/visible.ts"));
+    assert!(!state.files.iter().any(|path| path == "a/hidden.ts"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_names_with_colons_and_backslashes_are_scanned() {
+    let dir = tempdir();
+    write(dir.path(), "folder:one/src/a.ts", "import '../lib/b';\n");
+    write(dir.path(), "folder:one/lib/b.ts", "");
+    write(dir.path(), r"folder:one/src/back\slash.ts", "");
+    let report = scan(dir.path(), "folder:one", limits()).unwrap();
+    assert_eq!(report.stats.files, 3);
+    assert_eq!(
+        edges(&report.document),
+        [("src".to_string(), "lib".to_string())]
+    );
+    let anchor = RootAnchor::open(dir.path()).unwrap();
+    assert!(anchor.is_regular_file(r"folder:one/src/back\slash.ts"));
 }
 
 #[test]
@@ -915,7 +981,7 @@ fn a_wide_folder_is_refused_while_it_is_still_being_listed() {
         files: Vec::new(),
     };
     entry_probe::reset();
-    let error = walk(&scan_dir, &[], &mut state, 0).unwrap_err();
+    let error = walk(&scan_dir, &mut Vec::new(), &mut state, 0).unwrap_err();
     assert_eq!(error.code, "diagram_scan_too_many_entries");
     assert!(
         error
@@ -970,7 +1036,7 @@ fn a_folder_of_unrepresentable_names_is_refused_while_it_is_still_being_listed()
         files: Vec::new(),
     };
     entry_probe::reset();
-    let error = walk(&scan_dir, &[], &mut state, 0).unwrap_err();
+    let error = walk(&scan_dir, &mut Vec::new(), &mut state, 0).unwrap_err();
     assert_eq!(error.code, "diagram_scan_too_many_entries");
     assert_eq!(
         state.entries,
@@ -1144,10 +1210,8 @@ fn an_ancestor_that_cannot_be_searched_is_refused_with_its_permission() {
     let middle = ancestor.join("middle");
     let root = middle.join("ws");
     write(&root, "src/a.ts", "export const a = 1;\n");
-    // 0400: readable and not searchable. The failing component is the one below
-    // the ancestor - `middle` where the ancestor is opened without asking for
-    // search permission, `ancestor` where the open needs it - so the fixture has
-    // a level under the ancestor to fail on either way.
+    // 0400: readable and not searchable. The refusal names the ancestor on
+    // both search-only open implementations.
     fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o400)).unwrap();
     let restore = RestoreMode(ancestor.clone());
 
@@ -1158,6 +1222,10 @@ fn an_ancestor_that_cannot_be_searched_is_refused_with_its_permission() {
         return;
     }
 
+    if fs::metadata(root.join("src/a.ts")).is_ok() {
+        eprintln!("skipped: this process can search the 0400 folder");
+        return;
+    }
     let error = scan(&root, ".", limits()).unwrap_err();
     drop(restore);
     assert_eq!(error.code, "diagram_scan_workspace_unavailable");
@@ -1187,6 +1255,10 @@ fn a_root_parent_that_cannot_be_searched_is_not_a_root_read_failure() {
     let restore = RestoreMode(parent.clone());
     if fs::File::open(&parent).is_err() {
         eprintln!("skipped: this process cannot read the 0400 parent either");
+        return;
+    }
+    if fs::metadata(root.join("src/a.ts")).is_ok() {
+        eprintln!("skipped: this process can search the 0400 folder");
         return;
     }
     let error = scan(&root, ".", limits()).unwrap_err();
