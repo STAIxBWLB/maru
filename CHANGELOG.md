@@ -9,6 +9,16 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 `chore(release)` version bumps and merge commits are omitted.
 
 
+## v1.1.31 - Scanned Maps (2026-11-22)
+
+- Diagram > File can propose a floorplan map from a read-only repository scan. The scan stays inside the workspace root: every read and listing is opened from a handle on that root without following links. It is bounded by files, folder depth, time and bytes, and every refusal names its cause and next step. Nothing is written until Save (#553, #617, #642).
+- Floorplan documents are validated, laid out and rendered by the Maru engine, and floorplan edits pass the engine apply gate before they commit (#616, #619, #622, #634). The engine receipt envelope is checked before a candidate is admitted (#637).
+- The HWP editor saves edited workspace HWPX with revision guards (#614). It forwards the engine's structured refusal report on refused edits (#621) and adds form binding host commands with the formBindings v1 capability (#628). Form worker and staging failures explain their cause safely (#638).
+- Document staging, template fill, memo migration and Archify candidate directories are created private (0700) (#635, #636, #639).
+- Opted-in task completion requires reviewed, revision-bound artifact evidence (#630).
+- The standalone `maru` CLI follows the shared CLI output standard v1: semantic colors with `--color` and `NO_COLOR`, ASCII markers under `--ascii` or a non-UTF-8 locale, help on stdout with exit 0, usage errors with exit 2, and `maru: <what>: <why>` failures. `--json` output is unchanged (#618, #640).
+- Development installs use pnpm 12.18 with a build-script allow list and a 24-hour release-age gate (#627, #629). Skills cleanup keeps ownership checks within trusted roots (#615).
+
 ## v1.1.30 - Editable Pages (2026-11-13)
 
 - A `.hwpx` file now opens in the published hwp-editor (`@hwp-editor/core` and `@hwp-editor/react` 1.3.0) on request, while the read-only preview stays the default. Edits travel over the engine's edit-ops-v1 JSON channel, every rendered SVG page is sanitized before it is painted, and edits stay in that window: nothing is written back to the file yet. A native macOS test opens, edits and re-applies a real `.hwpx` (#563, #609).
