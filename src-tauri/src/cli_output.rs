@@ -345,10 +345,12 @@ impl Style {
                 *width = (*width).max(UnicodeWidthStr::width(value.as_str()).max(1));
             }
         }
-        // Leave at least two cells for the flexible column. If the fixed
-        // columns fill the terminal, shorten the widest ones to their headings.
+        // Reserve useful space for the flexible column. If the fixed columns
+        // fill the terminal, shorten the widest ones toward their headings.
         if let Some(limit) = self.width {
-            while 2 + widths[..columns - 1].iter().map(|w| w + 2).sum::<usize>() + 2 > limit {
+            let flex_min = (limit / 3).clamp(2, 20);
+            while 2 + widths[..columns - 1].iter().map(|w| w + 2).sum::<usize>() + flex_min > limit
+            {
                 let candidate = (0..columns - 1)
                     .filter(|&i| widths[i] > headings[i].len().max(3))
                     .max_by_key(|&i| widths[i]);
@@ -366,7 +368,7 @@ impl Style {
                 } else {
                     value.as_str()
                 };
-                let pad = " ".repeat(widths[index] - UnicodeWidthStr::width(shown));
+                let pad = " ".repeat(widths[index].saturating_sub(UnicodeWidthStr::width(shown)));
                 let role = if heading {
                     Role::Key
                 } else if value.is_empty() {
@@ -420,7 +422,10 @@ pub(crate) fn shorten_middle(text: &str, cap: usize) -> String {
     if UnicodeWidthStr::width(text) <= cap {
         return text.to_string();
     }
-    let keep = cap.saturating_sub(3);
+    if cap < 3 {
+        return ".".repeat(cap);
+    }
+    let keep = cap - 3;
     let head_cells = keep / 2;
     let tail_cells = keep - head_cells;
     let mut head = String::new();
@@ -444,7 +449,21 @@ pub(crate) fn shorten_middle(text: &str, cap: usize) -> String {
         tail.push(ch);
     }
     tail.reverse();
-    format!("{head}...{}", tail.into_iter().collect::<String>())
+    let mut tail: String = tail.into_iter().collect();
+    // Sequence presentation can be wider than the sum of its scalar widths.
+    // Check the actual rendered string rather than relying on those sums.
+    loop {
+        let result = format!("{head}...{tail}");
+        if UnicodeWidthStr::width(result.as_str()) <= cap {
+            return result;
+        }
+        if head.pop().is_none() {
+            if tail.is_empty() {
+                return "...".to_string();
+            }
+            tail.remove(0);
+        }
+    }
 }
 
 /// Keep externally supplied text inert when printed on a terminal. Control
@@ -493,6 +512,18 @@ pub(crate) fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
                 }
                 cells += w;
                 cut = index + ch.len_utf8();
+            }
+            // Some presentation sequences occupy more cells than the sum of
+            // their scalar widths. Shrink the candidate to a fitting prefix.
+            while cut > 0 && UnicodeWidthStr::width(&line[..cut]) > width {
+                cut = line[..cut]
+                    .char_indices()
+                    .last()
+                    .map_or(0, |(index, _)| index);
+            }
+            if cut == 0 {
+                // Even an indivisible glyph wider than the width must advance.
+                cut = line.chars().next().map_or(0, char::len_utf8);
             }
             let rest = line.split_off(cut);
             lines.push(std::mem::replace(&mut line, rest));
@@ -837,6 +868,67 @@ mod tests {
         assert!(!error.chars().any(|c| c.is_control() || bidi.contains(c)));
         let section = style.section(&raw, None);
         assert!(!section.chars().any(|c| c.is_control() || bidi.contains(c)));
+    }
+
+    #[test]
+    fn wide_emoji_cells_shrink_without_overflow_and_leave_room_for_paths() {
+        let style = Style {
+            width: Some(56),
+            ..Style::plain()
+        };
+        for prefix in ["❤️", "#️"] {
+            let name = format!("{prefix}{}", "a".repeat(29));
+            let rows = vec![vec![
+                name,
+                "source-id".into(),
+                "managed".into(),
+                "p".repeat(60),
+            ]];
+            let report = style.table(&["name", "source", "tier", "path"], &rows);
+            for line in report.lines() {
+                assert!(UnicodeWidthStr::width(line) <= 56, "{line:?}");
+            }
+            assert!(report.lines().count() <= 7, "{report}");
+        }
+        // Three wide fixed columns force the shrink loop even at 80 cells.
+        let wide = Style {
+            width: Some(80),
+            ..Style::plain()
+        };
+        let rows = vec![vec![
+            "n".repeat(31),
+            "s".repeat(31),
+            "t".repeat(31),
+            "p".repeat(60),
+        ]];
+        let report = wide.table(&["name", "source", "tier", "path"], &rows);
+        assert!(
+            report
+                .lines()
+                .all(|line| UnicodeWidthStr::width(line) <= 80),
+            "{report}"
+        );
+        assert!(
+            report.contains("..."),
+            "the fixed columns must shrink: {report}"
+        );
+        assert!(report.lines().count() <= 6, "{report}");
+        for cap in 3..=32 {
+            let value = format!("❤️{}#️", "a".repeat(40));
+            let result = shorten_middle(&value, cap);
+            assert!(
+                UnicodeWidthStr::width(result.as_str()) <= cap,
+                "{cap}: {result:?}"
+            );
+        }
+        let wrapped = wrap("❤️❤️", Some(2));
+        assert!(
+            wrapped
+                .iter()
+                .all(|line| UnicodeWidthStr::width(line.as_str()) <= 2),
+            "{wrapped:?}"
+        );
+        assert_eq!(wrapped.concat(), "❤️❤️");
     }
 
     #[test]

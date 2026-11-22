@@ -576,7 +576,13 @@ fn run_secrets_migrate(args: &[String]) -> i32 {
                     render_action_report(
                         &out::stdout_style(),
                         &format!("secrets migrate: {} action(s) {verb}", report.actions.len()),
-                        Marker::Ok,
+                        if !report.ok {
+                            Marker::Warn
+                        } else if dry_run {
+                            Marker::Pending
+                        } else {
+                            Marker::Ok
+                        },
                         &["action", "status", "path"],
                         &rows,
                     )
@@ -1196,6 +1202,13 @@ fn run_skills_sync(args: &[String]) -> i32 {
                         &rows,
                     )
                 );
+                if !apply && !report.actions.is_empty() {
+                    println!(
+                        "{}",
+                        out::stdout_style()
+                            .next_step("Replace --check with --apply to carry out these actions")
+                    );
+                }
             }
             if !apply && !report.actions.is_empty() {
                 1
