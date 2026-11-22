@@ -368,6 +368,13 @@ struct RootAnchor {
     root: PathBuf,
     #[cfg(unix)]
     handle: fs::File,
+    /// Whether that handle is a search-only open, which only a root that is
+    /// `/` itself keeps: the loop below never reaches a last component, so
+    /// nothing reopens it for reading. Listing the root asks for that read
+    /// permission at that point instead of here, so a workspace rooted at an
+    /// unreadable `/` still scans the folder picked inside it.
+    #[cfg(unix)]
+    search_only_root: bool,
 }
 
 /// The open flags for a folder above the root: enough for it to be the `dirfd`
@@ -473,6 +480,30 @@ fn component_refusal(
     }
 }
 
+/// The refusal for listing a workspace whose root is `/` itself, which needs
+/// read permission on `/` that descending into a folder below it does not.
+/// Reported from the listing, never from opening the workspace, so a host whose
+/// `/` is search-only can still scan the folder the person picked.
+#[cfg(unix)]
+fn filesystem_root_read_refusal(errno: Errno) -> ScanError {
+    let permission = errno == Errno::ACCESS || errno == Errno::PERM;
+    if permission {
+        ScanError::new(
+            "diagram_scan_workspace_unavailable",
+            "the workspace is the filesystem root and cannot be listed: the filesystem root (/) grants no read permission to the account that runs Maru",
+            "give that account read permission on the filesystem root, then scan again",
+        )
+    } else {
+        ScanError::new(
+            "diagram_scan_workspace_unavailable",
+            format!(
+                "the workspace is the filesystem root and cannot be listed: the filesystem root failed ({errno})"
+            ),
+            "reopen the workspace in Maru and scan again",
+        )
+    }
+}
+
 impl RootAnchor {
     /// Open `root`, which is the canonical path the host resolved.
     fn open(root: &Path) -> Result<Self, ScanError> {
@@ -499,26 +530,25 @@ impl RootAnchor {
                 .filter(|component| matches!(component, Component::Normal(_)))
                 .count();
             let mut position = 0;
-            // A root that is `/` itself has no Normal component, so this open is
-            // also the root's own handle and has to be readable to be listed;
-            // the loop below is what opens every other root for reading, at its
-            // last component. Search-only flags here leave such a root with a
-            // handle `ScanDir` cannot enumerate.
-            let root_handle_flags = if total == 0 {
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC
-            } else {
-                search_only_flags() | OFlags::DIRECTORY | OFlags::CLOEXEC
-            };
-            let mut current =
-                open_component(None, Path::new("/"), root_handle_flags).map_err(|errno| {
-                    ScanError::new(
-                        "diagram_scan_workspace_unavailable",
-                        format!(
-                            "the workspace root cannot be opened: the filesystem root failed ({errno})"
-                        ),
-                        "reopen the workspace in Maru and scan again",
-                    )
-                })?;
+            // `/` is opened search-only like every ancestor, even when it is the
+            // root itself: descending needs search permission and nothing more,
+            // and a host whose `/` is 0711 must still scan a folder picked below
+            // it. The read permission a listing of `/` needs is asked for there,
+            // in `ScanDir::for_each_entry`, only when the scan lists `/`.
+            let mut current = open_component(
+                None,
+                Path::new("/"),
+                search_only_flags() | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            )
+            .map_err(|errno| {
+                ScanError::new(
+                    "diagram_scan_workspace_unavailable",
+                    format!(
+                        "the workspace root cannot be opened: the filesystem root failed ({errno})"
+                    ),
+                    "reopen the workspace in Maru and scan again",
+                )
+            })?;
             #[cfg(any(target_os = "linux", target_os = "android"))]
             let mut previous_name = std::ffi::OsStr::new("/");
             for component in root.components() {
@@ -604,7 +634,10 @@ impl RootAnchor {
                     }
                 }
             }
-            Ok(Self { handle: current })
+            Ok(Self {
+                handle: current,
+                search_only_root: total == 0,
+            })
         }
         #[cfg(not(unix))]
         {
@@ -646,6 +679,7 @@ impl RootAnchor {
             Some(ScanDir {
                 relative: relative.to_string(),
                 handle: current,
+                search_only: relative.is_empty() && self.search_only_root,
             })
         }
         #[cfg(not(unix))]
@@ -776,6 +810,11 @@ struct ScanDir {
     relative: String,
     #[cfg(unix)]
     handle: fs::File,
+    /// Whether `handle` was opened search-only, which is true only for the root
+    /// directory of a workspace rooted at `/`. Listing it reopens it for reading
+    /// first; every other folder under a root was opened `O_RDONLY` already.
+    #[cfg(unix)]
+    search_only: bool,
     #[cfg(not(unix))]
     path: PathBuf,
 }
@@ -803,7 +842,25 @@ impl ScanDir {
         #[cfg(unix)]
         {
             use std::os::fd::AsFd;
-            let listed = rustix::fs::Dir::read_from(self.handle.as_fd())
+            // A search-only handle cannot be enumerated, and the root of a
+            // workspace rooted at `/` is the only folder that keeps one. The
+            // read permission listing needs is asked for here, where listing is
+            // what needs it, so `/` at mode 0711 still lets the scan read a
+            // folder picked below it.
+            let readable = if self.search_only {
+                Some(
+                    open_component(
+                        Some(&self.handle),
+                        Path::new("."),
+                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    )
+                    .map_err(filesystem_root_read_refusal)?,
+                )
+            } else {
+                None
+            };
+            let handle = readable.as_ref().unwrap_or(&self.handle);
+            let listed = rustix::fs::Dir::read_from(handle.as_fd())
                 .map_err(|error| self.list_error(error))?;
             for entry in listed {
                 let entry = entry.map_err(|error| self.list_error(error))?;
@@ -907,7 +964,11 @@ impl ScanDir {
                 Path::new(name),
                 OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             )?;
-            Some(ScanDir { relative, handle })
+            Some(ScanDir {
+                relative,
+                handle,
+                search_only: false,
+            })
         }
         #[cfg(not(unix))]
         {

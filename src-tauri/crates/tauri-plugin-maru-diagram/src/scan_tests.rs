@@ -1311,6 +1311,62 @@ fn a_workspace_rooted_at_the_filesystem_root_keeps_a_handle_it_can_list() {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_workspace_rooted_at_the_filesystem_root_scans_a_picked_subfolder() {
+    // The workspace root is `/` and the picked folder is one below it: opening
+    // that workspace must ask for search permission on `/` only, because a host
+    // whose `/` is 0711 still has to scan a folder picked inside it. The read
+    // permission is asked for by the listing of `/`, which this scan never does.
+    let dir = tempdir();
+    write(dir.path(), "pkg/a.ts", "export const a = 1;\n");
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let picked = root.to_str().unwrap();
+    assert!(
+        picked.starts_with('/'),
+        "the fixture is not below the filesystem root: {picked}"
+    );
+    let report = scan(Path::new("/"), picked, limits()).unwrap();
+    assert_eq!(report.relative_path, picked.trim_start_matches('/'));
+    assert_eq!(ids(&report.document), ["pkg"]);
+}
+
+#[test]
+#[cfg(unix)]
+fn listing_the_filesystem_root_names_the_read_permission_it_needs() {
+    // The reopen of `/` for listing cannot be made to fail here, because a test
+    // cannot take read permission off `/` for its own account, so the refusal is
+    // pinned directly: a permission errno names the missing read permission and
+    // the folder to grant it on, and any other errno keeps the reopen advice.
+    let denied = filesystem_root_read_refusal(Errno::ACCESS);
+    assert!(
+        denied.message.contains("the filesystem root (/)"),
+        "{}",
+        denied.message
+    );
+    assert!(
+        denied.message.contains("no read permission"),
+        "{}",
+        denied.message
+    );
+    assert!(
+        denied.next_step.contains("read permission"),
+        "{}",
+        denied.next_step
+    );
+    let other = filesystem_root_read_refusal(Errno::NOTDIR);
+    assert!(
+        !other.message.contains("read permission"),
+        "{}",
+        other.message
+    );
+    assert!(
+        other.next_step.contains("reopen the workspace"),
+        "{}",
+        other.next_step
+    );
+}
+
+#[test]
 #[cfg(target_os = "linux")]
 fn an_unsearchable_filesystem_root_is_named_as_the_root_not_as_component_zero() {
     // This branch needs `/` to deny search to the account running the test,
