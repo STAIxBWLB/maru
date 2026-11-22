@@ -2392,7 +2392,7 @@
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "b0ef2038417cd614d50f19fbb21abfd2cd1e8380a6b5c40cdb6a12f059124909"
+      "sha256": "4ef9f5b1319033e883c1778e855a628de9230104049d0d2ed75113ed8b49c0fe"
     },
     {
       "path": "src-tauri/capabilities/default.json",
@@ -2464,7 +2464,7 @@
     },
     {
       "path": "src-tauri/src/calendar_sync.rs",
-      "sha256": "7931a4c528d1579f9639781eee06c8bfe862302b8d097db530322616ac1fd45c"
+      "sha256": "100f439b42524903660312d4979cc00e90ea59c488925611a3d0e47b6b42ddca"
     },
     {
       "path": "src-tauri/src/content_search.rs",
@@ -2763,5 +2763,5 @@
       "sha256": "a41f4ebf76e5c29a6f6b1f8f694c892002425bb97cf902bec089ee8721618cd7"
     }
   ],
-  "sourceCommit": "fbdb986f3be06890d78e43f961488186dacefd86"
+  "sourceCommit": "eb1c843bd1fd0bd9a818a893f19c7832a57b5e33"
 }
