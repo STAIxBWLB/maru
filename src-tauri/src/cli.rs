@@ -45,13 +45,37 @@ pub fn run_cli(args: Vec<String>) -> i32 {
     }
 }
 
+/// Options that take the next argument as their value. Their value is never
+/// read as an output flag, so `--message --ascii` keeps `--ascii` as the
+/// message, as before the output flags existed.
+const VALUE_OPTIONS: &[&str] = &[
+    "--select",
+    "--tools",
+    "--skills",
+    "--message",
+    "--name",
+    "--work",
+    "--destination",
+    "--gws",
+    "--event",
+    "--agent",
+    "--session-id",
+];
+
 /// Strip the global output flags (`--color=<when>`, `--color <when>`,
-/// `--ascii`) wherever they appear; every command accepts them.
+/// `--ascii`) wherever they appear as options; every command accepts them.
 fn take_output_flags(args: Vec<String>) -> Result<(OutputFlags, Vec<String>), i32> {
     let mut flags = OutputFlags::default();
     let mut rest = Vec::with_capacity(args.len());
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
+        if VALUE_OPTIONS.contains(&arg.as_str()) {
+            rest.push(arg);
+            if let Some(value) = iter.next() {
+                rest.push(value);
+            }
+            continue;
+        }
         let value = if arg == "--color" {
             Some(iter.next().unwrap_or_default())
         } else {
@@ -102,10 +126,151 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     (
         "terminal-hook",
         "Agent terminal hook entry point (internal)",
-        "maru terminal-hook <event>",
+        "maru terminal-hook --event <name> [--agent <name>] [--session-id <id>]",
     ),
     ("help", "Show help for a command", "maru help [<command>]"),
     ("version", "Print the version", "maru version"),
+];
+
+/// One line per flag of each command, as `maru help <command>` shows it:
+/// (command, the flag with its value shape, what it is for).
+const FLAG_DESCRIPTIONS: &[(&str, &str, &str)] = &[
+    (
+        "doctor",
+        "--json",
+        "Print the report as JSON (stable schema)",
+    ),
+    ("doctor", "--quiet", "Print nothing when every check passes"),
+    (
+        "secrets",
+        "--json",
+        "Print the report as JSON (stable schema)",
+    ),
+    (
+        "secrets",
+        "--quiet",
+        "doctor: print nothing when every check passes",
+    ),
+    (
+        "secrets",
+        "--dry-run",
+        "migrate: plan the moves without writing",
+    ),
+    ("secrets", "--apply", "migrate: perform the planned moves"),
+    (
+        "secrets",
+        "--select <relpath>",
+        "migrate: limit to one workspace path",
+    ),
+    (
+        "skills",
+        "--json",
+        "Print the result as JSON (stable schema)",
+    ),
+    ("skills", "--check", "sync/update: report what would change"),
+    ("skills", "--apply", "sync/update: make the change"),
+    (
+        "skills",
+        "--tools <csv>",
+        "sync: agent targets to install into",
+    ),
+    (
+        "skills",
+        "--skills <names-or-ids>",
+        "sync: limit to these skills",
+    ),
+    (
+        "skills",
+        "--retarget",
+        "sync --apply: move installs to new targets",
+    ),
+    (
+        "skills",
+        "--repair-env",
+        "update: also repair the skills env",
+    ),
+    ("skills", "--force", "env repair: rebuild even when healthy"),
+    ("skills", "--accept", "reconcile: keep the local edits"),
+    (
+        "skills",
+        "--discard",
+        "reconcile: restore the bundled version",
+    ),
+    (
+        "skills",
+        "--message <m>",
+        "reconcile --accept: note for the change",
+    ),
+    (
+        "skills",
+        "--dry-run",
+        "reconcile: show the outcome, change nothing",
+    ),
+    (
+        "skills",
+        "--name <name>",
+        "import: name for the imported skill",
+    ),
+    ("skills", "--copy", "import: copy the source into the store"),
+    ("skills", "--link", "import: link to the source in place"),
+    (
+        "skills",
+        "--delete-files",
+        "import-unmanage: also delete its files",
+    ),
+    ("jobs", "--json", "Print job status as JSON (stable schema)"),
+    (
+        "jobs",
+        "--if-missed",
+        "exec: run only if the last fire was missed",
+    ),
+    (
+        "calendar-sync",
+        "--work <path>",
+        "Workspace to sync (default: cwd)",
+    ),
+    (
+        "calendar-sync",
+        "--destination <key-or-id>",
+        "Calendar to write to",
+    ),
+    ("calendar-sync", "--gws <path>", "Path to the gws binary"),
+    (
+        "calendar-sync",
+        "--dry-run",
+        "Plan the changes without writing",
+    ),
+    (
+        "calendar-sync",
+        "--json",
+        "Print the outcome as JSON (stable schema)",
+    ),
+    (
+        "terminal-hook",
+        "--event <name>",
+        "The agent hook event to record",
+    ),
+    (
+        "terminal-hook",
+        "--agent <name>",
+        "The agent that fired the hook",
+    ),
+    (
+        "terminal-hook",
+        "--session-id <id>",
+        "The agent's own session id",
+    ),
+];
+
+/// One or two complete examples per command that takes arguments.
+const EXAMPLES: &[(&str, &str)] = &[
+    ("doctor", "maru doctor --quiet"),
+    ("secrets", "maru secrets migrate --dry-run"),
+    ("skills", "maru skills update --check"),
+    ("skills", "maru skills sync --check --tools claude,codex"),
+    ("jobs", "maru jobs status"),
+    ("calendar-sync", "maru calendar-sync --dry-run"),
+    ("help", "maru help skills"),
 ];
 
 fn help_overview(style: &out::Style) -> String {
@@ -133,6 +298,11 @@ fn help_overview(style: &out::Style) -> String {
 
 fn help_command(style: &out::Style, name: &str) -> Option<String> {
     let (_, summary, usage) = COMMANDS.iter().find(|(command, _, _)| *command == name)?;
+    let details: Vec<&str> = usage
+        .lines()
+        .skip_while(|line| !line.is_empty())
+        .skip(1)
+        .collect();
     let mut text = style.section("Usage", None);
     for line in usage.lines() {
         if line.is_empty() {
@@ -144,11 +314,36 @@ fn help_command(style: &out::Style, name: &str) -> Option<String> {
         "\n\n{}\n  {summary}",
         style.section("Description", None)
     ));
-    let details: Vec<&str> = usage
-        .lines()
-        .skip_while(|line| !line.is_empty())
-        .skip(1)
+    let flags: Vec<&(&str, &str, &str)> = FLAG_DESCRIPTIONS
+        .iter()
+        .filter(|(command, _, _)| *command == name)
         .collect();
+    if !flags.is_empty() {
+        let count = flags.len().to_string();
+        text.push_str(&format!("\n\n{}", style.section("Flags", Some(&count))));
+        let width = flags
+            .iter()
+            .map(|(_, flag, _)| flag.len())
+            .max()
+            .unwrap_or(0);
+        for (_, flag, description) in flags {
+            text.push_str(&format!(
+                "\n  {}  {description}",
+                style.paint(out::Role::Accent, &format!("{flag:width$}"))
+            ));
+        }
+    }
+    let examples: Vec<&str> = EXAMPLES
+        .iter()
+        .filter(|(command, _)| *command == name)
+        .map(|(_, example)| *example)
+        .collect();
+    if !examples.is_empty() {
+        text.push_str(&format!("\n\n{}", style.section("Examples", None)));
+        for example in examples {
+            text.push_str(&format!("\n  {}", style.paint(out::Role::Accent, example)));
+        }
+    }
     if !details.is_empty() {
         text.push_str(&format!("\n\n{}", style.section("Details", None)));
         for line in details {
@@ -224,25 +419,31 @@ fn run_secrets_scan(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&report).unwrap_or_default()
                 );
             } else {
+                let findings: Vec<Finding> = report
+                    .issues
+                    .iter()
+                    .map(|issue| Finding {
+                        severity: issue.severity.clone(),
+                        code: issue.code.clone(),
+                        message: issue.message.clone(),
+                        subject: issue.path.clone(),
+                    })
+                    .collect();
+                let facts = [
+                    ("Managed", report.managed.len().to_string()),
+                    ("Candidates", report.candidates.len().to_string()),
+                    ("Legacy symlinks", report.legacy_symlinks.len().to_string()),
+                ];
                 println!(
-                    "secrets: {} managed, {} candidate(s), {} legacy symlink(s), {} issue(s)",
-                    report.managed.len(),
-                    report.candidates.len(),
-                    report.legacy_symlinks.len(),
-                    report.issues.len()
+                    "{}",
+                    render_check_report(
+                        &out::stdout_style(),
+                        "Secrets scan",
+                        &facts,
+                        &findings,
+                        (0, "")
+                    )
                 );
-                for issue in &report.issues {
-                    println!(
-                        "{}: {}{}",
-                        issue.code,
-                        issue.message,
-                        issue
-                            .path
-                            .as_ref()
-                            .map(|path| format!(" ({path})"))
-                            .unwrap_or_default()
-                    );
-                }
             }
             if report.ok {
                 0
@@ -378,19 +579,27 @@ fn run_secrets_migrate(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&report).unwrap_or_default()
                 );
             } else {
+                let rows: Vec<Vec<String>> = report
+                    .actions
+                    .iter()
+                    .map(|action| {
+                        vec![
+                            action.action.clone(),
+                            action.status.clone(),
+                            action.rel_path.clone().unwrap_or_default(),
+                        ]
+                    })
+                    .collect();
+                let verb = if report.applied { "applied" } else { "planned" };
                 println!(
-                    "secrets migrate: {} action(s) {}",
-                    report.actions.len(),
-                    if report.applied { "applied" } else { "planned" }
+                    "{}",
+                    render_action_report(
+                        &out::stdout_style(),
+                        &format!("secrets migrate: {} action(s) {verb}", report.actions.len()),
+                        &["action", "status", "path"],
+                        &rows,
+                    )
                 );
-                for action in &report.actions {
-                    println!(
-                        "{}\t{}\t{}",
-                        action.action,
-                        action.status,
-                        action.rel_path.clone().unwrap_or_default()
-                    );
-                }
             }
             if report.ok {
                 0
@@ -457,6 +666,22 @@ fn run_doctor(args: &[String]) -> i32 {
         }
         Err(err) => fail(&format!("doctor: {err}")),
     }
+}
+
+/// A mutating command's human report: the summary as a `✓` line, then its
+/// actions as a table.
+fn render_action_report(
+    style: &out::Style,
+    summary: &str,
+    headings: &[&str],
+    rows: &[Vec<String>],
+) -> String {
+    let mut text = style.done_line(summary);
+    if !rows.is_empty() {
+        text.push_str("\n\n");
+        text.push_str(&style.table(headings, rows));
+    }
+    text
 }
 
 /// One finding of a check report, independent of the report type.
@@ -601,7 +826,7 @@ fn run_skills_env(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&outcome).unwrap_or_default()
                 );
             } else if outcome.success {
-                println!("skills env repaired: {}", outcome.root);
+                out::done(&format!("skills env repaired: {}", outcome.root));
             }
             if outcome.success {
                 0
@@ -637,7 +862,7 @@ fn run_skills_env(args: &[String]) -> i32 {
                     serde_json::json!({ "repaired": false, "reason": err })
                 );
             } else {
-                println!("{err}");
+                out::done(&err);
             }
             0
         }
@@ -676,10 +901,10 @@ fn run_skills_rollback(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&outcome).unwrap_or_default()
                 );
             } else {
-                println!(
+                out::done(&format!(
                     "skills bundle rolled back to {} (r{})",
                     outcome.current.display_version, outcome.current.revision
-                );
+                ));
             }
             0
         }
@@ -779,11 +1004,26 @@ fn run_skills_update(args: &[String]) -> i32 {
                             format!("{} (r{})", available.display_version, available.revision)
                         })
                         .unwrap_or_else(|| "none published".to_string());
-                    println!("skills bundle: active {active}; channel {channel}");
-                    println!("{}", skills_update_check_text(&status));
+                    let style = out::stdout_style();
+                    let verdict = skills_update_check_text(&status);
+                    let marker = if !status.update_available {
+                        Marker::Ok
+                    } else if status.auto_applicable {
+                        Marker::Pending
+                    } else {
+                        Marker::Warn
+                    };
+                    let mut text = format!(
+                        "{}\n{}\n\n{}",
+                        style.header("maru skills update", Some("check")),
+                        style.rows(&[("Active", active), ("Channel", channel)]),
+                        style.bullet(marker, &verdict),
+                    );
                     if let Some(hint) = &status.env_repair_hint {
-                        println!("{hint}");
+                        text.push('\n');
+                        text.push_str(&style.bullet(Marker::Warn, hint));
                     }
+                    println!("{text}");
                 }
                 0
             }
@@ -798,17 +1038,23 @@ fn run_skills_update(args: &[String]) -> i32 {
                         serde_json::to_string_pretty(&outcome).unwrap_or_default()
                     );
                 } else {
-                    println!(
+                    out::done(&format!(
                         "skills bundle {} applied: {} added, {} updated, {} removed",
                         outcome.current.display_version,
                         outcome.added_skills.len(),
                         outcome.updated_skills.len(),
                         outcome.removed_skills.len()
-                    );
+                    ));
                     if !outcome.stale_copy_installs.is_empty() {
                         println!(
-                            "stale copy installs (reinstall to refresh): {}",
-                            outcome.stale_copy_installs.join(", ")
+                            "{}",
+                            out::stdout_style().bullet(
+                                Marker::Warn,
+                                &format!(
+                                    "stale copy installs (reinstall to refresh): {}",
+                                    outcome.stale_copy_installs.join(", ")
+                                ),
+                            )
                         );
                     }
                 }
@@ -820,7 +1066,7 @@ fn run_skills_update(args: &[String]) -> i32 {
                 if json {
                     println!("{}", serde_json::json!({ "updated": false, "reason": err }));
                 } else {
-                    println!("up to date ({err})");
+                    out::done(&format!("up to date ({err})"));
                 }
                 0
             }
@@ -921,22 +1167,33 @@ fn run_skills_sync(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&report).unwrap_or_default()
                 );
             } else {
+                let rows: Vec<Vec<String>> = report
+                    .actions
+                    .iter()
+                    .map(|action| {
+                        vec![
+                            action.action.clone(),
+                            action.target.clone().unwrap_or_else(|| "maru".to_string()),
+                            action.skill_name.clone(),
+                            action.path.clone(),
+                        ]
+                    })
+                    .collect();
+                let verb = if report.applied { "applied" } else { "planned" };
                 println!(
-                    "skills sync: {} skill(s), {} install(s), {} action(s) {}",
-                    report.desired_skills,
-                    report.desired_installs,
-                    report.actions.len(),
-                    if report.applied { "applied" } else { "planned" }
+                    "{}",
+                    render_action_report(
+                        &out::stdout_style(),
+                        &format!(
+                            "skills sync: {} skill(s), {} install(s), {} action(s) {verb}",
+                            report.desired_skills,
+                            report.desired_installs,
+                            report.actions.len()
+                        ),
+                        &["action", "target", "skill", "path"],
+                        &rows,
+                    )
                 );
-                for action in &report.actions {
-                    println!(
-                        "{}\t{}\t{}\t{}",
-                        action.action,
-                        action.target.as_deref().unwrap_or("maru"),
-                        action.skill_name,
-                        action.path
-                    );
-                }
             }
             if !apply && !report.actions.is_empty() {
                 1
@@ -966,10 +1223,23 @@ fn run_skills_dirty(args: &[String]) -> i32 {
                     serde_json::to_string_pretty(&records).unwrap_or_default()
                 );
             } else {
-                for record in &records {
+                let rows: Vec<Vec<String>> = records
+                    .iter()
+                    .map(|record| {
+                        vec![
+                            record.name.clone(),
+                            record.source_id.clone(),
+                            record.tier.clone(),
+                            record.abs_path.clone(),
+                        ]
+                    })
+                    .collect();
+                if rows.is_empty() {
+                    out::done("no skills with local edits");
+                } else {
                     println!(
-                        "{}\t{}\t{}\t{}",
-                        record.name, record.source_id, record.tier, record.abs_path
+                        "{}",
+                        out::stdout_style().table(&["name", "source", "tier", "path"], &rows)
                     );
                 }
             }
@@ -1122,6 +1392,19 @@ fn run_skills_import_unmanage(args: &[String]) -> i32 {
     }
 }
 
+/// The workspace as the current directory, or the failure to print: the
+/// cause from the OS and how to recover.
+fn work_dir_or_fail() -> Result<String, i32> {
+    env::current_dir()
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|err| {
+            out::fail_with_next(
+                &format!("cannot read the current directory: {err}"),
+                "cd <workspace folder> and rerun the command",
+            )
+        })
+}
+
 fn current_work_path() -> Option<String> {
     env::current_dir()
         .ok()
@@ -1181,10 +1464,14 @@ fn run_jobs_exec(args: &[String]) -> i32 {
             "jobs",
         );
     };
-    let Some(work) = current_work_path() else {
-        return fail("cannot resolve current directory");
+    let work = match work_dir_or_fail() {
+        Ok(work) => work,
+        Err(code) => return code,
     };
-    crate::jobs::jobs_exec_in(std::path::Path::new(&work), &id, if_missed)
+    match crate::jobs::jobs_exec_result_in(std::path::Path::new(&work), &id, if_missed) {
+        Ok(code) => code,
+        Err(err) => fail(&format!("jobs exec: jobs_exec_failed: {err}")),
+    }
 }
 
 /// Parse `[<id>] [--json]` following the run_skills manual-parsing pattern.
@@ -1240,8 +1527,9 @@ fn run_jobs_list(args: &[String]) -> i32 {
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
-    let Some(work) = current_work_path() else {
-        return fail("cannot resolve current directory");
+    let work = match work_dir_or_fail() {
+        Ok(work) => work,
+        Err(code) => return code,
     };
     let work_path = std::path::Path::new(&work);
     match crate::jobs::jobs_list_in(work_path) {
@@ -1249,7 +1537,12 @@ fn run_jobs_list(args: &[String]) -> i32 {
             if let Some(id) = id {
                 statuses.retain(|status| status.id == id);
                 if statuses.is_empty() {
-                    return fail(&format!("job_not_found: {id}"));
+                    return out::fail_with_next(
+                        &format!(
+                            "jobs status: job_not_found: no job {id:?} in {work}/.maru/jobs.json"
+                        ),
+                        "maru jobs list",
+                    );
                 }
             }
             if json {
@@ -1271,8 +1564,9 @@ fn run_jobs_action(verb: &str, args: &[String]) -> i32 {
         Ok(parsed) => parsed,
         Err(code) => return code,
     };
-    let Some(work) = current_work_path() else {
-        return fail("cannot resolve current directory");
+    let work = match work_dir_or_fail() {
+        Ok(work) => work,
+        Err(code) => return code,
     };
     let work_path = std::path::Path::new(&work);
     let id = match resolve_jobs_id(work_path, id) {
@@ -1304,23 +1598,41 @@ fn run_jobs_action(verb: &str, args: &[String]) -> i32 {
 }
 
 fn print_jobs_table(statuses: &[crate::jobs::JobStatus]) {
+    println!("{}", render_jobs(&out::stdout_style(), statuses));
+}
+
+/// Job status as a header-less list: one `▸ <id>` section per job with
+/// its state rows.
+fn render_jobs(style: &out::Style, statuses: &[crate::jobs::JobStatus]) -> String {
+    let mut sections = Vec::new();
     for status in statuses {
         let last_exit = status
             .last_exit_code
             .map(|code| code.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        println!(
-            "{id}  {title}\n  installed={installed} loaded={loaded} enabled={enabled} last-exit={last_exit}\n  label={label}\n  plist={plist}",
-            id = status.id,
-            title = status.title,
-            installed = yes_no(status.installed),
-            loaded = yes_no(status.loaded),
-            enabled = yes_no(status.enabled),
-            last_exit = last_exit,
-            label = status.label,
-            plist = status.plist_path,
-        );
+            .unwrap_or_default();
+        let title = if status.title.is_empty() {
+            status.id.clone()
+        } else {
+            format!("{} {}", status.id, status.title)
+        };
+        let rows = [
+            ("Installed", yes_no(status.installed).to_string()),
+            ("Loaded", yes_no(status.loaded).to_string()),
+            ("Enabled", yes_no(status.enabled).to_string()),
+            ("Last exit", last_exit),
+            ("Label", status.label.clone()),
+            ("Plist", status.plist_path.clone()),
+        ];
+        sections.push(format!(
+            "{}\n{}",
+            style.section(&title, None),
+            style.rows(&rows)
+        ));
     }
+    if sections.is_empty() {
+        return style.bullet(Marker::Absent, "no jobs declared in .maru/jobs.json");
+    }
+    sections.join("\n\n")
 }
 
 fn yes_no(value: bool) -> &'static str {
@@ -1555,6 +1867,167 @@ mod tests {
         assert_eq!(flags.color, ColorChoice::Never);
         assert!(flags.ascii);
         assert_eq!(rest, vec!["doctor".to_string(), "--json".to_string()]);
+    }
+
+    // Review T142-1: an option's value is never taken as an output flag, so
+    // `--message --ascii` keeps --ascii as the message and the conflicting
+    // actions are refused (exit 2) before any effect.
+    #[test]
+    fn option_values_are_not_taken_as_output_flags() {
+        let (flags, rest) = take_output_flags(
+            [
+                "skills",
+                "reconcile",
+                "NAME",
+                "--message",
+                "--ascii",
+                "--accept",
+                "--discard",
+            ]
+            .map(String::from)
+            .to_vec(),
+        )
+        .unwrap();
+        assert!(!flags.ascii);
+        assert_eq!(
+            rest,
+            [
+                "skills",
+                "reconcile",
+                "NAME",
+                "--message",
+                "--ascii",
+                "--accept",
+                "--discard"
+            ]
+            .map(String::from)
+            .to_vec()
+        );
+        assert_eq!(
+            run_cli(
+                [
+                    "skills",
+                    "reconcile",
+                    "NAME",
+                    "--message",
+                    "--ascii",
+                    "--accept",
+                    "--discard"
+                ]
+                .map(String::from)
+                .to_vec()
+            ),
+            2
+        );
+        let (_, rest) = take_output_flags(
+            ["calendar-sync", "--work", "--color", "--dry-run"]
+                .map(String::from)
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(rest.len(), 4);
+    }
+
+    #[test]
+    fn command_help_lists_flags_and_examples_for_every_flag_it_names() {
+        for (name, _, usage) in COMMANDS {
+            let text = help_command(&style(false, false), name).unwrap();
+            let flags: Vec<&str> = usage
+                .split(|ch: char| ch.is_whitespace() || "[]()|<>".contains(ch))
+                .filter(|token| token.starts_with("--"))
+                .collect();
+            for flag in flags {
+                assert!(
+                    super::FLAG_DESCRIPTIONS
+                        .iter()
+                        .any(|(command, label, _)| command == name
+                            && label.split(' ').next() == Some(flag)),
+                    "{name}: {flag} has no description"
+                );
+            }
+            if usage.contains("--") {
+                assert!(text.contains("\u{25b8} Flags ("), "{name}: {text}");
+            }
+        }
+        for (command, example) in super::EXAMPLES {
+            assert!(example.starts_with(&format!("maru {command}")), "{example}");
+            assert!(help_command(&style(false, false), command)
+                .unwrap()
+                .contains(example));
+        }
+    }
+
+    fn job(id: &str) -> crate::jobs::JobStatus {
+        crate::jobs::JobStatus {
+            id: id.into(),
+            title: "Daily sync".into(),
+            description: String::new(),
+            installed: true,
+            loaded: false,
+            enabled: true,
+            plist_path: "/Users/me/Library/LaunchAgents/x.plist".into(),
+            label: "com.maru.x".into(),
+            schedule: crate::jobs::JobSchedule {
+                hour: 7,
+                minute: 0,
+                recovery_interval_seconds: 0,
+                recovery_mode: Default::default(),
+                run_at_load: false,
+            },
+            last_exit_code: None,
+            last_run_at: None,
+            receipts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn jobs_render_as_sections_and_rows() {
+        let text = super::render_jobs(&style(false, false), &[job("daily")]);
+        assert!(
+            text.starts_with("\u{25b8} daily Daily sync\n  Installed:"),
+            "{text}"
+        );
+        assert!(text.contains("  Last exit:  (unset)"), "{text}");
+        let ascii = super::render_jobs(&style(false, true), &[]);
+        assert_eq!(ascii, "  -  no jobs declared in .maru/jobs.json");
+    }
+
+    #[test]
+    fn calendar_sync_report_follows_the_layout_in_both_alphabets() {
+        let outcome = crate::calendar_sync::CalendarSyncOutcome {
+            destination: "primary".into(),
+            dry_run: true,
+            scanned: 3,
+            inserts: 1,
+            failed: 1,
+            changes: vec![crate::calendar_sync::CalendarSyncChange {
+                rel_path: "Today/2026-11-22.md".into(),
+                action: "insert".into(),
+                event_id: None,
+            }],
+            ..Default::default()
+        };
+        let plain = crate::calendar_sync::render_calendar_sync(&style(false, false), &outcome);
+        assert!(
+            plain.starts_with("maru calendar-sync primary dry run\n\n\u{25b8} Changes (1)"),
+            "{plain}"
+        );
+        assert!(
+            plain.contains("  ACTION  EVENT  NOTE\n  insert  -      Today/2026-11-22.md"),
+            "{plain}"
+        );
+        assert!(plain.contains("\u{2717} 1 failed"), "{plain}");
+        let ascii = crate::calendar_sync::render_calendar_sync(&style(false, true), &outcome);
+        assert!(ascii.is_ascii(), "{ascii}");
+        assert!(ascii.contains("x 1 failed"), "{ascii}");
+        let colored = crate::calendar_sync::render_calendar_sync(&style(true, false), &outcome);
+        assert!(
+            colored.contains("\x1b[1;34mmaru calendar-sync primary\x1b[0m"),
+            "{colored}"
+        );
+        for line in plain.lines() {
+            assert!(UnicodeWidthStr::width(line) <= 80, "{line}");
+        }
     }
 
     #[test]

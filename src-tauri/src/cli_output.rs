@@ -267,6 +267,102 @@ impl Style {
         }
     }
 
+    /// `✓ <what was done>`, the success confirmation.
+    pub(crate) fn done_line(&self, message: &str) -> String {
+        format!("{} {message}", self.marker(Marker::Ok))
+    }
+
+    /// Header line: ` <title>` in `header`, optional context in `hint`.
+    pub(crate) fn header(&self, title: &str, context: Option<&str>) -> String {
+        let title = self.paint(Role::Header, title);
+        match context.filter(|context| !context.is_empty()) {
+            Some(context) => format!("{title} {}", self.paint(Role::Hint, context)),
+            None => title,
+        }
+    }
+
+    /// Key/value rows at a two-space indent, keys padded to the widest one;
+    /// an empty value is `(unset)` in `hint`.
+    pub(crate) fn rows(&self, rows: &[(&str, String)]) -> String {
+        let width = rows
+            .iter()
+            .map(|(key, _)| UnicodeWidthStr::width(*key) + 1)
+            .max()
+            .unwrap_or(0);
+        rows.iter()
+            .map(|(key, value)| {
+                let label = format!("{key}:");
+                let pad = " ".repeat(width - UnicodeWidthStr::width(label.as_str()));
+                let value = if value.is_empty() {
+                    self.paint(Role::Hint, "(unset)")
+                } else {
+                    value.clone()
+                };
+                format!("  {}{pad}  {value}", self.paint(Role::Key, &label))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A borderless table: uppercase headings in `key`, two-space gutter.
+    /// Every column but the last is capped at 32 cells (paths shorten in the
+    /// middle); the last, flexible column wraps at the width. Empty cells are
+    /// `-` in `hint`.
+    pub(crate) fn table(&self, headings: &[&str], rows: &[Vec<String>]) -> String {
+        const CAP: usize = 32;
+        let columns = headings.len();
+        let cell = |row: &Vec<String>, index: usize| -> String {
+            let value = row.get(index).cloned().unwrap_or_default();
+            if index + 1 < columns {
+                shorten_middle(&value, CAP)
+            } else {
+                value
+            }
+        };
+        let mut widths: Vec<usize> = headings.iter().map(|h| h.len()).collect();
+        for row in rows {
+            for (index, width) in widths.iter_mut().enumerate().take(columns - 1) {
+                let value = cell(row, index);
+                *width = (*width).max(UnicodeWidthStr::width(value.as_str()).max(1));
+            }
+        }
+        let lead: usize = 2 + widths[..columns - 1].iter().map(|w| w + 2).sum::<usize>();
+        let flex = self.width.map(|width| width.saturating_sub(lead));
+        let render = |values: Vec<String>, heading: bool| -> String {
+            let mut first = String::from("  ");
+            for (index, value) in values.iter().enumerate().take(columns - 1) {
+                let shown = if value.is_empty() {
+                    "-"
+                } else {
+                    value.as_str()
+                };
+                let pad = " ".repeat(widths[index] - UnicodeWidthStr::width(shown));
+                let role = if heading {
+                    Role::Key
+                } else if value.is_empty() {
+                    Role::Hint
+                } else {
+                    Role::Value
+                };
+                first.push_str(&format!("{}{pad}  ", self.paint(role, shown)));
+            }
+            let last = values.last().cloned().unwrap_or_default();
+            let lines = wrap(if last.is_empty() { "-" } else { &last }, flex);
+            let role = if heading { Role::Key } else { Role::Value };
+            let mut out = format!("{first}{}", self.paint(role, &lines[0]));
+            for line in &lines[1..] {
+                out.push_str(&format!("\n{}{}", " ".repeat(lead), self.paint(role, line)));
+            }
+            out.trim_end().to_string()
+        };
+        let mut text = render(headings.iter().map(|h| h.to_uppercase()).collect(), true);
+        for row in rows {
+            text.push('\n');
+            text.push_str(&render((0..columns).map(|i| cell(row, i)).collect(), false));
+        }
+        text
+    }
+
     /// `  → <command>` under an error line.
     pub(crate) fn error_next(&self, command: &str) -> String {
         format!(
@@ -275,6 +371,38 @@ impl Style {
             self.paint(Role::Accent, command)
         )
     }
+}
+
+/// Shorten text longer than `cap` cells in the middle: `~/Library/.../home`.
+pub(crate) fn shorten_middle(text: &str, cap: usize) -> String {
+    if UnicodeWidthStr::width(text) <= cap {
+        return text.to_string();
+    }
+    let keep = cap.saturating_sub(3);
+    let head_cells = keep / 2;
+    let tail_cells = keep - head_cells;
+    let mut head = String::new();
+    let mut cells = 0;
+    for ch in text.chars() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cells + w > head_cells {
+            break;
+        }
+        cells += w;
+        head.push(ch);
+    }
+    let mut tail: Vec<char> = Vec::new();
+    cells = 0;
+    for ch in text.chars().rev() {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cells + w > tail_cells {
+            break;
+        }
+        cells += w;
+        tail.push(ch);
+    }
+    tail.reverse();
+    format!("{head}...{}", tail.into_iter().collect::<String>())
 }
 
 /// Greedy word wrap measured in terminal cells (ambiguous width narrow).
@@ -343,12 +471,22 @@ fn env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-fn style_for(is_tty: bool) -> Style {
+/// Which standard stream a style renders for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stream {
+    Stdout,
+    Stderr,
+}
+
+fn style_for(stream: Stream, is_tty: bool) -> Style {
     let flags = FLAGS.with(|cell| *cell.borrow());
+    let columns = env_var("COLUMNS").and_then(|value| value.parse().ok());
+    // On a TTY wrap to the real width (COLUMNS overrides); on a pipe only
+    // when COLUMNS is set.
     let width = if is_tty {
-        terminal_width().or(Some(80))
+        columns.or_else(|| terminal_width(stream)).or(Some(80))
     } else {
-        env_var("COLUMNS").and_then(|value| value.parse().ok())
+        columns
     };
     Style {
         color: resolve_color(flags.color, &env_var, is_tty),
@@ -358,16 +496,44 @@ fn style_for(is_tty: bool) -> Style {
     }
 }
 
-fn terminal_width() -> Option<usize> {
-    env_var("COLUMNS").and_then(|value| value.parse().ok())
+/// The terminal's column count, queried from the stream's TTY.
+#[cfg(unix)]
+fn terminal_width(stream: Stream) -> Option<usize> {
+    fd_width(match stream {
+        Stream::Stdout => libc::STDOUT_FILENO,
+        Stream::Stderr => libc::STDERR_FILENO,
+    })
+}
+
+#[cfg(unix)]
+fn fd_width(fd: libc::c_int) -> Option<usize> {
+    let mut size = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    // SAFETY: TIOCGWINSZ writes one winsize into the pointed-to struct.
+    let rc = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut size) };
+    (rc == 0 && size.ws_col > 0).then_some(size.ws_col as usize)
+}
+
+#[cfg(not(unix))]
+fn terminal_width(_stream: Stream) -> Option<usize> {
+    None
 }
 
 pub(crate) fn stdout_style() -> Style {
-    style_for(std::io::stdout().is_terminal())
+    style_for(Stream::Stdout, std::io::stdout().is_terminal())
 }
 
 pub(crate) fn stderr_style() -> Style {
-    style_for(std::io::stderr().is_terminal())
+    style_for(Stream::Stderr, std::io::stderr().is_terminal())
+}
+
+/// Print `✓ <what was done>` to stdout.
+pub(crate) fn done(message: &str) {
+    println!("{}", stdout_style().done_line(message));
 }
 
 /// Print `maru: <message>` to stderr; returns 1, the failure exit.
@@ -527,6 +693,48 @@ mod tests {
             text,
             "maru: unknown option: --x\nUsage: maru doctor [--json] [--quiet]\nRun 'maru help doctor' for details."
         );
+    }
+
+    #[test]
+    fn tables_cap_columns_and_wrap_the_flexible_one() {
+        let style = Style {
+            width: Some(80),
+            ..Style::plain()
+        };
+        let rows = vec![
+            vec![
+                "insert".to_string(),
+                "/Users/someone/Library/Application Support/very/long/path".to_string(),
+                "word ".repeat(30),
+            ],
+            vec!["patch".to_string(), String::new(), "short".to_string()],
+        ];
+        let text = style.table(&["action", "path", "note"], &rows);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].starts_with("  ACTION  PATH"), "{text}");
+        assert!(text.contains("..."), "{text}");
+        assert!(text.contains("  patch   -  "), "{text}");
+        for line in &lines {
+            assert!(UnicodeWidthStr::width(*line) <= 80, "{line}");
+        }
+        assert_eq!(
+            UnicodeWidthStr::width(shorten_middle(&"x".repeat(50), 32).as_str()),
+            32
+        );
+    }
+
+    #[test]
+    fn rows_pad_keys_and_mark_unset_values() {
+        let text = Style::plain().rows(&[("Id", "a".into()), ("Label", String::new())]);
+        assert_eq!(text, "  Id:     a\n  Label:  (unset)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_tty_fd_has_no_terminal_width() {
+        use std::os::fd::AsRawFd;
+        let dev_null = std::fs::File::open("/dev/null").unwrap();
+        assert_eq!(fd_width(dev_null.as_raw_fd()), None);
     }
 
     #[test]

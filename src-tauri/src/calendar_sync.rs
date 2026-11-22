@@ -626,6 +626,70 @@ pub fn calendar_sync_run(
 pub(crate) const CALENDAR_SYNC_USAGE: &str =
     "maru calendar-sync [--work <path>] [--destination <key-or-id>] [--gws <path>] [--dry-run] [--json]";
 
+/// Human report of one run: header, the changes table, the counts and a
+/// summary line (cli-output v1 layout).
+pub(crate) fn render_calendar_sync(
+    style: &crate::cli_output::Style,
+    outcome: &CalendarSyncOutcome,
+) -> String {
+    use crate::cli_output::Marker;
+    let context = if outcome.dry_run { "dry run" } else { "" };
+    let mut text = style.header(
+        &format!("maru calendar-sync {}", outcome.destination),
+        Some(context),
+    );
+    if !outcome.changes.is_empty() {
+        let count = outcome.changes.len().to_string();
+        text.push_str(&format!("\n\n{}", style.section("Changes", Some(&count))));
+        let rows: Vec<Vec<String>> = outcome
+            .changes
+            .iter()
+            .map(|change| {
+                vec![
+                    change.action.clone(),
+                    change.event_id.clone().unwrap_or_default(),
+                    change.rel_path.clone(),
+                ]
+            })
+            .collect();
+        text.push('\n');
+        text.push_str(&style.table(&["action", "event", "note"], &rows));
+    }
+    let counts = [
+        ("Scanned", outcome.scanned),
+        ("Insert", outcome.inserts),
+        ("Patch", outcome.patches),
+        ("Delete", outcome.deletes),
+        ("Adopt", outcome.adopted),
+        ("Unchanged", outcome.unchanged),
+        ("Foreign", outcome.skipped_foreign),
+        ("Pending", outcome.pending),
+        ("Drained", outcome.drained),
+    ];
+    let rows: Vec<(&str, String)> = counts
+        .iter()
+        .map(|(key, value)| (*key, value.to_string()))
+        .collect();
+    text.push_str(&format!(
+        "\n\n{}\n{}",
+        style.section("Counts", None),
+        style.rows(&rows)
+    ));
+    let problems = outcome.failed + outcome.blocked;
+    text.push_str("\n\n");
+    if problems == 0 {
+        text.push_str(&style.summary(0, 0, outcome.drained));
+    } else {
+        text.push_str(&style.summary(outcome.failed, outcome.blocked, outcome.drained));
+        text.push('\n');
+        text.push_str(&style.bullet(
+            Marker::Next,
+            "maru calendar-sync --json shows each failed or blocked record",
+        ));
+    }
+    text
+}
+
 /// `maru calendar-sync`: the daily job's entry point. Exit 0 when nothing
 /// failed or blocked, 1 otherwise, 2 on usage errors.
 pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
@@ -662,13 +726,17 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
             }
         }
     }
-    let work = work.or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .map(|path| path.to_string_lossy().to_string())
-    });
-    let Some(work) = work else {
-        return crate::cli_output::fail("cannot resolve current directory");
+    let work = match work {
+        Some(work) => work,
+        None => match std::env::current_dir() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(err) => {
+                return crate::cli_output::fail_with_next(
+                    &format!("calendar-sync: cannot read the current directory: {err}"),
+                    "maru calendar-sync --work <workspace folder>",
+                );
+            }
+        },
     };
     let now_iso = chrono::Local::now().to_rfc3339();
     match calendar_sync_run(work, destination, gws, now_iso, dry_run) {
@@ -680,33 +748,9 @@ pub(crate) fn run_calendar_sync(args: &[String]) -> i32 {
                 );
             } else {
                 println!(
-                    "calendar-sync{}: {} → scanned {}, insert {}, patch {}, delete {}, adopt {}, unchanged {}, foreign {}, pending {}; drained {}, failed {}, blocked {}",
-                    if outcome.dry_run { " (dry run)" } else { "" },
-                    outcome.destination,
-                    outcome.scanned,
-                    outcome.inserts,
-                    outcome.patches,
-                    outcome.deletes,
-                    outcome.adopted,
-                    outcome.unchanged,
-                    outcome.skipped_foreign,
-                    outcome.pending,
-                    outcome.drained,
-                    outcome.failed,
-                    outcome.blocked,
+                    "{}",
+                    render_calendar_sync(&crate::cli_output::stdout_style(), &outcome)
                 );
-                for change in &outcome.changes {
-                    println!(
-                        "  {:<12} {}{}",
-                        change.action,
-                        change.rel_path,
-                        change
-                            .event_id
-                            .as_deref()
-                            .map(|id| format!(" [{id}]"))
-                            .unwrap_or_default()
-                    );
-                }
             }
             if outcome.failed == 0 && outcome.blocked == 0 {
                 0
