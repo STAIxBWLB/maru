@@ -1957,8 +1957,7 @@ mod tests {
             .join("render-test.cmd.json");
         let source = fs::read(&source_path).unwrap();
         fs::write(render_dir.join(HTML_FILE), HTML).unwrap();
-        let pin: serde_json::Value =
-            serde_json::from_str(LEGACY_ARCHIFY_PIN_JSON).unwrap();
+        let pin: serde_json::Value = serde_json::from_str(LEGACY_ARCHIFY_PIN_JSON).unwrap();
         let receipt = serde_json::json!({
             "schemaVersion": 1,
             "docId": fixture.doc_id.clone(),
