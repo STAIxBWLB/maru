@@ -232,7 +232,7 @@ clippy: $(ICON_PATH) ## Rust lint gate (cargo clippy -D warnings, lib scope)
 
 .PHONY: test-cli
 test-cli: $(ICON_PATH) ## Compile and test standalone Maru CLI binary
-	cd $(TAURI_DIR) && $(CARGO) test -p maru-cli --bin maru-cli
+	cd $(TAURI_DIR) && $(CARGO) test -p maru-cli
 
 .PHONY: test-e2e
 test-e2e: node_modules ## Playwright e2e (requires browsers; run `pnpm playwright install` first)

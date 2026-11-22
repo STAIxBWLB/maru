@@ -2635,7 +2635,7 @@ dependencies = [
 
 [[package]]
 name = "maru"
-version = "1.1.30"
+version = "1.1.31"
 dependencies = [
  "alacritty_terminal",
  "base64 0.22.1",
@@ -2646,6 +2646,7 @@ dependencies = [
  "dirs 5.0.1",
  "encoding_rs",
  "include_dir",
+ "libc",
  "maru-diagram-engine",
  "mime_guess",
  "minisign-verify 0.2.5",
@@ -2680,7 +2681,7 @@ dependencies = [
 
 [[package]]
 name = "maru-cli"
-version = "1.1.30"
+version = "1.1.31"
 dependencies = [
  "maru",
 ]
