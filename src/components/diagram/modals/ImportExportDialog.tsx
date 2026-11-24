@@ -49,6 +49,8 @@ export interface ImportExportDialogProps {
   doc: DiagramDoc;
   workspace: string | null;
   dirty: boolean;
+  /** Whether the document has a saved source file; never-saved exports skip render history (#658). */
+  sourceSaved?: boolean;
   onImportDoc: (doc: DiagramDoc) => void;
   onImportDataset: (dataset: ReportDataset) => void;
   onClose: () => void;
@@ -120,6 +122,7 @@ export function ImportExportDialog({
   doc,
   workspace,
   dirty,
+  sourceSaved,
   onImportDoc,
   onImportDataset,
   onClose,
@@ -267,7 +270,7 @@ export function ImportExportDialog({
         doc,
         ...(needsDataset ? { datasetId: effectiveDatasetId } : {}),
         workspace: workspace ?? undefined, renderHost: hostOverride?.renderCandidate,
-        isCurrent, theme,
+        isCurrent, theme, sourceSaved: sourceSaved ?? true,
       });
       if (!isCurrent()) return;
       if (outcome.receipt) setRenderReceipt(outcome.receipt);

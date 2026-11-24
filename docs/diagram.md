@@ -595,6 +595,13 @@ source, or a new export with an explicit dataset choice. Its output hash belongs
 export's final SVG/PNG hash belongs to the converted copy. This is not HTML export
 to a user-selected path; that remains behind #528 T2's platform gates.
 
+Only a document with a saved source stores history renders. Exporting a
+document that was never saved (no active `diagrams/<name>.cmd.json`) passes no
+render-store context: the exported SVG/PNG copy is still written and its receipt
+still shown, but nothing is added under `attachments/diagrams/`, so File >
+Renders never lists an unsaved export as orphaned (#658). Exports after the
+first save are stored as above.
+
 The native commands scan receipts and join current `diagrams/*.cmd.json` files
 by `docId`, using the current filename for Re-render. Removing or renaming a
 source document does not delete its renders: a missing source is listed as
