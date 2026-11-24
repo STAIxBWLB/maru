@@ -105,6 +105,8 @@ export interface DiagramCodec {
     renderHost?: EngineRenderHost;
     isCurrent?: () => boolean;
     theme?: StaticTheme;
+    /** False when the document has no saved `diagrams/*.cmd.json` source yet (#658). */
+    sourceSaved?: boolean;
   }): CodecSerializeOutcome | Promise<CodecSerializeOutcome>;
 }
 
@@ -1040,6 +1042,7 @@ function engineStaticCodec(format: "svg" | "png"): DiagramCodec {
       const artifact = await exportVerifiedSemanticArtifact({
         doc: input.doc, datasetId: input.datasetId, workspace: input.workspace, format,
         host: input.renderHost, isCurrent: input.isCurrent, theme: input.theme,
+        ...(input.sourceSaved === false ? { storeRender: false } : {}),
       });
       return { bytes: artifact.bytes, receipt: artifact.receipt, storeWarning: artifact.storeWarning, fidelity: "visual", warnings: [{ key: "diagram.codec.warn.engineSemanticOnly" }] };
     },

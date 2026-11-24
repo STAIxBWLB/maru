@@ -164,6 +164,30 @@ describe("verified semantic export through the engine host", () => {
     },
   );
 
+  it("passes no render-store context for a never-saved document but still returns the verified export (#658)", async () => {
+    const { doc } = semanticDoc("architecture");
+    const contexts: unknown[] = [];
+    const result = await exportVerifiedSemanticArtifact({
+      doc, workspace: "/fixture", format: "svg", storeRender: false,
+      host: async (type, json, context) => { contexts.push(context); return mockHost(type, json); },
+    });
+    expect(contexts).toEqual([undefined]);
+    expect(result.receipt.outputSha256).toBe(digest(result.bytes));
+    expect(result.storeWarning).toBeUndefined();
+  });
+
+  it("passes the render-store context for a saved document (#658)", async () => {
+    const { doc } = semanticDoc("architecture");
+    const contexts: Array<{ docId?: string } | undefined> = [];
+    for (const storeRender of [true, undefined]) {
+      await exportVerifiedSemanticArtifact({
+        doc, workspace: "/fixture", format: "png", ...(storeRender === undefined ? {} : { storeRender }),
+        host: async (type, json, context, options) => { contexts.push(context); return mockHost(type, json, options); },
+      });
+    }
+    expect(contexts.map((context) => context?.docId)).toEqual([doc.id, doc.id]);
+  });
+
   it("uses the fixed native source fixture and drops untrusted receipt metadata", async () => {
     const { dataset } = archifySpecToDataset("architecture", NATIVE_EXPORT_SPEC);
     const doc = { ...createEmptyDoc("native-fixed", 1), datasets: [dataset] };

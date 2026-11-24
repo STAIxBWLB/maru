@@ -62,6 +62,7 @@ function renderDialog(
   doc?: DiagramDoc,
   hostOverride: GenerationHost | null = null,
   workspace: string | null = null,
+  sourceSaved?: boolean,
 ): Harness {
   const onImportDoc = vi.fn();
   const onImportDataset = vi.fn();
@@ -86,6 +87,7 @@ function renderDialog(
               doc={currentDoc}
               workspace={workspace}
               dirty={false}
+              {...(sourceSaved === undefined ? {} : { sourceSaved })}
               onImportDoc={onImportDoc}
               onImportDataset={onImportDataset}
               onClose={onClose}
@@ -261,6 +263,25 @@ describe("ImportExportDialog (export)", () => {
     expect(query('[data-testid="render-store-warning"]')?.textContent).toContain("repair the render store and retry");
     expect(query('[data-testid="engine-export-receipt"]')).not.toBeNull();
   });
+
+  it.each([[false, false], [true, true]])(
+    "stores render history only for a saved document (sourceSaved=%s) and still writes the export with its receipt (#658)",
+    async (sourceSaved, expectContext) => {
+      const { doc } = semanticDoc();
+      const host: EngineRenderHost = vi.fn(async (type, json, context, options) => renderArtifact(type, json, context, options));
+      setNativeMode();
+      chooseSaveFileMock.mockResolvedValue("/workspace/copy.svg");
+      diagramExportBlobToPathMock.mockResolvedValue("/workspace/copy.svg");
+      harness = renderDialog("export", doc, generationHost(host), "/workspace", sourceSaved);
+      await selectFormat("archify-svg");
+      await click(query('[data-testid="ie-export-confirm"]')!);
+      await waitForCalls(diagramExportBlobToPathMock, 1);
+      const context = vi.mocked(host).mock.calls[0]?.[2];
+      expect(context === undefined).toBe(!expectContext);
+      if (expectContext) expect(context?.docId).toBe(doc.id);
+      expect(query('[data-testid="engine-export-receipt"]')).not.toBeNull();
+    },
+  );
 
   it("renders the semantic engine codec only on Export and displays verified hashes, gates and native readback", async () => {
     const { doc, dataset } = semanticDoc();

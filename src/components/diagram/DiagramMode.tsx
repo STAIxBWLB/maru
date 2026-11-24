@@ -1895,6 +1895,7 @@ function DiagramShell({
         doc={store.getState().doc}
         workspace={workPath}
         dirty={dirty}
+        sourceSaved={activeName !== null}
         onImportDoc={handleImportDoc}
         onImportDataset={handleImportDataset}
         onClose={() => setIoDialog(null)}

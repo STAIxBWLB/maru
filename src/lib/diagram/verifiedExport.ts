@@ -29,6 +29,9 @@ export async function exportVerifiedSemanticArtifact(input: {
   doc: DiagramDoc; datasetId?: string; workspace: string; format: "svg" | "png";
   theme?: StaticTheme; host?: EngineRenderHost; isCurrent?: () => boolean;
   documentName?: string; documentRevision?: string;
+  /** False for a document that was never saved: the export is still verified and returned,
+   *  but no render-store context is passed, so nothing is stored in render history (#658). */
+  storeRender?: boolean;
 }): Promise<VerifiedStaticArtifact> {
   const current = () => {
     if (input.isCurrent?.() === false) throw new Error("The export was cancelled or its document changed; start a new export from the current diagram.");
@@ -36,7 +39,7 @@ export async function exportVerifiedSemanticArtifact(input: {
   current();
   const canonical = canonicalSemanticExportInput(input.doc, input.datasetId);
   const theme = input.theme ?? "light";
-  const context = {
+  const context = input.storeRender === false ? undefined : {
     docId: input.doc.id,
     documentName: receiptDisplayName(input.documentName ?? (input.doc.docTitle || input.doc.id)),
     datasetId: canonical.datasetId,
