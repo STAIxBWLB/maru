@@ -9,7 +9,7 @@ use crate::atomic_file::{
 };
 use crate::vault::{lexical_normalize, normalize_existing_dir};
 use crate::vault_list::{assert_maru_can_write, WorkspaceWriteAction};
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use maru_diagram_engine::render::ArtifactReport;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -1134,6 +1134,16 @@ pub fn list_renders(workspace: &str) -> Result<Vec<RenderGroup>, String> {
             .cmp(right.document_name.as_deref().unwrap_or(&right.doc_id))
             .then_with(|| left.doc_id.cmp(&right.doc_id))
     });
+    for group in &mut groups {
+        group.renders.sort_by_cached_key(|render| {
+            let timestamp = render
+                .receipt
+                .as_ref()
+                .filter(|_| render.verified)
+                .and_then(|receipt| DateTime::parse_from_rfc3339(&receipt.rendered_at).ok());
+            (std::cmp::Reverse(timestamp), render.render_id.clone())
+        });
+    }
     Ok(groups)
 }
 
@@ -2256,6 +2266,48 @@ mod tests {
         assert_eq!(
             verified[0].receipt.as_ref().unwrap().doc_id,
             stored.receipt.doc_id
+        );
+    }
+
+    #[test]
+    fn list_renders_orders_each_group_by_timestamp_then_id() {
+        let fixture = Fixture::new();
+        const RENDER_E: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        for (id, timestamp) in [
+            (RENDER_C, "2026-11-24T00:20:39.000Z"),
+            (RENDER_D, "2026-11-24T00:21:53.000Z"),
+            (RENDER_E, "2026-11-24T01:21:53.000+01:00"),
+        ] {
+            let mut stored = fixture.store(id, "image/svg+xml", SVG);
+            stored.receipt.rendered_at = timestamp.into();
+            fs::write(
+                receipt_path(&fixture.render_dir(id)),
+                serde_json::to_vec(&stored.receipt).unwrap(),
+            )
+            .unwrap();
+        }
+
+        fixture.store(RENDER_B, "image/svg+xml", SVG);
+        fs::write(receipt_path(&fixture.render_dir(RENDER_B)), b"{").unwrap();
+        fixture.store(RENDER_A, "image/svg+xml", SVG);
+        fs::remove_file(receipt_path(&fixture.render_dir(RENDER_A))).unwrap();
+
+        let groups = list_renders(fixture.work.to_str().unwrap()).unwrap();
+        assert_eq!(groups.len(), 1);
+        let listed: Vec<_> = groups[0]
+            .renders
+            .iter()
+            .map(|render| (render.render_id.as_str(), render.verified))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                (RENDER_D, true),
+                (RENDER_E, true),
+                (RENDER_C, true),
+                (RENDER_A, false),
+                (RENDER_B, false),
+            ]
         );
     }
 
