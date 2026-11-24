@@ -11,7 +11,7 @@ import { createEmptyDoc, type DiagramDoc } from "../../../lib/diagram/types";
 import { archifySpecToDataset } from "../../../lib/diagram/archifyCodec";
 import { SEMANTIC_FIXTURES } from "../../../lib/diagram/__fixtures__/semantic";
 import { serializeDoc } from "../../../lib/diagram/persistence";
-import { canonicalSemanticExportInput } from "../../../lib/diagram/export";
+import { canonicalSemanticExportInput, suggestedFileName } from "../../../lib/diagram/export";
 import { DiagramStoreProvider } from "../DiagramStoreContext";
 import type { GenerationHost } from "../../../lib/diagram/generation";
 import type { EngineRenderHost, EngineRenderedCandidate, EngineRenderOptions } from "../../../lib/diagram/engine";
@@ -20,9 +20,10 @@ import { LocaleContext, t as translate } from "../../../lib/i18n";
 import "../../../lib/i18n/testing";
 import { ImportExportDialog } from "./ImportExportDialog";
 
-const { chooseSaveFileMock, diagramExportBlobToPathMock } = vi.hoisted(() => ({
+const { chooseSaveFileMock, diagramExportBlobToPathMock, diagramListDocumentsMock } = vi.hoisted(() => ({
   chooseSaveFileMock: vi.fn(),
   diagramExportBlobToPathMock: vi.fn(),
+  diagramListDocumentsMock: vi.fn(),
 }));
 vi.mock("../../../lib/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../lib/api")>(),
@@ -31,6 +32,7 @@ vi.mock("../../../lib/api", async (importOriginal) => ({
 vi.mock("../../../lib/diagram", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../lib/diagram")>(),
   diagramExportBlobToPath: diagramExportBlobToPathMock,
+  diagramListDocuments: diagramListDocumentsMock,
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -186,6 +188,8 @@ describe("ImportExportDialog (export)", () => {
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
     chooseSaveFileMock.mockReset().mockResolvedValue(null);
     diagramExportBlobToPathMock.mockReset().mockResolvedValue("/workspace/diagrams/saved.svg");
+    diagramListDocumentsMock.mockReset().mockResolvedValue([]);
+    window.localStorage.clear();
   });
 
   afterEach(async () => {
@@ -414,6 +418,40 @@ describe("ImportExportDialog (export)", () => {
     expect(diagramExportBlobToPathMock).not.toHaveBeenCalled();
     expect(query('[data-testid="engine-export-receipt"]')!.textContent).toContain(
       translate("ko", "diagram.dialog.ie.gateNotRun"),
+    );
+  });
+
+  it("opens the save panel under <workspace>/diagrams while saved diagrams live there", async () => {
+    const { doc } = semanticDoc();
+    setNativeMode();
+    diagramListDocumentsMock.mockResolvedValue([
+      { name: "kept", size: 1, modifiedAt: 1, docTitle: "Kept" },
+    ]);
+    chooseSaveFileMock.mockResolvedValue(null);
+    harness = renderDialog("export", doc, generationHost(renderHostSpy()), "/workspace");
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(chooseSaveFileMock, 1);
+    expect(chooseSaveFileMock).toHaveBeenCalledWith(
+      translate("ko", "diagram.dialog.export.saveTitle"),
+      `/workspace/diagrams/${suggestedFileName(doc, "svg")}`,
+    );
+  });
+
+  it("reopens the save panel in the folder the user picked for this workspace", async () => {
+    const { doc } = semanticDoc();
+    setNativeMode();
+    chooseSaveFileMock.mockResolvedValue("/elsewhere/exports/first.svg");
+    diagramExportBlobToPathMock.mockResolvedValue("/elsewhere/exports/first.svg");
+    harness = renderDialog("export", doc, generationHost(renderHostSpy()), "/workspace");
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(diagramExportBlobToPathMock, 1);
+    chooseSaveFileMock.mockResolvedValue(null);
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(chooseSaveFileMock, 2);
+    expect(chooseSaveFileMock.mock.calls[1]![1]).toBe(
+      `/elsewhere/exports/${suggestedFileName(doc, "svg")}`,
     );
   });
 });

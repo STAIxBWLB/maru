@@ -531,6 +531,12 @@ projected canvas and exports the spec for `floorplan/architecture@1` maps.
 A dangling relation endpoint remains in the stored source; projection draws
 no edge until both endpoints exist.
 
+The native save panel starts in the folder the user last saved a diagram export
+into for this workspace. Until one exists it starts at `<workspace>/diagrams/`
+when that folder holds saved diagram documents, and at the user's Downloads
+folder otherwise; Maru creates no folder and writes nothing before the user
+confirms the save (#659).
+
 ### Verified static semantic export (T1)
 
 The `archify-svg` and `archify-png` codec identifiers remain compatible with

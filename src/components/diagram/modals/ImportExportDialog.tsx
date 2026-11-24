@@ -25,6 +25,7 @@ import { supportsArchifyStaticExport } from "../../../lib/diagram/export";
 import type { StaticTheme } from "../../../lib/diagram/engineSvg";
 import { chooseSaveFile } from "../../../lib/api";
 import { diagramExportBlobToPath, type DiagramExportKind } from "../../../lib/diagram";
+import { rememberExportFolder, resolveExportDefaultPath } from "../../../lib/diagram/exportFolder";
 import {
   CODEC_LIST,
   IMPORT_ACCEPT,
@@ -284,13 +285,18 @@ export function ImportExportDialog({
           ? new Blob([outcome.bytes])
           : new Blob([outcome.bytes as unknown as BlobPart]);
       if (workspace && runningInTauri()) {
-        const defaultPath = `${workspace.replace(/[/\\]+$/, "")}/diagrams/${fileName}`;
-        const targetPath = await chooseSaveFile(t("diagram.dialog.export.saveTitle"), defaultPath);
+        const defaultPath = await resolveExportDefaultPath(workspace, fileName);
+        if (!isCurrent()) return;
+        const saveTitle = t("diagram.dialog.export.saveTitle");
+        const targetPath = defaultPath
+          ? await chooseSaveFile(saveTitle, defaultPath)
+          : await chooseSaveFile(saveTitle);
         if (!isCurrent()) return;
         if (!targetPath) {
           setStatus({ kind: "idle" });
           return;
         }
+        rememberExportFolder(workspace, targetPath);
         const data =
           typeof outcome.bytes === "string"
             ? new TextEncoder().encode(outcome.bytes)
