@@ -1141,7 +1141,16 @@ pub fn list_renders(workspace: &str) -> Result<Vec<RenderGroup>, String> {
                 .as_ref()
                 .filter(|_| render.verified)
                 .and_then(|receipt| DateTime::parse_from_rfc3339(&receipt.rendered_at).ok());
-            (std::cmp::Reverse(timestamp), render.render_id.clone())
+            let bucket = match (render.verified, timestamp.is_some()) {
+                (true, true) => 0,
+                (true, false) => 1,
+                (false, _) => 2,
+            };
+            (
+                bucket,
+                std::cmp::Reverse(timestamp),
+                render.render_id.clone(),
+            )
         });
     }
     Ok(groups)
@@ -2273,10 +2282,14 @@ mod tests {
     fn list_renders_orders_each_group_by_timestamp_then_id() {
         let fixture = Fixture::new();
         const RENDER_E: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        const UNDATED_SECOND: &str = "ffffffffffffffffffffffffffffffff";
+        const UNDATED_FIRST: &str = "99999999999999999999999999999999";
         for (id, timestamp) in [
             (RENDER_C, "2026-11-24T00:20:39.000Z"),
             (RENDER_D, "2026-11-24T00:21:53.000Z"),
             (RENDER_E, "2026-11-24T01:21:53.000+01:00"),
+            (UNDATED_SECOND, "2026-11-24 23:59"),
+            (UNDATED_FIRST, "2026-11-24 00:10"),
         ] {
             let mut stored = fixture.store(id, "image/svg+xml", SVG);
             stored.receipt.rendered_at = timestamp.into();
@@ -2305,6 +2318,8 @@ mod tests {
                 (RENDER_D, true),
                 (RENDER_E, true),
                 (RENDER_C, true),
+                (UNDATED_FIRST, true),
+                (UNDATED_SECOND, true),
                 (RENDER_A, false),
                 (RENDER_B, false),
             ]
