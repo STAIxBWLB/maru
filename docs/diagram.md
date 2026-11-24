@@ -535,7 +535,13 @@ The native save panel starts in the folder the user last saved a diagram export
 into for this workspace. Until one exists it starts at `<workspace>/diagrams/`
 when that folder holds saved diagram documents, and at the user's Downloads
 folder otherwise; Maru creates no folder and writes nothing before the user
-confirms the save (#659).
+confirms the save (#659). `diagrams/` counts only when it holds saved
+`*.cmd.json` documents, so a folder that holds only exports falls through to
+Downloads. The folder is remembered only after the export write succeeds, from
+the path actually written; a canceled or failed save leaves the previous folder
+unchanged (#663). Known limitation: if a remembered folder is later deleted,
+the macOS panel may open at its nearest existing ancestor rather than falling
+back to `diagrams/` or Downloads.
 
 ### Verified static semantic export (T1)
 

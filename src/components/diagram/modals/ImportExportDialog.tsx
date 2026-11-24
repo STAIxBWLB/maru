@@ -51,7 +51,7 @@ export interface ImportExportDialogProps {
   workspace: string | null;
   dirty: boolean;
   /** Whether the document has a saved source file; never-saved exports skip render history (#658). */
-  sourceSaved?: boolean;
+  sourceSaved: boolean;
   onImportDoc: (doc: DiagramDoc) => void;
   onImportDataset: (dataset: ReportDataset) => void;
   onClose: () => void;
@@ -271,7 +271,7 @@ export function ImportExportDialog({
         doc,
         ...(needsDataset ? { datasetId: effectiveDatasetId } : {}),
         workspace: workspace ?? undefined, renderHost: hostOverride?.renderCandidate,
-        isCurrent, theme, sourceSaved: sourceSaved ?? true,
+        isCurrent, theme, sourceSaved,
       });
       if (!isCurrent()) return;
       if (outcome.receipt) setRenderReceipt(outcome.receipt);
@@ -296,7 +296,6 @@ export function ImportExportDialog({
           setStatus({ kind: "idle" });
           return;
         }
-        rememberExportFolder(workspace, targetPath);
         const data =
           typeof outcome.bytes === "string"
             ? new TextEncoder().encode(outcome.bytes)
@@ -309,6 +308,8 @@ export function ImportExportDialog({
           data,
         );
         if (!isCurrent()) return;
+        // Remember the folder only once the write succeeded, from the path actually written (#663 F3).
+        rememberExportFolder(workspace, path);
         if (outcome.receipt) setRenderReceipt({ ...outcome.receipt, readback: { status: "passed", scope: "native-saved-file-byte-comparison" } });
         setStatus({ kind: "done", path });
       } else {
