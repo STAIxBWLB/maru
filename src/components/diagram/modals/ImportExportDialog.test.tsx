@@ -19,6 +19,7 @@ import { makeEngineArtifactFixture } from "../../../lib/diagram/__fixtures__/eng
 import { LocaleContext, t as translate } from "../../../lib/i18n";
 import "../../../lib/i18n/testing";
 import { ImportExportDialog } from "./ImportExportDialog";
+import { readLastExportFolder, rememberExportFolder } from "../../../lib/diagram/exportFolder";
 
 const { chooseSaveFileMock, diagramExportBlobToPathMock, diagramListDocumentsMock } = vi.hoisted(() => ({
   chooseSaveFileMock: vi.fn(),
@@ -64,7 +65,7 @@ function renderDialog(
   doc?: DiagramDoc,
   hostOverride: GenerationHost | null = null,
   workspace: string | null = null,
-  sourceSaved?: boolean,
+  sourceSaved = true,
 ): Harness {
   const onImportDoc = vi.fn();
   const onImportDataset = vi.fn();
@@ -89,7 +90,7 @@ function renderDialog(
               doc={currentDoc}
               workspace={workspace}
               dirty={false}
-              {...(sourceSaved === undefined ? {} : { sourceSaved })}
+              sourceSaved={sourceSaved}
               onImportDoc={onImportDoc}
               onImportDataset={onImportDataset}
               onClose={onClose}
@@ -403,6 +404,35 @@ describe("ImportExportDialog (export)", () => {
     await flushAsyncUi();
     expect(host).toHaveBeenCalledTimes(1);
     expect(diagramExportBlobToPathMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the previously remembered export folder when the native write is rejected (#663)", async () => {
+    const { doc } = semanticDoc();
+    rememberExportFolder("/workspace", "/previous/exports/old.svg");
+    harness = renderDialog("export", doc, generationHost(renderHostSpy()), "/workspace");
+    setNativeMode();
+    chooseSaveFileMock.mockResolvedValue("/elsewhere/new/copy.svg");
+    diagramExportBlobToPathMock.mockRejectedValue(new Error("Cannot write the export; check the folder and retry."));
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(diagramExportBlobToPathMock, 1);
+    await flushAsyncUi();
+    expect(document.body.textContent).toContain("Cannot write the export");
+    expect(readLastExportFolder("/workspace")).toBe("/previous/exports");
+  });
+
+  it("remembers the folder of the written path after a successful native write (#663)", async () => {
+    const { doc } = semanticDoc();
+    rememberExportFolder("/workspace", "/previous/exports/old.svg");
+    harness = renderDialog("export", doc, generationHost(renderHostSpy()), "/workspace");
+    setNativeMode();
+    chooseSaveFileMock.mockResolvedValue("/elsewhere/new/copy");
+    diagramExportBlobToPathMock.mockResolvedValue("/elsewhere/written/copy.svg");
+    await selectFormat("archify-svg");
+    await click(query('[data-testid="ie-export-confirm"]')!);
+    await waitForCalls(diagramExportBlobToPathMock, 1);
+    await flushAsyncUi();
+    expect(readLastExportFolder("/workspace")).toBe("/elsewhere/written");
   });
 
   it("does not save when the native chooser is canceled", async () => {
