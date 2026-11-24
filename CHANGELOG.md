@@ -11,7 +11,7 @@ Dates are the release-tag dates. Only `feat`/`fix`-level changes are listed;
 
 ## v1.1.33 - Export Folders (2026-11-25)
 
-- Diagram export no longer offers the workspace root as the save location. The save panel opens at the last folder an export of that workspace was written to, otherwise at `diagrams/` when the workspace has saved diagrams, otherwise at Downloads. The folder is remembered only after the export file is written, so a canceled or failed save keeps the previous one (#659, #662, #663, #665).
+- Diagram export no longer starts the save panel at the workspace root by default. It opens at the last folder an export of that workspace was written to, otherwise at `diagrams/` when the workspace has saved diagrams, otherwise at Downloads. The folder is remembered only after the export file is written, so a canceled or failed save keeps the previous one (#659, #662, #663, #665).
 - Exporting a document that was never saved no longer adds a render to the Renders history, where it showed as Document missing; the exported file is still written (#658, #661).
 - Renders lists each document's renders newest first by their verified render time, then verified renders without a readable time, then unverified ones, each group by ID (#657, #660, #663, #664).
 
